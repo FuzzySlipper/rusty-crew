@@ -60,7 +60,8 @@ npm run format
   allow/deny gate as the main tool model.
 - Use the current `https://github.com/earendil-works/pi` source for the pi
   packages. Older local checkout references in docs are historical audit
-  context only.
+  context only. The current package pin is tracked in
+  `docs/pi-package-source-lock.md`.
 
 ## Integrated Milestones
 

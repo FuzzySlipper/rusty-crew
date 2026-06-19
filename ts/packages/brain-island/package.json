@@ -8,20 +8,24 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "piPackageSource": "https://github.com/earendil-works/pi",
+  "scripts": {
+    "smoke:wake": "tsx src/smoke-wake.ts"
+  },
+  "piPackageSource": {
+    "repository": "https://github.com/earendil-works/pi",
+    "commit": "6e6ce70caf3328683517b0e308fdbbc6d1c1abc9",
+    "packages": {
+      "@earendil-works/pi-agent-core": "0.79.8",
+      "@earendil-works/pi-ai": "0.79.8"
+    }
+  },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.79.8",
+    "@earendil-works/pi-ai": "0.79.8",
     "@rusty-crew/contracts": "0.1.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-ai": "*"
-  },
-  "peerDependenciesMeta": {
-    "@earendil-works/pi-agent-core": {
-      "optional": true
-    },
-    "@earendil-works/pi-ai": {
-      "optional": true
-    }
+    "@earendil-works/pi-agent-core": "0.79.8",
+    "@earendil-works/pi-ai": "0.79.8"
   }
 }

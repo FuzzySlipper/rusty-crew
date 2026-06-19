@@ -73,6 +73,9 @@ historical audit context only; they are not an implementation recommendation.
    Code's typed `ApiError` enum — when designing `ToolExecutorDescriptor`
    and `CoreBridgeError`. Read before choosing any dependency.
 
+6. **`pi-package-source-lock.md`** — current source/version pin for the
+   `@earendil-works/pi-*` packages used by the TypeScript brain island.
+
 ## Structural model
 
 Patterned on `/home/dev/asha/engine-rs/crates/bridge/runtime-bridge-api/`.
