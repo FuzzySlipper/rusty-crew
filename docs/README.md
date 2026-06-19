@@ -20,6 +20,12 @@ historical audit context only; they are not an implementation recommendation.
 
 ## Start here
 
+0. **Den document `rusty-crew-unified-architecture`** — authoritative design.
+   It supersedes recommendations in every local companion doc where they
+   conflict. In particular, it moves activation/spawn/prompt mechanics inside
+   Rust, scopes Den to product data plus observability, and replaces
+   `WorkerPolicy`-style tool gates with profile-based tool enablement.
+
 1. **`pi-crew-upstream-audit.md`** — what's actually used from
    `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` today.
    5 runtime symbols, 51 type-only imports, ~3 actual call sites. Read
@@ -31,12 +37,12 @@ historical audit context only; they are not an implementation recommendation.
    derives the tier table and explains why the rewrite is the cheaper
    path.
 
-3. **`pi-crew-core-bridge-manifest.md`** — the FFI contract for the
-   rewrite. 12 operations, 6 handle types, 1 typed error channel, ~25
-   protocol types. **This is the PRD for the implementation agent.**
-   It includes the LLM boundary decision (TS-side LLM, Rust-side
-   authority) and the anti-patterns the manifest is designed to
-   prevent.
+3. **`pi-crew-core-bridge-manifest.md`** — historical draft manifest and
+   anti-pattern catalog. It remains useful for typed handles, error-channel
+   discipline, codegen shape, and protocol inventory, but it is no longer the
+   literal PRD for the FFI surface. Do not implement its obsolete
+   `spawn_worker` / `prompt_worker` TS-called FFI verbs or `WorkerPolicy`
+   allow/deny model; use the unified architecture instead.
 
 4. **`pi-agent-rust-port-inspiration.md`** — someone has done a Rust
    port of the upstream pi packages at `/home/research/pi_agent_rust`.
@@ -90,13 +96,41 @@ The ownership/depgraph rules from asha's `governance/ownership.toml`
 should be ported over (with the per-crate `may_not_depend_on` lists)
 so the rewrite inherits the same machine-checkable dependency rules.
 
-## LLM boundary decision (the big one)
+## Current scaffold
+
+The initial repo scaffold now exists in `/home/dev/rusty-crew` and
+`https://github.com/FuzzySlipper/rusty-crew`.
+
+- `crates/core/core-protocol` — transport-free Rust protocol types.
+- `crates/core/core-bus` — in-process event bus.
+- `crates/core/core-session` — session registry.
+- `crates/core/core-body` — body-loop wake threshold surface.
+- `crates/core/core-engine` — core composition crate.
+- `crates/bridge/*` — bridge API, mock, native Node placeholder, and codegen
+  placeholder.
+- `ts/packages/contracts` — generated-contract placeholder.
+- `ts/packages/core-bridge` and `ts/packages/native-bridge` — TS bridge facade
+  and loader placeholder.
+- `ts/packages/brain-island` — current pi package brain boundary.
+- `ts/packages/adapter-*` — platform adapter placeholders.
+
+First checks:
+
+```sh
+cargo fmt --all --check
+cargo test --workspace
+npm install
+npm run typecheck
+npm run format
+```
+
+## LLM boundary decision
 
 The Rust core does **not** call any LLM provider API. `streamSimple`,
 `getModels`, `getProviders`, and the upstream `Model<Api>` shape stay
-in the TypeScript front-end. The Rust core's `WorkerHandle` is the
-*supervised worker* — it has a `prompt_worker` operation and an event
-stream, but the LLM call is a TS-side concern.
+in the TypeScript brain island/front-end. In the unified architecture the Rust
+core drives activation and wakes the TS brain with a frozen state snapshot; the
+old `prompt_worker` operation is not a TS-called FFI verb.
 
 The trade is documented in `pi-crew-core-bridge-manifest.md` §"LLM
 boundary". The alternative (vendor the LLM surface into Rust) is
@@ -105,6 +139,21 @@ TS where it already has working code and lets the Rust core focus on
 authority, lifecycle, and the packet protocol.
 
 This decision is recorded in `adr/0001-current-pi-package-source.md`.
+
+## Integrated open-question milestones
+
+The open questions should be answered through the real path as it comes online,
+not through detached mock spikes:
+
+1. Build enough Rust substrate to route events, project body state, validate
+   brain actions, and create sessions.
+2. Wire the TS brain island to the current pi packages.
+3. Implement the native bridge around a real brain wake path.
+4. Settle `RuntimeBufferHandle` ownership using large state/prompt payloads in
+   that path.
+5. Measure FFI event throughput using the real bridge/body/brain stream.
+6. Resolve mid-turn state deltas by testing actual upstream Agent hook behavior.
+7. Prove a minimal full-agent to delegated-worker completion flow.
 
 ## What this rewrite is *not*
 
@@ -117,8 +166,9 @@ This decision is recorded in `adr/0001-current-pi-package-source.md`.
 - **Not a complete rewrite.** The TS-side packages above are the
   front-end. They are the things that talk to Den Channels, render the
   TUI, drive the cron subsystem, and integrate with the rest of the
-  Den stack. Those stay TS. The Rust core is *only* the worker pool,
-  packet protocol, session/persistence lifecycle, and policy enforcement.
+  Den stack. Those stay TS. The Rust core is *only* the coordination substrate:
+  bus, activation, body loop, packet protocol, session/persistence lifecycle,
+  and action validation.
 - **Not a performance project.** The rewrite's primary value is
   *enforcement* of the architectural boundary. Performance is
   incidental and should not drive design decisions; if Rust happens to

@@ -1,20 +1,62 @@
-# pi-crew core bridge manifest (draft v0)
+# pi-crew core bridge manifest (historical draft v0)
 
-> **Status:** Living PRD for the Rust-core rewrite. The 4 functions + 1 class
-> currently imported from upstream `@earendil-works/pi-*` packages are the
-> target; everything else that ships today is "pulling concepts" and is a
-> candidate for replacement.
+> **Status:** Superseded as an implementation PRD by the Den document
+> `rusty-crew-unified-architecture`. Keep this document as historical design
+> context, protocol inventory, codegen-shape reference, and anti-pattern
+> catalog. Where this manifest conflicts with the unified architecture, the
+> unified architecture wins.
 
-This is the single source of truth for the FFI surface between the Rust core
-and the TypeScript front-end. Every operation on this list is a *verb on a
-handle*; all errors are typed; all payloads are typed; the manifest is the
-source of truth, the codegen produces the boilerplate, and humans write the
-semantic operation bodies.
+## Unified Architecture Override
 
-It is deliberately small. Asha's `runtime-bridge-api/bridge-manifest.toml`
-ships 19 operations across the entire engine boundary; we should not need
-more than 12 for the pi-crew core. Adding an operation is a boundary change
-and warrants an ADR.
+Do **not** implement the operation list below literally without reconciling it
+through the unified architecture first.
+
+The following parts of this draft are obsolete:
+
+- `spawn_worker` and `prompt_worker` as TS-called FFI operations. Worker
+  spawning, prompting, routing, wake threshold evaluation, and action execution
+  are internal Rust coordination-core operations.
+- `WorkerPolicy` as the primary tool allow/deny model. Tool availability is
+  profile-based: a session can use the tools its profile registered. Resource
+  constraints may still exist as typed session fields, but not as the main
+  behavioral gate.
+- Den as a coordination routing authority. Den is product data and
+  observability; the in-process Rust bus owns agent-to-agent coordination.
+- The idea that the TS side drives worker activation. Rust drives activation
+  and invokes the TS brain island with a frozen state snapshot.
+
+The following parts remain useful:
+
+- Opaque handle discipline.
+- Typed error-channel discipline.
+- Runtime buffer concerns.
+- Codegen as the Rust/TS contract source of truth.
+- Completion packet, event vocabulary, and existing pi-crew anti-pattern
+  analysis.
+
+The next manifest should expose the unified boundary: register brain
+implementations, wake brain, receive streamed brain events and action batches,
+register platform adapters, inject external events, and inject Den data updates.
+It should not expose Rust-internal coordination mechanics as TS-callable verbs.
+
+---
+
+> **Historical draft note:** The 4 functions + 1 class currently imported from
+> upstream `@earendil-works/pi-*` packages were the original target; everything
+> else that ships today was treated as "pulling concepts" and candidate
+> replacement.
+
+This draft was originally written as the single source of truth for the FFI
+surface between the Rust core and the TypeScript front-end. In the current
+plan, its operation list is historical until replaced by a unified manifest.
+The durable lesson is still valid: every operation should be a bounded verb on
+a handle, all errors should be typed, all payloads should be typed, codegen
+should produce boilerplate, and humans should write semantic operation bodies.
+
+The intended surface is deliberately small. Asha's
+`runtime-bridge-api/bridge-manifest.toml` ships 19 operations across the entire
+engine boundary; the unified pi-crew boundary should stay similarly bounded.
+Adding an operation is a boundary change and warrants an ADR.
 
 ## Provenance
 
