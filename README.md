@@ -34,7 +34,10 @@ material. When they conflict, the unified architecture wins.
   and native loader placeholder.
 - `ts/packages/brain-island` — TS brain island boundary. This is where the
   current `@earendil-works/pi-*` Agent/LLM dependency belongs.
-- `ts/packages/adapter-*` — platform adapter package placeholders.
+- `ts/packages/adapter-den` — first platform adapter boundary. It injects Den
+  product-data updates into the Rust bus and projects internal coordination
+  events back to Den as best-effort observability.
+- `ts/packages/adapter-*` — remaining platform adapter package placeholders.
 
 ## Build And Test
 
@@ -44,6 +47,7 @@ cargo test --workspace
 npm install
 npm run typecheck
 npm run format
+npm run smoke:den
 ```
 
 ## Architecture Rules
@@ -54,6 +58,8 @@ npm run format
 - TypeScript owns the brain island, tool execution, LLM provider calls, profile
   composition, and platform adapters.
 - Den is product data and observability. It is not the coordination bus.
+  Projection failures are explicit degraded/dropped observability state; they
+  must not block internal agent-to-agent routing.
 - Worker spawning and prompting are internal Rust lifecycle/activation
   operations, not TS-called FFI verbs.
 - Tool availability is profile-based. Do not reintroduce a `WorkerPolicy`

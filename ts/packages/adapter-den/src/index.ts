@@ -1,10 +1,202 @@
 import type {
   AdapterId,
+  CoreEvent,
+  DenDataUpdate,
+  EventReceipt,
+  ExternalEvent,
+  ExternalEventPayload,
   PlatformAdapterRegistration,
 } from "@rusty-crew/contracts";
 
+export type DenAdapterConnectionState =
+  | "connected"
+  | "degraded"
+  | "disconnected";
+
+export interface DenProjection {
+  adapterId: AdapterId;
+  eventType: CoreEvent["type"];
+  summary: string;
+  event: CoreEvent;
+}
+
+export interface DenProjectionResult {
+  accepted: boolean;
+  dropped: boolean;
+  reason?: string;
+}
+
+export interface DenProjectionSink {
+  project(projection: DenProjection): Promise<void> | void;
+}
+
+export interface DenCoreIngress {
+  injectDenDataUpdate(
+    update: DenDataUpdate,
+  ): Promise<EventReceipt> | EventReceipt;
+  injectExternalEvent(
+    event: ExternalEvent,
+  ): Promise<EventReceipt> | EventReceipt;
+}
+
+export interface DenAdapterStatus {
+  state: DenAdapterConnectionState;
+  projectedEvents: number;
+  droppedProjections: number;
+  lastAcceptedSequence?: number;
+  lastProjectionError?: string;
+}
+
+export interface DenAdapterOptions {
+  adapterId: AdapterId;
+  ingress: DenCoreIngress;
+  projectionSink: DenProjectionSink;
+  displayName?: string;
+  projectionFailureMode?: "record" | "throw";
+}
+
+export interface DenAdapter {
+  registration(): PlatformAdapterRegistration;
+  status(): DenAdapterStatus;
+  injectDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
+  injectExternalEventPayload(
+    source: string,
+    payload: ExternalEventPayload,
+  ): Promise<EventReceipt>;
+  projectEvent(event: CoreEvent): Promise<DenProjectionResult>;
+}
+
+export interface MemoryDenProjectionSink extends DenProjectionSink {
+  readonly projections: DenProjection[];
+  failNext(error?: Error): void;
+}
+
 export function createDenAdapterRegistration(
   adapterId: AdapterId,
+  displayName = "Den",
 ): PlatformAdapterRegistration {
-  return { adapterId, kind: "den", displayName: "Den" };
+  return { adapterId, kind: "den", displayName };
+}
+
+export function createDenAdapter(options: DenAdapterOptions): DenAdapter {
+  const failureMode = options.projectionFailureMode ?? "record";
+  const status: DenAdapterStatus = {
+    state: "connected",
+    projectedEvents: 0,
+    droppedProjections: 0,
+  };
+
+  return {
+    registration(): PlatformAdapterRegistration {
+      return createDenAdapterRegistration(
+        options.adapterId,
+        options.displayName ?? "Den",
+      );
+    },
+
+    status(): DenAdapterStatus {
+      return { ...status };
+    },
+
+    async injectDataUpdate(update): Promise<EventReceipt> {
+      const receipt = await options.ingress.injectDenDataUpdate(update);
+      status.lastAcceptedSequence = receipt.sequence;
+      return receipt;
+    },
+
+    async injectExternalEventPayload(source, payload): Promise<EventReceipt> {
+      const receipt = await options.ingress.injectExternalEvent({
+        adapterId: options.adapterId,
+        source,
+        payload,
+      });
+      status.lastAcceptedSequence = receipt.sequence;
+      return receipt;
+    },
+
+    async projectEvent(event): Promise<DenProjectionResult> {
+      const projection = toDenProjection(options.adapterId, event);
+
+      try {
+        await options.projectionSink.project(projection);
+        status.state = "connected";
+        status.projectedEvents += 1;
+        status.lastProjectionError = undefined;
+        return { accepted: true, dropped: false };
+      } catch (error) {
+        const reason = projectionErrorMessage(error);
+        status.state = "degraded";
+        status.droppedProjections += 1;
+        status.lastProjectionError = reason;
+
+        if (failureMode === "throw") {
+          throw error;
+        }
+
+        return { accepted: false, dropped: true, reason };
+      }
+    },
+  };
+}
+
+export function createMemoryDenProjectionSink(): MemoryDenProjectionSink {
+  const projections: DenProjection[] = [];
+  let nextFailure: Error | undefined;
+
+  return {
+    projections,
+
+    failNext(error = new Error("Den projection sink unavailable")): void {
+      nextFailure = error;
+    },
+
+    project(projection): void {
+      if (nextFailure) {
+        const error = nextFailure;
+        nextFailure = undefined;
+        throw error;
+      }
+
+      projections.push(projection);
+    },
+  };
+}
+
+export function toDenProjection(
+  adapterId: AdapterId,
+  event: CoreEvent,
+): DenProjection {
+  return {
+    adapterId,
+    eventType: event.type,
+    summary: summarizeCoreEvent(event),
+    event,
+  };
+}
+
+function summarizeCoreEvent(event: CoreEvent): string {
+  switch (event.type) {
+    case "session_created":
+      return `session created for ${event.state.agentId}`;
+    case "session_archived":
+      return `session archived ${event.sessionId}`;
+    case "agent_message_routed":
+      return `agent message routed ${event.message.from} -> ${event.message.to}`;
+    case "external_event_injected":
+      return `external event injected from ${event.event.source}`;
+    case "den_data_updated":
+      return `den ${event.update.entityKind} updated ${event.update.entityId}`;
+    case "brain_wake_requested":
+      return `brain wake requested for ${event.sessionId}`;
+    case "brain_event_observed":
+      return `brain event observed for ${event.sessionId}`;
+    case "brain_actions_accepted":
+      return `brain accepted ${event.count} actions for ${event.sessionId}`;
+    case "completion_packet_delivered":
+      return `completion ${event.packet.status} for ${event.packet.sessionId}`;
+  }
+}
+
+function projectionErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

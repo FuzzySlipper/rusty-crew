@@ -4,8 +4,8 @@ use rusty_crew_core_body::{BodyProjector, BrainActionExecutor};
 use rusty_crew_core_bus::CoreBus;
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, BodyState, BrainActionBatch, ClockConfig, CoreEvent, CoreResult,
-    EngineConfig, EngineHandle, EventSubscription, IsoTimestamp, SessionConfig, SessionId,
-    SessionState, ShutdownSummary,
+    DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
+    IsoTimestamp, SessionConfig, SessionId, SessionState, ShutdownSummary,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -81,6 +81,24 @@ impl CoreEngine {
         self.action_executor.execute(batch)
     }
 
+    pub fn inject_external_event(&self, event: ExternalEvent) -> CoreResult<EventReceipt> {
+        let sequence = self
+            .bus
+            .publish(CoreEvent::ExternalEventInjected { event })?;
+        Ok(EventReceipt {
+            accepted: true,
+            sequence,
+        })
+    }
+
+    pub fn inject_den_data_update(&self, update: DenDataUpdate) -> CoreResult<EventReceipt> {
+        let sequence = self.bus.publish(CoreEvent::DenDataUpdated { update })?;
+        Ok(EventReceipt {
+            accepted: true,
+            sequence,
+        })
+    }
+
     pub fn shutdown(self) -> CoreResult<ShutdownSummary> {
         Ok(ShutdownSummary {
             engine: self.handle,
@@ -101,9 +119,9 @@ impl CoreEngine {
 mod tests {
     use super::*;
     use rusty_crew_core_protocol::{
-        AgentId, AgentMessage, BrainAction, ClockConfig, CompletionPacket, CompletionStatus,
-        CoreErrorKind, CoreEventKind, ProfileId, ResourceLimits, SessionKind, ToolDescriptor,
-        ToolProfile,
+        AdapterId, AgentId, AgentMessage, BrainAction, ClockConfig, CompletionPacket,
+        CompletionStatus, CoreErrorKind, CoreEventKind, ExternalEventPayload, ProfileId, ProjectId,
+        ResourceLimits, SessionKind, ToolDescriptor, ToolProfile,
     };
     use std::time::Duration;
 
@@ -264,6 +282,94 @@ mod tests {
             .recent_events
             .iter()
             .any(|event| matches!(event, CoreEvent::CompletionPacketDelivered { .. })));
+    }
+
+    #[test]
+    fn injects_den_and_external_events_into_the_bus() {
+        let engine = test_engine();
+        let (_subscription_id, events) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![
+                    CoreEventKind::DenDataUpdated,
+                    CoreEventKind::ExternalEventInjected,
+                ],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        let den_receipt = engine
+            .inject_den_data_update(DenDataUpdate {
+                project_id: ProjectId::new("pi-crew"),
+                entity_kind: "task".to_string(),
+                entity_id: "2767".to_string(),
+                revision: Some("rev-1".to_string()),
+            })
+            .unwrap();
+        let external_receipt = engine
+            .inject_external_event(ExternalEvent {
+                adapter_id: AdapterId::new("den"),
+                source: "den".to_string(),
+                payload: ExternalEventPayload::AdapterStatus {
+                    status: "connected".to_string(),
+                    detail: None,
+                },
+            })
+            .unwrap();
+
+        assert!(den_receipt.accepted);
+        assert!(external_receipt.accepted);
+        assert!(external_receipt.sequence > den_receipt.sequence);
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::DenDataUpdated { .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::ExternalEventInjected { .. }
+        ));
+    }
+
+    #[test]
+    fn den_observability_is_not_required_for_internal_routing() {
+        let engine = test_engine();
+        let worker = engine
+            .create_session(session_config(
+                "worker-session",
+                "worker",
+                "coder-profile",
+                SessionKind::Worker,
+            ))
+            .unwrap();
+
+        engine
+            .inject_external_event(ExternalEvent {
+                adapter_id: AdapterId::new("den"),
+                source: "den-observability".to_string(),
+                payload: ExternalEventPayload::AdapterStatus {
+                    status: "disconnected".to_string(),
+                    detail: Some("projection sink unavailable".to_string()),
+                },
+            })
+            .unwrap();
+
+        engine
+            .bus()
+            .route_message(
+                AgentId::new("planner"),
+                worker.agent_id.clone(),
+                "routing continues without den",
+            )
+            .unwrap();
+
+        let body = engine.project_body_state(&worker.session_id).unwrap();
+
+        assert_eq!(body.pending_messages.len(), 1);
+        assert_eq!(
+            body.pending_messages[0].body,
+            "routing continues without den"
+        );
     }
 
     fn test_engine() -> CoreEngine {
