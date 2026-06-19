@@ -1,8 +1,8 @@
 //! Session lifecycle records for full agents and workers.
 
 use rusty_crew_core_protocol::{
-    CoreError, CoreErrorKind, CoreResult, IsoTimestamp, SessionConfig, SessionHandle, SessionId,
-    SessionState, SessionStatus,
+    AgentId, CoreError, CoreErrorKind, CoreResult, IsoTimestamp, SessionConfig, SessionHandle,
+    SessionId, SessionState, SessionStatus,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -72,6 +72,22 @@ impl SessionRegistry {
                 CoreError::new(
                     CoreErrorKind::NotFound,
                     format!("session {session_id} not found"),
+                )
+            })
+    }
+
+    pub fn get_session_by_agent(&self, agent_id: &AgentId) -> CoreResult<SessionState> {
+        self.inner
+            .sessions
+            .lock()
+            .map_err(|_| CoreError::new(CoreErrorKind::InternalError, "session lock poisoned"))?
+            .values()
+            .find(|state| &state.agent_id == agent_id && state.status != SessionStatus::Archived)
+            .cloned()
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("active session for agent {agent_id} not found"),
                 )
             })
     }

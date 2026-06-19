@@ -5,4 +5,6 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+rusty-crew-core-bus = { path = "../core-bus" }
 rusty-crew-core-protocol = { path = "../core-protocol" }
+rusty-crew-core-session = { path = "../core-session" }

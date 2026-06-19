@@ -1,11 +1,15 @@
 //! In-process coordination bus.
 
 use rusty_crew_core_protocol::{
-    AgentId, AgentMessage, CoreError, CoreErrorKind, CoreEvent, CoreResult,
+    AgentId, AgentMessage, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
+    EventSubscription, SessionId,
 };
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+
+const DEFAULT_HISTORY_LIMIT: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub struct CoreBus {
@@ -15,13 +19,23 @@ pub struct CoreBus {
 #[derive(Debug)]
 struct Inner {
     next_subscription: AtomicU64,
+    next_sequence: AtomicU64,
     subscribers: Mutex<Vec<Subscriber>>,
+    history: Mutex<VecDeque<SequencedEvent>>,
+    history_limit: usize,
 }
 
 #[derive(Debug)]
 struct Subscriber {
     id: u64,
+    filter: EventSubscription,
     sender: Sender<CoreEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SequencedEvent {
+    pub sequence: u64,
+    pub event: CoreEvent,
 }
 
 impl CoreBus {
@@ -29,19 +43,22 @@ impl CoreBus {
         Self {
             inner: Arc::new(Inner {
                 next_subscription: AtomicU64::new(1),
+                next_sequence: AtomicU64::new(1),
                 subscribers: Mutex::new(Vec::new()),
+                history: Mutex::new(VecDeque::new()),
+                history_limit: DEFAULT_HISTORY_LIMIT,
             }),
         }
     }
 
-    pub fn subscribe(&self) -> CoreResult<(u64, Receiver<CoreEvent>)> {
+    pub fn subscribe(&self, filter: EventSubscription) -> CoreResult<(u64, Receiver<CoreEvent>)> {
         let id = self.inner.next_subscription.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         self.inner
             .subscribers
             .lock()
             .map_err(|_| CoreError::new(CoreErrorKind::InternalError, "subscriber lock poisoned"))?
-            .push(Subscriber { id, sender });
+            .push(Subscriber { id, filter, sender });
         Ok((id, receiver))
     }
 
@@ -66,22 +83,160 @@ impl CoreBus {
                 body: body.into(),
                 correlation_id: None,
             },
-        })
+        })?;
+        Ok(())
     }
 
-    pub fn publish(&self, event: CoreEvent) -> CoreResult<()> {
+    pub fn publish(&self, event: CoreEvent) -> CoreResult<u64> {
+        let sequence = self.inner.next_sequence.fetch_add(1, Ordering::Relaxed);
+        {
+            let mut history = self.inner.history.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "history lock poisoned")
+            })?;
+            history.push_back(SequencedEvent {
+                sequence,
+                event: event.clone(),
+            });
+            while history.len() > self.inner.history_limit {
+                history.pop_front();
+            }
+        }
+
         let mut subscribers = self.inner.subscribers.lock().map_err(|_| {
             CoreError::new(CoreErrorKind::InternalError, "subscriber lock poisoned")
         })?;
 
-        subscribers.retain(|subscriber| subscriber.sender.send(event.clone()).is_ok());
-        Ok(())
+        subscribers.retain(|subscriber| {
+            !event_matches_filter(&event, &subscriber.filter)
+                || subscriber.sender.send(event.clone()).is_ok()
+        });
+        Ok(sequence)
+    }
+
+    pub fn recent_events_for_session(
+        &self,
+        session_id: &SessionId,
+        limit: usize,
+    ) -> CoreResult<Vec<CoreEvent>> {
+        let history =
+            self.inner.history.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "history lock poisoned")
+            })?;
+
+        Ok(history
+            .iter()
+            .rev()
+            .filter(|entry| event_mentions_session(&entry.event, session_id))
+            .take(limit)
+            .map(|entry| entry.event.clone())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect())
+    }
+
+    pub fn pending_messages_for_agent(&self, agent_id: &AgentId) -> CoreResult<Vec<AgentMessage>> {
+        let history =
+            self.inner.history.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "history lock poisoned")
+            })?;
+
+        Ok(history
+            .iter()
+            .filter_map(|entry| match &entry.event {
+                CoreEvent::AgentMessageRouted { message } if &message.to == agent_id => {
+                    Some(message.clone())
+                }
+                _ => None,
+            })
+            .collect())
     }
 }
 
 impl Default for CoreBus {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub fn event_matches_filter(event: &CoreEvent, filter: &EventSubscription) -> bool {
+    if !filter.event_kinds.is_empty() && !filter.event_kinds.contains(&CoreEventKind::of(event)) {
+        return false;
+    }
+
+    if let Some(session_id) = &filter.session_id {
+        if !event_mentions_session(event, session_id) {
+            return false;
+        }
+    }
+
+    if let Some(agent_id) = &filter.agent_id {
+        if !event_mentions_agent(event, agent_id) {
+            return false;
+        }
+    }
+
+    if let Some(adapter_id) = &filter.adapter_id {
+        if !event_mentions_adapter(event, adapter_id) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn event_mentions_session(event: &CoreEvent, session_id: &SessionId) -> bool {
+    match event {
+        CoreEvent::SessionCreated { state } => &state.session_id == session_id,
+        CoreEvent::SessionArchived {
+            session_id: archived,
+        } => archived == session_id,
+        CoreEvent::BrainWakeRequested { session_id: wake } => wake == session_id,
+        CoreEvent::BrainEventObserved {
+            session_id: observed,
+            ..
+        } => observed == session_id,
+        CoreEvent::BrainActionsAccepted {
+            session_id: accepted,
+            ..
+        } => accepted == session_id,
+        CoreEvent::CompletionPacketDelivered { packet } => &packet.session_id == session_id,
+        CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. } => false,
+    }
+}
+
+fn event_mentions_agent(event: &CoreEvent, agent_id: &AgentId) -> bool {
+    match event {
+        CoreEvent::SessionCreated { state } => &state.agent_id == agent_id,
+        CoreEvent::AgentMessageRouted { message } => {
+            &message.from == agent_id || &message.to == agent_id
+        }
+        CoreEvent::SessionArchived { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. }
+        | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::BrainEventObserved { .. }
+        | CoreEvent::BrainActionsAccepted { .. }
+        | CoreEvent::CompletionPacketDelivered { .. } => false,
+    }
+}
+
+fn event_mentions_adapter(
+    event: &CoreEvent,
+    adapter_id: &rusty_crew_core_protocol::AdapterId,
+) -> bool {
+    match event {
+        CoreEvent::ExternalEventInjected { event } => &event.adapter_id == adapter_id,
+        CoreEvent::SessionCreated { .. }
+        | CoreEvent::SessionArchived { .. }
+        | CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::DenDataUpdated { .. }
+        | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::BrainEventObserved { .. }
+        | CoreEvent::BrainActionsAccepted { .. }
+        | CoreEvent::CompletionPacketDelivered { .. } => false,
     }
 }
 
@@ -92,7 +247,14 @@ mod tests {
     #[test]
     fn routes_messages_to_subscribers() {
         let bus = CoreBus::new();
-        let (_id, events) = bus.subscribe().unwrap();
+        let (_id, events) = bus
+            .subscribe(EventSubscription {
+                event_kinds: Vec::new(),
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
 
         bus.route_message(AgentId::new("planner"), AgentId::new("coder"), "hello")
             .unwrap();

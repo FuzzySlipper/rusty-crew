@@ -85,6 +85,7 @@ pub struct ShutdownRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShutdownSummary {
+    pub engine: EngineHandle,
     pub archived_sessions: u32,
     pub dropped_subscriptions: u32,
 }
@@ -208,6 +209,22 @@ pub enum CoreEventKind {
     BrainEventObserved,
     BrainActionsAccepted,
     CompletionPacketDelivered,
+}
+
+impl CoreEventKind {
+    pub const fn of(event: &CoreEvent) -> Self {
+        match event {
+            CoreEvent::SessionCreated { .. } => Self::SessionCreated,
+            CoreEvent::SessionArchived { .. } => Self::SessionArchived,
+            CoreEvent::AgentMessageRouted { .. } => Self::AgentMessageRouted,
+            CoreEvent::ExternalEventInjected { .. } => Self::ExternalEventInjected,
+            CoreEvent::DenDataUpdated { .. } => Self::DenDataUpdated,
+            CoreEvent::BrainWakeRequested { .. } => Self::BrainWakeRequested,
+            CoreEvent::BrainEventObserved { .. } => Self::BrainEventObserved,
+            CoreEvent::BrainActionsAccepted { .. } => Self::BrainActionsAccepted,
+            CoreEvent::CompletionPacketDelivered { .. } => Self::CompletionPacketDelivered,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,6 +365,16 @@ pub enum BrainAction {
     DeliverCompletion {
         packet: CompletionPacket,
     },
+}
+
+impl BrainAction {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::SendMessage { .. } => "send_message",
+            Self::RequestDelegation { .. } => "request_delegation",
+            Self::DeliverCompletion { .. } => "deliver_completion",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

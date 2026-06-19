@@ -30,7 +30,9 @@ dependencies = [
 name = "rusty-crew-core-body"
 version = "0.1.0"
 dependencies = [
+ "rusty-crew-core-bus",
  "rusty-crew-core-protocol",
+ "rusty-crew-core-session",
 ]
 
 [[package]]
@@ -73,6 +75,7 @@ dependencies = [
 name = "rusty-crew-core-engine"
 version = "0.1.0"
 dependencies = [
+ "rusty-crew-core-body",
  "rusty-crew-core-bus",
  "rusty-crew-core-protocol",
  "rusty-crew-core-session",

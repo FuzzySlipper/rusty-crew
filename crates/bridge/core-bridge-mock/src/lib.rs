@@ -1,9 +1,9 @@
 //! In-process bridge implementation for tests and early TS integration spikes.
 
 use rusty_crew_core_bridge_api::{
-    CoreResult, EngineConfig, SessionConfig, SessionId, SessionState,
+    CoreResult, EngineConfig, SessionConfig, SessionId, SessionState, ShutdownSummary,
 };
-use rusty_crew_core_engine::{CoreEngine, ShutdownSummary};
+use rusty_crew_core_engine::CoreEngine;
 
 #[derive(Debug)]
 pub struct MockBridge {
