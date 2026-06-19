@@ -2,3 +2,5 @@
 /node_modules/
 
 *.tsbuildinfo
+ts/packages/native-bridge/native/*.d.ts
+ts/packages/native-bridge/native/*.js

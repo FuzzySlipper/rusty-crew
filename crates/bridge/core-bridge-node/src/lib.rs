@@ -6,13 +6,15 @@
 
 use rusty_crew_core_bridge_api::{
     manifest_summary, ActionBatchReceipt, BrainActionBatch, BrainEventEnvelope,
-    BrainImplementationRegistration, BrainWakeAccepted, BrainWakeBufferInput, BrainWakeRequest,
-    BridgeManifestSummary, CoreError, CoreErrorKind, CoreResult, DenDataUpdate, EngineConfig,
-    EngineHandle, EventReceipt, EventSubscription, ExternalEvent, PlatformAdapterHandle,
-    PlatformAdapterRegistration, RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView,
-    ShutdownRequest, ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
+    BrainImplementationHandle, BrainImplementationRegistration, BrainWakeAccepted,
+    BrainWakeBufferInput, BrainWakeRequest, BridgeManifestSummary, CoreError, CoreErrorKind,
+    CoreResult, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
+    ExternalEvent, PlatformAdapterHandle, PlatformAdapterRegistration, RuntimeBufferHandle,
+    RuntimeBufferStore, RuntimeBufferView, ShutdownRequest, ShutdownSummary, SubscriptionHandle,
+    Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_engine::CoreEngine;
+use std::sync::Mutex;
 
 #[derive(Debug)]
 pub struct NativeBridge {
@@ -152,6 +154,264 @@ fn not_implemented(operation: &str) -> CoreError {
     CoreError::new(
         CoreErrorKind::AdapterUnavailable,
         format!("native bridge operation {operation} is not implemented yet"),
+    )
+}
+
+#[napi_derive::napi(object)]
+pub struct JsEngineConfig {
+    pub engine_data_dir: String,
+    pub fixed_clock: Option<String>,
+    pub default_turn_budget: u32,
+    pub default_idle_timeout_ms: u32,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsEventReceipt {
+    pub accepted: bool,
+    pub sequence: f64,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsShutdownSummary {
+    pub archived_sessions: u32,
+    pub dropped_subscriptions: u32,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsBufferedBrainWakeRequest {
+    pub body_state: u32,
+    pub system_prompt: u32,
+    pub role_assembly: u32,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeBufferView {
+    pub handle: u32,
+    pub media_type: String,
+    pub byte_len: f64,
+    pub bytes: napi::bindgen_prelude::Buffer,
+}
+
+#[napi_derive::napi]
+pub struct NativeBridgeBinding {
+    inner: Mutex<NativeBridge>,
+}
+
+#[napi_derive::napi]
+impl NativeBridgeBinding {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(NativeBridge::new()),
+        }
+    }
+
+    #[napi(getter)]
+    pub fn manifest_version(&self) -> u32 {
+        MANIFEST_VERSION
+    }
+
+    #[napi(getter)]
+    pub fn operation_names(&self) -> Vec<String> {
+        OPERATION_NAMES
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    #[napi]
+    pub fn initialize_engine(&self, config: JsEngineConfig) -> napi::Result<f64> {
+        let mut bridge = self.bridge()?;
+        let handle = bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: config.engine_data_dir,
+                clock: match config.fixed_clock {
+                    Some(at) => rusty_crew_core_bridge_api::ClockConfig::Fixed { at },
+                    None => rusty_crew_core_bridge_api::ClockConfig::System,
+                },
+                default_turn_budget: config.default_turn_budget,
+                default_idle_timeout_ms: config.default_idle_timeout_ms,
+            })
+            .map_err(to_napi_error)?;
+        Ok(handle.get() as f64)
+    }
+
+    #[napi]
+    pub fn shutdown_engine(
+        &self,
+        engine: f64,
+        drain_timeout_ms: u32,
+    ) -> napi::Result<JsShutdownSummary> {
+        let mut bridge = self.bridge()?;
+        let summary = bridge
+            .shutdown_engine(ShutdownRequest {
+                engine: EngineHandle::new(engine as u64),
+                drain_timeout_ms,
+            })
+            .map_err(to_napi_error)?;
+        Ok(JsShutdownSummary {
+            archived_sessions: summary.archived_sessions,
+            dropped_subscriptions: summary.dropped_subscriptions,
+        })
+    }
+
+    #[napi]
+    pub fn build_brain_wake_request(
+        &self,
+        brain: f64,
+        session_id: String,
+        body_state_json: napi::bindgen_prelude::Buffer,
+        system_prompt: String,
+        role_assembly_json: napi::bindgen_prelude::Buffer,
+        wake_id: String,
+    ) -> napi::Result<JsBufferedBrainWakeRequest> {
+        let bridge = self.bridge()?;
+        let buffered = bridge
+            .build_brain_wake_request(BrainWakeBufferInput {
+                brain: BrainImplementationHandle::new(brain as u64),
+                session_id: rusty_crew_core_bridge_api::SessionId::new(session_id),
+                body_state_json: body_state_json.to_vec(),
+                system_prompt,
+                role_assembly_json: role_assembly_json.to_vec(),
+                wake_id,
+            })
+            .map_err(to_napi_error)?;
+        Ok(JsBufferedBrainWakeRequest {
+            body_state: handle_to_u32(buffered.request.body_state)?,
+            system_prompt: handle_to_u32(buffered.request.system_prompt)?,
+            role_assembly: handle_to_u32(buffered.request.role_assembly)?,
+        })
+    }
+
+    #[napi]
+    pub fn get_buffer(&self, handle: u32) -> napi::Result<JsRuntimeBufferView> {
+        let bridge = self.bridge()?;
+        let view = bridge
+            .get_buffer(RuntimeBufferHandle::new(handle as u64))
+            .map_err(to_napi_error)?;
+        Ok(JsRuntimeBufferView {
+            handle,
+            media_type: view.media_type,
+            byte_len: view.byte_len as f64,
+            bytes: view.bytes.into(),
+        })
+    }
+
+    #[napi]
+    pub fn release_buffer(&self, handle: u32) -> napi::Result<()> {
+        let bridge = self.bridge()?;
+        bridge
+            .release_buffer(RuntimeBufferHandle::new(handle as u64))
+            .map_err(to_napi_error)?;
+        Ok(())
+    }
+
+    #[napi]
+    pub fn assert_no_buffer_leaks(&self) -> napi::Result<()> {
+        let bridge = self.bridge()?;
+        bridge.assert_no_buffer_leaks().map_err(to_napi_error)?;
+        Ok(())
+    }
+
+    #[napi]
+    pub fn submit_brain_text_delta(
+        &self,
+        wake_id: String,
+        session_id: String,
+        text: String,
+    ) -> napi::Result<JsEventReceipt> {
+        let bridge = self.bridge()?;
+        let receipt = bridge
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id,
+                session_id: rusty_crew_core_bridge_api::SessionId::new(session_id),
+                event: rusty_crew_core_bridge_api::BrainEvent::TextDelta { text },
+            })
+            .map_err(to_napi_error)?;
+        Ok(to_js_event_receipt(receipt))
+    }
+
+    #[napi]
+    pub fn submit_brain_event(
+        &self,
+        wake_id: String,
+        session_id: String,
+        event_type: String,
+        text: Option<String>,
+        tool_name: Option<String>,
+        is_error: Option<bool>,
+    ) -> napi::Result<JsEventReceipt> {
+        let bridge = self.bridge()?;
+        let event = match event_type.as_str() {
+            "started" => rusty_crew_core_bridge_api::BrainEvent::Started,
+            "text_delta" => rusty_crew_core_bridge_api::BrainEvent::TextDelta {
+                text: text.unwrap_or_default(),
+            },
+            "tool_call_started" => rusty_crew_core_bridge_api::BrainEvent::ToolCallStarted {
+                tool_name: tool_name.ok_or_else(|| {
+                    napi::Error::new(
+                        napi::Status::InvalidArg,
+                        "tool_call_started requires toolName".to_string(),
+                    )
+                })?,
+            },
+            "tool_call_finished" => rusty_crew_core_bridge_api::BrainEvent::ToolCallFinished {
+                tool_name: tool_name.ok_or_else(|| {
+                    napi::Error::new(
+                        napi::Status::InvalidArg,
+                        "tool_call_finished requires toolName".to_string(),
+                    )
+                })?,
+                is_error: is_error.unwrap_or(false),
+            },
+            "finished" => rusty_crew_core_bridge_api::BrainEvent::Finished,
+            other => {
+                return Err(napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("unsupported brain event type {other}"),
+                ))
+            }
+        };
+        let receipt = bridge
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id,
+                session_id: rusty_crew_core_bridge_api::SessionId::new(session_id),
+                event,
+            })
+            .map_err(to_napi_error)?;
+        Ok(to_js_event_receipt(receipt))
+    }
+
+    fn bridge(&self) -> napi::Result<std::sync::MutexGuard<'_, NativeBridge>> {
+        self.inner.lock().map_err(|_| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                "native bridge lock poisoned".to_string(),
+            )
+        })
+    }
+}
+
+fn to_js_event_receipt(receipt: EventReceipt) -> JsEventReceipt {
+    JsEventReceipt {
+        accepted: receipt.accepted,
+        sequence: receipt.sequence as f64,
+    }
+}
+
+fn handle_to_u32(handle: RuntimeBufferHandle) -> napi::Result<u32> {
+    u32::try_from(handle.get()).map_err(|_| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("runtime buffer handle {} does not fit in u32", handle.get()),
+        )
+    })
+}
+
+fn to_napi_error(error: CoreError) -> napi::Error {
+    napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("{:?}: {}", error.kind, error.message),
     )
 }
 

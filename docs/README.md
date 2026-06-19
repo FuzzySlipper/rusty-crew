@@ -159,6 +159,10 @@ not through detached mock spikes:
 6. Resolve mid-turn state deltas by testing actual upstream Agent hook behavior.
 7. Prove a minimal full-agent to delegated-worker completion flow.
 
+The true napi throughput measurement for item 5 is recorded in
+`ffi-throughput-napi.md`, with the resulting hybrid batching decision in
+`adr/0002-napi-brain-event-throughput.md`.
+
 ## What this rewrite is *not*
 
 - **Not a fork of pi-crew.** The TS implementation keeps shipping at

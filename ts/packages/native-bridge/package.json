@@ -8,7 +8,14 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "build:native": "napi build --manifest-path ../../../crates/bridge/core-bridge-node/Cargo.toml --release --platform --output-dir native",
+    "measure:napi": "tsx src/measure-napi-throughput.ts"
+  },
   "dependencies": {
     "@rusty-crew/contracts": "0.1.0"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.7.2"
   }
 }

@@ -7,7 +7,9 @@
     "ts/packages/*"
   ],
   "scripts": {
+    "build:native": "npm run build:native -w @rusty-crew/native-bridge",
     "build": "npm run typecheck",
+    "measure:napi": "npm run measure:napi -w @rusty-crew/native-bridge",
     "smoke:brain": "npm run smoke:wake -w @rusty-crew/brain-island",
     "smoke:bridge-wake": "npm run smoke:bridge-wake -w @rusty-crew/brain-island",
     "smoke:den": "npm run smoke -w @rusty-crew/adapter-den",

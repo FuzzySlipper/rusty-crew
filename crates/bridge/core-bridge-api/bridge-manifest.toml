@@ -74,7 +74,8 @@ input = "core_protocol::BrainEventEnvelope"
 output = "core_protocol::EventReceipt"
 errors = "core_protocol::CoreError"
 summary = "TS streams brain events produced during a Rust-driven wake."
-throughput_note = "Pre-napi native-facade baseline is documented in docs/ffi-throughput-pre-napi.md; final per-event vs batching policy requires true napi measurement and persistence/FFI separation."
+throughput_note = "True napi measurement is documented in docs/ffi-throughput-napi.md. Use a hybrid policy: lifecycle and coordination facts remain per-event; high-rate text_delta streams must be coalesced before durable submission when expected rate exceeds 250 deltas/sec, when multiple streams are active, or when fragments are token-sized."
+throughput_policy = "Flush text coalescing at 16-64 deltas, 20-50 ms, 16 KiB of accumulated UTF-8 text, finished, or a tool-call boundary. Revisit only after p95 submit latency is below 1 ms and sustained throughput exceeds 1000 deltas/sec."
 
 [[operation]]
 name = "submit_brain_actions"
