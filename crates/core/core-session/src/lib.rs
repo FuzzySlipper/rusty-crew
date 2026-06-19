@@ -21,10 +21,25 @@ struct Inner {
 
 impl SessionRegistry {
     pub fn new() -> Self {
+        Self::from_states(Vec::new())
+    }
+
+    pub fn from_states(states: Vec<SessionState>) -> Self {
+        let next_handle = states
+            .iter()
+            .map(|state| state.handle.get())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let sessions = states
+            .into_iter()
+            .map(|state| (state.session_id.clone(), state))
+            .collect();
+
         Self {
             inner: Arc::new(Inner {
-                next_handle: AtomicU64::new(1),
-                sessions: Mutex::new(HashMap::new()),
+                next_handle: AtomicU64::new(next_handle),
+                sessions: Mutex::new(sessions),
             }),
         }
     }

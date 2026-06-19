@@ -5,24 +5,36 @@ use rusty_crew_core_protocol::{
     EventSubscription, SessionId,
 };
 use std::collections::VecDeque;
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 const DEFAULT_HISTORY_LIMIT: usize = 1024;
 
-#[derive(Debug, Clone)]
+pub type EventRecorder = Arc<dyn Fn(u64, &CoreEvent) -> CoreResult<()> + Send + Sync>;
+
+#[derive(Clone)]
 pub struct CoreBus {
     inner: Arc<Inner>,
 }
 
-#[derive(Debug)]
 struct Inner {
     next_subscription: AtomicU64,
     next_sequence: AtomicU64,
     subscribers: Mutex<Vec<Subscriber>>,
     history: Mutex<VecDeque<SequencedEvent>>,
     history_limit: usize,
+    recorder: Option<EventRecorder>,
+}
+
+impl fmt::Debug for CoreBus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CoreBus")
+            .field("history_limit", &self.inner.history_limit)
+            .field("has_recorder", &self.inner.recorder.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
@@ -40,13 +52,32 @@ pub struct SequencedEvent {
 
 impl CoreBus {
     pub fn new() -> Self {
+        Self::with_history_and_recorder(Vec::new(), None)
+    }
+
+    pub fn with_history(history: Vec<SequencedEvent>) -> Self {
+        Self::with_history_and_recorder(history, None)
+    }
+
+    pub fn with_history_and_recorder(
+        history: Vec<SequencedEvent>,
+        recorder: Option<EventRecorder>,
+    ) -> Self {
+        let next_sequence = history
+            .iter()
+            .map(|entry| entry.sequence)
+            .max()
+            .unwrap_or(0)
+            + 1;
+
         Self {
             inner: Arc::new(Inner {
                 next_subscription: AtomicU64::new(1),
-                next_sequence: AtomicU64::new(1),
+                next_sequence: AtomicU64::new(next_sequence),
                 subscribers: Mutex::new(Vec::new()),
-                history: Mutex::new(VecDeque::new()),
+                history: Mutex::new(history.into_iter().collect()),
                 history_limit: DEFAULT_HISTORY_LIMIT,
+                recorder,
             }),
         }
     }
@@ -89,6 +120,10 @@ impl CoreBus {
 
     pub fn publish(&self, event: CoreEvent) -> CoreResult<u64> {
         let sequence = self.inner.next_sequence.fetch_add(1, Ordering::Relaxed);
+        if let Some(recorder) = &self.inner.recorder {
+            recorder(sequence, &event)?;
+        }
+
         {
             let mut history = self.inner.history.lock().map_err(|_| {
                 CoreError::new(CoreErrorKind::InternalError, "history lock poisoned")

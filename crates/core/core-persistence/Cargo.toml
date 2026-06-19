@@ -1,0 +1,11 @@
+[package]
+name = "rusty-crew-core-persistence"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+rusty-crew-core-protocol = { path = "../core-protocol" }
+serde.workspace = true
+serde_json.workspace = true

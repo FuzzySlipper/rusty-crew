@@ -17,6 +17,9 @@ material. When they conflict, the unified architecture wins.
   routing and event fanout.
 - `crates/core/core-session` — session registry for full, worker, and delegated
   sessions.
+- `crates/core/core-persistence` — SQLite-backed local coordination store for
+  sessions, message history, worker-run records, completion packets, and
+  restart hydration. Den product data is intentionally excluded.
 - `crates/core/core-body` — body-loop wake threshold and deterministic state
   projection surface.
 - `crates/core/core-engine` — composition crate for the Rust coordination
@@ -55,6 +58,9 @@ npm run smoke:den
 - Rust owns deterministic coordination: bus routing, sessions, body state, wake
   thresholds, action validation, packet lifecycle, and coordination
   persistence.
+- Rust persistence stores coordination state under `engine_data_dir`; Den
+  task/project/document records remain in Den and are not mirrored into the
+  SQLite store.
 - TypeScript owns the brain island, tool execution, LLM provider calls, profile
   composition, and platform adapters.
 - Den is product data and observability. It is not the coordination bus.
