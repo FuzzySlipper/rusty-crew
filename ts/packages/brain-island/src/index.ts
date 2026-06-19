@@ -95,3 +95,8 @@ export type {
 export { createPiAgentBrain } from "./pi-agent-brain.js";
 export type { BridgeBufferClient } from "./bridge-wake.js";
 export { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
+export {
+  BodyControlledDeltaQueue,
+  defaultBodyDeltaPolicy,
+} from "./mid-turn-delta.js";
+export type { DrainResult, QueuedMidTurnMessage } from "./mid-turn-delta.js";

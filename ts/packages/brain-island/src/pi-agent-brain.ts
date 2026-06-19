@@ -17,7 +17,11 @@ import type {
   BrainWakeResult,
 } from "./index.js";
 
-export type PiAgentLike = Pick<PiAgent, "prompt" | "subscribe" | "waitForIdle">;
+export type PiAgentLike = Pick<
+  PiAgent,
+  "prompt" | "subscribe" | "waitForIdle"
+> &
+  Partial<Pick<PiAgent, "clearAllQueues">>;
 
 export type PiAgentFactory = (options: PiAgentOptions) => PiAgentLike;
 
@@ -46,6 +50,7 @@ export function createPiAgentBrain(
         );
         await agent.waitForIdle();
       } finally {
+        agent.clearAllQueues?.();
         unsubscribe();
       }
 
@@ -80,6 +85,8 @@ function buildAgentOptions(input: BrainWakeInput): PiAgentOptions {
       tools: [],
     },
     sessionId: input.sessionId,
+    steeringMode: "one-at-a-time",
+    followUpMode: "one-at-a-time",
   };
 }
 

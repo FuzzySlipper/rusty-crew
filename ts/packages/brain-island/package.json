@@ -10,7 +10,8 @@
   },
   "scripts": {
     "smoke:wake": "tsx src/smoke-wake.ts",
-    "smoke:bridge-wake": "tsx src/smoke-bridge-wake.ts"
+    "smoke:bridge-wake": "tsx src/smoke-bridge-wake.ts",
+    "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts"
   },
   "piPackageSource": {
     "repository": "https://github.com/earendil-works/pi",

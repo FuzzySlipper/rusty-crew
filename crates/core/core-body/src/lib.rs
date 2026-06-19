@@ -2,9 +2,10 @@
 
 use rusty_crew_core_bus::CoreBus;
 use rusty_crew_core_protocol::{
-    ActionBatchReceipt, ActionRejection, AgentMessage, BodyState, BrainAction, BrainActionBatch,
-    CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreResult, EventReceipt, ProfileId,
-    SessionId, SessionKind, SessionStatus,
+    ActionBatchReceipt, ActionRejection, AgentMessage, BodyDeltaPolicy, BodyState, BrainAction,
+    BrainActionBatch, CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreResult,
+    DeltaQueueOwner, EventReceipt, MidTurnDeltaMode, ProfileId, SessionId, SessionKind,
+    SessionStatus,
 };
 use rusty_crew_core_session::SessionRegistry;
 
@@ -39,7 +40,17 @@ impl BodyProjector {
             session,
             pending_messages,
             recent_events,
+            delta_policy: default_delta_policy(),
         })
+    }
+}
+
+pub const fn default_delta_policy() -> BodyDeltaPolicy {
+    BodyDeltaPolicy {
+        mode: MidTurnDeltaMode::FrozenSnapshotNextWake,
+        queue_owner: DeltaQueueOwner::Body,
+        queued_message_ttl_ms: 5_000,
+        max_queued_messages: 32,
     }
 }
 

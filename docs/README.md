@@ -163,6 +163,11 @@ The true napi throughput measurement for item 5 is recorded in
 `ffi-throughput-napi.md`, with the resulting hybrid batching decision in
 `adr/0002-napi-brain-event-throughput.md`.
 
+The mid-turn delta decision for item 6 is recorded in
+`adr/0003-mid-turn-delta-policy.md`: v1 uses frozen snapshots plus
+body-owned next-wake queuing with aggressive TTL rather than pi-agent internal
+queues as durable state.
+
 ## What this rewrite is *not*
 
 - **Not a fork of pi-crew.** The TS implementation keeps shipping at

@@ -316,6 +316,27 @@ pub struct BodyState {
     pub session: SessionState,
     pub pending_messages: Vec<AgentMessage>,
     pub recent_events: Vec<CoreEvent>,
+    pub delta_policy: BodyDeltaPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BodyDeltaPolicy {
+    pub mode: MidTurnDeltaMode,
+    pub queue_owner: DeltaQueueOwner,
+    pub queued_message_ttl_ms: u32,
+    pub max_queued_messages: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MidTurnDeltaMode {
+    FrozenSnapshotNextWake,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeltaQueueOwner {
+    Body,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

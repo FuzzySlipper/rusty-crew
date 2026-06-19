@@ -63,6 +63,12 @@ const request: BrainWakeRequest = {
       },
     ],
     recentEvents: [],
+    deltaPolicy: {
+      mode: "frozen_snapshot_next_wake",
+      queueOwner: "body",
+      queuedMessageTtlMs: 5_000,
+      maxQueuedMessages: 32,
+    },
   }),
   systemPrompt: insertText("system prompt ".repeat(4096)),
   roleAssembly: insertJson({

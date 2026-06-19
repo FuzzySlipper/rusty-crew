@@ -65,6 +65,7 @@ output = "core_protocol::BrainWakeAccepted"
 errors = "core_protocol::CoreError"
 summary = "Rust invokes the TS brain island with a frozen body-state snapshot."
 buffer_contract = "BrainWakeRequest carries body_state, system_prompt, and role_assembly as RuntimeBufferHandle leases; TS must release each handle exactly once after hydration."
+delta_policy = "BodyState.delta_policy is frozen_snapshot_next_wake. Mid-turn deltas are not injected into the active provider stream; fresh deltas may be considered by the body-owned next-wake queue with a 5000 ms default TTL and 32 message cap. Expired queued messages are dropped, not replayed."
 
 [[operation]]
 name = "submit_brain_event"

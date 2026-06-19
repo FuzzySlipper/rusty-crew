@@ -194,10 +194,18 @@ export interface RuntimeBufferView {
   bytes: Uint8Array;
 }
 
+export interface BodyDeltaPolicy {
+  mode: "frozen_snapshot_next_wake";
+  queueOwner: "body";
+  queuedMessageTtlMs: number;
+  maxQueuedMessages: number;
+}
+
 export interface BodyState {
   session: SessionState;
   pendingMessages: AgentMessage[];
   recentEvents: CoreEvent[];
+  deltaPolicy: BodyDeltaPolicy;
 }
 
 export type CoreEvent =
