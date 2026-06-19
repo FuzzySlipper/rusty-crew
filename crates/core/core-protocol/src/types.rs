@@ -42,6 +42,8 @@ macro_rules! string_id {
 
 handle_type!(EngineHandle);
 handle_type!(SessionHandle);
+handle_type!(BrainImplementationHandle);
+handle_type!(PlatformAdapterHandle);
 handle_type!(SubscriptionHandle);
 handle_type!(RuntimeBufferHandle);
 
@@ -53,8 +55,12 @@ string_id!(TaskId);
 string_id!(RunId);
 string_id!(AssignmentId);
 string_id!(AdapterId);
+string_id!(BrainImplementationId);
 
 pub type IsoTimestamp = String;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unit;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,6 +75,18 @@ pub struct EngineConfig {
     pub clock: ClockConfig,
     pub default_turn_budget: u32,
     pub default_idle_timeout_ms: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShutdownRequest {
+    pub engine: EngineHandle,
+    pub drain_timeout_ms: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShutdownSummary {
+    pub archived_sessions: u32,
+    pub dropped_subscriptions: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +149,7 @@ pub struct ResourceLimits {
 pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
+    pub input_schema: Option<RuntimeBufferHandle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,6 +189,28 @@ pub struct AgentMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventSubscription {
+    pub event_kinds: Vec<CoreEventKind>,
+    pub session_id: Option<SessionId>,
+    pub agent_id: Option<AgentId>,
+    pub adapter_id: Option<AdapterId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoreEventKind {
+    SessionCreated,
+    SessionArchived,
+    AgentMessageRouted,
+    ExternalEventInjected,
+    DenDataUpdated,
+    BrainWakeRequested,
+    BrainEventObserved,
+    BrainActionsAccepted,
+    CompletionPacketDelivered,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DenDataUpdate {
     pub project_id: ProjectId,
     pub entity_kind: String,
@@ -181,7 +222,26 @@ pub struct DenDataUpdate {
 pub struct ExternalEvent {
     pub adapter_id: AdapterId,
     pub source: String,
-    pub payload_json: String,
+    pub payload: ExternalEventPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalEventPayload {
+    HumanMessage {
+        from: String,
+        text: String,
+    },
+    AdapterStatus {
+        status: String,
+        detail: Option<String>,
+    },
+    ToolCatalogChanged {
+        catalog_id: String,
+    },
+    RawJson {
+        json: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,9 +303,18 @@ pub struct BodyState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrainWakeRequest {
+    pub brain: BrainImplementationHandle,
     pub session_id: SessionId,
     pub state: BodyState,
     pub system_prompt: RuntimeBufferHandle,
+    pub role_assembly: RuntimeBufferHandle,
+    pub wake_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainWakeAccepted {
+    pub wake_id: String,
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,6 +325,13 @@ pub enum BrainEvent {
     ToolCallStarted { tool_name: String },
     ToolCallFinished { tool_name: String, is_error: bool },
     Finished,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainEventEnvelope {
+    pub wake_id: String,
+    pub session_id: SessionId,
+    pub event: BrainEvent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,14 +352,59 @@ pub enum BrainAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrainActionBatch {
+    pub wake_id: String,
     pub session_id: SessionId,
     pub actions: Vec<BrainAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionBatchReceipt {
+    pub wake_id: String,
+    pub accepted_actions: u32,
+    pub rejected_actions: Vec<ActionRejection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionRejection {
+    pub index: u32,
+    pub kind: CoreErrorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventReceipt {
+    pub accepted: bool,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeBufferView {
+    pub handle: RuntimeBufferHandle,
+    pub media_type: String,
+    pub byte_len: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainImplementationRegistration {
+    pub implementation_id: BrainImplementationId,
+    pub profile_id: ProfileId,
+    pub tool_profile: ToolProfile,
+    pub model_config: BrainModelConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainModelConfig {
+    pub provider: String,
+    pub model_name: String,
+    pub temperature_milli: Option<u32>,
+    pub max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformAdapterRegistration {
     pub adapter_id: AdapterId,
     pub kind: PlatformAdapterKind,
+    pub display_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,5 +6,5 @@ import type {
 export function createDenAdapterRegistration(
   adapterId: AdapterId,
 ): PlatformAdapterRegistration {
-  return { adapterId, kind: "den" };
+  return { adapterId, kind: "den", displayName: "Den" };
 }

@@ -107,7 +107,8 @@ The initial repo scaffold now exists in `/home/dev/rusty-crew` and
 - `crates/core/core-body` — body-loop wake threshold surface.
 - `crates/core/core-engine` — core composition crate.
 - `crates/bridge/*` — bridge API, mock, native Node placeholder, and codegen
-  placeholder.
+  placeholder. `crates/bridge/core-bridge-api/bridge-manifest.toml` is the
+  active unified manifest scaffold.
 - `ts/packages/contracts` — generated-contract placeholder.
 - `ts/packages/core-bridge` and `ts/packages/native-bridge` — TS bridge facade
   and loader placeholder.

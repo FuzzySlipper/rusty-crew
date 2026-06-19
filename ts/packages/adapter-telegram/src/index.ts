@@ -6,5 +6,5 @@ import type {
 export function createTelegramAdapterRegistration(
   adapterId: AdapterId,
 ): PlatformAdapterRegistration {
-  return { adapterId, kind: "telegram" };
+  return { adapterId, kind: "telegram", displayName: "Telegram" };
 }

@@ -1,0 +1,153 @@
+# Rusty-Crew core bridge manifest (unified v1)
+#
+# This is the active bridge-surface source of truth for the scaffold. It follows
+# the Den `rusty-crew-unified-architecture` document, not the historical
+# `docs/pi-crew-core-bridge-manifest.md` operation list.
+#
+# Boundary rule: Rust owns deterministic coordination. TypeScript owns the
+# brain island and platform adapters. Internal Rust coordination mechanics
+# (message routing, worker spawning, wake threshold evaluation, action
+# validation/execution) are intentionally not TS-callable operations.
+
+[manifest]
+version = 1
+owning_crate = "rusty-crew-core-bridge-api"
+facade_package = "@rusty-crew/core-bridge"
+native_package = "@rusty-crew/native-bridge"
+contracts_package = "@rusty-crew/contracts"
+error_type = "CoreError"
+handle_types = [
+  "EngineHandle",
+  "SessionHandle",
+  "BrainImplementationHandle",
+  "PlatformAdapterHandle",
+  "SubscriptionHandle",
+  "RuntimeBufferHandle",
+]
+
+# Engine lifecycle: constructing and draining the single-process fleet.
+
+[[operation]]
+name = "initialize_engine"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::EngineConfig"
+output = "core_protocol::EngineHandle"
+errors = "core_protocol::CoreError"
+summary = "Create the single-process Rust coordination engine."
+
+[[operation]]
+name = "shutdown_engine"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ShutdownRequest"
+output = "core_protocol::ShutdownSummary"
+errors = "core_protocol::CoreError"
+summary = "Drain and close the Rust coordination engine."
+
+# Brain island registration and wake path.
+
+[[operation]]
+name = "register_brain_implementation"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BrainImplementationRegistration"
+output = "core_protocol::BrainImplementationHandle"
+errors = "core_protocol::CoreError"
+summary = "Register a TS brain implementation/profile/tool catalog for Rust-driven activation."
+
+[[operation]]
+name = "wake_brain"
+surface = "stable"
+direction = "rust_to_ts"
+input = "core_protocol::BrainWakeRequest"
+output = "core_protocol::BrainWakeAccepted"
+errors = "core_protocol::CoreError"
+summary = "Rust invokes the TS brain island with a frozen body-state snapshot."
+
+[[operation]]
+name = "submit_brain_event"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BrainEventEnvelope"
+output = "core_protocol::EventReceipt"
+errors = "core_protocol::CoreError"
+summary = "TS streams brain events produced during a Rust-driven wake."
+
+[[operation]]
+name = "submit_brain_actions"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BrainActionBatch"
+output = "core_protocol::ActionBatchReceipt"
+errors = "core_protocol::CoreError"
+summary = "TS returns the structured brain action batch; Rust validates and executes it internally."
+
+# Platform adapters: external systems inject/project through the bus.
+
+[[operation]]
+name = "register_platform_adapter"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::PlatformAdapterRegistration"
+output = "core_protocol::PlatformAdapterHandle"
+errors = "core_protocol::CoreError"
+summary = "Register a TS platform adapter such as Den, Telegram, MCP, TUI, or CLI."
+
+[[operation]]
+name = "inject_external_event"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalEvent"
+output = "core_protocol::EventReceipt"
+errors = "core_protocol::CoreError"
+summary = "Inject an external adapter event into the internal Rust bus."
+
+[[operation]]
+name = "inject_den_data_update"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::DenDataUpdate"
+output = "core_protocol::EventReceipt"
+errors = "core_protocol::CoreError"
+summary = "Inject Den product-data updates without making Den the coordination authority."
+
+# Observability/event projection.
+
+[[operation]]
+name = "subscribe_events"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::EventSubscription"
+output = "core_protocol::SubscriptionHandle"
+errors = "core_protocol::CoreError"
+summary = "Subscribe a bridge/adaptor projection to internal coordination events."
+
+[[operation]]
+name = "unsubscribe_events"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SubscriptionHandle"
+output = "core_protocol::Unit"
+errors = "core_protocol::CoreError"
+summary = "Cancel an event subscription."
+
+# Runtime buffers: large prompts/state snapshots cross by handle.
+
+[[operation]]
+name = "get_buffer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::RuntimeBufferHandle"
+output = "core_protocol::RuntimeBufferView"
+errors = "core_protocol::CoreError"
+summary = "Borrow bridge-owned bytes for a large wake payload."
+
+[[operation]]
+name = "release_buffer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::RuntimeBufferHandle"
+output = "core_protocol::Unit"
+errors = "core_protocol::CoreError"
+summary = "Release a borrowed runtime buffer."

@@ -6,5 +6,5 @@ import type {
 export function createMcpAdapterRegistration(
   adapterId: AdapterId,
 ): PlatformAdapterRegistration {
-  return { adapterId, kind: "mcp" };
+  return { adapterId, kind: "mcp", displayName: "MCP" };
 }

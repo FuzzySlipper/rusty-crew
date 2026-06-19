@@ -6,12 +6,29 @@
 pub use rusty_crew_core_protocol::*;
 
 pub const MANIFEST_VERSION: u32 = 1;
+pub const MANIFEST_TEXT: &str = include_str!("../bridge-manifest.toml");
+pub const OPERATION_NAMES: &[&str] = &[
+    "initialize_engine",
+    "shutdown_engine",
+    "register_brain_implementation",
+    "wake_brain",
+    "submit_brain_event",
+    "submit_brain_actions",
+    "register_platform_adapter",
+    "inject_external_event",
+    "inject_den_data_update",
+    "subscribe_events",
+    "unsubscribe_events",
+    "get_buffer",
+    "release_buffer",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeManifestSummary {
     pub version: u32,
     pub owning_crate: &'static str,
     pub native_package: &'static str,
+    pub operation_names: &'static [&'static str],
 }
 
 pub fn manifest_summary() -> BridgeManifestSummary {
@@ -19,5 +36,6 @@ pub fn manifest_summary() -> BridgeManifestSummary {
         version: MANIFEST_VERSION,
         owning_crate: "rusty-crew-core-bridge-api",
         native_package: "@rusty-crew/native-bridge",
+        operation_names: OPERATION_NAMES,
     }
 }

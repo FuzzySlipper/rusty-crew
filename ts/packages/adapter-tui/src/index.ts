@@ -6,5 +6,5 @@ import type {
 export function createTuiAdapterRegistration(
   adapterId: AdapterId,
 ): PlatformAdapterRegistration {
-  return { adapterId, kind: "tui" };
+  return { adapterId, kind: "tui", displayName: "TUI" };
 }

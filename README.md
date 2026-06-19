@@ -22,7 +22,8 @@ material. When they conflict, the unified architecture wins.
 - `crates/core/core-engine` — composition crate for the Rust coordination
   service.
 - `crates/bridge/core-bridge-api` — stable bridge-facing facade with no native
-  transport dependency.
+  transport dependency. Its `bridge-manifest.toml` is the active unified
+  manifest scaffold.
 - `crates/bridge/core-bridge-node` — native Node transport placeholder.
 - `crates/bridge/core-bridge-mock` — in-process bridge for early integration
   tests.
