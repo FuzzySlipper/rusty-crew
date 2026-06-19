@@ -54,6 +54,19 @@ npm install
 npm run typecheck
 npm run format
 npm run smoke:den
+npm run smoke:bridge-wake
+```
+
+## Throughput Measurement
+
+The pre-napi native-facade benchmark is documented in
+`docs/ffi-throughput-pre-napi.md`.
+
+```sh
+RUSTY_CREW_THROUGHPUT_EVENTS=10000 \
+RUSTY_CREW_THROUGHPUT_BATCHES=1,16,64 \
+RUSTY_CREW_THROUGHPUT_TEXT_BYTES=64 \
+cargo run --release -p rusty-crew-core-bridge-node --bin measure_brain_event_throughput
 ```
 
 ## Architecture Rules

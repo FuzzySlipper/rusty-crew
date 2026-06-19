@@ -78,8 +78,8 @@ impl NativeBridge {
         Err(not_implemented("wake_brain"))
     }
 
-    pub fn submit_brain_event(&self, _event: BrainEventEnvelope) -> CoreResult<EventReceipt> {
-        Err(not_implemented("submit_brain_event"))
+    pub fn submit_brain_event(&self, event: BrainEventEnvelope) -> CoreResult<EventReceipt> {
+        self.engine()?.submit_brain_event(event)
     }
 
     pub fn submit_brain_actions(&self, batch: BrainActionBatch) -> CoreResult<ActionBatchReceipt> {
@@ -217,5 +217,33 @@ mod tests {
             .expect_err("unreleased wake buffers should be visible");
 
         assert_eq!(error.kind, CoreErrorKind::InternalError);
+    }
+
+    #[test]
+    fn native_bridge_submits_brain_events_to_the_engine() {
+        let mut bridge = NativeBridge::new();
+        bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: std::env::temp_dir()
+                    .join(format!("rusty-crew-native-event-{}", std::process::id()))
+                    .to_string_lossy()
+                    .to_string(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                    at: "2026-06-19T00:00:00Z".to_string(),
+                },
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1000,
+            })
+            .unwrap();
+
+        let receipt = bridge
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "wake".to_string(),
+                session_id: SessionId::new("session"),
+                event: rusty_crew_core_bridge_api::BrainEvent::Started,
+            })
+            .unwrap();
+
+        assert!(receipt.accepted);
     }
 }

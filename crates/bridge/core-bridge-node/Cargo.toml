@@ -7,3 +7,4 @@ version.workspace = true
 [dependencies]
 rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
 rusty-crew-core-engine = { path = "../../core/core-engine" }
+serde_json.workspace = true

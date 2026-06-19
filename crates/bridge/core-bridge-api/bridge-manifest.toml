@@ -74,6 +74,7 @@ input = "core_protocol::BrainEventEnvelope"
 output = "core_protocol::EventReceipt"
 errors = "core_protocol::CoreError"
 summary = "TS streams brain events produced during a Rust-driven wake."
+throughput_note = "Pre-napi native-facade baseline is documented in docs/ffi-throughput-pre-napi.md; final per-event vs batching policy requires true napi measurement and persistence/FFI separation."
 
 [[operation]]
 name = "submit_brain_actions"

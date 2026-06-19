@@ -4,8 +4,8 @@ use rusty_crew_core_body::{BodyProjector, BrainActionExecutor};
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::CoordinationStore;
 use rusty_crew_core_protocol::{
-    ActionBatchReceipt, BodyState, BrainActionBatch, ClockConfig, CoreError, CoreErrorKind,
-    CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt,
+    ActionBatchReceipt, BodyState, BrainActionBatch, BrainEventEnvelope, ClockConfig, CoreError,
+    CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt,
     EventSubscription, ExternalEvent, IsoTimestamp, SessionConfig, SessionId, SessionState,
     SessionStatus, ShutdownSummary,
 };
@@ -122,6 +122,17 @@ impl CoreEngine {
         self.action_executor.execute(batch)
     }
 
+    pub fn submit_brain_event(&self, envelope: BrainEventEnvelope) -> CoreResult<EventReceipt> {
+        let sequence = self.bus.publish(CoreEvent::BrainEventObserved {
+            session_id: envelope.session_id,
+            event: envelope.event,
+        })?;
+        Ok(EventReceipt {
+            accepted: true,
+            sequence,
+        })
+    }
+
     pub fn inject_external_event(&self, event: ExternalEvent) -> CoreResult<EventReceipt> {
         let sequence = self
             .bus
@@ -161,7 +172,7 @@ mod tests {
     use super::*;
     use rusty_crew_core_persistence::CoordinationStore;
     use rusty_crew_core_protocol::{
-        AdapterId, AgentId, AgentMessage, BrainAction, ClockConfig, CompletionPacket,
+        AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, ExternalEventPayload, ProfileId, ProjectId,
         ResourceLimits, SessionKind, ToolDescriptor, ToolProfile,
     };
@@ -374,6 +385,38 @@ mod tests {
         assert!(matches!(
             events.recv_timeout(Duration::from_secs(1)).unwrap(),
             CoreEvent::ExternalEventInjected { .. }
+        ));
+    }
+
+    #[test]
+    fn submits_brain_events_into_core_event_handling() {
+        let engine = test_engine();
+        let (_subscription_id, events) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::BrainEventObserved],
+                session_id: Some(SessionId::new("brain-session")),
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        let receipt = engine
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "wake-1".to_string(),
+                session_id: SessionId::new("brain-session"),
+                event: BrainEvent::TextDelta {
+                    text: "streaming".to_string(),
+                },
+            })
+            .unwrap();
+
+        assert!(receipt.accepted);
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::BrainEventObserved {
+                event: BrainEvent::TextDelta { .. },
+                ..
+            }
         ));
     }
 
