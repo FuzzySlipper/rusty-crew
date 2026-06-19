@@ -9,7 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "smoke:wake": "tsx src/smoke-wake.ts"
+    "smoke:wake": "tsx src/smoke-wake.ts",
+    "smoke:bridge-wake": "tsx src/smoke-bridge-wake.ts"
   },
   "piPackageSource": {
     "repository": "https://github.com/earendil-works/pi",

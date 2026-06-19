@@ -26,8 +26,11 @@ material. When they conflict, the unified architecture wins.
   service.
 - `crates/bridge/core-bridge-api` — stable bridge-facing facade with no native
   transport dependency. Its `bridge-manifest.toml` is the active unified
-  manifest scaffold.
-- `crates/bridge/core-bridge-node` — native Node transport placeholder.
+  manifest scaffold. It also owns the shared runtime-buffer lease protocol used
+  by bridge transports.
+- `crates/bridge/core-bridge-node` — native Node transport boundary. napi-rs
+  glue belongs here; the current slice exposes the manifest surface and tests
+  runtime-buffer ownership without leaking native dependencies into core crates.
 - `crates/bridge/core-bridge-mock` — in-process bridge for early integration
   tests.
 - `crates/bridge/core-bridge-codegen` — manifest/codegen placeholder.
@@ -68,6 +71,8 @@ npm run smoke:den
   must not block internal agent-to-agent routing.
 - Worker spawning and prompting are internal Rust lifecycle/activation
   operations, not TS-called FFI verbs.
+- Large bridge wake payloads cross as `RuntimeBufferHandle`s. See
+  `docs/runtime-buffer-ownership.md` for acquire/release rules.
 - Tool availability is profile-based. Do not reintroduce a `WorkerPolicy`
   allow/deny gate as the main tool model.
 - Use the current `https://github.com/earendil-works/pi` source for the pi

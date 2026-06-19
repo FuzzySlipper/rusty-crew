@@ -64,6 +64,7 @@ input = "core_protocol::BrainWakeRequest"
 output = "core_protocol::BrainWakeAccepted"
 errors = "core_protocol::CoreError"
 summary = "Rust invokes the TS brain island with a frozen body-state snapshot."
+buffer_contract = "BrainWakeRequest carries body_state, system_prompt, and role_assembly as RuntimeBufferHandle leases; TS must release each handle exactly once after hydration."
 
 [[operation]]
 name = "submit_brain_event"
@@ -142,6 +143,7 @@ input = "core_protocol::RuntimeBufferHandle"
 output = "core_protocol::RuntimeBufferView"
 errors = "core_protocol::CoreError"
 summary = "Borrow bridge-owned bytes for a large wake payload."
+buffer_contract = "Requires an active RuntimeBufferHandle lease and returns a byte view without transferring coordination ownership."
 
 [[operation]]
 name = "release_buffer"
@@ -151,3 +153,4 @@ input = "core_protocol::RuntimeBufferHandle"
 output = "core_protocol::Unit"
 errors = "core_protocol::CoreError"
 summary = "Release a borrowed runtime buffer."
+buffer_contract = "Consumes one active RuntimeBufferHandle lease; double release and leaked leases are bridge test failures."

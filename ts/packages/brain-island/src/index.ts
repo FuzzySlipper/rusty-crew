@@ -93,3 +93,5 @@ export type {
   PiAgentLike,
 } from "./pi-agent-brain.js";
 export { createPiAgentBrain } from "./pi-agent-brain.js";
+export type { BridgeBufferClient } from "./bridge-wake.js";
+export { wakeBrainFromBridgeRequest } from "./bridge-wake.js";

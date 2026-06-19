@@ -1,8 +1,26 @@
 import type {
+  ActionBatchReceipt,
+  BrainActionBatch,
+  BrainEventEnvelope,
+  BrainImplementationHandle,
+  BrainImplementationRegistration,
+  BrainWakeAccepted,
+  BrainWakeRequest,
   DenDataUpdate,
   EngineConfig,
+  EngineHandle,
   EventReceipt,
+  EventSubscription,
   ExternalEvent,
+  ManifestOperationName,
+  PlatformAdapterHandle,
+  PlatformAdapterRegistration,
+  RuntimeBufferHandle,
+  RuntimeBufferView,
+  ShutdownRequest,
+  ShutdownSummary,
+  SubscriptionHandle,
+  Unit,
 } from "@rusty-crew/contracts";
 import {
   loadNativeBridge,
@@ -20,22 +38,68 @@ export class CoreBridge {
     return new CoreBridge(native.manifestVersion, native);
   }
 
-  async injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt> {
-    if (!this.native.injectDenDataUpdate) {
-      throw new Error(
-        "native bridge does not implement inject_den_data_update",
-      );
-    }
+  operationNames(): readonly ManifestOperationName[] {
+    return this.native.operationNames;
+  }
 
+  async initializeEngine(config: EngineConfig): Promise<EngineHandle> {
+    return this.native.initializeEngine(config);
+  }
+
+  async shutdownEngine(request: ShutdownRequest): Promise<ShutdownSummary> {
+    return this.native.shutdownEngine(request);
+  }
+
+  async registerBrainImplementation(
+    registration: BrainImplementationRegistration,
+  ): Promise<BrainImplementationHandle> {
+    return this.native.registerBrainImplementation(registration);
+  }
+
+  async wakeBrain(request: BrainWakeRequest): Promise<BrainWakeAccepted> {
+    return this.native.wakeBrain(request);
+  }
+
+  async submitBrainEvent(event: BrainEventEnvelope): Promise<EventReceipt> {
+    return this.native.submitBrainEvent(event);
+  }
+
+  async submitBrainActions(
+    batch: BrainActionBatch,
+  ): Promise<ActionBatchReceipt> {
+    return this.native.submitBrainActions(batch);
+  }
+
+  async registerPlatformAdapter(
+    registration: PlatformAdapterRegistration,
+  ): Promise<PlatformAdapterHandle> {
+    return this.native.registerPlatformAdapter(registration);
+  }
+
+  async injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt> {
     return this.native.injectDenDataUpdate(update);
   }
 
   async injectExternalEvent(event: ExternalEvent): Promise<EventReceipt> {
-    if (!this.native.injectExternalEvent) {
-      throw new Error("native bridge does not implement inject_external_event");
-    }
-
     return this.native.injectExternalEvent(event);
+  }
+
+  async subscribeEvents(
+    subscription: EventSubscription,
+  ): Promise<SubscriptionHandle> {
+    return this.native.subscribeEvents(subscription);
+  }
+
+  async unsubscribeEvents(handle: SubscriptionHandle): Promise<Unit> {
+    return this.native.unsubscribeEvents(handle);
+  }
+
+  async getBuffer(handle: RuntimeBufferHandle): Promise<RuntimeBufferView> {
+    return this.native.getBuffer(handle);
+  }
+
+  async releaseBuffer(handle: RuntimeBufferHandle): Promise<Unit> {
+    return this.native.releaseBuffer(handle);
   }
 }
 

@@ -3,6 +3,12 @@
 //! This crate intentionally has no native transport dependency. napi-rs, CLI,
 //! and test transports live in sibling crates.
 
+mod buffers;
+
+pub use buffers::{
+    BrainWakeBufferInput, BufferedBrainWakeRequest, RuntimeBufferLease, RuntimeBufferStore,
+    APPLICATION_JSON, TEXT_PLAIN,
+};
 pub use rusty_crew_core_protocol::*;
 
 pub const MANIFEST_VERSION: u32 = 1;

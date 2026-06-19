@@ -147,7 +147,7 @@ export type BrainAction =
 export interface BrainWakeRequest {
   brain: BrainImplementationHandle;
   sessionId: SessionId;
-  state: BodyState;
+  bodyState: RuntimeBufferHandle;
   systemPrompt: RuntimeBufferHandle;
   roleAssembly: RuntimeBufferHandle;
   wakeId: string;
@@ -191,6 +191,7 @@ export interface RuntimeBufferView {
   handle: RuntimeBufferHandle;
   mediaType: string;
   byteLen: number;
+  bytes: Uint8Array;
 }
 
 export interface BodyState {

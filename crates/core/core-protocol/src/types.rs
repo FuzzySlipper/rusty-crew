@@ -322,7 +322,7 @@ pub struct BodyState {
 pub struct BrainWakeRequest {
     pub brain: BrainImplementationHandle,
     pub session_id: SessionId,
-    pub state: BodyState,
+    pub body_state: RuntimeBufferHandle,
     pub system_prompt: RuntimeBufferHandle,
     pub role_assembly: RuntimeBufferHandle,
     pub wake_id: String,
@@ -409,6 +409,7 @@ pub struct RuntimeBufferView {
     pub handle: RuntimeBufferHandle,
     pub media_type: String,
     pub byte_len: u64,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
