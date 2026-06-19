@@ -1,0 +1,14 @@
+# Dependency guardrail sketch. This will become machine-checked once the
+# scaffold has a manifest/codegen harness.
+
+[[crate]]
+name = "rusty-crew-core-protocol"
+may_not_depend_on = ["rusty-crew-core-engine", "rusty-crew-core-bus", "rusty-crew-core-session", "rusty-crew-core-body", "rusty-crew-core-bridge-node"]
+
+[[crate]]
+name = "rusty-crew-core-engine"
+may_not_depend_on = ["rusty-crew-core-bridge-node"]
+
+[[crate]]
+name = "rusty-crew-core-bridge-api"
+may_not_depend_on = ["rusty-crew-core-bridge-node"]

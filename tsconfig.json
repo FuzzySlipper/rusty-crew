@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./ts/packages/contracts" },
+    { "path": "./ts/packages/native-bridge" },
+    { "path": "./ts/packages/core-bridge" },
+    { "path": "./ts/packages/brain-island" },
+    { "path": "./ts/packages/adapter-den" },
+    { "path": "./ts/packages/adapter-telegram" },
+    { "path": "./ts/packages/adapter-mcp" },
+    { "path": "./ts/packages/adapter-tui" }
+  ]
+}

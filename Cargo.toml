@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core/core-protocol",
+    "crates/core/core-bus",
+    "crates/core/core-session",
+    "crates/core/core-body",
+    "crates/core/core-engine",
+    "crates/bridge/core-bridge-api",
+    "crates/bridge/core-bridge-mock",
+    "crates/bridge/core-bridge-node",
+    "crates/bridge/core-bridge-codegen",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"

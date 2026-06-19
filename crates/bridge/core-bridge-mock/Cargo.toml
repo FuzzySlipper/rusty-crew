@@ -1,0 +1,9 @@
+[package]
+name = "rusty-crew-core-bridge-mock"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
+rusty-crew-core-engine = { path = "../../core/core-engine" }

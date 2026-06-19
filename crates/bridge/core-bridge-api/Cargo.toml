@@ -1,0 +1,8 @@
+[package]
+name = "rusty-crew-core-bridge-api"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusty-crew-core-protocol = { path = "../../core/core-protocol" }

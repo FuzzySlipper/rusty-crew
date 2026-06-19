@@ -1,0 +1,20 @@
+{
+  "name": "rusty-crew",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "ts/packages/*"
+  ],
+  "scripts": {
+    "build": "npm run typecheck",
+    "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/core-bridge && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.8.0"
+  }
+}
