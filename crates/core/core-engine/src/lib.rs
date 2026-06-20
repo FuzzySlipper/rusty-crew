@@ -101,8 +101,8 @@ impl CoreEngine {
     }
 
     pub fn create_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
-        let state = self.sessions.create_session(config, self.now())?;
-        self.store.save_session(&state)?;
+        let state = self.sessions.create_session(config.clone(), self.now())?;
+        self.store.save_session_with_config(&state, &config)?;
         self.bus.publish(CoreEvent::SessionCreated {
             state: Box::new(state.clone()),
         })?;

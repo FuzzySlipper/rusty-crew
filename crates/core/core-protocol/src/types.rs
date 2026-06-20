@@ -48,6 +48,7 @@ handle_type!(SubscriptionHandle);
 handle_type!(RuntimeBufferHandle);
 
 string_id!(AgentId);
+string_id!(AgentInstanceId);
 string_id!(SessionId);
 string_id!(ProfileId);
 string_id!(ProjectId);
@@ -137,6 +138,76 @@ pub enum SessionStatus {
     Active,
     Idle,
     Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DurableAgentKind {
+    Prime,
+    Full,
+    Delegated,
+    WorkerPoolWorker,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DurableIdentityStatus {
+    Active,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceSystemReference {
+    pub system: String,
+    pub external_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenRuntimeReference {
+    pub project_id: Option<ProjectId>,
+    pub task_id: Option<TaskId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DurableAgentRecord {
+    pub agent_id: AgentId,
+    pub display_label: String,
+    pub profile_id: ProfileId,
+    pub kind: DurableAgentKind,
+    pub status: DurableIdentityStatus,
+    pub source: Option<SourceSystemReference>,
+    pub den: DenRuntimeReference,
+    pub created_at: IsoTimestamp,
+    pub archived_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentInstanceRecord {
+    pub instance_id: AgentInstanceId,
+    pub agent_id: AgentId,
+    pub display_label: String,
+    pub profile_id: ProfileId,
+    pub status: DurableIdentityStatus,
+    pub source: Option<SourceSystemReference>,
+    pub den: DenRuntimeReference,
+    pub created_at: IsoTimestamp,
+    pub last_active_at: IsoTimestamp,
+    pub archived_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionIdentityRecord {
+    pub session_id: SessionId,
+    pub instance_id: AgentInstanceId,
+    pub agent_id: AgentId,
+    pub profile_id: ProfileId,
+    pub kind: SessionKind,
+    pub status: SessionStatus,
+    pub source: Option<SourceSystemReference>,
+    pub den: DenRuntimeReference,
+    pub created_at: IsoTimestamp,
+    pub last_active_at: IsoTimestamp,
+    pub archived_at: Option<IsoTimestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
