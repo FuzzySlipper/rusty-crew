@@ -17,10 +17,13 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 8;
+const CURRENT_SCHEMA_VERSION: i64 = 10;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
+const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
+const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
 const COUNTER_BRAIN_TURNS: &str = "brain_turns";
 const COUNTER_WAKES: &str = "wakes";
 const COUNTER_TOOL_CALLS: &str = "tool_calls";
@@ -81,6 +84,16 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add queued message retention state",
         apply: migrate_v8_add_queued_message_retention,
     },
+    SchemaMigration {
+        version: 9,
+        description: "add scale guardrail indexes for runtime diagnostics",
+        apply: migrate_v9_add_scale_guardrail_indexes,
+    },
+    SchemaMigration {
+        version: 10,
+        description: "add future legacy runtime import metadata",
+        apply: migrate_v10_add_legacy_runtime_import_metadata,
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -110,6 +123,82 @@ pub struct SessionConfigRecord {
 pub struct PersistedEvent {
     pub sequence: u64,
     pub event: CoreEvent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueryPage {
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+impl QueryPage {
+    fn bounded(self, default_limit: u32, max_limit: u32) -> (i64, i64) {
+        (
+            self.limit.unwrap_or(default_limit).clamp(1, max_limit) as i64,
+            self.offset.unwrap_or(0) as i64,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SessionQuery {
+    pub agent_id: Option<AgentId>,
+    pub profile_id: Option<ProfileId>,
+    pub kind: Option<SessionKind>,
+    pub status: Option<SessionStatus>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AgentInstanceQuery {
+    pub agent_id: Option<AgentId>,
+    pub profile_id: Option<ProfileId>,
+    pub status: Option<DurableIdentityStatus>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMessageRecord {
+    pub sequence: u64,
+    pub message: AgentMessage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AgentMessageQuery {
+    pub agent_id: Option<AgentId>,
+    pub correlation_id: Option<String>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionPacketRecord {
+    pub sequence: u64,
+    pub packet: CompletionPacket,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CompletionPacketQuery {
+    pub session_id: Option<SessionId>,
+    pub status: Option<rusty_crew_core_protocol::CompletionStatus>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WorkerRunQuery {
+    pub parent_session_id: Option<SessionId>,
+    pub delegated_session_id: Option<SessionId>,
+    pub profile_id: Option<ProfileId>,
+    pub task_id: Option<TaskId>,
+    pub status: Option<WorkerRunStatus>,
+    pub terminal: Option<bool>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeCounterQuery {
+    pub scope: Option<RuntimeCounterScope>,
+    pub counter_name: Option<String>,
+    pub page: Option<QueryPage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,6 +304,95 @@ pub struct QueuedMessageFilter {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeMaintenancePolicy {
+    pub expire_queued_messages_at: Option<IsoTimestamp>,
+    pub purge_terminal_queued_messages_before: Option<IsoTimestamp>,
+    pub run_wal_checkpoint: bool,
+    pub run_optimize: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeDatabaseSize {
+    pub database_bytes: u64,
+    pub page_count: u64,
+    pub page_size_bytes: u64,
+    pub freelist_pages: u64,
+    pub freelist_bytes: u64,
+    pub wal_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMaintenanceReport {
+    pub size_before: RuntimeDatabaseSize,
+    pub size_after: RuntimeDatabaseSize,
+    pub expired_queue_messages: u64,
+    pub purged_terminal_queue_messages: u64,
+    pub wal_checkpoint_ran: bool,
+    pub optimize_ran: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeQueryPlanCheck {
+    pub name: &'static str,
+    pub uses_index: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeImportBatchRecord {
+    pub import_batch_id: String,
+    pub source_system: String,
+    pub source_label: String,
+    pub source_snapshot_ref: Option<String>,
+    pub notes: Option<String>,
+    pub imported_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeObjectKind {
+    Agent,
+    AgentInstance,
+    Session,
+    Profile,
+    WorkerRun,
+    Message,
+    CompletionPacket,
+    ToolCall,
+    QueueMessage,
+    ExternalArtifact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, serde::Deserialize)]
+pub struct RuntimeImportProvenance {
+    pub profile_id: Option<ProfileId>,
+    pub session_id: Option<SessionId>,
+    pub agent_id: Option<AgentId>,
+    pub externally_owned: bool,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyIdMappingRecord {
+    pub import_batch_id: String,
+    pub source: SourceSystemReference,
+    pub legacy_kind: RuntimeObjectKind,
+    pub rusty_kind: RuntimeObjectKind,
+    pub rusty_id: String,
+    pub provenance: RuntimeImportProvenance,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LegacyIdMappingQuery {
+    pub import_batch_id: Option<String>,
+    pub source_system: Option<String>,
+    pub legacy_kind: Option<RuntimeObjectKind>,
+    pub rusty_kind: Option<RuntimeObjectKind>,
+    pub rusty_id: Option<String>,
+    pub page: Option<QueryPage>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeCounterScope {
     Runtime,
@@ -289,6 +467,8 @@ pub enum DiagnosticTable {
     RuntimeCounters,
     RuntimeSearch,
     QueuedMessages,
+    RuntimeImportBatches,
+    LegacyIdMappings,
     AgentMessages,
     CompletionPackets,
     WorkerRuns,
@@ -311,6 +491,8 @@ impl DiagnosticTable {
         Self::RuntimeCounters,
         Self::RuntimeSearch,
         Self::QueuedMessages,
+        Self::RuntimeImportBatches,
+        Self::LegacyIdMappings,
         Self::AgentMessages,
         Self::CompletionPackets,
         Self::WorkerRuns,
@@ -333,6 +515,8 @@ impl DiagnosticTable {
             "runtime_counters" => Ok(Self::RuntimeCounters),
             "runtime_search_fts" => Ok(Self::RuntimeSearch),
             "queued_messages" => Ok(Self::QueuedMessages),
+            "runtime_import_batches" => Ok(Self::RuntimeImportBatches),
+            "legacy_id_mappings" => Ok(Self::LegacyIdMappings),
             "agent_messages" => Ok(Self::AgentMessages),
             "completion_packets" => Ok(Self::CompletionPackets),
             "worker_runs" => Ok(Self::WorkerRuns),
@@ -360,6 +544,8 @@ impl DiagnosticTable {
             Self::RuntimeCounters => "runtime_counters",
             Self::RuntimeSearch => "runtime_search_fts",
             Self::QueuedMessages => "queued_messages",
+            Self::RuntimeImportBatches => "runtime_import_batches",
+            Self::LegacyIdMappings => "legacy_id_mappings",
             Self::AgentMessages => "agent_messages",
             Self::CompletionPackets => "completion_packets",
             Self::WorkerRuns => "worker_runs",
@@ -443,6 +629,7 @@ impl CoordinationStore {
     pub fn open_file(path: impl AsRef<Path>) -> CoreResult<Self> {
         let conn = Connection::open(path.as_ref())
             .map_err(|error| persistence_error("open sqlite", error))?;
+        configure_connection(&conn)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -499,6 +686,14 @@ impl CoordinationStore {
         load_agent_instances(&conn)
     }
 
+    pub fn query_agent_instances(
+        &self,
+        query: &AgentInstanceQuery,
+    ) -> CoreResult<Vec<AgentInstanceRecord>> {
+        let conn = self.conn()?;
+        query_agent_instances(&conn, query)
+    }
+
     pub fn upsert_session_identity(&self, record: &SessionIdentityRecord) -> CoreResult<()> {
         let conn = self.conn()?;
         save_session_identity(&conn, record)
@@ -545,6 +740,53 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<QueuedMessageRecord>> {
         let conn = self.conn()?;
         load_queued_messages(&conn, filter)
+    }
+
+    pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
+        let conn = self.conn()?;
+        database_size(&conn)
+    }
+
+    pub fn run_maintenance(
+        &self,
+        policy: &RuntimeMaintenancePolicy,
+    ) -> CoreResult<RuntimeMaintenanceReport> {
+        let size_before = self.database_size()?;
+        let mut expired_queue_messages = 0;
+        let mut purged_terminal_queue_messages = 0;
+        {
+            let mut conn = self.conn()?;
+            let tx = conn
+                .transaction()
+                .map_err(|error| persistence_error("start runtime maintenance", error))?;
+            if let Some(now) = &policy.expire_queued_messages_at {
+                expired_queue_messages = expire_queued_messages_in_tx(&tx, now)?.len() as u64;
+            }
+            if let Some(cutoff) = &policy.purge_terminal_queued_messages_before {
+                purged_terminal_queue_messages = purge_terminal_queued_messages_in_tx(&tx, cutoff)?;
+            }
+            tx.commit()
+                .map_err(|error| persistence_error("commit runtime maintenance", error))?;
+
+            if policy.run_optimize {
+                conn.execute_batch("PRAGMA optimize;")
+                    .map_err(|error| persistence_error("optimize sqlite", error))?;
+            }
+            if policy.run_wal_checkpoint {
+                conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                    .map_err(|error| persistence_error("checkpoint sqlite wal", error))?;
+            }
+        }
+
+        let size_after = self.database_size()?;
+        Ok(RuntimeMaintenanceReport {
+            size_before,
+            size_after,
+            expired_queue_messages,
+            purged_terminal_queue_messages,
+            wal_checkpoint_ran: policy.run_wal_checkpoint,
+            optimize_ran: policy.run_optimize,
+        })
     }
 
     pub fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
@@ -618,6 +860,27 @@ impl CoordinationStore {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| persistence_error("load sessions", error))
+    }
+
+    pub fn query_sessions(&self, query: &SessionQuery) -> CoreResult<Vec<SessionState>> {
+        let conn = self.conn()?;
+        query_sessions(&conn, query)
+    }
+
+    pub fn query_agent_messages(
+        &self,
+        query: &AgentMessageQuery,
+    ) -> CoreResult<Vec<AgentMessageRecord>> {
+        let conn = self.conn()?;
+        query_agent_messages(&conn, query)
+    }
+
+    pub fn query_completion_packets(
+        &self,
+        query: &CompletionPacketQuery,
+    ) -> CoreResult<Vec<CompletionPacketRecord>> {
+        let conn = self.conn()?;
+        query_completion_packets(&conn, query)
     }
 
     pub fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
@@ -896,6 +1159,34 @@ impl CoordinationStore {
             .map_err(|error| persistence_error("load runtime search results", error))
     }
 
+    pub fn hot_query_plan_checks(&self) -> CoreResult<Vec<RuntimeQueryPlanCheck>> {
+        let conn = self.conn()?;
+        hot_query_plan_checks(&conn)
+    }
+
+    pub fn save_import_batch(&self, record: &RuntimeImportBatchRecord) -> CoreResult<()> {
+        let conn = self.conn()?;
+        save_import_batch(&conn, record)
+    }
+
+    pub fn load_import_batches(&self) -> CoreResult<Vec<RuntimeImportBatchRecord>> {
+        let conn = self.conn()?;
+        load_import_batches(&conn)
+    }
+
+    pub fn save_legacy_id_mapping(&self, record: &LegacyIdMappingRecord) -> CoreResult<()> {
+        let conn = self.conn()?;
+        save_legacy_id_mapping(&conn, record)
+    }
+
+    pub fn query_legacy_id_mappings(
+        &self,
+        query: &LegacyIdMappingQuery,
+    ) -> CoreResult<Vec<LegacyIdMappingRecord>> {
+        let conn = self.conn()?;
+        query_legacy_id_mappings(&conn, query)
+    }
+
     pub fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
         let conn = self.conn()?;
         let mut stmt = conn
@@ -1033,6 +1324,11 @@ impl CoordinationStore {
         )
         .optional()
         .map_err(|error| persistence_error("load worker run by delegated session", error))
+    }
+
+    pub fn query_worker_runs(&self, query: &WorkerRunQuery) -> CoreResult<Vec<WorkerRunRecord>> {
+        let conn = self.conn()?;
+        query_worker_runs(&conn, query)
     }
 
     pub fn update_worker_run_status_by_delegated_session(
@@ -1226,6 +1522,14 @@ impl CoordinationStore {
         load_runtime_counters(&conn, scope)
     }
 
+    pub fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        let conn = self.conn()?;
+        query_runtime_counters(&conn, query)
+    }
+
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
         let counters = self.runtime_counters(Some(scope))?;
         Ok(RuntimeStateSummary {
@@ -1338,6 +1642,21 @@ pub fn coordination_db_path(engine_data_dir: impl AsRef<Path>) -> PathBuf {
     engine_data_dir.as_ref().join(DB_FILE_NAME)
 }
 
+fn configure_connection(conn: &Connection) -> CoreResult<()> {
+    conn.busy_timeout(Duration::from_millis(SQLITE_BUSY_TIMEOUT_MS))
+        .map_err(|error| persistence_error("set sqlite busy timeout", error))?;
+    conn.execute_batch(&format!(
+        "
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA foreign_keys = ON;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA wal_autocheckpoint = {SQLITE_WAL_AUTOCHECKPOINT_PAGES};
+            "
+    ))
+    .map_err(|error| persistence_error("configure sqlite connection", error))
+}
+
 fn prepare_migration_metadata(conn: &Connection) -> CoreResult<()> {
     conn.execute_batch(
         "
@@ -1359,6 +1678,106 @@ fn prepare_migration_metadata(conn: &Connection) -> CoreResult<()> {
         "TEXT NOT NULL DEFAULT ''",
     )?;
     reject_unsupported_unversioned_schema(conn)
+}
+
+fn database_size(conn: &Connection) -> CoreResult<RuntimeDatabaseSize> {
+    let page_count = pragma_u64(conn, "page_count")?;
+    let page_size_bytes = pragma_u64(conn, "page_size")?;
+    let freelist_pages = pragma_u64(conn, "freelist_count")?;
+    let database_bytes = page_count.saturating_mul(page_size_bytes);
+    let freelist_bytes = freelist_pages.saturating_mul(page_size_bytes);
+    let wal_bytes = database_path(conn)?
+        .and_then(|path| fs::metadata(format!("{}-wal", path.display())).ok())
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    Ok(RuntimeDatabaseSize {
+        database_bytes,
+        page_count,
+        page_size_bytes,
+        freelist_pages,
+        freelist_bytes,
+        wal_bytes,
+    })
+}
+
+fn pragma_u64(conn: &Connection, name: &str) -> CoreResult<u64> {
+    let value = conn
+        .query_row(&format!("PRAGMA {name}"), [], |row| row.get::<_, i64>(0))
+        .map_err(|error| persistence_error("read sqlite pragma", error))?;
+    Ok(value as u64)
+}
+
+fn database_path(conn: &Connection) -> CoreResult<Option<PathBuf>> {
+    let path = conn
+        .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(2))
+        .map_err(|error| persistence_error("read sqlite database path", error))?;
+    if path.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(PathBuf::from(path)))
+    }
+}
+
+fn hot_query_plan_checks(conn: &Connection) -> CoreResult<Vec<RuntimeQueryPlanCheck>> {
+    const HOT_QUERIES: &[(&str, &str)] = &[
+        (
+            "pending_queue_by_agent",
+            "SELECT message_id FROM queued_messages
+             WHERE owner_agent_id = 'agent-alpha' AND state = 'pending'
+             ORDER BY expires_at ASC LIMIT 10",
+        ),
+        (
+            "worker_runs_by_parent_status",
+            "SELECT run_id FROM worker_runs
+             WHERE session_id = 'session-alpha' AND status = 'running'
+             ORDER BY created_at ASC, run_id ASC LIMIT 10",
+        ),
+        (
+            "messages_by_correlation",
+            "SELECT sequence FROM agent_messages
+             WHERE correlation_id = 'corr-alpha'
+             ORDER BY sequence ASC LIMIT 10",
+        ),
+        (
+            "completion_packets_by_session",
+            "SELECT sequence FROM completion_packets
+             WHERE session_id = 'session-alpha'
+             ORDER BY sequence ASC LIMIT 10",
+        ),
+        (
+            "event_session_lookup",
+            "SELECT sequence FROM event_session_index
+             WHERE session_id = 'session-alpha'
+             ORDER BY sequence ASC LIMIT 10",
+        ),
+    ];
+
+    HOT_QUERIES
+        .iter()
+        .map(|(name, sql)| query_plan_check(conn, name, sql))
+        .collect()
+}
+
+fn query_plan_check(
+    conn: &Connection,
+    name: &'static str,
+    sql: &str,
+) -> CoreResult<RuntimeQueryPlanCheck> {
+    let mut stmt = conn
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .map_err(|error| persistence_error("prepare hot query plan", error))?;
+    let details = stmt
+        .query_map([], |row| row.get::<_, String>(3))
+        .map_err(|error| persistence_error("run hot query plan", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("read hot query plan", error))?;
+    let detail = details.join(" | ");
+    let uses_index = detail.contains("USING INDEX") || detail.contains("USING COVERING INDEX");
+    Ok(RuntimeQueryPlanCheck {
+        name,
+        uses_index,
+        detail,
+    })
 }
 
 fn apply_schema_migrations(
@@ -1472,6 +1891,8 @@ fn reject_unsupported_unversioned_schema(conn: &Connection) -> CoreResult<()> {
                 | "runtime_counters"
                 | "queued_messages"
                 | "runtime_search_fts"
+                | "runtime_import_batches"
+                | "legacy_id_mappings"
         )
     });
     let has_migration_records = conn
@@ -1787,6 +2208,74 @@ fn migrate_v8_add_queued_message_retention(tx: &rusqlite::Transaction<'_>) -> Co
     .map_err(|error| persistence_error("apply schema migration 8", error))
 }
 
+fn migrate_v9_add_scale_guardrail_indexes(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE INDEX IF NOT EXISTS idx_sessions_agent_profile_handle
+                ON sessions(agent_id, profile_id, handle);
+            CREATE INDEX IF NOT EXISTS idx_sessions_profile_handle
+                ON sessions(profile_id, handle);
+            CREATE INDEX IF NOT EXISTS idx_agent_instances_agent_status
+                ON agent_instances(agent_id, status, instance_id);
+            CREATE INDEX IF NOT EXISTS idx_agent_messages_from_sequence
+                ON agent_messages(from_agent, sequence);
+            CREATE INDEX IF NOT EXISTS idx_agent_messages_to_sequence
+                ON agent_messages(to_agent, sequence);
+            CREATE INDEX IF NOT EXISTS idx_agent_messages_correlation_sequence
+                ON agent_messages(correlation_id, sequence);
+            CREATE INDEX IF NOT EXISTS idx_completion_packets_session_sequence
+                ON completion_packets(session_id, sequence);
+            CREATE INDEX IF NOT EXISTS idx_worker_runs_parent_status_created
+                ON worker_runs(session_id, status, created_at, run_id);
+            CREATE INDEX IF NOT EXISTS idx_worker_runs_delegated_session
+                ON worker_runs(delegated_session_id);
+            CREATE INDEX IF NOT EXISTS idx_worker_runs_profile_task_created
+                ON worker_runs(profile_id, task_id, created_at, run_id);
+            CREATE INDEX IF NOT EXISTS idx_tool_call_history_session_sequence
+                ON tool_call_history(session_id, sequence);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 9", error))
+}
+
+fn migrate_v10_add_legacy_runtime_import_metadata(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS runtime_import_batches (
+                import_batch_id TEXT PRIMARY KEY,
+                source_system TEXT NOT NULL,
+                source_label TEXT NOT NULL,
+                source_snapshot_ref TEXT,
+                notes TEXT,
+                imported_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_runtime_import_batches_source
+                ON runtime_import_batches(source_system, imported_at);
+
+            CREATE TABLE IF NOT EXISTS legacy_id_mappings (
+                import_batch_id TEXT NOT NULL,
+                source_system TEXT NOT NULL,
+                legacy_kind TEXT NOT NULL,
+                legacy_id TEXT NOT NULL,
+                rusty_kind TEXT NOT NULL,
+                rusty_id TEXT NOT NULL,
+                provenance_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (source_system, legacy_kind, legacy_id),
+                FOREIGN KEY (import_batch_id)
+                    REFERENCES runtime_import_batches(import_batch_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_legacy_id_mappings_batch
+                ON legacy_id_mappings(import_batch_id, legacy_kind);
+            CREATE INDEX IF NOT EXISTS idx_legacy_id_mappings_rusty
+                ON legacy_id_mappings(rusty_kind, rusty_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 10", error))
+}
+
 fn save_queued_message_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record: &QueuedMessageRecord,
@@ -1890,6 +2379,34 @@ fn expire_queued_messages_in_tx(
             message
         })
         .collect())
+}
+
+fn purge_terminal_queued_messages_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    cutoff: &IsoTimestamp,
+) -> CoreResult<u64> {
+    tx.execute(
+        "DELETE FROM runtime_search_fts
+         WHERE row_type = 'queue_message'
+           AND row_key IN (
+               SELECT message_id FROM queued_messages
+               WHERE state IN ('delivered', 'expired', 'discarded', 'cancelled')
+                 AND terminal_at IS NOT NULL
+                 AND terminal_at < ?1
+           )",
+        params![cutoff],
+    )
+    .map_err(|error| persistence_error("delete purged queue search rows", error))?;
+    let purged = tx
+        .execute(
+            "DELETE FROM queued_messages
+             WHERE state IN ('delivered', 'expired', 'discarded', 'cancelled')
+               AND terminal_at IS NOT NULL
+               AND terminal_at < ?1",
+            params![cutoff],
+        )
+        .map_err(|error| persistence_error("purge terminal queued messages", error))?;
+    Ok(purged as u64)
 }
 
 fn load_queued_messages(
@@ -2046,6 +2563,529 @@ fn queued_message_state_from_str(raw: &str) -> rusqlite::Result<QueuedMessageSta
             Box::new(CoreError::new(
                 CoreErrorKind::PersistenceFailure,
                 format!("unknown queued message state {other}"),
+            )),
+        )),
+    }
+}
+
+fn query_sessions(conn: &Connection, query: &SessionQuery) -> CoreResult<Vec<SessionState>> {
+    let kind_json = query.kind.as_ref().map(to_json_text).transpose()?;
+    let status_json = query.status.as_ref().map(to_json_text).transpose()?;
+    let agent_id = query.agent_id.as_ref().map(|value| value.0.as_str());
+    let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                session_id,
+                handle,
+                agent_id,
+                profile_id,
+                kind_json,
+                delegation_json,
+                resource_limits_json,
+                tool_profile_json,
+                status_json,
+                brain_turn_count,
+                created_at,
+                last_active_at
+             FROM sessions
+             WHERE (?1 IS NULL OR agent_id = ?1)
+               AND (?2 IS NULL OR profile_id = ?2)
+               AND (?3 IS NULL OR kind_json = ?3)
+               AND (?4 IS NULL OR status_json = ?4)
+             ORDER BY handle ASC
+             LIMIT ?5 OFFSET ?6",
+        )
+        .map_err(|error| persistence_error("prepare query sessions", error))?;
+    let rows = stmt
+        .query_map(
+            params![agent_id, profile_id, kind_json, status_json, limit, offset],
+            row_to_session_state,
+        )
+        .map_err(|error| persistence_error("query sessions", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load queried sessions", error))
+}
+
+fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionState> {
+    let kind_json: String = row.get(4)?;
+    let delegation_json: Option<String> = row.get(5)?;
+    let resource_limits_json: Option<String> = row.get(6)?;
+    let tool_profile_json: Option<String> = row.get(7)?;
+    let status_json: String = row.get(8)?;
+    Ok(SessionState {
+        session_id: SessionId(row.get(0)?),
+        handle: SessionHandle::new(row.get::<_, i64>(1)? as u64),
+        agent_id: AgentId(row.get(2)?),
+        profile_id: ProfileId(row.get(3)?),
+        kind: from_json_text::<SessionKind>(&kind_json).map_err(to_sql_error)?,
+        delegation: delegation_json
+            .as_deref()
+            .map(from_json_text::<DelegationLineage>)
+            .transpose()
+            .map_err(to_sql_error)?,
+        resource_limits: resource_limits_json
+            .as_deref()
+            .map(from_json_text::<ResourceLimits>)
+            .transpose()
+            .map_err(to_sql_error)?
+            .unwrap_or(ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            }),
+        tool_profile: tool_profile_json
+            .as_deref()
+            .map(from_json_text::<ToolProfile>)
+            .transpose()
+            .map_err(to_sql_error)?
+            .unwrap_or(ToolProfile { tools: Vec::new() }),
+        status: from_json_text::<SessionStatus>(&status_json).map_err(to_sql_error)?,
+        brain_turn_count: row.get::<_, i64>(9)? as u32,
+        created_at: row.get(10)?,
+        last_active_at: row.get(11)?,
+    })
+}
+
+fn query_agent_instances(
+    conn: &Connection,
+    query: &AgentInstanceQuery,
+) -> CoreResult<Vec<AgentInstanceRecord>> {
+    let agent_id = query.agent_id.as_ref().map(|value| value.0.as_str());
+    let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+    let status = query.status.as_ref().map(durable_identity_status_as_str);
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                instance_id,
+                agent_id,
+                display_label,
+                profile_id,
+                status,
+                source_system,
+                source_external_id,
+                den_project_id,
+                den_task_id,
+                created_at,
+                last_active_at,
+                archived_at
+             FROM agent_instances
+             WHERE (?1 IS NULL OR agent_id = ?1)
+               AND (?2 IS NULL OR profile_id = ?2)
+               AND (?3 IS NULL OR status = ?3)
+             ORDER BY instance_id ASC
+             LIMIT ?4 OFFSET ?5",
+        )
+        .map_err(|error| persistence_error("prepare query agent instances", error))?;
+    let rows = stmt
+        .query_map(
+            params![agent_id, profile_id, status, limit, offset],
+            row_to_agent_instance,
+        )
+        .map_err(|error| persistence_error("query agent instances", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load queried agent instances", error))
+}
+
+fn query_agent_messages(
+    conn: &Connection,
+    query: &AgentMessageQuery,
+) -> CoreResult<Vec<AgentMessageRecord>> {
+    let agent_id = query.agent_id.as_ref().map(|value| value.0.as_str());
+    let correlation_id = query.correlation_id.as_deref();
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT sequence, message_json
+             FROM agent_messages
+             WHERE (?1 IS NULL OR from_agent = ?1 OR to_agent = ?1)
+               AND (?2 IS NULL OR correlation_id = ?2)
+             ORDER BY sequence ASC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|error| persistence_error("prepare query agent messages", error))?;
+    let rows = stmt
+        .query_map(params![agent_id, correlation_id, limit, offset], |row| {
+            let message_json: String = row.get(1)?;
+            Ok(AgentMessageRecord {
+                sequence: row.get::<_, i64>(0)? as u64,
+                message: from_json_text(&message_json).map_err(to_sql_error)?,
+            })
+        })
+        .map_err(|error| persistence_error("query agent messages", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load queried agent messages", error))
+}
+
+fn query_completion_packets(
+    conn: &Connection,
+    query: &CompletionPacketQuery,
+) -> CoreResult<Vec<CompletionPacketRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let status_json = query.status.as_ref().map(to_json_text).transpose()?;
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT sequence, packet_json
+             FROM completion_packets
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR status = ?2)
+             ORDER BY sequence ASC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|error| persistence_error("prepare query completion packets", error))?;
+    let rows = stmt
+        .query_map(params![session_id, status_json, limit, offset], |row| {
+            let packet_json: String = row.get(1)?;
+            Ok(CompletionPacketRecord {
+                sequence: row.get::<_, i64>(0)? as u64,
+                packet: from_json_text(&packet_json).map_err(to_sql_error)?,
+            })
+        })
+        .map_err(|error| persistence_error("query completion packets", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load queried completion packets", error))
+}
+
+fn query_worker_runs(
+    conn: &Connection,
+    query: &WorkerRunQuery,
+) -> CoreResult<Vec<WorkerRunRecord>> {
+    let parent_session_id = query
+        .parent_session_id
+        .as_ref()
+        .map(|value| value.0.as_str());
+    let delegated_session_id = query
+        .delegated_session_id
+        .as_ref()
+        .map(|value| value.0.as_str());
+    let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+    let task_id = query.task_id.as_ref().map(|value| value.0.as_str());
+    let status = query.status.as_ref().map(WorkerRunStatus::as_str);
+    let terminal = query
+        .terminal
+        .map(|value| if value { 1_i64 } else { 0_i64 });
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                run_id,
+                session_id,
+                delegated_session_id,
+                parent_agent_id,
+                profile_id,
+                task_id,
+                status,
+                created_at,
+                last_updated_at,
+                source_wake_id,
+                source_action_index,
+                delegation_correlation_id,
+                parent_consumption,
+                fan_out_group_id,
+                fan_out_max_concurrency,
+                fan_out_failure_policy
+             FROM worker_runs
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR delegated_session_id = ?2)
+               AND (?3 IS NULL OR profile_id = ?3)
+               AND (?4 IS NULL OR task_id = ?4)
+               AND (?5 IS NULL OR status = ?5)
+               AND (
+                   ?6 IS NULL
+                   OR (?6 = 1 AND status IN ('completed', 'failed', 'blocked', 'exhausted', 'cancelled', 'expired'))
+                   OR (?6 = 0 AND status NOT IN ('completed', 'failed', 'blocked', 'exhausted', 'cancelled', 'expired'))
+               )
+             ORDER BY created_at ASC, run_id ASC
+             LIMIT ?7 OFFSET ?8",
+        )
+        .map_err(|error| persistence_error("prepare query worker runs", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                parent_session_id,
+                delegated_session_id,
+                profile_id,
+                task_id,
+                status,
+                terminal,
+                limit,
+                offset,
+            ],
+            row_to_worker_run,
+        )
+        .map_err(|error| persistence_error("query worker runs", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load queried worker runs", error))
+}
+
+fn query_runtime_counters(
+    conn: &Connection,
+    query: &RuntimeCounterQuery,
+) -> CoreResult<Vec<RuntimeCounterRecord>> {
+    let scope_parts = query.scope.as_ref().map(runtime_counter_scope_parts);
+    let scope_type = scope_parts.as_ref().map(|(scope_type, _)| *scope_type);
+    let scope_id = scope_parts.as_ref().map(|(_, scope_id)| scope_id.as_str());
+    let counter_name = query.counter_name.as_deref();
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(200, 5_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT scope_type, scope_id, counter_name, value, updated_at
+             FROM runtime_counters
+             WHERE (?1 IS NULL OR scope_type = ?1)
+               AND (?2 IS NULL OR scope_id = ?2)
+               AND (?3 IS NULL OR counter_name = ?3)
+             ORDER BY scope_type ASC, scope_id ASC, counter_name ASC
+             LIMIT ?4 OFFSET ?5",
+        )
+        .map_err(|error| persistence_error("prepare query runtime counters", error))?;
+    let rows = stmt
+        .query_map(
+            params![scope_type, scope_id, counter_name, limit, offset],
+            row_to_runtime_counter,
+        )
+        .map_err(|error| persistence_error("query runtime counters", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load queried runtime counters", error))
+}
+
+fn save_import_batch(conn: &Connection, record: &RuntimeImportBatchRecord) -> CoreResult<()> {
+    conn.execute(
+        "INSERT INTO runtime_import_batches (
+            import_batch_id,
+            source_system,
+            source_label,
+            source_snapshot_ref,
+            notes,
+            imported_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(import_batch_id) DO UPDATE SET
+            source_system = excluded.source_system,
+            source_label = excluded.source_label,
+            source_snapshot_ref = excluded.source_snapshot_ref,
+            notes = excluded.notes",
+        params![
+            record.import_batch_id,
+            record.source_system,
+            record.source_label,
+            record.source_snapshot_ref,
+            record.notes,
+            record.imported_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save runtime import batch", error))?;
+    Ok(())
+}
+
+fn load_import_batches(conn: &Connection) -> CoreResult<Vec<RuntimeImportBatchRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                import_batch_id,
+                source_system,
+                source_label,
+                source_snapshot_ref,
+                notes,
+                imported_at
+             FROM runtime_import_batches
+             ORDER BY imported_at ASC, import_batch_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare load runtime import batches", error))?;
+    let rows = stmt
+        .query_map([], row_to_import_batch)
+        .map_err(|error| persistence_error("query runtime import batches", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load runtime import batches", error))
+}
+
+fn save_legacy_id_mapping(conn: &Connection, record: &LegacyIdMappingRecord) -> CoreResult<()> {
+    let provenance_json = to_json_text(&record.provenance)?;
+    conn.execute(
+        "INSERT INTO legacy_id_mappings (
+            import_batch_id,
+            source_system,
+            legacy_kind,
+            legacy_id,
+            rusty_kind,
+            rusty_id,
+            provenance_json,
+            created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        ON CONFLICT(source_system, legacy_kind, legacy_id) DO UPDATE SET
+            import_batch_id = excluded.import_batch_id,
+            rusty_kind = excluded.rusty_kind,
+            rusty_id = excluded.rusty_id,
+            provenance_json = excluded.provenance_json",
+        params![
+            record.import_batch_id,
+            record.source.system,
+            runtime_object_kind_as_str(record.legacy_kind),
+            record.source.external_id,
+            runtime_object_kind_as_str(record.rusty_kind),
+            record.rusty_id,
+            provenance_json,
+            record.created_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save legacy id mapping", error))?;
+    Ok(())
+}
+
+fn query_legacy_id_mappings(
+    conn: &Connection,
+    query: &LegacyIdMappingQuery,
+) -> CoreResult<Vec<LegacyIdMappingRecord>> {
+    let import_batch_id = query.import_batch_id.as_deref();
+    let source_system = query.source_system.as_deref();
+    let legacy_kind = query.legacy_kind.map(runtime_object_kind_as_str);
+    let rusty_kind = query.rusty_kind.map(runtime_object_kind_as_str);
+    let rusty_id = query.rusty_id.as_deref();
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                import_batch_id,
+                source_system,
+                legacy_kind,
+                legacy_id,
+                rusty_kind,
+                rusty_id,
+                provenance_json,
+                created_at
+             FROM legacy_id_mappings
+             WHERE (?1 IS NULL OR import_batch_id = ?1)
+               AND (?2 IS NULL OR source_system = ?2)
+               AND (?3 IS NULL OR legacy_kind = ?3)
+               AND (?4 IS NULL OR rusty_kind = ?4)
+               AND (?5 IS NULL OR rusty_id = ?5)
+             ORDER BY created_at ASC, source_system ASC, legacy_kind ASC, legacy_id ASC
+             LIMIT ?6 OFFSET ?7",
+        )
+        .map_err(|error| persistence_error("prepare query legacy id mappings", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                import_batch_id,
+                source_system,
+                legacy_kind,
+                rusty_kind,
+                rusty_id,
+                limit,
+                offset,
+            ],
+            row_to_legacy_id_mapping,
+        )
+        .map_err(|error| persistence_error("query legacy id mappings", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load legacy id mappings", error))
+}
+
+fn row_to_import_batch(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeImportBatchRecord> {
+    Ok(RuntimeImportBatchRecord {
+        import_batch_id: row.get(0)?,
+        source_system: row.get(1)?,
+        source_label: row.get(2)?,
+        source_snapshot_ref: row.get(3)?,
+        notes: row.get(4)?,
+        imported_at: row.get(5)?,
+    })
+}
+
+fn row_to_legacy_id_mapping(row: &rusqlite::Row<'_>) -> rusqlite::Result<LegacyIdMappingRecord> {
+    let legacy_kind: String = row.get(2)?;
+    let rusty_kind: String = row.get(4)?;
+    let provenance_json: String = row.get(6)?;
+    Ok(LegacyIdMappingRecord {
+        import_batch_id: row.get(0)?,
+        source: SourceSystemReference {
+            system: row.get(1)?,
+            external_id: row.get(3)?,
+        },
+        legacy_kind: runtime_object_kind_from_str(&legacy_kind)?,
+        rusty_kind: runtime_object_kind_from_str(&rusty_kind)?,
+        rusty_id: row.get(5)?,
+        provenance: from_json_text(&provenance_json).map_err(to_sql_error)?,
+        created_at: row.get(7)?,
+    })
+}
+
+fn runtime_object_kind_as_str(kind: RuntimeObjectKind) -> &'static str {
+    match kind {
+        RuntimeObjectKind::Agent => "agent",
+        RuntimeObjectKind::AgentInstance => "agent_instance",
+        RuntimeObjectKind::Session => "session",
+        RuntimeObjectKind::Profile => "profile",
+        RuntimeObjectKind::WorkerRun => "worker_run",
+        RuntimeObjectKind::Message => "message",
+        RuntimeObjectKind::CompletionPacket => "completion_packet",
+        RuntimeObjectKind::ToolCall => "tool_call",
+        RuntimeObjectKind::QueueMessage => "queue_message",
+        RuntimeObjectKind::ExternalArtifact => "external_artifact",
+    }
+}
+
+fn runtime_object_kind_from_str(raw: &str) -> rusqlite::Result<RuntimeObjectKind> {
+    match raw {
+        "agent" => Ok(RuntimeObjectKind::Agent),
+        "agent_instance" => Ok(RuntimeObjectKind::AgentInstance),
+        "session" => Ok(RuntimeObjectKind::Session),
+        "profile" => Ok(RuntimeObjectKind::Profile),
+        "worker_run" => Ok(RuntimeObjectKind::WorkerRun),
+        "message" => Ok(RuntimeObjectKind::Message),
+        "completion_packet" => Ok(RuntimeObjectKind::CompletionPacket),
+        "tool_call" => Ok(RuntimeObjectKind::ToolCall),
+        "queue_message" => Ok(RuntimeObjectKind::QueueMessage),
+        "external_artifact" => Ok(RuntimeObjectKind::ExternalArtifact),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            2,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown runtime object kind {other}"),
             )),
         )),
     }
@@ -3571,7 +4611,7 @@ mod tests {
         let store = CoordinationStore::open_file(&db_path).unwrap();
 
         assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(store.schema_migrations().unwrap().len(), 8);
+        assert_eq!(store.schema_migrations().unwrap().len(), 10);
         assert_eq!(store.count_rows("sessions").unwrap(), 0);
 
         remove_temp_db(&db_path);
@@ -3604,6 +4644,107 @@ mod tests {
         assert!(table_exists(&db_path, "runtime_search_fts"));
         assert!(table_exists(&db_path, "runtime_counters"));
         assert!(table_exists(&db_path, "queued_messages"));
+        assert!(table_exists(&db_path, "runtime_import_batches"));
+        assert!(table_exists(&db_path, "legacy_id_mappings"));
+        assert!(index_exists(
+            &db_path,
+            "idx_worker_runs_parent_status_created"
+        ));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn legacy_import_metadata_maps_pi_crew_and_hermes_ids_without_runtime_coupling() {
+        let db_path = temp_db_path("legacy-import-metadata");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+
+        store
+            .save_import_batch(&RuntimeImportBatchRecord {
+                import_batch_id: "import-pi-crew-001".to_string(),
+                source_system: "pi-crew".to_string(),
+                source_label: "pi-crew production snapshot".to_string(),
+                source_snapshot_ref: Some("/backup/pi-crew/2026-06-20.sqlite3".to_string()),
+                notes: Some("worker-pool history imported as provenance only".to_string()),
+                imported_at: "2026-06-20T03:00:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .save_import_batch(&RuntimeImportBatchRecord {
+                import_batch_id: "import-hermes-001".to_string(),
+                source_system: "hermes".to_string(),
+                source_label: "Hermes profile sqlite exports".to_string(),
+                source_snapshot_ref: Some("/backup/hermes/profiles".to_string()),
+                notes: Some("one sqlite source per profile".to_string()),
+                imported_at: "2026-06-20T03:05:00Z".to_string(),
+            })
+            .unwrap();
+
+        store
+            .save_legacy_id_mapping(&LegacyIdMappingRecord {
+                import_batch_id: "import-pi-crew-001".to_string(),
+                source: SourceSystemReference {
+                    system: "pi-crew".to_string(),
+                    external_id: "worker-run:abc123".to_string(),
+                },
+                legacy_kind: RuntimeObjectKind::WorkerRun,
+                rusty_kind: RuntimeObjectKind::WorkerRun,
+                rusty_id: "run-rusty-001".to_string(),
+                provenance: RuntimeImportProvenance {
+                    profile_id: Some(ProfileId::new("coder-profile")),
+                    session_id: Some(SessionId::new("session-rusty-001")),
+                    agent_id: Some(AgentId::new("agent-rusty")),
+                    externally_owned: false,
+                    notes: Some("pi-crew worker-pool run mapped to delegated run".to_string()),
+                },
+                created_at: "2026-06-20T03:10:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .save_legacy_id_mapping(&LegacyIdMappingRecord {
+                import_batch_id: "import-hermes-001".to_string(),
+                source: SourceSystemReference {
+                    system: "hermes".to_string(),
+                    external_id: "profile-db:/home/dev/.hermes/profiles/alpha.sqlite3".to_string(),
+                },
+                legacy_kind: RuntimeObjectKind::ExternalArtifact,
+                rusty_kind: RuntimeObjectKind::Profile,
+                rusty_id: "profile-alpha".to_string(),
+                provenance: RuntimeImportProvenance {
+                    profile_id: Some(ProfileId::new("profile-alpha")),
+                    session_id: None,
+                    agent_id: None,
+                    externally_owned: true,
+                    notes: Some("Hermes source database remains external".to_string()),
+                },
+                created_at: "2026-06-20T03:11:00Z".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(store.load_import_batches().unwrap().len(), 2);
+        let pi_crew_mapping = store
+            .query_legacy_id_mappings(&LegacyIdMappingQuery {
+                source_system: Some("pi-crew".to_string()),
+                legacy_kind: Some(RuntimeObjectKind::WorkerRun),
+                ..LegacyIdMappingQuery::default()
+            })
+            .unwrap();
+        assert_eq!(pi_crew_mapping.len(), 1);
+        assert_eq!(pi_crew_mapping[0].rusty_id, "run-rusty-001");
+        assert!(!pi_crew_mapping[0].provenance.externally_owned);
+
+        let hermes_mapping = store
+            .query_legacy_id_mappings(&LegacyIdMappingQuery {
+                rusty_kind: Some(RuntimeObjectKind::Profile),
+                rusty_id: Some("profile-alpha".to_string()),
+                ..LegacyIdMappingQuery::default()
+            })
+            .unwrap();
+        assert_eq!(hermes_mapping.len(), 1);
+        assert_eq!(hermes_mapping[0].source.system, "hermes");
+        assert!(hermes_mapping[0].provenance.externally_owned);
+        assert_eq!(store.count_rows("runtime_import_batches").unwrap(), 2);
+        assert_eq!(store.count_rows("legacy_id_mappings").unwrap(), 2);
 
         remove_temp_db(&db_path);
     }
@@ -4198,6 +5339,359 @@ mod tests {
     }
 
     #[test]
+    fn runtime_state_query_apis_filter_and_page_without_raw_sql() {
+        let db_path = temp_db_path("runtime-query-api");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let alpha_config = sample_session_config();
+        let alpha = sample_session_state();
+        let beta_config = SessionConfig {
+            session_id: SessionId::new("session-beta"),
+            agent_id: AgentId::new("agent-beta"),
+            profile_id: ProfileId::new("review-profile"),
+            kind: SessionKind::Worker,
+            delegation: None,
+            resource_limits: sample_resource_limits(),
+            tool_profile: sample_tool_profile(),
+        };
+        let beta = SessionState {
+            handle: SessionHandle::new(2),
+            session_id: beta_config.session_id.clone(),
+            agent_id: beta_config.agent_id.clone(),
+            profile_id: beta_config.profile_id.clone(),
+            kind: beta_config.kind.clone(),
+            delegation: None,
+            resource_limits: beta_config.resource_limits.clone(),
+            tool_profile: beta_config.tool_profile.clone(),
+            status: SessionStatus::Idle,
+            brain_turn_count: 0,
+            created_at: "2026-06-20T00:01:00Z".to_string(),
+            last_active_at: "2026-06-20T00:01:00Z".to_string(),
+        };
+
+        store
+            .save_session_with_config(&alpha, &alpha_config)
+            .unwrap();
+        store.save_session_with_config(&beta, &beta_config).unwrap();
+        store
+            .save_worker_run_requested(&WorkerRunRecord {
+                run_id: RunId::new("alpha-wake:0"),
+                parent_session_id: alpha.session_id.clone(),
+                delegated_session_id: Some(SessionId::new("delegated-alpha")),
+                parent_agent_id: Some(alpha.agent_id.clone()),
+                profile_id: ProfileId::new("coder-profile"),
+                task_id: Some(TaskId::new("2876")),
+                status: WorkerRunStatus::Requested,
+                created_at: "2026-06-20T00:02:00Z".to_string(),
+                last_updated_at: "2026-06-20T00:02:00Z".to_string(),
+                source_wake_id: "alpha-wake".to_string(),
+                source_action_index: 0,
+                delegation_correlation_id: Some("query-run".to_string()),
+                parent_consumption: ParentConsumptionPolicy::AwaitCompletion,
+                fan_out_group_id: None,
+                fan_out_max_concurrency: None,
+                fan_out_failure_policy: FanOutFailurePolicy::FailSoft,
+            })
+            .unwrap();
+        store
+            .save_event(
+                1,
+                &CoreEvent::AgentMessageRouted {
+                    message: AgentMessage {
+                        from: alpha.agent_id.clone(),
+                        to: beta.agent_id.clone(),
+                        body: "first query message".to_string(),
+                        correlation_id: Some("query-corr".to_string()),
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                2,
+                &CoreEvent::AgentMessageRouted {
+                    message: AgentMessage {
+                        from: beta.agent_id.clone(),
+                        to: alpha.agent_id.clone(),
+                        body: "second query message".to_string(),
+                        correlation_id: Some("query-corr".to_string()),
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                3,
+                &CoreEvent::CompletionPacketDelivered {
+                    packet: CompletionPacket {
+                        session_id: alpha.session_id.clone(),
+                        status: rusty_crew_core_protocol::CompletionStatus::Completed,
+                        summary: "query completion".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                4,
+                &CoreEvent::BrainWakeRequested {
+                    session_id: alpha.session_id.clone(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .query_sessions(&SessionQuery {
+                    kind: Some(SessionKind::Full),
+                    page: Some(QueryPage {
+                        limit: Some(10),
+                        offset: Some(0),
+                    }),
+                    ..SessionQuery::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .query_agent_instances(&AgentInstanceQuery {
+                    agent_id: Some(AgentId::new("agent-beta")),
+                    ..AgentInstanceQuery::default()
+                })
+                .unwrap()[0]
+                .instance_id,
+            AgentInstanceId::new("instance:session-beta")
+        );
+        assert_eq!(
+            store
+                .query_agent_messages(&AgentMessageQuery {
+                    agent_id: Some(AgentId::new("agent-alpha")),
+                    correlation_id: Some("query-corr".to_string()),
+                    page: Some(QueryPage {
+                        limit: Some(1),
+                        offset: Some(1),
+                    }),
+                })
+                .unwrap()[0]
+                .sequence,
+            2
+        );
+        assert_eq!(
+            store
+                .query_completion_packets(&CompletionPacketQuery {
+                    session_id: Some(SessionId::new("session-alpha")),
+                    status: Some(rusty_crew_core_protocol::CompletionStatus::Completed),
+                    page: None,
+                })
+                .unwrap()[0]
+                .packet
+                .summary,
+            "query completion"
+        );
+        assert_eq!(
+            store
+                .query_worker_runs(&WorkerRunQuery {
+                    parent_session_id: Some(SessionId::new("session-alpha")),
+                    terminal: Some(false),
+                    ..WorkerRunQuery::default()
+                })
+                .unwrap()[0]
+                .run_id,
+            RunId::new("alpha-wake:0")
+        );
+        assert_eq!(
+            store
+                .query_runtime_counters(&RuntimeCounterQuery {
+                    scope: Some(RuntimeCounterScope::Runtime),
+                    counter_name: Some(COUNTER_MESSAGES.to_string()),
+                    page: None,
+                })
+                .unwrap()[0]
+                .value,
+            2
+        );
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn maintenance_guardrails_cover_queue_retention_size_and_hot_indexes() {
+        let db_path = temp_db_path("maintenance-guardrails");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let mut sequence = 1_u64;
+        for index in 0..30 {
+            let session_id = SessionId::new(format!("session-{index:02}"));
+            let agent_id = AgentId::new(format!("agent-{index:02}"));
+            let profile_id = ProfileId::new(format!("profile-{}", index % 3));
+            let config = SessionConfig {
+                session_id: session_id.clone(),
+                agent_id: agent_id.clone(),
+                profile_id: profile_id.clone(),
+                kind: SessionKind::Full,
+                delegation: None,
+                resource_limits: sample_resource_limits(),
+                tool_profile: sample_tool_profile(),
+            };
+            store
+                .save_session_with_config(
+                    &SessionState {
+                        handle: SessionHandle::new((index + 1) as u64),
+                        session_id: session_id.clone(),
+                        agent_id: agent_id.clone(),
+                        profile_id,
+                        kind: SessionKind::Full,
+                        delegation: None,
+                        resource_limits: sample_resource_limits(),
+                        tool_profile: sample_tool_profile(),
+                        status: SessionStatus::Idle,
+                        brain_turn_count: 0,
+                        created_at: format!("2026-06-20T00:{index:02}:00Z"),
+                        last_active_at: format!("2026-06-20T00:{index:02}:00Z"),
+                    },
+                    &config,
+                )
+                .unwrap();
+            store
+                .save_worker_run_requested(&WorkerRunRecord {
+                    run_id: RunId::new(format!("run-{index:02}")),
+                    parent_session_id: session_id.clone(),
+                    delegated_session_id: Some(SessionId::new(format!("delegated-{index:02}"))),
+                    parent_agent_id: Some(agent_id.clone()),
+                    profile_id: ProfileId::new("delegated-profile"),
+                    task_id: Some(TaskId::new(format!("task-{index:02}"))),
+                    status: WorkerRunStatus::Running,
+                    created_at: format!("2026-06-20T01:{index:02}:00Z"),
+                    last_updated_at: format!("2026-06-20T01:{index:02}:00Z"),
+                    source_wake_id: format!("wake-{index:02}"),
+                    source_action_index: index,
+                    delegation_correlation_id: Some("scale-corr".to_string()),
+                    parent_consumption: ParentConsumptionPolicy::AwaitCompletion,
+                    fan_out_group_id: Some("scale-group".to_string()),
+                    fan_out_max_concurrency: Some(4),
+                    fan_out_failure_policy: FanOutFailurePolicy::FailSoft,
+                })
+                .unwrap();
+
+            for message_index in 0..12 {
+                store
+                    .save_event(
+                        sequence,
+                        &CoreEvent::AgentMessageRouted {
+                            message: AgentMessage {
+                                from: agent_id.clone(),
+                                to: AgentId::new(format!("agent-{:02}", (index + 1) % 30)),
+                                body: format!("scale message {index}-{message_index}"),
+                                correlation_id: Some("corr-alpha".to_string()),
+                            },
+                        },
+                    )
+                    .unwrap();
+                sequence += 1;
+            }
+        }
+
+        for index in 0..5 {
+            store
+                .save_queued_message(&QueuedMessageRecord {
+                    message_id: format!("expired-queue-{index}"),
+                    owner_session_id: Some(SessionId::new("session-00")),
+                    owner_agent_id: AgentId::new("agent-00"),
+                    message: AgentMessage {
+                        from: AgentId::new("operator"),
+                        to: AgentId::new("agent-00"),
+                        body: format!("expired queue message {index}"),
+                        correlation_id: Some("queue-scale".to_string()),
+                    },
+                    source_sequence: Some(sequence + index as u64),
+                    enqueued_at: "2026-06-20T02:00:00Z".to_string(),
+                    expires_at: "2026-06-20T02:00:01Z".to_string(),
+                    ttl_ms: 1_000,
+                    delivery_attempts: 0,
+                    state: QueuedMessageState::Pending,
+                    terminal_at: None,
+                    state_reason: None,
+                })
+                .unwrap();
+        }
+        store
+            .save_queued_message(&QueuedMessageRecord {
+                message_id: "future-queue".to_string(),
+                owner_session_id: Some(SessionId::new("session-00")),
+                owner_agent_id: AgentId::new("agent-00"),
+                message: AgentMessage {
+                    from: AgentId::new("operator"),
+                    to: AgentId::new("agent-00"),
+                    body: "fresh queue message".to_string(),
+                    correlation_id: Some("queue-scale".to_string()),
+                },
+                source_sequence: Some(sequence + 10),
+                enqueued_at: "2026-06-20T02:00:00Z".to_string(),
+                expires_at: "2026-06-20T02:10:00Z".to_string(),
+                ttl_ms: 600_000,
+                delivery_attempts: 0,
+                state: QueuedMessageState::Pending,
+                terminal_at: None,
+                state_reason: None,
+            })
+            .unwrap();
+
+        let report = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                expire_queued_messages_at: Some("2026-06-20T02:00:02Z".to_string()),
+                purge_terminal_queued_messages_before: Some("2026-06-20T02:00:03Z".to_string()),
+                run_wal_checkpoint: true,
+                run_optimize: true,
+            })
+            .unwrap();
+
+        assert_eq!(report.expired_queue_messages, 5);
+        assert_eq!(report.purged_terminal_queue_messages, 5);
+        assert!(report.optimize_ran);
+        assert!(report.wal_checkpoint_ran);
+        assert!(report.size_before.page_size_bytes > 0);
+        assert!(report.size_after.database_bytes > 0);
+        assert_eq!(store.count_rows("queued_messages").unwrap(), 1);
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: None,
+                    owner_agent_id: Some(AgentId::new("agent-00")),
+                    limit: None,
+                })
+                .unwrap()[0]
+                .message_id,
+            "future-queue"
+        );
+        assert_eq!(
+            store
+                .search_runtime(&RuntimeSearchFilter {
+                    query: "expired queue message".to_string(),
+                    row_type: Some(RuntimeSearchRowType::QueueMessage),
+                    session_id: Some(SessionId::new("session-00")),
+                    agent_id: Some(AgentId::new("agent-00")),
+                    instance_id: None,
+                    task_id: None,
+                    event_kind: None,
+                    recorded_after: None,
+                    recorded_before: None,
+                    limit: Some(10),
+                })
+                .unwrap()
+                .len(),
+            0
+        );
+        let checks = store.hot_query_plan_checks().unwrap();
+        assert!(
+            checks.iter().all(|check| check.uses_index),
+            "hot query plan lost index coverage: {checks:?}"
+        );
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
     fn sqlite_and_sql_literals_do_not_leak_outside_persistence_crate() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let workspace_root = find_workspace_root(manifest_dir);
@@ -4300,6 +5794,19 @@ mod tests {
                 SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1
             )",
             params![table],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+            != 0
+    }
+
+    fn index_exists(db_path: &Path, index: &str) -> bool {
+        let conn = Connection::open(db_path).unwrap();
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?1
+            )",
+            params![index],
             |row| row.get::<_, i64>(0),
         )
         .unwrap()
