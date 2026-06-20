@@ -126,13 +126,14 @@ impl NativeBridge {
         from: rusty_crew_core_bridge_api::AgentId,
         to: rusty_crew_core_bridge_api::AgentId,
         body: String,
+        correlation_id: Option<String>,
     ) -> CoreResult<EventReceipt> {
         self.engine()?
             .route_agent_message(rusty_crew_core_bridge_api::AgentMessage {
                 from,
                 to,
                 body,
-                correlation_id: None,
+                correlation_id,
             })
     }
 
@@ -1007,6 +1008,7 @@ impl NativeBridgeBinding {
         from: String,
         to: String,
         body: String,
+        correlation_id: Option<String>,
     ) -> napi::Result<JsEventReceipt> {
         let bridge = self.bridge()?;
         let receipt = bridge
@@ -1014,6 +1016,7 @@ impl NativeBridgeBinding {
                 rusty_crew_core_bridge_api::AgentId::new(from),
                 rusty_crew_core_bridge_api::AgentId::new(to),
                 body,
+                correlation_id,
             )
             .map_err(to_napi_error)?;
         Ok(to_js_event_receipt(receipt))

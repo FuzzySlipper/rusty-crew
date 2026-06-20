@@ -358,6 +358,7 @@ pub enum ExternalEventPayload {
         from: String,
         text: String,
     },
+    ChannelMessage(Box<ChannelMessageExternalPayload>),
     AdapterStatus {
         status: String,
         detail: Option<String>,
@@ -368,6 +369,21 @@ pub enum ExternalEventPayload {
     RawJson {
         json: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelMessageExternalPayload {
+    pub binding_id: String,
+    pub correlation_id: String,
+    pub idempotency_key: String,
+    pub provider: String,
+    pub external_channel_id: String,
+    pub external_thread_id: Option<String>,
+    pub external_message_id: Option<String>,
+    pub from: String,
+    pub text: String,
+    pub received_at: IsoTimestamp,
+    pub expires_at: IsoTimestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -673,4 +689,36 @@ pub enum PlatformAdapterKind {
     Mcp,
     Tui,
     Cli,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_external_event_payload_keeps_flat_tagged_json_shape() {
+        let payload =
+            ExternalEventPayload::ChannelMessage(Box::new(ChannelMessageExternalPayload {
+                binding_id: "binding-alpha".to_string(),
+                correlation_id: "channel:binding-alpha:message-1".to_string(),
+                idempotency_key: "den_channels:crew-room:thread-1:message-1".to_string(),
+                provider: "den_channels".to_string(),
+                external_channel_id: "crew-room".to_string(),
+                external_thread_id: Some("thread-1".to_string()),
+                external_message_id: Some("message-1".to_string()),
+                from: "den-user-alpha".to_string(),
+                text: "hello".to_string(),
+                received_at: "2026-06-20T05:01:00.000Z".to_string(),
+                expires_at: "2026-06-20T05:01:05.000Z".to_string(),
+            }));
+
+        let json = serde_json::to_value(&payload).expect("serialize payload");
+        assert_eq!(json["type"], "channel_message");
+        assert_eq!(json["binding_id"], "binding-alpha");
+        assert_eq!(json["correlation_id"], "channel:binding-alpha:message-1");
+
+        let round_trip: ExternalEventPayload =
+            serde_json::from_value(json).expect("deserialize payload");
+        assert_eq!(round_trip, payload);
+    }
 }

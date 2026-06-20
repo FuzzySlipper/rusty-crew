@@ -122,6 +122,20 @@ export interface DenDataUpdate {
 
 export type ExternalEventPayload =
   | { type: "human_message"; from: string; text: string }
+  | {
+      type: "channel_message";
+      bindingId: string;
+      correlationId: string;
+      idempotencyKey: string;
+      provider: string;
+      externalChannelId: string;
+      externalThreadId?: string;
+      externalMessageId?: string;
+      from: string;
+      text: string;
+      receivedAt: string;
+      expiresAt: string;
+    }
   | { type: "adapter_status"; status: string; detail?: string }
   | { type: "tool_catalog_changed"; catalogId: string }
   | { type: "raw_json"; json: string };
@@ -136,6 +150,25 @@ export type ChannelProvider = "den_channels" | "telegram" | "simulated";
 export type ChannelVisibility = "conversation" | "task" | "debug" | "system";
 export type ChannelSeverity = "info" | "success" | "warning" | "error";
 export type ChannelDeliveryPolicy = "best_effort" | "must_ack" | "dry_run";
+export type ExternalBindingStatus =
+  | "active"
+  | "degraded"
+  | "disconnected"
+  | "archived";
+export type ChannelMembershipStatus = "joined" | "left" | "invited" | "unknown";
+export type ChannelPresenceStatus = "online" | "idle" | "offline" | "unknown";
+export type ChannelSubscriptionStatus =
+  | "active"
+  | "degraded"
+  | "disconnected"
+  | "paused"
+  | "archived";
+export type ChannelSubscriptionTransportKind =
+  | "websocket"
+  | "http_poll"
+  | "webhook"
+  | "simulation"
+  | "rust_event_subscription";
 
 export interface ChannelRuntimeIdentity {
   agentId?: AgentId;
@@ -211,6 +244,73 @@ export interface NormalizedChannelActivityProjection {
   workRef?: string;
   resultRef?: string;
   createdAt: string;
+}
+
+export interface ChannelBindingRecord {
+  bindingId: string;
+  adapterId: AdapterId;
+  provider: ChannelProvider | string;
+  agentId: AgentId;
+  instanceId?: AgentInstanceId;
+  sessionId?: SessionId;
+  profileId: ProfileId;
+  externalChannelId: string;
+  externalThreadId?: string;
+  externalUserId?: string;
+  providerSubscriptionId?: string;
+  cursor?: string;
+  membershipState?: string;
+  presenceState?: string;
+  status: ExternalBindingStatus;
+  degradedReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChannelMembershipRecord {
+  kind: "channel_membership.v1";
+  bindingId: string;
+  adapterId: AdapterId;
+  providerRefs: ChannelProviderRefs;
+  externalUserId: string;
+  displayLabel?: string;
+  agentId?: AgentId;
+  profileId?: ProfileId;
+  roleLabels: string[];
+  status: ChannelMembershipStatus;
+  observedAt: string;
+  provenance: Record<string, unknown>;
+}
+
+export interface ChannelPresenceRecord {
+  kind: "channel_presence.v1";
+  bindingId: string;
+  adapterId: AdapterId;
+  providerRefs: ChannelProviderRefs;
+  externalUserId?: string;
+  agentId?: AgentId;
+  sessionId?: SessionId;
+  status: ChannelPresenceStatus;
+  observedAt: string;
+  expiresAt?: string;
+  provenance: Record<string, unknown>;
+}
+
+export interface ChannelSubscriptionRecord {
+  kind: "channel_subscription.v1";
+  bindingId: string;
+  adapterId: AdapterId;
+  providerRefs: ChannelProviderRefs;
+  transportKind: ChannelSubscriptionTransportKind;
+  providerSubscriptionId?: string;
+  rustSubscriptionHandle?: SubscriptionHandle;
+  cursor?: string;
+  status: ChannelSubscriptionStatus;
+  lastConnectedAt?: string;
+  lastSeenAt?: string;
+  lastErrorAt?: string;
+  degradedReason?: string;
+  provenance: Record<string, unknown>;
 }
 
 export type CompletionStatus = "completed" | "failed" | "blocked" | "exhausted";

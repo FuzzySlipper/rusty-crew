@@ -1,5 +1,6 @@
 import type {
   ActionBatchReceipt,
+  AgentMessage,
   BrainActionBatch,
   BrainEventEnvelope,
   BrainImplementationHandle,
@@ -86,6 +87,15 @@ export class CoreBridge {
 
   async injectExternalEvent(event: ExternalEvent): Promise<EventReceipt> {
     return this.native.injectExternalEvent(event);
+  }
+
+  async routeAgentMessage(message: AgentMessage): Promise<EventReceipt> {
+    return this.native.routeAgentMessage(
+      message.from,
+      message.to,
+      message.body,
+      message.correlationId,
+    );
   }
 
   async cancelDelegatedSession(

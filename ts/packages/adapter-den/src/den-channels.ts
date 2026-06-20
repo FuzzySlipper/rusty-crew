@@ -195,6 +195,30 @@ export function denChannelsInboundToExternalEvent(
   };
 }
 
+export function denChannelsInboundToChannelExternalEvent(
+  message: NormalizedChannelInboundMessage,
+  correlationId: string,
+): ExternalEvent {
+  return {
+    adapterId: message.adapterId,
+    source: `${message.providerRefs.provider}:${message.bindingId}`,
+    payload: {
+      type: "channel_message",
+      bindingId: message.bindingId,
+      correlationId,
+      idempotencyKey: message.idempotencyKey,
+      provider: message.providerRefs.provider,
+      externalChannelId: message.providerRefs.externalChannelId,
+      externalThreadId: message.providerRefs.externalThreadId,
+      externalMessageId: message.providerRefs.externalMessageId,
+      from: message.author.externalUserId,
+      text: message.body,
+      receivedAt: message.receivedAt,
+      expiresAt: message.expiresAt,
+    },
+  };
+}
+
 export function toDenChannelsPostMessageRequest(
   message: NormalizedChannelOutboundMessage,
 ): DenChannelsPostMessageRequest {

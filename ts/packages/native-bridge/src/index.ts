@@ -134,6 +134,7 @@ interface NativeBridgeBinding {
     from: string,
     to: string,
     body: string,
+    correlationId?: string,
   ): { accepted: boolean; sequence: number };
   buildBrainWakeRequest(
     brain: number,
@@ -287,6 +288,7 @@ export interface NativeBridgeModule {
     from: string,
     to: string,
     body: string,
+    correlationId?: string,
   ): Promise<EventReceipt>;
   /**
    * Runtime-local helper: projects body state in Rust and builds the three
@@ -545,8 +547,8 @@ function createNativeBridgeModule(
         .drainSubscriptionEvents(handle, maxEvents)
         .map((eventJson) => toCoreEvent(JSON.parse(eventJson) as RawCoreEvent)),
     createSession: async (config) => binding.createSession(config),
-    routeAgentMessage: async (from, to, body) =>
-      binding.routeAgentMessage(from, to, body),
+    routeAgentMessage: async (from, to, body, correlationId) =>
+      binding.routeAgentMessage(from, to, body, correlationId),
     buildBrainWakeRequest: async (input) => {
       const buffered = binding.buildBrainWakeRequest(
         input.brain,
@@ -689,6 +691,21 @@ function toNativeExternalEventPayload(
   switch (payload.type) {
     case "human_message":
       return payload;
+    case "channel_message":
+      return {
+        type: payload.type,
+        binding_id: payload.bindingId,
+        correlation_id: payload.correlationId,
+        idempotency_key: payload.idempotencyKey,
+        provider: payload.provider,
+        external_channel_id: payload.externalChannelId,
+        external_thread_id: payload.externalThreadId,
+        external_message_id: payload.externalMessageId,
+        from: payload.from,
+        text: payload.text,
+        received_at: payload.receivedAt,
+        expires_at: payload.expiresAt,
+      };
     case "adapter_status":
       return payload;
     case "tool_catalog_changed":
@@ -698,6 +715,34 @@ function toNativeExternalEventPayload(
       };
     case "raw_json":
       return payload;
+  }
+}
+
+function toExternalEventPayload(payload: unknown): ExternalEvent["payload"] {
+  const raw = payload as Record<string, unknown>;
+  switch (raw["type"]) {
+    case "channel_message":
+      return {
+        type: "channel_message",
+        bindingId: raw["binding_id"] as string,
+        correlationId: raw["correlation_id"] as string,
+        idempotencyKey: raw["idempotency_key"] as string,
+        provider: raw["provider"] as string,
+        externalChannelId: raw["external_channel_id"] as string,
+        externalThreadId: raw["external_thread_id"] as string | undefined,
+        externalMessageId: raw["external_message_id"] as string | undefined,
+        from: raw["from"] as string,
+        text: raw["text"] as string,
+        receivedAt: raw["received_at"] as string,
+        expiresAt: raw["expires_at"] as string,
+      };
+    case "tool_catalog_changed":
+      return {
+        type: "tool_catalog_changed",
+        catalogId: raw["catalog_id"] as string,
+      };
+    default:
+      return payload as ExternalEvent["payload"];
   }
 }
 
@@ -724,7 +769,7 @@ function toCoreEvent(event: RawCoreEvent): CoreEvent {
         event: {
           adapterId: event.event.adapter_id,
           source: event.event.source,
-          payload: event.event.payload,
+          payload: toExternalEventPayload(event.event.payload),
         },
       };
     case "den_data_updated":
@@ -884,10 +929,7 @@ type RawCoreEvent =
       event: {
         adapter_id: AdapterId;
         source: string;
-        payload: Extract<
-          CoreEvent,
-          { type: "external_event_injected" }
-        >["event"]["payload"];
+        payload: unknown;
       };
     }
   | {
