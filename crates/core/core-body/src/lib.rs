@@ -39,6 +39,7 @@ impl BodyProjector {
             session,
             pending_messages,
             recent_events,
+            child_completions: Vec::new(),
             delta_policy: default_delta_policy(),
         })
     }
@@ -206,6 +207,16 @@ fn validate_action(batch_session_id: &SessionId, action: &BrainAction) -> CoreRe
                 return Err(CoreError::new(
                     CoreErrorKind::InvalidInput,
                     "request_delegation timeout_ms must be greater than zero when provided",
+                ));
+            }
+            if resource_limits
+                .as_ref()
+                .and_then(|limits| limits.workdir.as_deref())
+                .is_some_and(|value| value.trim().is_empty())
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "request_delegation resource_limits.workdir must be non-empty when provided",
                 ));
             }
             if resource_limits

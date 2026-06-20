@@ -10,3 +10,4 @@ rusty-crew-core-bus = { path = "../core-bus" }
 rusty-crew-core-persistence = { path = "../core-persistence" }
 rusty-crew-core-protocol = { path = "../core-protocol" }
 rusty-crew-core-session = { path = "../core-session" }
+time.workspace = true

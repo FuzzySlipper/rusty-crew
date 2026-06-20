@@ -3,11 +3,13 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
+  AgentTool as PiAgentTool,
 } from "@earendil-works/pi-agent-core";
 import type {
   AgentMessage as RustyAgentMessage,
   BrainEvent,
   BrainEventEnvelope,
+  ToolDescriptor,
 } from "@rusty-crew/contracts";
 import type {
   BrainActionPlanner,
@@ -25,9 +27,15 @@ export type PiAgentLike = Pick<
 
 export type PiAgentFactory = (options: PiAgentOptions) => PiAgentLike;
 
+export type PiAgentToolResolver = (input: {
+  wake: BrainWakeInput;
+  tools: ToolDescriptor[];
+}) => PiAgentTool[];
+
 export interface PiAgentBrainOptions {
   createAgent: PiAgentFactory;
   planActions?: BrainActionPlanner;
+  resolveTools?: PiAgentToolResolver;
 }
 
 export function createPiAgentBrain(
@@ -36,7 +44,7 @@ export function createPiAgentBrain(
   return {
     async wake(input: BrainWakeInput): Promise<BrainWakeResult> {
       const events: BrainWakeResult["events"] = [];
-      const agent = options.createAgent(buildAgentOptions(input));
+      const agent = options.createAgent(buildAgentOptions(input, options));
       const unsubscribe = agent.subscribe((event) => {
         const mapped = mapPiAgentEvent(event);
         if (mapped) {
@@ -75,19 +83,40 @@ function envelope(
   };
 }
 
-function buildAgentOptions(input: BrainWakeInput): PiAgentOptions {
+function buildAgentOptions(
+  input: BrainWakeInput,
+  options: PiAgentBrainOptions,
+): PiAgentOptions {
   return {
     initialState: {
       systemPrompt: [input.systemPrompt, input.roleAssembly.instructions]
         .filter(Boolean)
         .join("\n\n"),
       messages: toPiMessages(input.roleAssembly, []),
-      tools: [],
+      tools: resolveAllowedTools(input, options.resolveTools),
     },
     sessionId: input.sessionId,
     steeringMode: "one-at-a-time",
     followUpMode: "one-at-a-time",
   };
+}
+
+function resolveAllowedTools(
+  input: BrainWakeInput,
+  resolveTools: PiAgentToolResolver | undefined,
+): PiAgentTool[] {
+  const allowedDescriptors = input.state.session.toolProfile.tools;
+  if (!resolveTools || allowedDescriptors.length === 0) {
+    return [];
+  }
+
+  const allowedNames = new Set(
+    allowedDescriptors.map((descriptor) => descriptor.name),
+  );
+  return resolveTools({
+    wake: input,
+    tools: allowedDescriptors,
+  }).filter((tool) => allowedNames.has(tool.name));
 }
 
 function toPiMessages(

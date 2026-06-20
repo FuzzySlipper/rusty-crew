@@ -13,6 +13,7 @@ import type {
   CompletionPacket,
   CoreEvent,
   ProfileId,
+  RunId,
   SessionHandle,
   SessionId,
   TaskId,
@@ -230,6 +231,7 @@ async function projectBodyState(sessionId: SessionId): Promise<BodyState> {
     },
     pendingMessages: raw.pending_messages.map(toTsMessage),
     recentEvents: raw.recent_events.map(toTsEvent),
+    childCompletions: raw.child_completions.map(toTsDelegatedCompletion),
     deltaPolicy: raw.delta_policy
       ? {
           mode: raw.delta_policy.mode,
@@ -238,6 +240,25 @@ async function projectBodyState(sessionId: SessionId): Promise<BodyState> {
           maxQueuedMessages: raw.delta_policy.max_queued_messages,
         }
       : defaultBodyDeltaPolicy,
+  };
+}
+
+function toTsDelegatedCompletion(
+  completion: RustDelegatedCompletionJson,
+): BodyState["childCompletions"][number] {
+  return {
+    runId: completion.run_id as RunId,
+    childSessionId: completion.child_session_id as SessionId,
+    requestedTaskId: completion.requested_task_id as TaskId | undefined,
+    sourceWakeId: completion.source_wake_id,
+    sourceActionIndex: completion.source_action_index,
+    correlationId: completion.correlation_id,
+    parentConsumption: completion.parent_consumption,
+    packet: {
+      sessionId: completion.packet.session_id as SessionId,
+      status: completion.packet.status,
+      summary: completion.packet.summary,
+    },
   };
 }
 
@@ -347,6 +368,7 @@ interface RustBodyStateJson {
   session: RustSessionStateJson;
   pending_messages: RustAgentMessageJson[];
   recent_events: RustCoreEventJson[];
+  child_completions: RustDelegatedCompletionJson[];
   delta_policy?: {
     mode: "frozen_snapshot_next_wake";
     queue_owner: "body";
@@ -383,6 +405,21 @@ interface RustDelegationLineageJson {
   correlation_id: string;
 }
 
+interface RustDelegatedCompletionJson {
+  run_id: string;
+  child_session_id: string;
+  requested_task_id?: string;
+  source_wake_id: string;
+  source_action_index: number;
+  correlation_id?: string;
+  parent_consumption: "await_completion" | "observe_only";
+  packet: {
+    session_id: string;
+    status: "completed" | "failed" | "blocked" | "exhausted";
+    summary: string;
+  };
+}
+
 interface RustAgentMessageJson {
   from: string;
   to: string;
@@ -402,7 +439,11 @@ type RustCoreEventJson =
   | { type: "brain_actions_accepted"; session_id: string; count: number }
   | {
       type: "completion_packet_delivered";
-      packet: { session_id: string; status: "completed"; summary: string };
+      packet: {
+        session_id: string;
+        status: "completed" | "failed" | "blocked" | "exhausted";
+        summary: string;
+      };
     };
 
 type RustBrainEventJson =

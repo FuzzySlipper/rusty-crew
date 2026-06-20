@@ -9,14 +9,17 @@ use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
     BrainActionBatch, BrainEvent, BrainEventEnvelope, ClockConfig, CompletionStatus, CoreError,
     CoreErrorKind, CoreEvent, CoreResult, DelegationLineage, DenDataUpdate, EngineConfig,
-    EngineHandle, EventReceipt, EventSubscription, ExternalEvent, IsoTimestamp, ResourceLimits,
-    RunId, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary,
-    ToolProfile,
+    EngineHandle, EventReceipt, EventSubscription, ExternalEvent, IsoTimestamp,
+    ParentConsumptionPolicy, ProfileId, ResourceLimits, RunId, SessionConfig, SessionId,
+    SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 static NEXT_ENGINE_HANDLE: AtomicU64 = AtomicU64::new(1);
 
@@ -29,6 +32,7 @@ pub struct CoreEngine {
     store: CoordinationStore,
     body_projector: BodyProjector,
     action_executor: BrainActionExecutor,
+    profile_tool_profiles: Arc<Mutex<HashMap<ProfileId, ToolProfile>>>,
 }
 
 impl CoreEngine {
@@ -60,6 +64,7 @@ impl CoreEngine {
             bus,
             sessions,
             store,
+            profile_tool_profiles: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -105,7 +110,27 @@ impl CoreEngine {
     }
 
     pub fn project_body_state(&self, session_id: &SessionId) -> CoreResult<BodyState> {
-        self.body_projector.project(session_id)
+        let mut state = self.body_projector.project(session_id)?;
+        state.child_completions = self.store.delegated_completions_for_parent(session_id)?;
+        Ok(state)
+    }
+
+    pub fn register_profile_tool_profile(
+        &self,
+        profile_id: ProfileId,
+        tool_profile: ToolProfile,
+    ) -> CoreResult<()> {
+        validate_tool_profile(&tool_profile)?;
+        self.profile_tool_profiles
+            .lock()
+            .map_err(|_| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "profile registry lock poisoned",
+                )
+            })?
+            .insert(profile_id, tool_profile);
+        Ok(())
     }
 
     pub fn route_agent_message(&self, message: AgentMessage) -> CoreResult<EventReceipt> {
@@ -148,6 +173,7 @@ impl CoreEngine {
         self.spawn_delegated_workers(&session, &batch)?;
         let receipt = self.action_executor.execute(batch.clone())?;
         self.update_lifecycle_for_actions(&batch)?;
+        self.schedule_parent_completion_wakes(&batch)?;
         Ok(receipt)
     }
 
@@ -230,7 +256,9 @@ impl CoreEngine {
 
     fn now(&self) -> IsoTimestamp {
         match &self.config.clock {
-            ClockConfig::System => "system-clock-placeholder".to_string(),
+            ClockConfig::System => OffsetDateTime::now_utc()
+                .format(&Rfc3339)
+                .expect("formatting current UTC timestamp as RFC3339 should not fail"),
             ClockConfig::Fixed { at } => at.clone(),
         }
     }
@@ -247,6 +275,7 @@ impl CoreEngine {
                 prompt,
                 resource_limits,
                 correlation_id,
+                parent_consumption,
                 ..
             } = action
             else {
@@ -283,7 +312,7 @@ impl CoreEngine {
                         max_duration_ms: None,
                         max_delegation_depth: Some(0),
                     }),
-                    tool_profile: ToolProfile { tools: Vec::new() },
+                    tool_profile: self.tool_profile_for_profile(profile_id)?,
                 },
                 self.now(),
             )?;
@@ -300,6 +329,9 @@ impl CoreEngine {
                 source_wake_id: batch.wake_id.clone(),
                 source_action_index: index as u32,
                 delegation_correlation_id: Some(correlation_id.clone()),
+                parent_consumption: parent_consumption
+                    .clone()
+                    .unwrap_or(ParentConsumptionPolicy::AwaitCompletion),
             })?;
             self.store.save_session(&state)?;
             self.store.update_worker_run_status_by_delegated_session(
@@ -331,6 +363,21 @@ impl CoreEngine {
         }
 
         Ok(())
+    }
+
+    fn tool_profile_for_profile(&self, profile_id: &ProfileId) -> CoreResult<ToolProfile> {
+        Ok(self
+            .profile_tool_profiles
+            .lock()
+            .map_err(|_| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "profile registry lock poisoned",
+                )
+            })?
+            .get(profile_id)
+            .cloned()
+            .unwrap_or(ToolProfile { tools: Vec::new() }))
     }
 
     fn validate_delegation_invariants(
@@ -378,6 +425,35 @@ impl CoreEngine {
         Ok(())
     }
 
+    fn schedule_parent_completion_wakes(&self, batch: &BrainActionBatch) -> CoreResult<()> {
+        for action in &batch.actions {
+            let BrainAction::DeliverCompletion { packet } = action else {
+                continue;
+            };
+            let Some(run) = self
+                .store
+                .load_worker_run_by_delegated_session(&packet.session_id)?
+            else {
+                continue;
+            };
+            if run.parent_consumption != ParentConsumptionPolicy::AwaitCompletion {
+                continue;
+            }
+            let parent = match self.sessions.get_session(&run.parent_session_id) {
+                Ok(parent) => parent,
+                Err(error) if error.kind == CoreErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            if !session_kind_can_wake(&parent.kind) || parent.status == SessionStatus::Archived {
+                continue;
+            }
+            self.bus.publish(CoreEvent::BrainWakeRequested {
+                session_id: parent.session_id,
+            })?;
+        }
+        Ok(())
+    }
+
     fn schedule_wake_for_event(&self, event: &CoreEvent) -> CoreResult<()> {
         let CoreEvent::AgentMessageRouted { message } = event else {
             return Ok(());
@@ -413,6 +489,31 @@ pub fn delegated_session_id(
 
 pub fn delegated_agent_id(session_id: &SessionId) -> AgentId {
     AgentId::new(format!("agent:{session_id}"))
+}
+
+fn validate_tool_profile(tool_profile: &ToolProfile) -> CoreResult<()> {
+    let mut names = HashSet::new();
+    for tool in &tool_profile.tools {
+        if tool.name.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "tool profile tool name must be non-empty",
+            ));
+        }
+        if tool.description.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("tool profile tool {} requires a description", tool.name),
+            ));
+        }
+        if !names.insert(tool.name.clone()) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("tool profile contains duplicate tool {}", tool.name),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1225,6 +1326,226 @@ mod tests {
     }
 
     #[test]
+    fn delegated_completion_packets_route_to_parent_body_and_policy_wake() {
+        let data_dir = unique_data_dir("delegated-completion-routing");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let cases = [
+            (
+                CompletionStatus::Completed,
+                ParentConsumptionPolicy::AwaitCompletion,
+            ),
+            (
+                CompletionStatus::Failed,
+                ParentConsumptionPolicy::AwaitCompletion,
+            ),
+            (
+                CompletionStatus::Blocked,
+                ParentConsumptionPolicy::AwaitCompletion,
+            ),
+            (
+                CompletionStatus::Exhausted,
+                ParentConsumptionPolicy::ObserveOnly,
+            ),
+        ];
+
+        engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: cases
+                    .iter()
+                    .enumerate()
+                    .map(
+                        |(index, (_status, policy))| BrainAction::RequestDelegation {
+                            profile_id: ProfileId::new(format!("coder-profile-{index}")),
+                            task_id: Some(rusty_crew_core_protocol::TaskId::new(format!(
+                                "task-{index}"
+                            ))),
+                            prompt: format!("complete delegated slice {index}"),
+                            expected_output: Some("completion packet".to_string()),
+                            resource_limits: None,
+                            timeout_ms: None,
+                            priority: None,
+                            fan_out_group_id: Some("completion-routing".to_string()),
+                            correlation_id: Some(format!("correlation-{index}")),
+                            parent_consumption: Some(policy.clone()),
+                        },
+                    )
+                    .collect(),
+            })
+            .unwrap();
+
+        let (_subscription_id, parent_wakes) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::BrainWakeRequested],
+                session_id: Some(planner.session_id.clone()),
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        for (index, (status, _policy)) in cases.iter().enumerate() {
+            let child_session_id = delegated_session_id(&planner.session_id, "planner-wake", index);
+            engine
+                .execute_brain_actions(BrainActionBatch {
+                    wake_id: format!("child-wake-{index}"),
+                    session_id: child_session_id.clone(),
+                    actions: vec![BrainAction::DeliverCompletion {
+                        packet: CompletionPacket {
+                            session_id: child_session_id,
+                            status: status.clone(),
+                            summary: format!("child {index} finished as {status:?}"),
+                        },
+                    }],
+                })
+                .unwrap();
+        }
+
+        for _ in 0..3 {
+            assert!(matches!(
+                parent_wakes.recv_timeout(Duration::from_secs(1)).unwrap(),
+                CoreEvent::BrainWakeRequested { session_id } if session_id == planner.session_id
+            ));
+        }
+        assert!(parent_wakes
+            .recv_timeout(Duration::from_millis(50))
+            .is_err());
+
+        let body = engine.project_body_state(&planner.session_id).unwrap();
+        assert_eq!(body.child_completions.len(), 4);
+        assert_eq!(
+            body.child_completions
+                .iter()
+                .map(|completion| completion.packet.status.clone())
+                .collect::<Vec<_>>(),
+            cases
+                .iter()
+                .map(|(status, _policy)| status.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            body.child_completions
+                .iter()
+                .map(|completion| completion.parent_consumption.clone())
+                .collect::<Vec<_>>(),
+            cases
+                .iter()
+                .map(|(_status, policy)| policy.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            body.child_completions[0].run_id,
+            RunId::new("planner-wake:0")
+        );
+        assert_eq!(
+            body.child_completions[3].child_session_id,
+            delegated_session_id(&planner.session_id, "planner-wake", 3)
+        );
+        assert_eq!(
+            body.child_completions[3].correlation_id.as_deref(),
+            Some("correlation-3")
+        );
+
+        drop(engine);
+
+        let restarted_engine = test_engine_with_data_dir(data_dir);
+        let restarted_body = restarted_engine
+            .project_body_state(&planner.session_id)
+            .expect("parent completion state should hydrate");
+        assert_eq!(restarted_body.child_completions, body.child_completions);
+    }
+
+    #[test]
+    fn delegated_sessions_resolve_tool_profile_from_requested_profile() {
+        let data_dir = unique_data_dir("delegated-tool-profile");
+        let engine = test_engine_with_data_dir(data_dir);
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .register_profile_tool_profile(
+                ProfileId::new("restricted-coder-profile"),
+                ToolProfile {
+                    tools: vec![
+                        ToolDescriptor {
+                            name: "read_file".to_string(),
+                            description: "Read files in the delegated workdir".to_string(),
+                            input_schema: None,
+                        },
+                        ToolDescriptor {
+                            name: "patch".to_string(),
+                            description: "Apply a bounded source patch".to_string(),
+                            input_schema: None,
+                        },
+                    ],
+                },
+            )
+            .unwrap();
+
+        engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![BrainAction::RequestDelegation {
+                    profile_id: ProfileId::new("restricted-coder-profile"),
+                    task_id: None,
+                    prompt: "use only delegated profile tools".to_string(),
+                    expected_output: None,
+                    resource_limits: Some(ResourceLimits {
+                        workdir: Some("/home/dev/rusty-crew".to_string()),
+                        max_duration_ms: Some(30_000),
+                        max_delegation_depth: Some(0),
+                    }),
+                    timeout_ms: None,
+                    priority: None,
+                    fan_out_group_id: None,
+                    correlation_id: None,
+                    parent_consumption: None,
+                }],
+            })
+            .unwrap();
+
+        let delegated = engine
+            .get_session(&delegated_session_id(
+                &planner.session_id,
+                "planner-wake",
+                0,
+            ))
+            .unwrap();
+
+        assert_eq!(
+            delegated
+                .tool_profile
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["read_file", "patch"]
+        );
+        assert_eq!(
+            delegated.resource_limits,
+            ResourceLimits {
+                workdir: Some("/home/dev/rusty-crew".to_string()),
+                max_duration_ms: Some(30_000),
+                max_delegation_depth: Some(0),
+            }
+        );
+    }
+
+    #[test]
     fn den_product_data_updates_are_not_persisted_to_coordination_store() {
         let data_dir = unique_data_dir("den-data");
         let engine = test_engine_with_data_dir(data_dir.clone());
@@ -1243,6 +1564,75 @@ mod tests {
         assert_eq!(store.count_rows("event_history").unwrap(), 0);
         assert_eq!(store.count_rows("agent_messages").unwrap(), 0);
         assert_eq!(store.count_rows("completion_packets").unwrap(), 0);
+    }
+
+    #[test]
+    fn system_clock_writes_rfc3339_timestamps() {
+        let data_dir = unique_data_dir("system-clock");
+        let engine = CoreEngine::initialize(EngineConfig {
+            engine_data_dir: data_dir.to_string_lossy().to_string(),
+            clock: ClockConfig::System,
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1000,
+        })
+        .unwrap();
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+
+        assert_ne!(planner.created_at, "system-clock-placeholder");
+        assert!(time::OffsetDateTime::parse(
+            &planner.created_at,
+            &time::format_description::well_known::Rfc3339
+        )
+        .is_ok());
+        assert!(time::OffsetDateTime::parse(
+            &planner.last_active_at,
+            &time::format_description::well_known::Rfc3339
+        )
+        .is_ok());
+
+        engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![BrainAction::RequestDelegation {
+                    profile_id: ProfileId::new("coder-profile"),
+                    task_id: None,
+                    prompt: "check system timestamps".to_string(),
+                    expected_output: None,
+                    resource_limits: None,
+                    timeout_ms: None,
+                    priority: None,
+                    fan_out_group_id: None,
+                    correlation_id: None,
+                    parent_consumption: None,
+                }],
+            })
+            .unwrap();
+
+        let store = CoordinationStore::open(data_dir).unwrap();
+        let run = store
+            .load_worker_run(&RunId::new("planner-wake:0"))
+            .unwrap()
+            .unwrap();
+
+        assert_ne!(run.created_at, "system-clock-placeholder");
+        assert!(time::OffsetDateTime::parse(
+            &run.created_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .is_ok());
+        assert!(time::OffsetDateTime::parse(
+            &run.last_updated_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .is_ok());
     }
 
     #[test]

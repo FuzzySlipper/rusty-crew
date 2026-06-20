@@ -14,6 +14,7 @@ import type {
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
+  buildDelegatedRoleAssembly,
   createLocalBrain,
   registerBrainImplementationRuntime,
 } from "./index.js";
@@ -43,6 +44,7 @@ try {
     kind: "full",
   });
 
+  let parentConsumedChildCompletion = false;
   const plannerBrain = await registerBrainImplementationRuntime(
     native,
     {
@@ -53,6 +55,29 @@ try {
     },
     createLocalBrain(({ wake }): BrainAction[] => {
       assert.equal(wake.sessionId, plannerSessionId);
+      if (wake.state.childCompletions.length > 0) {
+        assert.equal(wake.state.childCompletions.length, 1);
+        assert.equal(
+          wake.state.childCompletions[0]!.packet.status,
+          "completed",
+        );
+        assert.equal(
+          wake.state.childCompletions[0]!.packet.summary,
+          "delegated production wake proof completed",
+        );
+        parentConsumedChildCompletion = true;
+        return [
+          {
+            type: "deliver_completion",
+            packet: {
+              sessionId: plannerSessionId,
+              status: "completed",
+              summary: "prime consumed delegated completion and finished",
+            },
+          },
+        ];
+      }
+
       assert.equal(wake.state.pendingMessages.length, 1);
       return [
         {
@@ -81,11 +106,20 @@ try {
     {
       implementationId: "coder-brain" as BrainImplementationId,
       profileId: coderProfileId,
-      toolProfile: { tools: [] },
+      toolProfile: {
+        tools: ["read_file", "patch", "terminal"].map((name) => ({
+          name,
+          description: `${name} delegated profile tool`,
+        })),
+      },
       modelConfig: { provider: "local", modelName: "deterministic" },
     },
     createLocalBrain(({ wake }): BrainAction[] => {
       assert.equal(wake.state.session.kind, "delegated");
+      assert.deepEqual(
+        wake.state.session.toolProfile.tools.map((tool) => tool.name),
+        ["read_file", "patch", "terminal"],
+      );
       assert.equal(
         wake.state.session.delegation?.parentSessionId,
         plannerSessionId,
@@ -134,7 +168,7 @@ try {
 
   for (
     let attempt = 0;
-    processedWakes.length < 2 && attempt < 4;
+    processedWakes.length < 3 && attempt < 6;
     attempt += 1
   ) {
     const wakeEvents = await native.drainSubscriptionEvents(
@@ -145,15 +179,44 @@ try {
       assert.equal(event.type, "brain_wake_requested");
       const sessionId = event.sessionId;
       const brain = brainBySession.get(sessionId) ?? coderBrain;
+      const roleAssembly =
+        sessionId === plannerSessionId
+          ? { instructions: "Use the deterministic local brain." }
+          : buildDelegatedRoleAssembly({
+              role: "coder",
+              profile: {
+                profileId: coderProfileId,
+                displayName: "Delegated Coder",
+                systemPrompt: "Use a focused implementation posture.",
+                toolNames: ["read_file", "patch", "terminal"],
+              },
+              context: {
+                sessionId,
+                agentId: `agent:${sessionId}` as AgentId,
+                parentSessionId: plannerSessionId,
+                parentAgentId: plannerAgentId,
+                sourceWakeId: "production-wake-1",
+                sourceActionIndex: 0,
+                taskId: "2844" as TaskId,
+                prompt: "Complete the delegated production wake proof.",
+                expectedOutput: "completion packet",
+                correlationId: "production-delegation-correlation",
+                resourceLimits: {
+                  workdir: "/home/dev/rusty-crew",
+                  maxDurationMs: 30_000,
+                  maxDelegationDepth: 0,
+                },
+                acceptanceCriteria: [
+                  "Wake through the registered bridge path.",
+                  "Return a completion packet.",
+                ],
+              },
+            });
       const request = await native.buildBrainWakeRequestForSession({
         brain,
         sessionId,
         systemPrompt: `Production delegation wake for ${sessionId}`,
-        roleAssemblyJson: encoder.encode(
-          JSON.stringify({
-            instructions: "Use the deterministic local brain.",
-          }),
-        ),
+        roleAssemblyJson: encoder.encode(JSON.stringify(roleAssembly)),
         wakeId: `production-wake-${processedWakes.length + 1}`,
       });
       await native.wakeBrain(request);
@@ -163,21 +226,43 @@ try {
 
   assert.equal(processedWakes[0], plannerSessionId);
   assert.match(processedWakes[1]!, /^planner-session:delegated:/);
+  assert.equal(processedWakes[2], plannerSessionId);
 
   const completionEvents = await native.drainSubscriptionEvents(
     completionSubscription,
     4,
   );
-  const completion = completionEvents.find(
+  const childCompletion = completionEvents.find(
     (
       event,
     ): event is Extract<CoreEvent, { type: "completion_packet_delivered" }> =>
-      event.type === "completion_packet_delivered",
+      event.type === "completion_packet_delivered" &&
+      event.packet.sessionId !== plannerSessionId,
+  );
+  const parentCompletion = completionEvents.find(
+    (
+      event,
+    ): event is Extract<CoreEvent, { type: "completion_packet_delivered" }> =>
+      event.type === "completion_packet_delivered" &&
+      event.packet.sessionId === plannerSessionId,
   );
   assert.equal(
-    completion?.packet.summary,
+    childCompletion?.packet.summary,
     "delegated production wake proof completed",
   );
+  assert.equal(
+    parentCompletion?.packet.summary,
+    "prime consumed delegated completion and finished",
+  );
+  assert.equal(parentConsumedChildCompletion, true);
+  const counts = {
+    sessions: await native.countRows("sessions"),
+    workerRuns: await native.countRows("worker_runs"),
+    completionPackets: await native.countRows("completion_packets"),
+  };
+  assert.equal(counts.sessions, 2);
+  assert.equal(counts.workerRuns, 1);
+  assert.equal(counts.completionPackets, 2);
 
   await native.unsubscribeEvents(wakeSubscription);
   await native.unsubscribeEvents(completionSubscription);
@@ -186,7 +271,10 @@ try {
     JSON.stringify(
       {
         processedWakes,
-        completionSummary: completion?.packet.summary,
+        childCompletionSummary: childCompletion?.packet.summary,
+        parentCompletionSummary: parentCompletion?.packet.summary,
+        parentConsumedChildCompletion,
+        counts,
       },
       null,
       2,

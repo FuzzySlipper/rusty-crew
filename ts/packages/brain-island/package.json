@@ -13,6 +13,7 @@
     "smoke:bridge-wake": "tsx src/smoke-bridge-wake.ts",
     "smoke:registered-bridge-wake": "tsx src/smoke-registered-bridge-wake.ts",
     "smoke:production-delegation-wake": "tsx src/smoke-production-delegation-wake.ts",
+    "smoke:delegated-role-assembly": "tsx src/smoke-delegated-role-assembly.ts",
     "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts",
     "smoke:delegated-slice": "tsx src/smoke-delegated-slice.ts"
   },

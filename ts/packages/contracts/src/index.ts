@@ -15,6 +15,7 @@ export type SessionId = Brand<string, "SessionId">;
 export type ProfileId = Brand<string, "ProfileId">;
 export type ProjectId = Brand<string, "ProjectId">;
 export type TaskId = Brand<string, "TaskId">;
+export type RunId = Brand<string, "RunId">;
 export type AdapterId = Brand<string, "AdapterId">;
 export type BrainImplementationId = Brand<string, "BrainImplementationId">;
 
@@ -137,6 +138,19 @@ export interface CompletionPacket {
   summary: string;
 }
 
+export type ParentConsumptionPolicy = "await_completion" | "observe_only";
+
+export interface DelegatedCompletion {
+  runId: RunId;
+  childSessionId: SessionId;
+  requestedTaskId?: TaskId;
+  sourceWakeId: string;
+  sourceActionIndex: number;
+  correlationId?: string;
+  parentConsumption: ParentConsumptionPolicy;
+  packet: CompletionPacket;
+}
+
 export type BrainEvent =
   | { type: "started" }
   | { type: "text_delta"; text: string }
@@ -157,7 +171,7 @@ export type BrainAction =
       priority?: "low" | "normal" | "high";
       fanOutGroupId?: string;
       correlationId?: string;
-      parentConsumption?: "await_completion" | "observe_only";
+      parentConsumption?: ParentConsumptionPolicy;
     }
   | { type: "deliver_completion"; packet: CompletionPacket };
 
@@ -222,6 +236,7 @@ export interface BodyState {
   session: SessionState;
   pendingMessages: AgentMessage[];
   recentEvents: CoreEvent[];
+  childCompletions: DelegatedCompletion[];
   deltaPolicy: BodyDeltaPolicy;
 }
 

@@ -307,6 +307,18 @@ pub enum CompletionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedCompletion {
+    pub run_id: RunId,
+    pub child_session_id: SessionId,
+    pub requested_task_id: Option<TaskId>,
+    pub source_wake_id: String,
+    pub source_action_index: u32,
+    pub correlation_id: Option<String>,
+    pub parent_consumption: ParentConsumptionPolicy,
+    pub packet: CompletionPacket,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoreEvent {
     SessionCreated {
@@ -345,6 +357,7 @@ pub struct BodyState {
     pub session: SessionState,
     pub pending_messages: Vec<AgentMessage>,
     pub recent_events: Vec<CoreEvent>,
+    pub child_completions: Vec<DelegatedCompletion>,
     pub delta_policy: BodyDeltaPolicy,
 }
 

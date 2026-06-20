@@ -9,6 +9,7 @@ import type {
 import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
+  AgentTool as PiAgentTool,
 } from "@earendil-works/pi-agent-core";
 import {
   BodyControlledDeltaQueue,
@@ -148,6 +149,7 @@ await brain.wake({
       },
     ],
     recentEvents: [],
+    childCompletions: [],
     deltaPolicy: {
       ...defaultBodyDeltaPolicy,
       queuedMessageTtlMs: 25,
@@ -159,6 +161,52 @@ await brain.wake({
 assert.equal(fakeAgent.clearAllQueuesCalls, 1);
 assert.equal(fakeAgent.promptedText(), "frozen snapshot message");
 assert.equal(queue.size(), 1);
+
+let capturedToolNames: string[] = [];
+const toolFilteredBrain = createPiAgentBrain({
+  createAgent: (options) => {
+    capturedToolNames = (options.initialState?.tools ?? []).map(
+      (tool) => tool.name,
+    );
+    return new FakeAgent(async () => {});
+  },
+  resolveTools: () => [fakeTool("read_file"), fakeTool("dangerous_shell")],
+});
+
+await toolFilteredBrain.wake({
+  wakeId: "wake-tools",
+  sessionId,
+  systemPrompt: "system",
+  roleAssembly: { instructions: "test tool filtering" },
+  state: {
+    session: {
+      handle: 2 as SessionHandle,
+      sessionId,
+      agentId,
+      profileId: "tool-filter-profile" as ProfileId,
+      kind: "delegated",
+      resourceLimits: {},
+      toolProfile: {
+        tools: [
+          {
+            name: "read_file",
+            description: "Read files visible to this delegated profile",
+          },
+        ],
+      },
+      status: "idle",
+      brainTurnCount: 0,
+      createdAt: "2026-06-19T00:00:00Z",
+      lastActiveAt: "2026-06-19T00:00:00Z",
+    },
+    pendingMessages: [],
+    recentEvents: [],
+    childCompletions: [],
+    deltaPolicy: defaultBodyDeltaPolicy,
+  },
+});
+
+assert.deepEqual(capturedToolNames, ["read_file"]);
 
 const freshDrain = queue.drainForNextWake(sessionId, 1_010);
 assert.deepEqual(
@@ -184,8 +232,22 @@ console.log(
       freshNextWakeMessages: freshDrain.messages.length,
       expiredDropped: expiredDrain.droppedExpired,
       clearAllQueuesCalls: fakeAgent.clearAllQueuesCalls,
+      filteredTools: capturedToolNames,
     },
     null,
     2,
   ),
 );
+
+function fakeTool(name: string): PiAgentTool {
+  return {
+    name,
+    description: `${name} description`,
+    label: name,
+    parameters: {} as PiAgentTool["parameters"],
+    execute: async () => ({
+      content: [{ type: "text", text: `${name} result` }],
+      details: {},
+    }),
+  };
+}

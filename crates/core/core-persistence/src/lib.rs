@@ -6,8 +6,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
     AgentId, CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
-    DelegationLineage, IsoTimestamp, ProfileId, ResourceLimits, RunId, SessionHandle, SessionId,
-    SessionKind, SessionState, SessionStatus, TaskId, ToolProfile,
+    DelegatedCompletion, DelegationLineage, IsoTimestamp, ParentConsumptionPolicy, ProfileId,
+    ResourceLimits, RunId, SessionHandle, SessionId, SessionKind, SessionState, SessionStatus,
+    TaskId, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
@@ -72,6 +73,7 @@ pub struct WorkerRunRecord {
     pub source_wake_id: String,
     pub source_action_index: u32,
     pub delegation_correlation_id: Option<String>,
+    pub parent_consumption: ParentConsumptionPolicy,
 }
 
 impl CoordinationStore {
@@ -304,8 +306,9 @@ impl CoordinationStore {
                 last_updated_at,
                 source_wake_id,
                 source_action_index,
-                delegation_correlation_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                delegation_correlation_id,
+                parent_consumption
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 record.run_id.0.as_str(),
                 record.parent_session_id.0.as_str(),
@@ -325,6 +328,7 @@ impl CoordinationStore {
                 record.source_wake_id.as_str(),
                 record.source_action_index as i64,
                 record.delegation_correlation_id.as_deref(),
+                parent_consumption_policy_as_str(&record.parent_consumption),
             ],
         )
         .map_err(|error| persistence_error("save worker run", error))?;
@@ -346,7 +350,8 @@ impl CoordinationStore {
                 last_updated_at,
                 source_wake_id,
                 source_action_index,
-                delegation_correlation_id
+                delegation_correlation_id,
+                parent_consumption
              FROM worker_runs
              WHERE run_id = ?1",
             params![run_id.0.as_str()],
@@ -354,6 +359,35 @@ impl CoordinationStore {
         )
         .optional()
         .map_err(|error| persistence_error("load worker run", error))
+    }
+
+    pub fn load_worker_run_by_delegated_session(
+        &self,
+        delegated_session_id: &SessionId,
+    ) -> CoreResult<Option<WorkerRunRecord>> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT
+                run_id,
+                session_id,
+                delegated_session_id,
+                parent_agent_id,
+                profile_id,
+                task_id,
+                status,
+                created_at,
+                last_updated_at,
+                source_wake_id,
+                source_action_index,
+                delegation_correlation_id,
+                parent_consumption
+             FROM worker_runs
+             WHERE delegated_session_id = ?1",
+            params![delegated_session_id.0.as_str()],
+            row_to_worker_run,
+        )
+        .optional()
+        .map_err(|error| persistence_error("load worker run by delegated session", error))
     }
 
     pub fn update_worker_run_status_by_delegated_session(
@@ -375,6 +409,53 @@ impl CoordinationStore {
         )
         .map_err(|error| persistence_error("update worker run status", error))?;
         Ok(())
+    }
+
+    pub fn delegated_completions_for_parent(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> CoreResult<Vec<DelegatedCompletion>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    worker_runs.run_id,
+                    worker_runs.delegated_session_id,
+                    worker_runs.task_id,
+                    worker_runs.source_wake_id,
+                    worker_runs.source_action_index,
+                    worker_runs.delegation_correlation_id,
+                    worker_runs.parent_consumption,
+                    completion_packets.packet_json
+                 FROM worker_runs
+                 JOIN completion_packets
+                    ON completion_packets.session_id = worker_runs.delegated_session_id
+                 WHERE worker_runs.session_id = ?1
+                 ORDER BY completion_packets.sequence ASC",
+            )
+            .map_err(|error| persistence_error("prepare delegated completions", error))?;
+
+        let rows = stmt
+            .query_map(params![parent_session_id.0.as_str()], |row| {
+                let parent_consumption: String = row.get(6)?;
+                let packet_json: String = row.get(7)?;
+                let packet =
+                    from_json_text::<CompletionPacket>(&packet_json).map_err(to_sql_error)?;
+                Ok(DelegatedCompletion {
+                    run_id: RunId(row.get(0)?),
+                    child_session_id: SessionId(row.get(1)?),
+                    requested_task_id: row.get::<_, Option<String>>(2)?.map(TaskId),
+                    source_wake_id: row.get(3)?,
+                    source_action_index: row.get::<_, i64>(4)? as u32,
+                    correlation_id: row.get(5)?,
+                    parent_consumption: parent_consumption_policy_from_str(&parent_consumption)?,
+                    packet,
+                })
+            })
+            .map_err(|error| persistence_error("query delegated completions", error))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| persistence_error("load delegated completions", error))
     }
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
@@ -453,7 +534,8 @@ impl CoordinationStore {
                 last_updated_at TEXT NOT NULL,
                 source_wake_id TEXT NOT NULL,
                 source_action_index INTEGER NOT NULL,
-                delegation_correlation_id TEXT
+                delegation_correlation_id TEXT,
+                parent_consumption TEXT NOT NULL DEFAULT 'await_completion'
             );
 
             CREATE TABLE IF NOT EXISTS completion_packets (
@@ -474,6 +556,12 @@ impl CoordinationStore {
         add_missing_column(&conn, "worker_runs", "delegated_session_id", "TEXT")?;
         add_missing_column(&conn, "worker_runs", "parent_agent_id", "TEXT")?;
         add_missing_column(&conn, "worker_runs", "delegation_correlation_id", "TEXT")?;
+        add_missing_column(
+            &conn,
+            "worker_runs",
+            "parent_consumption",
+            "TEXT NOT NULL DEFAULT 'await_completion'",
+        )?;
         Ok(())
     }
 
@@ -538,6 +626,7 @@ fn row_to_worker_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRunRecor
         source_wake_id: row.get(9)?,
         source_action_index: row.get::<_, i64>(10)? as u32,
         delegation_correlation_id: row.get(11)?,
+        parent_consumption: parent_consumption_policy_from_str(&row.get::<_, String>(12)?)?,
     })
 }
 
@@ -559,6 +648,28 @@ fn worker_run_status_from_str(raw: &str) -> rusqlite::Result<WorkerRunStatus> {
             Box::new(CoreError::new(
                 CoreErrorKind::PersistenceFailure,
                 format!("unknown worker run status {other}"),
+            )),
+        )),
+    }
+}
+
+fn parent_consumption_policy_as_str(policy: &ParentConsumptionPolicy) -> &'static str {
+    match policy {
+        ParentConsumptionPolicy::AwaitCompletion => "await_completion",
+        ParentConsumptionPolicy::ObserveOnly => "observe_only",
+    }
+}
+
+fn parent_consumption_policy_from_str(raw: &str) -> rusqlite::Result<ParentConsumptionPolicy> {
+    match raw {
+        "await_completion" => Ok(ParentConsumptionPolicy::AwaitCompletion),
+        "observe_only" => Ok(ParentConsumptionPolicy::ObserveOnly),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            12,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown parent consumption policy {other}"),
             )),
         )),
     }

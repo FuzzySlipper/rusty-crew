@@ -119,6 +119,7 @@ export type {
   PiAgentBrainOptions,
   PiAgentFactory,
   PiAgentLike,
+  PiAgentToolResolver,
 } from "./pi-agent-brain.js";
 export { createPiAgentBrain } from "./pi-agent-brain.js";
 export type { BridgeBufferClient } from "./bridge-wake.js";
@@ -136,3 +137,14 @@ export type {
   DenRouterAgentOptions,
   DenRouterModelSelection,
 } from "./den-router-agent.js";
+export {
+  buildDelegatedRoleAssembly,
+  normalizeDelegatedRole,
+} from "./delegated-role-assembly.js";
+export type {
+  BuildDelegatedRoleAssemblyInput,
+  DelegatedProfileData,
+  DelegatedRole,
+  DelegatedRoleInput,
+  DelegationRoleContext,
+} from "./delegated-role-assembly.js";

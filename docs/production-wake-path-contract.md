@@ -92,10 +92,10 @@ Duplicate implementation ids should fail with `AlreadyExists`. A session wake
 must resolve to exactly one registered brain/profile binding or fail with a
 typed `BrainUnavailable`/`NotFound` error.
 
-The selected tool profile must become durable enough for later wake/tool
-filtering. The current `SessionState` does not retain `ToolProfile`, so
-implementation work must add a registry or persisted binding rather than
-assuming the profile can be recovered from `SessionState`.
+The selected tool profile must be durable enough for later wake/tool filtering.
+`SessionState` retains `ToolProfile`; delegated sessions resolve it from the
+registered brain profile mirrored into the Rust engine, while full sessions can
+still be created with an explicit session tool profile.
 
 ## Scheduler Contract
 

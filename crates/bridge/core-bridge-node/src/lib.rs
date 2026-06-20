@@ -14,7 +14,7 @@ use rusty_crew_core_bridge_api::{
     SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_engine::CoreEngine;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 
@@ -59,6 +59,12 @@ impl NativeBridge {
         }
 
         let engine = CoreEngine::initialize(config)?;
+        for registration in self.brain_registrations.registrations() {
+            engine.register_profile_tool_profile(
+                registration.profile_id.clone(),
+                registration.tool_profile.clone(),
+            )?;
+        }
         let handle = engine.handle();
         self.engine = Some(engine);
         Ok(handle)
@@ -78,7 +84,14 @@ impl NativeBridge {
         &mut self,
         registration: BrainImplementationRegistration,
     ) -> CoreResult<rusty_crew_core_bridge_api::BrainImplementationHandle> {
-        self.brain_registrations.register(registration)
+        let handle = self.brain_registrations.register(registration.clone())?;
+        if let Some(engine) = &self.engine {
+            engine.register_profile_tool_profile(
+                registration.profile_id,
+                registration.tool_profile,
+            )?;
+        }
+        Ok(handle)
     }
 
     pub fn wake_brain(&self, request: BrainWakeRequest) -> CoreResult<BrainWakeAccepted> {
@@ -318,6 +331,10 @@ impl BrainImplementationRegistry {
             )
         })
     }
+
+    fn registrations(&self) -> impl Iterator<Item = &BrainImplementationRegistration> {
+        self.by_handle.values()
+    }
 }
 
 #[derive(Debug)]
@@ -465,6 +482,30 @@ fn validate_brain_registration(registration: &BrainImplementationRegistration) -
             CoreErrorKind::InvalidInput,
             "brain implementation requires a model name",
         ));
+    }
+    let mut tool_names = HashSet::new();
+    for tool in &registration.tool_profile.tools {
+        if tool.name.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "brain implementation tool name must be non-empty",
+            ));
+        }
+        if tool.description.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "brain implementation tool {} requires a description",
+                    tool.name
+                ),
+            ));
+        }
+        if !tool_names.insert(tool.name.clone()) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("brain implementation has duplicate tool {}", tool.name),
+            ));
+        }
     }
     Ok(())
 }
@@ -1146,8 +1187,9 @@ fn to_napi_error(error: CoreError) -> napi::Error {
 mod tests {
     use super::*;
     use rusty_crew_core_bridge_api::{
-        BrainImplementationHandle, BrainImplementationId, BrainModelConfig, ProfileId, SessionId,
-        ToolProfile,
+        AgentId, BrainAction, BrainActionBatch, BrainImplementationHandle, BrainImplementationId,
+        BrainModelConfig, ProfileId, ResourceLimits, SessionConfig, SessionId, SessionKind,
+        ToolDescriptor, ToolProfile,
     };
 
     #[test]
@@ -1250,6 +1292,90 @@ mod tests {
     }
 
     #[test]
+    fn native_bridge_mirrors_registered_tool_profiles_into_delegated_sessions() {
+        let mut bridge = NativeBridge::new();
+        bridge
+            .register_brain_implementation(brain_registration_with_tools(
+                "coder",
+                "coder-profile",
+                vec!["read_file", "patch"],
+            ))
+            .unwrap();
+        bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: std::env::temp_dir()
+                    .join(format!(
+                        "rusty-crew-native-tool-profile-{}",
+                        std::process::id()
+                    ))
+                    .to_string_lossy()
+                    .to_string(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                    at: "2026-06-19T00:00:00Z".to_string(),
+                },
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1000,
+            })
+            .unwrap();
+        let planner = bridge
+            .create_session(SessionConfig {
+                session_id: SessionId::new("planner-session"),
+                agent_id: AgentId::new("planner"),
+                profile_id: ProfileId::new("planner-profile"),
+                kind: SessionKind::Full,
+                delegation: None,
+                resource_limits: ResourceLimits {
+                    workdir: None,
+                    max_duration_ms: None,
+                    max_delegation_depth: Some(1),
+                },
+                tool_profile: ToolProfile {
+                    tools: vec![ToolDescriptor {
+                        name: "planner_only".to_string(),
+                        description: "Only visible to the planner".to_string(),
+                        input_schema: None,
+                    }],
+                },
+            })
+            .unwrap();
+
+        bridge
+            .submit_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![BrainAction::RequestDelegation {
+                    profile_id: ProfileId::new("coder-profile"),
+                    task_id: None,
+                    prompt: "use registered coder tools".to_string(),
+                    expected_output: None,
+                    resource_limits: None,
+                    timeout_ms: None,
+                    priority: None,
+                    fan_out_group_id: None,
+                    correlation_id: None,
+                    parent_consumption: None,
+                }],
+            })
+            .unwrap();
+
+        let body_json = bridge
+            .project_body_state_json(SessionId::new("planner-session:delegated:planner-wake:0"))
+            .unwrap();
+        let body: rusty_crew_core_bridge_api::BodyState =
+            serde_json::from_slice(&body_json).expect("delegated body state should deserialize");
+
+        assert_eq!(
+            body.session
+                .tool_profile
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["read_file", "patch"]
+        );
+    }
+
+    #[test]
     fn native_bridge_submits_brain_events_to_the_engine() {
         let mut bridge = NativeBridge::new();
         bridge
@@ -1281,10 +1407,27 @@ mod tests {
         implementation_id: &str,
         profile_id: &str,
     ) -> BrainImplementationRegistration {
+        brain_registration_with_tools(implementation_id, profile_id, Vec::new())
+    }
+
+    fn brain_registration_with_tools(
+        implementation_id: &str,
+        profile_id: &str,
+        tools: Vec<&str>,
+    ) -> BrainImplementationRegistration {
         BrainImplementationRegistration {
             implementation_id: BrainImplementationId::new(implementation_id),
             profile_id: ProfileId::new(profile_id),
-            tool_profile: ToolProfile { tools: Vec::new() },
+            tool_profile: ToolProfile {
+                tools: tools
+                    .into_iter()
+                    .map(|name| ToolDescriptor {
+                        name: name.to_string(),
+                        description: format!("{name} tool"),
+                        input_schema: None,
+                    })
+                    .collect(),
+            },
             model_config: BrainModelConfig {
                 provider: "local".to_string(),
                 model_name: "deterministic".to_string(),

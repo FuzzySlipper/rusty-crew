@@ -52,17 +52,16 @@ Tracked by: tasks 2989, 2830, 2832, and 2836.
 
 ### ToolProfile enforcement
 
-Still true, and slightly sharper than the audit phrasing: `SessionConfig`
-carries a `ToolProfile`, and `BrainImplementationRegistration` carries a
-`ToolProfile`, but `SessionState` does not retain the tool profile. That means
-the selected tool surface is not yet durable or enforceable after session
-creation. The TS brain island also currently builds pi-agent options with an
-empty `tools: []`.
+Partly resolved by task 2846: `SessionState` now retains a `ToolProfile`, the
+native bridge mirrors registered brain profile tools into the Rust engine, and
+delegated sessions resolve their tool surface from the requested profile.
+The TS pi-agent brain accepts a resolver for concrete tools and filters its
+result back to the `ToolProfile` descriptors projected by Rust.
 
-The design direction remains profile-based tool enablement, not a runtime
-`WorkerPolicy` allow/deny model. Rust should keep the canonical selected tool
-profile/session binding and TS should expose only that selected registry
-surface to the brain.
+The remaining design direction is still profile-based tool enablement, not a
+runtime `WorkerPolicy` allow/deny model. Future work should continue to keep
+Rust as the canonical selected profile/session binding while TS supplies only
+the concrete tools named by that selected profile.
 
 Tracked by: tasks 2990 and the 2815 children, especially 2855, 2858, 2861,
 2862, and 2864.

@@ -45,6 +45,7 @@ const result = await brain.wake({
       },
     ],
     recentEvents: [],
+    childCompletions: [],
     deltaPolicy: {
       mode: "frozen_snapshot_next_wake",
       queueOwner: "body",
