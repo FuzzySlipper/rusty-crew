@@ -137,6 +137,43 @@ export {
 } from "./mid-turn-delta.js";
 export type { DrainResult, QueuedMidTurnMessage } from "./mid-turn-delta.js";
 export {
+  adapterActivity,
+  adminCommandActivity,
+  AgentActivityObservationProducer,
+  createAgentActivityObservationEvent,
+  createMemoryAgentActivityObservationSink,
+  sessionActivity,
+  toolActivity,
+  workActivity,
+} from "./agent-activity-observation.js";
+export type {
+  AgentActivityEventInput,
+  AgentActivityEventType,
+  AgentActivityObservationEvent,
+  AgentActivityObservationSink,
+  AgentActivityPayload,
+  AgentActivityPublishResult,
+  AgentActivityResultRef,
+  AgentActivitySeverity,
+  AgentActivityVisibility,
+  AgentActivityWorkRef,
+  AgentObservationIdentity,
+  MemoryAgentActivityObservationSink,
+  ObservationSourceDomain,
+} from "./agent-activity-observation.js";
+export {
+  createRuntimeActivityObserver,
+  RuntimeActivityObserver,
+} from "./runtime-activity-observer.js";
+export type {
+  RuntimeActivityObserverOptions,
+  RuntimeActivityResult,
+  RuntimeAdapterActivityInput,
+  RuntimeSessionActivityInput,
+  RuntimeToolActivityInput,
+  RuntimeWorkActivityInput,
+} from "./runtime-activity-observer.js";
+export {
   createDenRouterPiAgentFactory,
   resolveDenRouterModel,
 } from "./den-router-agent.js";
@@ -216,6 +253,157 @@ export type {
   ChannelProjectionFailureRecord,
   McpAdapterSurfaceDiagnostics,
 } from "./adapter-diagnostics.js";
+export { buildRuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
+export type {
+  DiagnosticsHealth,
+  DiagnosticsIssue,
+  DiagnosticsReasonCode,
+  ObservationDiagnosticsInput,
+  ObservationDiagnosticsProjection,
+  PersistenceDiagnosticsInput,
+  PersistenceDiagnosticsProjection,
+  QueueDiagnosticsInput,
+  QueueDiagnosticsProjection,
+  RuntimeCounterSummary,
+  RuntimeDelegationDiagnostics,
+  RuntimeDiagnosticError,
+  RuntimeDiagnosticsInput,
+  RuntimeDiagnosticsProjection,
+  RuntimeSessionDiagnostics,
+  ToolDiagnosticsProjection,
+} from "./runtime-diagnostics.js";
+export { buildRuntimeHealthProjection, issueDomain } from "./runtime-health.js";
+export type {
+  RuntimeDegradedStatus,
+  RuntimeHealthDomain,
+  RuntimeHealthDomainStatus,
+  RuntimeHealthProbe,
+  RuntimeHealthProjection,
+  RuntimeMetricSample,
+  RuntimeReadinessProbe,
+} from "./runtime-health.js";
+export {
+  buildToolContextDiagnosticsReport,
+  formatToolContextDiagnosticsMarkdown,
+} from "./tool-context-diagnostics.js";
+export type {
+  TextSurfaceSummary,
+  ToolContextAdapterSummary,
+  ToolContextAssemblySummary,
+  ToolContextDiagnosticTool,
+  ToolContextDiagnosticsInput,
+  ToolContextDiagnosticsIssue,
+  ToolContextDiagnosticsReport,
+  ToolContextDiagnosticsSession,
+  ToolContextDiagnosticsSummary,
+  ToolContextPolicySummary,
+  ToolContextReasonCode,
+  ToolContextResourceSummary,
+  ToolContextSkillSummary,
+  ToolContextToolStatus,
+} from "./tool-context-diagnostics.js";
+export {
+  inspectDirectDebugSession,
+  requestDirectDebugTurn,
+} from "./direct-debug-service.js";
+export type {
+  DirectDebugContextView,
+  DirectDebugControlSummary,
+  DirectDebugErrorCode,
+  DirectDebugInspectRequest,
+  DirectDebugMessageSummary,
+  DirectDebugRecentEventSummary,
+  DirectDebugResult,
+  DirectDebugRuntimeSummary,
+  DirectDebugServiceContext,
+  DirectDebugSessionSource,
+  DirectDebugSessionSummary,
+  DirectDebugSessionView,
+  DirectDebugTurnExecutor,
+  DirectDebugTurnExecutorInput,
+  DirectDebugTurnOutcome,
+  DirectDebugTurnRequest,
+} from "./direct-debug-service.js";
+export {
+  createDebugApiClient,
+  DebugApiClientError,
+} from "./debug-api-client.js";
+export type {
+  DebugApiClient,
+  DebugApiClientOptions,
+  DebugApiFetch,
+  DebugApiQuery,
+  DebugDiagnosticsBundle,
+  DirectDebugContextRequest,
+} from "./debug-api-client.js";
+export { handleAdminDiagnosticsRequest } from "./admin-diagnostics-api.js";
+export type {
+  AdminAgentDiagnostics,
+  AdminApiEnvelope,
+  AdminApiMeta,
+  AdminDiagnosticsContext,
+  AdminDiagnosticsRouteRequest,
+  AdminErrorCode,
+  AdminPage,
+  AdminRecentEvent,
+  AdminRouteResult,
+} from "./admin-diagnostics-api.js";
+export {
+  createMemoryAdminControlAuditSink,
+  handleAdminControlRequest,
+} from "./admin-control-api.js";
+export type {
+  AdminControlActor,
+  AdminControlAuditEvent,
+  AdminControlAuditSink,
+  AdminControlAuthConfig,
+  AdminControlCommand,
+  AdminControlCommandName,
+  AdminControlContext,
+  AdminControlExecutor,
+  AdminControlOutcome,
+  AdminControlResponse,
+  AdminControlRouteRequest,
+  AdminControlStatus,
+  MemoryAdminControlAuditSink,
+} from "./admin-control-api.js";
+export { routeSlashCommand } from "./slash-command-router.js";
+export type {
+  SlashCommandActor,
+  SlashCommandControlRequest,
+  SlashCommandInput,
+  SlashCommandName,
+  SlashCommandResponse,
+  SlashCommandRouteResult,
+  SlashCommandRouterOptions,
+  SlashCommandSession,
+  SlashCommandStatus,
+} from "./slash-command-router.js";
+export { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
+export type { SlashCommandResponseContext } from "./slash-command-responses.js";
+export {
+  createMemoryNewSessionLifecycleAuditSink,
+  createNewSessionLifecycleExecutor,
+} from "./new-session-lifecycle.js";
+export type {
+  MemoryNewSessionLifecycleAuditSink,
+  NewSessionLifecycleAuditEvent,
+  NewSessionLifecycleAuditSink,
+  NewSessionLifecycleOptions,
+  NewSessionLifecyclePhase,
+  NewSessionTemplate,
+} from "./new-session-lifecycle.js";
+export {
+  createMemoryReloadMcpLifecycleAuditSink,
+  createReloadMcpControlExecutor,
+} from "./reload-mcp-control.js";
+export type {
+  MemoryReloadMcpLifecycleAuditSink,
+  ReloadMcpControlOptions,
+  ReloadMcpLifecycleAuditEvent,
+  ReloadMcpLifecycleAuditSink,
+  ReloadMcpLifecyclePhase,
+} from "./reload-mcp-control.js";
 export {
   assertValidToolRegistry,
   buildToolInventory,
