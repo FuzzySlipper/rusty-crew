@@ -49,6 +49,7 @@ material. When they conflict, the unified architecture wins.
 
 ```sh
 cargo fmt --all --check
+cargo clippy --workspace -- -D warnings
 cargo test --workspace
 npm install
 npm run typecheck

@@ -79,6 +79,7 @@ not the current planning queue.
 ```bash
 # Rust
 cargo fmt --all --check
+cargo clippy --workspace -- -D warnings
 cargo test --workspace
 
 # TypeScript and docs formatting
@@ -149,3 +150,10 @@ Rust in this repo should be boring coordination authority code. Prefer explicit
 state, explicit errors, explicit events, and narrow crate APIs. Keep adapter,
 LLM, and Node concerns out of core crates. If persistence helpers accept dynamic
 names, whitelist them.
+
+`cargo clippy --workspace -- -D warnings` is a required check — it must pass
+with zero warnings before any Rust change is considered done. Run it alongside
+`cargo fmt --all --check`. Clippy is not part of `cargo build` or `cargo test`;
+it is a separate command that must be invoked explicitly. Treat all clippy
+warnings as errors to fix, not lint suggestions to suppress with `#[allow]`
+unless there is a documented reason in a code comment.

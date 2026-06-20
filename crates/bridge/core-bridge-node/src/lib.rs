@@ -269,6 +269,13 @@ pub struct NativeBridgeBinding {
 }
 
 #[napi_derive::napi]
+impl Default for NativeBridgeBinding {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[napi_derive::napi]
 impl NativeBridgeBinding {
     #[napi(constructor)]
     pub fn new() -> Self {
