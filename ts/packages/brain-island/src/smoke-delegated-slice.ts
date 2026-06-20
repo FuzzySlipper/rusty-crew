@@ -214,6 +214,7 @@ async function projectBodyState(sessionId: SessionId): Promise<BodyState> {
       agentId: raw.session.agent_id as AgentId,
       profileId: raw.session.profile_id as ProfileId,
       kind: raw.session.kind,
+      delegation: toTsDelegationLineage(raw.session.delegation),
       resourceLimits: {
         workdir: raw.session.resource_limits?.workdir,
         maxDurationMs: raw.session.resource_limits?.max_duration_ms,
@@ -266,6 +267,7 @@ function toTsEvent(event: RustCoreEventJson): CoreEvent {
           agentId: event.state.agent_id as AgentId,
           profileId: event.state.profile_id as ProfileId,
           kind: event.state.kind,
+          delegation: toTsDelegationLineage(event.state.delegation),
           resourceLimits: {
             workdir: event.state.resource_limits?.workdir,
             maxDurationMs: event.state.resource_limits?.max_duration_ms,
@@ -326,6 +328,21 @@ function toTsBrainEvent(event: RustBrainEventJson): BrainEvent {
   }
 }
 
+function toTsDelegationLineage(
+  lineage: RustDelegationLineageJson | undefined,
+): BodyState["session"]["delegation"] {
+  return lineage
+    ? {
+        parentSessionId: lineage.parent_session_id as SessionId,
+        parentAgentId: lineage.parent_agent_id as AgentId,
+        sourceWakeId: lineage.source_wake_id,
+        sourceActionIndex: lineage.source_action_index,
+        requestedTaskId: lineage.requested_task_id as TaskId | undefined,
+        correlationId: lineage.correlation_id,
+      }
+    : undefined;
+}
+
 interface RustBodyStateJson {
   session: RustSessionStateJson;
   pending_messages: RustAgentMessageJson[];
@@ -344,6 +361,7 @@ interface RustSessionStateJson {
   agent_id: string;
   profile_id: string;
   kind: "full" | "worker" | "delegated";
+  delegation?: RustDelegationLineageJson;
   resource_limits?: {
     workdir?: string;
     max_duration_ms?: number;
@@ -354,6 +372,15 @@ interface RustSessionStateJson {
   brain_turn_count: number;
   created_at: string;
   last_active_at: string;
+}
+
+interface RustDelegationLineageJson {
+  parent_session_id: string;
+  parent_agent_id: string;
+  source_wake_id: string;
+  source_action_index: number;
+  requested_task_id?: string;
+  correlation_id: string;
 }
 
 interface RustAgentMessageJson {

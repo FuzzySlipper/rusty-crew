@@ -147,6 +147,31 @@ pub struct ResourceLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegationLineage {
+    pub parent_session_id: SessionId,
+    pub parent_agent_id: AgentId,
+    pub source_wake_id: String,
+    pub source_action_index: u32,
+    pub requested_task_id: Option<TaskId>,
+    pub correlation_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegationPriority {
+    Low,
+    Normal,
+    High,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParentConsumptionPolicy {
+    AwaitCompletion,
+    ObserveOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
@@ -164,6 +189,7 @@ pub struct SessionConfig {
     pub agent_id: AgentId,
     pub profile_id: ProfileId,
     pub kind: SessionKind,
+    pub delegation: Option<DelegationLineage>,
     pub resource_limits: ResourceLimits,
     pub tool_profile: ToolProfile,
 }
@@ -175,6 +201,9 @@ pub struct SessionState {
     pub agent_id: AgentId,
     pub profile_id: ProfileId,
     pub kind: SessionKind,
+    pub delegation: Option<DelegationLineage>,
+    pub resource_limits: ResourceLimits,
+    pub tool_profile: ToolProfile,
     pub status: SessionStatus,
     pub brain_turn_count: u32,
     pub created_at: IsoTimestamp,
@@ -281,7 +310,7 @@ pub enum CompletionStatus {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoreEvent {
     SessionCreated {
-        state: SessionState,
+        state: Box<SessionState>,
     },
     SessionArchived {
         session_id: SessionId,
@@ -382,6 +411,13 @@ pub enum BrainAction {
         profile_id: ProfileId,
         task_id: Option<TaskId>,
         prompt: String,
+        expected_output: Option<String>,
+        resource_limits: Option<ResourceLimits>,
+        timeout_ms: Option<u32>,
+        priority: Option<DelegationPriority>,
+        fan_out_group_id: Option<String>,
+        correlation_id: Option<String>,
+        parent_consumption: Option<ParentConsumptionPolicy>,
     },
     DeliverCompletion {
         packet: CompletionPacket,

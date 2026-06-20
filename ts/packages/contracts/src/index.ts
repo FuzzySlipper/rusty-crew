@@ -58,11 +58,21 @@ export interface ResourceLimits {
   maxDelegationDepth?: number;
 }
 
+export interface DelegationLineage {
+  parentSessionId: SessionId;
+  parentAgentId: AgentId;
+  sourceWakeId: string;
+  sourceActionIndex: number;
+  requestedTaskId?: TaskId;
+  correlationId: string;
+}
+
 export interface SessionConfig {
   sessionId: SessionId;
   agentId: AgentId;
   profileId: ProfileId;
   kind: SessionKind;
+  delegation?: DelegationLineage;
   resourceLimits: ResourceLimits;
   toolProfile: ToolProfile;
 }
@@ -141,6 +151,13 @@ export type BrainAction =
       profileId: ProfileId;
       taskId?: TaskId;
       prompt: string;
+      expectedOutput?: string;
+      resourceLimits?: ResourceLimits;
+      timeoutMs?: number;
+      priority?: "low" | "normal" | "high";
+      fanOutGroupId?: string;
+      correlationId?: string;
+      parentConsumption?: "await_completion" | "observe_only";
     }
   | { type: "deliver_completion"; packet: CompletionPacket };
 

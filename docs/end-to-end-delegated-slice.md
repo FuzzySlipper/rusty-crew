@@ -69,3 +69,19 @@ route one operator message, project body state, submit action JSON, and count
 rows. Those helpers are for local proof and development; production TS should
 still treat worker spawning and wake scheduling as Rust-owned internals rather
 than manifest operations.
+
+## Production Wake Proof
+
+Task 2844 adds a production-style proof:
+
+```sh
+npm run build:native
+npm run smoke:production-delegation-wake
+```
+
+That smoke starts from a routed message to a full planner session. The runtime
+then consumes `BrainWakeRequested`, builds buffered requests with
+`buildBrainWakeRequestForSession`, and invokes registered planner/coder brains
+with `wakeBrain`. The delegated coder body state is asserted to include the
+routed prompt, first-class lineage, and resource limits. The runtime loop does
+not use body projection or raw action-submission diagnostic helpers.

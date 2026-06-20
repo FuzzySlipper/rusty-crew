@@ -4,9 +4,16 @@ import type {
   BrainAction,
   BrainEvent,
   BrainEventEnvelope,
+  BrainImplementationHandle,
+  BrainImplementationRegistration,
   CompletionPacket,
   SessionId,
 } from "@rusty-crew/contracts";
+import type {
+  BrainWakeExecutor,
+  NativeBridgeModule,
+} from "@rusty-crew/native-bridge";
+import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 
 export interface BrainRoleAssembly {
   instructions?: string;
@@ -28,6 +35,27 @@ export interface BrainWakeResult {
 
 export interface BrainImplementation {
   wake(input: BrainWakeInput): Promise<BrainWakeResult>;
+}
+
+export function createBrainWakeExecutor(
+  brain: BrainImplementation,
+): BrainWakeExecutor {
+  return {
+    wake(request, buffers): Promise<BrainWakeResult> {
+      return wakeBrainFromBridgeRequest(buffers, brain, request);
+    },
+  };
+}
+
+export function registerBrainImplementationRuntime(
+  bridge: NativeBridgeModule,
+  registration: BrainImplementationRegistration,
+  brain: BrainImplementation,
+): Promise<BrainImplementationHandle> {
+  return bridge.registerBrainRuntime(
+    registration,
+    createBrainWakeExecutor(brain),
+  );
 }
 
 export type BrainActionPlanner = (input: {

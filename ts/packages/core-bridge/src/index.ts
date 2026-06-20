@@ -6,6 +6,7 @@ import type {
   BrainImplementationRegistration,
   BrainWakeAccepted,
   BrainWakeRequest,
+  CoreEvent,
   DenDataUpdate,
   EngineConfig,
   EngineHandle,
@@ -23,6 +24,7 @@ import type {
   Unit,
 } from "@rusty-crew/contracts";
 import {
+  type BrainWakeSessionBufferInput,
   loadNativeBridge,
   type NativeBridgeModule,
 } from "@rusty-crew/native-bridge";
@@ -94,8 +96,21 @@ export class CoreBridge {
     return this.native.unsubscribeEvents(handle);
   }
 
+  async drainSubscriptionEvents(
+    handle: SubscriptionHandle,
+    maxEvents?: number,
+  ): Promise<CoreEvent[]> {
+    return this.native.drainSubscriptionEvents(handle, maxEvents);
+  }
+
   async getBuffer(handle: RuntimeBufferHandle): Promise<RuntimeBufferView> {
     return this.native.getBuffer(handle);
+  }
+
+  async buildBrainWakeRequestForSession(
+    input: BrainWakeSessionBufferInput,
+  ): Promise<BrainWakeRequest> {
+    return this.native.buildBrainWakeRequestForSession(input);
   }
 
   async releaseBuffer(handle: RuntimeBufferHandle): Promise<Unit> {

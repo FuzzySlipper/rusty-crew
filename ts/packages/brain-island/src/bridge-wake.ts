@@ -1,8 +1,14 @@
 import type {
+  AdapterId,
+  AgentMessage,
   BodyState,
   BrainWakeRequest,
+  CoreEvent,
+  ExternalEventPayload,
+  ProjectId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  TaskId,
   Unit,
 } from "@rusty-crew/contracts";
 import type {
@@ -39,7 +45,7 @@ export async function wakeBrainFromBridgeRequest(
     return await brain.wake({
       wakeId: request.wakeId,
       sessionId: request.sessionId,
-      state: parseJsonBuffer<BodyState>(bodyStateView),
+      state: parseBodyStateBuffer(bodyStateView),
       systemPrompt: decodeBuffer(systemPromptView),
       roleAssembly: parseJsonBuffer<BrainRoleAssembly>(roleAssemblyView),
     });
@@ -64,6 +70,245 @@ function parseJsonBuffer<T>(view: RuntimeBufferView): T {
   return JSON.parse(decodeBuffer(view)) as T;
 }
 
+function parseBodyStateBuffer(view: RuntimeBufferView): BodyState {
+  return toBodyState(JSON.parse(decodeBuffer(view)) as unknown);
+}
+
 function decodeBuffer(view: RuntimeBufferView): string {
   return new TextDecoder().decode(view.bytes);
 }
+
+function toBodyState(value: unknown): BodyState {
+  const raw = value as Partial<RustBodyStateJson> & Partial<BodyState>;
+  if (raw.session && "agentId" in raw.session) {
+    return value as BodyState;
+  }
+
+  const state = value as RustBodyStateJson;
+  return {
+    session: {
+      handle: state.session.handle as BodyState["session"]["handle"],
+      sessionId: state.session.session_id,
+      agentId: state.session.agent_id,
+      profileId: state.session.profile_id,
+      kind: state.session.kind,
+      delegation: toDelegationLineage(state.session.delegation),
+      resourceLimits: {
+        workdir: state.session.resource_limits?.workdir,
+        maxDurationMs: state.session.resource_limits?.max_duration_ms,
+        maxDelegationDepth: state.session.resource_limits?.max_delegation_depth,
+      },
+      toolProfile: {
+        tools: state.session.tool_profile?.tools ?? [],
+      },
+      status: state.session.status,
+      brainTurnCount: state.session.brain_turn_count,
+      createdAt: state.session.created_at,
+      lastActiveAt: state.session.last_active_at,
+    },
+    pendingMessages: state.pending_messages.map(toAgentMessage),
+    recentEvents: state.recent_events.map(toCoreEvent),
+    deltaPolicy: {
+      mode: state.delta_policy.mode,
+      queueOwner: state.delta_policy.queue_owner,
+      queuedMessageTtlMs: state.delta_policy.queued_message_ttl_ms,
+      maxQueuedMessages: state.delta_policy.max_queued_messages,
+    },
+  };
+}
+
+function toAgentMessage(message: RustAgentMessageJson): AgentMessage {
+  return {
+    from: message.from,
+    to: message.to,
+    body: message.body,
+    correlationId: message.correlation_id,
+  };
+}
+
+function toCoreEvent(event: RustCoreEventJson): CoreEvent {
+  switch (event.type) {
+    case "session_created":
+      return { type: event.type, state: toBodyStateSession(event.state) };
+    case "session_archived":
+      return { type: event.type, sessionId: event.session_id };
+    case "agent_message_routed":
+      return { type: event.type, message: toAgentMessage(event.message) };
+    case "external_event_injected":
+      return {
+        type: event.type,
+        event: {
+          adapterId: event.event.adapter_id,
+          source: event.event.source,
+          payload: event.event.payload,
+        },
+      };
+    case "den_data_updated":
+      return {
+        type: event.type,
+        update: {
+          projectId: event.update.project_id,
+          entityKind: event.update.entity_kind,
+          entityId: event.update.entity_id,
+          revision: event.update.revision,
+        },
+      };
+    case "brain_wake_requested":
+      return { type: event.type, sessionId: event.session_id };
+    case "brain_event_observed":
+      return {
+        type: event.type,
+        sessionId: event.session_id,
+        event: event.event,
+      };
+    case "brain_actions_accepted":
+      return {
+        type: event.type,
+        sessionId: event.session_id,
+        count: event.count,
+      };
+    case "completion_packet_delivered":
+      return {
+        type: event.type,
+        packet: {
+          sessionId: event.packet.session_id,
+          status: event.packet.status,
+          summary: event.packet.summary,
+        },
+      };
+  }
+}
+
+function toBodyStateSession(
+  session: RustSessionStateJson,
+): BodyState["session"] {
+  return {
+    handle: session.handle as BodyState["session"]["handle"],
+    sessionId: session.session_id,
+    agentId: session.agent_id,
+    profileId: session.profile_id,
+    kind: session.kind,
+    delegation: toDelegationLineage(session.delegation),
+    resourceLimits: {
+      workdir: session.resource_limits?.workdir,
+      maxDurationMs: session.resource_limits?.max_duration_ms,
+      maxDelegationDepth: session.resource_limits?.max_delegation_depth,
+    },
+    toolProfile: {
+      tools: session.tool_profile?.tools ?? [],
+    },
+    status: session.status,
+    brainTurnCount: session.brain_turn_count,
+    createdAt: session.created_at,
+    lastActiveAt: session.last_active_at,
+  };
+}
+
+function toDelegationLineage(
+  lineage: RustDelegationLineageJson | undefined,
+): BodyState["session"]["delegation"] {
+  return lineage
+    ? {
+        parentSessionId: lineage.parent_session_id,
+        parentAgentId: lineage.parent_agent_id,
+        sourceWakeId: lineage.source_wake_id,
+        sourceActionIndex: lineage.source_action_index,
+        requestedTaskId: lineage.requested_task_id,
+        correlationId: lineage.correlation_id,
+      }
+    : undefined;
+}
+
+interface RustBodyStateJson {
+  session: RustSessionStateJson;
+  pending_messages: RustAgentMessageJson[];
+  recent_events: RustCoreEventJson[];
+  delta_policy: {
+    mode: "frozen_snapshot_next_wake";
+    queue_owner: "body";
+    queued_message_ttl_ms: number;
+    max_queued_messages: number;
+  };
+}
+
+interface RustSessionStateJson {
+  handle: number;
+  session_id: BodyState["session"]["sessionId"];
+  agent_id: BodyState["session"]["agentId"];
+  profile_id: BodyState["session"]["profileId"];
+  kind: BodyState["session"]["kind"];
+  delegation?: RustDelegationLineageJson;
+  resource_limits?: {
+    workdir?: string;
+    max_duration_ms?: number;
+    max_delegation_depth?: number;
+  };
+  tool_profile?: BodyState["session"]["toolProfile"];
+  status: BodyState["session"]["status"];
+  brain_turn_count: number;
+  created_at: string;
+  last_active_at: string;
+}
+
+interface RustDelegationLineageJson {
+  parent_session_id: BodyState["session"]["sessionId"];
+  parent_agent_id: BodyState["session"]["agentId"];
+  source_wake_id: string;
+  source_action_index: number;
+  requested_task_id?: TaskId;
+  correlation_id: string;
+}
+
+interface RustAgentMessageJson {
+  from: AgentMessage["from"];
+  to: AgentMessage["to"];
+  body: string;
+  correlation_id?: string;
+}
+
+type RustCoreEventJson =
+  | { type: "session_created"; state: RustSessionStateJson }
+  | { type: "session_archived"; session_id: BodyState["session"]["sessionId"] }
+  | { type: "agent_message_routed"; message: RustAgentMessageJson }
+  | {
+      type: "external_event_injected";
+      event: {
+        adapter_id: AdapterId;
+        source: string;
+        payload: ExternalEventPayload;
+      };
+    }
+  | {
+      type: "den_data_updated";
+      update: {
+        project_id: ProjectId;
+        entity_kind: string;
+        entity_id: string;
+        revision?: string;
+      };
+    }
+  | {
+      type: "brain_wake_requested";
+      session_id: BodyState["session"]["sessionId"];
+    }
+  | {
+      type: "brain_event_observed";
+      session_id: BodyState["session"]["sessionId"];
+      event: Extract<CoreEvent, { type: "brain_event_observed" }>["event"];
+    }
+  | {
+      type: "brain_actions_accepted";
+      session_id: BodyState["session"]["sessionId"];
+      count: number;
+    }
+  | {
+      type: "completion_packet_delivered";
+      packet: {
+        session_id: BodyState["session"]["sessionId"];
+        status: Extract<
+          CoreEvent,
+          { type: "completion_packet_delivered" }
+        >["packet"]["status"];
+        summary: string;
+      };
+    };

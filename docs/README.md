@@ -168,6 +168,25 @@ The mid-turn delta decision for item 6 is recorded in
 body-owned next-wake queuing with aggressive TTL rather than pi-agent internal
 queues as durable state.
 
+The current parity-audit grounding for task 2986 is recorded in
+`parity-open-questions-grounding.md`. The production wake scheduler decision
+for task 2988 is recorded in `adr/0004-wake-scheduler-ownership.md`, and the
+implementation contract for task 2830 is recorded in
+`production-wake-path-contract.md`.
+
+Bridge helper classification for task 2839 is recorded in
+`adr/0005-bridge-surface-and-diagnostics.md`: the manifest is the stable
+protocol spec for v1, while hand-written bindings may expose explicitly
+classified setup, runtime-local, or diagnostic helpers until codegen matures.
+
+The prime-agent delegation runtime decision for task 2840 is recorded in
+`adr/0006-prime-agent-delegation-runtime.md`: direct subagent delegation comes
+before worker-pool leasing, with worker pools preserved as a later capacity
+layer rather than the default architecture.
+
+The production delegation request shape for task 2842 is documented in
+`delegation-request-contract.md`.
+
 The delegated-worker slice for item 7 is documented in
 `end-to-end-delegated-slice.md`; run it locally with `npm run build:native` and
 `npm run smoke:delegated-slice`.

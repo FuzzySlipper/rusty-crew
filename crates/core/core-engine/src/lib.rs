@@ -1,14 +1,17 @@
 //! Coordination engine composition.
 
-use rusty_crew_core_body::{session_kind_can_wake, BodyProjector, BrainActionExecutor};
+use rusty_crew_core_body::{
+    session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
+};
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
-use rusty_crew_core_persistence::CoordinationStore;
+use rusty_crew_core_persistence::{CoordinationStore, WorkerRunRecord, WorkerRunStatus};
 use rusty_crew_core_protocol::{
-    ActionBatchReceipt, AgentId, AgentMessage, BodyState, BrainAction, BrainActionBatch,
-    BrainEventEnvelope, ClockConfig, CoreError, CoreErrorKind, CoreEvent, CoreResult,
-    DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
-    IsoTimestamp, ResourceLimits, SessionConfig, SessionId, SessionKind, SessionState,
-    SessionStatus, ShutdownSummary, ToolProfile,
+    ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
+    BrainActionBatch, BrainEvent, BrainEventEnvelope, ClockConfig, CompletionStatus, CoreError,
+    CoreErrorKind, CoreEvent, CoreResult, DelegationLineage, DenDataUpdate, EngineConfig,
+    EngineHandle, EventReceipt, EventSubscription, ExternalEvent, IsoTimestamp, ResourceLimits,
+    RunId, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary,
+    ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -75,11 +78,15 @@ impl CoreEngine {
         self.bus.subscribe(filter)
     }
 
+    pub fn unsubscribe_events(&self, id: u64) -> CoreResult<()> {
+        self.bus.unsubscribe(id)
+    }
+
     pub fn create_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
         let state = self.sessions.create_session(config, self.now())?;
         self.store.save_session(&state)?;
         self.bus.publish(CoreEvent::SessionCreated {
-            state: state.clone(),
+            state: Box::new(state.clone()),
         })?;
         Ok(state)
     }
@@ -101,6 +108,16 @@ impl CoreEngine {
         self.body_projector.project(session_id)
     }
 
+    pub fn route_agent_message(&self, message: AgentMessage) -> CoreResult<EventReceipt> {
+        let event = CoreEvent::AgentMessageRouted { message };
+        let sequence = self.bus.publish(event.clone())?;
+        self.schedule_wake_for_event(&event)?;
+        Ok(EventReceipt {
+            accepted: true,
+            sequence,
+        })
+    }
+
     pub fn execute_brain_actions(&self, batch: BrainActionBatch) -> CoreResult<ActionBatchReceipt> {
         let session = self.sessions.get_session(&batch.session_id)?;
         if session.status == SessionStatus::Archived {
@@ -119,12 +136,29 @@ impl CoreEngine {
             });
         }
 
-        self.store.save_worker_runs_requested(&batch, self.now())?;
+        let rejected_actions = self.validate_delegation_invariants(&session, &batch);
+        if !rejected_actions.is_empty() {
+            return Ok(ActionBatchReceipt {
+                wake_id: batch.wake_id,
+                accepted_actions: 0,
+                rejected_actions,
+            });
+        }
+
         self.spawn_delegated_workers(&session, &batch)?;
-        self.action_executor.execute(batch)
+        let receipt = self.action_executor.execute(batch.clone())?;
+        self.update_lifecycle_for_actions(&batch)?;
+        Ok(receipt)
     }
 
     pub fn submit_brain_event(&self, envelope: BrainEventEnvelope) -> CoreResult<EventReceipt> {
+        if matches!(envelope.event, BrainEvent::Started) {
+            self.store.update_worker_run_status_by_delegated_session(
+                &envelope.session_id,
+                WorkerRunStatus::Running,
+                self.now(),
+            )?;
+        }
         let sequence = self.bus.publish(CoreEvent::BrainEventObserved {
             session_id: envelope.session_id,
             event: envelope.event,
@@ -136,9 +170,9 @@ impl CoreEngine {
     }
 
     pub fn inject_external_event(&self, event: ExternalEvent) -> CoreResult<EventReceipt> {
-        let sequence = self
-            .bus
-            .publish(CoreEvent::ExternalEventInjected { event })?;
+        let event = CoreEvent::ExternalEventInjected { event };
+        let sequence = self.bus.publish(event.clone())?;
+        self.schedule_wake_for_event(&event)?;
         Ok(EventReceipt {
             accepted: true,
             sequence,
@@ -146,7 +180,9 @@ impl CoreEngine {
     }
 
     pub fn inject_den_data_update(&self, update: DenDataUpdate) -> CoreResult<EventReceipt> {
-        let sequence = self.bus.publish(CoreEvent::DenDataUpdated { update })?;
+        let event = CoreEvent::DenDataUpdated { update };
+        let sequence = self.bus.publish(event.clone())?;
+        self.schedule_wake_for_event(&event)?;
         Ok(EventReceipt {
             accepted: true,
             sequence,
@@ -155,6 +191,33 @@ impl CoreEngine {
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         self.store.count_rows(table)
+    }
+
+    pub fn delegated_sessions_for_parent(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> CoreResult<Vec<SessionState>> {
+        self.sessions
+            .delegated_sessions_for_parent(parent_session_id)
+    }
+
+    pub fn delegated_session_for_run(&self, run_id: &RunId) -> CoreResult<Option<SessionState>> {
+        let Some(run) = self.store.load_worker_run(run_id)? else {
+            return Ok(None);
+        };
+        if let Some(session_id) = run.delegated_session_id {
+            return match self.sessions.get_session(&session_id) {
+                Ok(session) => Ok(Some(session)),
+                Err(error) if error.kind == CoreErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            };
+        }
+
+        self.sessions.delegated_session_for_source(
+            &run.parent_session_id,
+            &run.source_wake_id,
+            run.source_action_index,
+        )
     }
 
     pub fn shutdown(self) -> CoreResult<ShutdownSummary> {
@@ -179,46 +242,161 @@ impl CoreEngine {
     ) -> CoreResult<()> {
         for (index, action) in batch.actions.iter().enumerate() {
             let BrainAction::RequestDelegation {
-                profile_id, prompt, ..
+                profile_id,
+                task_id,
+                prompt,
+                resource_limits,
+                correlation_id,
+                ..
             } = action
             else {
                 continue;
             };
 
+            let run_id = RunId::new(format!("{}:{index}", batch.wake_id));
+            if self.store.load_worker_run(&run_id)?.is_some() {
+                continue;
+            }
+
             let session_id = delegated_session_id(&batch.session_id, &batch.wake_id, index);
             let agent_id = delegated_agent_id(&session_id);
+            let correlation_id = correlation_id
+                .clone()
+                .unwrap_or_else(|| format!("delegation:{}:{index}", batch.wake_id));
+            let lineage = DelegationLineage {
+                parent_session_id: parent.session_id.clone(),
+                parent_agent_id: parent.agent_id.clone(),
+                source_wake_id: batch.wake_id.clone(),
+                source_action_index: index as u32,
+                requested_task_id: task_id.clone(),
+                correlation_id: correlation_id.clone(),
+            };
             let state = self.sessions.create_session(
                 SessionConfig {
                     session_id: session_id.clone(),
                     agent_id: agent_id.clone(),
                     profile_id: profile_id.clone(),
                     kind: SessionKind::Delegated,
-                    resource_limits: ResourceLimits {
+                    delegation: Some(lineage.clone()),
+                    resource_limits: resource_limits.clone().unwrap_or(ResourceLimits {
                         workdir: None,
                         max_duration_ms: None,
                         max_delegation_depth: Some(0),
-                    },
+                    }),
                     tool_profile: ToolProfile { tools: Vec::new() },
                 },
                 self.now(),
             )?;
+            self.store.save_worker_run_requested(&WorkerRunRecord {
+                run_id,
+                parent_session_id: parent.session_id.clone(),
+                delegated_session_id: Some(state.session_id.clone()),
+                parent_agent_id: Some(parent.agent_id.clone()),
+                profile_id: profile_id.clone(),
+                task_id: task_id.clone(),
+                status: WorkerRunStatus::Requested,
+                created_at: state.created_at.clone(),
+                last_updated_at: state.created_at.clone(),
+                source_wake_id: batch.wake_id.clone(),
+                source_action_index: index as u32,
+                delegation_correlation_id: Some(correlation_id.clone()),
+            })?;
             self.store.save_session(&state)?;
+            self.store.update_worker_run_status_by_delegated_session(
+                &state.session_id,
+                WorkerRunStatus::SessionCreated,
+                self.now(),
+            )?;
             self.bus.publish(CoreEvent::SessionCreated {
-                state: state.clone(),
+                state: Box::new(state.clone()),
             })?;
             self.bus.publish(CoreEvent::AgentMessageRouted {
                 message: AgentMessage {
                     from: parent.agent_id.clone(),
                     to: agent_id,
                     body: prompt.clone(),
-                    correlation_id: Some(format!("delegation:{}:{index}", batch.wake_id)),
+                    correlation_id: Some(correlation_id),
                 },
             })?;
             if session_kind_can_wake(&state.kind) {
                 self.bus.publish(CoreEvent::BrainWakeRequested {
-                    session_id: state.session_id,
+                    session_id: state.session_id.clone(),
                 })?;
+                self.store.update_worker_run_status_by_delegated_session(
+                    &state.session_id,
+                    WorkerRunStatus::WakeRequested,
+                    self.now(),
+                )?;
             }
+        }
+
+        Ok(())
+    }
+
+    fn validate_delegation_invariants(
+        &self,
+        session: &SessionState,
+        batch: &BrainActionBatch,
+    ) -> Vec<ActionRejection> {
+        batch
+            .actions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| {
+                let BrainAction::RequestDelegation { .. } = action else {
+                    return None;
+                };
+                match session.resource_limits.max_delegation_depth {
+                    Some(0) => Some(ActionRejection {
+                        index: index as u32,
+                        kind: CoreErrorKind::ActionRejected,
+                        message: "request_delegation exceeds max_delegation_depth".to_string(),
+                    }),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    fn update_lifecycle_for_actions(&self, batch: &BrainActionBatch) -> CoreResult<()> {
+        for action in &batch.actions {
+            let BrainAction::DeliverCompletion { packet } = action else {
+                continue;
+            };
+            let status = match packet.status {
+                CompletionStatus::Completed => WorkerRunStatus::Completed,
+                CompletionStatus::Failed => WorkerRunStatus::Failed,
+                CompletionStatus::Blocked => WorkerRunStatus::Blocked,
+                CompletionStatus::Exhausted => WorkerRunStatus::Exhausted,
+            };
+            self.store.update_worker_run_status_by_delegated_session(
+                &packet.session_id,
+                status,
+                self.now(),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn schedule_wake_for_event(&self, event: &CoreEvent) -> CoreResult<()> {
+        let CoreEvent::AgentMessageRouted { message } = event else {
+            return Ok(());
+        };
+        let session = match self.sessions.get_session_by_agent(&message.to) {
+            Ok(session) => session,
+            Err(error) if error.kind == CoreErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+
+        if !session_kind_can_wake(&session.kind) || session.status == SessionStatus::Archived {
+            return Ok(());
+        }
+
+        let state = self.body_projector.project(&session.session_id)?;
+        if DefaultWakeThreshold.should_wake(&state, event) {
+            self.bus.publish(CoreEvent::BrainWakeRequested {
+                session_id: session.session_id,
+            })?;
         }
 
         Ok(())
@@ -296,6 +474,82 @@ mod tests {
             .recent_events
             .iter()
             .any(|event| matches!(event, CoreEvent::SessionCreated { .. })));
+    }
+
+    #[test]
+    fn routing_message_to_active_session_requests_brain_wake() {
+        let engine = test_engine();
+        let worker = engine
+            .create_session(session_config(
+                "worker-session",
+                "worker",
+                "coder-profile",
+                SessionKind::Worker,
+            ))
+            .unwrap();
+        let (_subscription_id, events) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![
+                    CoreEventKind::AgentMessageRouted,
+                    CoreEventKind::BrainWakeRequested,
+                ],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        let receipt = engine
+            .route_agent_message(AgentMessage {
+                from: AgentId::new("planner"),
+                to: worker.agent_id.clone(),
+                body: "please wake".to_string(),
+                correlation_id: None,
+            })
+            .unwrap();
+
+        assert!(receipt.accepted);
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::AgentMessageRouted { .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::BrainWakeRequested { session_id } if session_id == worker.session_id
+        ));
+    }
+
+    #[test]
+    fn routing_message_to_archived_session_does_not_request_brain_wake() {
+        let engine = test_engine();
+        let worker = engine
+            .create_session(session_config(
+                "worker-session",
+                "worker",
+                "coder-profile",
+                SessionKind::Worker,
+            ))
+            .unwrap();
+        engine.archive_session(&worker.session_id).unwrap();
+        let (_subscription_id, events) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::BrainWakeRequested],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        engine
+            .route_agent_message(AgentMessage {
+                from: AgentId::new("planner"),
+                to: worker.agent_id,
+                body: "do not wake".to_string(),
+                correlation_id: None,
+            })
+            .unwrap();
+
+        assert!(events.recv_timeout(Duration::from_millis(50)).is_err());
     }
 
     #[test]
@@ -406,6 +660,19 @@ mod tests {
                     profile_id: ProfileId::new("coder-profile"),
                     task_id: Some(rusty_crew_core_protocol::TaskId::new("2772")),
                     prompt: "complete the tiny delegated slice".to_string(),
+                    expected_output: Some("completion packet with concise summary".to_string()),
+                    resource_limits: Some(ResourceLimits {
+                        workdir: Some("/home/dev/rusty-crew".to_string()),
+                        max_duration_ms: Some(30_000),
+                        max_delegation_depth: Some(0),
+                    }),
+                    timeout_ms: Some(30_000),
+                    priority: Some(rusty_crew_core_protocol::DelegationPriority::High),
+                    fan_out_group_id: Some("implementation-slice".to_string()),
+                    correlation_id: Some("delegation-correlation-1".to_string()),
+                    parent_consumption: Some(
+                        rusty_crew_core_protocol::ParentConsumptionPolicy::AwaitCompletion,
+                    ),
                 }],
             })
             .unwrap();
@@ -415,8 +682,67 @@ mod tests {
         let delegated = engine.get_session(&delegated_session_id).unwrap();
         assert_eq!(delegated.kind, SessionKind::Delegated);
         assert_eq!(delegated.profile_id, ProfileId::new("coder-profile"));
+        assert_eq!(
+            delegated.resource_limits,
+            ResourceLimits {
+                workdir: Some("/home/dev/rusty-crew".to_string()),
+                max_duration_ms: Some(30_000),
+                max_delegation_depth: Some(0),
+            }
+        );
+        assert_eq!(
+            delegated
+                .delegation
+                .as_ref()
+                .map(|lineage| &lineage.parent_session_id),
+            Some(&planner.session_id)
+        );
+        assert_eq!(
+            delegated
+                .delegation
+                .as_ref()
+                .map(|lineage| lineage.source_action_index),
+            Some(0)
+        );
+        assert_eq!(
+            delegated
+                .delegation
+                .as_ref()
+                .map(|lineage| lineage.correlation_id.as_str()),
+            Some("delegation-correlation-1")
+        );
+        assert_eq!(
+            delegated
+                .delegation
+                .as_ref()
+                .and_then(|lineage| lineage.requested_task_id.as_ref())
+                .map(|task_id| task_id.0.as_str()),
+            Some("2772")
+        );
+        assert_eq!(
+            engine
+                .delegated_sessions_for_parent(&planner.session_id)
+                .unwrap(),
+            vec![delegated.clone()]
+        );
+        assert_eq!(
+            engine
+                .delegated_session_for_run(&RunId::new("planner-wake:0"))
+                .unwrap(),
+            Some(delegated.clone())
+        );
+        assert_eq!(
+            CoordinationStore::open(data_dir.clone())
+                .unwrap()
+                .load_worker_run(&RunId::new("planner-wake:0"))
+                .unwrap()
+                .unwrap()
+                .status,
+            WorkerRunStatus::WakeRequested
+        );
 
         let body = engine.project_body_state(&delegated_session_id).unwrap();
+        assert_eq!(body.session.delegation, delegated.delegation);
         assert_eq!(body.pending_messages.len(), 1);
         assert_eq!(
             body.pending_messages[0].body,
@@ -433,6 +759,23 @@ mod tests {
             }
         }
         assert!(observed_wake);
+
+        engine
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "worker-wake".to_string(),
+                session_id: delegated_session_id.clone(),
+                event: BrainEvent::Started,
+            })
+            .unwrap();
+        assert_eq!(
+            CoordinationStore::open(data_dir.clone())
+                .unwrap()
+                .load_worker_run(&RunId::new("planner-wake:0"))
+                .unwrap()
+                .unwrap()
+                .status,
+            WorkerRunStatus::Running
+        );
 
         engine
             .execute_brain_actions(BrainActionBatch {
@@ -457,6 +800,14 @@ mod tests {
         assert_eq!(store.count_rows("sessions").unwrap(), 2);
         assert_eq!(store.count_rows("worker_runs").unwrap(), 1);
         assert_eq!(store.count_rows("completion_packets").unwrap(), 1);
+        assert_eq!(
+            store
+                .load_worker_run(&RunId::new("planner-wake:0"))
+                .unwrap()
+                .unwrap()
+                .status,
+            WorkerRunStatus::Completed
+        );
     }
 
     #[test]
@@ -497,6 +848,148 @@ mod tests {
             .recent_events
             .iter()
             .any(|event| matches!(event, CoreEvent::CompletionPacketDelivered { .. })));
+    }
+
+    #[test]
+    fn rejects_malformed_delegation_before_side_effects() {
+        let data_dir = unique_data_dir("invalid-delegation");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+
+        let receipt = engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![BrainAction::RequestDelegation {
+                    profile_id: ProfileId::new("coder-profile"),
+                    task_id: None,
+                    prompt: "try malformed delegation".to_string(),
+                    expected_output: Some(" ".to_string()),
+                    resource_limits: Some(ResourceLimits {
+                        workdir: None,
+                        max_duration_ms: Some(0),
+                        max_delegation_depth: Some(0),
+                    }),
+                    timeout_ms: Some(0),
+                    priority: None,
+                    fan_out_group_id: None,
+                    correlation_id: None,
+                    parent_consumption: None,
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(receipt.accepted_actions, 0);
+        assert_eq!(receipt.rejected_actions.len(), 1);
+        assert_eq!(
+            receipt.rejected_actions[0].kind,
+            CoreErrorKind::InvalidInput
+        );
+        assert!(engine
+            .delegated_sessions_for_parent(&planner.session_id)
+            .unwrap()
+            .is_empty());
+
+        let store = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(store.count_rows("sessions").unwrap(), 1);
+        assert_eq!(store.count_rows("worker_runs").unwrap(), 0);
+    }
+
+    #[test]
+    fn delegation_retry_does_not_duplicate_child_session() {
+        let data_dir = unique_data_dir("delegation-idempotency");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let batch = BrainActionBatch {
+            wake_id: "planner-wake".to_string(),
+            session_id: planner.session_id.clone(),
+            actions: vec![BrainAction::RequestDelegation {
+                profile_id: ProfileId::new("coder-profile"),
+                task_id: None,
+                prompt: "retry-safe delegation".to_string(),
+                expected_output: None,
+                resource_limits: None,
+                timeout_ms: None,
+                priority: None,
+                fan_out_group_id: None,
+                correlation_id: None,
+                parent_consumption: None,
+            }],
+        };
+
+        engine.execute_brain_actions(batch.clone()).unwrap();
+        drop(engine);
+
+        let restarted_engine = test_engine_with_data_dir(data_dir.clone());
+        restarted_engine.execute_brain_actions(batch).unwrap();
+
+        let store = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(store.count_rows("sessions").unwrap(), 2);
+        assert_eq!(store.count_rows("worker_runs").unwrap(), 1);
+        assert_eq!(
+            restarted_engine
+                .delegated_sessions_for_parent(&planner.session_id)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn delegation_depth_zero_rejects_before_side_effects() {
+        let data_dir = unique_data_dir("delegation-depth");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let mut config = session_config(
+            "planner-session",
+            "planner",
+            "planner-profile",
+            SessionKind::Full,
+        );
+        config.resource_limits.max_delegation_depth = Some(0);
+        let planner = engine.create_session(config).unwrap();
+
+        let receipt = engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![BrainAction::RequestDelegation {
+                    profile_id: ProfileId::new("coder-profile"),
+                    task_id: None,
+                    prompt: "should not spawn".to_string(),
+                    expected_output: None,
+                    resource_limits: None,
+                    timeout_ms: None,
+                    priority: None,
+                    fan_out_group_id: None,
+                    correlation_id: None,
+                    parent_consumption: None,
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(receipt.accepted_actions, 0);
+        assert_eq!(
+            receipt.rejected_actions[0].kind,
+            CoreErrorKind::ActionRejected
+        );
+
+        let store = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(store.count_rows("sessions").unwrap(), 1);
+        assert_eq!(store.count_rows("worker_runs").unwrap(), 0);
     }
 
     #[test]
@@ -657,6 +1150,13 @@ mod tests {
                         profile_id: ProfileId::new("coder-profile"),
                         task_id: Some(rusty_crew_core_protocol::TaskId::new("2768")),
                         prompt: "persist the coordination state".to_string(),
+                        expected_output: None,
+                        resource_limits: None,
+                        timeout_ms: None,
+                        priority: None,
+                        fan_out_group_id: None,
+                        correlation_id: None,
+                        parent_consumption: None,
                     },
                 ],
             })
@@ -684,6 +1184,10 @@ mod tests {
         let hydrated_worker = restarted_engine
             .get_session(&worker.session_id)
             .expect("worker session should hydrate");
+        let hydrated_delegated = restarted_engine
+            .delegated_session_for_run(&RunId::new("planner-wake:1"))
+            .expect("delegated run lookup should load")
+            .expect("delegated session should hydrate");
         let hydrated_body = restarted_engine
             .project_body_state(&worker.session_id)
             .expect("worker body should hydrate from persisted bus history");
@@ -691,6 +1195,20 @@ mod tests {
 
         assert_eq!(hydrated_planner.kind, SessionKind::Full);
         assert_eq!(hydrated_worker.kind, SessionKind::Worker);
+        assert_eq!(hydrated_delegated.kind, SessionKind::Delegated);
+        assert_eq!(
+            hydrated_delegated
+                .delegation
+                .as_ref()
+                .map(|lineage| (&lineage.parent_session_id, lineage.source_action_index)),
+            Some((&planner.session_id, 1))
+        );
+        assert_eq!(
+            restarted_engine
+                .delegated_sessions_for_parent(&planner.session_id)
+                .unwrap(),
+            vec![hydrated_delegated]
+        );
         assert_eq!(hydrated_body.pending_messages.len(), 1);
         assert_eq!(
             hydrated_body.pending_messages[0].body,
@@ -779,6 +1297,7 @@ mod tests {
             agent_id: AgentId::new(agent_id),
             profile_id: ProfileId::new(profile_id),
             kind,
+            delegation: None,
             resource_limits: ResourceLimits {
                 workdir: Some("/home/dev/rusty-crew".to_string()),
                 max_duration_ms: Some(60_000),

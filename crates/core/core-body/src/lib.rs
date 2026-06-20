@@ -108,6 +108,13 @@ impl BrainActionExecutor {
                     profile_id: _,
                     task_id: _,
                     prompt: _,
+                    expected_output: _,
+                    resource_limits: _,
+                    timeout_ms: _,
+                    priority: _,
+                    fan_out_group_id: _,
+                    correlation_id: _,
+                    parent_consumption: _,
                 } => {}
                 BrainAction::DeliverCompletion { packet } => {
                     self.publish_completion(packet.clone())?;
@@ -165,7 +172,14 @@ fn validate_action(batch_session_id: &SessionId, action: &BrainAction) -> CoreRe
             }
         }
         BrainAction::RequestDelegation {
-            profile_id, prompt, ..
+            profile_id,
+            prompt,
+            expected_output,
+            resource_limits,
+            timeout_ms,
+            fan_out_group_id,
+            correlation_id,
+            ..
         } => {
             if profile_id.0.trim().is_empty() {
                 return Err(CoreError::new(
@@ -177,6 +191,49 @@ fn validate_action(batch_session_id: &SessionId, action: &BrainAction) -> CoreRe
                 return Err(CoreError::new(
                     CoreErrorKind::InvalidInput,
                     "request_delegation requires a prompt",
+                ));
+            }
+            if expected_output
+                .as_deref()
+                .is_some_and(|value| value.trim().is_empty())
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "request_delegation expected_output must be non-empty when provided",
+                ));
+            }
+            if timeout_ms.is_some_and(|value| value == 0) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "request_delegation timeout_ms must be greater than zero when provided",
+                ));
+            }
+            if resource_limits
+                .as_ref()
+                .and_then(|limits| limits.max_duration_ms)
+                .is_some_and(|value| value == 0)
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "request_delegation resource_limits.max_duration_ms must be greater than zero when provided",
+                ));
+            }
+            if fan_out_group_id
+                .as_deref()
+                .is_some_and(|value| value.trim().is_empty())
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "request_delegation fan_out_group_id must be non-empty when provided",
+                ));
+            }
+            if correlation_id
+                .as_deref()
+                .is_some_and(|value| value.trim().is_empty())
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "request_delegation correlation_id must be non-empty when provided",
                 ));
             }
         }

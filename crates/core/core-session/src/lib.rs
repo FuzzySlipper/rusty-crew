@@ -67,6 +67,9 @@ impl SessionRegistry {
             agent_id: config.agent_id,
             profile_id: config.profile_id,
             kind: config.kind,
+            delegation: config.delegation,
+            resource_limits: config.resource_limits,
+            tool_profile: config.tool_profile,
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: now.clone(),
@@ -105,6 +108,51 @@ impl SessionRegistry {
                     format!("active session for agent {agent_id} not found"),
                 )
             })
+    }
+
+    pub fn delegated_sessions_for_parent(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> CoreResult<Vec<SessionState>> {
+        let mut children = self
+            .inner
+            .sessions
+            .lock()
+            .map_err(|_| CoreError::new(CoreErrorKind::InternalError, "session lock poisoned"))?
+            .values()
+            .filter(|state| {
+                state
+                    .delegation
+                    .as_ref()
+                    .is_some_and(|lineage| &lineage.parent_session_id == parent_session_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        children.sort_by_key(|state| {
+            state
+                .delegation
+                .as_ref()
+                .map(|lineage| lineage.source_action_index)
+                .unwrap_or(u32::MAX)
+        });
+        Ok(children)
+    }
+
+    pub fn delegated_session_for_source(
+        &self,
+        parent_session_id: &SessionId,
+        source_wake_id: &str,
+        source_action_index: u32,
+    ) -> CoreResult<Option<SessionState>> {
+        Ok(self
+            .delegated_sessions_for_parent(parent_session_id)?
+            .into_iter()
+            .find(|state| {
+                state.delegation.as_ref().is_some_and(|lineage| {
+                    lineage.source_wake_id == source_wake_id
+                        && lineage.source_action_index == source_action_index
+                })
+            }))
     }
 
     pub fn archive_session(
