@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 13;
+const CURRENT_SCHEMA_VERSION: i64 = 14;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -109,6 +109,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 13,
         description: "add dense profile memory persistence",
         apply: migrate_v13_add_profile_memory,
+    },
+    SchemaMigration {
+        version: 14,
+        description: "add scheduler job and run persistence",
+        apply: migrate_v14_add_scheduler_persistence,
     },
 ];
 
@@ -386,6 +391,79 @@ pub struct QueuedMessageFilter {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduledJobStatus {
+    Active,
+    Paused,
+    Archived,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduledRunStatus {
+    Claimed,
+    Completed,
+    Skipped,
+    Failed,
+    Expired,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduledRunTrigger {
+    Due,
+    Manual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledJobRecord {
+    pub job_id: String,
+    pub job_kind: String,
+    pub target_session_id: Option<SessionId>,
+    pub interval_ms: Option<u64>,
+    pub next_due_at: Option<IsoTimestamp>,
+    pub payload_json: JsonValue,
+    pub status: ScheduledJobStatus,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub paused_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ScheduledJobQuery {
+    pub status: Option<ScheduledJobStatus>,
+    pub job_kind: Option<String>,
+    pub due_at_or_before: Option<IsoTimestamp>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledRunRecord {
+    pub run_id: RunId,
+    pub job_id: String,
+    pub job_kind: String,
+    pub target_session_id: Option<SessionId>,
+    pub status: ScheduledRunStatus,
+    pub trigger: ScheduledRunTrigger,
+    pub scheduled_for: Option<IsoTimestamp>,
+    pub claimed_at: IsoTimestamp,
+    pub claim_deadline_at: IsoTimestamp,
+    pub completed_at: Option<IsoTimestamp>,
+    pub error: Option<String>,
+    pub output_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ScheduledRunQuery {
+    pub job_id: Option<String>,
+    pub status: Option<ScheduledRunStatus>,
+    pub trigger: Option<ScheduledRunTrigger>,
+    pub target_session_id: Option<SessionId>,
+    pub stale_claim_deadline_before: Option<IsoTimestamp>,
+    pub page: Option<QueryPage>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeMaintenancePolicy {
     pub expire_queued_messages_at: Option<IsoTimestamp>,
@@ -654,6 +732,8 @@ pub enum DiagnosticTable {
     RuntimeImportBatches,
     LegacyIdMappings,
     ProfileMemories,
+    ScheduledJobs,
+    ScheduledJobRuns,
     ChannelBindings,
     McpBindings,
     AgentMessages,
@@ -681,6 +761,8 @@ impl DiagnosticTable {
         Self::RuntimeImportBatches,
         Self::LegacyIdMappings,
         Self::ProfileMemories,
+        Self::ScheduledJobs,
+        Self::ScheduledJobRuns,
         Self::ChannelBindings,
         Self::McpBindings,
         Self::AgentMessages,
@@ -708,6 +790,8 @@ impl DiagnosticTable {
             "runtime_import_batches" => Ok(Self::RuntimeImportBatches),
             "legacy_id_mappings" => Ok(Self::LegacyIdMappings),
             "profile_memories" => Ok(Self::ProfileMemories),
+            "scheduled_jobs" => Ok(Self::ScheduledJobs),
+            "scheduled_job_runs" => Ok(Self::ScheduledJobRuns),
             "channel_bindings" => Ok(Self::ChannelBindings),
             "mcp_bindings" => Ok(Self::McpBindings),
             "agent_messages" => Ok(Self::AgentMessages),
@@ -740,6 +824,8 @@ impl DiagnosticTable {
             Self::RuntimeImportBatches => "runtime_import_batches",
             Self::LegacyIdMappings => "legacy_id_mappings",
             Self::ProfileMemories => "profile_memories",
+            Self::ScheduledJobs => "scheduled_jobs",
+            Self::ScheduledJobRuns => "scheduled_job_runs",
             Self::ChannelBindings => "channel_bindings",
             Self::McpBindings => "mcp_bindings",
             Self::AgentMessages => "agent_messages",
@@ -1079,6 +1165,149 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<QueuedMessageRecord>> {
         let conn = self.conn()?;
         load_queued_messages(&conn, filter)
+    }
+
+    pub fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
+        let conn = self.conn()?;
+        save_scheduled_job(&conn, record)
+    }
+
+    pub fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
+        let conn = self.conn()?;
+        load_scheduled_job(&conn, job_id)
+    }
+
+    pub fn query_scheduled_jobs(
+        &self,
+        query: &ScheduledJobQuery,
+    ) -> CoreResult<Vec<ScheduledJobRecord>> {
+        let conn = self.conn()?;
+        query_scheduled_jobs(&conn, query)
+    }
+
+    pub fn pause_scheduled_job(&self, job_id: &str, now: &IsoTimestamp) -> CoreResult<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE scheduled_jobs
+             SET status = 'paused', paused_at = ?2, updated_at = ?2
+             WHERE job_id = ?1 AND status != 'archived'",
+            params![job_id, now],
+        )
+        .map_err(|error| persistence_error("pause scheduled job", error))?;
+        Ok(())
+    }
+
+    pub fn resume_scheduled_job(
+        &self,
+        job_id: &str,
+        next_due_at: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE scheduled_jobs
+             SET status = 'active', next_due_at = ?2, paused_at = NULL, updated_at = ?3
+             WHERE job_id = ?1 AND status != 'archived'",
+            params![job_id, next_due_at, now],
+        )
+        .map_err(|error| persistence_error("resume scheduled job", error))?;
+        Ok(())
+    }
+
+    pub fn claim_scheduled_run(
+        &self,
+        run: &ScheduledRunRecord,
+        next_due_at: Option<&IsoTimestamp>,
+    ) -> CoreResult<()> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start claim scheduled run", error))?;
+        save_scheduled_run_in_tx(&tx, run)?;
+        if run.trigger == ScheduledRunTrigger::Due {
+            tx.execute(
+                "UPDATE scheduled_jobs
+                 SET next_due_at = ?2, updated_at = ?3
+                 WHERE job_id = ?1 AND status = 'active'",
+                params![run.job_id.as_str(), next_due_at, run.updated_at.as_str()],
+            )
+            .map_err(|error| persistence_error("advance scheduled job", error))?;
+        }
+        tx.commit()
+            .map_err(|error| persistence_error("commit claim scheduled run", error))?;
+        Ok(())
+    }
+
+    pub fn complete_scheduled_run(
+        &self,
+        run_id: &RunId,
+        status: ScheduledRunStatus,
+        completed_at: &IsoTimestamp,
+        output_json: &JsonValue,
+        error: Option<&str>,
+    ) -> CoreResult<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE scheduled_job_runs
+             SET status = ?2,
+                 completed_at = ?3,
+                 updated_at = ?3,
+                 output_json = ?4,
+                 error = ?5
+             WHERE run_id = ?1",
+            params![
+                run_id.0.as_str(),
+                scheduled_run_status_as_str(status),
+                completed_at,
+                to_json_text(output_json)?,
+                error,
+            ],
+        )
+        .map_err(|error| persistence_error("complete scheduled run", error))?;
+        Ok(())
+    }
+
+    pub fn query_scheduled_runs(
+        &self,
+        query: &ScheduledRunQuery,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        let conn = self.conn()?;
+        query_scheduled_runs(&conn, query)
+    }
+
+    pub fn expire_stale_scheduled_runs(
+        &self,
+        stale_before: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start expire stale scheduled runs", error))?;
+        let stale = query_scheduled_runs(
+            &tx,
+            &ScheduledRunQuery {
+                status: Some(ScheduledRunStatus::Claimed),
+                stale_claim_deadline_before: Some(stale_before.clone()),
+                page: None,
+                ..ScheduledRunQuery::default()
+            },
+        )?;
+        for run in &stale {
+            tx.execute(
+                "UPDATE scheduled_job_runs
+                 SET status = 'expired',
+                     completed_at = ?2,
+                     updated_at = ?2,
+                     error = 'claim deadline elapsed'
+                 WHERE run_id = ?1 AND status = 'claimed'",
+                params![run.run_id.0.as_str(), now],
+            )
+            .map_err(|error| persistence_error("expire stale scheduled run", error))?;
+        }
+        tx.commit()
+            .map_err(|error| persistence_error("commit expire stale scheduled runs", error))?;
+        Ok(stale)
     }
 
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
@@ -2758,6 +2987,54 @@ fn migrate_v13_add_profile_memory(tx: &rusqlite::Transaction<'_>) -> CoreResult<
     .map_err(|error| persistence_error("apply schema migration 13", error))
 }
 
+fn migrate_v14_add_scheduler_persistence(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                job_id TEXT PRIMARY KEY,
+                job_kind TEXT NOT NULL,
+                target_session_id TEXT,
+                interval_ms INTEGER,
+                next_due_at TEXT,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                paused_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due
+                ON scheduled_jobs(status, next_due_at, job_id);
+            CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_kind_status
+                ON scheduled_jobs(job_kind, status, job_id);
+
+            CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+                run_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                job_kind TEXT NOT NULL,
+                target_session_id TEXT,
+                status TEXT NOT NULL,
+                trigger_kind TEXT NOT NULL,
+                scheduled_for TEXT,
+                claimed_at TEXT NOT NULL,
+                claim_deadline_at TEXT NOT NULL,
+                completed_at TEXT,
+                error TEXT,
+                output_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (job_id) REFERENCES scheduled_jobs(job_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_created
+                ON scheduled_job_runs(job_id, created_at, run_id);
+            CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_status_deadline
+                ON scheduled_job_runs(status, claim_deadline_at, run_id);
+            CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_target
+                ON scheduled_job_runs(target_session_id, status, created_at);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 14", error))
+}
+
 fn save_queued_message_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record: &QueuedMessageRecord,
@@ -2970,6 +3247,327 @@ fn row_to_queued_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedMess
         terminal_at: row.get(13)?,
         state_reason: row.get(14)?,
     })
+}
+
+fn save_scheduled_job(conn: &Connection, record: &ScheduledJobRecord) -> CoreResult<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO scheduled_jobs (
+            job_id,
+            job_kind,
+            target_session_id,
+            interval_ms,
+            next_due_at,
+            payload_json,
+            status,
+            created_at,
+            updated_at,
+            paused_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            record.job_id.as_str(),
+            record.job_kind.as_str(),
+            record
+                .target_session_id
+                .as_ref()
+                .map(|session_id| session_id.0.as_str()),
+            record.interval_ms.map(|value| value as i64),
+            record.next_due_at.as_deref(),
+            to_json_text(&record.payload_json)?,
+            scheduled_job_status_as_str(record.status),
+            record.created_at.as_str(),
+            record.updated_at.as_str(),
+            record.paused_at.as_deref(),
+        ],
+    )
+    .map_err(|error| persistence_error("save scheduled job", error))?;
+    Ok(())
+}
+
+fn load_scheduled_job(conn: &Connection, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
+    conn.query_row(
+        "SELECT
+            job_id,
+            job_kind,
+            target_session_id,
+            interval_ms,
+            next_due_at,
+            payload_json,
+            status,
+            created_at,
+            updated_at,
+            paused_at
+         FROM scheduled_jobs
+         WHERE job_id = ?1",
+        params![job_id],
+        row_to_scheduled_job,
+    )
+    .optional()
+    .map_err(|error| persistence_error("load scheduled job", error))
+}
+
+fn query_scheduled_jobs(
+    conn: &Connection,
+    query: &ScheduledJobQuery,
+) -> CoreResult<Vec<ScheduledJobRecord>> {
+    let status = query.status.map(scheduled_job_status_as_str);
+    let job_kind = query.job_kind.as_deref();
+    let due_at_or_before = query.due_at_or_before.as_deref();
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                job_id,
+                job_kind,
+                target_session_id,
+                interval_ms,
+                next_due_at,
+                payload_json,
+                status,
+                created_at,
+                updated_at,
+                paused_at
+             FROM scheduled_jobs
+             WHERE (?1 IS NULL OR status = ?1)
+               AND (?2 IS NULL OR job_kind = ?2)
+               AND (?3 IS NULL OR (next_due_at IS NOT NULL AND next_due_at <= ?3))
+             ORDER BY COALESCE(next_due_at, created_at) ASC, job_id ASC
+             LIMIT ?4 OFFSET ?5",
+        )
+        .map_err(|error| persistence_error("prepare scheduled jobs query", error))?;
+    let rows = stmt
+        .query_map(
+            params![status, job_kind, due_at_or_before, limit, offset],
+            row_to_scheduled_job,
+        )
+        .map_err(|error| persistence_error("query scheduled jobs", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load scheduled jobs", error))
+}
+
+fn row_to_scheduled_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledJobRecord> {
+    let payload_json: String = row.get(5)?;
+    let status: String = row.get(6)?;
+    Ok(ScheduledJobRecord {
+        job_id: row.get(0)?,
+        job_kind: row.get(1)?,
+        target_session_id: row.get::<_, Option<String>>(2)?.map(SessionId),
+        interval_ms: row.get::<_, Option<i64>>(3)?.map(|value| value as u64),
+        next_due_at: row.get(4)?,
+        payload_json: from_json_text(&payload_json).map_err(to_sql_error)?,
+        status: scheduled_job_status_from_str(&status)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        paused_at: row.get(9)?,
+    })
+}
+
+fn save_scheduled_run_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    run: &ScheduledRunRecord,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO scheduled_job_runs (
+            run_id,
+            job_id,
+            job_kind,
+            target_session_id,
+            status,
+            trigger_kind,
+            scheduled_for,
+            claimed_at,
+            claim_deadline_at,
+            completed_at,
+            error,
+            output_json,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![
+            run.run_id.0.as_str(),
+            run.job_id.as_str(),
+            run.job_kind.as_str(),
+            run.target_session_id
+                .as_ref()
+                .map(|session_id| session_id.0.as_str()),
+            scheduled_run_status_as_str(run.status),
+            scheduled_run_trigger_as_str(run.trigger),
+            run.scheduled_for.as_deref(),
+            run.claimed_at.as_str(),
+            run.claim_deadline_at.as_str(),
+            run.completed_at.as_deref(),
+            run.error.as_deref(),
+            to_json_text(&run.output_json)?,
+            run.created_at.as_str(),
+            run.updated_at.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("save scheduled run", error))?;
+    Ok(())
+}
+
+fn query_scheduled_runs(
+    conn: &Connection,
+    query: &ScheduledRunQuery,
+) -> CoreResult<Vec<ScheduledRunRecord>> {
+    let job_id = query.job_id.as_deref();
+    let status = query.status.map(scheduled_run_status_as_str);
+    let trigger = query.trigger.map(scheduled_run_trigger_as_str);
+    let target_session_id = query
+        .target_session_id
+        .as_ref()
+        .map(|session_id| session_id.0.as_str());
+    let stale_before = query.stale_claim_deadline_before.as_deref();
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                run_id,
+                job_id,
+                job_kind,
+                target_session_id,
+                status,
+                trigger_kind,
+                scheduled_for,
+                claimed_at,
+                claim_deadline_at,
+                completed_at,
+                error,
+                output_json,
+                created_at,
+                updated_at
+             FROM scheduled_job_runs
+             WHERE (?1 IS NULL OR job_id = ?1)
+               AND (?2 IS NULL OR status = ?2)
+               AND (?3 IS NULL OR trigger_kind = ?3)
+               AND (?4 IS NULL OR target_session_id = ?4)
+               AND (?5 IS NULL OR claim_deadline_at < ?5)
+             ORDER BY created_at ASC, run_id ASC
+             LIMIT ?6 OFFSET ?7",
+        )
+        .map_err(|error| persistence_error("prepare scheduled runs query", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                job_id,
+                status,
+                trigger,
+                target_session_id,
+                stale_before,
+                limit,
+                offset,
+            ],
+            row_to_scheduled_run,
+        )
+        .map_err(|error| persistence_error("query scheduled runs", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load scheduled runs", error))
+}
+
+fn row_to_scheduled_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledRunRecord> {
+    let status: String = row.get(4)?;
+    let trigger: String = row.get(5)?;
+    let output_json: String = row.get(11)?;
+    Ok(ScheduledRunRecord {
+        run_id: RunId(row.get(0)?),
+        job_id: row.get(1)?,
+        job_kind: row.get(2)?,
+        target_session_id: row.get::<_, Option<String>>(3)?.map(SessionId),
+        status: scheduled_run_status_from_str(&status)?,
+        trigger: scheduled_run_trigger_from_str(&trigger)?,
+        scheduled_for: row.get(6)?,
+        claimed_at: row.get(7)?,
+        claim_deadline_at: row.get(8)?,
+        completed_at: row.get(9)?,
+        error: row.get(10)?,
+        output_json: from_json_text(&output_json).map_err(to_sql_error)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+    })
+}
+
+fn scheduled_job_status_as_str(status: ScheduledJobStatus) -> &'static str {
+    match status {
+        ScheduledJobStatus::Active => "active",
+        ScheduledJobStatus::Paused => "paused",
+        ScheduledJobStatus::Archived => "archived",
+    }
+}
+
+fn scheduled_job_status_from_str(raw: &str) -> rusqlite::Result<ScheduledJobStatus> {
+    match raw {
+        "active" => Ok(ScheduledJobStatus::Active),
+        "paused" => Ok(ScheduledJobStatus::Paused),
+        "archived" => Ok(ScheduledJobStatus::Archived),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::<dyn std::error::Error + Send + Sync>::from(format!(
+                "unknown scheduled job status {other}",
+            )),
+        )),
+    }
+}
+
+fn scheduled_run_status_as_str(status: ScheduledRunStatus) -> &'static str {
+    match status {
+        ScheduledRunStatus::Claimed => "claimed",
+        ScheduledRunStatus::Completed => "completed",
+        ScheduledRunStatus::Skipped => "skipped",
+        ScheduledRunStatus::Failed => "failed",
+        ScheduledRunStatus::Expired => "expired",
+        ScheduledRunStatus::Cancelled => "cancelled",
+    }
+}
+
+fn scheduled_run_status_from_str(raw: &str) -> rusqlite::Result<ScheduledRunStatus> {
+    match raw {
+        "claimed" => Ok(ScheduledRunStatus::Claimed),
+        "completed" => Ok(ScheduledRunStatus::Completed),
+        "skipped" => Ok(ScheduledRunStatus::Skipped),
+        "failed" => Ok(ScheduledRunStatus::Failed),
+        "expired" => Ok(ScheduledRunStatus::Expired),
+        "cancelled" => Ok(ScheduledRunStatus::Cancelled),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::<dyn std::error::Error + Send + Sync>::from(format!(
+                "unknown scheduled run status {other}",
+            )),
+        )),
+    }
+}
+
+fn scheduled_run_trigger_as_str(trigger: ScheduledRunTrigger) -> &'static str {
+    match trigger {
+        ScheduledRunTrigger::Due => "due",
+        ScheduledRunTrigger::Manual => "manual",
+    }
+}
+
+fn scheduled_run_trigger_from_str(raw: &str) -> rusqlite::Result<ScheduledRunTrigger> {
+    match raw {
+        "due" => Ok(ScheduledRunTrigger::Due),
+        "manual" => Ok(ScheduledRunTrigger::Manual),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::<dyn std::error::Error + Send + Sync>::from(format!(
+                "unknown scheduled run trigger {other}",
+            )),
+        )),
+    }
 }
 
 fn save_queued_message_search_row_in_tx(
@@ -5757,6 +6355,8 @@ mod tests {
         assert!(table_exists(&db_path, "runtime_import_batches"));
         assert!(table_exists(&db_path, "legacy_id_mappings"));
         assert!(table_exists(&db_path, "profile_memories"));
+        assert!(table_exists(&db_path, "scheduled_jobs"));
+        assert!(table_exists(&db_path, "scheduled_job_runs"));
         assert!(table_exists(&db_path, "channel_bindings"));
         assert!(table_exists(&db_path, "mcp_bindings"));
         assert!(index_exists(
@@ -5766,6 +6366,11 @@ mod tests {
         assert!(index_exists(
             &db_path,
             "idx_profile_memories_profile_updated"
+        ));
+        assert!(index_exists(&db_path, "idx_scheduled_jobs_due"));
+        assert!(index_exists(
+            &db_path,
+            "idx_scheduled_job_runs_status_deadline"
         ));
         assert!(index_exists(&db_path, "idx_channel_bindings_external"));
         assert!(index_exists(&db_path, "idx_mcp_bindings_agent_profile"));
@@ -6217,6 +6822,146 @@ mod tests {
 
         assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
         assert!(error.message.contains("newer than supported"));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn scheduled_jobs_claim_runs_and_reconcile_stale_claims() {
+        let db_path = temp_db_path("scheduled-jobs");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store
+            .upsert_scheduled_job(&ScheduledJobRecord {
+                job_id: "wake-prime".to_string(),
+                job_kind: "runtime.wake.session".to_string(),
+                target_session_id: Some(SessionId::new("prime-session")),
+                interval_ms: Some(60_000),
+                next_due_at: Some("2026-06-20T06:00:00Z".to_string()),
+                payload_json: serde_json::json!({"reason": "scheduled"}),
+                status: ScheduledJobStatus::Active,
+                created_at: "2026-06-20T05:59:00Z".to_string(),
+                updated_at: "2026-06-20T05:59:00Z".to_string(),
+                paused_at: None,
+            })
+            .unwrap();
+
+        let due = store
+            .query_scheduled_jobs(&ScheduledJobQuery {
+                status: Some(ScheduledJobStatus::Active),
+                due_at_or_before: Some("2026-06-20T06:00:00Z".to_string()),
+                ..ScheduledJobQuery::default()
+            })
+            .unwrap();
+        assert_eq!(due.len(), 1);
+
+        let run = ScheduledRunRecord {
+            run_id: RunId::new("scheduled:wake-prime:1"),
+            job_id: "wake-prime".to_string(),
+            job_kind: "runtime.wake.session".to_string(),
+            target_session_id: Some(SessionId::new("prime-session")),
+            status: ScheduledRunStatus::Claimed,
+            trigger: ScheduledRunTrigger::Due,
+            scheduled_for: Some("2026-06-20T06:00:00Z".to_string()),
+            claimed_at: "2026-06-20T06:00:00Z".to_string(),
+            claim_deadline_at: "2026-06-20T06:00:30Z".to_string(),
+            completed_at: None,
+            error: None,
+            output_json: serde_json::json!({}),
+            created_at: "2026-06-20T06:00:00Z".to_string(),
+            updated_at: "2026-06-20T06:00:00Z".to_string(),
+        };
+        store
+            .claim_scheduled_run(&run, Some(&"2026-06-20T06:01:00Z".to_string()))
+            .unwrap();
+        assert_eq!(
+            store
+                .load_scheduled_job("wake-prime")
+                .unwrap()
+                .unwrap()
+                .next_due_at,
+            Some("2026-06-20T06:01:00Z".to_string())
+        );
+
+        store
+            .complete_scheduled_run(
+                &run.run_id,
+                ScheduledRunStatus::Completed,
+                &"2026-06-20T06:00:01Z".to_string(),
+                &serde_json::json!({"wake_requested": true}),
+                None,
+            )
+            .unwrap();
+        let completed = store
+            .query_scheduled_runs(&ScheduledRunQuery {
+                status: Some(ScheduledRunStatus::Completed),
+                ..ScheduledRunQuery::default()
+            })
+            .unwrap();
+        assert_eq!(completed.len(), 1);
+
+        store
+            .claim_scheduled_run(
+                &ScheduledRunRecord {
+                    run_id: RunId::new("scheduled:wake-prime:2"),
+                    status: ScheduledRunStatus::Claimed,
+                    trigger: ScheduledRunTrigger::Manual,
+                    claimed_at: "2026-06-20T06:02:00Z".to_string(),
+                    claim_deadline_at: "2026-06-20T06:02:05Z".to_string(),
+                    created_at: "2026-06-20T06:02:00Z".to_string(),
+                    updated_at: "2026-06-20T06:02:00Z".to_string(),
+                    scheduled_for: None,
+                    completed_at: None,
+                    error: None,
+                    output_json: serde_json::json!({}),
+                    ..run.clone()
+                },
+                None,
+            )
+            .unwrap();
+        let expired = store
+            .expire_stale_scheduled_runs(
+                &"2026-06-20T06:02:06Z".to_string(),
+                &"2026-06-20T06:02:06Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(
+            store
+                .query_scheduled_runs(&ScheduledRunQuery {
+                    status: Some(ScheduledRunStatus::Expired),
+                    ..ScheduledRunQuery::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+
+        store
+            .pause_scheduled_job("wake-prime", &"2026-06-20T06:03:00Z".to_string())
+            .unwrap();
+        assert_eq!(
+            store
+                .load_scheduled_job("wake-prime")
+                .unwrap()
+                .unwrap()
+                .status,
+            ScheduledJobStatus::Paused
+        );
+        store
+            .resume_scheduled_job(
+                "wake-prime",
+                &"2026-06-20T06:04:00Z".to_string(),
+                &"2026-06-20T06:03:30Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .load_scheduled_job("wake-prime")
+                .unwrap()
+                .unwrap()
+                .next_due_at,
+            Some("2026-06-20T06:04:00Z".to_string())
+        );
 
         remove_temp_db(&db_path);
     }

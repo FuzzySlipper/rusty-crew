@@ -116,6 +116,15 @@ output = "core_protocol::EventReceipt"
 errors = "core_protocol::CoreError"
 summary = "Inject Den product-data updates without making Den the coordination authority."
 
+[[operation]]
+name = "enqueue_body_follow_up_message"
+surface = "stable"
+direction = "ts_to_rust"
+input = "session_id + core_protocol::AgentId + body + correlation_id"
+output = "queued_message_record"
+errors = "core_protocol::CoreError"
+summary = "Queue a steer/follow-up message for the next Rust-owned wake with body-policy TTL and cap enforcement."
+
 # Delegation operator controls. These are typed control requests into the Rust
 # lifecycle state machine; adapters must not edit Den state as if it were
 # coordination state.

@@ -348,6 +348,19 @@ export {
   buildToolContextDiagnosticsReport,
   formatToolContextDiagnosticsMarkdown,
 } from "./tool-context-diagnostics.js";
+export { runBackgroundMemorySkillReview } from "./background-memory-skill-review.js";
+export type {
+  BackgroundReviewCandidateKind,
+  BackgroundReviewDenseMemoryRecord,
+  BackgroundReviewFinding,
+  BackgroundReviewPayload,
+  BackgroundReviewResult,
+  BackgroundReviewResultRef,
+  BackgroundReviewRunnerInput,
+  BackgroundReviewSeverity,
+  BackgroundReviewSourceRef,
+  BackgroundReviewType,
+} from "./background-memory-skill-review.js";
 export type {
   TextSurfaceSummary,
   ToolContextAdapterSummary,

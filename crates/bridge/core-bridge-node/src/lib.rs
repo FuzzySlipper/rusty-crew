@@ -16,9 +16,9 @@ use rusty_crew_core_bridge_api::{
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
     ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeSearchRowType, RuntimeStateSummary,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, QueuedMessageRecord,
+    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
@@ -141,6 +141,17 @@ impl NativeBridge {
                 body,
                 correlation_id,
             })
+    }
+
+    pub fn enqueue_body_follow_up_message(
+        &self,
+        session_id: SessionId,
+        from: rusty_crew_core_bridge_api::AgentId,
+        body: String,
+        correlation_id: Option<String>,
+    ) -> CoreResult<QueuedMessageRecord> {
+        self.engine()?
+            .enqueue_body_follow_up_message(&session_id, from, body, correlation_id)
     }
 
     pub fn project_body_state_json(
@@ -311,7 +322,7 @@ impl NativeBridge {
         role_assembly_json: Vec<u8>,
         wake_id: String,
     ) -> CoreResult<rusty_crew_core_bridge_api::BufferedBrainWakeRequest> {
-        let body_state = self.engine()?.project_body_state(&session_id)?;
+        let body_state = self.engine()?.prepare_body_state_for_wake(&session_id)?;
         let body_state_json = serde_json::to_vec(&body_state).map_err(|error| {
             CoreError::new(
                 CoreErrorKind::InternalError,
@@ -721,6 +732,24 @@ pub struct JsProfileMemoryRecord {
     pub revision: f64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsQueuedMessageRecord {
+    pub message_id: String,
+    pub owner_session_id: Option<String>,
+    pub owner_agent_id: String,
+    pub from_agent: String,
+    pub to_agent: String,
+    pub body: String,
+    pub correlation_id: Option<String>,
+    pub enqueued_at: String,
+    pub expires_at: String,
+    pub ttl_ms: u32,
+    pub delivery_attempts: u32,
+    pub state: String,
+    pub terminal_at: Option<String>,
+    pub state_reason: Option<String>,
 }
 
 #[napi_derive::napi(object)]
@@ -1210,6 +1239,26 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn enqueue_body_follow_up_message(
+        &self,
+        session_id: String,
+        from: String,
+        body: String,
+        correlation_id: Option<String>,
+    ) -> napi::Result<JsQueuedMessageRecord> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .enqueue_body_follow_up_message(
+                rusty_crew_core_bridge_api::SessionId::new(session_id),
+                rusty_crew_core_bridge_api::AgentId::new(from),
+                body,
+                correlation_id,
+            )
+            .map_err(to_napi_error)?;
+        Ok(to_js_queued_message_record(record))
+    }
+
+    #[napi]
     pub fn project_body_state_json(
         &self,
         session_id: String,
@@ -1496,6 +1545,25 @@ fn to_js_profile_memory_record(record: ProfileMemoryRecord) -> napi::Result<JsPr
         created_at: record.created_at,
         updated_at: record.updated_at,
     })
+}
+
+fn to_js_queued_message_record(record: QueuedMessageRecord) -> JsQueuedMessageRecord {
+    JsQueuedMessageRecord {
+        message_id: record.message_id,
+        owner_session_id: record.owner_session_id.map(|session_id| session_id.0),
+        owner_agent_id: record.owner_agent_id.0,
+        from_agent: record.message.from.0,
+        to_agent: record.message.to.0,
+        body: record.message.body,
+        correlation_id: record.message.correlation_id,
+        enqueued_at: record.enqueued_at,
+        expires_at: record.expires_at,
+        ttl_ms: record.ttl_ms,
+        delivery_attempts: record.delivery_attempts,
+        state: format!("{:?}", record.state).to_ascii_lowercase(),
+        terminal_at: record.terminal_at,
+        state_reason: record.state_reason,
+    }
 }
 
 fn to_profile_memory_query(query: JsProfileMemoryQuery) -> napi::Result<ProfileMemoryQuery> {

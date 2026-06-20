@@ -138,6 +138,12 @@ interface NativeBridgeBinding {
     body: string,
     correlationId?: string,
   ): { accepted: boolean; sequence: number };
+  enqueueBodyFollowUpMessage(
+    sessionId: string,
+    from: string,
+    body: string,
+    correlationId?: string,
+  ): NativeQueuedMessageRecord;
   buildBrainWakeRequest(
     brain: number,
     sessionId: string,
@@ -372,6 +378,23 @@ export interface NativeRuntimeCounterSummary {
   queueExpirations: number;
 }
 
+export interface NativeQueuedMessageRecord {
+  messageId: string;
+  ownerSessionId?: string;
+  ownerAgentId: string;
+  fromAgent: string;
+  toAgent: string;
+  body: string;
+  correlationId?: string;
+  enqueuedAt: string;
+  expiresAt: string;
+  ttlMs: number;
+  deliveryAttempts: number;
+  state: "pending" | "delivered" | "expired" | "discarded" | "cancelled";
+  terminalAt?: string;
+  stateReason?: string;
+}
+
 export interface NativeBridgeModule {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
@@ -432,6 +455,12 @@ export interface NativeBridgeModule {
     body: string,
     correlationId?: string,
   ): Promise<EventReceipt>;
+  enqueueBodyFollowUpMessage(input: {
+    sessionId: SessionId;
+    from: AgentId;
+    body: string;
+    correlationId?: string;
+  }): Promise<NativeQueuedMessageRecord>;
   /**
    * Runtime-local helper: projects body state in Rust and builds the three
    * runtime-buffer handles used by a registered brain wake.
@@ -500,6 +529,7 @@ export const nativeManifestOperationNames = [
   "register_platform_adapter",
   "inject_external_event",
   "inject_den_data_update",
+  "enqueue_body_follow_up_message",
   "cancel_delegated_session",
   "request_delegated_checkpoint",
   "drain_delegated_sessions",
@@ -533,6 +563,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     registerPlatformAdapter: unavailable("register_platform_adapter"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
+    enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
     cancelDelegatedSession: unavailable("cancel_delegated_session"),
     requestDelegatedCheckpoint: unavailable("request_delegated_checkpoint"),
     drainDelegatedSessions: unavailable("drain_delegated_sessions"),
@@ -730,6 +761,13 @@ function createNativeBridgeModule(
     createSession: async (config) => binding.createSession(config),
     routeAgentMessage: async (from, to, body, correlationId) =>
       binding.routeAgentMessage(from, to, body, correlationId),
+    enqueueBodyFollowUpMessage: async (input) =>
+      binding.enqueueBodyFollowUpMessage(
+        input.sessionId,
+        input.from,
+        input.body,
+        input.correlationId,
+      ),
     buildBrainWakeRequest: async (input) => {
       const buffered = binding.buildBrainWakeRequest(
         input.brain,

@@ -7,8 +7,10 @@ use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
     CoordinationStore, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
     ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeStateSummary, WorkerRunRecord, WorkerRunStatus,
+    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeStateSummary, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
@@ -25,11 +27,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use time::format_description::well_known::Rfc3339;
 use time::Duration;
 use time::OffsetDateTime;
 
 static NEXT_ENGINE_HANDLE: AtomicU64 = AtomicU64::new(1);
+static NEXT_SCHEDULED_RUN: AtomicU64 = AtomicU64::new(1);
+static NEXT_QUEUED_MESSAGE: AtomicU64 = AtomicU64::new(1);
+
+const SCHEDULED_WAKE_JOB_KIND: &str = "runtime.wake.session";
+const SCHEDULER_CLAIM_TTL_MS: u64 = 30_000;
 
 #[derive(Debug, Clone)]
 pub struct CoreEngine {
@@ -41,6 +49,17 @@ pub struct CoreEngine {
     body_projector: BodyProjector,
     action_executor: BrainActionExecutor,
     profile_tool_profiles: Arc<Mutex<HashMap<ProfileId, ToolProfile>>>,
+    scheduler_tick_lock: Arc<Mutex<()>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SchedulerTickReport {
+    pub stale_runs_expired: u32,
+    pub due_runs_claimed: u32,
+    pub wakes_requested: u32,
+    pub runs_completed: u32,
+    pub runs_skipped: u32,
+    pub runs_failed: u32,
 }
 
 #[derive(Debug, Default)]
@@ -80,6 +99,7 @@ impl CoreEngine {
             sessions,
             store,
             profile_tool_profiles: Arc::new(Mutex::new(HashMap::new())),
+            scheduler_tick_lock: Arc::new(Mutex::new(())),
         };
         engine.cleanup_orphaned_delegated_sessions()?;
         engine.expire_delegated_sessions()?;
@@ -148,6 +168,63 @@ impl CoreEngine {
         state.child_completions = self.store.delegated_completions_for_parent(session_id)?;
         state.fan_out_groups = self.store.fan_out_groups_for_parent(session_id)?;
         Ok(state)
+    }
+
+    pub fn prepare_body_state_for_wake(&self, session_id: &SessionId) -> CoreResult<BodyState> {
+        let mut state = self.project_body_state(session_id)?;
+        let queued = self.drain_body_follow_up_messages_for_wake(session_id)?;
+        state
+            .pending_messages
+            .extend(queued.into_iter().map(|record| record.message));
+        Ok(state)
+    }
+
+    pub fn enqueue_body_follow_up_message(
+        &self,
+        session_id: &SessionId,
+        from: AgentId,
+        body: impl Into<String>,
+        correlation_id: Option<String>,
+    ) -> CoreResult<QueuedMessageRecord> {
+        let session = self.sessions.get_session(session_id)?;
+        if !session_kind_can_wake(&session.kind) || session.status == SessionStatus::Archived {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "session {} cannot receive follow-up wakes",
+                    session.session_id
+                ),
+            ));
+        }
+        let state = self.body_projector.project(session_id)?;
+        let ttl_ms = state.delta_policy.queued_message_ttl_ms;
+        let now = self.now();
+        let expires_at = add_millis_to_iso(&now, ttl_ms as u64)?;
+        let record = QueuedMessageRecord {
+            message_id: next_queued_message_id(session_id),
+            owner_session_id: Some(session_id.clone()),
+            owner_agent_id: session.agent_id.clone(),
+            message: AgentMessage {
+                from,
+                to: session.agent_id.clone(),
+                body: body.into(),
+                correlation_id,
+            },
+            source_sequence: None,
+            enqueued_at: now.clone(),
+            expires_at,
+            ttl_ms,
+            delivery_attempts: 0,
+            state: QueuedMessageState::Pending,
+            terminal_at: None,
+            state_reason: None,
+        };
+        self.store.save_queued_message(&record)?;
+        self.enforce_body_follow_up_cap(session_id, state.delta_policy.max_queued_messages)?;
+        self.bus.publish(CoreEvent::BrainWakeRequested {
+            session_id: session_id.clone(),
+        })?;
+        Ok(record)
     }
 
     pub fn register_profile_tool_profile(
@@ -326,6 +403,98 @@ impl CoreEngine {
 
     pub fn reset_runtime_counters(&self, query: &RuntimeCounterQuery) -> CoreResult<u64> {
         self.store.reset_runtime_counters(query, self.now())
+    }
+
+    pub fn register_scheduled_wake_job(
+        &self,
+        job_id: impl Into<String>,
+        target_session_id: SessionId,
+        interval_ms: Option<u64>,
+        first_due_at: IsoTimestamp,
+    ) -> CoreResult<ScheduledJobRecord> {
+        let session = self.sessions.get_session(&target_session_id)?;
+        if !session_kind_can_wake(&session.kind) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "session {} cannot be woken by scheduler",
+                    session.session_id
+                ),
+            ));
+        }
+        let now = self.now();
+        let record = ScheduledJobRecord {
+            job_id: job_id.into(),
+            job_kind: SCHEDULED_WAKE_JOB_KIND.to_string(),
+            target_session_id: Some(target_session_id),
+            interval_ms,
+            next_due_at: Some(first_due_at),
+            payload_json: serde_json::json!({}),
+            status: ScheduledJobStatus::Active,
+            created_at: now.clone(),
+            updated_at: now,
+            paused_at: None,
+        };
+        self.store.upsert_scheduled_job(&record)?;
+        Ok(record)
+    }
+
+    pub fn pause_scheduled_job(&self, job_id: &str) -> CoreResult<()> {
+        self.store.pause_scheduled_job(job_id, &self.now())
+    }
+
+    pub fn resume_scheduled_job(&self, job_id: &str, next_due_at: IsoTimestamp) -> CoreResult<()> {
+        self.store
+            .resume_scheduled_job(job_id, &next_due_at, &self.now())
+    }
+
+    pub fn request_scheduled_job_run(
+        &self,
+        job_id: &str,
+    ) -> CoreResult<Option<ScheduledRunRecord>> {
+        let Some(job) = self.store.load_scheduled_job(job_id)? else {
+            return Ok(None);
+        };
+        if job.status == ScheduledJobStatus::Archived {
+            return Ok(None);
+        }
+        let run = self.claim_scheduled_run(&job, ScheduledRunTrigger::Manual, None)?;
+        self.finish_scheduler_run(run)
+    }
+
+    pub fn run_scheduler_tick(&self) -> CoreResult<SchedulerTickReport> {
+        let _guard = self.scheduler_tick_lock.lock().map_err(|_| {
+            CoreError::new(CoreErrorKind::InternalError, "scheduler tick lock poisoned")
+        })?;
+        let now = self.now();
+        let stale_runs = self.store.expire_stale_scheduled_runs(&now, &now)?;
+        let due_jobs = self.store.query_scheduled_jobs(&ScheduledJobQuery {
+            status: Some(ScheduledJobStatus::Active),
+            due_at_or_before: Some(now.clone()),
+            page: None,
+            ..ScheduledJobQuery::default()
+        })?;
+        let mut report = SchedulerTickReport {
+            stale_runs_expired: stale_runs.len() as u32,
+            ..SchedulerTickReport::default()
+        };
+        for job in due_jobs {
+            let run =
+                self.claim_scheduled_run(&job, ScheduledRunTrigger::Due, job.next_due_at.clone())?;
+            report.due_runs_claimed += 1;
+            if let Some(run) = self.finish_scheduler_run(run)? {
+                match run.status {
+                    ScheduledRunStatus::Completed => {
+                        report.runs_completed += 1;
+                        report.wakes_requested += 1;
+                    }
+                    ScheduledRunStatus::Skipped => report.runs_skipped += 1,
+                    ScheduledRunStatus::Failed => report.runs_failed += 1,
+                    _ => {}
+                }
+            }
+        }
+        Ok(report)
     }
 
     pub fn request_delegated_checkpoint(
@@ -533,6 +702,180 @@ impl CoreEngine {
                 .expect("formatting current UTC timestamp as RFC3339 should not fail"),
             ClockConfig::Fixed { at } => at.clone(),
         }
+    }
+
+    fn drain_body_follow_up_messages_for_wake(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        let now = self.now();
+        self.store.expire_queued_messages_at(&now)?;
+        let pending = self.store.load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: Some(session_id.clone()),
+            owner_agent_id: None,
+            limit: None,
+        })?;
+        let mut delivered = Vec::new();
+        for mut record in pending {
+            record.state = QueuedMessageState::Delivered;
+            record.delivery_attempts += 1;
+            record.terminal_at = Some(now.clone());
+            record.state_reason = Some("delivered_for_wake".to_string());
+            self.store.save_queued_message(&record)?;
+            delivered.push(record);
+        }
+        Ok(delivered)
+    }
+
+    fn enforce_body_follow_up_cap(
+        &self,
+        session_id: &SessionId,
+        max_queued_messages: u32,
+    ) -> CoreResult<()> {
+        let pending = self.store.load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: Some(session_id.clone()),
+            owner_agent_id: None,
+            limit: None,
+        })?;
+        let overflow = pending.len().saturating_sub(max_queued_messages as usize);
+        if overflow == 0 {
+            return Ok(());
+        }
+        let now = self.now();
+        for mut record in pending.into_iter().take(overflow) {
+            record.state = QueuedMessageState::Discarded;
+            record.terminal_at = Some(now.clone());
+            record.state_reason = Some("queue_cap_exceeded".to_string());
+            self.store.save_queued_message(&record)?;
+        }
+        Ok(())
+    }
+
+    fn claim_scheduled_run(
+        &self,
+        job: &ScheduledJobRecord,
+        trigger: ScheduledRunTrigger,
+        scheduled_for: Option<IsoTimestamp>,
+    ) -> CoreResult<ScheduledRunRecord> {
+        let now = self.now();
+        let claim_deadline_at = add_millis_to_iso(&now, SCHEDULER_CLAIM_TTL_MS)?;
+        let run = ScheduledRunRecord {
+            run_id: next_scheduled_run_id(&job.job_id),
+            job_id: job.job_id.clone(),
+            job_kind: job.job_kind.clone(),
+            target_session_id: job.target_session_id.clone(),
+            status: ScheduledRunStatus::Claimed,
+            trigger,
+            scheduled_for,
+            claimed_at: now.clone(),
+            claim_deadline_at,
+            completed_at: None,
+            error: None,
+            output_json: serde_json::json!({}),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        let next_due_at = if trigger == ScheduledRunTrigger::Due {
+            job.interval_ms
+                .map(|interval_ms| add_millis_to_iso(&now, interval_ms))
+                .transpose()?
+        } else {
+            None
+        };
+        self.store.claim_scheduled_run(&run, next_due_at.as_ref())?;
+        Ok(run)
+    }
+
+    fn finish_scheduler_run(
+        &self,
+        mut run: ScheduledRunRecord,
+    ) -> CoreResult<Option<ScheduledRunRecord>> {
+        if run.job_kind != SCHEDULED_WAKE_JOB_KIND {
+            let now = self.now();
+            run.status = ScheduledRunStatus::Skipped;
+            run.completed_at = Some(now.clone());
+            run.updated_at = now.clone();
+            run.error = Some(format!("unsupported scheduled job kind {}", run.job_kind));
+            run.output_json = serde_json::json!({ "wake_requested": false });
+            self.store.complete_scheduled_run(
+                &run.run_id,
+                run.status,
+                &now,
+                &run.output_json,
+                run.error.as_deref(),
+            )?;
+            return Ok(Some(run));
+        }
+        let Some(session_id) = &run.target_session_id else {
+            let now = self.now();
+            run.status = ScheduledRunStatus::Failed;
+            run.completed_at = Some(now.clone());
+            run.updated_at = now.clone();
+            run.error = Some("scheduled wake job has no target session".to_string());
+            run.output_json = serde_json::json!({ "wake_requested": false });
+            self.store.complete_scheduled_run(
+                &run.run_id,
+                run.status,
+                &now,
+                &run.output_json,
+                run.error.as_deref(),
+            )?;
+            return Ok(Some(run));
+        };
+        let session = match self.sessions.get_session(session_id) {
+            Ok(session) => session,
+            Err(error) if error.kind == CoreErrorKind::NotFound => {
+                let now = self.now();
+                run.status = ScheduledRunStatus::Skipped;
+                run.completed_at = Some(now.clone());
+                run.updated_at = now.clone();
+                run.error = Some(format!("target session {session_id} not found"));
+                run.output_json = serde_json::json!({ "wake_requested": false });
+                self.store.complete_scheduled_run(
+                    &run.run_id,
+                    run.status,
+                    &now,
+                    &run.output_json,
+                    run.error.as_deref(),
+                )?;
+                return Ok(Some(run));
+            }
+            Err(error) => return Err(error),
+        };
+        let now = self.now();
+        if session.status == SessionStatus::Archived || !session_kind_can_wake(&session.kind) {
+            run.status = ScheduledRunStatus::Skipped;
+            run.completed_at = Some(now.clone());
+            run.updated_at = now.clone();
+            run.error = Some(format!(
+                "target session {} is not wakeable",
+                session.session_id
+            ));
+            run.output_json = serde_json::json!({ "wake_requested": false });
+            self.store.complete_scheduled_run(
+                &run.run_id,
+                run.status,
+                &now,
+                &run.output_json,
+                run.error.as_deref(),
+            )?;
+            return Ok(Some(run));
+        }
+        self.bus.publish(CoreEvent::BrainWakeRequested {
+            session_id: session.session_id.clone(),
+        })?;
+        run.status = ScheduledRunStatus::Completed;
+        run.completed_at = Some(now.clone());
+        run.updated_at = now.clone();
+        run.output_json = serde_json::json!({
+            "wake_requested": true,
+            "session_id": session.session_id.0,
+        });
+        self.store
+            .complete_scheduled_run(&run.run_id, run.status, &now, &run.output_json, None)?;
+        Ok(Some(run))
     }
 
     fn spawn_delegated_workers(
@@ -1018,6 +1361,45 @@ pub fn delegated_agent_id(session_id: &SessionId) -> AgentId {
     AgentId::new(format!("agent:{session_id}"))
 }
 
+fn add_millis_to_iso(at: &IsoTimestamp, millis: u64) -> CoreResult<IsoTimestamp> {
+    let parsed = OffsetDateTime::parse(at, &Rfc3339).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("invalid scheduler timestamp {at}: {error}"),
+        )
+    })?;
+    let millis = i64::try_from(millis).map_err(|_| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("scheduler interval {millis}ms is too large"),
+        )
+    })?;
+    (parsed + Duration::milliseconds(millis))
+        .format(&Rfc3339)
+        .map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                format!("format scheduler timestamp: {error}"),
+            )
+        })
+}
+
+fn next_scheduled_run_id(job_id: &str) -> RunId {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let sequence = NEXT_SCHEDULED_RUN.fetch_add(1, Ordering::Relaxed);
+    RunId::new(format!("scheduled:{job_id}:{nanos}:{sequence}"))
+}
+
+fn next_queued_message_id(session_id: &SessionId) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let sequence = NEXT_QUEUED_MESSAGE.fetch_add(1, Ordering::Relaxed);
+    format!("follow-up:{session_id}:{nanos}:{sequence}")
+}
+
 fn delegated_run_status(status: WorkerRunStatus) -> DelegatedRunStatus {
     match status {
         WorkerRunStatus::Requested => DelegatedRunStatus::Requested,
@@ -1099,8 +1481,8 @@ mod tests {
     use rusty_crew_core_persistence::{
         AgentMessageQuery, CompletionPacketQuery, CoordinationStore, QueryPage,
         QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope,
-        RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, SessionQuery,
-        ToolCallPhase, WorkerRunQuery,
+        RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
+        ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
     };
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
@@ -1235,6 +1617,214 @@ mod tests {
             .unwrap();
 
         assert!(events.recv_timeout(Duration::from_millis(50)).is_err());
+    }
+
+    #[test]
+    fn scheduler_tick_requests_wake_and_records_terminal_run() {
+        let engine = test_engine();
+        let prime = engine
+            .create_session(session_config(
+                "prime-session",
+                "prime",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let (_subscription_id, events) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::BrainWakeRequested],
+                session_id: Some(prime.session_id.clone()),
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        engine
+            .register_scheduled_wake_job(
+                "wake-prime",
+                prime.session_id.clone(),
+                Some(60_000),
+                "2026-06-19T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        let report = engine.run_scheduler_tick().unwrap();
+
+        assert_eq!(report.due_runs_claimed, 1);
+        assert_eq!(report.wakes_requested, 1);
+        assert_eq!(report.runs_completed, 1);
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::BrainWakeRequested { session_id } if session_id == prime.session_id
+        ));
+        let store = CoordinationStore::open(engine.config.engine_data_dir.clone()).unwrap();
+        let runs = store
+            .query_scheduled_runs(&ScheduledRunQuery {
+                status: Some(ScheduledRunStatus::Completed),
+                target_session_id: Some(prime.session_id.clone()),
+                ..ScheduledRunQuery::default()
+            })
+            .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            store
+                .load_scheduled_job("wake-prime")
+                .unwrap()
+                .unwrap()
+                .next_due_at,
+            Some("2026-06-19T00:01:00Z".to_string())
+        );
+    }
+
+    #[test]
+    fn body_follow_up_queue_drains_once_at_wake_boundary() {
+        let engine = test_engine();
+        let prime = engine
+            .create_session(session_config(
+                "prime-session",
+                "prime",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let (_subscription_id, events) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::BrainWakeRequested],
+                session_id: Some(prime.session_id.clone()),
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        engine
+            .enqueue_body_follow_up_message(
+                &prime.session_id,
+                AgentId::new("operator"),
+                "arrived mid-turn",
+                Some("follow-up-1".to_string()),
+            )
+            .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::BrainWakeRequested { session_id } if session_id == prime.session_id
+        ));
+
+        let diagnostic = engine.project_body_state(&prime.session_id).unwrap();
+        assert!(diagnostic.pending_messages.is_empty());
+
+        let prepared = engine.prepare_body_state_for_wake(&prime.session_id).unwrap();
+        assert_eq!(
+            prepared
+                .pending_messages
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["arrived mid-turn"]
+        );
+        let second = engine.prepare_body_state_for_wake(&prime.session_id).unwrap();
+        assert!(second.pending_messages.is_empty());
+
+        let store = CoordinationStore::open(engine.config.engine_data_dir.clone()).unwrap();
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(prime.session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Delivered),
+                    owner_session_id: Some(prime.session_id),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn body_follow_up_queue_caps_and_expires_without_redelivery() {
+        let data_dir = unique_data_dir("follow-up-queue");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let prime = engine
+            .create_session(session_config(
+                "prime-session",
+                "prime",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        for index in 0..33 {
+            engine
+                .enqueue_body_follow_up_message(
+                    &prime.session_id,
+                    AgentId::new("operator"),
+                    format!("queued follow-up {index}"),
+                    Some(format!("follow-up-{index}")),
+                )
+                .unwrap();
+        }
+        let store = CoordinationStore::open(data_dir.clone()).unwrap();
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(prime.session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            32
+        );
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Discarded),
+                    owner_session_id: Some(prime.session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+
+        drop(engine);
+        let late_engine = CoreEngine::initialize(EngineConfig {
+            engine_data_dir: data_dir.to_string_lossy().to_string(),
+            clock: ClockConfig::Fixed {
+                at: "2026-06-19T00:00:06Z".to_string(),
+            },
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1000,
+        })
+        .unwrap();
+        let prepared = late_engine
+            .prepare_body_state_for_wake(&prime.session_id)
+            .unwrap();
+        assert!(prepared.pending_messages.is_empty());
+        let late_store = CoordinationStore::open(data_dir.clone()).unwrap();
+        assert_eq!(
+            late_store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Expired),
+                    owner_session_id: Some(prime.session_id),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            32
+        );
     }
 
     #[test]

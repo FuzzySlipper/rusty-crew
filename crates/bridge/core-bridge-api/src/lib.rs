@@ -23,6 +23,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "register_platform_adapter",
     "inject_external_event",
     "inject_den_data_update",
+    "enqueue_body_follow_up_message",
     "cancel_delegated_session",
     "request_delegated_checkpoint",
     "drain_delegated_sessions",

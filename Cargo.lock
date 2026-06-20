@@ -412,6 +412,7 @@ dependencies = [
  "rusty-crew-core-persistence",
  "rusty-crew-core-protocol",
  "rusty-crew-core-session",
+ "serde_json",
  "time",
 ]
 
