@@ -54,6 +54,28 @@ export interface ToolProfile {
   tools: ToolDescriptor[];
 }
 
+export type ToolCallSource = "local" | "mcp";
+
+export interface ToolCallPolicyMetadata {
+  allowed?: boolean;
+  denialReason?: string;
+  timeoutMs?: number;
+  cancelled?: boolean;
+  archiveCleanup?: boolean;
+}
+
+export interface ToolCallMetadata {
+  source: ToolCallSource;
+  adapterId?: AdapterId;
+  bindingId?: string;
+  serverNames: string[];
+  profileId?: ProfileId;
+  toolProfileKey?: string;
+  sourceToolName?: string;
+  catalogRevision?: string;
+  policy?: ToolCallPolicyMetadata;
+}
+
 export interface ResourceLimits {
   workdir?: string;
   maxDurationMs?: number;
@@ -313,6 +335,64 @@ export interface ChannelSubscriptionRecord {
   provenance: Record<string, unknown>;
 }
 
+export type McpTransportKind = "stdio" | "streamable_http" | "websocket";
+export type McpSurfaceStatus =
+  | "disconnected"
+  | "connecting"
+  | "active"
+  | "degraded"
+  | "archived";
+
+export interface McpBindingDiagnostics {
+  lastError?: string;
+  lastCheckedAt?: string;
+  notes?: string;
+}
+
+export interface McpBindingRecord {
+  bindingId: string;
+  adapterId: AdapterId;
+  agentId: AgentId;
+  instanceId?: AgentInstanceId;
+  sessionId?: SessionId;
+  profileId: ProfileId;
+  serverNames: string[];
+  endpointRef: string;
+  transport: McpTransportKind | string;
+  toolProfileKey: string;
+  discoveredToolRevision?: string;
+  status: ExternalBindingStatus;
+  degradedReason?: string;
+  diagnostics: McpBindingDiagnostics;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface McpSurfaceIdentity {
+  bindingId: string;
+  adapterId: AdapterId;
+  agentId: AgentId;
+  instanceId?: AgentInstanceId;
+  sessionId?: SessionId;
+  profileId: ProfileId;
+  serverNames: string[];
+  toolProfileKey: string;
+}
+
+export interface McpSurfaceDiagnostics {
+  bindingId: string;
+  status: McpSurfaceStatus;
+  transport: McpTransportKind | string;
+  serverNames: string[];
+  endpointRef: string;
+  toolProfileKey: string;
+  connectedAt?: string;
+  lastCheckedAt?: string;
+  lastError?: string;
+  reconnectAttempts: number;
+  optional: boolean;
+}
+
 export type CompletionStatus = "completed" | "failed" | "blocked" | "exhausted";
 
 export interface CompletionPacket {
@@ -396,8 +476,17 @@ export interface DelegatedFanOutGroup {
 export type BrainEvent =
   | { type: "started" }
   | { type: "text_delta"; text: string }
-  | { type: "tool_call_started"; toolName: string }
-  | { type: "tool_call_finished"; toolName: string; isError: boolean }
+  | {
+      type: "tool_call_started";
+      toolName: string;
+      metadata?: ToolCallMetadata;
+    }
+  | {
+      type: "tool_call_finished";
+      toolName: string;
+      isError: boolean;
+      metadata?: ToolCallMetadata;
+    }
   | { type: "finished" };
 
 export type BrainAction =

@@ -1038,7 +1038,8 @@ mod tests {
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
         DelegationLifecyclePhase, ExternalEventPayload, ProfileId, ProjectId, ResourceLimits,
-        SessionKind, ToolDescriptor, ToolProfile,
+        SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor,
+        ToolProfile,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1706,6 +1707,7 @@ mod tests {
                 session_id: SessionId::new("brain-session"),
                 event: BrainEvent::ToolCallStarted {
                     tool_name: "read_file".to_string(),
+                    metadata: None,
                 },
             })
             .unwrap();
@@ -1716,6 +1718,7 @@ mod tests {
                 event: BrainEvent::ToolCallFinished {
                     tool_name: "read_file".to_string(),
                     is_error: false,
+                    metadata: None,
                 },
             })
             .unwrap();
@@ -1729,6 +1732,44 @@ mod tests {
         assert_eq!(records[0].is_error, None);
         assert_eq!(records[1].phase, ToolCallPhase::Finished);
         assert_eq!(records[1].is_error, Some(false));
+    }
+
+    #[test]
+    fn persists_mcp_tool_metadata_without_payloads() {
+        let engine = test_engine();
+        let metadata = ToolCallMetadata {
+            source: ToolCallSource::Mcp,
+            adapter_id: Some(AdapterId::new("adapter-mcp")),
+            binding_id: Some("binding-alpha".to_string()),
+            server_names: vec!["filesystem".to_string()],
+            profile_id: Some(ProfileId::new("profile-alpha")),
+            tool_profile_key: Some("profile-tools".to_string()),
+            source_tool_name: Some("read_file".to_string()),
+            catalog_revision: Some("rev-1".to_string()),
+            policy: Some(ToolCallPolicyMetadata {
+                allowed: Some(true),
+                denial_reason: None,
+                timeout_ms: Some(5_000),
+                cancelled: Some(false),
+                archive_cleanup: Some(false),
+            }),
+        };
+
+        engine
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "wake-mcp".to_string(),
+                session_id: SessionId::new("brain-session"),
+                event: BrainEvent::ToolCallStarted {
+                    tool_name: "mcp_read_file".to_string(),
+                    metadata: Some(metadata.clone()),
+                },
+            })
+            .unwrap();
+
+        let records = engine.store.load_tool_call_history().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].tool_name, "mcp_read_file");
+        assert_eq!(records[0].metadata, Some(metadata));
     }
 
     #[test]
@@ -2153,6 +2194,7 @@ mod tests {
                 wake_id: "proof-child-wake".to_string(),
                 event: BrainEvent::ToolCallStarted {
                     tool_name: "patch".to_string(),
+                    metadata: None,
                 },
             })
             .unwrap();
@@ -2163,6 +2205,7 @@ mod tests {
                 event: BrainEvent::ToolCallFinished {
                     tool_name: "patch".to_string(),
                     is_error: false,
+                    metadata: None,
                 },
             })
             .unwrap();

@@ -1072,6 +1072,7 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    #[allow(clippy::too_many_arguments)]
     pub fn submit_brain_event(
         &self,
         wake_id: String,
@@ -1080,8 +1081,14 @@ impl NativeBridgeBinding {
         text: Option<String>,
         tool_name: Option<String>,
         is_error: Option<bool>,
+        metadata_json: Option<String>,
     ) -> napi::Result<JsEventReceipt> {
         let bridge = self.bridge()?;
+        let metadata = metadata_json
+            .as_deref()
+            .map(serde_json::from_str::<rusty_crew_core_bridge_api::ToolCallMetadata>)
+            .transpose()
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
         let event = match event_type.as_str() {
             "started" => rusty_crew_core_bridge_api::BrainEvent::Started,
             "text_delta" => rusty_crew_core_bridge_api::BrainEvent::TextDelta {
@@ -1094,6 +1101,7 @@ impl NativeBridgeBinding {
                         "tool_call_started requires toolName".to_string(),
                     )
                 })?,
+                metadata: metadata.clone(),
             },
             "tool_call_finished" => rusty_crew_core_bridge_api::BrainEvent::ToolCallFinished {
                 tool_name: tool_name.ok_or_else(|| {
@@ -1103,6 +1111,7 @@ impl NativeBridgeBinding {
                     )
                 })?,
                 is_error: is_error.unwrap_or(false),
+                metadata,
             },
             "finished" => rusty_crew_core_bridge_api::BrainEvent::Finished,
             other => {

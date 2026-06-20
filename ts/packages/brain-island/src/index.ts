@@ -180,6 +180,43 @@ export type {
   ToolRegistryDiagnosticsSummary,
 } from "./tool-registry-diagnostics.js";
 export {
+  integrateMcpToolsWithRegistry,
+  mcpCandidateToRegistryEntry,
+} from "./mcp-tool-registry-integration.js";
+export type {
+  McpNameCollisionPolicy,
+  McpRegistryIntegrationInput,
+  McpRegistryIntegrationReport,
+  McpToolRegistryEntry,
+} from "./mcp-tool-registry-integration.js";
+export { reloadMcpSurface } from "./mcp-surface-reload.js";
+export type {
+  McpSurfaceReloadInput,
+  McpSurfaceReloadReport,
+  McpToolDiff,
+} from "./mcp-surface-reload.js";
+export {
+  createMcpToolCallMetadata,
+  createMcpToolFinishedEvent,
+  createMcpToolStartedEvent,
+  evaluateMcpResourceHooks,
+} from "./mcp-tool-telemetry.js";
+export type {
+  McpResourceDenialReason,
+  McpResourceHookDecision,
+  McpResourceHookInput,
+  McpToolTelemetryInput,
+} from "./mcp-tool-telemetry.js";
+export { buildAdapterDiagnosticsProjection } from "./adapter-diagnostics.js";
+export type {
+  AdapterDiagnosticsInput,
+  AdapterDiagnosticsProjection,
+  AdapterHealthStatus,
+  ChannelAdapterBindingDiagnostics,
+  ChannelProjectionFailureRecord,
+  McpAdapterSurfaceDiagnostics,
+} from "./adapter-diagnostics.js";
+export {
   assertValidToolRegistry,
   buildToolInventory,
   createToolRegistry,

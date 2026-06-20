@@ -11,7 +11,7 @@ use rusty_crew_core_protocol::{
     DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
     FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId, ResourceLimits,
     RunId, SessionConfig, SessionHandle, SessionId, SessionIdentityRecord, SessionKind,
-    SessionState, SessionStatus, SourceSystemReference, TaskId, ToolProfile,
+    SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs;
@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 11;
+const CURRENT_SCHEMA_VERSION: i64 = 12;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -98,6 +98,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 11,
         description: "add per-agent external channel and MCP bindings",
         apply: migrate_v11_add_external_bindings,
+    },
+    SchemaMigration {
+        version: 12,
+        description: "add tool call metadata audit column",
+        apply: migrate_v12_add_tool_call_metadata,
     },
 ];
 
@@ -540,6 +545,7 @@ pub struct ToolCallRecord {
     pub tool_name: String,
     pub phase: ToolCallPhase,
     pub is_error: Option<bool>,
+    pub metadata: Option<ToolCallMetadata>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1328,7 +1334,7 @@ impl CoordinationStore {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT sequence, session_id, wake_id, tool_name, phase, is_error
+                "SELECT sequence, session_id, wake_id, tool_name, phase, is_error, metadata_json
                  FROM tool_call_history
                  ORDER BY sequence ASC",
             )
@@ -1344,6 +1350,11 @@ impl CoordinationStore {
                     tool_name: row.get(3)?,
                     phase: tool_call_phase_from_str(&phase)?,
                     is_error: row.get::<_, Option<i64>>(5)?.map(|value| value != 0),
+                    metadata: row
+                        .get::<_, Option<String>>(6)?
+                        .map(|value| from_json_text::<ToolCallMetadata>(&value))
+                        .transpose()
+                        .map_err(to_sql_error)?,
                 })
             })
             .map_err(|error| persistence_error("query tool call history", error))?;
@@ -1738,14 +1749,24 @@ impl CoordinationStore {
         wake_id: Option<&str>,
         event: &BrainEvent,
     ) -> CoreResult<()> {
-        let (tool_name, phase, is_error) = match event {
-            BrainEvent::ToolCallStarted { tool_name } => (tool_name, ToolCallPhase::Started, None),
+        let (tool_name, phase, is_error, metadata) = match event {
+            BrainEvent::ToolCallStarted {
+                tool_name,
+                metadata,
+            } => (tool_name, ToolCallPhase::Started, None, metadata),
             BrainEvent::ToolCallFinished {
                 tool_name,
                 is_error,
-            } => (tool_name, ToolCallPhase::Finished, Some(*is_error)),
+                metadata,
+            } => (
+                tool_name,
+                ToolCallPhase::Finished,
+                Some(*is_error),
+                metadata,
+            ),
             _ => return Ok(()),
         };
+        let metadata_json = metadata.as_ref().map(to_json_text).transpose()?;
         tx.execute(
             "INSERT OR REPLACE INTO tool_call_history (
                 sequence,
@@ -1753,8 +1774,9 @@ impl CoordinationStore {
                 wake_id,
                 tool_name,
                 phase,
-                is_error
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                is_error,
+                metadata_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 sequence as i64,
                 session_id.0,
@@ -1762,6 +1784,7 @@ impl CoordinationStore {
                 tool_name,
                 phase.as_str(),
                 is_error.map(|value| if value { 1_i64 } else { 0_i64 }),
+                metadata_json,
             ],
         )
         .map_err(|error| persistence_error("save tool call history", error))?;
@@ -2124,7 +2147,8 @@ fn migrate_v1_create_base_tables(tx: &rusqlite::Transaction<'_>) -> CoreResult<(
                 wake_id TEXT,
                 tool_name TEXT NOT NULL,
                 phase TEXT NOT NULL,
-                is_error INTEGER
+                is_error INTEGER,
+                metadata_json TEXT
             );
             ",
     )
@@ -2475,6 +2499,10 @@ fn migrate_v11_add_external_bindings(tx: &rusqlite::Transaction<'_>) -> CoreResu
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 11", error))
+}
+
+fn migrate_v12_add_tool_call_metadata(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    add_missing_column(tx, "tool_call_history", "metadata_json", "TEXT")
 }
 
 fn save_queued_message_in_tx(
@@ -5148,7 +5176,10 @@ mod tests {
         let store = CoordinationStore::open_file(&db_path).unwrap();
 
         assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(store.schema_migrations().unwrap().len(), 11);
+        assert_eq!(
+            store.schema_migrations().unwrap().len(),
+            SCHEMA_MIGRATIONS.len()
+        );
         assert_eq!(store.count_rows("sessions").unwrap(), 0);
 
         remove_temp_db(&db_path);
@@ -5820,6 +5851,7 @@ mod tests {
                     wake_id: Some("wake-tools".to_string()),
                     event: BrainEvent::ToolCallStarted {
                         tool_name: "read_file".to_string(),
+                        metadata: None,
                     },
                 },
             )
@@ -5833,6 +5865,7 @@ mod tests {
                     event: BrainEvent::ToolCallFinished {
                         tool_name: "read_file".to_string(),
                         is_error: true,
+                        metadata: None,
                     },
                 },
             )

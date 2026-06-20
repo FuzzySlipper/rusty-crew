@@ -262,6 +262,35 @@ pub struct ToolProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallSource {
+    Local,
+    Mcp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallPolicyMetadata {
+    pub allowed: Option<bool>,
+    pub denial_reason: Option<String>,
+    pub timeout_ms: Option<u32>,
+    pub cancelled: Option<bool>,
+    pub archive_cleanup: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallMetadata {
+    pub source: ToolCallSource,
+    pub adapter_id: Option<AdapterId>,
+    pub binding_id: Option<String>,
+    pub server_names: Vec<String>,
+    pub profile_id: Option<ProfileId>,
+    pub tool_profile_key: Option<String>,
+    pub source_tool_name: Option<String>,
+    pub catalog_revision: Option<String>,
+    pub policy: Option<ToolCallPolicyMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionConfig {
     pub session_id: SessionId,
     pub agent_id: AgentId,
@@ -575,9 +604,20 @@ pub struct BrainWakeAccepted {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BrainEvent {
     Started,
-    TextDelta { text: String },
-    ToolCallStarted { tool_name: String },
-    ToolCallFinished { tool_name: String, is_error: bool },
+    TextDelta {
+        text: String,
+    },
+    ToolCallStarted {
+        tool_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<ToolCallMetadata>,
+    },
+    ToolCallFinished {
+        tool_name: String,
+        is_error: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<ToolCallMetadata>,
+    },
     Finished,
 }
 

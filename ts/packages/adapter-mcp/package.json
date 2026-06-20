@@ -8,7 +8,11 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "smoke": "tsx src/smoke-mcp.ts"
+  },
   "dependencies": {
-    "@rusty-crew/contracts": "0.1.0"
+    "@rusty-crew/contracts": "0.1.0",
+    "typebox": "1.1.38"
   }
 }

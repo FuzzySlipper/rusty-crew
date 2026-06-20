@@ -36,6 +36,7 @@ import type {
   ShutdownSummary,
   SubscriptionHandle,
   TaskId,
+  ToolCallMetadata,
   Unit,
 } from "@rusty-crew/contracts";
 
@@ -88,6 +89,7 @@ interface NativeBridgeBinding {
     text?: string,
     toolName?: string,
     isError?: boolean,
+    metadataJson?: string,
   ): { accepted: boolean; sequence: number };
   injectExternalEvent(eventJson: Uint8Array): {
     accepted: boolean;
@@ -487,6 +489,7 @@ function createNativeBridgeModule(
         nativeEvent.text,
         nativeEvent.toolName,
         nativeEvent.isError,
+        nativeEvent.metadataJson,
       );
     },
     submitBrainActions: async (batch) => {
@@ -882,12 +885,21 @@ function toBrainEvent(event: RawBrainEvent): BrainEvent {
     case "text_delta":
       return { type: event.type, text: event.text };
     case "tool_call_started":
-      return { type: event.type, toolName: event.tool_name };
+      return {
+        type: event.type,
+        toolName: event.tool_name,
+        metadata: event.metadata
+          ? toToolCallMetadata(event.metadata)
+          : undefined,
+      };
     case "tool_call_finished":
       return {
         type: event.type,
         toolName: event.tool_name,
         isError: event.is_error,
+        metadata: event.metadata
+          ? toToolCallMetadata(event.metadata)
+          : undefined,
       };
   }
 }
@@ -897,6 +909,7 @@ function toNativeBrainEvent(event: BrainEvent): {
   text?: string;
   toolName?: string;
   isError?: boolean;
+  metadataJson?: string;
 } {
   switch (event.type) {
     case "started":
@@ -904,16 +917,71 @@ function toNativeBrainEvent(event: BrainEvent): {
     case "text_delta":
       return { eventType: event.type, text: event.text };
     case "tool_call_started":
-      return { eventType: event.type, toolName: event.toolName };
+      return {
+        eventType: event.type,
+        toolName: event.toolName,
+        metadataJson: event.metadata
+          ? JSON.stringify(toRawToolCallMetadata(event.metadata))
+          : undefined,
+      };
     case "tool_call_finished":
       return {
         eventType: event.type,
         toolName: event.toolName,
         isError: event.isError,
+        metadataJson: event.metadata
+          ? JSON.stringify(toRawToolCallMetadata(event.metadata))
+          : undefined,
       };
     case "finished":
       return { eventType: event.type };
   }
+}
+
+function toToolCallMetadata(metadata: RawToolCallMetadata): ToolCallMetadata {
+  return {
+    source: metadata.source,
+    adapterId: metadata.adapter_id as ToolCallMetadata["adapterId"],
+    bindingId: metadata.binding_id,
+    serverNames: metadata.server_names,
+    profileId: metadata.profile_id as ToolCallMetadata["profileId"],
+    toolProfileKey: metadata.tool_profile_key,
+    sourceToolName: metadata.source_tool_name,
+    catalogRevision: metadata.catalog_revision,
+    policy: metadata.policy
+      ? {
+          allowed: metadata.policy.allowed,
+          denialReason: metadata.policy.denial_reason,
+          timeoutMs: metadata.policy.timeout_ms,
+          cancelled: metadata.policy.cancelled,
+          archiveCleanup: metadata.policy.archive_cleanup,
+        }
+      : undefined,
+  };
+}
+
+function toRawToolCallMetadata(
+  metadata: ToolCallMetadata,
+): RawToolCallMetadata {
+  return {
+    source: metadata.source,
+    adapter_id: metadata.adapterId,
+    binding_id: metadata.bindingId,
+    server_names: metadata.serverNames,
+    profile_id: metadata.profileId,
+    tool_profile_key: metadata.toolProfileKey,
+    source_tool_name: metadata.sourceToolName,
+    catalog_revision: metadata.catalogRevision,
+    policy: metadata.policy
+      ? {
+          allowed: metadata.policy.allowed,
+          denial_reason: metadata.policy.denialReason,
+          timeout_ms: metadata.policy.timeoutMs,
+          cancelled: metadata.policy.cancelled,
+          archive_cleanup: metadata.policy.archiveCleanup,
+        }
+      : undefined,
+  };
 }
 
 type RawCoreEvent =
@@ -1020,6 +1088,35 @@ interface RawAgentMessage {
 type RawBrainEvent =
   | { type: "started" }
   | { type: "text_delta"; text: string }
-  | { type: "tool_call_started"; tool_name: string }
-  | { type: "tool_call_finished"; tool_name: string; is_error: boolean }
+  | {
+      type: "tool_call_started";
+      tool_name: string;
+      metadata?: RawToolCallMetadata;
+    }
+  | {
+      type: "tool_call_finished";
+      tool_name: string;
+      is_error: boolean;
+      metadata?: RawToolCallMetadata;
+    }
   | { type: "finished" };
+
+interface RawToolCallPolicyMetadata {
+  allowed?: boolean;
+  denial_reason?: string;
+  timeout_ms?: number;
+  cancelled?: boolean;
+  archive_cleanup?: boolean;
+}
+
+interface RawToolCallMetadata {
+  source: "local" | "mcp";
+  adapter_id?: string;
+  binding_id?: string;
+  server_names: string[];
+  profile_id?: string;
+  tool_profile_key?: string;
+  source_tool_name?: string;
+  catalog_revision?: string;
+  policy?: RawToolCallPolicyMetadata;
+}

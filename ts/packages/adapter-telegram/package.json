@@ -8,6 +8,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "smoke": "tsx src/smoke-telegram.ts"
+  },
   "dependencies": {
     "@rusty-crew/contracts": "0.1.0"
   }
