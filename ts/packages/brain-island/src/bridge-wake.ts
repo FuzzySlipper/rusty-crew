@@ -211,6 +211,7 @@ function toCoreEvent(event: RustCoreEventJson): CoreEvent {
       return {
         type: event.type,
         sessionId: event.session_id,
+        wakeId: event.wake_id,
         event: event.event,
       };
     case "brain_actions_accepted":
@@ -391,6 +392,7 @@ type RustCoreEventJson =
   | {
       type: "brain_event_observed";
       session_id: BodyState["session"]["sessionId"];
+      wake_id?: string;
       event: Extract<CoreEvent, { type: "brain_event_observed" }>["event"];
     }
   | {

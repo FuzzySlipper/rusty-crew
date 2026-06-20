@@ -314,7 +314,12 @@ export type CoreEvent =
   | { type: "external_event_injected"; event: ExternalEvent }
   | { type: "den_data_updated"; update: DenDataUpdate }
   | { type: "brain_wake_requested"; sessionId: SessionId }
-  | { type: "brain_event_observed"; sessionId: SessionId; event: BrainEvent }
+  | {
+      type: "brain_event_observed";
+      sessionId: SessionId;
+      wakeId?: string;
+      event: BrainEvent;
+    }
   | { type: "brain_actions_accepted"; sessionId: SessionId; count: number }
   | { type: "completion_packet_delivered"; packet: CompletionPacket };
 

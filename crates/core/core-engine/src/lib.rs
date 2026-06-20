@@ -227,6 +227,7 @@ impl CoreEngine {
         }
         let sequence = self.bus.publish(CoreEvent::BrainEventObserved {
             session_id: envelope.session_id,
+            wake_id: Some(envelope.wake_id),
             event: envelope.event,
         })?;
         Ok(EventReceipt {
@@ -1029,7 +1030,7 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_crew_core_persistence::CoordinationStore;
+    use rusty_crew_core_persistence::{CoordinationStore, ToolCallPhase};
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
@@ -1685,10 +1686,46 @@ mod tests {
         assert!(matches!(
             events.recv_timeout(Duration::from_secs(1)).unwrap(),
             CoreEvent::BrainEventObserved {
+                wake_id: Some(wake_id),
                 event: BrainEvent::TextDelta { .. },
                 ..
-            }
+            } if wake_id == "wake-1"
         ));
+    }
+
+    #[test]
+    fn persists_tool_call_telemetry_with_wake_context() {
+        let engine = test_engine();
+
+        engine
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "wake-tools".to_string(),
+                session_id: SessionId::new("brain-session"),
+                event: BrainEvent::ToolCallStarted {
+                    tool_name: "read_file".to_string(),
+                },
+            })
+            .unwrap();
+        engine
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "wake-tools".to_string(),
+                session_id: SessionId::new("brain-session"),
+                event: BrainEvent::ToolCallFinished {
+                    tool_name: "read_file".to_string(),
+                    is_error: false,
+                },
+            })
+            .unwrap();
+
+        let records = engine.store.load_tool_call_history().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].session_id, SessionId::new("brain-session"));
+        assert_eq!(records[0].wake_id.as_deref(), Some("wake-tools"));
+        assert_eq!(records[0].tool_name, "read_file");
+        assert_eq!(records[0].phase, ToolCallPhase::Started);
+        assert_eq!(records[0].is_error, None);
+        assert_eq!(records[1].phase, ToolCallPhase::Finished);
+        assert_eq!(records[1].is_error, Some(false));
     }
 
     #[test]

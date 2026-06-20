@@ -426,6 +426,7 @@ pub enum CoreEvent {
     },
     BrainEventObserved {
         session_id: SessionId,
+        wake_id: Option<String>,
         event: BrainEvent,
     },
     BrainActionsAccepted {

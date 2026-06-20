@@ -343,6 +343,7 @@ function toTsEvent(event: RustCoreEventJson): CoreEvent {
       return {
         type: event.type,
         sessionId: event.session_id as SessionId,
+        wakeId: event.wake_id,
         event: toTsBrainEvent(event.event),
       };
     case "brain_actions_accepted":
@@ -496,6 +497,7 @@ type RustCoreEventJson =
   | {
       type: "brain_event_observed";
       session_id: string;
+      wake_id?: string;
       event: RustBrainEventJson;
     }
   | { type: "brain_actions_accepted"; session_id: string; count: number }

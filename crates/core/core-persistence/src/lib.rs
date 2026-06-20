@@ -5,8 +5,8 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
-    AgentId, CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
-    DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, FanOutFailurePolicy,
+    AgentId, BrainEvent, CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind,
+    CoreResult, DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, FanOutFailurePolicy,
     FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ResourceLimits, RunId,
     SessionHandle, SessionId, SessionKind, SessionState, SessionStatus, TaskId, ToolProfile,
 };
@@ -26,6 +26,31 @@ pub struct CoordinationStore {
 pub struct PersistedEvent {
     pub sequence: u64,
     pub event: CoreEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCallRecord {
+    pub sequence: u64,
+    pub session_id: SessionId,
+    pub wake_id: Option<String>,
+    pub tool_name: String,
+    pub phase: ToolCallPhase,
+    pub is_error: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolCallPhase {
+    Started,
+    Finished,
+}
+
+impl ToolCallPhase {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Finished => "finished",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,6 +304,13 @@ impl CoordinationStore {
             CoreEvent::CompletionPacketDelivered { packet } => {
                 self.save_completion_packet_in_tx(&tx, sequence, packet)?;
             }
+            CoreEvent::BrainEventObserved {
+                session_id,
+                wake_id,
+                event,
+            } => {
+                self.save_tool_call_in_tx(&tx, sequence, session_id, wake_id.as_deref(), event)?;
+            }
             _ => {}
         }
 
@@ -306,6 +338,34 @@ impl CoordinationStore {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| persistence_error("load event history", error))
+    }
+
+    pub fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT sequence, session_id, wake_id, tool_name, phase, is_error
+                 FROM tool_call_history
+                 ORDER BY sequence ASC",
+            )
+            .map_err(|error| persistence_error("prepare tool call history", error))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let phase: String = row.get(4)?;
+                Ok(ToolCallRecord {
+                    sequence: row.get::<_, i64>(0)? as u64,
+                    session_id: SessionId(row.get(1)?),
+                    wake_id: row.get(2)?,
+                    tool_name: row.get(3)?,
+                    phase: tool_call_phase_from_str(&phase)?,
+                    is_error: row.get::<_, Option<i64>>(5)?.map(|value| value != 0),
+                })
+            })
+            .map_err(|error| persistence_error("query tool call history", error))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| persistence_error("load tool call history", error))
     }
 
     pub fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
@@ -589,7 +649,12 @@ impl CoordinationStore {
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         if !matches!(
             table,
-            "sessions" | "event_history" | "agent_messages" | "completion_packets" | "worker_runs"
+            "sessions"
+                | "event_history"
+                | "agent_messages"
+                | "completion_packets"
+                | "worker_runs"
+                | "tool_call_history"
         ) {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
@@ -677,6 +742,15 @@ impl CoordinationStore {
                 packet_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS tool_call_history (
+                sequence INTEGER PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                wake_id TEXT,
+                tool_name TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                is_error INTEGER
+            );
+
             INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
             ",
         )
@@ -729,6 +803,44 @@ impl CoordinationStore {
             ],
         )
         .map_err(|error| persistence_error("save completion packet", error))?;
+        Ok(())
+    }
+
+    fn save_tool_call_in_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        sequence: u64,
+        session_id: &SessionId,
+        wake_id: Option<&str>,
+        event: &BrainEvent,
+    ) -> CoreResult<()> {
+        let (tool_name, phase, is_error) = match event {
+            BrainEvent::ToolCallStarted { tool_name } => (tool_name, ToolCallPhase::Started, None),
+            BrainEvent::ToolCallFinished {
+                tool_name,
+                is_error,
+            } => (tool_name, ToolCallPhase::Finished, Some(*is_error)),
+            _ => return Ok(()),
+        };
+        tx.execute(
+            "INSERT OR REPLACE INTO tool_call_history (
+                sequence,
+                session_id,
+                wake_id,
+                tool_name,
+                phase,
+                is_error
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                sequence as i64,
+                session_id.0,
+                wake_id,
+                tool_name,
+                phase.as_str(),
+                is_error.map(|value| if value { 1_i64 } else { 0_i64 }),
+            ],
+        )
+        .map_err(|error| persistence_error("save tool call history", error))?;
         Ok(())
     }
 
@@ -792,6 +904,21 @@ fn worker_run_status_from_str(raw: &str) -> rusqlite::Result<WorkerRunStatus> {
             Box::new(CoreError::new(
                 CoreErrorKind::PersistenceFailure,
                 format!("unknown worker run status {other}"),
+            )),
+        )),
+    }
+}
+
+fn tool_call_phase_from_str(raw: &str) -> rusqlite::Result<ToolCallPhase> {
+    match raw {
+        "started" => Ok(ToolCallPhase::Started),
+        "finished" => Ok(ToolCallPhase::Finished),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unsupported tool call phase {other}"),
             )),
         )),
     }

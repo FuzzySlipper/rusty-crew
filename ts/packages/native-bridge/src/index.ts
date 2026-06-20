@@ -743,6 +743,7 @@ function toCoreEvent(event: RawCoreEvent): CoreEvent {
       return {
         type: event.type,
         sessionId: event.session_id,
+        wakeId: event.wake_id,
         event: toBrainEvent(event.event),
       };
     case "brain_actions_accepted":
@@ -902,6 +903,7 @@ type RawCoreEvent =
   | {
       type: "brain_event_observed";
       session_id: SessionId;
+      wake_id?: string;
       event: RawBrainEvent;
     }
   | {

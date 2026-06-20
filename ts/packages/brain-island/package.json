@@ -13,9 +13,19 @@
     "smoke:bridge-wake": "tsx src/smoke-bridge-wake.ts",
     "smoke:registered-bridge-wake": "tsx src/smoke-registered-bridge-wake.ts",
     "smoke:production-delegation-wake": "tsx src/smoke-production-delegation-wake.ts",
+    "smoke:production-local-tools-wake": "tsx src/smoke-production-local-tools-wake.ts",
+    "smoke:production-patch-wake": "tsx src/smoke-production-patch-wake.ts",
     "smoke:delegated-role-assembly": "tsx src/smoke-delegated-role-assembly.ts",
     "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts",
-    "smoke:delegated-slice": "tsx src/smoke-delegated-slice.ts"
+    "smoke:delegated-slice": "tsx src/smoke-delegated-slice.ts",
+    "smoke:tool-registry": "tsx src/smoke-tool-registry.ts",
+    "smoke:tool-registry-diagnostics": "tsx src/smoke-tool-registry-diagnostics.ts",
+    "smoke:tool-profile-selection": "tsx src/smoke-tool-profile-selection.ts",
+    "smoke:profile-loading": "tsx src/smoke-profile-loading.ts",
+    "smoke:profile-role-assembly": "tsx src/smoke-profile-role-assembly.ts",
+    "smoke:tool-session-selection": "tsx src/smoke-tool-session-selection.ts",
+    "smoke:local-code-tools": "tsx src/smoke-local-code-tools.ts",
+    "smoke:patch-tool": "tsx src/smoke-patch-tool.ts"
   },
   "piPackageSource": {
     "repository": "https://github.com/earendil-works/pi",

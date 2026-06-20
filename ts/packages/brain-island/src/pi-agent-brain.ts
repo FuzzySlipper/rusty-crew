@@ -18,6 +18,10 @@ import type {
   BrainWakeInput,
   BrainWakeResult,
 } from "./index.js";
+import {
+  resolveToolSession,
+  type PiAgentToolResolver,
+} from "./tool-session-selection.js";
 
 export type PiAgentLike = Pick<
   PiAgent,
@@ -26,11 +30,6 @@ export type PiAgentLike = Pick<
   Partial<Pick<PiAgent, "clearAllQueues">>;
 
 export type PiAgentFactory = (options: PiAgentOptions) => PiAgentLike;
-
-export type PiAgentToolResolver = (input: {
-  wake: BrainWakeInput;
-  tools: ToolDescriptor[];
-}) => PiAgentTool[];
 
 export interface PiAgentBrainOptions {
   createAgent: PiAgentFactory;
@@ -105,18 +104,7 @@ function resolveAllowedTools(
   input: BrainWakeInput,
   resolveTools: PiAgentToolResolver | undefined,
 ): PiAgentTool[] {
-  const allowedDescriptors = input.state.session.toolProfile.tools;
-  if (!resolveTools || allowedDescriptors.length === 0) {
-    return [];
-  }
-
-  const allowedNames = new Set(
-    allowedDescriptors.map((descriptor) => descriptor.name),
-  );
-  return resolveTools({
-    wake: input,
-    tools: allowedDescriptors,
-  }).filter((tool) => allowedNames.has(tool.name));
+  return resolveToolSession({ wake: input, resolveTools }).tools;
 }
 
 function toPiMessages(
