@@ -181,7 +181,12 @@ function summarizeCoreEvent(event: CoreEvent): string {
     case "session_archived":
       return `session archived ${event.sessionId}`;
     case "agent_message_routed":
+      if (event.message.correlationId?.startsWith("checkpoint:")) {
+        return `delegation checkpoint routed to ${event.message.to}`;
+      }
       return `agent message routed ${event.message.from} -> ${event.message.to}`;
+    case "delegation_lifecycle_observed":
+      return summarizeDelegationLifecycle(event.lifecycle);
     case "external_event_injected":
       return `external event injected from ${event.event.source}`;
     case "den_data_updated":
@@ -194,6 +199,31 @@ function summarizeCoreEvent(event: CoreEvent): string {
       return `brain accepted ${event.count} actions for ${event.sessionId}`;
     case "completion_packet_delivered":
       return `completion ${event.packet.status} for ${event.packet.sessionId}`;
+  }
+}
+
+function summarizeDelegationLifecycle(
+  lifecycle: Extract<
+    CoreEvent,
+    { type: "delegation_lifecycle_observed" }
+  >["lifecycle"],
+): string {
+  switch (lifecycle.phase) {
+    case "created":
+      return `delegation created ${lifecycle.delegatedSessionId} from ${lifecycle.parentSessionId}`;
+    case "wake_requested":
+      return `delegation wake requested for ${lifecycle.delegatedSessionId}`;
+    case "checkpoint_requested":
+      return `delegation checkpoint requested for ${lifecycle.delegatedSessionId}`;
+    case "completed":
+    case "failed":
+    case "blocked":
+    case "exhausted":
+      return `delegation ${lifecycle.phase} for ${lifecycle.delegatedSessionId}`;
+    case "timed_out":
+      return `delegation timed out for ${lifecycle.delegatedSessionId}`;
+    case "cancelled":
+      return `delegation cancelled for ${lifecycle.delegatedSessionId}`;
   }
 }
 

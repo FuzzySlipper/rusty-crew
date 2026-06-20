@@ -6,9 +6,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
     AgentId, CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
-    DelegatedCompletion, DelegationLineage, IsoTimestamp, ParentConsumptionPolicy, ProfileId,
-    ResourceLimits, RunId, SessionHandle, SessionId, SessionKind, SessionState, SessionStatus,
-    TaskId, ToolProfile,
+    DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, FanOutFailurePolicy,
+    FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ResourceLimits, RunId,
+    SessionHandle, SessionId, SessionKind, SessionState, SessionStatus, TaskId, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
@@ -28,12 +28,13 @@ pub struct PersistedEvent {
     pub event: CoreEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerRunStatus {
     Requested,
     SessionCreated,
     WakeRequested,
     Running,
+    CheckpointWaiting,
     Completed,
     Failed,
     Blocked,
@@ -49,6 +50,7 @@ impl WorkerRunStatus {
             Self::SessionCreated => "session_created",
             Self::WakeRequested => "wake_requested",
             Self::Running => "running",
+            Self::CheckpointWaiting => "checkpoint_waiting",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Blocked => "blocked",
@@ -56,6 +58,18 @@ impl WorkerRunStatus {
             Self::Cancelled => "cancelled",
             Self::Expired => "expired",
         }
+    }
+
+    pub const fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed
+                | Self::Failed
+                | Self::Blocked
+                | Self::Exhausted
+                | Self::Cancelled
+                | Self::Expired
+        )
     }
 }
 
@@ -74,6 +88,9 @@ pub struct WorkerRunRecord {
     pub source_action_index: u32,
     pub delegation_correlation_id: Option<String>,
     pub parent_consumption: ParentConsumptionPolicy,
+    pub fan_out_group_id: Option<String>,
+    pub fan_out_max_concurrency: Option<u32>,
+    pub fan_out_failure_policy: FanOutFailurePolicy,
 }
 
 impl CoordinationStore {
@@ -307,8 +324,11 @@ impl CoordinationStore {
                 source_wake_id,
                 source_action_index,
                 delegation_correlation_id,
-                parent_consumption
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                parent_consumption,
+                fan_out_group_id,
+                fan_out_max_concurrency,
+                fan_out_failure_policy
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 record.run_id.0.as_str(),
                 record.parent_session_id.0.as_str(),
@@ -329,6 +349,9 @@ impl CoordinationStore {
                 record.source_action_index as i64,
                 record.delegation_correlation_id.as_deref(),
                 parent_consumption_policy_as_str(&record.parent_consumption),
+                record.fan_out_group_id.as_deref(),
+                record.fan_out_max_concurrency.map(|value| value as i64),
+                fan_out_failure_policy_as_str(&record.fan_out_failure_policy),
             ],
         )
         .map_err(|error| persistence_error("save worker run", error))?;
@@ -351,7 +374,10 @@ impl CoordinationStore {
                 source_wake_id,
                 source_action_index,
                 delegation_correlation_id,
-                parent_consumption
+                parent_consumption,
+                fan_out_group_id,
+                fan_out_max_concurrency,
+                fan_out_failure_policy
              FROM worker_runs
              WHERE run_id = ?1",
             params![run_id.0.as_str()],
@@ -380,7 +406,10 @@ impl CoordinationStore {
                 source_wake_id,
                 source_action_index,
                 delegation_correlation_id,
-                parent_consumption
+                parent_consumption,
+                fan_out_group_id,
+                fan_out_max_concurrency,
+                fan_out_failure_policy
              FROM worker_runs
              WHERE delegated_session_id = ?1",
             params![delegated_session_id.0.as_str()],
@@ -408,6 +437,23 @@ impl CoordinationStore {
             ],
         )
         .map_err(|error| persistence_error("update worker run status", error))?;
+        Ok(())
+    }
+
+    pub fn update_worker_run_status(
+        &self,
+        run_id: &RunId,
+        status: WorkerRunStatus,
+        now: IsoTimestamp,
+    ) -> CoreResult<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE worker_runs
+             SET status = ?1, last_updated_at = ?2
+             WHERE run_id = ?3",
+            params![status.as_str(), now.as_str(), run_id.0.as_str()],
+        )
+        .map_err(|error| persistence_error("update worker run status by run id", error))?;
         Ok(())
     }
 
@@ -456,6 +502,88 @@ impl CoordinationStore {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| persistence_error("load delegated completions", error))
+    }
+
+    pub fn worker_runs_for_fan_out_group(
+        &self,
+        parent_session_id: &SessionId,
+        group_id: &str,
+    ) -> CoreResult<Vec<WorkerRunRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    run_id,
+                    session_id,
+                    delegated_session_id,
+                    parent_agent_id,
+                    profile_id,
+                    task_id,
+                    status,
+                    created_at,
+                    last_updated_at,
+                    source_wake_id,
+                    source_action_index,
+                    delegation_correlation_id,
+                    parent_consumption,
+                    fan_out_group_id,
+                    fan_out_max_concurrency,
+                    fan_out_failure_policy
+                 FROM worker_runs
+                 WHERE session_id = ?1 AND fan_out_group_id = ?2
+                 ORDER BY source_wake_id ASC, source_action_index ASC",
+            )
+            .map_err(|error| persistence_error("prepare worker runs for fan-out group", error))?;
+
+        let rows = stmt
+            .query_map(
+                params![parent_session_id.0.as_str(), group_id],
+                row_to_worker_run,
+            )
+            .map_err(|error| persistence_error("query worker runs for fan-out group", error))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| persistence_error("load worker runs for fan-out group", error))
+    }
+
+    pub fn fan_out_groups_for_parent(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> CoreResult<Vec<DelegatedFanOutGroup>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    run_id,
+                    session_id,
+                    delegated_session_id,
+                    parent_agent_id,
+                    profile_id,
+                    task_id,
+                    status,
+                    created_at,
+                    last_updated_at,
+                    source_wake_id,
+                    source_action_index,
+                    delegation_correlation_id,
+                    parent_consumption,
+                    fan_out_group_id,
+                    fan_out_max_concurrency,
+                    fan_out_failure_policy
+                 FROM worker_runs
+                 WHERE session_id = ?1 AND fan_out_group_id IS NOT NULL
+                 ORDER BY fan_out_group_id ASC, source_wake_id ASC, source_action_index ASC",
+            )
+            .map_err(|error| persistence_error("prepare fan-out groups", error))?;
+
+        let rows = stmt
+            .query_map(params![parent_session_id.0.as_str()], row_to_worker_run)
+            .map_err(|error| persistence_error("query fan-out groups", error))?;
+        let runs = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| persistence_error("load fan-out group runs", error))?;
+
+        Ok(aggregate_fan_out_groups(runs))
     }
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
@@ -535,7 +663,10 @@ impl CoordinationStore {
                 source_wake_id TEXT NOT NULL,
                 source_action_index INTEGER NOT NULL,
                 delegation_correlation_id TEXT,
-                parent_consumption TEXT NOT NULL DEFAULT 'await_completion'
+                parent_consumption TEXT NOT NULL DEFAULT 'await_completion',
+                fan_out_group_id TEXT,
+                fan_out_max_concurrency INTEGER,
+                fan_out_failure_policy TEXT NOT NULL DEFAULT 'fail_soft'
             );
 
             CREATE TABLE IF NOT EXISTS completion_packets (
@@ -561,6 +692,14 @@ impl CoordinationStore {
             "worker_runs",
             "parent_consumption",
             "TEXT NOT NULL DEFAULT 'await_completion'",
+        )?;
+        add_missing_column(&conn, "worker_runs", "fan_out_group_id", "TEXT")?;
+        add_missing_column(&conn, "worker_runs", "fan_out_max_concurrency", "INTEGER")?;
+        add_missing_column(
+            &conn,
+            "worker_runs",
+            "fan_out_failure_policy",
+            "TEXT NOT NULL DEFAULT 'fail_soft'",
         )?;
         Ok(())
     }
@@ -613,6 +752,7 @@ fn should_persist_event(event: &CoreEvent) -> bool {
 
 fn row_to_worker_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRunRecord> {
     let status: String = row.get(6)?;
+    let fan_out_failure_policy: String = row.get(15)?;
     Ok(WorkerRunRecord {
         run_id: RunId(row.get(0)?),
         parent_session_id: SessionId(row.get(1)?),
@@ -627,6 +767,9 @@ fn row_to_worker_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRunRecor
         source_action_index: row.get::<_, i64>(10)? as u32,
         delegation_correlation_id: row.get(11)?,
         parent_consumption: parent_consumption_policy_from_str(&row.get::<_, String>(12)?)?,
+        fan_out_group_id: row.get(13)?,
+        fan_out_max_concurrency: row.get::<_, Option<i64>>(14)?.map(|value| value as u32),
+        fan_out_failure_policy: fan_out_failure_policy_from_str(&fan_out_failure_policy)?,
     })
 }
 
@@ -636,6 +779,7 @@ fn worker_run_status_from_str(raw: &str) -> rusqlite::Result<WorkerRunStatus> {
         "session_created" => Ok(WorkerRunStatus::SessionCreated),
         "wake_requested" => Ok(WorkerRunStatus::WakeRequested),
         "running" => Ok(WorkerRunStatus::Running),
+        "checkpoint_waiting" => Ok(WorkerRunStatus::CheckpointWaiting),
         "completed" => Ok(WorkerRunStatus::Completed),
         "failed" => Ok(WorkerRunStatus::Failed),
         "blocked" => Ok(WorkerRunStatus::Blocked),
@@ -673,6 +817,108 @@ fn parent_consumption_policy_from_str(raw: &str) -> rusqlite::Result<ParentConsu
             )),
         )),
     }
+}
+
+fn fan_out_failure_policy_as_str(policy: &FanOutFailurePolicy) -> &'static str {
+    match policy {
+        FanOutFailurePolicy::FailFast => "fail_fast",
+        FanOutFailurePolicy::FailSoft => "fail_soft",
+    }
+}
+
+fn fan_out_failure_policy_from_str(raw: &str) -> rusqlite::Result<FanOutFailurePolicy> {
+    match raw {
+        "fail_fast" => Ok(FanOutFailurePolicy::FailFast),
+        "fail_soft" => Ok(FanOutFailurePolicy::FailSoft),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            15,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown fan-out failure policy {other}"),
+            )),
+        )),
+    }
+}
+
+fn aggregate_fan_out_groups(mut runs: Vec<WorkerRunRecord>) -> Vec<DelegatedFanOutGroup> {
+    runs.sort_by(|left, right| {
+        left.fan_out_group_id
+            .cmp(&right.fan_out_group_id)
+            .then_with(|| left.source_wake_id.cmp(&right.source_wake_id))
+            .then_with(|| left.source_action_index.cmp(&right.source_action_index))
+    });
+
+    let mut groups = Vec::new();
+    let mut index = 0;
+    while index < runs.len() {
+        let Some(group_id) = runs[index].fan_out_group_id.clone() else {
+            index += 1;
+            continue;
+        };
+        let mut group_runs = Vec::new();
+        while index < runs.len() && runs[index].fan_out_group_id.as_deref() == Some(&group_id) {
+            group_runs.push(runs[index].clone());
+            index += 1;
+        }
+        groups.push(aggregate_fan_out_group(group_id, &group_runs));
+    }
+    groups
+}
+
+fn aggregate_fan_out_group(group_id: String, runs: &[WorkerRunRecord]) -> DelegatedFanOutGroup {
+    let mut group = DelegatedFanOutGroup {
+        group_id,
+        total: runs.len() as u32,
+        pending: 0,
+        completed: 0,
+        failed: 0,
+        blocked: 0,
+        exhausted: 0,
+        cancelled: 0,
+        expired: 0,
+        max_concurrency: runs.iter().find_map(|run| run.fan_out_max_concurrency),
+        failure_policy: runs
+            .iter()
+            .find(|run| run.fan_out_failure_policy == FanOutFailurePolicy::FailFast)
+            .map(|run| run.fan_out_failure_policy.clone())
+            .unwrap_or(FanOutFailurePolicy::FailSoft),
+        status: FanOutGroupStatus::InProgress,
+    };
+
+    for run in runs {
+        match run.status {
+            WorkerRunStatus::Requested
+            | WorkerRunStatus::SessionCreated
+            | WorkerRunStatus::WakeRequested
+            | WorkerRunStatus::Running
+            | WorkerRunStatus::CheckpointWaiting => group.pending += 1,
+            WorkerRunStatus::Completed => group.completed += 1,
+            WorkerRunStatus::Failed => group.failed += 1,
+            WorkerRunStatus::Blocked => group.blocked += 1,
+            WorkerRunStatus::Exhausted => group.exhausted += 1,
+            WorkerRunStatus::Cancelled => group.cancelled += 1,
+            WorkerRunStatus::Expired => group.expired += 1,
+        }
+    }
+
+    let non_success =
+        group.failed + group.blocked + group.exhausted + group.cancelled + group.expired;
+    group.status = if group.pending > 0 {
+        if group.failure_policy == FanOutFailurePolicy::FailFast && non_success > 0 {
+            FanOutGroupStatus::FailedFast
+        } else {
+            FanOutGroupStatus::InProgress
+        }
+    } else if non_success == 0 {
+        FanOutGroupStatus::Completed
+    } else if group.failure_policy == FanOutFailurePolicy::FailFast {
+        FanOutGroupStatus::FailedFast
+    } else {
+        FanOutGroupStatus::PartialFailure
+    };
+
+    group
 }
 
 fn add_missing_column(

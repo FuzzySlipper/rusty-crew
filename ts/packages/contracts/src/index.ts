@@ -97,6 +97,7 @@ export type CoreEventKind =
   | "session_created"
   | "session_archived"
   | "agent_message_routed"
+  | "delegation_lifecycle_observed"
   | "external_event_injected"
   | "den_data_updated"
   | "brain_wake_requested"
@@ -139,6 +140,34 @@ export interface CompletionPacket {
 }
 
 export type ParentConsumptionPolicy = "await_completion" | "observe_only";
+export type FanOutFailurePolicy = "fail_fast" | "fail_soft";
+export type DelegationLifecyclePhase =
+  | "created"
+  | "wake_requested"
+  | "checkpoint_requested"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "exhausted"
+  | "timed_out"
+  | "cancelled";
+export type DelegatedRunStatus =
+  | "requested"
+  | "session_created"
+  | "wake_requested"
+  | "running"
+  | "checkpoint_waiting"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "exhausted"
+  | "cancelled"
+  | "expired";
+export type FanOutGroupStatus =
+  | "in_progress"
+  | "completed"
+  | "partial_failure"
+  | "failed_fast";
 
 export interface DelegatedCompletion {
   runId: RunId;
@@ -149,6 +178,37 @@ export interface DelegatedCompletion {
   correlationId?: string;
   parentConsumption: ParentConsumptionPolicy;
   packet: CompletionPacket;
+}
+
+export interface DelegationLifecycleEvent {
+  parentSessionId: SessionId;
+  delegatedSessionId: SessionId;
+  runId?: RunId;
+  phase: DelegationLifecyclePhase;
+  detail?: string;
+}
+
+export interface DelegatedSessionRuntimeStatus {
+  session: SessionState;
+  parentSessionId?: SessionId;
+  runId?: RunId;
+  runStatus?: DelegatedRunStatus;
+  terminal: boolean;
+}
+
+export interface DelegatedFanOutGroup {
+  groupId: string;
+  total: number;
+  pending: number;
+  completed: number;
+  failed: number;
+  blocked: number;
+  exhausted: number;
+  cancelled: number;
+  expired: number;
+  maxConcurrency?: number;
+  failurePolicy: FanOutFailurePolicy;
+  status: FanOutGroupStatus;
 }
 
 export type BrainEvent =
@@ -170,6 +230,8 @@ export type BrainAction =
       timeoutMs?: number;
       priority?: "low" | "normal" | "high";
       fanOutGroupId?: string;
+      fanOutMaxConcurrency?: number;
+      fanOutFailurePolicy?: FanOutFailurePolicy;
       correlationId?: string;
       parentConsumption?: ParentConsumptionPolicy;
     }
@@ -237,6 +299,7 @@ export interface BodyState {
   pendingMessages: AgentMessage[];
   recentEvents: CoreEvent[];
   childCompletions: DelegatedCompletion[];
+  fanOutGroups: DelegatedFanOutGroup[];
   deltaPolicy: BodyDeltaPolicy;
 }
 
@@ -244,6 +307,10 @@ export type CoreEvent =
   | { type: "session_created"; state: SessionState }
   | { type: "session_archived"; sessionId: SessionId }
   | { type: "agent_message_routed"; message: AgentMessage }
+  | {
+      type: "delegation_lifecycle_observed";
+      lifecycle: DelegationLifecycleEvent;
+    }
   | { type: "external_event_injected"; event: ExternalEvent }
   | { type: "den_data_updated"; update: DenDataUpdate }
   | { type: "brain_wake_requested"; sessionId: SessionId }
@@ -300,6 +367,10 @@ export const manifestOperationNames = [
   "register_platform_adapter",
   "inject_external_event",
   "inject_den_data_update",
+  "cancel_delegated_session",
+  "request_delegated_checkpoint",
+  "drain_delegated_sessions",
+  "delegated_session_status",
   "subscribe_events",
   "unsubscribe_events",
   "get_buffer",

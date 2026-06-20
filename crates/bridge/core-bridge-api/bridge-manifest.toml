@@ -116,6 +116,46 @@ output = "core_protocol::EventReceipt"
 errors = "core_protocol::CoreError"
 summary = "Inject Den product-data updates without making Den the coordination authority."
 
+# Delegation operator controls. These are typed control requests into the Rust
+# lifecycle state machine; adapters must not edit Den state as if it were
+# coordination state.
+
+[[operation]]
+name = "cancel_delegated_session"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionId"
+output = "core_protocol::SessionState"
+errors = "core_protocol::CoreError"
+summary = "Cancel one nonterminal delegated session through Rust lifecycle state."
+
+[[operation]]
+name = "request_delegated_checkpoint"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(parent_session_id: core_protocol::SessionId, delegated_session_id: core_protocol::SessionId, reason: String)"
+output = "core_protocol::EventReceipt"
+errors = "core_protocol::CoreError"
+summary = "Route a checkpoint request to a delegated session and mark the run checkpoint-waiting."
+
+[[operation]]
+name = "drain_delegated_sessions"
+surface = "stable"
+direction = "ts_to_rust"
+input = "Option<core_protocol::SessionId>"
+output = "Vec<core_protocol::SessionId>"
+errors = "core_protocol::CoreError"
+summary = "Cancel active delegated sessions, optionally scoped to one parent session."
+
+[[operation]]
+name = "delegated_session_status"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionId"
+output = "core_protocol::DelegatedSessionRuntimeStatus"
+errors = "core_protocol::CoreError"
+summary = "Read Rust-owned delegated session status for operator display."
+
 # Observability/event projection.
 
 [[operation]]

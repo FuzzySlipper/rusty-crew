@@ -64,6 +64,7 @@ const request: BrainWakeRequest = {
     ],
     recentEvents: [],
     childCompletions: [],
+    fanOutGroups: [],
     deltaPolicy: {
       mode: "frozen_snapshot_next_wake",
       queueOwner: "body",

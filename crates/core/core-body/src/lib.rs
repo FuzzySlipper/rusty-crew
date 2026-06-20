@@ -40,6 +40,7 @@ impl BodyProjector {
             pending_messages,
             recent_events,
             child_completions: Vec::new(),
+            fan_out_groups: Vec::new(),
             delta_policy: default_delta_policy(),
         })
     }
@@ -114,6 +115,8 @@ impl BrainActionExecutor {
                     timeout_ms: _,
                     priority: _,
                     fan_out_group_id: _,
+                    fan_out_max_concurrency: _,
+                    fan_out_failure_policy: _,
                     correlation_id: _,
                     parent_consumption: _,
                 } => {}
@@ -179,6 +182,7 @@ fn validate_action(batch_session_id: &SessionId, action: &BrainAction) -> CoreRe
             resource_limits,
             timeout_ms,
             fan_out_group_id,
+            fan_out_max_concurrency,
             correlation_id,
             ..
         } => {
@@ -236,6 +240,12 @@ fn validate_action(batch_session_id: &SessionId, action: &BrainAction) -> CoreRe
                 return Err(CoreError::new(
                     CoreErrorKind::InvalidInput,
                     "request_delegation fan_out_group_id must be non-empty when provided",
+                ));
+            }
+            if fan_out_max_concurrency.is_some_and(|value| value == 0) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "request_delegation fan_out_max_concurrency must be greater than zero when provided",
                 ));
             }
             if correlation_id

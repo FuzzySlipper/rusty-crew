@@ -110,6 +110,19 @@ impl SessionRegistry {
             })
     }
 
+    pub fn all_sessions(&self) -> CoreResult<Vec<SessionState>> {
+        let mut sessions = self
+            .inner
+            .sessions
+            .lock()
+            .map_err(|_| CoreError::new(CoreErrorKind::InternalError, "session lock poisoned"))?
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        sessions.sort_by_key(|state| state.handle.get());
+        Ok(sessions)
+    }
+
     pub fn delegated_sessions_for_parent(
         &self,
         parent_session_id: &SessionId,

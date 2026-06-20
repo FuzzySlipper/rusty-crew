@@ -15,6 +15,7 @@ import type {
   BrainWakeAccepted,
   BrainWakeRequest,
   CoreEvent,
+  DelegatedSessionRuntimeStatus,
   DenDataUpdate,
   EngineConfig,
   EngineHandle,
@@ -26,6 +27,7 @@ import type {
   PlatformAdapterRegistration,
   ProfileId,
   ProjectId,
+  RunId,
   RuntimeBufferHandle,
   RuntimeBufferView,
   SessionId,
@@ -95,6 +97,21 @@ interface NativeBridgeBinding {
     accepted: boolean;
     sequence: number;
   };
+  cancelDelegatedSession(delegatedSessionId: string): {
+    handle: number;
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: string;
+    status: string;
+  };
+  requestDelegatedCheckpoint(
+    parentSessionId: string,
+    delegatedSessionId: string,
+    reason: string,
+  ): { accepted: boolean; sequence: number };
+  drainDelegatedSessions(parentSessionId?: string): string[];
+  delegatedSessionStatusJson(delegatedSessionId: string): string;
   submitBrainTextDelta(
     wakeId: string,
     sessionId: string,
@@ -203,6 +220,15 @@ export interface BrainWakeSessionBufferInput {
   wakeId: string;
 }
 
+export interface NativeSessionStateSummary {
+  handle: number;
+  sessionId: string;
+  agentId: string;
+  profileId: string;
+  kind: string;
+  status: string;
+}
+
 export interface NativeBridgeModule {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
@@ -223,6 +249,20 @@ export interface NativeBridgeModule {
   ): Promise<PlatformAdapterHandle>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
+  cancelDelegatedSession(
+    delegatedSessionId: SessionId,
+  ): Promise<NativeSessionStateSummary>;
+  requestDelegatedCheckpoint(input: {
+    parentSessionId: SessionId;
+    delegatedSessionId: SessionId;
+    reason: string;
+  }): Promise<EventReceipt>;
+  drainDelegatedSessions(input?: {
+    parentSessionId?: SessionId;
+  }): Promise<SessionId[]>;
+  delegatedSessionStatus(
+    delegatedSessionId: SessionId,
+  ): Promise<DelegatedSessionRuntimeStatus>;
   subscribeEvents(subscription: EventSubscription): Promise<SubscriptionHandle>;
   unsubscribeEvents(handle: SubscriptionHandle): Promise<Unit>;
   drainSubscriptionEvents(
@@ -238,14 +278,7 @@ export interface NativeBridgeModule {
     agentId: string;
     profileId: string;
     kind: "full" | "worker" | "delegated";
-  }): Promise<{
-    handle: number;
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: string;
-    status: string;
-  }>;
+  }): Promise<NativeSessionStateSummary>;
   /**
    * Internal agent-to-agent routing trigger. This publishes through
    * CoreEngine::route_agent_message and runs scheduler evaluation.
@@ -294,6 +327,10 @@ export const nativeManifestOperationNames = [
   "register_platform_adapter",
   "inject_external_event",
   "inject_den_data_update",
+  "cancel_delegated_session",
+  "request_delegated_checkpoint",
+  "drain_delegated_sessions",
+  "delegated_session_status",
   "subscribe_events",
   "unsubscribe_events",
   "get_buffer",
@@ -323,6 +360,10 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     registerPlatformAdapter: unavailable("register_platform_adapter"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
+    cancelDelegatedSession: unavailable("cancel_delegated_session"),
+    requestDelegatedCheckpoint: unavailable("request_delegated_checkpoint"),
+    drainDelegatedSessions: unavailable("drain_delegated_sessions"),
+    delegatedSessionStatus: unavailable("delegated_session_status"),
     subscribeEvents: unavailable("subscribe_events"),
     unsubscribeEvents: unavailable("unsubscribe_events"),
     drainSubscriptionEvents: unavailable("subscribe_events"),
@@ -472,6 +513,22 @@ function createNativeBridgeModule(
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
     injectDenDataUpdate: async (update) =>
       binding.injectDenDataUpdate(encodeJson(toNativeDenDataUpdate(update))),
+    cancelDelegatedSession: async (delegatedSessionId) =>
+      binding.cancelDelegatedSession(delegatedSessionId),
+    requestDelegatedCheckpoint: async (input) =>
+      binding.requestDelegatedCheckpoint(
+        input.parentSessionId,
+        input.delegatedSessionId,
+        input.reason,
+      ),
+    drainDelegatedSessions: async (input) =>
+      binding.drainDelegatedSessions(input?.parentSessionId) as SessionId[],
+    delegatedSessionStatus: async (delegatedSessionId) =>
+      toDelegatedSessionRuntimeStatus(
+        JSON.parse(
+          binding.delegatedSessionStatusJson(delegatedSessionId),
+        ) as RawDelegatedSessionRuntimeStatus,
+      ),
     subscribeEvents: async (subscription) =>
       binding.subscribeEvents({
         eventKinds: subscription.eventKinds,
@@ -592,6 +649,8 @@ function toNativeBrainAction(action: BrainAction): unknown {
         timeout_ms: action.timeoutMs,
         priority: action.priority,
         fan_out_group_id: action.fanOutGroupId,
+        fan_out_max_concurrency: action.fanOutMaxConcurrency,
+        fan_out_failure_policy: action.fanOutFailurePolicy,
         correlation_id: action.correlationId,
         parent_consumption: action.parentConsumption,
       };
@@ -654,6 +713,11 @@ function toCoreEvent(event: RawCoreEvent): CoreEvent {
       return { type: event.type, sessionId: event.session_id };
     case "agent_message_routed":
       return { type: event.type, message: toAgentMessage(event.message) };
+    case "delegation_lifecycle_observed":
+      return {
+        type: event.type,
+        lifecycle: toDelegationLifecycleEvent(event.lifecycle),
+      };
     case "external_event_injected":
       return {
         type: event.type,
@@ -697,6 +761,30 @@ function toCoreEvent(event: RawCoreEvent): CoreEvent {
         },
       };
   }
+}
+
+function toDelegationLifecycleEvent(
+  lifecycle: RawDelegationLifecycleEvent,
+): Extract<CoreEvent, { type: "delegation_lifecycle_observed" }>["lifecycle"] {
+  return {
+    parentSessionId: lifecycle.parent_session_id,
+    delegatedSessionId: lifecycle.delegated_session_id,
+    runId: lifecycle.run_id,
+    phase: lifecycle.phase,
+    detail: lifecycle.detail,
+  };
+}
+
+function toDelegatedSessionRuntimeStatus(
+  status: RawDelegatedSessionRuntimeStatus,
+): DelegatedSessionRuntimeStatus {
+  return {
+    session: toSessionState(status.session),
+    parentSessionId: status.parent_session_id,
+    runId: status.run_id,
+    runStatus: status.run_status,
+    terminal: status.terminal,
+  };
 }
 
 function toSessionState(state: RawSessionState): SessionState {
@@ -787,6 +875,10 @@ type RawCoreEvent =
   | { type: "session_archived"; session_id: SessionId }
   | { type: "agent_message_routed"; message: RawAgentMessage }
   | {
+      type: "delegation_lifecycle_observed";
+      lifecycle: RawDelegationLifecycleEvent;
+    }
+  | {
       type: "external_event_injected";
       event: {
         adapter_id: AdapterId;
@@ -828,6 +920,25 @@ type RawCoreEvent =
         summary: string;
       };
     };
+
+interface RawDelegationLifecycleEvent {
+  parent_session_id: SessionId;
+  delegated_session_id: SessionId;
+  run_id?: RunId;
+  phase: Extract<
+    CoreEvent,
+    { type: "delegation_lifecycle_observed" }
+  >["lifecycle"]["phase"];
+  detail?: string;
+}
+
+interface RawDelegatedSessionRuntimeStatus {
+  session: RawSessionState;
+  parent_session_id?: SessionId;
+  run_id?: RunId;
+  run_status?: DelegatedSessionRuntimeStatus["runStatus"];
+  terminal: boolean;
+}
 
 interface RawSessionState {
   handle: number;

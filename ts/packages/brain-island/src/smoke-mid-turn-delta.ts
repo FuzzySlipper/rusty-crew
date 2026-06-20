@@ -150,6 +150,7 @@ await brain.wake({
     ],
     recentEvents: [],
     childCompletions: [],
+    fanOutGroups: [],
     deltaPolicy: {
       ...defaultBodyDeltaPolicy,
       queuedMessageTtlMs: 25,
@@ -202,6 +203,7 @@ await toolFilteredBrain.wake({
     pendingMessages: [],
     recentEvents: [],
     childCompletions: [],
+    fanOutGroups: [],
     deltaPolicy: defaultBodyDeltaPolicy,
   },
 });

@@ -10,8 +10,8 @@ use rusty_crew_core_bridge_api::{
     BrainWakeBufferInput, BrainWakeRequest, BridgeManifestSummary, CoreError, CoreErrorKind,
     CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt,
     EventSubscription, ExternalEvent, PlatformAdapterHandle, PlatformAdapterRegistration,
-    RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, ShutdownRequest, ShutdownSummary,
-    SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
+    RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest,
+    ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_engine::CoreEngine;
 use std::collections::{HashMap, HashSet};
@@ -166,6 +166,43 @@ impl NativeBridge {
 
     pub fn inject_den_data_update(&self, update: DenDataUpdate) -> CoreResult<EventReceipt> {
         self.engine()?.inject_den_data_update(update)
+    }
+
+    pub fn cancel_delegated_session(
+        &self,
+        delegated_session_id: SessionId,
+    ) -> CoreResult<rusty_crew_core_bridge_api::SessionState> {
+        self.engine()?
+            .cancel_delegated_session(&delegated_session_id)
+    }
+
+    pub fn request_delegated_checkpoint(
+        &self,
+        parent_session_id: SessionId,
+        delegated_session_id: SessionId,
+        reason: String,
+    ) -> CoreResult<EventReceipt> {
+        self.engine()?.request_delegated_checkpoint(
+            &parent_session_id,
+            &delegated_session_id,
+            reason,
+        )
+    }
+
+    pub fn drain_delegated_sessions(
+        &self,
+        parent_session_id: Option<SessionId>,
+    ) -> CoreResult<Vec<SessionId>> {
+        self.engine()?
+            .drain_delegated_sessions(parent_session_id.as_ref())
+    }
+
+    pub fn delegated_session_status(
+        &self,
+        delegated_session_id: SessionId,
+    ) -> CoreResult<rusty_crew_core_bridge_api::DelegatedSessionRuntimeStatus> {
+        self.engine()?
+            .delegated_session_status(&delegated_session_id)
     }
 
     pub fn subscribe_events(
@@ -851,6 +888,61 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn cancel_delegated_session(
+        &self,
+        delegated_session_id: String,
+    ) -> napi::Result<JsSessionState> {
+        let bridge = self.bridge()?;
+        let state = bridge
+            .cancel_delegated_session(SessionId::new(delegated_session_id))
+            .map_err(to_napi_error)?;
+        Ok(to_js_session_state(state))
+    }
+
+    #[napi]
+    pub fn request_delegated_checkpoint(
+        &self,
+        parent_session_id: String,
+        delegated_session_id: String,
+        reason: String,
+    ) -> napi::Result<JsEventReceipt> {
+        let bridge = self.bridge()?;
+        let receipt = bridge
+            .request_delegated_checkpoint(
+                SessionId::new(parent_session_id),
+                SessionId::new(delegated_session_id),
+                reason,
+            )
+            .map_err(to_napi_error)?;
+        Ok(to_js_event_receipt(receipt))
+    }
+
+    #[napi]
+    pub fn drain_delegated_sessions(
+        &self,
+        parent_session_id: Option<String>,
+    ) -> napi::Result<Vec<String>> {
+        let bridge = self.bridge()?;
+        let drained = bridge
+            .drain_delegated_sessions(parent_session_id.map(SessionId::new))
+            .map_err(to_napi_error)?;
+        Ok(drained.into_iter().map(|session_id| session_id.0).collect())
+    }
+
+    #[napi]
+    pub fn delegated_session_status_json(
+        &self,
+        delegated_session_id: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let status = bridge
+            .delegated_session_status(SessionId::new(delegated_session_id))
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&status)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
     pub fn subscribe_events(&self, subscription: JsEventSubscription) -> napi::Result<f64> {
         let mut bridge = self.bridge()?;
         let handle = bridge
@@ -1148,6 +1240,9 @@ fn parse_event_kind(raw: &str) -> napi::Result<rusty_crew_core_bridge_api::CoreE
         "session_created" => Ok(rusty_crew_core_bridge_api::CoreEventKind::SessionCreated),
         "session_archived" => Ok(rusty_crew_core_bridge_api::CoreEventKind::SessionArchived),
         "agent_message_routed" => Ok(rusty_crew_core_bridge_api::CoreEventKind::AgentMessageRouted),
+        "delegation_lifecycle_observed" => {
+            Ok(rusty_crew_core_bridge_api::CoreEventKind::DelegationLifecycleObserved)
+        }
         "external_event_injected" => {
             Ok(rusty_crew_core_bridge_api::CoreEventKind::ExternalEventInjected)
         }
@@ -1352,6 +1447,8 @@ mod tests {
                     timeout_ms: None,
                     priority: None,
                     fan_out_group_id: None,
+                    fan_out_max_concurrency: None,
+                    fan_out_failure_policy: None,
                     correlation_id: None,
                     parent_consumption: None,
                 }],

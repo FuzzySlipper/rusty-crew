@@ -154,6 +154,9 @@ try {
   const completionSubscription = await native.subscribeEvents({
     eventKinds: ["completion_packet_delivered"],
   });
+  const lifecycleSubscription = await native.subscribeEvents({
+    eventKinds: ["delegation_lifecycle_observed"],
+  });
 
   await native.routeAgentMessage(
     "human",
@@ -255,6 +258,26 @@ try {
     "prime consumed delegated completion and finished",
   );
   assert.equal(parentConsumedChildCompletion, true);
+  const lifecycleEvents = await native.drainSubscriptionEvents(
+    lifecycleSubscription,
+    8,
+  );
+  const lifecyclePhases = lifecycleEvents
+    .filter(
+      (
+        event,
+      ): event is Extract<
+        CoreEvent,
+        { type: "delegation_lifecycle_observed" }
+      > => event.type === "delegation_lifecycle_observed",
+    )
+    .map((event) => event.lifecycle.phase);
+  assert.deepEqual(lifecyclePhases, ["created", "wake_requested", "completed"]);
+  const delegatedStatus = await native.delegatedSessionStatus(
+    processedWakes[1]!,
+  );
+  assert.equal(delegatedStatus.runStatus, "completed");
+  assert.equal(delegatedStatus.terminal, true);
   const counts = {
     sessions: await native.countRows("sessions"),
     workerRuns: await native.countRows("worker_runs"),
@@ -266,6 +289,7 @@ try {
 
   await native.unsubscribeEvents(wakeSubscription);
   await native.unsubscribeEvents(completionSubscription);
+  await native.unsubscribeEvents(lifecycleSubscription);
 
   console.log(
     JSON.stringify(
@@ -274,6 +298,8 @@ try {
         childCompletionSummary: childCompletion?.packet.summary,
         parentCompletionSummary: parentCompletion?.packet.summary,
         parentConsumedChildCompletion,
+        lifecyclePhases,
+        delegatedRunStatus: delegatedStatus.runStatus,
         counts,
       },
       null,

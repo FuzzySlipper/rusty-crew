@@ -7,6 +7,7 @@ import type {
   BrainWakeAccepted,
   BrainWakeRequest,
   CoreEvent,
+  DelegatedSessionRuntimeStatus,
   DenDataUpdate,
   EngineConfig,
   EngineHandle,
@@ -16,6 +17,7 @@ import type {
   ManifestOperationName,
   PlatformAdapterHandle,
   PlatformAdapterRegistration,
+  SessionId,
   RuntimeBufferHandle,
   RuntimeBufferView,
   ShutdownRequest,
@@ -84,6 +86,34 @@ export class CoreBridge {
 
   async injectExternalEvent(event: ExternalEvent): Promise<EventReceipt> {
     return this.native.injectExternalEvent(event);
+  }
+
+  async cancelDelegatedSession(
+    delegatedSessionId: SessionId,
+  ): Promise<
+    Awaited<ReturnType<NativeBridgeModule["cancelDelegatedSession"]>>
+  > {
+    return this.native.cancelDelegatedSession(delegatedSessionId);
+  }
+
+  async requestDelegatedCheckpoint(input: {
+    parentSessionId: SessionId;
+    delegatedSessionId: SessionId;
+    reason: string;
+  }): Promise<EventReceipt> {
+    return this.native.requestDelegatedCheckpoint(input);
+  }
+
+  async drainDelegatedSessions(input?: {
+    parentSessionId?: SessionId;
+  }): Promise<SessionId[]> {
+    return this.native.drainDelegatedSessions(input);
+  }
+
+  async delegatedSessionStatus(
+    delegatedSessionId: SessionId,
+  ): Promise<DelegatedSessionRuntimeStatus> {
+    return this.native.delegatedSessionStatus(delegatedSessionId);
   }
 
   async subscribeEvents(

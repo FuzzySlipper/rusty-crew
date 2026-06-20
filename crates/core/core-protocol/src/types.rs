@@ -172,6 +172,13 @@ pub enum ParentConsumptionPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FanOutFailurePolicy {
+    FailFast,
+    FailSoft,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
@@ -232,6 +239,7 @@ pub enum CoreEventKind {
     SessionCreated,
     SessionArchived,
     AgentMessageRouted,
+    DelegationLifecycleObserved,
     ExternalEventInjected,
     DenDataUpdated,
     BrainWakeRequested,
@@ -246,6 +254,7 @@ impl CoreEventKind {
             CoreEvent::SessionCreated { .. } => Self::SessionCreated,
             CoreEvent::SessionArchived { .. } => Self::SessionArchived,
             CoreEvent::AgentMessageRouted { .. } => Self::AgentMessageRouted,
+            CoreEvent::DelegationLifecycleObserved { .. } => Self::DelegationLifecycleObserved,
             CoreEvent::ExternalEventInjected { .. } => Self::ExternalEventInjected,
             CoreEvent::DenDataUpdated { .. } => Self::DenDataUpdated,
             CoreEvent::BrainWakeRequested { .. } => Self::BrainWakeRequested,
@@ -319,6 +328,79 @@ pub struct DelegatedCompletion {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedFanOutGroup {
+    pub group_id: String,
+    pub total: u32,
+    pub pending: u32,
+    pub completed: u32,
+    pub failed: u32,
+    pub blocked: u32,
+    pub exhausted: u32,
+    pub cancelled: u32,
+    pub expired: u32,
+    pub max_concurrency: Option<u32>,
+    pub failure_policy: FanOutFailurePolicy,
+    pub status: FanOutGroupStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FanOutGroupStatus {
+    InProgress,
+    Completed,
+    PartialFailure,
+    FailedFast,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegationLifecyclePhase {
+    Created,
+    WakeRequested,
+    CheckpointRequested,
+    Completed,
+    Failed,
+    Blocked,
+    Exhausted,
+    TimedOut,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegationLifecycleEvent {
+    pub parent_session_id: SessionId,
+    pub delegated_session_id: SessionId,
+    pub run_id: Option<RunId>,
+    pub phase: DelegationLifecyclePhase,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegatedRunStatus {
+    Requested,
+    SessionCreated,
+    WakeRequested,
+    Running,
+    CheckpointWaiting,
+    Completed,
+    Failed,
+    Blocked,
+    Exhausted,
+    Cancelled,
+    Expired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedSessionRuntimeStatus {
+    pub session: SessionState,
+    pub parent_session_id: Option<SessionId>,
+    pub run_id: Option<RunId>,
+    pub run_status: Option<DelegatedRunStatus>,
+    pub terminal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoreEvent {
     SessionCreated {
@@ -329,6 +411,9 @@ pub enum CoreEvent {
     },
     AgentMessageRouted {
         message: AgentMessage,
+    },
+    DelegationLifecycleObserved {
+        lifecycle: DelegationLifecycleEvent,
     },
     ExternalEventInjected {
         event: ExternalEvent,
@@ -358,6 +443,7 @@ pub struct BodyState {
     pub pending_messages: Vec<AgentMessage>,
     pub recent_events: Vec<CoreEvent>,
     pub child_completions: Vec<DelegatedCompletion>,
+    pub fan_out_groups: Vec<DelegatedFanOutGroup>,
     pub delta_policy: BodyDeltaPolicy,
 }
 
@@ -429,6 +515,8 @@ pub enum BrainAction {
         timeout_ms: Option<u32>,
         priority: Option<DelegationPriority>,
         fan_out_group_id: Option<String>,
+        fan_out_max_concurrency: Option<u32>,
+        fan_out_failure_policy: Option<FanOutFailurePolicy>,
         correlation_id: Option<String>,
         parent_consumption: Option<ParentConsumptionPolicy>,
     },

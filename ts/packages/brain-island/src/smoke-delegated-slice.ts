@@ -232,6 +232,7 @@ async function projectBodyState(sessionId: SessionId): Promise<BodyState> {
     pendingMessages: raw.pending_messages.map(toTsMessage),
     recentEvents: raw.recent_events.map(toTsEvent),
     childCompletions: raw.child_completions.map(toTsDelegatedCompletion),
+    fanOutGroups: raw.fan_out_groups.map(toTsDelegatedFanOutGroup),
     deltaPolicy: raw.delta_policy
       ? {
           mode: raw.delta_policy.mode,
@@ -259,6 +260,25 @@ function toTsDelegatedCompletion(
       status: completion.packet.status,
       summary: completion.packet.summary,
     },
+  };
+}
+
+function toTsDelegatedFanOutGroup(
+  group: RustDelegatedFanOutGroupJson,
+): BodyState["fanOutGroups"][number] {
+  return {
+    groupId: group.group_id,
+    total: group.total,
+    pending: group.pending,
+    completed: group.completed,
+    failed: group.failed,
+    blocked: group.blocked,
+    exhausted: group.exhausted,
+    cancelled: group.cancelled,
+    expired: group.expired,
+    maxConcurrency: group.max_concurrency,
+    failurePolicy: group.failure_policy,
+    status: group.status,
   };
 }
 
@@ -304,6 +324,19 @@ function toTsEvent(event: RustCoreEventJson): CoreEvent {
       };
     case "agent_message_routed":
       return { type: event.type, message: toTsMessage(event.message) };
+    case "delegation_lifecycle_observed":
+      return {
+        type: event.type,
+        lifecycle: {
+          parentSessionId: event.lifecycle.parent_session_id as SessionId,
+          delegatedSessionId: event.lifecycle.delegated_session_id as SessionId,
+          runId: event.lifecycle.run_id as
+            | BodyState["childCompletions"][number]["runId"]
+            | undefined,
+          phase: event.lifecycle.phase,
+          detail: event.lifecycle.detail,
+        },
+      };
     case "brain_wake_requested":
       return { type: event.type, sessionId: event.session_id as SessionId };
     case "brain_event_observed":
@@ -369,6 +402,7 @@ interface RustBodyStateJson {
   pending_messages: RustAgentMessageJson[];
   recent_events: RustCoreEventJson[];
   child_completions: RustDelegatedCompletionJson[];
+  fan_out_groups: RustDelegatedFanOutGroupJson[];
   delta_policy?: {
     mode: "frozen_snapshot_next_wake";
     queue_owner: "body";
@@ -420,6 +454,21 @@ interface RustDelegatedCompletionJson {
   };
 }
 
+interface RustDelegatedFanOutGroupJson {
+  group_id: string;
+  total: number;
+  pending: number;
+  completed: number;
+  failed: number;
+  blocked: number;
+  exhausted: number;
+  cancelled: number;
+  expired: number;
+  max_concurrency?: number;
+  failure_policy: BodyState["fanOutGroups"][number]["failurePolicy"];
+  status: BodyState["fanOutGroups"][number]["status"];
+}
+
 interface RustAgentMessageJson {
   from: string;
   to: string;
@@ -430,6 +479,19 @@ interface RustAgentMessageJson {
 type RustCoreEventJson =
   | { type: "session_created"; state: RustSessionStateJson }
   | { type: "agent_message_routed"; message: RustAgentMessageJson }
+  | {
+      type: "delegation_lifecycle_observed";
+      lifecycle: {
+        parent_session_id: string;
+        delegated_session_id: string;
+        run_id?: string;
+        phase: Extract<
+          CoreEvent,
+          { type: "delegation_lifecycle_observed" }
+        >["lifecycle"]["phase"];
+        detail?: string;
+      };
+    }
   | { type: "brain_wake_requested"; session_id: string }
   | {
       type: "brain_event_observed";

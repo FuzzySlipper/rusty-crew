@@ -6,6 +6,8 @@ import type {
   EventReceipt,
   ExternalEvent,
   ProjectId,
+  RunId,
+  SessionId,
 } from "@rusty-crew/contracts";
 import { createDenAdapter, createMemoryDenProjectionSink } from "./index.js";
 
@@ -62,6 +64,21 @@ const projectionResult = await adapter.projectEvent({
 
 assert.equal(projectionResult.accepted, true);
 assert.equal(projectionSink.projections.length, 1);
+
+const lifecycleProjection = await adapter.projectEvent({
+  type: "delegation_lifecycle_observed",
+  lifecycle: {
+    parentSessionId: "planner-session" as SessionId,
+    delegatedSessionId: "planner-session:delegated:wake:0" as SessionId,
+    runId: "wake:0" as RunId,
+    phase: "cancelled",
+  },
+});
+
+assert.equal(lifecycleProjection.accepted, true);
+const lifecycleSummary = projectionSink.projections.at(-1)?.summary;
+assert.ok(lifecycleSummary);
+assert.match(lifecycleSummary, /delegation cancelled/);
 
 projectionSink.failNext(new Error("simulated Den outage"));
 const droppedProjection = await adapter.projectEvent({
