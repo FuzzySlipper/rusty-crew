@@ -1,13 +1,14 @@
 //! Coordination engine composition.
 
-use rusty_crew_core_body::{BodyProjector, BrainActionExecutor};
+use rusty_crew_core_body::{session_kind_can_wake, BodyProjector, BrainActionExecutor};
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::CoordinationStore;
 use rusty_crew_core_protocol::{
-    ActionBatchReceipt, BodyState, BrainActionBatch, BrainEventEnvelope, ClockConfig, CoreError,
-    CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt,
-    EventSubscription, ExternalEvent, IsoTimestamp, SessionConfig, SessionId, SessionState,
-    SessionStatus, ShutdownSummary,
+    ActionBatchReceipt, AgentId, AgentMessage, BodyState, BrainAction, BrainActionBatch,
+    BrainEventEnvelope, ClockConfig, CoreError, CoreErrorKind, CoreEvent, CoreResult,
+    DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
+    IsoTimestamp, ResourceLimits, SessionConfig, SessionId, SessionKind, SessionState,
+    SessionStatus, ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -119,6 +120,7 @@ impl CoreEngine {
         }
 
         self.store.save_worker_runs_requested(&batch, self.now())?;
+        self.spawn_delegated_workers(&session, &batch)?;
         self.action_executor.execute(batch)
     }
 
@@ -151,6 +153,10 @@ impl CoreEngine {
         })
     }
 
+    pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
+        self.store.count_rows(table)
+    }
+
     pub fn shutdown(self) -> CoreResult<ShutdownSummary> {
         Ok(ShutdownSummary {
             engine: self.handle,
@@ -165,6 +171,70 @@ impl CoreEngine {
             ClockConfig::Fixed { at } => at.clone(),
         }
     }
+
+    fn spawn_delegated_workers(
+        &self,
+        parent: &SessionState,
+        batch: &BrainActionBatch,
+    ) -> CoreResult<()> {
+        for (index, action) in batch.actions.iter().enumerate() {
+            let BrainAction::RequestDelegation {
+                profile_id, prompt, ..
+            } = action
+            else {
+                continue;
+            };
+
+            let session_id = delegated_session_id(&batch.session_id, &batch.wake_id, index);
+            let agent_id = delegated_agent_id(&session_id);
+            let state = self.sessions.create_session(
+                SessionConfig {
+                    session_id: session_id.clone(),
+                    agent_id: agent_id.clone(),
+                    profile_id: profile_id.clone(),
+                    kind: SessionKind::Delegated,
+                    resource_limits: ResourceLimits {
+                        workdir: None,
+                        max_duration_ms: None,
+                        max_delegation_depth: Some(0),
+                    },
+                    tool_profile: ToolProfile { tools: Vec::new() },
+                },
+                self.now(),
+            )?;
+            self.store.save_session(&state)?;
+            self.bus.publish(CoreEvent::SessionCreated {
+                state: state.clone(),
+            })?;
+            self.bus.publish(CoreEvent::AgentMessageRouted {
+                message: AgentMessage {
+                    from: parent.agent_id.clone(),
+                    to: agent_id,
+                    body: prompt.clone(),
+                    correlation_id: Some(format!("delegation:{}:{index}", batch.wake_id)),
+                },
+            })?;
+            if session_kind_can_wake(&state.kind) {
+                self.bus.publish(CoreEvent::BrainWakeRequested {
+                    session_id: state.session_id,
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub fn delegated_session_id(
+    parent_session_id: &SessionId,
+    wake_id: &str,
+    index: usize,
+) -> SessionId {
+    SessionId::new(format!("{parent_session_id}:delegated:{wake_id}:{index}"))
+}
+
+pub fn delegated_agent_id(session_id: &SessionId) -> AgentId {
+    AgentId::new(format!("agent:{session_id}"))
 }
 
 #[cfg(test)]
@@ -299,6 +369,94 @@ mod tests {
             .recent_events
             .iter()
             .any(|event| matches!(event, CoreEvent::CompletionPacketDelivered { .. })));
+    }
+
+    #[test]
+    fn request_delegation_creates_and_wakes_worker_session() {
+        let data_dir = unique_data_dir("delegated-slice");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let (_subscription_id, events) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![
+                    CoreEventKind::SessionCreated,
+                    CoreEventKind::AgentMessageRouted,
+                    CoreEventKind::BrainWakeRequested,
+                    CoreEventKind::BrainActionsAccepted,
+                    CoreEventKind::CompletionPacketDelivered,
+                ],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        let receipt = engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![BrainAction::RequestDelegation {
+                    profile_id: ProfileId::new("coder-profile"),
+                    task_id: Some(rusty_crew_core_protocol::TaskId::new("2772")),
+                    prompt: "complete the tiny delegated slice".to_string(),
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(receipt.accepted_actions, 1);
+        let delegated_session_id = delegated_session_id(&planner.session_id, "planner-wake", 0);
+        let delegated = engine.get_session(&delegated_session_id).unwrap();
+        assert_eq!(delegated.kind, SessionKind::Delegated);
+        assert_eq!(delegated.profile_id, ProfileId::new("coder-profile"));
+
+        let body = engine.project_body_state(&delegated_session_id).unwrap();
+        assert_eq!(body.pending_messages.len(), 1);
+        assert_eq!(
+            body.pending_messages[0].body,
+            "complete the tiny delegated slice"
+        );
+
+        let mut observed_wake = false;
+        for _ in 0..4 {
+            if matches!(
+                events.recv_timeout(Duration::from_secs(1)).unwrap(),
+                CoreEvent::BrainWakeRequested { session_id } if session_id == delegated_session_id
+            ) {
+                observed_wake = true;
+            }
+        }
+        assert!(observed_wake);
+
+        engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "worker-wake".to_string(),
+                session_id: delegated_session_id.clone(),
+                actions: vec![BrainAction::DeliverCompletion {
+                    packet: CompletionPacket {
+                        session_id: delegated_session_id.clone(),
+                        status: CompletionStatus::Completed,
+                        summary: "delegated worker completed".to_string(),
+                    },
+                }],
+            })
+            .unwrap();
+
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CoreEvent::BrainActionsAccepted { .. } | CoreEvent::CompletionPacketDelivered { .. }
+        ));
+
+        let store = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(store.count_rows("sessions").unwrap(), 2);
+        assert_eq!(store.count_rows("worker_runs").unwrap(), 1);
+        assert_eq!(store.count_rows("completion_packets").unwrap(), 1);
     }
 
     #[test]
@@ -542,7 +700,7 @@ mod tests {
             .recent_events
             .iter()
             .any(|event| matches!(event, CoreEvent::CompletionPacketDelivered { .. })));
-        assert_eq!(store.count_rows("sessions").unwrap(), 2);
+        assert_eq!(store.count_rows("sessions").unwrap(), 3);
         assert_eq!(store.count_rows("agent_messages").unwrap(), 2);
         assert_eq!(store.count_rows("completion_packets").unwrap(), 1);
         assert_eq!(store.count_rows("worker_runs").unwrap(), 1);

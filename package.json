@@ -12,6 +12,7 @@
     "measure:napi": "npm run measure:napi -w @rusty-crew/native-bridge",
     "smoke:brain": "npm run smoke:wake -w @rusty-crew/brain-island",
     "smoke:bridge-wake": "npm run smoke:bridge-wake -w @rusty-crew/brain-island",
+    "smoke:delegated-slice": "npm run smoke:delegated-slice -w @rusty-crew/brain-island",
     "smoke:den": "npm run smoke -w @rusty-crew/adapter-den",
     "smoke:mid-turn": "npm run smoke:mid-turn -w @rusty-crew/brain-island",
     "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/core-bridge && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui",

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import type {
   ActionBatchReceipt,
+  BrainAction,
   BrainActionBatch,
   BrainEvent,
   BrainEventEnvelope,
@@ -60,6 +61,35 @@ interface NativeBridgeBinding {
     sessionId: string,
     text: string,
   ): { accepted: boolean; sequence: number };
+  createSession(config: {
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: string;
+  }): {
+    handle: number;
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: string;
+    status: string;
+  };
+  routeAgentMessage(
+    from: string,
+    to: string,
+    body: string,
+  ): { accepted: boolean; sequence: number };
+  projectBodyStateJson(sessionId: string): Uint8Array;
+  submitBrainActionsJson(
+    wakeId: string,
+    sessionId: string,
+    actionsJson: Uint8Array,
+  ): {
+    wakeId: string;
+    acceptedActions: number;
+    rejectedActionsJson: string;
+  };
+  countRows(table: string): number;
   getBuffer(handle: number): {
     handle: number;
     mediaType: string;
@@ -87,6 +117,31 @@ export interface NativeBridgeModule {
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   subscribeEvents(subscription: EventSubscription): Promise<SubscriptionHandle>;
   unsubscribeEvents(handle: SubscriptionHandle): Promise<Unit>;
+  createSession(config: {
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: "full" | "worker" | "delegated";
+  }): Promise<{
+    handle: number;
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: string;
+    status: string;
+  }>;
+  routeAgentMessage(
+    from: string,
+    to: string,
+    body: string,
+  ): Promise<EventReceipt>;
+  projectBodyStateJson(sessionId: string): Promise<Uint8Array>;
+  submitBrainActionsJson(
+    wakeId: string,
+    sessionId: string,
+    actions: BrainActionBatch["actions"],
+  ): Promise<ActionBatchReceipt>;
+  countRows(table: string): Promise<number>;
   getBuffer(handle: RuntimeBufferHandle): Promise<RuntimeBufferView>;
   releaseBuffer(handle: RuntimeBufferHandle): Promise<Unit>;
 }
@@ -131,6 +186,11 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     subscribeEvents: unavailable("subscribe_events"),
     unsubscribeEvents: unavailable("unsubscribe_events"),
+    createSession: unavailable("initialize_engine"),
+    routeAgentMessage: unavailable("inject_external_event"),
+    projectBodyStateJson: unavailable("wake_brain"),
+    submitBrainActionsJson: unavailable("submit_brain_actions"),
+    countRows: unavailable("initialize_engine"),
     getBuffer: unavailable("get_buffer"),
     releaseBuffer: unavailable("release_buffer"),
   };
@@ -206,6 +266,26 @@ function createNativeBridgeModule(
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     subscribeEvents: unavailable("subscribe_events"),
     unsubscribeEvents: unavailable("unsubscribe_events"),
+    createSession: async (config) => binding.createSession(config),
+    routeAgentMessage: async (from, to, body) =>
+      binding.routeAgentMessage(from, to, body),
+    projectBodyStateJson: async (sessionId) =>
+      binding.projectBodyStateJson(sessionId),
+    submitBrainActionsJson: async (wakeId, sessionId, actions) => {
+      const receipt = binding.submitBrainActionsJson(
+        wakeId,
+        sessionId,
+        new TextEncoder().encode(
+          JSON.stringify(actions.map(toNativeBrainAction)),
+        ),
+      );
+      return {
+        wakeId: receipt.wakeId,
+        acceptedActions: receipt.acceptedActions,
+        rejectedActions: JSON.parse(receipt.rejectedActionsJson) as [],
+      };
+    },
+    countRows: async (table) => binding.countRows(table),
     getBuffer: async (handle) => {
       const view = binding.getBuffer(handle);
       return {
@@ -218,6 +298,37 @@ function createNativeBridgeModule(
       return {};
     },
   };
+}
+
+function toNativeBrainAction(action: BrainAction): unknown {
+  switch (action.type) {
+    case "send_message":
+      return {
+        type: action.type,
+        message: {
+          from: action.message.from,
+          to: action.message.to,
+          body: action.message.body,
+          correlation_id: action.message.correlationId,
+        },
+      };
+    case "request_delegation":
+      return {
+        type: action.type,
+        profile_id: action.profileId,
+        task_id: action.taskId,
+        prompt: action.prompt,
+      };
+    case "deliver_completion":
+      return {
+        type: action.type,
+        packet: {
+          session_id: action.packet.sessionId,
+          status: action.packet.status,
+          summary: action.packet.summary,
+        },
+      };
+  }
 }
 
 function toNativeBrainEvent(event: BrainEvent): {

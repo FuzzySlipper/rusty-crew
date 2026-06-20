@@ -168,6 +168,10 @@ The mid-turn delta decision for item 6 is recorded in
 body-owned next-wake queuing with aggressive TTL rather than pi-agent internal
 queues as durable state.
 
+The delegated-worker slice for item 7 is documented in
+`end-to-end-delegated-slice.md`; run it locally with `npm run build:native` and
+`npm run smoke:delegated-slice`.
+
 ## What this rewrite is *not*
 
 - **Not a fork of pi-crew.** The TS implementation keeps shipping at

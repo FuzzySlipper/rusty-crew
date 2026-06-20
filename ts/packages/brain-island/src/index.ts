@@ -100,3 +100,11 @@ export {
   defaultBodyDeltaPolicy,
 } from "./mid-turn-delta.js";
 export type { DrainResult, QueuedMidTurnMessage } from "./mid-turn-delta.js";
+export {
+  createDenRouterPiAgentFactory,
+  resolveDenRouterModel,
+} from "./den-router-agent.js";
+export type {
+  DenRouterAgentOptions,
+  DenRouterModelSelection,
+} from "./den-router-agent.js";

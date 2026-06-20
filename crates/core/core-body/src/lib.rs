@@ -4,8 +4,7 @@ use rusty_crew_core_bus::CoreBus;
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentMessage, BodyDeltaPolicy, BodyState, BrainAction,
     BrainActionBatch, CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreResult,
-    DeltaQueueOwner, EventReceipt, MidTurnDeltaMode, ProfileId, SessionId, SessionKind,
-    SessionStatus,
+    DeltaQueueOwner, EventReceipt, MidTurnDeltaMode, SessionId, SessionKind, SessionStatus,
 };
 use rusty_crew_core_session::SessionRegistry;
 
@@ -106,17 +105,10 @@ impl BrainActionExecutor {
                     self.publish_message(message.clone())?;
                 }
                 BrainAction::RequestDelegation {
-                    profile_id,
-                    task_id,
-                    prompt,
-                } => {
-                    self.publish_delegation_request(
-                        &batch.session_id,
-                        profile_id.clone(),
-                        task_id.as_ref().map(|id| id.to_string()),
-                        prompt.clone(),
-                    )?;
-                }
+                    profile_id: _,
+                    task_id: _,
+                    prompt: _,
+                } => {}
                 BrainAction::DeliverCompletion { packet } => {
                     self.publish_completion(packet.clone())?;
                 }
@@ -149,34 +141,6 @@ impl BrainActionExecutor {
         let sequence = self
             .bus
             .publish(CoreEvent::CompletionPacketDelivered { packet })?;
-        Ok(EventReceipt {
-            accepted: true,
-            sequence,
-        })
-    }
-
-    fn publish_delegation_request(
-        &self,
-        source_session_id: &SessionId,
-        profile_id: ProfileId,
-        task_id: Option<String>,
-        prompt: String,
-    ) -> CoreResult<EventReceipt> {
-        let body = format!(
-            "delegation requested from {source_session_id}: profile={profile_id}; task={}; prompt={prompt}",
-            task_id.unwrap_or_else(|| "none".to_string())
-        );
-        let sequence = self.bus.publish(CoreEvent::AgentMessageRouted {
-            message: AgentMessage {
-                from: rusty_crew_core_protocol::AgentId::new(format!(
-                    "session:{}",
-                    source_session_id
-                )),
-                to: rusty_crew_core_protocol::AgentId::new("rusty-core"),
-                body,
-                correlation_id: Some("delegation_request".to_string()),
-            },
-        })?;
         Ok(EventReceipt {
             accepted: true,
             sequence,

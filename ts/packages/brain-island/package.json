@@ -11,7 +11,8 @@
   "scripts": {
     "smoke:wake": "tsx src/smoke-wake.ts",
     "smoke:bridge-wake": "tsx src/smoke-bridge-wake.ts",
-    "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts"
+    "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts",
+    "smoke:delegated-slice": "tsx src/smoke-delegated-slice.ts"
   },
   "piPackageSource": {
     "repository": "https://github.com/earendil-works/pi",
@@ -24,6 +25,8 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.79.8",
     "@earendil-works/pi-ai": "0.79.8",
+    "@rusty-crew/adapter-den": "0.1.0",
+    "@rusty-crew/native-bridge": "0.1.0",
     "@rusty-crew/contracts": "0.1.0"
   },
   "peerDependencies": {

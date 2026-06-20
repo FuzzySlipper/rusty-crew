@@ -88,6 +88,52 @@ impl NativeBridge {
         self.engine()?.execute_brain_actions(batch)
     }
 
+    pub fn create_session(
+        &self,
+        config: rusty_crew_core_bridge_api::SessionConfig,
+    ) -> CoreResult<rusty_crew_core_bridge_api::SessionState> {
+        self.engine()?.create_session(config)
+    }
+
+    pub fn route_agent_message(
+        &self,
+        from: rusty_crew_core_bridge_api::AgentId,
+        to: rusty_crew_core_bridge_api::AgentId,
+        body: String,
+    ) -> CoreResult<EventReceipt> {
+        let sequence = self.engine()?.bus().publish(
+            rusty_crew_core_bridge_api::CoreEvent::AgentMessageRouted {
+                message: rusty_crew_core_bridge_api::AgentMessage {
+                    from,
+                    to,
+                    body,
+                    correlation_id: None,
+                },
+            },
+        )?;
+        Ok(EventReceipt {
+            accepted: true,
+            sequence,
+        })
+    }
+
+    pub fn project_body_state_json(
+        &self,
+        session_id: rusty_crew_core_bridge_api::SessionId,
+    ) -> CoreResult<Vec<u8>> {
+        let state = self.engine()?.project_body_state(&session_id)?;
+        serde_json::to_vec(&state).map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                format!("serialize body state: {error}"),
+            )
+        })
+    }
+
+    pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
+        self.engine()?.count_rows(table)
+    }
+
     pub fn register_platform_adapter(
         &self,
         _registration: PlatformAdapterRegistration,
@@ -175,6 +221,31 @@ pub struct JsEventReceipt {
 pub struct JsShutdownSummary {
     pub archived_sessions: u32,
     pub dropped_subscriptions: u32,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSessionConfig {
+    pub session_id: String,
+    pub agent_id: String,
+    pub profile_id: String,
+    pub kind: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSessionState {
+    pub handle: f64,
+    pub session_id: String,
+    pub agent_id: String,
+    pub profile_id: String,
+    pub kind: String,
+    pub status: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsActionBatchReceipt {
+    pub wake_id: String,
+    pub accepted_actions: u32,
+    pub rejected_actions_json: String,
 }
 
 #[napi_derive::napi(object)]
@@ -332,6 +403,93 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_session(&self, config: JsSessionConfig) -> napi::Result<JsSessionState> {
+        let bridge = self.bridge()?;
+        let state = bridge
+            .create_session(rusty_crew_core_bridge_api::SessionConfig {
+                session_id: rusty_crew_core_bridge_api::SessionId::new(config.session_id),
+                agent_id: rusty_crew_core_bridge_api::AgentId::new(config.agent_id),
+                profile_id: rusty_crew_core_bridge_api::ProfileId::new(config.profile_id),
+                kind: parse_session_kind(&config.kind)?,
+                resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
+                    workdir: None,
+                    max_duration_ms: None,
+                    max_delegation_depth: None,
+                },
+                tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+            })
+            .map_err(to_napi_error)?;
+        Ok(to_js_session_state(state))
+    }
+
+    #[napi]
+    pub fn route_agent_message(
+        &self,
+        from: String,
+        to: String,
+        body: String,
+    ) -> napi::Result<JsEventReceipt> {
+        let bridge = self.bridge()?;
+        let receipt = bridge
+            .route_agent_message(
+                rusty_crew_core_bridge_api::AgentId::new(from),
+                rusty_crew_core_bridge_api::AgentId::new(to),
+                body,
+            )
+            .map_err(to_napi_error)?;
+        Ok(to_js_event_receipt(receipt))
+    }
+
+    #[napi]
+    pub fn project_body_state_json(
+        &self,
+        session_id: String,
+    ) -> napi::Result<napi::bindgen_prelude::Buffer> {
+        let bridge = self.bridge()?;
+        let bytes = bridge
+            .project_body_state_json(rusty_crew_core_bridge_api::SessionId::new(session_id))
+            .map_err(to_napi_error)?;
+        Ok(bytes.into())
+    }
+
+    #[napi]
+    pub fn submit_brain_actions_json(
+        &self,
+        wake_id: String,
+        session_id: String,
+        actions_json: napi::bindgen_prelude::Buffer,
+    ) -> napi::Result<JsActionBatchReceipt> {
+        let bridge = self.bridge()?;
+        let actions = serde_json::from_slice(actions_json.as_ref()).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid brain action JSON: {error}"),
+            )
+        })?;
+        let receipt = bridge
+            .submit_brain_actions(BrainActionBatch {
+                wake_id,
+                session_id: rusty_crew_core_bridge_api::SessionId::new(session_id),
+                actions,
+            })
+            .map_err(to_napi_error)?;
+        Ok(JsActionBatchReceipt {
+            wake_id: receipt.wake_id,
+            accepted_actions: receipt.accepted_actions,
+            rejected_actions_json: serde_json::to_string(&receipt.rejected_actions).map_err(
+                |error| napi::Error::new(napi::Status::GenericFailure, error.to_string()),
+            )?,
+        })
+    }
+
+    #[napi]
+    pub fn count_rows(&self, table: String) -> napi::Result<f64> {
+        let bridge = self.bridge()?;
+        let count = bridge.count_rows(&table).map_err(to_napi_error)?;
+        Ok(count as f64)
+    }
+
+    #[napi]
     pub fn submit_brain_event(
         &self,
         wake_id: String,
@@ -396,6 +554,29 @@ fn to_js_event_receipt(receipt: EventReceipt) -> JsEventReceipt {
     JsEventReceipt {
         accepted: receipt.accepted,
         sequence: receipt.sequence as f64,
+    }
+}
+
+fn to_js_session_state(state: rusty_crew_core_bridge_api::SessionState) -> JsSessionState {
+    JsSessionState {
+        handle: state.handle.get() as f64,
+        session_id: state.session_id.0,
+        agent_id: state.agent_id.0,
+        profile_id: state.profile_id.0,
+        kind: format!("{:?}", state.kind).to_ascii_lowercase(),
+        status: format!("{:?}", state.status).to_ascii_lowercase(),
+    }
+}
+
+fn parse_session_kind(raw: &str) -> napi::Result<rusty_crew_core_bridge_api::SessionKind> {
+    match raw {
+        "full" => Ok(rusty_crew_core_bridge_api::SessionKind::Full),
+        "worker" => Ok(rusty_crew_core_bridge_api::SessionKind::Worker),
+        "delegated" => Ok(rusty_crew_core_bridge_api::SessionKind::Delegated),
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unsupported session kind {other}"),
+        )),
     }
 }
 
