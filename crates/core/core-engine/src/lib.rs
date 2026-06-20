@@ -1711,7 +1711,9 @@ mod tests {
         let diagnostic = engine.project_body_state(&prime.session_id).unwrap();
         assert!(diagnostic.pending_messages.is_empty());
 
-        let prepared = engine.prepare_body_state_for_wake(&prime.session_id).unwrap();
+        let prepared = engine
+            .prepare_body_state_for_wake(&prime.session_id)
+            .unwrap();
         assert_eq!(
             prepared
                 .pending_messages
@@ -1720,7 +1722,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["arrived mid-turn"]
         );
-        let second = engine.prepare_body_state_for_wake(&prime.session_id).unwrap();
+        let second = engine
+            .prepare_body_state_for_wake(&prime.session_id)
+            .unwrap();
         assert!(second.pending_messages.is_empty());
 
         let store = CoordinationStore::open(engine.config.engine_data_dir.clone()).unwrap();
@@ -2428,6 +2432,77 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].tool_name, "mcp_read_file");
         assert_eq!(records[0].metadata, Some(metadata));
+    }
+
+    #[test]
+    fn persists_web_browser_tool_metadata_without_payloads() {
+        let engine = test_engine();
+        let web_metadata = ToolCallMetadata {
+            source: ToolCallSource::Web,
+            adapter_id: None,
+            binding_id: None,
+            server_names: vec![],
+            profile_id: Some(ProfileId::new("profile-web")),
+            tool_profile_key: None,
+            source_tool_name: Some("web_extract".to_string()),
+            catalog_revision: None,
+            policy: Some(ToolCallPolicyMetadata {
+                allowed: Some(false),
+                denial_reason: Some("network_denied".to_string()),
+                timeout_ms: Some(5_000),
+                cancelled: Some(false),
+                archive_cleanup: Some(false),
+            }),
+        };
+        let browser_metadata = ToolCallMetadata {
+            source: ToolCallSource::Browser,
+            adapter_id: None,
+            binding_id: None,
+            server_names: vec![],
+            profile_id: Some(ProfileId::new("profile-browser")),
+            tool_profile_key: None,
+            source_tool_name: Some("browser_vision".to_string()),
+            catalog_revision: None,
+            policy: Some(ToolCallPolicyMetadata {
+                allowed: Some(true),
+                denial_reason: None,
+                timeout_ms: Some(8_000),
+                cancelled: Some(false),
+                archive_cleanup: Some(false),
+            }),
+        };
+
+        engine
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "wake-web-browser".to_string(),
+                session_id: SessionId::new("brain-session"),
+                event: BrainEvent::ToolCallStarted {
+                    tool_name: "web_extract".to_string(),
+                    metadata: Some(web_metadata.clone()),
+                },
+            })
+            .unwrap();
+        engine
+            .submit_brain_event(BrainEventEnvelope {
+                wake_id: "wake-web-browser".to_string(),
+                session_id: SessionId::new("brain-session"),
+                event: BrainEvent::ToolCallFinished {
+                    tool_name: "browser_vision".to_string(),
+                    is_error: false,
+                    metadata: Some(browser_metadata.clone()),
+                },
+            })
+            .unwrap();
+
+        let records = engine.store.load_tool_call_history().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].metadata, Some(web_metadata));
+        assert_eq!(records[1].metadata, Some(browser_metadata));
+        let web_json = serde_json::to_string(&records[0].metadata).unwrap();
+        let browser_json = serde_json::to_string(&records[1].metadata).unwrap();
+        assert!(!web_json.contains("page content"));
+        assert!(!browser_json.contains("base64"));
+        assert!(!browser_json.contains("screenshot"));
     }
 
     #[test]

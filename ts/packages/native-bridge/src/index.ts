@@ -1343,7 +1343,7 @@ interface RawToolCallPolicyMetadata {
 }
 
 interface RawToolCallMetadata {
-  source: "local" | "mcp";
+  source: ToolCallMetadata["source"];
   adapter_id?: string;
   binding_id?: string;
   server_names: string[];

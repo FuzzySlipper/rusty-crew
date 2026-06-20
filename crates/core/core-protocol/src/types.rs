@@ -266,6 +266,8 @@ pub struct ToolProfile {
 pub enum ToolCallSource {
     Local,
     Mcp,
+    Web,
+    Browser,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

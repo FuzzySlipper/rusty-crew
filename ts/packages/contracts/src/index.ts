@@ -54,7 +54,7 @@ export interface ToolProfile {
   tools: ToolDescriptor[];
 }
 
-export type ToolCallSource = "local" | "mcp";
+export type ToolCallSource = "local" | "mcp" | "web" | "browser";
 
 export interface ToolCallPolicyMetadata {
   allowed?: boolean;

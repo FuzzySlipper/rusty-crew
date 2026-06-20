@@ -221,6 +221,26 @@ export type {
   DenMemoryToolPolicy,
 } from "./den-memory-tools.js";
 export {
+  assertSafePublicUrl,
+  createWebSearchProvider,
+  createWebToolResolver,
+  resolveWebTools,
+  webExtractTool,
+  webSearchTool,
+} from "./web-tools.js";
+export type {
+  ResolveHostAddresses,
+  ResolvedAddress,
+  WebExtractResult,
+  WebExtractToolContext,
+  WebExtractToolDetails,
+  WebNetworkPolicy,
+  WebSearchProvider,
+  WebSearchResult,
+  WebSearchToolContext,
+  WebSearchToolDetails,
+} from "./web-tools.js";
+export {
   createSkillsToolResolver,
   resolveSkillsTools,
   skillManageTool,
@@ -306,6 +326,30 @@ export type {
   McpResourceHookInput,
   McpToolTelemetryInput,
 } from "./mcp-tool-telemetry.js";
+export {
+  createWebBrowserToolCallMetadata,
+  createWebBrowserToolFinishedEvent,
+  createWebBrowserToolStartedEvent,
+  evaluateWebBrowserResourceHooks,
+  webBrowserToolSource,
+} from "./web-browser-tool-telemetry.js";
+export type {
+  WebBrowserResourceDenialReason,
+  WebBrowserResourceHookDecision,
+  WebBrowserResourceHookInput,
+  WebBrowserToolTelemetryInput,
+} from "./web-browser-tool-telemetry.js";
+export {
+  buildWebBrowserDiagnostics,
+  cleanupWebBrowserCapabilities,
+} from "./web-browser-diagnostics.js";
+export type {
+  BrowserCapabilityDiagnostics,
+  WebBrowserDiagnostics,
+  WebBrowserDiagnosticsInput,
+  WebDiagnosticsInput,
+  WebProviderDiagnostics,
+} from "./web-browser-diagnostics.js";
 export { buildAdapterDiagnosticsProjection } from "./adapter-diagnostics.js";
 export type {
   AdapterDiagnosticsInput,
@@ -419,6 +463,54 @@ export type {
   DebugDiagnosticsBundle,
   DirectDebugContextRequest,
 } from "./debug-api-client.js";
+export {
+  BrowserSessionManager,
+  createChromiumBrowserLauncher,
+} from "./browser-session-manager.js";
+export type {
+  BrowserCleanupSummary,
+  BrowserCloseReason,
+  BrowserLaunchInput,
+  BrowserLauncher,
+  BrowserLaunchResult,
+  BrowserManagerDiagnostics,
+  BrowserManagerOptions,
+  BrowserOpenInput,
+  BrowserProcessHandle,
+  BrowserRefEntry,
+  BrowserResolvedRef,
+  BrowserSessionDiagnostics,
+  BrowserSessionHandle,
+  BrowserSessionLimits,
+  BrowserSessionState,
+  BrowserSnapshot,
+  CdpConnection,
+} from "./browser-session-manager.js";
+export {
+  browserBackTool,
+  browserClickTool,
+  browserConsoleTool,
+  browserNavigateTool,
+  browserPressTool,
+  browserScrollTool,
+  browserSnapshotTool,
+  browserTypeTool,
+  browserVisionTool,
+  createBrowserToolResolver,
+  MemoryBrowserScreenshotStore,
+  resolveBrowserTools,
+} from "./browser-tools.js";
+export type {
+  BrowserActionDetails,
+  BrowserConsoleDetails,
+  BrowserConsoleExpression,
+  BrowserScreenshotArtifact,
+  BrowserScreenshotStore,
+  BrowserSnapshotDetails,
+  BrowserToolContext,
+  BrowserToolResolverContext,
+  BrowserVisionDetails,
+} from "./browser-tools.js";
 export { handleAdminDiagnosticsRequest } from "./admin-diagnostics-api.js";
 export type {
   AdminAgentDiagnostics,

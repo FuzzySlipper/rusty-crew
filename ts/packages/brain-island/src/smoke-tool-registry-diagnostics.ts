@@ -7,20 +7,37 @@ import type { ToolRegistryEntry } from "./index.js";
 
 const report = buildToolRegistryDiagnostics({
   inventoryRequest: {
-    requestedToolsets: ["local_code_read"],
+    requestedToolsets: ["local_code_read", "web_research", "browser_vision"],
     requestedTools: ["missing_tool"],
     sessionDeniedTools: ["git_diff"],
+    resourceDeniedTools: ["web_search", "browser_vision"],
+    resourceDeniedReasons: {
+      web_search: "web search provider is not configured",
+      browser_vision: "browser binary is not configured",
+    },
   },
 });
 
-assert.equal(report.summary.registeredTools, 20);
-assert.equal(report.summary.selectedTools, 3);
-assert.equal(report.summary.deniedTools, 1);
+assert.equal(report.summary.registeredTools, 31);
+assert.equal(report.summary.selectedTools, 4);
+assert.equal(report.summary.deniedTools, 3);
 assert.equal(report.summary.missingTools, 1);
 assert.equal(report.validation.ok, true);
 assert.equal(
   report.tools.find((tool) => tool.name === "git_diff")?.status,
   "session_denied",
+);
+assert.equal(
+  report.tools.find((tool) => tool.name === "web_extract")?.status,
+  "selected",
+);
+assert.equal(
+  report.tools.find((tool) => tool.name === "web_search")?.reasons[0],
+  "web search provider is not configured",
+);
+assert.equal(
+  report.tools.find((tool) => tool.name === "browser_vision")?.reasons[0],
+  "browser binary is not configured",
 );
 
 const invalidReport = buildToolRegistryDiagnostics({
@@ -51,6 +68,8 @@ const markdown = formatToolRegistryDiagnosticsMarkdown(report);
 assert.match(markdown, /Tool Registry Diagnostics/);
 assert.match(markdown, /git_diff/);
 assert.match(markdown, /session_denied/);
+assert.match(markdown, /web_search/);
+assert.match(markdown, /browser_vision/);
 
 console.log(
   JSON.stringify(

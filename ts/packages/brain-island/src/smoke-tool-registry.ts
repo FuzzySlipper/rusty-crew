@@ -90,6 +90,58 @@ assert.equal(
   "not_requested",
 );
 
+const webBrowserInventory = defaultToolRegistry.buildInventory({
+  requestedToolsets: ["web_research", "browser", "browser_vision"],
+  resourceDeniedTools: [
+    "web_search",
+    "web_extract",
+    "browser_navigate",
+    "browser_vision",
+  ],
+  resourceDeniedReasons: {
+    web_search: "web search provider is not configured",
+    web_extract: "web extraction network policy denied the URL",
+    browser_navigate: "browser binary is not configured",
+    browser_vision: "browser screenshot artifact store is not configured",
+  },
+});
+assert.deepEqual(
+  webBrowserInventory.selectedTools.map((tool) => tool.name),
+  [
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_press",
+    "browser_console",
+  ],
+);
+assert.equal(
+  webBrowserInventory.items.find((item) => item.name === "web_search")?.status,
+  "resource_denied",
+);
+assert.equal(
+  webBrowserInventory.items.find((item) => item.name === "web_search")
+    ?.reasons[0],
+  "web search provider is not configured",
+);
+assert.equal(
+  webBrowserInventory.items.find((item) => item.name === "web_extract")
+    ?.reasons[0],
+  "web extraction network policy denied the URL",
+);
+assert.equal(
+  webBrowserInventory.items.find((item) => item.name === "browser_navigate")
+    ?.reasons[0],
+  "browser binary is not configured",
+);
+assert.equal(
+  webBrowserInventory.items.find((item) => item.name === "browser_vision")
+    ?.reasons[0],
+  "browser screenshot artifact store is not configured",
+);
+
 const aliasRegistry = createToolRegistry([
   {
     ...entry("read_file"),
@@ -152,6 +204,9 @@ console.log(
       registeredTools: defaultToolRegistry.entries.length,
       readSelected: readInventory.selectedTools.map((tool) => tool.name),
       memorySelected: memoryInventory.selectedTools.map((tool) => tool.name),
+      webBrowserSelected: webBrowserInventory.selectedTools.map(
+        (tool) => tool.name,
+      ),
       writeStatuses: Object.fromEntries(
         writeInventory.items.map((item) => [item.name, item.status]),
       ),
