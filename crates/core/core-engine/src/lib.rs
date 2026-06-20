@@ -507,22 +507,20 @@ impl CoreEngine {
                 requested_task_id: task_id.clone(),
                 correlation_id: correlation_id.clone(),
             };
-            let state = self.sessions.create_session(
-                SessionConfig {
-                    session_id: session_id.clone(),
-                    agent_id: agent_id.clone(),
-                    profile_id: profile_id.clone(),
-                    kind: SessionKind::Delegated,
-                    delegation: Some(lineage.clone()),
-                    resource_limits: resource_limits.clone().unwrap_or(ResourceLimits {
-                        workdir: None,
-                        max_duration_ms: None,
-                        max_delegation_depth: Some(0),
-                    }),
-                    tool_profile: self.tool_profile_for_profile(profile_id)?,
-                },
-                self.now(),
-            )?;
+            let config = SessionConfig {
+                session_id: session_id.clone(),
+                agent_id: agent_id.clone(),
+                profile_id: profile_id.clone(),
+                kind: SessionKind::Delegated,
+                delegation: Some(lineage.clone()),
+                resource_limits: resource_limits.clone().unwrap_or(ResourceLimits {
+                    workdir: None,
+                    max_duration_ms: None,
+                    max_delegation_depth: Some(0),
+                }),
+                tool_profile: self.tool_profile_for_profile(profile_id)?,
+            };
+            let state = self.sessions.create_session(config.clone(), self.now())?;
             self.store.save_worker_run_requested(&WorkerRunRecord {
                 run_id,
                 parent_session_id: parent.session_id.clone(),
@@ -545,7 +543,7 @@ impl CoreEngine {
                     .clone()
                     .unwrap_or(FanOutFailurePolicy::FailSoft),
             })?;
-            self.store.save_session(&state)?;
+            self.store.save_session_with_config(&state, &config)?;
             self.store.update_worker_run_status_by_delegated_session(
                 &state.session_id,
                 WorkerRunStatus::SessionCreated,
@@ -1030,7 +1028,10 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_crew_core_persistence::{CoordinationStore, ToolCallPhase};
+    use rusty_crew_core_persistence::{
+        CoordinationStore, RuntimeCounterScope, RuntimeSearchFilter, RuntimeSearchRowType,
+        ToolCallPhase,
+    };
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
@@ -1881,6 +1882,168 @@ mod tests {
         assert_eq!(store.count_rows("agent_messages").unwrap(), 2);
         assert_eq!(store.count_rows("completion_packets").unwrap(), 1);
         assert_eq!(store.count_rows("worker_runs").unwrap(), 1);
+    }
+
+    #[test]
+    fn restart_hydrates_many_agents_without_resurrecting_work() {
+        let data_dir = unique_data_dir("many-agent-hydrate");
+        let first_engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = first_engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let reviewer = first_engine
+            .create_session(session_config(
+                "reviewer-session",
+                "reviewer",
+                "reviewer-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+
+        first_engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![
+                    BrainAction::SendMessage {
+                        message: AgentMessage {
+                            from: planner.agent_id.clone(),
+                            to: reviewer.agent_id.clone(),
+                            body: "please review restart hydration".to_string(),
+                            correlation_id: Some("restart-review".to_string()),
+                        },
+                    },
+                    BrainAction::RequestDelegation {
+                        profile_id: ProfileId::new("coder-profile"),
+                        task_id: Some(rusty_crew_core_protocol::TaskId::new("2874")),
+                        prompt: "keep delegated work restart-safe".to_string(),
+                        expected_output: Some("restart note".to_string()),
+                        resource_limits: None,
+                        timeout_ms: None,
+                        priority: None,
+                        fan_out_group_id: None,
+                        fan_out_max_concurrency: None,
+                        fan_out_failure_policy: None,
+                        correlation_id: Some("delegated-restart".to_string()),
+                        parent_consumption: None,
+                    },
+                ],
+            })
+            .unwrap();
+        first_engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "reviewer-wake".to_string(),
+                session_id: reviewer.session_id.clone(),
+                actions: vec![BrainAction::SendMessage {
+                    message: AgentMessage {
+                        from: reviewer.agent_id.clone(),
+                        to: planner.agent_id.clone(),
+                        body: "restart review acknowledged".to_string(),
+                        correlation_id: Some("restart-review".to_string()),
+                    },
+                }],
+            })
+            .unwrap();
+
+        let store_before_restart = CoordinationStore::open(data_dir.clone()).unwrap();
+        let event_count_before = store_before_restart.count_rows("event_history").unwrap();
+        let search_before = store_before_restart
+            .search_runtime(&RuntimeSearchFilter {
+                query: "hydration".to_string(),
+                row_type: Some(RuntimeSearchRowType::Message),
+                session_id: None,
+                agent_id: Some(reviewer.agent_id.clone()),
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(CoreEventKind::AgentMessageRouted),
+                recorded_after: None,
+                recorded_before: None,
+                limit: Some(10),
+            })
+            .unwrap();
+        assert_eq!(search_before.len(), 1);
+        drop(first_engine);
+        drop(store_before_restart);
+
+        let restarted_engine = test_engine_with_data_dir(data_dir.clone());
+        let hydrated_planner = restarted_engine.get_session(&planner.session_id).unwrap();
+        let hydrated_reviewer = restarted_engine.get_session(&reviewer.session_id).unwrap();
+        let hydrated_delegated = restarted_engine
+            .delegated_session_for_run(&RunId::new("planner-wake:1"))
+            .unwrap()
+            .unwrap();
+        let reviewer_body = restarted_engine
+            .project_body_state(&reviewer.session_id)
+            .unwrap();
+        let planner_body = restarted_engine
+            .project_body_state(&planner.session_id)
+            .unwrap();
+        let store_after_restart = CoordinationStore::open(data_dir).unwrap();
+
+        assert_eq!(hydrated_planner.status, SessionStatus::Idle);
+        assert_eq!(hydrated_reviewer.status, SessionStatus::Idle);
+        assert_eq!(hydrated_delegated.kind, SessionKind::Delegated);
+        assert_eq!(
+            hydrated_delegated
+                .delegation
+                .as_ref()
+                .map(|lineage| (&lineage.parent_session_id, lineage.source_wake_id.as_str())),
+            Some((&planner.session_id, "planner-wake"))
+        );
+        assert!(reviewer_body
+            .pending_messages
+            .iter()
+            .any(|message| message.body == "please review restart hydration"));
+        assert!(planner_body
+            .pending_messages
+            .iter()
+            .any(|message| message.body == "restart review acknowledged"));
+        assert_eq!(
+            store_after_restart.count_rows("event_history").unwrap(),
+            event_count_before
+        );
+        assert_eq!(
+            store_after_restart.load_agent_identities().unwrap().len(),
+            3
+        );
+        assert_eq!(store_after_restart.load_session_configs().unwrap().len(), 3);
+        assert_eq!(
+            store_after_restart
+                .runtime_summary(&RuntimeCounterScope::Runtime)
+                .unwrap()
+                .messages,
+            3
+        );
+        assert_eq!(
+            store_after_restart
+                .runtime_summary(&RuntimeCounterScope::Runtime)
+                .unwrap()
+                .wakes,
+            1
+        );
+        assert_eq!(
+            store_after_restart
+                .search_runtime(&RuntimeSearchFilter {
+                    query: "hydration".to_string(),
+                    row_type: Some(RuntimeSearchRowType::Message),
+                    session_id: None,
+                    agent_id: Some(reviewer.agent_id),
+                    instance_id: None,
+                    task_id: None,
+                    event_kind: Some(CoreEventKind::AgentMessageRouted),
+                    recorded_after: None,
+                    recorded_before: None,
+                    limit: Some(10),
+                })
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

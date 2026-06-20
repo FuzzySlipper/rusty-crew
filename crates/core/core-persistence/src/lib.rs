@@ -5,13 +5,13 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
-    AgentId, AgentInstanceId, AgentInstanceRecord, BrainEvent, CompletionPacket, CoreError,
-    CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DelegatedCompletion, DelegatedFanOutGroup,
-    DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
-    DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp,
-    ParentConsumptionPolicy, ProfileId, ProjectId, ResourceLimits, RunId, SessionConfig,
-    SessionHandle, SessionId, SessionIdentityRecord, SessionKind, SessionState, SessionStatus,
-    SourceSystemReference, TaskId, ToolProfile,
+    AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, BrainEvent, CompletionPacket,
+    CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DelegatedCompletion,
+    DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference, DurableAgentKind,
+    DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus,
+    IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId, ResourceLimits, RunId,
+    SessionConfig, SessionHandle, SessionId, SessionIdentityRecord, SessionKind, SessionState,
+    SessionStatus, SourceSystemReference, TaskId, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
@@ -19,8 +19,20 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
+const COUNTER_BRAIN_TURNS: &str = "brain_turns";
+const COUNTER_WAKES: &str = "wakes";
+const COUNTER_TOOL_CALLS: &str = "tool_calls";
+const COUNTER_TOOL_ERRORS: &str = "tool_errors";
+const COUNTER_DELEGATIONS_CREATED: &str = "delegations_created";
+const COUNTER_DELEGATIONS_COMPLETED: &str = "delegations_completed";
+const COUNTER_DELEGATIONS_FAILED: &str = "delegations_failed";
+const COUNTER_DELEGATIONS_TIMED_OUT: &str = "delegations_timed_out";
+const COUNTER_DELEGATIONS_CANCELLED: &str = "delegations_cancelled";
+const COUNTER_MESSAGES: &str = "messages";
+const COUNTER_COMPLETIONS: &str = "completions";
+const COUNTER_QUEUE_EXPIRATIONS: &str = "queue_expirations";
 
 struct SchemaMigration {
     version: i64,
@@ -58,6 +70,16 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 6,
         description: "add FTS runtime search index",
         apply: migrate_v6_add_runtime_search_index,
+    },
+    SchemaMigration {
+        version: 7,
+        description: "add durable runtime counters",
+        apply: migrate_v7_add_runtime_counters,
+    },
+    SchemaMigration {
+        version: 8,
+        description: "add queued message retention state",
+        apply: migrate_v8_add_queued_message_retention,
     },
 ];
 
@@ -117,6 +139,7 @@ pub struct RuntimeEventFilter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeSearchRowType {
     Message,
+    QueueMessage,
     Session,
 }
 
@@ -124,6 +147,7 @@ impl RuntimeSearchRowType {
     fn as_str(self) -> &'static str {
         match self {
             Self::Message => "message",
+            Self::QueueMessage => "queue_message",
             Self::Session => "session",
         }
     }
@@ -156,6 +180,72 @@ pub struct RuntimeSearchResult {
     pub recorded_at: IsoTimestamp,
     pub title: String,
     pub body: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueuedMessageState {
+    Pending,
+    Delivered,
+    Expired,
+    Discarded,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedMessageRecord {
+    pub message_id: String,
+    pub owner_session_id: Option<SessionId>,
+    pub owner_agent_id: AgentId,
+    pub message: AgentMessage,
+    pub source_sequence: Option<u64>,
+    pub enqueued_at: IsoTimestamp,
+    pub expires_at: IsoTimestamp,
+    pub ttl_ms: u32,
+    pub delivery_attempts: u32,
+    pub state: QueuedMessageState,
+    pub terminal_at: Option<IsoTimestamp>,
+    pub state_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QueuedMessageFilter {
+    pub state: Option<QueuedMessageState>,
+    pub owner_session_id: Option<SessionId>,
+    pub owner_agent_id: Option<AgentId>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeCounterScope {
+    Runtime,
+    Agent(AgentId),
+    Instance(AgentInstanceId),
+    Session(SessionId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeCounterRecord {
+    pub scope: RuntimeCounterScope,
+    pub counter_name: String,
+    pub value: u64,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStateSummary {
+    pub scope: RuntimeCounterScope,
+    pub brain_turns: u64,
+    pub wakes: u64,
+    pub tool_calls: u64,
+    pub tool_errors: u64,
+    pub delegations_created: u64,
+    pub delegations_completed: u64,
+    pub delegations_failed: u64,
+    pub delegations_timed_out: u64,
+    pub delegations_cancelled: u64,
+    pub messages: u64,
+    pub completions: u64,
+    pub queue_expirations: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,7 +286,9 @@ pub enum DiagnosticTable {
     EventInstanceIndex,
     EventSessionIndex,
     EventWakeIndex,
+    RuntimeCounters,
     RuntimeSearch,
+    QueuedMessages,
     AgentMessages,
     CompletionPackets,
     WorkerRuns,
@@ -216,7 +308,9 @@ impl DiagnosticTable {
         Self::EventInstanceIndex,
         Self::EventSessionIndex,
         Self::EventWakeIndex,
+        Self::RuntimeCounters,
         Self::RuntimeSearch,
+        Self::QueuedMessages,
         Self::AgentMessages,
         Self::CompletionPackets,
         Self::WorkerRuns,
@@ -236,7 +330,9 @@ impl DiagnosticTable {
             "event_instance_index" => Ok(Self::EventInstanceIndex),
             "event_session_index" => Ok(Self::EventSessionIndex),
             "event_wake_index" => Ok(Self::EventWakeIndex),
+            "runtime_counters" => Ok(Self::RuntimeCounters),
             "runtime_search_fts" => Ok(Self::RuntimeSearch),
+            "queued_messages" => Ok(Self::QueuedMessages),
             "agent_messages" => Ok(Self::AgentMessages),
             "completion_packets" => Ok(Self::CompletionPackets),
             "worker_runs" => Ok(Self::WorkerRuns),
@@ -261,7 +357,9 @@ impl DiagnosticTable {
             Self::EventInstanceIndex => "event_instance_index",
             Self::EventSessionIndex => "event_session_index",
             Self::EventWakeIndex => "event_wake_index",
+            Self::RuntimeCounters => "runtime_counters",
             Self::RuntimeSearch => "runtime_search_fts",
+            Self::QueuedMessages => "queued_messages",
             Self::AgentMessages => "agent_messages",
             Self::CompletionPackets => "completion_packets",
             Self::WorkerRuns => "worker_runs",
@@ -416,6 +514,39 @@ impl CoordinationStore {
         load_session_config_records(&conn)
     }
 
+    pub fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start save queued message", error))?;
+        save_queued_message_in_tx(&tx, record)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save queued message", error))?;
+        Ok(())
+    }
+
+    pub fn expire_queued_messages_at(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start expire queued messages", error))?;
+        let expired = expire_queued_messages_in_tx(&tx, now)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit expire queued messages", error))?;
+        Ok(expired)
+    }
+
+    pub fn load_queued_messages(
+        &self,
+        filter: &QueuedMessageFilter,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        let conn = self.conn()?;
+        load_queued_messages(&conn, filter)
+    }
+
     pub fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
         let conn = self.conn()?;
         let mut stmt = conn
@@ -500,6 +631,14 @@ impl CoordinationStore {
         let tx = conn
             .unchecked_transaction()
             .map_err(|error| persistence_error("begin save event", error))?;
+        let is_new_event = tx
+            .query_row(
+                "SELECT NOT EXISTS(SELECT 1 FROM event_history WHERE sequence = ?1)",
+                params![sequence as i64],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("check existing event sequence", error))?
+            != 0;
         tx.execute(
             "INSERT OR REPLACE INTO event_history (sequence, event_kind, event_json)
              VALUES (?1, ?2, ?3)",
@@ -507,6 +646,9 @@ impl CoordinationStore {
         )
         .map_err(|error| persistence_error("save event history", error))?;
         save_event_indexes_in_tx(&tx, sequence, event)?;
+        if is_new_event {
+            increment_event_counters_in_tx(&tx, event)?;
+        }
         let recorded_at = tx
             .query_row(
                 "SELECT recorded_at FROM event_history WHERE sequence = ?1",
@@ -1076,6 +1218,33 @@ impl CoordinationStore {
         Ok(count as u64)
     }
 
+    pub fn runtime_counters(
+        &self,
+        scope: Option<&RuntimeCounterScope>,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        let conn = self.conn()?;
+        load_runtime_counters(&conn, scope)
+    }
+
+    pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+        let counters = self.runtime_counters(Some(scope))?;
+        Ok(RuntimeStateSummary {
+            scope: scope.clone(),
+            brain_turns: counter_value(&counters, COUNTER_BRAIN_TURNS),
+            wakes: counter_value(&counters, COUNTER_WAKES),
+            tool_calls: counter_value(&counters, COUNTER_TOOL_CALLS),
+            tool_errors: counter_value(&counters, COUNTER_TOOL_ERRORS),
+            delegations_created: counter_value(&counters, COUNTER_DELEGATIONS_CREATED),
+            delegations_completed: counter_value(&counters, COUNTER_DELEGATIONS_COMPLETED),
+            delegations_failed: counter_value(&counters, COUNTER_DELEGATIONS_FAILED),
+            delegations_timed_out: counter_value(&counters, COUNTER_DELEGATIONS_TIMED_OUT),
+            delegations_cancelled: counter_value(&counters, COUNTER_DELEGATIONS_CANCELLED),
+            messages: counter_value(&counters, COUNTER_MESSAGES),
+            completions: counter_value(&counters, COUNTER_COMPLETIONS),
+            queue_expirations: counter_value(&counters, COUNTER_QUEUE_EXPIRATIONS),
+        })
+    }
+
     pub fn schema_version(&self) -> CoreResult<i64> {
         let conn = self.conn()?;
         current_schema_version(&conn)
@@ -1300,6 +1469,8 @@ fn reject_unsupported_unversioned_schema(conn: &Connection) -> CoreResult<()> {
                 | "worker_runs"
                 | "completion_packets"
                 | "tool_call_history"
+                | "runtime_counters"
+                | "queued_messages"
                 | "runtime_search_fts"
         )
     });
@@ -1564,6 +1735,529 @@ fn migrate_v6_add_runtime_search_index(tx: &rusqlite::Transaction<'_>) -> CoreRe
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 6", error))
+}
+
+fn migrate_v7_add_runtime_counters(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS runtime_counters (
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                counter_name TEXT NOT NULL,
+                value INTEGER NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (scope_type, scope_id, counter_name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_runtime_counters_scope
+                ON runtime_counters(scope_type, scope_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 7", error))
+}
+
+fn migrate_v8_add_queued_message_retention(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS queued_messages (
+                message_id TEXT PRIMARY KEY,
+                owner_session_id TEXT,
+                owner_agent_id TEXT NOT NULL,
+                from_agent TEXT NOT NULL,
+                to_agent TEXT NOT NULL,
+                body TEXT NOT NULL,
+                correlation_id TEXT,
+                source_sequence INTEGER,
+                enqueued_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                ttl_ms INTEGER NOT NULL,
+                delivery_attempts INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL,
+                terminal_at TEXT,
+                state_reason TEXT,
+                message_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_queued_messages_state_expiry
+                ON queued_messages(state, expires_at);
+            CREATE INDEX IF NOT EXISTS idx_queued_messages_owner_agent
+                ON queued_messages(owner_agent_id, state, expires_at);
+            CREATE INDEX IF NOT EXISTS idx_queued_messages_owner_session
+                ON queued_messages(owner_session_id, state, expires_at);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 8", error))
+}
+
+fn save_queued_message_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record: &QueuedMessageRecord,
+) -> CoreResult<()> {
+    let message_json = to_json_text(&record.message)?;
+    tx.execute(
+        "INSERT INTO queued_messages (
+            message_id,
+            owner_session_id,
+            owner_agent_id,
+            from_agent,
+            to_agent,
+            body,
+            correlation_id,
+            source_sequence,
+            enqueued_at,
+            expires_at,
+            ttl_ms,
+            delivery_attempts,
+            state,
+            terminal_at,
+            state_reason,
+            message_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ON CONFLICT(message_id) DO UPDATE SET
+            owner_session_id = excluded.owner_session_id,
+            owner_agent_id = excluded.owner_agent_id,
+            from_agent = excluded.from_agent,
+            to_agent = excluded.to_agent,
+            body = excluded.body,
+            correlation_id = excluded.correlation_id,
+            source_sequence = excluded.source_sequence,
+            expires_at = excluded.expires_at,
+            ttl_ms = excluded.ttl_ms,
+            delivery_attempts = excluded.delivery_attempts,
+            state = excluded.state,
+            terminal_at = excluded.terminal_at,
+            state_reason = excluded.state_reason,
+            message_json = excluded.message_json",
+        params![
+            record.message_id,
+            record
+                .owner_session_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            record.owner_agent_id.0,
+            record.message.from.0,
+            record.message.to.0,
+            record.message.body,
+            record.message.correlation_id,
+            record.source_sequence.map(|value| value as i64),
+            record.enqueued_at,
+            record.expires_at,
+            record.ttl_ms as i64,
+            record.delivery_attempts as i64,
+            queued_message_state_as_str(record.state),
+            record.terminal_at,
+            record.state_reason,
+            message_json,
+        ],
+    )
+    .map_err(|error| persistence_error("save queued message", error))?;
+    save_queued_message_search_row_in_tx(tx, record)
+}
+
+fn expire_queued_messages_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    now: &IsoTimestamp,
+) -> CoreResult<Vec<QueuedMessageRecord>> {
+    let expiring = load_queued_messages_in_tx(
+        tx,
+        &QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: None,
+            owner_agent_id: None,
+            limit: None,
+        },
+    )?
+    .into_iter()
+    .filter(|message| message.expires_at <= *now)
+    .collect::<Vec<_>>();
+
+    for mut message in expiring.clone() {
+        message.state = QueuedMessageState::Expired;
+        message.terminal_at = Some(now.clone());
+        message.state_reason = Some("ttl_expired".to_string());
+        save_queued_message_in_tx(tx, &message)?;
+        increment_counter_for_scopes_in_tx(
+            tx,
+            queued_message_counter_scopes(&message),
+            COUNTER_QUEUE_EXPIRATIONS,
+            1,
+        )?;
+    }
+    Ok(expiring
+        .into_iter()
+        .map(|mut message| {
+            message.state = QueuedMessageState::Expired;
+            message.terminal_at = Some(now.clone());
+            message.state_reason = Some("ttl_expired".to_string());
+            message
+        })
+        .collect())
+}
+
+fn load_queued_messages(
+    conn: &Connection,
+    filter: &QueuedMessageFilter,
+) -> CoreResult<Vec<QueuedMessageRecord>> {
+    load_queued_messages_with_conn(conn, filter)
+}
+
+fn load_queued_messages_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    filter: &QueuedMessageFilter,
+) -> CoreResult<Vec<QueuedMessageRecord>> {
+    load_queued_messages_with_conn(tx, filter)
+}
+
+fn load_queued_messages_with_conn(
+    conn: &Connection,
+    filter: &QueuedMessageFilter,
+) -> CoreResult<Vec<QueuedMessageRecord>> {
+    let state = filter.state.map(queued_message_state_as_str);
+    let owner_session_id = filter
+        .owner_session_id
+        .as_ref()
+        .map(|value| value.0.as_str());
+    let owner_agent_id = filter.owner_agent_id.as_ref().map(|value| value.0.as_str());
+    let limit = filter.limit.unwrap_or(1_000).clamp(1, 10_000) as i64;
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                message_id,
+                owner_session_id,
+                owner_agent_id,
+                from_agent,
+                to_agent,
+                body,
+                correlation_id,
+                source_sequence,
+                enqueued_at,
+                expires_at,
+                ttl_ms,
+                delivery_attempts,
+                state,
+                terminal_at,
+                state_reason,
+                message_json
+             FROM queued_messages
+             WHERE (?1 IS NULL OR state = ?1)
+               AND (?2 IS NULL OR owner_session_id = ?2)
+               AND (?3 IS NULL OR owner_agent_id = ?3)
+             ORDER BY enqueued_at ASC, message_id ASC
+             LIMIT ?4",
+        )
+        .map_err(|error| persistence_error("prepare queued message query", error))?;
+    let rows = stmt
+        .query_map(
+            params![state, owner_session_id, owner_agent_id, limit],
+            row_to_queued_message,
+        )
+        .map_err(|error| persistence_error("query queued messages", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load queued messages", error))
+}
+
+fn row_to_queued_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedMessageRecord> {
+    let message_json: String = row.get(15)?;
+    let state: String = row.get(12)?;
+    Ok(QueuedMessageRecord {
+        message_id: row.get(0)?,
+        owner_session_id: row.get::<_, Option<String>>(1)?.map(SessionId),
+        owner_agent_id: AgentId(row.get(2)?),
+        message: from_json_text(&message_json).map_err(to_sql_error)?,
+        source_sequence: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
+        enqueued_at: row.get(8)?,
+        expires_at: row.get(9)?,
+        ttl_ms: row.get::<_, i64>(10)? as u32,
+        delivery_attempts: row.get::<_, i64>(11)? as u32,
+        state: queued_message_state_from_str(&state)?,
+        terminal_at: row.get(13)?,
+        state_reason: row.get(14)?,
+    })
+}
+
+fn save_queued_message_search_row_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record: &QueuedMessageRecord,
+) -> CoreResult<()> {
+    tx.execute(
+        "DELETE FROM runtime_search_fts WHERE row_type = ?1 AND row_key = ?2",
+        params!["queue_message", record.message_id],
+    )
+    .map_err(|error| persistence_error("delete queued message search row", error))?;
+    insert_runtime_search_row(
+        tx,
+        &RuntimeSearchInsert {
+            row_type: RuntimeSearchRowType::QueueMessage,
+            row_key: record.message_id.clone(),
+            sequence: record.source_sequence,
+            session_id: record
+                .owner_session_id
+                .as_ref()
+                .map(|value| value.0.clone()),
+            agent_id: Some(record.owner_agent_id.0.clone()),
+            instance_id: record
+                .owner_session_id
+                .as_ref()
+                .map(|value| AgentInstanceId::new(format!("instance:{value}")).0),
+            task_id: None,
+            event_kind: Some(CoreEventKind::AgentMessageRouted),
+            recorded_at: record.enqueued_at.clone(),
+            title: format!(
+                "queued message {}",
+                queued_message_state_as_str(record.state)
+            ),
+            body: record.message.body.clone(),
+        },
+    )
+}
+
+fn queued_message_counter_scopes(message: &QueuedMessageRecord) -> Vec<RuntimeCounterScope> {
+    let mut scopes = vec![
+        RuntimeCounterScope::Runtime,
+        RuntimeCounterScope::Agent(message.owner_agent_id.clone()),
+    ];
+    if let Some(session_id) = &message.owner_session_id {
+        scopes.push(RuntimeCounterScope::Session(session_id.clone()));
+        scopes.push(RuntimeCounterScope::Instance(AgentInstanceId::new(
+            format!("instance:{session_id}"),
+        )));
+    }
+    scopes
+}
+
+fn queued_message_state_as_str(state: QueuedMessageState) -> &'static str {
+    match state {
+        QueuedMessageState::Pending => "pending",
+        QueuedMessageState::Delivered => "delivered",
+        QueuedMessageState::Expired => "expired",
+        QueuedMessageState::Discarded => "discarded",
+        QueuedMessageState::Cancelled => "cancelled",
+    }
+}
+
+fn queued_message_state_from_str(raw: &str) -> rusqlite::Result<QueuedMessageState> {
+    match raw {
+        "pending" => Ok(QueuedMessageState::Pending),
+        "delivered" => Ok(QueuedMessageState::Delivered),
+        "expired" => Ok(QueuedMessageState::Expired),
+        "discarded" => Ok(QueuedMessageState::Discarded),
+        "cancelled" => Ok(QueuedMessageState::Cancelled),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            12,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown queued message state {other}"),
+            )),
+        )),
+    }
+}
+
+fn load_runtime_counters(
+    conn: &Connection,
+    scope: Option<&RuntimeCounterScope>,
+) -> CoreResult<Vec<RuntimeCounterRecord>> {
+    if let Some(scope) = scope {
+        let (scope_type, scope_id) = runtime_counter_scope_parts(scope);
+        let mut stmt = conn
+            .prepare(
+                "SELECT scope_type, scope_id, counter_name, value, updated_at
+                 FROM runtime_counters
+                 WHERE scope_type = ?1 AND scope_id = ?2
+                 ORDER BY counter_name ASC",
+            )
+            .map_err(|error| persistence_error("prepare scoped runtime counters", error))?;
+        let rows = stmt
+            .query_map(params![scope_type, scope_id], row_to_runtime_counter)
+            .map_err(|error| persistence_error("query scoped runtime counters", error))?;
+        return rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| persistence_error("load scoped runtime counters", error));
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT scope_type, scope_id, counter_name, value, updated_at
+             FROM runtime_counters
+             ORDER BY scope_type ASC, scope_id ASC, counter_name ASC",
+        )
+        .map_err(|error| persistence_error("prepare runtime counters", error))?;
+    let rows = stmt
+        .query_map([], row_to_runtime_counter)
+        .map_err(|error| persistence_error("query runtime counters", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load runtime counters", error))
+}
+
+fn row_to_runtime_counter(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeCounterRecord> {
+    let scope_type: String = row.get(0)?;
+    let scope_id: String = row.get(1)?;
+    Ok(RuntimeCounterRecord {
+        scope: runtime_counter_scope_from_parts(&scope_type, &scope_id)?,
+        counter_name: row.get(2)?,
+        value: row.get::<_, i64>(3)? as u64,
+        updated_at: row.get(4)?,
+    })
+}
+
+fn counter_value(counters: &[RuntimeCounterRecord], name: &str) -> u64 {
+    counters
+        .iter()
+        .find(|counter| counter.counter_name == name)
+        .map_or(0, |counter| counter.value)
+}
+
+fn increment_counter_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    scope: &RuntimeCounterScope,
+    counter_name: &str,
+    amount: u64,
+) -> CoreResult<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    let (scope_type, scope_id) = runtime_counter_scope_parts(scope);
+    tx.execute(
+        "INSERT INTO runtime_counters (
+            scope_type,
+            scope_id,
+            counter_name,
+            value
+        ) VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(scope_type, scope_id, counter_name) DO UPDATE SET
+            value = value + excluded.value,
+            updated_at = CURRENT_TIMESTAMP",
+        params![scope_type, scope_id, counter_name, amount as i64],
+    )
+    .map_err(|error| persistence_error("increment runtime counter", error))?;
+    Ok(())
+}
+
+fn increment_counter_for_scopes_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    scopes: Vec<RuntimeCounterScope>,
+    counter_name: &str,
+    amount: u64,
+) -> CoreResult<()> {
+    for scope in dedupe_counter_scopes(scopes) {
+        increment_counter_in_tx(tx, &scope, counter_name, amount)?;
+    }
+    Ok(())
+}
+
+fn increment_event_counters_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    event: &CoreEvent,
+) -> CoreResult<()> {
+    for (counter_name, amount) in event_counter_deltas(event) {
+        increment_counter_for_scopes_in_tx(tx, event_counter_scopes(event), counter_name, amount)?;
+    }
+    Ok(())
+}
+
+fn event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> {
+    match event {
+        CoreEvent::AgentMessageRouted { .. } => vec![(COUNTER_MESSAGES, 1)],
+        CoreEvent::BrainWakeRequested { .. } => vec![(COUNTER_WAKES, 1)],
+        CoreEvent::BrainActionsAccepted { count, .. } => {
+            vec![
+                (COUNTER_BRAIN_TURNS, 1),
+                ("accepted_actions", *count as u64),
+            ]
+        }
+        CoreEvent::BrainEventObserved { event, .. } => match event {
+            BrainEvent::ToolCallStarted { .. } => vec![(COUNTER_TOOL_CALLS, 1)],
+            BrainEvent::ToolCallFinished { is_error: true, .. } => vec![(COUNTER_TOOL_ERRORS, 1)],
+            _ => Vec::new(),
+        },
+        CoreEvent::DelegationLifecycleObserved { lifecycle } => match lifecycle.phase {
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Created => {
+                vec![(COUNTER_DELEGATIONS_CREATED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Completed => {
+                vec![(COUNTER_DELEGATIONS_COMPLETED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Failed
+            | rusty_crew_core_protocol::DelegationLifecyclePhase::Blocked
+            | rusty_crew_core_protocol::DelegationLifecyclePhase::Exhausted => {
+                vec![(COUNTER_DELEGATIONS_FAILED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::TimedOut => {
+                vec![(COUNTER_DELEGATIONS_TIMED_OUT, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Cancelled => {
+                vec![(COUNTER_DELEGATIONS_CANCELLED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::WakeRequested
+            | rusty_crew_core_protocol::DelegationLifecyclePhase::CheckpointRequested => Vec::new(),
+        },
+        CoreEvent::CompletionPacketDelivered { .. } => vec![(COUNTER_COMPLETIONS, 1)],
+        CoreEvent::SessionCreated { .. }
+        | CoreEvent::SessionArchived { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. } => Vec::new(),
+    }
+}
+
+fn event_counter_scopes(event: &CoreEvent) -> Vec<RuntimeCounterScope> {
+    let mut scopes = vec![RuntimeCounterScope::Runtime];
+    scopes.extend(
+        event_agent_ids(event)
+            .into_iter()
+            .map(RuntimeCounterScope::Agent),
+    );
+    let session_ids = event_session_ids(event);
+    scopes.extend(
+        session_ids
+            .iter()
+            .cloned()
+            .map(RuntimeCounterScope::Session),
+    );
+    scopes.extend(session_ids.into_iter().map(|session_id| {
+        RuntimeCounterScope::Instance(AgentInstanceId::new(format!("instance:{session_id}")))
+    }));
+    scopes
+}
+
+fn runtime_counter_scope_parts(scope: &RuntimeCounterScope) -> (&'static str, String) {
+    match scope {
+        RuntimeCounterScope::Runtime => ("runtime", "_global".to_string()),
+        RuntimeCounterScope::Agent(agent_id) => ("agent", agent_id.0.clone()),
+        RuntimeCounterScope::Instance(instance_id) => ("instance", instance_id.0.clone()),
+        RuntimeCounterScope::Session(session_id) => ("session", session_id.0.clone()),
+    }
+}
+
+fn runtime_counter_scope_from_parts(
+    scope_type: &str,
+    scope_id: &str,
+) -> rusqlite::Result<RuntimeCounterScope> {
+    match scope_type {
+        "runtime" if scope_id == "_global" => Ok(RuntimeCounterScope::Runtime),
+        "agent" => Ok(RuntimeCounterScope::Agent(AgentId::new(scope_id))),
+        "instance" => Ok(RuntimeCounterScope::Instance(AgentInstanceId::new(
+            scope_id,
+        ))),
+        "session" => Ok(RuntimeCounterScope::Session(SessionId::new(scope_id))),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown runtime counter scope {other}:{scope_id}"),
+            )),
+        )),
+    }
+}
+
+fn dedupe_counter_scopes(scopes: Vec<RuntimeCounterScope>) -> Vec<RuntimeCounterScope> {
+    let mut deduped = Vec::new();
+    for scope in scopes {
+        if deduped.contains(&scope) {
+            continue;
+        }
+        deduped.push(scope);
+    }
+    deduped
 }
 
 fn save_event_indexes_in_tx(
@@ -1942,6 +2636,7 @@ fn row_to_runtime_search_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run
 fn runtime_search_row_type_from_str(raw: &str) -> rusqlite::Result<RuntimeSearchRowType> {
     match raw {
         "message" => Ok(RuntimeSearchRowType::Message),
+        "queue_message" => Ok(RuntimeSearchRowType::QueueMessage),
         "session" => Ok(RuntimeSearchRowType::Session),
         other => Err(rusqlite::Error::FromSqlConversionFailure(
             0,
@@ -2876,7 +3571,7 @@ mod tests {
         let store = CoordinationStore::open_file(&db_path).unwrap();
 
         assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(store.schema_migrations().unwrap().len(), 6);
+        assert_eq!(store.schema_migrations().unwrap().len(), 8);
         assert_eq!(store.count_rows("sessions").unwrap(), 0);
 
         remove_temp_db(&db_path);
@@ -2907,6 +3602,8 @@ mod tests {
         assert!(table_exists(&db_path, "event_session_index"));
         assert!(table_exists(&db_path, "event_agent_index"));
         assert!(table_exists(&db_path, "runtime_search_fts"));
+        assert!(table_exists(&db_path, "runtime_counters"));
+        assert!(table_exists(&db_path, "queued_messages"));
 
         remove_temp_db(&db_path);
     }
@@ -3251,6 +3948,251 @@ mod tests {
             })
             .unwrap()
             .is_empty());
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn runtime_counters_increment_by_scope_without_scanning_history() {
+        let db_path = temp_db_path("runtime-counters");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let session = sample_session_state();
+        let delegated_session_id = SessionId::new("delegated-alpha");
+
+        store
+            .save_event(
+                1,
+                &CoreEvent::BrainWakeRequested {
+                    session_id: session.session_id.clone(),
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                2,
+                &CoreEvent::BrainActionsAccepted {
+                    session_id: session.session_id.clone(),
+                    count: 2,
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                3,
+                &CoreEvent::BrainEventObserved {
+                    session_id: session.session_id.clone(),
+                    wake_id: Some("wake-tools".to_string()),
+                    event: BrainEvent::ToolCallStarted {
+                        tool_name: "read_file".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                4,
+                &CoreEvent::BrainEventObserved {
+                    session_id: session.session_id.clone(),
+                    wake_id: Some("wake-tools".to_string()),
+                    event: BrainEvent::ToolCallFinished {
+                        tool_name: "read_file".to_string(),
+                        is_error: true,
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                5,
+                &CoreEvent::AgentMessageRouted {
+                    message: AgentMessage {
+                        from: AgentId::new("agent-alpha"),
+                        to: AgentId::new("agent-beta"),
+                        body: "counter message".to_string(),
+                        correlation_id: None,
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                6,
+                &CoreEvent::DelegationLifecycleObserved {
+                    lifecycle: rusty_crew_core_protocol::DelegationLifecycleEvent {
+                        parent_session_id: session.session_id.clone(),
+                        delegated_session_id: delegated_session_id.clone(),
+                        run_id: Some(RunId::new("wake-tools:0")),
+                        phase: rusty_crew_core_protocol::DelegationLifecyclePhase::Created,
+                        detail: None,
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                7,
+                &CoreEvent::DelegationLifecycleObserved {
+                    lifecycle: rusty_crew_core_protocol::DelegationLifecycleEvent {
+                        parent_session_id: session.session_id.clone(),
+                        delegated_session_id,
+                        run_id: Some(RunId::new("wake-tools:0")),
+                        phase: rusty_crew_core_protocol::DelegationLifecyclePhase::TimedOut,
+                        detail: None,
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                8,
+                &CoreEvent::CompletionPacketDelivered {
+                    packet: CompletionPacket {
+                        session_id: session.session_id.clone(),
+                        status: rusty_crew_core_protocol::CompletionStatus::Completed,
+                        summary: "done".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+
+        // Re-saving the same sequence replaces projections but must not inflate counters.
+        store
+            .save_event(
+                8,
+                &CoreEvent::CompletionPacketDelivered {
+                    packet: CompletionPacket {
+                        session_id: session.session_id.clone(),
+                        status: rusty_crew_core_protocol::CompletionStatus::Completed,
+                        summary: "done again".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+
+        let runtime = store
+            .runtime_summary(&RuntimeCounterScope::Runtime)
+            .unwrap();
+        let session_summary = store
+            .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                "session-alpha",
+            )))
+            .unwrap();
+        let agent_summary = store
+            .runtime_summary(&RuntimeCounterScope::Agent(AgentId::new("agent-beta")))
+            .unwrap();
+
+        assert_eq!(runtime.wakes, 1);
+        assert_eq!(runtime.brain_turns, 1);
+        assert_eq!(runtime.tool_calls, 1);
+        assert_eq!(runtime.tool_errors, 1);
+        assert_eq!(runtime.messages, 1);
+        assert_eq!(runtime.delegations_created, 1);
+        assert_eq!(runtime.delegations_timed_out, 1);
+        assert_eq!(runtime.completions, 1);
+        assert_eq!(session_summary.wakes, 1);
+        assert_eq!(session_summary.completions, 1);
+        assert_eq!(agent_summary.messages, 1);
+        assert_eq!(store.count_rows("runtime_counters").unwrap(), 31);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn queued_message_expiry_is_queryable_without_redelivery() {
+        let db_path = temp_db_path("queued-messages");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let record = QueuedMessageRecord {
+            message_id: "queue-1".to_string(),
+            owner_session_id: Some(SessionId::new("session-alpha")),
+            owner_agent_id: AgentId::new("agent-alpha"),
+            message: AgentMessage {
+                from: AgentId::new("operator"),
+                to: AgentId::new("agent-alpha"),
+                body: "time boxed queue work".to_string(),
+                correlation_id: Some("queue-corr".to_string()),
+            },
+            source_sequence: Some(42),
+            enqueued_at: "2026-06-20T00:00:00Z".to_string(),
+            expires_at: "2026-06-20T00:00:05Z".to_string(),
+            ttl_ms: 5_000,
+            delivery_attempts: 0,
+            state: QueuedMessageState::Pending,
+            terminal_at: None,
+            state_reason: None,
+        };
+
+        store.save_queued_message(&record).unwrap();
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(SessionId::new("session-alpha")),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store
+            .expire_queued_messages_at(&"2026-06-20T00:00:04Z".to_string())
+            .unwrap()
+            .is_empty());
+
+        let expired = store
+            .expire_queued_messages_at(&"2026-06-20T00:00:06Z".to_string())
+            .unwrap();
+
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].state, QueuedMessageState::Expired);
+        assert!(store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(SessionId::new("session-alpha")),
+                owner_agent_id: None,
+                limit: None,
+            })
+            .unwrap()
+            .is_empty());
+        let expired_query = store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Expired),
+                owner_session_id: None,
+                owner_agent_id: Some(AgentId::new("agent-alpha")),
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(expired_query.len(), 1);
+        assert_eq!(
+            expired_query[0].state_reason.as_deref(),
+            Some("ttl_expired")
+        );
+        assert_eq!(
+            store
+                .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                    "session-alpha"
+                )))
+                .unwrap()
+                .queue_expirations,
+            1
+        );
+        let search = store
+            .search_runtime(&RuntimeSearchFilter {
+                query: "queue".to_string(),
+                row_type: Some(RuntimeSearchRowType::QueueMessage),
+                session_id: Some(SessionId::new("session-alpha")),
+                agent_id: Some(AgentId::new("agent-alpha")),
+                instance_id: None,
+                task_id: None,
+                event_kind: None,
+                recorded_after: None,
+                recorded_before: None,
+                limit: Some(10),
+            })
+            .unwrap();
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].row_type, RuntimeSearchRowType::QueueMessage);
+        assert_eq!(store.count_rows("queued_messages").unwrap(), 1);
 
         remove_temp_db(&db_path);
     }
