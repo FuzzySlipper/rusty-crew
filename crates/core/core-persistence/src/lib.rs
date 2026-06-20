@@ -5,22 +5,22 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
-    AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, BrainEvent, CompletionPacket,
-    CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DelegatedCompletion,
-    DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference, DurableAgentKind,
-    DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus,
-    IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId, ResourceLimits, RunId,
-    SessionConfig, SessionHandle, SessionId, SessionIdentityRecord, SessionKind, SessionState,
-    SessionStatus, SourceSystemReference, TaskId, ToolProfile,
+    AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, BrainEvent,
+    CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
+    DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
+    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
+    FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId, ResourceLimits,
+    RunId, SessionConfig, SessionHandle, SessionId, SessionIdentityRecord, SessionKind,
+    SessionState, SessionStatus, SourceSystemReference, TaskId, ToolProfile,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 10;
+const CURRENT_SCHEMA_VERSION: i64 = 11;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -93,6 +93,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 10,
         description: "add future legacy runtime import metadata",
         apply: migrate_v10_add_legacy_runtime_import_metadata,
+    },
+    SchemaMigration {
+        version: 11,
+        description: "add per-agent external channel and MCP bindings",
+        apply: migrate_v11_add_external_bindings,
     },
 ];
 
@@ -393,6 +398,107 @@ pub struct LegacyIdMappingQuery {
     pub page: Option<QueryPage>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalBindingStatus {
+    Active,
+    Degraded,
+    Disconnected,
+    Archived,
+}
+
+impl ExternalBindingStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Degraded => "degraded",
+            Self::Disconnected => "disconnected",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ExternalBindingProvenance {
+    pub source_system: Option<String>,
+    pub source_ref: Option<String>,
+    pub externally_owned: bool,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelBindingRecord {
+    pub binding_id: String,
+    pub adapter_id: AdapterId,
+    pub provider: String,
+    pub agent_id: AgentId,
+    pub instance_id: Option<AgentInstanceId>,
+    pub session_id: Option<SessionId>,
+    pub profile_id: ProfileId,
+    pub external_channel_id: String,
+    pub external_thread_id: Option<String>,
+    pub external_user_id: Option<String>,
+    pub provider_subscription_id: Option<String>,
+    pub cursor: Option<String>,
+    pub membership_state: Option<String>,
+    pub presence_state: Option<String>,
+    pub status: ExternalBindingStatus,
+    pub degraded_reason: Option<String>,
+    pub provenance: ExternalBindingProvenance,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ChannelBindingQuery {
+    pub agent_id: Option<AgentId>,
+    pub instance_id: Option<AgentInstanceId>,
+    pub session_id: Option<SessionId>,
+    pub profile_id: Option<ProfileId>,
+    pub adapter_id: Option<AdapterId>,
+    pub provider: Option<String>,
+    pub external_channel_id: Option<String>,
+    pub status: Option<ExternalBindingStatus>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct McpBindingDiagnostics {
+    pub last_error: Option<String>,
+    pub last_checked_at: Option<IsoTimestamp>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpBindingRecord {
+    pub binding_id: String,
+    pub adapter_id: AdapterId,
+    pub agent_id: AgentId,
+    pub instance_id: Option<AgentInstanceId>,
+    pub session_id: Option<SessionId>,
+    pub profile_id: ProfileId,
+    pub server_names: Vec<String>,
+    pub endpoint_ref: String,
+    pub transport: String,
+    pub tool_profile_key: String,
+    pub discovered_tool_revision: Option<String>,
+    pub status: ExternalBindingStatus,
+    pub degraded_reason: Option<String>,
+    pub diagnostics: McpBindingDiagnostics,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct McpBindingQuery {
+    pub agent_id: Option<AgentId>,
+    pub instance_id: Option<AgentInstanceId>,
+    pub session_id: Option<SessionId>,
+    pub profile_id: Option<ProfileId>,
+    pub adapter_id: Option<AdapterId>,
+    pub status: Option<ExternalBindingStatus>,
+    pub page: Option<QueryPage>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeCounterScope {
     Runtime,
@@ -469,6 +575,8 @@ pub enum DiagnosticTable {
     QueuedMessages,
     RuntimeImportBatches,
     LegacyIdMappings,
+    ChannelBindings,
+    McpBindings,
     AgentMessages,
     CompletionPackets,
     WorkerRuns,
@@ -493,6 +601,8 @@ impl DiagnosticTable {
         Self::QueuedMessages,
         Self::RuntimeImportBatches,
         Self::LegacyIdMappings,
+        Self::ChannelBindings,
+        Self::McpBindings,
         Self::AgentMessages,
         Self::CompletionPackets,
         Self::WorkerRuns,
@@ -517,6 +627,8 @@ impl DiagnosticTable {
             "queued_messages" => Ok(Self::QueuedMessages),
             "runtime_import_batches" => Ok(Self::RuntimeImportBatches),
             "legacy_id_mappings" => Ok(Self::LegacyIdMappings),
+            "channel_bindings" => Ok(Self::ChannelBindings),
+            "mcp_bindings" => Ok(Self::McpBindings),
             "agent_messages" => Ok(Self::AgentMessages),
             "completion_packets" => Ok(Self::CompletionPackets),
             "worker_runs" => Ok(Self::WorkerRuns),
@@ -546,6 +658,8 @@ impl DiagnosticTable {
             Self::QueuedMessages => "queued_messages",
             Self::RuntimeImportBatches => "runtime_import_batches",
             Self::LegacyIdMappings => "legacy_id_mappings",
+            Self::ChannelBindings => "channel_bindings",
+            Self::McpBindings => "mcp_bindings",
             Self::AgentMessages => "agent_messages",
             Self::CompletionPackets => "completion_packets",
             Self::WorkerRuns => "worker_runs",
@@ -1185,6 +1299,29 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<LegacyIdMappingRecord>> {
         let conn = self.conn()?;
         query_legacy_id_mappings(&conn, query)
+    }
+
+    pub fn save_channel_binding(&self, record: &ChannelBindingRecord) -> CoreResult<()> {
+        let conn = self.conn()?;
+        save_channel_binding(&conn, record)
+    }
+
+    pub fn query_channel_bindings(
+        &self,
+        query: &ChannelBindingQuery,
+    ) -> CoreResult<Vec<ChannelBindingRecord>> {
+        let conn = self.conn()?;
+        query_channel_bindings(&conn, query)
+    }
+
+    pub fn save_mcp_binding(&self, record: &McpBindingRecord) -> CoreResult<()> {
+        let conn = self.conn()?;
+        save_mcp_binding(&conn, record)
+    }
+
+    pub fn query_mcp_bindings(&self, query: &McpBindingQuery) -> CoreResult<Vec<McpBindingRecord>> {
+        let conn = self.conn()?;
+        query_mcp_bindings(&conn, query)
     }
 
     pub fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
@@ -1893,6 +2030,8 @@ fn reject_unsupported_unversioned_schema(conn: &Connection) -> CoreResult<()> {
                 | "runtime_search_fts"
                 | "runtime_import_batches"
                 | "legacy_id_mappings"
+                | "channel_bindings"
+                | "mcp_bindings"
         )
     });
     let has_migration_records = conn
@@ -2274,6 +2413,68 @@ fn migrate_v10_add_legacy_runtime_import_metadata(
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 10", error))
+}
+
+fn migrate_v11_add_external_bindings(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS channel_bindings (
+                binding_id TEXT PRIMARY KEY,
+                adapter_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                instance_id TEXT,
+                session_id TEXT,
+                profile_id TEXT NOT NULL,
+                external_channel_id TEXT NOT NULL,
+                external_thread_id TEXT,
+                external_user_id TEXT,
+                provider_subscription_id TEXT,
+                cursor TEXT,
+                membership_state TEXT,
+                presence_state TEXT,
+                status TEXT NOT NULL,
+                degraded_reason TEXT,
+                provenance_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_channel_bindings_agent_provider
+                ON channel_bindings(agent_id, provider, status);
+            CREATE INDEX IF NOT EXISTS idx_channel_bindings_profile_agent
+                ON channel_bindings(profile_id, agent_id, status);
+            CREATE INDEX IF NOT EXISTS idx_channel_bindings_session
+                ON channel_bindings(session_id, status);
+            CREATE INDEX IF NOT EXISTS idx_channel_bindings_external
+                ON channel_bindings(provider, external_channel_id, external_thread_id);
+
+            CREATE TABLE IF NOT EXISTS mcp_bindings (
+                binding_id TEXT PRIMARY KEY,
+                adapter_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                instance_id TEXT,
+                session_id TEXT,
+                profile_id TEXT NOT NULL,
+                server_names_json TEXT NOT NULL,
+                endpoint_ref TEXT NOT NULL,
+                transport TEXT NOT NULL,
+                tool_profile_key TEXT NOT NULL,
+                discovered_tool_revision TEXT,
+                status TEXT NOT NULL,
+                degraded_reason TEXT,
+                diagnostics_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_mcp_bindings_agent_profile
+                ON mcp_bindings(agent_id, profile_id, status);
+            CREATE INDEX IF NOT EXISTS idx_mcp_bindings_session
+                ON mcp_bindings(session_id, status);
+            CREATE INDEX IF NOT EXISTS idx_mcp_bindings_adapter
+                ON mcp_bindings(adapter_id, status);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 11", error))
 }
 
 fn save_queued_message_in_tx(
@@ -3022,6 +3223,342 @@ fn query_legacy_id_mappings(
         .map_err(|error| persistence_error("query legacy id mappings", error))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| persistence_error("load legacy id mappings", error))
+}
+
+fn save_channel_binding(conn: &Connection, record: &ChannelBindingRecord) -> CoreResult<()> {
+    let provenance_json = to_json_text(&record.provenance)?;
+    conn.execute(
+        "INSERT INTO channel_bindings (
+            binding_id,
+            adapter_id,
+            provider,
+            agent_id,
+            instance_id,
+            session_id,
+            profile_id,
+            external_channel_id,
+            external_thread_id,
+            external_user_id,
+            provider_subscription_id,
+            cursor,
+            membership_state,
+            presence_state,
+            status,
+            degraded_reason,
+            provenance_json,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+        ON CONFLICT(binding_id) DO UPDATE SET
+            adapter_id = excluded.adapter_id,
+            provider = excluded.provider,
+            agent_id = excluded.agent_id,
+            instance_id = excluded.instance_id,
+            session_id = excluded.session_id,
+            profile_id = excluded.profile_id,
+            external_channel_id = excluded.external_channel_id,
+            external_thread_id = excluded.external_thread_id,
+            external_user_id = excluded.external_user_id,
+            provider_subscription_id = excluded.provider_subscription_id,
+            cursor = excluded.cursor,
+            membership_state = excluded.membership_state,
+            presence_state = excluded.presence_state,
+            status = excluded.status,
+            degraded_reason = excluded.degraded_reason,
+            provenance_json = excluded.provenance_json,
+            updated_at = excluded.updated_at",
+        params![
+            record.binding_id,
+            record.adapter_id.0,
+            record.provider,
+            record.agent_id.0,
+            record.instance_id.as_ref().map(|value| value.0.as_str()),
+            record.session_id.as_ref().map(|value| value.0.as_str()),
+            record.profile_id.0,
+            record.external_channel_id,
+            record.external_thread_id,
+            record.external_user_id,
+            record.provider_subscription_id,
+            record.cursor,
+            record.membership_state,
+            record.presence_state,
+            record.status.as_str(),
+            record.degraded_reason,
+            provenance_json,
+            record.created_at,
+            record.updated_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save channel binding", error))?;
+    Ok(())
+}
+
+fn query_channel_bindings(
+    conn: &Connection,
+    query: &ChannelBindingQuery,
+) -> CoreResult<Vec<ChannelBindingRecord>> {
+    let agent_id = query.agent_id.as_ref().map(|value| value.0.as_str());
+    let instance_id = query.instance_id.as_ref().map(|value| value.0.as_str());
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+    let adapter_id = query.adapter_id.as_ref().map(|value| value.0.as_str());
+    let provider = query.provider.as_deref();
+    let external_channel_id = query.external_channel_id.as_deref();
+    let status = query.status.map(ExternalBindingStatus::as_str);
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                binding_id,
+                adapter_id,
+                provider,
+                agent_id,
+                instance_id,
+                session_id,
+                profile_id,
+                external_channel_id,
+                external_thread_id,
+                external_user_id,
+                provider_subscription_id,
+                cursor,
+                membership_state,
+                presence_state,
+                status,
+                degraded_reason,
+                provenance_json,
+                created_at,
+                updated_at
+             FROM channel_bindings
+             WHERE (?1 IS NULL OR agent_id = ?1)
+               AND (?2 IS NULL OR instance_id = ?2)
+               AND (?3 IS NULL OR session_id = ?3)
+               AND (?4 IS NULL OR profile_id = ?4)
+               AND (?5 IS NULL OR adapter_id = ?5)
+               AND (?6 IS NULL OR provider = ?6)
+               AND (?7 IS NULL OR external_channel_id = ?7)
+               AND (?8 IS NULL OR status = ?8)
+             ORDER BY provider ASC, external_channel_id ASC, binding_id ASC
+             LIMIT ?9 OFFSET ?10",
+        )
+        .map_err(|error| persistence_error("prepare channel binding query", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                agent_id,
+                instance_id,
+                session_id,
+                profile_id,
+                adapter_id,
+                provider,
+                external_channel_id,
+                status,
+                limit,
+                offset,
+            ],
+            row_to_channel_binding,
+        )
+        .map_err(|error| persistence_error("query channel bindings", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load channel bindings", error))
+}
+
+fn row_to_channel_binding(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelBindingRecord> {
+    let status: String = row.get(14)?;
+    let provenance_json: String = row.get(16)?;
+    Ok(ChannelBindingRecord {
+        binding_id: row.get(0)?,
+        adapter_id: AdapterId(row.get(1)?),
+        provider: row.get(2)?,
+        agent_id: AgentId(row.get(3)?),
+        instance_id: row.get::<_, Option<String>>(4)?.map(AgentInstanceId),
+        session_id: row.get::<_, Option<String>>(5)?.map(SessionId),
+        profile_id: ProfileId(row.get(6)?),
+        external_channel_id: row.get(7)?,
+        external_thread_id: row.get(8)?,
+        external_user_id: row.get(9)?,
+        provider_subscription_id: row.get(10)?,
+        cursor: row.get(11)?,
+        membership_state: row.get(12)?,
+        presence_state: row.get(13)?,
+        status: external_binding_status_from_str(&status)?,
+        degraded_reason: row.get(15)?,
+        provenance: from_json_text(&provenance_json).map_err(to_sql_error)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
+    })
+}
+
+fn save_mcp_binding(conn: &Connection, record: &McpBindingRecord) -> CoreResult<()> {
+    let server_names_json = to_json_text(&record.server_names)?;
+    let diagnostics_json = to_json_text(&record.diagnostics)?;
+    conn.execute(
+        "INSERT INTO mcp_bindings (
+            binding_id,
+            adapter_id,
+            agent_id,
+            instance_id,
+            session_id,
+            profile_id,
+            server_names_json,
+            endpoint_ref,
+            transport,
+            tool_profile_key,
+            discovered_tool_revision,
+            status,
+            degraded_reason,
+            diagnostics_json,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ON CONFLICT(binding_id) DO UPDATE SET
+            adapter_id = excluded.adapter_id,
+            agent_id = excluded.agent_id,
+            instance_id = excluded.instance_id,
+            session_id = excluded.session_id,
+            profile_id = excluded.profile_id,
+            server_names_json = excluded.server_names_json,
+            endpoint_ref = excluded.endpoint_ref,
+            transport = excluded.transport,
+            tool_profile_key = excluded.tool_profile_key,
+            discovered_tool_revision = excluded.discovered_tool_revision,
+            status = excluded.status,
+            degraded_reason = excluded.degraded_reason,
+            diagnostics_json = excluded.diagnostics_json,
+            updated_at = excluded.updated_at",
+        params![
+            record.binding_id,
+            record.adapter_id.0,
+            record.agent_id.0,
+            record.instance_id.as_ref().map(|value| value.0.as_str()),
+            record.session_id.as_ref().map(|value| value.0.as_str()),
+            record.profile_id.0,
+            server_names_json,
+            record.endpoint_ref,
+            record.transport,
+            record.tool_profile_key,
+            record.discovered_tool_revision,
+            record.status.as_str(),
+            record.degraded_reason,
+            diagnostics_json,
+            record.created_at,
+            record.updated_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save MCP binding", error))?;
+    Ok(())
+}
+
+fn query_mcp_bindings(
+    conn: &Connection,
+    query: &McpBindingQuery,
+) -> CoreResult<Vec<McpBindingRecord>> {
+    let agent_id = query.agent_id.as_ref().map(|value| value.0.as_str());
+    let instance_id = query.instance_id.as_ref().map(|value| value.0.as_str());
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+    let adapter_id = query.adapter_id.as_ref().map(|value| value.0.as_str());
+    let status = query.status.map(ExternalBindingStatus::as_str);
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                binding_id,
+                adapter_id,
+                agent_id,
+                instance_id,
+                session_id,
+                profile_id,
+                server_names_json,
+                endpoint_ref,
+                transport,
+                tool_profile_key,
+                discovered_tool_revision,
+                status,
+                degraded_reason,
+                diagnostics_json,
+                created_at,
+                updated_at
+             FROM mcp_bindings
+             WHERE (?1 IS NULL OR agent_id = ?1)
+               AND (?2 IS NULL OR instance_id = ?2)
+               AND (?3 IS NULL OR session_id = ?3)
+               AND (?4 IS NULL OR profile_id = ?4)
+               AND (?5 IS NULL OR adapter_id = ?5)
+               AND (?6 IS NULL OR status = ?6)
+             ORDER BY agent_id ASC, profile_id ASC, binding_id ASC
+             LIMIT ?7 OFFSET ?8",
+        )
+        .map_err(|error| persistence_error("prepare MCP binding query", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                agent_id,
+                instance_id,
+                session_id,
+                profile_id,
+                adapter_id,
+                status,
+                limit,
+                offset,
+            ],
+            row_to_mcp_binding,
+        )
+        .map_err(|error| persistence_error("query MCP bindings", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load MCP bindings", error))
+}
+
+fn row_to_mcp_binding(row: &rusqlite::Row<'_>) -> rusqlite::Result<McpBindingRecord> {
+    let server_names_json: String = row.get(6)?;
+    let status: String = row.get(11)?;
+    let diagnostics_json: String = row.get(13)?;
+    Ok(McpBindingRecord {
+        binding_id: row.get(0)?,
+        adapter_id: AdapterId(row.get(1)?),
+        agent_id: AgentId(row.get(2)?),
+        instance_id: row.get::<_, Option<String>>(3)?.map(AgentInstanceId),
+        session_id: row.get::<_, Option<String>>(4)?.map(SessionId),
+        profile_id: ProfileId(row.get(5)?),
+        server_names: from_json_text(&server_names_json).map_err(to_sql_error)?,
+        endpoint_ref: row.get(7)?,
+        transport: row.get(8)?,
+        tool_profile_key: row.get(9)?,
+        discovered_tool_revision: row.get(10)?,
+        status: external_binding_status_from_str(&status)?,
+        degraded_reason: row.get(12)?,
+        diagnostics: from_json_text(&diagnostics_json).map_err(to_sql_error)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+    })
+}
+
+fn external_binding_status_from_str(raw: &str) -> rusqlite::Result<ExternalBindingStatus> {
+    match raw {
+        "active" => Ok(ExternalBindingStatus::Active),
+        "degraded" => Ok(ExternalBindingStatus::Degraded),
+        "disconnected" => Ok(ExternalBindingStatus::Disconnected),
+        "archived" => Ok(ExternalBindingStatus::Archived),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown external binding status {other}"),
+            )),
+        )),
+    }
 }
 
 fn row_to_import_batch(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeImportBatchRecord> {
@@ -4611,7 +5148,7 @@ mod tests {
         let store = CoordinationStore::open_file(&db_path).unwrap();
 
         assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(store.schema_migrations().unwrap().len(), 10);
+        assert_eq!(store.schema_migrations().unwrap().len(), 11);
         assert_eq!(store.count_rows("sessions").unwrap(), 0);
 
         remove_temp_db(&db_path);
@@ -4646,10 +5183,14 @@ mod tests {
         assert!(table_exists(&db_path, "queued_messages"));
         assert!(table_exists(&db_path, "runtime_import_batches"));
         assert!(table_exists(&db_path, "legacy_id_mappings"));
+        assert!(table_exists(&db_path, "channel_bindings"));
+        assert!(table_exists(&db_path, "mcp_bindings"));
         assert!(index_exists(
             &db_path,
             "idx_worker_runs_parent_status_created"
         ));
+        assert!(index_exists(&db_path, "idx_channel_bindings_external"));
+        assert!(index_exists(&db_path, "idx_mcp_bindings_agent_profile"));
 
         remove_temp_db(&db_path);
     }
@@ -4745,6 +5286,160 @@ mod tests {
         assert!(hermes_mapping[0].provenance.externally_owned);
         assert_eq!(store.count_rows("runtime_import_batches").unwrap(), 2);
         assert_eq!(store.count_rows("legacy_id_mappings").unwrap(), 2);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn external_bindings_are_scoped_per_agent_without_secret_material() {
+        let db_path = temp_db_path("external-bindings");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+
+        let base_provenance = ExternalBindingProvenance {
+            source_system: Some("den-channels".to_string()),
+            source_ref: Some("den-channel:crew-room".to_string()),
+            externally_owned: true,
+            notes: Some("provider secret remains in adapter config".to_string()),
+        };
+        let alpha_channel = ChannelBindingRecord {
+            binding_id: "channel-alpha".to_string(),
+            adapter_id: AdapterId::new("den-channels-main"),
+            provider: "den_channels".to_string(),
+            agent_id: AgentId::new("agent-alpha"),
+            instance_id: Some(AgentInstanceId::new("instance-alpha")),
+            session_id: Some(SessionId::new("session-alpha")),
+            profile_id: ProfileId::new("prime-profile"),
+            external_channel_id: "crew-room".to_string(),
+            external_thread_id: Some("thread-42".to_string()),
+            external_user_id: Some("den-user-alpha".to_string()),
+            provider_subscription_id: Some("sub-alpha".to_string()),
+            cursor: Some("cursor-alpha".to_string()),
+            membership_state: Some("joined".to_string()),
+            presence_state: Some("online".to_string()),
+            status: ExternalBindingStatus::Active,
+            degraded_reason: None,
+            provenance: base_provenance.clone(),
+            created_at: "2026-06-20T04:00:00Z".to_string(),
+            updated_at: "2026-06-20T04:01:00Z".to_string(),
+        };
+        let beta_channel = ChannelBindingRecord {
+            binding_id: "channel-beta".to_string(),
+            agent_id: AgentId::new("agent-beta"),
+            instance_id: Some(AgentInstanceId::new("instance-beta")),
+            session_id: Some(SessionId::new("session-beta")),
+            profile_id: ProfileId::new("review-profile"),
+            provider_subscription_id: Some("sub-beta".to_string()),
+            cursor: Some("cursor-beta".to_string()),
+            presence_state: Some("idle".to_string()),
+            updated_at: "2026-06-20T04:02:00Z".to_string(),
+            ..alpha_channel.clone()
+        };
+
+        store.save_channel_binding(&alpha_channel).unwrap();
+        store.save_channel_binding(&beta_channel).unwrap();
+
+        let shared_channel = store
+            .query_channel_bindings(&ChannelBindingQuery {
+                provider: Some("den_channels".to_string()),
+                external_channel_id: Some("crew-room".to_string()),
+                ..ChannelBindingQuery::default()
+            })
+            .unwrap();
+        let alpha_only = store
+            .query_channel_bindings(&ChannelBindingQuery {
+                agent_id: Some(AgentId::new("agent-alpha")),
+                status: Some(ExternalBindingStatus::Active),
+                ..ChannelBindingQuery::default()
+            })
+            .unwrap();
+
+        assert_eq!(shared_channel.len(), 2);
+        assert_eq!(alpha_only.len(), 1);
+        assert_eq!(
+            alpha_only[0].provider_subscription_id.as_deref(),
+            Some("sub-alpha")
+        );
+        assert_eq!(alpha_only[0].cursor.as_deref(), Some("cursor-alpha"));
+        assert_eq!(alpha_only[0].profile_id, ProfileId::new("prime-profile"));
+
+        store
+            .save_mcp_binding(&McpBindingRecord {
+                binding_id: "mcp-alpha".to_string(),
+                adapter_id: AdapterId::new("mcp-ts-main"),
+                agent_id: AgentId::new("agent-alpha"),
+                instance_id: Some(AgentInstanceId::new("instance-alpha")),
+                session_id: Some(SessionId::new("session-alpha")),
+                profile_id: ProfileId::new("prime-profile"),
+                server_names: vec!["den".to_string(), "filesystem".to_string()],
+                endpoint_ref: "config://mcp/alpha".to_string(),
+                transport: "stdio".to_string(),
+                tool_profile_key: "tool-profile-alpha".to_string(),
+                discovered_tool_revision: Some("rev-alpha".to_string()),
+                status: ExternalBindingStatus::Active,
+                degraded_reason: None,
+                diagnostics: McpBindingDiagnostics {
+                    last_error: None,
+                    last_checked_at: Some("2026-06-20T04:05:00Z".to_string()),
+                    notes: Some("no secret fields".to_string()),
+                },
+                created_at: "2026-06-20T04:00:00Z".to_string(),
+                updated_at: "2026-06-20T04:05:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .save_mcp_binding(&McpBindingRecord {
+                binding_id: "mcp-beta".to_string(),
+                adapter_id: AdapterId::new("mcp-ts-main"),
+                agent_id: AgentId::new("agent-beta"),
+                instance_id: Some(AgentInstanceId::new("instance-beta")),
+                session_id: Some(SessionId::new("session-beta")),
+                profile_id: ProfileId::new("review-profile"),
+                server_names: vec!["den".to_string()],
+                endpoint_ref: "config://mcp/beta".to_string(),
+                transport: "stdio".to_string(),
+                tool_profile_key: "tool-profile-beta".to_string(),
+                discovered_tool_revision: Some("rev-beta".to_string()),
+                status: ExternalBindingStatus::Degraded,
+                degraded_reason: Some("tool discovery stale".to_string()),
+                diagnostics: McpBindingDiagnostics {
+                    last_error: Some("catalog revision mismatch".to_string()),
+                    last_checked_at: Some("2026-06-20T04:06:00Z".to_string()),
+                    notes: None,
+                },
+                created_at: "2026-06-20T04:00:00Z".to_string(),
+                updated_at: "2026-06-20T04:06:00Z".to_string(),
+            })
+            .unwrap();
+
+        let alpha_mcp = store
+            .query_mcp_bindings(&McpBindingQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..McpBindingQuery::default()
+            })
+            .unwrap();
+        let degraded = store
+            .query_mcp_bindings(&McpBindingQuery {
+                status: Some(ExternalBindingStatus::Degraded),
+                ..McpBindingQuery::default()
+            })
+            .unwrap();
+
+        assert_eq!(alpha_mcp.len(), 1);
+        assert_eq!(
+            alpha_mcp[0].server_names,
+            vec!["den".to_string(), "filesystem".to_string()]
+        );
+        assert_eq!(alpha_mcp[0].endpoint_ref, "config://mcp/alpha");
+        assert_eq!(alpha_mcp[0].tool_profile_key, "tool-profile-alpha");
+        assert!(!alpha_mcp[0].endpoint_ref.contains("secret"));
+        assert_eq!(degraded.len(), 1);
+        assert_eq!(degraded[0].agent_id, AgentId::new("agent-beta"));
+        assert_eq!(
+            degraded[0].diagnostics.last_error.as_deref(),
+            Some("catalog revision mismatch")
+        );
+        assert_eq!(store.count_rows("channel_bindings").unwrap(), 2);
+        assert_eq!(store.count_rows("mcp_bindings").unwrap(), 2);
 
         remove_temp_db(&db_path);
     }

@@ -8,6 +8,9 @@ import type {
   PlatformAdapterRegistration,
 } from "@rusty-crew/contracts";
 
+export * from "./den-channels.js";
+export * from "./den-channel-transport.js";
+
 export type DenAdapterConnectionState =
   | "connected"
   | "degraded"

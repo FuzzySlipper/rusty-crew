@@ -11,6 +11,7 @@ export type SubscriptionHandle = Brand<number, "SubscriptionHandle">;
 export type RuntimeBufferHandle = Brand<number, "RuntimeBufferHandle">;
 
 export type AgentId = Brand<string, "AgentId">;
+export type AgentInstanceId = Brand<string, "AgentInstanceId">;
 export type SessionId = Brand<string, "SessionId">;
 export type ProfileId = Brand<string, "ProfileId">;
 export type ProjectId = Brand<string, "ProjectId">;
@@ -129,6 +130,87 @@ export interface ExternalEvent {
   adapterId: AdapterId;
   source: string;
   payload: ExternalEventPayload;
+}
+
+export type ChannelProvider = "den_channels" | "telegram" | "simulated";
+export type ChannelVisibility = "conversation" | "task" | "debug" | "system";
+export type ChannelSeverity = "info" | "success" | "warning" | "error";
+export type ChannelDeliveryPolicy = "best_effort" | "must_ack" | "dry_run";
+
+export interface ChannelRuntimeIdentity {
+  agentId?: AgentId;
+  instanceId?: AgentInstanceId;
+  sessionId?: SessionId;
+  profileId?: ProfileId;
+}
+
+export interface ChannelProviderRefs {
+  provider: ChannelProvider | string;
+  externalChannelId: string;
+  externalThreadId?: string;
+  externalMessageId?: string;
+  externalUserId?: string;
+}
+
+export interface ChannelAuthorRef {
+  externalUserId: string;
+  displayLabel?: string;
+}
+
+export interface ChannelAttachmentRef {
+  ref: string;
+  mediaType?: string;
+  label?: string;
+}
+
+export interface NormalizedChannelInboundMessage {
+  kind: "channel_inbound_message.v1";
+  adapterId: AdapterId;
+  bindingId: string;
+  runtime: ChannelRuntimeIdentity;
+  providerRefs: ChannelProviderRefs;
+  author: ChannelAuthorRef;
+  body: string;
+  summary?: string;
+  attachments: ChannelAttachmentRef[];
+  mentions: string[];
+  receivedAt: string;
+  ttlMs: number;
+  expiresAt: string;
+  cursor?: string;
+  idempotencyKey: string;
+  visibility: ChannelVisibility;
+  provenance: Record<string, unknown>;
+}
+
+export interface NormalizedChannelOutboundMessage {
+  kind: "channel_outbound_message.v1";
+  adapterId: AdapterId;
+  bindingId: string;
+  runtime: ChannelRuntimeIdentity;
+  providerRefs: ChannelProviderRefs;
+  body: string;
+  replyToExternalMessageId?: string;
+  correlationId?: string;
+  idempotencyKey: string;
+  visibility: ChannelVisibility;
+  deliveryPolicy: ChannelDeliveryPolicy;
+  resultRef?: string;
+  workRef?: string;
+}
+
+export interface NormalizedChannelActivityProjection {
+  kind: "channel_activity_projection.v1";
+  adapterId: AdapterId;
+  bindingId: string;
+  runtime: ChannelRuntimeIdentity;
+  providerRefs: ChannelProviderRefs;
+  eventType: string;
+  summary: string;
+  severity: ChannelSeverity;
+  workRef?: string;
+  resultRef?: string;
+  createdAt: string;
 }
 
 export type CompletionStatus = "completed" | "failed" | "blocked" | "exhausted";
