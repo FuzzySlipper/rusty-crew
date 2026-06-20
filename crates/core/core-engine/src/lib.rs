@@ -4,7 +4,12 @@ use rusty_crew_core_body::{
     session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
-use rusty_crew_core_persistence::{CoordinationStore, WorkerRunRecord, WorkerRunStatus};
+use rusty_crew_core_persistence::{
+    CoordinationStore, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
+    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
+    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeStateSummary, WorkerRunRecord, WorkerRunStatus,
+};
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
     BrainActionBatch, BrainEvent, BrainEventEnvelope, ClockConfig, CompletionStatus, CoreError,
@@ -258,6 +263,69 @@ impl CoreEngine {
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         self.store.count_rows(table)
+    }
+
+    pub fn list_profile_memory(
+        &self,
+        query: &ProfileMemoryQuery,
+    ) -> CoreResult<Vec<ProfileMemoryRecord>> {
+        self.store.list_profile_memory(query)
+    }
+
+    pub fn get_profile_memory(
+        &self,
+        profile_id: &ProfileId,
+        target: &ProfileMemoryTarget,
+        key: &str,
+    ) -> CoreResult<Option<ProfileMemoryRecord>> {
+        self.store.get_profile_memory(profile_id, target, key)
+    }
+
+    pub fn add_profile_memory(
+        &self,
+        mut write: ProfileMemoryWrite,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        write.now = self.now();
+        self.store.add_profile_memory(&write, caps)
+    }
+
+    pub fn replace_profile_memory(
+        &self,
+        mut replace: ProfileMemoryReplace,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        replace.write.now = self.now();
+        self.store.replace_profile_memory(&replace, caps)
+    }
+
+    pub fn remove_profile_memory(
+        &self,
+        delete: &ProfileMemoryDelete,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        self.store.remove_profile_memory(delete)
+    }
+
+    pub fn search_runtime(
+        &self,
+        filter: &RuntimeSearchFilter,
+    ) -> CoreResult<Vec<RuntimeSearchResult>> {
+        self.store.search_runtime(filter)
+    }
+
+    pub fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        self.store.query_runtime_counters(query)
+    }
+
+    pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+        self.store.runtime_summary(scope)
+    }
+
+    pub fn reset_runtime_counters(&self, query: &RuntimeCounterQuery) -> CoreResult<u64> {
+        self.store.reset_runtime_counters(query, self.now())
     }
 
     pub fn request_delegated_checkpoint(

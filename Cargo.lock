@@ -392,6 +392,7 @@ dependencies = [
  "napi-derive",
  "rusty-crew-core-bridge-api",
  "rusty-crew-core-engine",
+ "rusty-crew-core-persistence",
  "serde_json",
 ]
 

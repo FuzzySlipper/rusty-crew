@@ -43,6 +43,53 @@ assert.equal(
   "selected",
 );
 
+const memoryInventory = defaultToolRegistry.buildInventory({
+  requestedToolsets: [
+    "memory_den_read",
+    "memory_den_write",
+    "memory_profile",
+    "skills_read",
+    "planning_session",
+  ],
+  resourceDeniedTools: [
+    "den_memory_store",
+    "den_memory_propose",
+    "dense_profile_memory",
+    "session_search",
+  ],
+  resourceDeniedReasons: {
+    den_memory_store: "Den Memories write endpoint is not configured",
+    den_memory_propose: "Den Memories proposal endpoint is not configured",
+    dense_profile_memory: "dense profile memory persistence is unavailable",
+    session_search: "runtime search API is unavailable",
+  },
+});
+assert.deepEqual(
+  memoryInventory.selectedTools.map((tool) => tool.name),
+  [
+    "den_memory_recall",
+    "den_memory_read",
+    "den_memory_search",
+    "skills_list",
+    "skill_view",
+    "todo",
+  ],
+);
+assert.equal(
+  memoryInventory.items.find((item) => item.name === "den_memory_store")
+    ?.status,
+  "resource_denied",
+);
+assert.equal(
+  memoryInventory.items.find((item) => item.name === "den_memory_store")
+    ?.reasons[0],
+  "Den Memories write endpoint is not configured",
+);
+assert.equal(
+  memoryInventory.items.find((item) => item.name === "counter_reset")?.status,
+  "not_requested",
+);
+
 const aliasRegistry = createToolRegistry([
   {
     ...entry("read_file"),
@@ -104,6 +151,7 @@ console.log(
     {
       registeredTools: defaultToolRegistry.entries.length,
       readSelected: readInventory.selectedTools.map((tool) => tool.name),
+      memorySelected: memoryInventory.selectedTools.map((tool) => tool.name),
       writeStatuses: Object.fromEntries(
         writeInventory.items.map((item) => [item.name, item.status]),
       ),

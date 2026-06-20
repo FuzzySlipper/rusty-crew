@@ -85,6 +85,9 @@ export interface ToolInventoryRequest {
   profileDeniedTools?: readonly string[];
   sessionDeniedTools?: readonly string[];
   resourceDeniedTools?: readonly string[];
+  profileDeniedReasons?: Record<string, string>;
+  sessionDeniedReasons?: Record<string, string>;
+  resourceDeniedReasons?: Record<string, string>;
   includeDeprecated?: boolean;
 }
 
@@ -234,6 +237,173 @@ export const defaultToolRegistry = createToolRegistry([
     safety: ["writes_files"],
     outputShape: "patch.apply_result.v1",
     version: "1.0.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "den_memory_recall",
+    description:
+      "Recall relevant Den-owned memory summaries for the current profile or work context.",
+    category: "memory",
+    toolsets: ["memory_den_read"],
+    implementationModule: "./den-memory-tools.js#denMemoryRecallTool",
+    surfaces: ["brain"],
+    safety: ["read_only", "network_access"],
+    outputShape: "den.memory_recall_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "den_memory_read",
+    description: "Read a specific Den-owned memory entry by stable reference.",
+    category: "memory",
+    toolsets: ["memory_den_read"],
+    implementationModule: "./den-memory-tools.js#denMemoryReadTool",
+    surfaces: ["brain"],
+    safety: ["read_only", "network_access"],
+    outputShape: "den.memory_read_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "den_memory_search",
+    description:
+      "Search Den-owned memories through the configured Den Memories service.",
+    category: "memory",
+    toolsets: ["memory_den_read"],
+    implementationModule: "./den-memory-tools.js#denMemorySearchTool",
+    surfaces: ["brain"],
+    safety: ["read_only", "network_access"],
+    outputShape: "den.memory_search_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "den_memory_store",
+    description:
+      "Store a new Den-owned memory through the configured Den Memories service.",
+    category: "memory",
+    toolsets: ["memory_den_write"],
+    implementationModule: "./den-memory-tools.js#denMemoryStoreTool",
+    surfaces: ["brain"],
+    safety: ["network_access", "external_write"],
+    outputShape: "den.memory_store_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "den_memory_propose",
+    description:
+      "Propose a Den-owned memory change for later review or acceptance.",
+    category: "memory",
+    toolsets: ["memory_den_write"],
+    implementationModule: "./den-memory-tools.js#denMemoryProposeTool",
+    surfaces: ["brain"],
+    safety: ["network_access", "external_write"],
+    outputShape: "den.memory_propose_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "dense_profile_memory",
+    description:
+      "Read or update Rusty Crew dense profile memory through runtime-owned APIs.",
+    category: "memory",
+    toolsets: ["memory_profile"],
+    implementationModule:
+      "./dense-profile-memory-tool.js#denseProfileMemoryTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "runtime.dense_profile_memory_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "skills_list",
+    description: "List configured skills visible to the current profile.",
+    category: "skills",
+    toolsets: ["skills_read"],
+    implementationModule: "./skills-tools.js#skillsListTool",
+    surfaces: ["brain"],
+    safety: ["read_only"],
+    outputShape: "skills.list_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "skill_view",
+    description:
+      "View one configured skill by slug without exposing unrelated files.",
+    category: "skills",
+    toolsets: ["skills_read"],
+    implementationModule: "./skills-tools.js#skillViewTool",
+    surfaces: ["brain"],
+    safety: ["read_only"],
+    outputShape: "skills.view_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "skill_manage",
+    description:
+      "Create, patch, replace, or retire configured skills with governance safeguards.",
+    category: "skills",
+    toolsets: ["skills_manage"],
+    implementationModule: "./skills-tools.js#skillManageTool",
+    surfaces: ["brain"],
+    safety: ["writes_files", "coordination_action"],
+    outputShape: "skills.manage_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "todo",
+    description:
+      "Read or update bounded session-local planning todos without changing Den tasks.",
+    category: "planning",
+    toolsets: ["planning_session"],
+    implementationModule: "./planning-tools.js#todoTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "planning.todo_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "session_search",
+    description: "Search Rusty Crew runtime history through typed search APIs.",
+    category: "planning",
+    toolsets: ["planning_session", "runtime_search"],
+    implementationModule: "./planning-tools.js#sessionSearchTool",
+    surfaces: ["brain"],
+    safety: ["read_only", "coordination_action"],
+    outputShape: "runtime.session_search_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "counter_reset",
+    description:
+      "Reset or rebuild derived runtime counters without deleting runtime facts.",
+    category: "planning",
+    toolsets: ["planning_privileged", "runtime_counters"],
+    implementationModule: "./planning-tools.js#counterResetTool",
+    surfaces: ["brain", "admin"],
+    safety: ["coordination_action"],
+    outputShape: "runtime.counter_reset_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "curator_execute",
+    description:
+      "Request a narrow audited curator/governance action through control APIs.",
+    category: "planning",
+    toolsets: ["planning_privileged", "curator_governance"],
+    implementationModule: "./planning-tools.js#curatorExecuteTool",
+    surfaces: ["brain", "admin"],
+    safety: ["coordination_action", "external_write"],
+    outputShape: "governance.curator_execute_result.v1",
+    version: "0.1.0",
     inventoryTest: "smoke:tool-registry",
   },
 ] satisfies readonly ToolRegistryEntry[]);
@@ -420,14 +590,13 @@ export function buildToolInventory(
       resourceDenied,
     });
     if (denialStatus) {
+      const reason = denialReason(entry.name, denialStatus, request);
       return {
         name: entry.name,
         canonicalName: entry.name,
         entry,
         status: denialStatus,
-        reasons: [
-          `${entry.name} was denied by ${denialStatus.replace("_", " ")}`,
-        ],
+        reasons: [reason],
       };
     }
 
@@ -474,6 +643,23 @@ export function buildToolInventory(
     selectedDescriptors: selectedTools.map(toToolDescriptor),
     items: allItems,
   };
+}
+
+function denialReason(
+  name: string,
+  status: Extract<
+    ToolInventoryStatus,
+    "profile_denied" | "session_denied" | "resource_denied"
+  >,
+  request: ToolInventoryRequest,
+): string {
+  const explicit =
+    status === "profile_denied"
+      ? request.profileDeniedReasons?.[name]
+      : status === "session_denied"
+        ? request.sessionDeniedReasons?.[name]
+        : request.resourceDeniedReasons?.[name];
+  return explicit ?? `${name} was denied by ${status.replace("_", " ")}`;
 }
 
 export function toToolDescriptor(entry: ToolRegistryEntry): ToolDescriptor {

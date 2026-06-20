@@ -14,6 +14,12 @@ use rusty_crew_core_bridge_api::{
     ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_engine::CoreEngine;
+use rusty_crew_core_persistence::{
+    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeSearchRowType, RuntimeStateSummary,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
@@ -152,6 +158,67 @@ impl NativeBridge {
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         self.engine()?.count_rows(table)
+    }
+
+    pub fn list_profile_memory(
+        &self,
+        query: &ProfileMemoryQuery,
+    ) -> CoreResult<Vec<ProfileMemoryRecord>> {
+        self.engine()?.list_profile_memory(query)
+    }
+
+    pub fn get_profile_memory(
+        &self,
+        profile_id: &rusty_crew_core_bridge_api::ProfileId,
+        target: &ProfileMemoryTarget,
+        key: &str,
+    ) -> CoreResult<Option<ProfileMemoryRecord>> {
+        self.engine()?.get_profile_memory(profile_id, target, key)
+    }
+
+    pub fn add_profile_memory(
+        &self,
+        write: ProfileMemoryWrite,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        self.engine()?.add_profile_memory(write, caps)
+    }
+
+    pub fn replace_profile_memory(
+        &self,
+        replace: ProfileMemoryReplace,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        self.engine()?.replace_profile_memory(replace, caps)
+    }
+
+    pub fn remove_profile_memory(
+        &self,
+        delete: &ProfileMemoryDelete,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        self.engine()?.remove_profile_memory(delete)
+    }
+
+    pub fn search_runtime(
+        &self,
+        filter: &RuntimeSearchFilter,
+    ) -> CoreResult<Vec<RuntimeSearchResult>> {
+        self.engine()?.search_runtime(filter)
+    }
+
+    pub fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        self.engine()?.query_runtime_counters(query)
+    }
+
+    pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+        self.engine()?.runtime_summary(scope)
+    }
+
+    pub fn reset_runtime_counters(&self, query: &RuntimeCounterQuery) -> CoreResult<u64> {
+        self.engine()?.reset_runtime_counters(query)
     }
 
     pub fn register_platform_adapter(
@@ -637,6 +704,126 @@ pub struct JsSessionState {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsProfileMemoryCaps {
+    pub max_records_per_profile: Option<u32>,
+    pub max_key_bytes: Option<u32>,
+    pub max_content_bytes: Option<u32>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsProfileMemoryRecord {
+    pub profile_id: String,
+    pub target_type: String,
+    pub target_id: String,
+    pub key: String,
+    pub content: String,
+    pub metadata_json: String,
+    pub revision: f64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsProfileMemoryQuery {
+    pub profile_id: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsProfileMemoryWrite {
+    pub profile_id: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub key: String,
+    pub content: String,
+    pub metadata_json: Option<String>,
+    pub caps: Option<JsProfileMemoryCaps>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsProfileMemoryReplace {
+    pub write: JsProfileMemoryWrite,
+    pub expected_revision: f64,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsProfileMemoryDelete {
+    pub profile_id: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub key: String,
+    pub expected_revision: f64,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeSearchQuery {
+    pub query: String,
+    pub row_type: Option<String>,
+    pub session_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub instance_id: Option<String>,
+    pub task_id: Option<String>,
+    pub event_kind: Option<String>,
+    pub recorded_after: Option<String>,
+    pub recorded_before: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeSearchResult {
+    pub row_type: String,
+    pub row_key: String,
+    pub sequence: Option<f64>,
+    pub session_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub instance_id: Option<String>,
+    pub task_id: Option<String>,
+    pub event_kind: Option<String>,
+    pub recorded_at: String,
+    pub title: String,
+    pub body: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeCounterQuery {
+    pub scope_type: Option<String>,
+    pub scope_id: Option<String>,
+    pub counter_name: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeCounterRecord {
+    pub scope_type: String,
+    pub scope_id: String,
+    pub counter_name: String,
+    pub value: f64,
+    pub updated_at: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeCounterSummary {
+    pub scope_type: String,
+    pub scope_id: String,
+    pub brain_turns: f64,
+    pub wakes: f64,
+    pub tool_calls: f64,
+    pub tool_errors: f64,
+    pub delegations_created: f64,
+    pub delegations_completed: f64,
+    pub delegations_failed: f64,
+    pub delegations_timed_out: f64,
+    pub delegations_cancelled: f64,
+    pub messages: f64,
+    pub completions: f64,
+    pub queue_expirations: f64,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsActionBatchReceipt {
     pub wake_id: String,
     pub accepted_actions: u32,
@@ -1072,6 +1259,142 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn list_profile_memory(
+        &self,
+        query: JsProfileMemoryQuery,
+    ) -> napi::Result<Vec<JsProfileMemoryRecord>> {
+        let bridge = self.bridge()?;
+        let records = bridge
+            .list_profile_memory(&to_profile_memory_query(query)?)
+            .map_err(to_napi_error)?;
+        records
+            .into_iter()
+            .map(to_js_profile_memory_record)
+            .collect()
+    }
+
+    #[napi]
+    pub fn get_profile_memory(
+        &self,
+        profile_id: String,
+        target_type: String,
+        target_id: Option<String>,
+        key: String,
+    ) -> napi::Result<Option<JsProfileMemoryRecord>> {
+        let bridge = self.bridge()?;
+        let profile_id = rusty_crew_core_bridge_api::ProfileId::new(profile_id);
+        let target = to_profile_memory_target(&profile_id, &target_type, target_id)?;
+        bridge
+            .get_profile_memory(&profile_id, &target, &key)
+            .map_err(to_napi_error)?
+            .map(to_js_profile_memory_record)
+            .transpose()
+    }
+
+    #[napi]
+    pub fn add_profile_memory(
+        &self,
+        write: JsProfileMemoryWrite,
+    ) -> napi::Result<JsProfileMemoryRecord> {
+        let caps = to_profile_memory_caps(write.caps.as_ref());
+        let bridge = self.bridge()?;
+        let record = bridge
+            .add_profile_memory(to_profile_memory_write(write)?, &caps)
+            .map_err(to_napi_error)?;
+        to_js_profile_memory_record(record)
+    }
+
+    #[napi]
+    pub fn replace_profile_memory(
+        &self,
+        replace: JsProfileMemoryReplace,
+    ) -> napi::Result<JsProfileMemoryRecord> {
+        let caps = to_profile_memory_caps(replace.write.caps.as_ref());
+        let bridge = self.bridge()?;
+        let record = bridge
+            .replace_profile_memory(
+                ProfileMemoryReplace {
+                    write: to_profile_memory_write(replace.write)?,
+                    expected_revision: replace.expected_revision as u64,
+                },
+                &caps,
+            )
+            .map_err(to_napi_error)?;
+        to_js_profile_memory_record(record)
+    }
+
+    #[napi]
+    pub fn remove_profile_memory(
+        &self,
+        delete: JsProfileMemoryDelete,
+    ) -> napi::Result<JsProfileMemoryRecord> {
+        let bridge = self.bridge()?;
+        let profile_id = rusty_crew_core_bridge_api::ProfileId::new(delete.profile_id);
+        let record = bridge
+            .remove_profile_memory(&ProfileMemoryDelete {
+                target: to_profile_memory_target(
+                    &profile_id,
+                    &delete.target_type,
+                    delete.target_id,
+                )?,
+                profile_id,
+                key: delete.key,
+                expected_revision: delete.expected_revision as u64,
+            })
+            .map_err(to_napi_error)?;
+        to_js_profile_memory_record(record)
+    }
+
+    #[napi]
+    pub fn search_runtime(
+        &self,
+        query: JsRuntimeSearchQuery,
+    ) -> napi::Result<Vec<JsRuntimeSearchResult>> {
+        let bridge = self.bridge()?;
+        let results = bridge
+            .search_runtime(&to_runtime_search_filter(query)?)
+            .map_err(to_napi_error)?;
+        Ok(results
+            .into_iter()
+            .map(to_js_runtime_search_result)
+            .collect())
+    }
+
+    #[napi]
+    pub fn query_runtime_counters(
+        &self,
+        query: JsRuntimeCounterQuery,
+    ) -> napi::Result<Vec<JsRuntimeCounterRecord>> {
+        let bridge = self.bridge()?;
+        let results = bridge
+            .query_runtime_counters(&to_runtime_counter_query(query)?)
+            .map_err(to_napi_error)?;
+        Ok(results.into_iter().map(to_js_runtime_counter).collect())
+    }
+
+    #[napi]
+    pub fn runtime_summary(
+        &self,
+        scope_type: String,
+        scope_id: Option<String>,
+    ) -> napi::Result<JsRuntimeCounterSummary> {
+        let bridge = self.bridge()?;
+        let summary = bridge
+            .runtime_summary(&to_runtime_counter_scope(&scope_type, scope_id)?)
+            .map_err(to_napi_error)?;
+        Ok(to_js_runtime_counter_summary(summary))
+    }
+
+    #[napi]
+    pub fn reset_runtime_counters(&self, query: JsRuntimeCounterQuery) -> napi::Result<f64> {
+        let bridge = self.bridge()?;
+        let reset = bridge
+            .reset_runtime_counters(&to_runtime_counter_query(query)?)
+            .map_err(to_napi_error)?;
+        Ok(reset as f64)
+    }
+
+    #[napi]
     #[allow(clippy::too_many_arguments)]
     pub fn submit_brain_event(
         &self,
@@ -1156,6 +1479,264 @@ fn to_js_session_state(state: rusty_crew_core_bridge_api::SessionState) -> JsSes
         profile_id: state.profile_id.0,
         kind: format!("{:?}", state.kind).to_ascii_lowercase(),
         status: format!("{:?}", state.status).to_ascii_lowercase(),
+    }
+}
+
+fn to_js_profile_memory_record(record: ProfileMemoryRecord) -> napi::Result<JsProfileMemoryRecord> {
+    let (target_type, target_id) = profile_memory_target_parts(&record.profile_id, &record.target);
+    Ok(JsProfileMemoryRecord {
+        profile_id: record.profile_id.0,
+        target_type: target_type.to_string(),
+        target_id,
+        key: record.key,
+        content: record.content,
+        metadata_json: serde_json::to_string(&record.metadata)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?,
+        revision: record.revision as f64,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+    })
+}
+
+fn to_profile_memory_query(query: JsProfileMemoryQuery) -> napi::Result<ProfileMemoryQuery> {
+    let profile_id = rusty_crew_core_bridge_api::ProfileId::new(query.profile_id);
+    let target = match query.target_type {
+        Some(target_type) => Some(to_profile_memory_target(
+            &profile_id,
+            &target_type,
+            query.target_id,
+        )?),
+        None => None,
+    };
+    Ok(ProfileMemoryQuery {
+        profile_id,
+        target,
+        page: Some(rusty_crew_core_persistence::QueryPage {
+            limit: query.limit,
+            offset: query.offset,
+        }),
+    })
+}
+
+fn to_profile_memory_write(write: JsProfileMemoryWrite) -> napi::Result<ProfileMemoryWrite> {
+    let profile_id = rusty_crew_core_bridge_api::ProfileId::new(write.profile_id);
+    let target = to_profile_memory_target(&profile_id, &write.target_type, write.target_id)?;
+    let metadata = write
+        .metadata_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?
+        .unwrap_or_else(|| serde_json::json!({}));
+    Ok(ProfileMemoryWrite {
+        profile_id,
+        target,
+        key: write.key,
+        content: write.content,
+        metadata,
+        now: String::new(),
+    })
+}
+
+fn to_profile_memory_target(
+    profile_id: &rusty_crew_core_bridge_api::ProfileId,
+    target_type: &str,
+    target_id: Option<String>,
+) -> napi::Result<ProfileMemoryTarget> {
+    match target_type {
+        "profile" => Ok(ProfileMemoryTarget::Profile),
+        "user" => target_id
+            .filter(|value| !value.trim().is_empty())
+            .map(ProfileMemoryTarget::User)
+            .ok_or_else(|| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    "user profile memory target requires targetId".to_string(),
+                )
+            }),
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!(
+                "unsupported profile memory target type {other} for profile {}",
+                profile_id.0
+            ),
+        )),
+    }
+}
+
+fn to_profile_memory_caps(caps: Option<&JsProfileMemoryCaps>) -> ProfileMemoryCaps {
+    let defaults = ProfileMemoryCaps::default();
+    ProfileMemoryCaps {
+        max_records_per_profile: caps
+            .and_then(|caps| caps.max_records_per_profile)
+            .unwrap_or(defaults.max_records_per_profile),
+        max_key_bytes: caps
+            .and_then(|caps| caps.max_key_bytes)
+            .unwrap_or(defaults.max_key_bytes),
+        max_content_bytes: caps
+            .and_then(|caps| caps.max_content_bytes)
+            .unwrap_or(defaults.max_content_bytes),
+    }
+}
+
+fn profile_memory_target_parts(
+    profile_id: &rusty_crew_core_bridge_api::ProfileId,
+    target: &ProfileMemoryTarget,
+) -> (&'static str, String) {
+    match target {
+        ProfileMemoryTarget::Profile => ("profile", profile_id.0.clone()),
+        ProfileMemoryTarget::User(user_id) => ("user", user_id.clone()),
+    }
+}
+
+fn to_runtime_search_filter(query: JsRuntimeSearchQuery) -> napi::Result<RuntimeSearchFilter> {
+    Ok(RuntimeSearchFilter {
+        query: query.query,
+        row_type: query
+            .row_type
+            .as_deref()
+            .map(parse_runtime_search_row_type)
+            .transpose()?,
+        session_id: query
+            .session_id
+            .map(rusty_crew_core_bridge_api::SessionId::new),
+        agent_id: query.agent_id.map(rusty_crew_core_bridge_api::AgentId::new),
+        instance_id: query
+            .instance_id
+            .map(rusty_crew_core_bridge_api::AgentInstanceId::new),
+        task_id: query.task_id.map(rusty_crew_core_bridge_api::TaskId::new),
+        event_kind: query
+            .event_kind
+            .as_deref()
+            .map(parse_event_kind)
+            .transpose()?,
+        recorded_after: query.recorded_after,
+        recorded_before: query.recorded_before,
+        limit: query.limit,
+    })
+}
+
+fn to_js_runtime_search_result(result: RuntimeSearchResult) -> JsRuntimeSearchResult {
+    JsRuntimeSearchResult {
+        row_type: runtime_search_row_type_as_str(result.row_type).to_string(),
+        row_key: result.row_key,
+        sequence: result.sequence.map(|sequence| sequence as f64),
+        session_id: result.session_id.map(|value| value.0),
+        agent_id: result.agent_id.map(|value| value.0),
+        instance_id: result.instance_id.map(|value| value.0),
+        task_id: result.task_id.map(|value| value.0),
+        event_kind: result.event_kind.map(|kind| format!("{kind:?}")),
+        recorded_at: result.recorded_at,
+        title: result.title,
+        body: result.body,
+    }
+}
+
+fn to_runtime_counter_query(query: JsRuntimeCounterQuery) -> napi::Result<RuntimeCounterQuery> {
+    Ok(RuntimeCounterQuery {
+        scope: query
+            .scope_type
+            .as_deref()
+            .map(|scope_type| to_runtime_counter_scope(scope_type, query.scope_id.clone()))
+            .transpose()?,
+        counter_name: query.counter_name,
+        page: Some(rusty_crew_core_persistence::QueryPage {
+            limit: query.limit,
+            offset: query.offset,
+        }),
+    })
+}
+
+fn to_runtime_counter_scope(
+    scope_type: &str,
+    scope_id: Option<String>,
+) -> napi::Result<RuntimeCounterScope> {
+    match scope_type {
+        "runtime" => Ok(RuntimeCounterScope::Runtime),
+        "agent" => required_scope_id(scope_type, scope_id)
+            .map(rusty_crew_core_bridge_api::AgentId::new)
+            .map(RuntimeCounterScope::Agent),
+        "instance" => required_scope_id(scope_type, scope_id)
+            .map(rusty_crew_core_bridge_api::AgentInstanceId::new)
+            .map(RuntimeCounterScope::Instance),
+        "session" => required_scope_id(scope_type, scope_id)
+            .map(rusty_crew_core_bridge_api::SessionId::new)
+            .map(RuntimeCounterScope::Session),
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unsupported runtime counter scope type {other}"),
+        )),
+    }
+}
+
+fn required_scope_id(scope_type: &str, scope_id: Option<String>) -> napi::Result<String> {
+    scope_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("runtime counter scope {scope_type} requires scopeId"),
+            )
+        })
+}
+
+fn to_js_runtime_counter(record: RuntimeCounterRecord) -> JsRuntimeCounterRecord {
+    let (scope_type, scope_id) = runtime_counter_scope_parts(record.scope);
+    JsRuntimeCounterRecord {
+        scope_type,
+        scope_id,
+        counter_name: record.counter_name,
+        value: record.value as f64,
+        updated_at: record.updated_at,
+    }
+}
+
+fn to_js_runtime_counter_summary(summary: RuntimeStateSummary) -> JsRuntimeCounterSummary {
+    let (scope_type, scope_id) = runtime_counter_scope_parts(summary.scope);
+    JsRuntimeCounterSummary {
+        scope_type,
+        scope_id,
+        brain_turns: summary.brain_turns as f64,
+        wakes: summary.wakes as f64,
+        tool_calls: summary.tool_calls as f64,
+        tool_errors: summary.tool_errors as f64,
+        delegations_created: summary.delegations_created as f64,
+        delegations_completed: summary.delegations_completed as f64,
+        delegations_failed: summary.delegations_failed as f64,
+        delegations_timed_out: summary.delegations_timed_out as f64,
+        delegations_cancelled: summary.delegations_cancelled as f64,
+        messages: summary.messages as f64,
+        completions: summary.completions as f64,
+        queue_expirations: summary.queue_expirations as f64,
+    }
+}
+
+fn runtime_counter_scope_parts(scope: RuntimeCounterScope) -> (String, String) {
+    match scope {
+        RuntimeCounterScope::Runtime => ("runtime".to_string(), "_global".to_string()),
+        RuntimeCounterScope::Agent(agent_id) => ("agent".to_string(), agent_id.0),
+        RuntimeCounterScope::Instance(instance_id) => ("instance".to_string(), instance_id.0),
+        RuntimeCounterScope::Session(session_id) => ("session".to_string(), session_id.0),
+    }
+}
+
+fn parse_runtime_search_row_type(raw: &str) -> napi::Result<RuntimeSearchRowType> {
+    match raw {
+        "message" => Ok(RuntimeSearchRowType::Message),
+        "queue_message" => Ok(RuntimeSearchRowType::QueueMessage),
+        "session" => Ok(RuntimeSearchRowType::Session),
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unsupported runtime search row type {other}"),
+        )),
+    }
+}
+
+fn runtime_search_row_type_as_str(row_type: RuntimeSearchRowType) -> &'static str {
+    match row_type {
+        RuntimeSearchRowType::Message => "message",
+        RuntimeSearchRowType::QueueMessage => "queue_message",
+        RuntimeSearchRowType::Session => "session",
     }
 }
 

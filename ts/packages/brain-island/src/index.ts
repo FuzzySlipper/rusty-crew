@@ -205,6 +205,68 @@ export type {
   LocalToolContext,
   LocalToolProcessResult,
 } from "./local-code-tools.js";
+export {
+  createDenMemoryToolResolver,
+  denMemoryProposeTool,
+  denMemoryReadTool,
+  denMemoryRecallTool,
+  denMemorySearchTool,
+  denMemoryStoreTool,
+  resolveDenMemoryTools,
+} from "./den-memory-tools.js";
+export type {
+  DenMemoryPolicyMode,
+  DenMemoryToolContext,
+  DenMemoryToolDetails,
+  DenMemoryToolPolicy,
+} from "./den-memory-tools.js";
+export {
+  createSkillsToolResolver,
+  resolveSkillsTools,
+  skillManageTool,
+  skillsListTool,
+  skillViewTool,
+} from "./skills-tools.js";
+export type {
+  SkillManageAction,
+  SkillManagementResult,
+  SkillManageMode,
+  SkillListItem,
+  SkillsToolContext,
+  SkillsToolDetails,
+} from "./skills-tools.js";
+export {
+  createDenseProfileMemoryToolResolver,
+  denseProfileMemoryTool,
+} from "./dense-profile-memory-tool.js";
+export type {
+  DenseProfileMemoryAction,
+  DenseProfileMemoryMode,
+  DenseProfileMemoryToolContext,
+  DenseProfileMemoryToolDetails,
+} from "./dense-profile-memory-tool.js";
+export {
+  counterResetTool,
+  MemorySessionTodoStore,
+  renderSessionTodoContext,
+  sessionSearchTool,
+  todoTool,
+} from "./planning-tools.js";
+export type {
+  CounterResetToolContext,
+  CounterResetToolDetails,
+  CounterResetTriggerType,
+  MemorySessionTodoStoreOptions,
+  SessionSearchResult,
+  SessionSearchToolContext,
+  SessionSearchToolDetails,
+  SessionTodoState,
+  SessionTodoStore,
+  TodoItem,
+  TodoStatus,
+  TodoToolContext,
+  TodoToolDetails,
+} from "./planning-tools.js";
 export { patchTool } from "./patch-tool.js";
 export {
   buildToolRegistryDiagnostics,
@@ -295,12 +357,20 @@ export type {
   ToolContextDiagnosticsIssue,
   ToolContextDiagnosticsReport,
   ToolContextDiagnosticsSession,
+  ToolContextMemorySkillsPlanningInput,
+  ToolContextMemorySkillsPlanningSummary,
   ToolContextDiagnosticsSummary,
   ToolContextPolicySummary,
   ToolContextReasonCode,
   ToolContextResourceSummary,
   ToolContextSkillSummary,
   ToolContextToolStatus,
+  DenMemoryDiagnosticsInput,
+  DenseProfileMemoryDiagnosticsInput,
+  RuntimeCounterDiagnosticsInput,
+  SessionSearchDiagnosticsInput,
+  SkillRootDiagnosticsInput,
+  TodoDiagnosticsInput,
 } from "./tool-context-diagnostics.js";
 export {
   inspectDirectDebugSession,
@@ -453,8 +523,18 @@ export type {
   ProfilePromptFragments,
   ProfileRuntimeConfig,
 } from "./profile-loading.js";
-export { buildProfileRoleAssembly } from "./profile-role-assembly.js";
+export {
+  buildProfileRoleAssembly,
+  renderDenMemoryContext,
+  renderDenseProfileMemoryContext,
+  renderPlanningContext,
+} from "./profile-role-assembly.js";
 export type {
   BuildProfileRoleAssemblyOptions,
+  DenMemoryPromptContext,
+  DenMemoryPromptMode,
+  DenseProfileMemoryPromptRecord,
+  PlanningPromptContext,
   ProfileRoleAssemblyResult,
+  RenderDenseProfileMemoryContextOptions,
 } from "./profile-role-assembly.js";

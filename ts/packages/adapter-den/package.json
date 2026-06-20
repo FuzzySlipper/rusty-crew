@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "smoke": "tsx src/smoke-den.ts"
+    "smoke": "tsx src/smoke-den.ts",
+    "smoke:memory-client": "tsx src/smoke-memory-client.ts"
   },
   "exports": {
     ".": "./src/index.ts"

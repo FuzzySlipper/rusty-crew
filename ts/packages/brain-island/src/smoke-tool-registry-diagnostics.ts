@@ -13,7 +13,7 @@ const report = buildToolRegistryDiagnostics({
   },
 });
 
-assert.equal(report.summary.registeredTools, 7);
+assert.equal(report.summary.registeredTools, 20);
 assert.equal(report.summary.selectedTools, 3);
 assert.equal(report.summary.deniedTools, 1);
 assert.equal(report.summary.missingTools, 1);

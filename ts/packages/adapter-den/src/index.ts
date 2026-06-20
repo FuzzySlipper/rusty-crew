@@ -14,6 +14,7 @@ export * from "./channel-routing.js";
 export * from "./channel-presence.js";
 export * from "./channel-ingress.js";
 export * from "./channel-projection.js";
+export * from "./memory-client.js";
 
 export type DenAdapterConnectionState =
   | "connected"

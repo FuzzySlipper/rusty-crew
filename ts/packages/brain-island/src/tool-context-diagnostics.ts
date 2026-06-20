@@ -35,7 +35,13 @@ export type ToolContextReasonCode =
   | "mcp_surface_degraded"
   | "adapter_unavailable"
   | "workdir_limited"
-  | "resource_limited";
+  | "resource_limited"
+  | "den_memory_unavailable"
+  | "skill_root_unavailable"
+  | "dense_profile_memory_unavailable"
+  | "session_search_unavailable"
+  | "todo_state_unavailable"
+  | "runtime_counter_unavailable";
 
 export interface ToolContextDiagnosticsSession {
   sessionId: string;
@@ -57,6 +63,7 @@ export interface ToolContextDiagnosticsInput {
   systemPrompt?: string;
   resourceLimits?: ResourceLimits;
   adapters?: AdapterDiagnosticsProjection;
+  memorySkillsPlanning?: ToolContextMemorySkillsPlanningInput;
 }
 
 export interface ToolContextDiagnosticsReport {
@@ -67,6 +74,7 @@ export interface ToolContextDiagnosticsReport {
   policy: ToolContextPolicySummary;
   tools: ToolContextDiagnosticTool[];
   context: ToolContextAssemblySummary;
+  memorySkillsPlanning: ToolContextMemorySkillsPlanningSummary;
   resources: ToolContextResourceSummary;
   adapters: ToolContextAdapterSummary;
   issues: ToolContextDiagnosticsIssue[];
@@ -167,6 +175,121 @@ export interface ToolContextAdapterSummary {
   notes: readonly string[];
 }
 
+export interface ToolContextMemorySkillsPlanningInput {
+  denMemory?: DenMemoryDiagnosticsInput;
+  skills?: SkillRootDiagnosticsInput;
+  denseProfileMemory?: DenseProfileMemoryDiagnosticsInput;
+  sessionSearch?: SessionSearchDiagnosticsInput;
+  todo?: TodoDiagnosticsInput;
+  counters?: RuntimeCounterDiagnosticsInput;
+}
+
+export interface DenMemoryDiagnosticsInput {
+  configured: boolean;
+  clientAvailable: boolean;
+  mode?: string;
+  endpointConfigured?: boolean;
+  lastError?: string;
+}
+
+export interface SkillRootDiagnosticsInput {
+  rootConfigured: boolean;
+  rootReadable: boolean;
+  profileSkillCount?: number;
+  loadedSkillCount?: number;
+  pinnedSkillCount?: number;
+  protectedSkillCount?: number;
+  invalidSkillCount?: number;
+  missingSkillCount?: number;
+  lastError?: string;
+}
+
+export interface DenseProfileMemoryDiagnosticsInput {
+  clientAvailable: boolean;
+  recordCount?: number;
+  maxRecordsPerProfile?: number;
+  capReached?: boolean;
+  lastError?: string;
+}
+
+export interface SessionSearchDiagnosticsInput {
+  available: boolean;
+  indexedRows?: number;
+  lastIndexedAt?: string;
+  lastError?: string;
+}
+
+export interface TodoDiagnosticsInput {
+  available: boolean;
+  itemCount?: number;
+  blockedItems?: number;
+  expiresAt?: string;
+  lastError?: string;
+}
+
+export interface RuntimeCounterDiagnosticsInput {
+  available: boolean;
+  resetAllowed?: boolean;
+  summary?: {
+    brainTurns?: number;
+    wakes?: number;
+    toolCalls?: number;
+    toolErrors?: number;
+    messages?: number;
+    completions?: number;
+    queueExpirations?: number;
+  };
+  lastError?: string;
+}
+
+export interface ToolContextMemorySkillsPlanningSummary {
+  denMemory: {
+    configured: boolean;
+    clientAvailable: boolean;
+    mode?: string;
+    endpointConfigured?: boolean;
+    lastError?: string;
+  };
+  skills: {
+    rootConfigured: boolean;
+    rootReadable: boolean;
+    profileSkillCount: number;
+    loadedSkillCount: number;
+    pinnedSkillCount: number;
+    protectedSkillCount: number;
+    invalidSkillCount: number;
+    missingSkillCount: number;
+    lastError?: string;
+  };
+  denseProfileMemory: {
+    clientAvailable: boolean;
+    recordCount?: number;
+    maxRecordsPerProfile?: number;
+    capReached: boolean;
+    lastError?: string;
+  };
+  sessionSearch: {
+    available: boolean;
+    indexedRows?: number;
+    lastIndexedAt?: string;
+    lastError?: string;
+  };
+  todo: {
+    available: boolean;
+    itemCount?: number;
+    blockedItems?: number;
+    expiresAt?: string;
+    lastError?: string;
+  };
+  counters: {
+    available: boolean;
+    resetAllowed: boolean;
+    summary?: RuntimeCounterDiagnosticsInput["summary"];
+    lastError?: string;
+  };
+  notes: readonly string[];
+}
+
 export interface ToolContextDiagnosticsIssue {
   code: ToolContextReasonCode;
   severity: "warning" | "blocked";
@@ -180,10 +303,12 @@ export function buildToolContextDiagnosticsReport(
   const policy = policySummary(input);
   const tools = buildToolReports(input);
   const context = assemblySummary(input);
+  const memorySkillsPlanning = memorySkillsPlanningSummary(input);
   const resources = resourceSummary(input);
   const adapters = adapterSummary(input);
   const issues = [
     ...toolIssues(tools),
+    ...memorySkillsPlanningIssues(memorySkillsPlanning),
     ...resourceIssues(resources),
     ...adapterIssues(adapters),
   ];
@@ -199,6 +324,7 @@ export function buildToolContextDiagnosticsReport(
     policy,
     tools,
     context,
+    memorySkillsPlanning,
     resources,
     adapters,
     issues,
@@ -250,6 +376,19 @@ export function formatToolContextDiagnosticsMarkdown(
     `- sections: ${joinOrNone(report.context.sections)}`,
     `- initial messages: ${report.context.initialMessages.count}`,
     `- skills: ${joinOrNone(report.context.skills.map((skill) => skill.slug))}`,
+    "",
+    "## Memory Skills Planning",
+    "",
+    `- den memory: ${statusWord(report.memorySkillsPlanning.denMemory.clientAvailable)}`,
+    `- den memory mode: ${report.memorySkillsPlanning.denMemory.mode ?? "none"}`,
+    `- skill root readable: ${report.memorySkillsPlanning.skills.rootReadable}`,
+    `- skill counts: loaded ${report.memorySkillsPlanning.skills.loadedSkillCount} / profile ${report.memorySkillsPlanning.skills.profileSkillCount}`,
+    `- pinned skills: ${report.memorySkillsPlanning.skills.pinnedSkillCount}`,
+    `- dense profile memory records: ${report.memorySkillsPlanning.denseProfileMemory.recordCount ?? "unknown"}`,
+    `- session search rows: ${report.memorySkillsPlanning.sessionSearch.indexedRows ?? "unknown"}`,
+    `- todo items: ${report.memorySkillsPlanning.todo.itemCount ?? "unknown"}`,
+    `- counter reset allowed: ${report.memorySkillsPlanning.counters.resetAllowed}`,
+    `- notes: ${joinOrNone(report.memorySkillsPlanning.notes)}`,
     "",
     "## Resources And Adapters",
     "",
@@ -510,6 +649,89 @@ function resourceSummary(
   };
 }
 
+function memorySkillsPlanningSummary(
+  input: ToolContextDiagnosticsInput,
+): ToolContextMemorySkillsPlanningSummary {
+  const supplied = input.memorySkillsPlanning;
+  const profileSkillCount = input.profileContext?.profile.skills?.length ?? 0;
+  const loadedSkillCount = input.profileContext?.skills.length ?? 0;
+  const denMemory = {
+    configured: supplied?.denMemory?.configured ?? false,
+    clientAvailable: supplied?.denMemory?.clientAvailable ?? false,
+    mode: supplied?.denMemory?.mode,
+    endpointConfigured: supplied?.denMemory?.endpointConfigured,
+    lastError: supplied?.denMemory?.lastError,
+  };
+  const skills = {
+    rootConfigured: supplied?.skills?.rootConfigured ?? loadedSkillCount > 0,
+    rootReadable: supplied?.skills?.rootReadable ?? loadedSkillCount > 0,
+    profileSkillCount: supplied?.skills?.profileSkillCount ?? profileSkillCount,
+    loadedSkillCount: supplied?.skills?.loadedSkillCount ?? loadedSkillCount,
+    pinnedSkillCount: supplied?.skills?.pinnedSkillCount ?? 0,
+    protectedSkillCount: supplied?.skills?.protectedSkillCount ?? 0,
+    invalidSkillCount: supplied?.skills?.invalidSkillCount ?? 0,
+    missingSkillCount: supplied?.skills?.missingSkillCount ?? 0,
+    lastError: supplied?.skills?.lastError,
+  };
+  const denseProfileMemory = {
+    clientAvailable:
+      supplied?.denseProfileMemory?.clientAvailable ??
+      hasTool(input, "dense_profile_memory"),
+    recordCount: supplied?.denseProfileMemory?.recordCount,
+    maxRecordsPerProfile: supplied?.denseProfileMemory?.maxRecordsPerProfile,
+    capReached: supplied?.denseProfileMemory?.capReached ?? false,
+    lastError: supplied?.denseProfileMemory?.lastError,
+  };
+  const sessionSearch = {
+    available:
+      supplied?.sessionSearch?.available ?? hasTool(input, "session_search"),
+    indexedRows: supplied?.sessionSearch?.indexedRows,
+    lastIndexedAt: supplied?.sessionSearch?.lastIndexedAt,
+    lastError: supplied?.sessionSearch?.lastError,
+  };
+  const todo = {
+    available: supplied?.todo?.available ?? hasTool(input, "todo"),
+    itemCount: supplied?.todo?.itemCount,
+    blockedItems: supplied?.todo?.blockedItems,
+    expiresAt: supplied?.todo?.expiresAt,
+    lastError: supplied?.todo?.lastError,
+  };
+  const counters = {
+    available: supplied?.counters?.available ?? hasTool(input, "counter_reset"),
+    resetAllowed: supplied?.counters?.resetAllowed ?? false,
+    summary: supplied?.counters?.summary,
+    lastError: supplied?.counters?.lastError,
+  };
+  const notes = [
+    denMemory.lastError ? `den memory: ${denMemory.lastError}` : undefined,
+    skills.lastError ? `skills: ${skills.lastError}` : undefined,
+    denseProfileMemory.lastError
+      ? `dense profile memory: ${denseProfileMemory.lastError}`
+      : undefined,
+    sessionSearch.lastError
+      ? `session search: ${sessionSearch.lastError}`
+      : undefined,
+    todo.lastError ? `todo: ${todo.lastError}` : undefined,
+    counters.lastError ? `counters: ${counters.lastError}` : undefined,
+    denseProfileMemory.capReached
+      ? "dense profile memory cap reached"
+      : undefined,
+    skills.pinnedSkillCount > 0
+      ? `${skills.pinnedSkillCount} pinned skills`
+      : undefined,
+  ].filter((note): note is string => Boolean(note));
+
+  return {
+    denMemory,
+    skills,
+    denseProfileMemory,
+    sessionSearch,
+    todo,
+    counters,
+    notes,
+  };
+}
+
 function adapterSummary(
   input: ToolContextDiagnosticsInput,
 ): ToolContextAdapterSummary {
@@ -554,6 +776,19 @@ function adapterSummary(
     },
     notes,
   };
+}
+
+function hasTool(
+  input: ToolContextDiagnosticsInput,
+  toolName: string,
+): boolean {
+  const inventoryItems =
+    input.toolSelection?.inventory.items ??
+    input.toolDiagnostics.inventory?.items ??
+    [];
+  return inventoryItems.some(
+    (item) => item.name === toolName && item.status === "selected",
+  );
 }
 
 function matchesSession(
@@ -621,6 +856,68 @@ function toolIssues(
       },
     ] satisfies ToolContextDiagnosticsIssue[];
   });
+}
+
+function memorySkillsPlanningIssues(
+  summary: ToolContextMemorySkillsPlanningSummary,
+): ToolContextDiagnosticsIssue[] {
+  const issues: ToolContextDiagnosticsIssue[] = [];
+  if (summary.denMemory.configured && !summary.denMemory.clientAvailable) {
+    issues.push({
+      code: "den_memory_unavailable",
+      severity: "warning",
+      message: `Den memory is configured but unavailable${detail(summary.denMemory.lastError)}`,
+      toolName: "den_memory_recall",
+    });
+  }
+  if (
+    summary.skills.rootConfigured &&
+    (!summary.skills.rootReadable || summary.skills.missingSkillCount > 0)
+  ) {
+    issues.push({
+      code: "skill_root_unavailable",
+      severity: summary.skills.rootReadable ? "warning" : "blocked",
+      message: `skill root has ${summary.skills.missingSkillCount} missing and ${summary.skills.invalidSkillCount} invalid skills${detail(summary.skills.lastError)}`,
+      toolName: "skills_list",
+    });
+  }
+  if (!summary.denseProfileMemory.clientAvailable) {
+    issues.push({
+      code: "dense_profile_memory_unavailable",
+      severity: "warning",
+      message: `dense profile memory client unavailable${detail(summary.denseProfileMemory.lastError)}`,
+      toolName: "dense_profile_memory",
+    });
+  }
+  if (!summary.sessionSearch.available) {
+    issues.push({
+      code: "session_search_unavailable",
+      severity: "warning",
+      message: `session search unavailable${detail(summary.sessionSearch.lastError)}`,
+      toolName: "session_search",
+    });
+  }
+  if (!summary.todo.available) {
+    issues.push({
+      code: "todo_state_unavailable",
+      severity: "warning",
+      message: `todo state unavailable${detail(summary.todo.lastError)}`,
+      toolName: "todo",
+    });
+  }
+  if (!summary.counters.available) {
+    issues.push({
+      code: "runtime_counter_unavailable",
+      severity: "warning",
+      message: `runtime counters unavailable${detail(summary.counters.lastError)}`,
+      toolName: "counter_reset",
+    });
+  }
+  return issues;
+}
+
+function detail(value: string | undefined): string {
+  return value ? `: ${value}` : "";
 }
 
 function resourceIssues(
@@ -697,6 +994,10 @@ function uniqueSorted(values: readonly string[]): readonly string[] {
 
 function joinOrNone(values: readonly string[]): string {
   return values.length > 0 ? values.join(", ") : "none";
+}
+
+function statusWord(ok: boolean): string {
+  return ok ? "available" : "unavailable";
 }
 
 function escapeMarkdownTableCell(value: unknown): string {

@@ -111,6 +111,50 @@ const report = buildToolContextDiagnosticsReport({
   sessionConstraints,
   roleAssembly: assembled.roleAssembly,
   systemPrompt: assembled.systemPrompt,
+  memorySkillsPlanning: {
+    denMemory: {
+      configured: true,
+      clientAvailable: false,
+      endpointConfigured: true,
+      mode: "metadata",
+      lastError: "connection refused",
+    },
+    skills: {
+      rootConfigured: true,
+      rootReadable: true,
+      profileSkillCount: 2,
+      loadedSkillCount: 1,
+      pinnedSkillCount: 1,
+      protectedSkillCount: 1,
+      invalidSkillCount: 0,
+      missingSkillCount: 1,
+    },
+    denseProfileMemory: {
+      clientAvailable: true,
+      recordCount: 4,
+      maxRecordsPerProfile: 20,
+      capReached: false,
+    },
+    sessionSearch: {
+      available: false,
+      indexedRows: 0,
+      lastError: "runtime search index unavailable",
+    },
+    todo: {
+      available: true,
+      itemCount: 2,
+      blockedItems: 1,
+    },
+    counters: {
+      available: true,
+      resetAllowed: false,
+      summary: {
+        wakes: 3,
+        toolCalls: 7,
+        messages: 11,
+      },
+    },
+  },
   adapters: {
     generatedAt: "2026-06-20T00:00:00Z",
     degraded: true,
@@ -178,6 +222,18 @@ assert.deepEqual(
 );
 assert.equal(report.context.sections.includes("Profile"), true);
 assert.equal(report.context.skills[0]?.bodyChars, 54);
+assert.equal(report.memorySkillsPlanning.denMemory.clientAvailable, false);
+assert.equal(report.memorySkillsPlanning.skills.pinnedSkillCount, 1);
+assert.equal(report.memorySkillsPlanning.denseProfileMemory.recordCount, 4);
+assert.equal(report.memorySkillsPlanning.todo.itemCount, 2);
+assert.equal(
+  report.issues.some((issue) => issue.code === "den_memory_unavailable"),
+  true,
+);
+assert.equal(
+  report.issues.some((issue) => issue.code === "session_search_unavailable"),
+  true,
+);
 assert.equal(
   "Use diagnostics without dumping raw prompt content.".includes(
     report.context.systemPrompt.sha256 ?? "",
@@ -215,6 +271,8 @@ assert.equal(
 const markdown = formatToolContextDiagnosticsMarkdown(report);
 assert.match(markdown, /Tool and Context Diagnostics/);
 assert.match(markdown, /missing_tool/);
+assert.match(markdown, /den memory: unavailable/);
+assert.match(markdown, /pinned skills: 1/);
 assert.doesNotMatch(
   markdown,
   /Use diagnostics without dumping raw prompt content\./,

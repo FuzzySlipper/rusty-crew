@@ -17,6 +17,10 @@ import {
   buildProfileRoleAssembly,
   createPiAgentBrain,
   loadProfileContext,
+  renderDenMemoryContext,
+  renderDenseProfileMemoryContext,
+  renderPlanningContext,
+  renderSessionTodoContext,
 } from "./index.js";
 import type { PiAgentLike } from "./index.js";
 
@@ -82,6 +86,36 @@ Look for concrete regressions and cite evidence.
   });
   const assembled = buildProfileRoleAssembly(context, {
     additionalInstructions: ["Do not invent findings."],
+    denMemoryContext: renderDenMemoryContext({
+      mode: "metadata",
+      projectId: "rusty-crew",
+      profileId: "reviewer",
+      guidance: "Recall only durable facts relevant to the current work.",
+    }),
+    denseProfileMemoryContext: renderDenseProfileMemoryContext([
+      {
+        targetType: "profile",
+        key: "review-style",
+        content: "Prefer high-signal evidence over broad commentary.",
+        revision: 2,
+      },
+    ]),
+    planningContext: renderPlanningContext({
+      todoContext: renderSessionTodoContext({
+        sessionId: "profile-role-session",
+        items: [
+          {
+            id: "review-pass",
+            title: "Check role assembly ordering",
+            status: "pending",
+          },
+        ],
+      }),
+      sessionSearchGuidance:
+        "Use session_search for Rust-owned session and message history.",
+      counterGuidance:
+        "Use runtime counters only as derived health/debug projections.",
+    }),
   });
   assert.equal(
     assembled.systemPrompt,
@@ -92,12 +126,19 @@ Look for concrete regressions and cite evidence.
   assertOrder(instructions, [
     "# Profile",
     "# Profile Instructions",
+    "# Den Memory",
+    "# Dense Profile Memory",
     "# Selected Skills",
     "# Tool Inventory",
+    "# Planning Context",
     "# Runtime",
     "# Additional Instructions",
   ]);
   assert.match(instructions, /Review Rubric/);
+  assert.match(instructions, /Den-owned memory/);
+  assert.match(instructions, /review-style/);
+  assert.match(instructions, /Session Search/);
+  assert.match(instructions, /Session Todo/);
   assert.match(instructions, /read_file/);
   assert.match(instructions, /terminal: profile_denied/);
   assert.match(instructions, /patch: resource_denied/);
@@ -161,8 +202,11 @@ Look for concrete regressions and cite evidence.
         sections: [
           "Profile",
           "Profile Instructions",
+          "Den Memory",
+          "Dense Profile Memory",
           "Selected Skills",
           "Tool Inventory",
+          "Planning Context",
           "Runtime",
           "Additional Instructions",
         ],

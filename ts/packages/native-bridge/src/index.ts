@@ -172,6 +172,31 @@ interface NativeBridgeBinding {
     rejectedActionsJson: string;
   };
   countRows(table: string): number;
+  listProfileMemory(
+    query: NativeProfileMemoryQuery,
+  ): NativeProfileMemoryRecord[];
+  getProfileMemory(
+    profileId: string,
+    targetType: string,
+    targetId: string | undefined,
+    key: string,
+  ): NativeProfileMemoryRecord | undefined;
+  addProfileMemory(write: NativeProfileMemoryWrite): NativeProfileMemoryRecord;
+  replaceProfileMemory(
+    replace: NativeProfileMemoryReplace,
+  ): NativeProfileMemoryRecord;
+  removeProfileMemory(
+    remove: NativeProfileMemoryDelete,
+  ): NativeProfileMemoryRecord;
+  searchRuntime(query: NativeRuntimeSearchQuery): NativeRuntimeSearchResult[];
+  queryRuntimeCounters(
+    query: NativeRuntimeCounterQuery,
+  ): NativeRuntimeCounterRecord[];
+  runtimeSummary(
+    scopeType: NativeRuntimeCounterScopeType,
+    scopeId: string | undefined,
+  ): NativeRuntimeCounterSummary;
+  resetRuntimeCounters(query: NativeRuntimeCounterQuery): number;
   getBuffer(handle: number): {
     handle: number;
     mediaType: string;
@@ -230,6 +255,121 @@ export interface NativeSessionStateSummary {
   profileId: string;
   kind: string;
   status: string;
+}
+
+export interface NativeProfileMemoryCaps {
+  maxRecordsPerProfile?: number;
+  maxKeyBytes?: number;
+  maxContentBytes?: number;
+}
+
+export interface NativeProfileMemoryRecord {
+  profileId: string;
+  targetType: "profile" | "user";
+  targetId: string;
+  key: string;
+  content: string;
+  metadataJson: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NativeProfileMemoryQuery {
+  profileId: string;
+  targetType?: "profile" | "user";
+  targetId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface NativeProfileMemoryWrite {
+  profileId: string;
+  targetType: "profile" | "user";
+  targetId?: string;
+  key: string;
+  content: string;
+  metadataJson?: string;
+  caps?: NativeProfileMemoryCaps;
+}
+
+export interface NativeProfileMemoryReplace {
+  write: NativeProfileMemoryWrite;
+  expectedRevision: number;
+}
+
+export interface NativeProfileMemoryDelete {
+  profileId: string;
+  targetType: "profile" | "user";
+  targetId?: string;
+  key: string;
+  expectedRevision: number;
+}
+
+export interface NativeRuntimeSearchQuery {
+  query: string;
+  rowType?: "message" | "queue_message" | "session";
+  sessionId?: string;
+  agentId?: string;
+  instanceId?: string;
+  taskId?: string;
+  eventKind?: string;
+  recordedAfter?: string;
+  recordedBefore?: string;
+  limit?: number;
+}
+
+export interface NativeRuntimeSearchResult {
+  rowType: "message" | "queue_message" | "session";
+  rowKey: string;
+  sequence?: number;
+  sessionId?: string;
+  agentId?: string;
+  instanceId?: string;
+  taskId?: string;
+  eventKind?: string;
+  recordedAt: string;
+  title: string;
+  body: string;
+}
+
+export type NativeRuntimeCounterScopeType =
+  | "runtime"
+  | "agent"
+  | "instance"
+  | "session";
+
+export interface NativeRuntimeCounterQuery {
+  scopeType?: NativeRuntimeCounterScopeType;
+  scopeId?: string;
+  counterName?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface NativeRuntimeCounterRecord {
+  scopeType: NativeRuntimeCounterScopeType;
+  scopeId: string;
+  counterName: string;
+  value: number;
+  updatedAt: string;
+}
+
+export interface NativeRuntimeCounterSummary {
+  scopeType: NativeRuntimeCounterScopeType;
+  scopeId: string;
+  brainTurns: number;
+  wakes: number;
+  toolCalls: number;
+  toolErrors: number;
+  delegationsCreated: number;
+  delegationsCompleted: number;
+  delegationsFailed: number;
+  delegationsTimedOut: number;
+  delegationsCancelled: number;
+  messages: number;
+  completions: number;
+  queueExpirations: number;
 }
 
 export interface NativeBridgeModule {
@@ -307,6 +447,35 @@ export interface NativeBridgeModule {
     actions: BrainActionBatch["actions"],
   ): Promise<ActionBatchReceipt>;
   diagnosticCountRows(table: string): Promise<number>;
+  listProfileMemory(
+    query: NativeProfileMemoryQuery,
+  ): Promise<NativeProfileMemoryRecord[]>;
+  getProfileMemory(input: {
+    profileId: string;
+    targetType: "profile" | "user";
+    targetId?: string;
+    key: string;
+  }): Promise<NativeProfileMemoryRecord | undefined>;
+  addProfileMemory(
+    write: NativeProfileMemoryWrite,
+  ): Promise<NativeProfileMemoryRecord>;
+  replaceProfileMemory(
+    replace: NativeProfileMemoryReplace,
+  ): Promise<NativeProfileMemoryRecord>;
+  removeProfileMemory(
+    remove: NativeProfileMemoryDelete,
+  ): Promise<NativeProfileMemoryRecord>;
+  searchRuntime(
+    query: NativeRuntimeSearchQuery,
+  ): Promise<NativeRuntimeSearchResult[]>;
+  queryRuntimeCounters(
+    query: NativeRuntimeCounterQuery,
+  ): Promise<NativeRuntimeCounterRecord[]>;
+  runtimeSummary(input: {
+    scopeType: NativeRuntimeCounterScopeType;
+    scopeId?: string;
+  }): Promise<NativeRuntimeCounterSummary>;
+  resetRuntimeCounters(query: NativeRuntimeCounterQuery): Promise<number>;
   /** @deprecated Diagnostic helper. Use diagnosticProjectBodyStateJson. */
   projectBodyStateJson(sessionId: string): Promise<Uint8Array>;
   /** @deprecated Diagnostic helper. Use diagnosticSubmitBrainActionsJson. */
@@ -378,6 +547,15 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     diagnosticProjectBodyStateJson: unavailable("wake_brain"),
     diagnosticSubmitBrainActionsJson: unavailable("submit_brain_actions"),
     diagnosticCountRows: unavailable("initialize_engine"),
+    listProfileMemory: unavailable("initialize_engine"),
+    getProfileMemory: unavailable("initialize_engine"),
+    addProfileMemory: unavailable("initialize_engine"),
+    replaceProfileMemory: unavailable("initialize_engine"),
+    removeProfileMemory: unavailable("initialize_engine"),
+    searchRuntime: unavailable("initialize_engine"),
+    queryRuntimeCounters: unavailable("initialize_engine"),
+    runtimeSummary: unavailable("initialize_engine"),
+    resetRuntimeCounters: unavailable("initialize_engine"),
     projectBodyStateJson: unavailable("wake_brain"),
     submitBrainActionsJson: unavailable("submit_brain_actions"),
     countRows: unavailable("initialize_engine"),
@@ -604,6 +782,23 @@ function createNativeBridgeModule(
       };
     },
     diagnosticCountRows: async (table) => binding.countRows(table),
+    listProfileMemory: async (query) => binding.listProfileMemory(query),
+    getProfileMemory: async (input) =>
+      binding.getProfileMemory(
+        input.profileId,
+        input.targetType,
+        input.targetId,
+        input.key,
+      ),
+    addProfileMemory: async (write) => binding.addProfileMemory(write),
+    replaceProfileMemory: async (replace) =>
+      binding.replaceProfileMemory(replace),
+    removeProfileMemory: async (remove) => binding.removeProfileMemory(remove),
+    searchRuntime: async (query) => binding.searchRuntime(query),
+    queryRuntimeCounters: async (query) => binding.queryRuntimeCounters(query),
+    runtimeSummary: async (input) =>
+      binding.runtimeSummary(input.scopeType, input.scopeId),
+    resetRuntimeCounters: async (query) => binding.resetRuntimeCounters(query),
     projectBodyStateJson: async (sessionId) =>
       module.diagnosticProjectBodyStateJson(sessionId),
     submitBrainActionsJson: async (wakeId, sessionId, actions) =>
