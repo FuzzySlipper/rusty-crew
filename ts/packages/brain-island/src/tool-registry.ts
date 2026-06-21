@@ -524,6 +524,19 @@ export const defaultToolRegistry = createToolRegistry([
     inventoryTest: "smoke:tool-registry",
   },
   {
+    name: "channel_readback",
+    description:
+      "Inspect bounded channel context for the current runtime binding without replaying messages.",
+    category: "planning",
+    toolsets: ["channels"],
+    implementationModule: "./planning-tools.js#channelReadbackTool",
+    surfaces: ["brain"],
+    safety: ["read_only", "coordination_action"],
+    outputShape: "channel.readback_response.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
     name: "counter_reset",
     description:
       "Reset or rebuild derived runtime counters without deleting runtime facts.",

@@ -6,6 +6,13 @@ import type {
   NativeRuntimeSearchResult,
 } from "@rusty-crew/native-bridge";
 import type {
+  ChannelReadbackReasonCode,
+  ChannelReadbackVisibilityFilter,
+  ChannelRuntimeIdentity,
+  NormalizedChannelReadbackRequest,
+  NormalizedChannelReadbackResponse,
+} from "@rusty-crew/contracts";
+import type {
   AgentTool as PiAgentTool,
   AgentToolResult,
 } from "@earendil-works/pi-agent-core";
@@ -167,6 +174,31 @@ export interface SessionSearchToolContext {
   maxBodyChars?: number;
 }
 
+export interface ChannelReadbackClient {
+  readback(
+    request: NormalizedChannelReadbackRequest,
+  ):
+    | Promise<NormalizedChannelReadbackResponse>
+    | NormalizedChannelReadbackResponse;
+}
+
+export interface ChannelReadbackToolContext {
+  client?: ChannelReadbackClient;
+  requester: ChannelRuntimeIdentity;
+  allowedBindingIds?: readonly string[];
+  defaultLimit?: number;
+  maxLimit?: number;
+  defaultMaxBodyChars?: number;
+  maxBodyChars?: number;
+}
+
+export interface ChannelReadbackToolDetails {
+  ok: boolean;
+  operation: "readback";
+  reasonCode?: string;
+  response?: NormalizedChannelReadbackResponse;
+}
+
 export type CounterResetTriggerType =
   | "manual"
   | "maintenance"
@@ -297,6 +329,34 @@ const sessionSearchParameters = Type.Object({
 });
 
 type SessionSearchParams = Static<typeof sessionSearchParameters>;
+
+const channelReadbackReasonSchema = Type.Union([
+  Type.Literal("agent_context"),
+  Type.Literal("operator_debug"),
+  Type.Literal("incident_review"),
+]);
+
+const channelReadbackVisibilitySchema = Type.Union([
+  Type.Literal("conversation"),
+  Type.Literal("task"),
+  Type.Literal("debug"),
+  Type.Literal("system"),
+  Type.Literal("any"),
+]);
+
+const channelReadbackParameters = Type.Object({
+  bindingId: Type.String({ minLength: 1 }),
+  externalChannelId: Type.Optional(Type.String({ minLength: 1 })),
+  externalThreadId: Type.Optional(Type.String({ minLength: 1 })),
+  beforeExternalMessageId: Type.Optional(Type.String({ minLength: 1 })),
+  beforeCursor: Type.Optional(Type.String({ minLength: 1 })),
+  limit: Type.Optional(Type.Number({ minimum: 1 })),
+  maxBodyChars: Type.Optional(Type.Number({ minimum: 1 })),
+  visibility: Type.Optional(channelReadbackVisibilitySchema),
+  reasonCode: Type.Optional(channelReadbackReasonSchema),
+});
+
+type ChannelReadbackParams = Static<typeof channelReadbackParameters>;
 
 const runtimeCounterScopeTypeSchema = Type.Union([
   Type.Literal("runtime"),
@@ -491,6 +551,90 @@ export function sessionSearchTool(
   };
 }
 
+export function channelReadbackTool(
+  context: ChannelReadbackToolContext,
+): PiAgentTool<typeof channelReadbackParameters, ChannelReadbackToolDetails> {
+  return {
+    name: "channel_readback",
+    label: "Channel readback",
+    description:
+      "Inspect bounded channel context for the current runtime binding without replaying or redelivering messages.",
+    parameters: channelReadbackParameters,
+    execute: async (_toolCallId, params: ChannelReadbackParams) => {
+      if (!context.client) {
+        return channelReadbackResult({
+          ok: false,
+          operation: "readback",
+          reasonCode: "channel_readback_client_unavailable",
+        });
+      }
+
+      const denied = validateChannelReadback(context, params);
+      if (denied) {
+        return channelReadbackResult({
+          ok: false,
+          operation: "readback",
+          reasonCode: denied,
+        });
+      }
+
+      const request: NormalizedChannelReadbackRequest = {
+        kind: "channel_readback_request.v1",
+        bindingId: params.bindingId,
+        providerRefs: {
+          externalChannelId: params.externalChannelId,
+          externalThreadId: params.externalThreadId,
+        },
+        requester: context.requester,
+        beforeExternalMessageId: params.beforeExternalMessageId,
+        beforeCursor: params.beforeCursor,
+        limit: clampToolNumber(
+          params.limit ?? context.defaultLimit ?? 10,
+          1,
+          context.maxLimit ?? 25,
+        ),
+        maxBodyChars: clampToolNumber(
+          params.maxBodyChars ?? context.defaultMaxBodyChars ?? 600,
+          1,
+          context.maxBodyChars ?? 2_000,
+        ),
+        visibility:
+          (params.visibility as ChannelReadbackVisibilityFilter | undefined) ??
+          "conversation",
+        reasonCode:
+          (params.reasonCode as ChannelReadbackReasonCode | undefined) ??
+          "agent_context",
+      };
+
+      try {
+        const response = await context.client.readback(request);
+        return channelReadbackResult({
+          ok: response.errors === undefined || response.errors.length === 0,
+          operation: "readback",
+          reasonCode: response.degradedReason,
+          response,
+        });
+      } catch (error) {
+        return channelReadbackResult({
+          ok: false,
+          operation: "readback",
+          reasonCode: "channel_readback_failed",
+          response: {
+            kind: "channel_readback_response.v1",
+            bindingId: params.bindingId,
+            messages: [],
+            cursorBoundaries: {},
+            truncated: false,
+            provenance: { service: "brain_island.channel_readback_tool" },
+            errors: [error instanceof Error ? error.message : String(error)],
+            degradedReason: "channel_readback_failed",
+          },
+        });
+      }
+    },
+  };
+}
+
 export function counterResetTool(
   context: CounterResetToolContext,
 ): PiAgentTool<typeof counterResetParameters, CounterResetToolDetails> {
@@ -679,6 +823,15 @@ function todoResult(
   };
 }
 
+function channelReadbackResult(
+  details: ChannelReadbackToolDetails,
+): AgentToolResult<ChannelReadbackToolDetails> {
+  return {
+    content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
+    details,
+  };
+}
+
 function normalizeTodoItem(item: TodoItem): TodoItem {
   if (!item.id.trim() || !item.title.trim()) {
     throw new TodoInputError("todo_item_invalid");
@@ -716,6 +869,26 @@ function normalizeResult(
     bodySnippet: row.body.slice(0, maxBodyChars),
     truncated: row.body.length > maxBodyChars,
   };
+}
+
+function validateChannelReadback(
+  context: ChannelReadbackToolContext,
+  params: ChannelReadbackParams,
+): string | undefined {
+  if (!context.requester.agentId && !context.requester.sessionId) {
+    return "channel_readback_requester_missing";
+  }
+  if (
+    context.allowedBindingIds &&
+    !context.allowedBindingIds.includes(params.bindingId)
+  ) {
+    return "channel_readback_binding_denied";
+  }
+  return undefined;
+}
+
+function clampToolNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.trunc(value)));
 }
 
 function validateCounterScope(

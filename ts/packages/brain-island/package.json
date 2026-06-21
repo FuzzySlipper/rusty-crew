@@ -33,6 +33,7 @@
     "smoke:den-memory-tools": "tsx src/smoke-den-memory-tools.ts",
     "smoke:dense-profile-memory-tool": "tsx src/smoke-dense-profile-memory-tool.ts",
     "smoke:session-search-tool": "tsx src/smoke-session-search-tool.ts",
+    "smoke:channel-readback-tool": "tsx src/smoke-channel-readback-tool.ts",
     "smoke:todo-tool": "tsx src/smoke-todo-tool.ts",
     "smoke:counter-reset-tool": "tsx src/smoke-counter-reset-tool.ts",
     "smoke:curator-execute-tool": "tsx src/smoke-curator-execute-tool.ts",

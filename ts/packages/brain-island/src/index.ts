@@ -286,6 +286,7 @@ export type {
   DenseProfileMemoryToolDetails,
 } from "./dense-profile-memory-tool.js";
 export {
+  channelReadbackTool,
   curatorExecuteTool,
   counterResetTool,
   MemorySessionTodoStore,
@@ -294,6 +295,9 @@ export {
   todoTool,
 } from "./planning-tools.js";
 export type {
+  ChannelReadbackClient,
+  ChannelReadbackToolContext,
+  ChannelReadbackToolDetails,
   CounterResetToolContext,
   CounterResetToolDetails,
   CounterResetTriggerType,

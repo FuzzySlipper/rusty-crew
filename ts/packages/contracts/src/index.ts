@@ -268,6 +268,130 @@ export interface NormalizedChannelActivityProjection {
   createdAt: string;
 }
 
+export type ChannelReadbackVisibilityFilter = ChannelVisibility | "any";
+
+export type ChannelReadbackReasonCode =
+  | "agent_context"
+  | "operator_debug"
+  | "incident_review";
+
+export interface NormalizedChannelReadbackRequest {
+  kind: "channel_readback_request.v1";
+  adapterId?: AdapterId;
+  bindingId: string;
+  providerRefs?: Partial<ChannelProviderRefs>;
+  requester: ChannelRuntimeIdentity;
+  beforeExternalMessageId?: string;
+  beforeCursor?: string;
+  limit?: number;
+  maxBodyChars?: number;
+  visibility?: ChannelReadbackVisibilityFilter;
+  includeExpired?: boolean;
+  reasonCode: ChannelReadbackReasonCode;
+}
+
+export interface NormalizedChannelReadbackMessageSummary {
+  providerRefs: ChannelProviderRefs;
+  author: ChannelAuthorRef;
+  bodySnippet: string;
+  summary?: string;
+  receivedAt: string;
+  expiresAt: string;
+  cursor?: string;
+  visibility: ChannelVisibility;
+  attachmentCount: number;
+  truncated: boolean;
+}
+
+export interface ChannelReadbackCursorBoundaries {
+  oldestCursor?: string;
+  newestCursor?: string;
+  beforeCursor?: string;
+  beforeExternalMessageId?: string;
+}
+
+export interface NormalizedChannelReadbackResponse {
+  kind: "channel_readback_response.v1";
+  adapterId?: AdapterId;
+  bindingId: string;
+  providerRefs?: Partial<ChannelProviderRefs>;
+  messages: NormalizedChannelReadbackMessageSummary[];
+  cursorBoundaries: ChannelReadbackCursorBoundaries;
+  truncated: boolean;
+  provenance: Record<string, unknown>;
+  errors?: string[];
+  degradedReason?: string;
+}
+
+export type ReferenceSourceDomain =
+  | "runtime"
+  | "den"
+  | "channel"
+  | "mcp"
+  | "artifact"
+  | "git";
+
+export type WorkReferenceKind =
+  | "project"
+  | "task"
+  | "assignment"
+  | "run"
+  | "session"
+  | "delegation_run"
+  | "channel_binding"
+  | "channel_message"
+  | "mcp_surface";
+
+export type ResultReferenceKind =
+  | "completion_packet"
+  | "runtime_event"
+  | "scheduler_run"
+  | "curator_candidate_batch"
+  | "den_message"
+  | "den_document"
+  | "den_task"
+  | "observation_event"
+  | "diagnostics_bundle"
+  | "artifact"
+  | "commit"
+  | "channel_message";
+
+export interface WorkReference {
+  kind: "work_ref.v1";
+  sourceDomain: ReferenceSourceDomain;
+  refKind: WorkReferenceKind | string;
+  id: string;
+  projectId?: ProjectId | string;
+  label?: string;
+  externalUrl?: string;
+}
+
+export interface ResultReference {
+  kind: "result_ref.v1";
+  sourceDomain: ReferenceSourceDomain;
+  refKind: ResultReferenceKind | string;
+  id: string;
+  label?: string;
+  contentHash?: string;
+  externalUrl?: string;
+}
+
+export interface DenRouterMetadataProjection {
+  kind: "den_router_metadata_projection.v1";
+  adapterId: AdapterId;
+  bindingId: string;
+  runtime: ChannelRuntimeIdentity;
+  providerRefs?: Partial<ChannelProviderRefs>;
+  workRefs: WorkReference[];
+  resultRefs?: ResultReference[];
+  toolProfileKey?: string;
+  mcpSurfaceRefs?: string[];
+  status: ExternalBindingStatus;
+  degradedReason?: string;
+  observedAt: string;
+  provenance: Record<string, unknown>;
+}
+
 export interface ChannelBindingRecord {
   bindingId: string;
   adapterId: AdapterId;

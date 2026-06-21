@@ -7,6 +7,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "smoke": "tsx src/smoke-den.ts",
+    "smoke:router-metadata": "tsx src/smoke-router-metadata.ts",
     "smoke:memory-client": "tsx src/smoke-memory-client.ts"
   },
   "exports": {
