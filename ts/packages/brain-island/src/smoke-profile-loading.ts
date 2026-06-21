@@ -140,6 +140,9 @@ skills: []
 modelConfig:
   provider: den-router
   model: deepseek-flash
+  baseUrl: http://127.0.0.1:18082/v1
+  apiKeyEnv: DEN_ROUTER_API_KEY
+  api: openai-responses
   temperature: 0.2
   maxTokens: 4096
 mcpConfig:
@@ -163,6 +166,9 @@ toolPolicy:
 
   assert.equal(runner.profile.displayName, "Rusty Crew Runner");
   assert.equal(runner.profile.modelConfig.modelName, "deepseek-flash");
+  assert.equal(runner.profile.modelConfig.baseUrl, "http://127.0.0.1:18082/v1");
+  assert.equal(runner.profile.modelConfig.apiKeyEnv, "DEN_ROUTER_API_KEY");
+  assert.equal(runner.profile.modelConfig.api, "openai-responses");
   assert.equal(runner.profile.modelConfig.temperatureMilli, 200);
   assert.equal(runner.profile.modelConfig.maxOutputTokens, 4096);
   assert.equal(runner.profile.runtime?.maxTurns, 100);

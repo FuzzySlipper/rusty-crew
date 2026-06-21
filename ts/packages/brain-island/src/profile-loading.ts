@@ -45,6 +45,10 @@ export interface ProfilePromptFragments {
 }
 
 export interface ProfileMcpConfig {
+  bindingId?: string;
+  endpointRef?: string;
+  serverNames?: string[];
+  transport?: string;
   toolProfile?: string;
 }
 
@@ -326,6 +330,9 @@ function validateProfileConfig(
     modelConfig: {
       provider,
       modelName,
+      baseUrl: optionalString(modelConfig.baseUrl),
+      api: optionalString(modelConfig.api),
+      apiKeyEnv: optionalString(modelConfig.apiKeyEnv),
       temperatureMilli,
       maxOutputTokens:
         optionalNumber(modelConfig.maxOutputTokens) ??
@@ -379,6 +386,10 @@ function validateProfileConfig(
     skills: stringList(parsed.skills),
     mcpConfig: isRecord(parsed.mcpConfig)
       ? {
+          bindingId: optionalString(parsed.mcpConfig.bindingId),
+          endpointRef: optionalString(parsed.mcpConfig.endpointRef),
+          serverNames: stringList(parsed.mcpConfig.serverNames),
+          transport: optionalString(parsed.mcpConfig.transport),
           toolProfile: optionalString(parsed.mcpConfig.toolProfile),
         }
       : undefined,

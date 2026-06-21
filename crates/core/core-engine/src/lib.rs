@@ -154,11 +154,14 @@ impl CoreEngine {
                 if existing.status == SessionStatus::Archived {
                     let now = self.now();
                     self.store.expire_queued_messages_at(&now)?;
+                    self.sessions.apply_config(&config)?;
                     let state = self.sessions.reactivate_session(&config.session_id, now)?;
                     self.store.save_session(&state)?;
                     return Ok(state);
                 }
-                Ok(existing)
+                let state = self.sessions.apply_config(&config)?;
+                self.store.save_session(&state)?;
+                Ok(state)
             }
             Err(error) if error.kind == CoreErrorKind::NotFound => self.create_session(config),
             Err(error) => Err(error),
@@ -1732,7 +1735,9 @@ mod tests {
         assert_eq!(reactivated.session_id, created.session_id);
         assert_eq!(reactivated.handle, created.handle);
         assert_eq!(reactivated.status, SessionStatus::Idle);
-        let body = engine.prepare_body_state_for_wake(&created.session_id).unwrap();
+        let body = engine
+            .prepare_body_state_for_wake(&created.session_id)
+            .unwrap();
         assert!(body.pending_messages.is_empty());
         assert_eq!(
             store
@@ -1746,6 +1751,34 @@ mod tests {
                 .len(),
             1,
         );
+    }
+
+    #[test]
+    fn ensure_configured_session_refreshes_existing_session_config() {
+        let engine = test_engine();
+        let mut config = session_config(
+            "configured-session",
+            "prime",
+            "prime-profile",
+            SessionKind::Full,
+        );
+        let created = engine.create_session(config.clone()).unwrap();
+
+        config.resource_limits.max_duration_ms = Some(120_000);
+        config.tool_profile = ToolProfile {
+            tools: vec![ToolDescriptor {
+                name: "read_file".to_string(),
+                description: "Read a file".to_string(),
+                input_schema: None,
+            }],
+        };
+        let refreshed = engine.ensure_configured_session(config).unwrap();
+
+        assert_eq!(refreshed.session_id, created.session_id);
+        assert_eq!(refreshed.handle, created.handle);
+        assert_eq!(refreshed.resource_limits.max_duration_ms, Some(120_000));
+        assert_eq!(refreshed.tool_profile.tools.len(), 1);
+        assert_eq!(refreshed.tool_profile.tools[0].name, "read_file");
     }
 
     #[test]

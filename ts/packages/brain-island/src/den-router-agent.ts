@@ -37,6 +37,8 @@ interface DenRouterRoutesResponse {
 export interface DenRouterAgentOptions {
   baseUrl?: string;
   modelId?: string;
+  api?: string;
+  apiKeyEnv?: string;
   maxTokens?: number;
   temperature?: number;
 }
@@ -53,11 +55,15 @@ export async function createDenRouterPiAgentFactory(
 ): Promise<PiAgentFactory> {
   const selection = await resolveDenRouterModel(options);
   registerApiProvidersOnce();
+  const apiKey =
+    options.apiKeyEnv === undefined
+      ? "den-router"
+      : (process.env[options.apiKeyEnv] ?? "den-router");
 
   return (agentOptions: AgentOptions) =>
     new Agent({
       ...agentOptions,
-      getApiKey: () => "den-router",
+      getApiKey: () => apiKey,
       initialState: {
         ...agentOptions.initialState,
         model: selection.model,
@@ -65,7 +71,7 @@ export async function createDenRouterPiAgentFactory(
       streamFn: (model, context, streamOptions) =>
         streamSimple(model, context, {
           ...streamOptions,
-          apiKey: "den-router",
+          apiKey,
           temperature: options.temperature ?? streamOptions?.temperature ?? 0,
           maxTokens: options.maxTokens ?? streamOptions?.maxTokens ?? 128,
         }),
@@ -86,9 +92,11 @@ export async function resolveDenRouterModel(
     models,
     options.modelId ?? process.env.RUSTY_CREW_DEN_ROUTER_MODEL,
   );
-  const api = isCodexBacked(selected.id, routes)
-    ? "openai-responses"
-    : "openai-completions";
+  const api =
+    normalizeApi(options.api) ??
+    (isCodexBacked(selected.id, routes)
+      ? "openai-responses"
+      : "openai-completions");
 
   return {
     baseUrl,
@@ -110,6 +118,14 @@ export async function resolveDenRouterModel(
       },
     } satisfies Model<Api>,
   };
+}
+
+function normalizeApi(raw: string | undefined): Api | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === "openai-responses" || raw === "openai-completions") {
+    return raw;
+  }
+  throw new Error(`unsupported den-router api ${raw}`);
 }
 
 async function fetchDenRouterModels(

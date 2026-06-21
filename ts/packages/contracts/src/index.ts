@@ -748,6 +748,9 @@ export interface CoreError {
 export interface BrainModelConfig {
   provider: string;
   modelName: string;
+  baseUrl?: string;
+  api?: string;
+  apiKeyEnv?: string;
   temperatureMilli?: number;
   maxOutputTokens?: number;
 }

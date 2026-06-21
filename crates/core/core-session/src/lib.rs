@@ -94,6 +94,22 @@ impl SessionRegistry {
             })
     }
 
+    pub fn apply_config(&self, config: &SessionConfig) -> CoreResult<SessionState> {
+        let mut sessions =
+            self.inner.sessions.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
+            })?;
+        let state = sessions.get_mut(&config.session_id).ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("session {} not found", config.session_id),
+            )
+        })?;
+        state.resource_limits = config.resource_limits.clone();
+        state.tool_profile = config.tool_profile.clone();
+        Ok(state.clone())
+    }
+
     pub fn get_session_by_agent(&self, agent_id: &AgentId) -> CoreResult<SessionState> {
         self.inner
             .sessions

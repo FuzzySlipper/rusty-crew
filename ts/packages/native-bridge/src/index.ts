@@ -28,6 +28,7 @@ import type {
   PlatformAdapterRegistration,
   ProfileId,
   ProjectId,
+  ResourceLimits,
   RunId,
   RuntimeBufferHandle,
   RuntimeBufferView,
@@ -44,8 +45,18 @@ import type {
   SubscriptionHandle,
   TaskId,
   ToolCallMetadata,
+  ToolProfile,
   Unit,
 } from "@rusty-crew/contracts";
+
+interface NativeSessionConfigInput {
+  sessionId: string;
+  agentId: string;
+  profileId: string;
+  kind: "full" | "worker" | "delegated";
+  resourceLimits?: ResourceLimits;
+  toolProfile?: ToolProfile;
+}
 
 interface NativeAddon {
   NativeBridgeBinding: new () => NativeBridgeBinding;
@@ -133,6 +144,8 @@ interface NativeBridgeBinding {
     agentId: string;
     profileId: string;
     kind: string;
+    resourceLimits?: ResourceLimits;
+    toolProfile?: ToolProfile;
   }): {
     handle: number;
     sessionId: string;
@@ -146,6 +159,8 @@ interface NativeBridgeBinding {
     agentId: string;
     profileId: string;
     kind: string;
+    resourceLimits?: ResourceLimits;
+    toolProfile?: ToolProfile;
   }): {
     handle: number;
     sessionId: string;
@@ -502,18 +517,12 @@ export interface NativeBridgeModule {
    * Startup/config setup surface. This creates a Rust session for a configured
    * agent; it is not a brain wake-loop diagnostic bypass.
    */
-  createSession(config: {
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: "full" | "worker" | "delegated";
-  }): Promise<NativeSessionStateSummary>;
-  ensureConfiguredSession(config: {
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: "full" | "worker" | "delegated";
-  }): Promise<NativeSessionStateSummary>;
+  createSession(
+    config: NativeSessionConfigInput,
+  ): Promise<NativeSessionStateSummary>;
+  ensureConfiguredSession(
+    config: NativeSessionConfigInput,
+  ): Promise<NativeSessionStateSummary>;
   /**
    * Internal agent-to-agent routing trigger. This publishes through
    * CoreEngine::route_agent_message and runs scheduler evaluation.

@@ -10,8 +10,10 @@ import type {
   ChannelBindingRecord,
   McpBindingRecord,
   ProfileId,
+  ResourceLimits,
   SessionId,
   SessionKind,
+  ToolProfile,
 } from "@rusty-crew/contracts";
 import type {
   BrainWakeExecutor,
@@ -24,7 +26,7 @@ import type { BrainImplementation } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
 import { createPiAgentBrain } from "./pi-agent-brain.js";
 import type { PiAgentFactory } from "./pi-agent-brain.js";
-import { loadProfileContext } from "./profile-loading.js";
+import { loadProfileConfig, loadProfileContext } from "./profile-loading.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 
 export interface RustyCrewConfiguredBrain {
@@ -37,6 +39,8 @@ export interface RustyCrewConfiguredSession {
   agentId: AgentId;
   profileId: ProfileId;
   kind: SessionKind;
+  resourceLimits?: ResourceLimits;
+  toolProfile?: ToolProfile;
 }
 
 export interface RustyCrewRuntimeConfig {
@@ -72,7 +76,70 @@ export async function loadRustyCrewRuntimeConfig(
   }
 
   const parsed = JSON.parse(raw) as unknown;
-  return validateRuntimeConfig(parsed, serviceConfig);
+  return expandRuntimeConfigFromProfiles(
+    validateRuntimeConfig(parsed, serviceConfig),
+  );
+}
+
+async function expandRuntimeConfigFromProfiles(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Promise<RustyCrewRuntimeConfig> {
+  const mcpBindings = [...runtimeConfig.mcpBindings];
+  for (const session of runtimeConfig.sessions) {
+    const profile = await loadProfileConfig(
+      runtimeConfig.profilesDir,
+      session.profileId,
+    );
+    const mcpConfig = profile.mcpConfig;
+    if (mcpConfig?.toolProfile === undefined) continue;
+    const bindingId = mcpConfig.bindingId ?? `${session.agentId}-mcp`;
+    if (
+      hasProfileMcpBinding(
+        mcpBindings,
+        session,
+        bindingId,
+        mcpConfig.toolProfile,
+      )
+    ) {
+      continue;
+    }
+    mcpBindings.push({
+      bindingId,
+      adapterId: "mcp-ts-main" as never,
+      agentId: session.agentId,
+      sessionId: session.sessionId,
+      profileId: session.profileId,
+      serverNames:
+        mcpConfig.serverNames && mcpConfig.serverNames.length > 0
+          ? mcpConfig.serverNames
+          : [session.agentId],
+      endpointRef: mcpConfig.endpointRef ?? `config://mcp/${session.agentId}`,
+      transport: mcpConfig.transport ?? "stdio",
+      toolProfileKey: mcpConfig.toolProfile,
+      status: "active",
+      diagnostics: {},
+    });
+  }
+  return {
+    ...runtimeConfig,
+    mcpBindings,
+  };
+}
+
+function hasProfileMcpBinding(
+  bindings: readonly McpBindingRecord[],
+  session: RustyCrewConfiguredSession,
+  bindingId: string,
+  toolProfileKey: string,
+): boolean {
+  return bindings.some(
+    (binding) =>
+      binding.bindingId === bindingId ||
+      (binding.profileId === session.profileId &&
+        (binding.sessionId === undefined ||
+          binding.sessionId === session.sessionId) &&
+        binding.toolProfileKey === toolProfileKey),
+  );
 }
 
 export async function applyRustyCrewRuntimeConfig(input: {
@@ -86,6 +153,21 @@ export async function applyRustyCrewRuntimeConfig(input: {
   ) => Promise<PiAgentFactory>;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const createMissingSessions = input.createMissingSessions ?? true;
+  const profileContexts = new Map<
+    ProfileId,
+    Awaited<ReturnType<typeof loadProfileContext>>
+  >();
+  const loadProfile = async (profileId: ProfileId) => {
+    const existing = profileContexts.get(profileId);
+    if (existing !== undefined) return existing;
+    const profile = await loadProfileContext({
+      profilesDir: input.runtimeConfig.profilesDir,
+      skillsDir: input.runtimeConfig.skillsDir,
+      profileId,
+    });
+    profileContexts.set(profileId, profile);
+    return profile;
+  };
   const result: RustyCrewRuntimeConfigApplyResult = {
     brainsRegistered: 0,
     brainsAlreadyPresent: 0,
@@ -97,11 +179,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   };
 
   for (const brain of input.runtimeConfig.brains) {
-    const profile = await loadProfileContext({
-      profilesDir: input.runtimeConfig.profilesDir,
-      skillsDir: input.runtimeConfig.skillsDir,
-      profileId: brain.profileId,
-    });
+    const profile = await loadProfile(brain.profileId);
     try {
       const handle = await input.bridge.registerBrainRuntime(
         {
@@ -136,12 +214,15 @@ export async function applyRustyCrewRuntimeConfig(input: {
     ]),
   );
   for (const session of input.runtimeConfig.sessions) {
+    const profile = await loadProfile(session.profileId);
+    const configuredSession = sessionWithProfileDefaults(session, profile);
     const existing = existingSessionsById.get(session.sessionId);
     if (!existing && !createMissingSessions) {
       result.sessionsMissing += 1;
       continue;
     }
-    const ensured = await input.bridge.ensureConfiguredSession(session);
+    const ensured =
+      await input.bridge.ensureConfiguredSession(configuredSession);
     if (!existing) {
       result.sessionsCreated += 1;
     } else if (
@@ -155,6 +236,20 @@ export async function applyRustyCrewRuntimeConfig(input: {
   }
 
   return result;
+}
+
+function sessionWithProfileDefaults(
+  session: RustyCrewConfiguredSession,
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+): RustyCrewConfiguredSession {
+  return {
+    ...session,
+    resourceLimits:
+      session.resourceLimits ??
+      profile.profile.runtime?.defaultResourceLimits ??
+      undefined,
+    toolProfile: session.toolProfile ?? profile.toolSelection.toolProfile,
+  };
 }
 
 export function configuredSessionForChannelBinding(
@@ -222,6 +317,9 @@ async function createConfiguredBrain(
     )({
       modelId: profile.profile.modelConfig.modelName,
       maxTokens: profile.profile.modelConfig.maxOutputTokens,
+      baseUrl: profile.profile.modelConfig.baseUrl,
+      api: profile.profile.modelConfig.api,
+      apiKeyEnv: profile.profile.modelConfig.apiKeyEnv,
       temperature:
         profile.profile.modelConfig.temperatureMilli === undefined
           ? undefined
@@ -400,6 +498,17 @@ function configuredSession(
       `sessions[${index}].profileId`,
     ) as ProfileId,
     kind,
+    resourceLimits: isRecord(parsed.resourceLimits)
+      ? resourceLimits(parsed.resourceLimits)
+      : undefined,
+  };
+}
+
+function resourceLimits(parsed: Record<string, unknown>): ResourceLimits {
+  return {
+    workdir: optionalString(parsed.workdir),
+    maxDurationMs: optionalNumber(parsed.maxDurationMs),
+    maxDelegationDepth: optionalNumber(parsed.maxDelegationDepth),
   };
 }
 
@@ -534,6 +643,12 @@ function requiredString(input: unknown, name: string): string {
 
 function optionalString(input: unknown): string | undefined {
   return typeof input === "string" && input.trim() ? input.trim() : undefined;
+}
+
+function optionalNumber(input: unknown): number | undefined {
+  return typeof input === "number" && Number.isFinite(input)
+    ? input
+    : undefined;
 }
 
 function isAlreadyPresentError(error: unknown): boolean {

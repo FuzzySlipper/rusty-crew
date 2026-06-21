@@ -4,7 +4,12 @@ import { mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
+import type {
+  AgentId,
+  McpBindingRecord,
+  ProfileId,
+  SessionId,
+} from "@rusty-crew/contracts";
 import { createDebugApiClient } from "./debug-api-client.js";
 import { startRustyCrewServiceHost } from "./service-host.js";
 
@@ -45,8 +50,18 @@ try {
   assert.equal(diagnostics.body.data.overview.summary.sessions, 1);
   assert.equal(diagnostics.body.data.overview.summary.idleSessions, 1);
   assert.equal(
+    diagnostics.body.data.overview.runtime.sessions[0]?.toolCount,
+    1,
+  );
+  assert.equal(
     typeof diagnostics.body.data.overview.persistence.databaseBytes,
     "number",
+  );
+  const configuredSessions = await host.bridge.listSessions();
+  assert.equal(
+    configuredSessions.find((session) => session.sessionId === "field-session")
+      ?.resourceLimits.maxDurationMs,
+    45_000,
   );
 
   const channels = await get("/v1/admin/diagnostics/channels", token);
@@ -440,33 +455,21 @@ function writeRuntimeConfig(
         status: "active",
       },
     ],
-    mcpBindings: [
-      {
-        bindingId: "field-mcp",
-        adapterId: "mcp-ts-main",
-        agentId: "field-agent",
-        sessionId: "field-session",
-        profileId: "field-profile",
-        serverNames: ["field"],
-        endpointRef: "config://mcp/field",
-        transport: "stdio",
-        toolProfileKey: "field-profile-mcp",
-        status: "active",
-      },
-    ],
+    mcpBindings: [] as McpBindingRecord[],
   };
   if (options.includeExtraMcpBinding) {
     runtimeConfig.mcpBindings.push({
       bindingId: "field-mcp-extra",
-      adapterId: "mcp-ts-extra",
-      agentId: "field-agent",
-      sessionId: "field-session",
-      profileId: "field-profile",
+      adapterId: "mcp-ts-extra" as never,
+      agentId: "field-agent" as AgentId,
+      sessionId: "field-session" as SessionId,
+      profileId: "field-profile" as ProfileId,
       serverNames: ["field-extra"],
       endpointRef: "config://mcp/field-extra",
       transport: "stdio",
       toolProfileKey: "field-profile-mcp-extra",
       status: "active",
+      diagnostics: {},
     });
   }
   writeFileSync(
@@ -481,6 +484,17 @@ function writeRuntimeConfig(
         modelConfig: {
           provider: "local",
           modelName: "deterministic",
+        },
+        runtime: {
+          defaultResourceLimits: {
+            maxDurationMs: 45_000,
+          },
+        },
+        mcpConfig: {
+          bindingId: "field-mcp",
+          serverNames: ["field"],
+          endpointRef: "config://mcp/field",
+          toolProfile: "field-profile-mcp",
         },
         toolPolicy: {
           requestedTools: ["read_file"],
