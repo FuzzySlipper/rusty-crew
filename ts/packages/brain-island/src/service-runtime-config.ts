@@ -40,6 +40,7 @@ import {
   channelReadbackTool,
   counterResetTool,
   curatorExecuteTool,
+  type CuratorExecuteContext,
   MemorySessionTodoStore,
   sessionSearchTool,
   todoTool,
@@ -178,6 +179,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   createDenRouterAgentFactory?: (
     options: Parameters<typeof createDenRouterPiAgentFactory>[0],
   ) => Promise<PiAgentFactory>;
+  curatorExecutor?: CuratorExecuteContext["executor"];
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const createMissingSessions = input.createMissingSessions ?? true;
   const profileContexts = new Map<
@@ -221,6 +223,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             bridge: input.bridge,
             runtimeConfig: input.runtimeConfig,
             serviceConfig: input.serviceConfig,
+            curatorExecutor: input.curatorExecutor,
           }),
         ),
       );
@@ -342,6 +345,7 @@ async function createConfiguredBrain(
     bridge?: NativeBridgeModule;
     runtimeConfig?: RustyCrewRuntimeConfig;
     serviceConfig?: RustyCrewServiceConfig;
+    curatorExecutor?: CuratorExecuteContext["executor"];
   } = {},
 ): Promise<BrainImplementation> {
   if (profile.profile.modelConfig.provider === "den-router") {
@@ -405,6 +409,7 @@ function createServiceToolResolver(
     bridge?: NativeBridgeModule;
     runtimeConfig?: RustyCrewRuntimeConfig;
     serviceConfig?: RustyCrewServiceConfig;
+    curatorExecutor?: CuratorExecuteContext["executor"];
   },
 ): PiAgentToolResolver {
   const todoStore = new MemorySessionTodoStore();
@@ -429,6 +434,7 @@ function createServiceToolResolver(
     createPlanningToolResolver({
       bridge: options.bridge,
       runtimeConfig: options.runtimeConfig,
+      curatorExecutor: options.curatorExecutor,
       todoStore,
     }),
   );
@@ -473,6 +479,7 @@ function denseProfileMemoryMode(
 function createPlanningToolResolver(input: {
   bridge?: NativeBridgeModule;
   runtimeConfig?: RustyCrewRuntimeConfig;
+  curatorExecutor?: CuratorExecuteContext["executor"];
   todoStore: MemorySessionTodoStore;
 }): PiAgentToolResolver {
   return ({ wake }) => {
@@ -496,6 +503,7 @@ function createPlanningToolResolver(input: {
       }),
       counterResetTool({ client: input.bridge }),
       curatorExecuteTool({
+        executor: input.curatorExecutor,
         actorId: session.agentId,
         sessionId: session.sessionId,
         profileId: session.profileId,

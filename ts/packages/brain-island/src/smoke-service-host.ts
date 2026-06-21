@@ -122,6 +122,26 @@ try {
   assert.equal(schedulerTick.status, 200);
   assert.equal(schedulerTick.body.ok, true);
 
+  const curatorStatus = await post("/v1/admin/control/curator/status", token, {
+    reason: "smoke",
+  });
+  assert.equal(curatorStatus.status, 200);
+  assert.equal(curatorStatus.body.ok, true);
+  assert.equal(curatorStatus.body.data.outcome.result.status, "available");
+
+  const curatorRun = await post("/v1/admin/control/curator/run", token, {
+    scopeType: "profile",
+    scopeId: "field-profile",
+    dryRun: true,
+    reason: "service host smoke",
+  });
+  assert.equal(curatorRun.status, 200);
+  assert.equal(curatorRun.body.ok, true);
+  assert.match(
+    curatorRun.body.data.outcome.result.summary,
+    /scan produced [1-9]/,
+  );
+
   const client = createDebugApiClient({
     baseUrl: `http://127.0.0.1:${port}`,
     bearerToken: token,
@@ -429,9 +449,12 @@ function writeRuntimeConfig(
 ): void {
   const configDir = join(root, "config");
   const profilesDir = join(configDir, "profiles");
+  const skillsDir = join(configDir, "skills");
   mkdirSync(profilesDir, { recursive: true });
+  mkdirSync(skillsDir, { recursive: true });
   const runtimeConfig = {
     profilesDir,
+    skillsDir,
     brains: [{ profileId: "field-profile" }],
     sessions: [
       {
@@ -499,9 +522,33 @@ function writeRuntimeConfig(
         toolPolicy: {
           requestedTools: ["read_file"],
         },
+        skills: "all",
       },
       null,
       2,
     ),
+  );
+  writeFileSync(
+    join(skillsDir, "field-review.md"),
+    `---
+title: Field Review
+summary: Review field service behavior.
+tags:
+  - smoke
+---
+
+Use this skill for stable field review behavior.
+`,
+  );
+  writeFileSync(
+    join(skillsDir, "field-review-copy.md"),
+    `---
+title: Field Review
+tags:
+  - smoke
+---
+
+TODO: move temporary project progress out of skills.
+`,
   );
 }

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   BrainEvent,
@@ -6,6 +7,7 @@ import type {
   ChannelBindingRecord,
   CoreEvent,
   EngineHandle,
+  ProfileId,
   SessionId,
   SessionState,
   SubscriptionHandle,
@@ -62,6 +64,24 @@ import {
   type DenSuccessorGatewayStartupReport,
 } from "./den-successor-service.js";
 import {
+  createCuratorAdminControlExecutor,
+  type CuratorAdminStatus,
+} from "./curator-admin-control.js";
+import {
+  discoverCuratorCandidates,
+  type CuratorCandidateBatch,
+} from "./curator-candidates.js";
+import {
+  createCuratorGovernanceExecutor,
+  MemoryCuratorGovernanceStore,
+  rollbackCuratorMutation,
+  type CuratorMutationCandidate,
+} from "./curator-mutations.js";
+import type {
+  CuratorExecuteContext,
+  CuratorExecuteRequest,
+} from "./planning-tools.js";
+import {
   acquireRustyCrewServiceLock,
   ensureRustyCrewServiceDirectories,
   loadRustyCrewServiceConfig,
@@ -103,6 +123,7 @@ interface ServiceState {
   runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
   denGatewayClient?: DenSuccessorGatewayClient;
   denGatewayStartupReport?: DenSuccessorGatewayStartupReport;
+  readonly curator: ServiceCuratorRuntime;
   readonly denConversationChannelIdsByExternalId: Map<string, number>;
   mcpManager: McpSurfaceManager;
   readonly wakeSubscription: SubscriptionHandle;
@@ -115,6 +136,14 @@ interface ServiceState {
   readonly now: () => string;
   nextWakeSequence: number;
   stopping: boolean;
+}
+
+interface ServiceCuratorRuntime {
+  readonly store: MemoryCuratorGovernanceStore;
+  executor: NonNullable<CuratorExecuteContext["executor"]>;
+  runtimeConfig: RustyCrewRuntimeConfig;
+  lastRunAt?: string;
+  lastError?: string;
 }
 
 interface ServiceRecentEvent {
@@ -156,10 +185,17 @@ export async function startRustyCrewServiceHost(
       defaultIdleTimeoutMs: 30_000,
     });
     const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
+    const curator = createServiceCuratorRuntime({
+      config,
+      runtimeConfig,
+      bridge,
+      now: options.now ?? (() => new Date().toISOString()),
+    });
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,
       bridge,
+      curatorExecutor: curator.executor,
     });
     const wakeSubscription = await bridge.subscribeEvents({
       eventKinds: ["brain_wake_requested"],
@@ -178,6 +214,7 @@ export async function startRustyCrewServiceHost(
           ? undefined
           : createDenSuccessorGatewayClient(config.denSuccessorGateway),
       denConversationChannelIdsByExternalId: new Map(),
+      curator,
       mcpManager: await createServiceMcpManager(runtimeConfig),
       wakeSubscription,
       timers: new Set(),
@@ -468,6 +505,194 @@ async function createServiceMcpManager(
   return manager;
 }
 
+function createServiceCuratorRuntime(input: {
+  config: RustyCrewServiceConfig;
+  runtimeConfig: RustyCrewRuntimeConfig;
+  bridge: NativeBridgeModule;
+  now: () => string;
+}): ServiceCuratorRuntime {
+  const store = new MemoryCuratorGovernanceStore();
+  const runtime: ServiceCuratorRuntime = {
+    store,
+    runtimeConfig: input.runtimeConfig,
+    executor: async () => {
+      throw new Error("curator executor not initialized");
+    },
+  };
+  runtime.executor = createCuratorGovernanceExecutor({
+    skillsDir: curatorSkillsDir(input.runtimeConfig),
+    store,
+    snapshotDir: join(input.config.paths.backupDir, "curator-snapshots"),
+    now: () => new Date(input.now()),
+    scan: async (request) => {
+      try {
+        const batch = await scanServiceCuratorCandidates(
+          {
+            ...input,
+            runtimeConfig: runtime.runtimeConfig,
+            store,
+          },
+          request,
+        );
+        runtime.lastRunAt = input.now();
+        runtime.lastError = undefined;
+        return batch;
+      } catch (error) {
+        runtime.lastError = errorMessage(error, "curator scan failed");
+        throw error;
+      }
+    },
+  });
+  return runtime;
+}
+
+async function scanServiceCuratorCandidates(
+  input: {
+    runtimeConfig: RustyCrewRuntimeConfig;
+    bridge: NativeBridgeModule;
+    store: MemoryCuratorGovernanceStore;
+    now: () => string;
+  },
+  request: CuratorExecuteRequest,
+): Promise<CuratorCandidateBatch> {
+  const profileId = curatorProfileId(input.runtimeConfig, request);
+  const profile = await loadProfileContext({
+    profilesDir: input.runtimeConfig.profilesDir,
+    skillsDir: input.runtimeConfig.skillsDir,
+    profileId,
+  });
+  const denseProfileMemory = await input.bridge
+    .listProfileMemory({ profileId })
+    .catch(() => []);
+  const batch = discoverCuratorCandidates({
+    batchId: [
+      "curator",
+      request.scopeType ?? "profile",
+      request.scopeId ?? profileId,
+      input.now().replace(/[^0-9A-Za-z]/g, ""),
+    ].join(":"),
+    now: input.now(),
+    scopeType: request.scopeType ?? "profile",
+    scopeId: request.scopeId ?? profileId,
+    profileId,
+    skills: profile.skills,
+    expectedSkillSlugs:
+      profile.profile.skillsMode === "all" ? [] : profile.profile.skills,
+    denseProfileMemory: denseProfileMemory.map((record) => ({
+      profileId: record.profileId,
+      key: record.key,
+      content: record.content,
+      revision: record.revision,
+      updatedAt: record.updatedAt,
+      metadata: record.metadataJson,
+    })),
+    dryRun: request.dryRun,
+  });
+  input.store.upsertBatch(
+    batch,
+    batch.candidates.flatMap((candidate) =>
+      mutationForServiceCuratorCandidate(candidate),
+    ),
+  );
+  return batch;
+}
+
+function curatorProfileId(
+  runtimeConfig: RustyCrewRuntimeConfig,
+  request: CuratorExecuteRequest,
+): ProfileId {
+  if (request.profileId) return request.profileId as ProfileId;
+  if (request.scopeType === "profile" && request.scopeId) {
+    return request.scopeId as ProfileId;
+  }
+  if (request.scopeType === "session" && request.scopeId) {
+    const session = runtimeConfig.sessions.find(
+      (candidate) => candidate.sessionId === request.scopeId,
+    );
+    if (session) return session.profileId;
+  }
+  const profileId =
+    runtimeConfig.brains[0]?.profileId ?? runtimeConfig.sessions[0]?.profileId;
+  if (!profileId) {
+    throw new Error("curator scan requires a configured profile");
+  }
+  return profileId;
+}
+
+function mutationForServiceCuratorCandidate(
+  candidate: CuratorCandidateBatch["candidates"][number],
+): CuratorMutationCandidate[] {
+  const slug = skillSlugFromTarget(candidate.targetRef);
+  if (!slug) return [];
+  if (candidate.kind === "skill_create") {
+    return [
+      {
+        ...candidate,
+        mutation: {
+          type: "skill_create",
+          slug,
+          content: skillCreateDraft(slug, candidate.summary),
+        },
+      },
+    ];
+  }
+  if (candidate.kind === "skill_archive") {
+    return [
+      {
+        ...candidate,
+        mutation: {
+          type: "skill_archive",
+          slug,
+          absorbedInto: "curator",
+        },
+      },
+    ];
+  }
+  return [];
+}
+
+function skillSlugFromTarget(targetRef: string): string | undefined {
+  return targetRef.startsWith("skill:")
+    ? targetRef.slice("skill:".length)
+    : undefined;
+}
+
+function skillCreateDraft(slug: string, summary: string): string {
+  return [
+    "---",
+    `title: ${titleFromSlug(slug)}`,
+    `summary: ${summary.replace(/\n/g, " ")}`,
+    "tags:",
+    "  - curated",
+    "---",
+    "",
+    "Describe when to use this skill and the exact workflow it should guide.",
+    "",
+  ].join("\n");
+}
+
+function titleFromSlug(slug: string): string {
+  return slug
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join(" ");
+}
+
+function curatorSkillsDir(runtimeConfig: RustyCrewRuntimeConfig): string {
+  return runtimeConfig.skillsDir ?? join(runtimeConfig.profilesDir, "skills");
+}
+
+function curatorStatus(state: ServiceState): CuratorAdminStatus {
+  return {
+    status: state.curator.lastError ? "degraded" : "available",
+    candidateCount: state.curator.store.candidates.size,
+    mutationCount: state.curator.store.mutations.size,
+    lastRunAt: state.curator.lastRunAt,
+    lastError: state.curator.lastError,
+  };
+}
+
 async function connectDenSuccessorGateway(
   state: ServiceState,
 ): Promise<DenSuccessorGatewayStartupReport | undefined> {
@@ -607,11 +832,13 @@ async function reloadServiceRuntimeConfig(
     existingBrainHandlesByProfileId:
       state.runtimeConfigApplyResult.brainHandlesByProfileId,
     createMissingSessions: false,
+    curatorExecutor: state.curator.executor,
   });
   const nextMcpManager = await createServiceMcpManager(nextRuntimeConfig);
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
   state.runtimeConfigApplyResult = nextApplyResult;
+  state.curator.runtimeConfig = nextRuntimeConfig;
   state.mcpManager = nextMcpManager;
   await previousMcpManager.shutdown();
   await ensureDenConversationChannels(state);
@@ -759,6 +986,12 @@ function createServiceControlExecutor(
   state: ServiceState,
 ): AdminControlExecutor {
   return {
+    ...createCuratorAdminControlExecutor({
+      curatorExecutor: state.curator.executor,
+      rollbackMutation: (mutationId) =>
+        rollbackCuratorMutation(state.curator.store, mutationId),
+      status: () => curatorStatus(state),
+    }),
     createSession: async (command) => {
       const sessionId = requiredBodyString(command, "sessionId");
       const agentId = requiredBodyString(command, "agentId");
