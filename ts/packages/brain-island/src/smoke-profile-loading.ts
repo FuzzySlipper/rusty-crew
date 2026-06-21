@@ -61,6 +61,37 @@ tags:
 Start with the Rusty Crew README and tool registry note.
 `,
   );
+  mkdirSync(join(skillsDir, "autonomous-ai-agents", "codex"), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(skillsDir, "autonomous-ai-agents", "codex", "SKILL.md"),
+    `---
+name: codex
+description: Delegate coding work through Codex CLI.
+tags:
+  - coding
+  - delegation
+---
+
+Use Codex for bounded coding delegation when context isolation helps.
+`,
+  );
+  writeFileSync(
+    join(profilesDir, "nested-skill-profile.json"),
+    JSON.stringify(
+      {
+        profileId: "nested-skill-profile",
+        modelConfig: {
+          provider: "den-router",
+          modelName: "local-deterministic",
+        },
+        skills: ["codex"],
+      },
+      null,
+      2,
+    ),
+  );
 
   const context = await loadProfileContext({
     profilesDir,
@@ -84,6 +115,79 @@ Start with the Rusty Crew README and tool registry note.
   assert.equal(context.skills[0]?.title, "Repo Orientation");
   assert.deepEqual(context.skills[0]?.tags, ["repo", "architecture"]);
   assert.match(context.skills[0]?.bodyMarkdown ?? "", /Rusty Crew README/);
+
+  const nestedSkill = await loadProfileContext({
+    profilesDir,
+    skillsDir,
+    profileId: "nested-skill-profile" as ProfileId,
+  });
+  assert.equal(nestedSkill.skills[0]?.slug, "codex");
+  assert.equal(nestedSkill.skills[0]?.title, "codex");
+  assert.equal(
+    nestedSkill.skills[0]?.summary,
+    "Delegate coding work through Codex CLI.",
+  );
+  assert.match(nestedSkill.skills[0]?.bodyMarkdown ?? "", /bounded coding/);
+
+  const runnerDir = join(profilesDir, "rusty-crew-runner");
+  mkdirSync(runnerDir, { recursive: true });
+  writeFileSync(
+    join(runnerDir, "profile.yaml"),
+    `name: "Rusty Crew Runner"
+displayName: "Rusty Crew Runner"
+profileIdentity: rusty-crew-runner
+skills: []
+modelConfig:
+  provider: den-router
+  model: deepseek-flash
+  temperature: 0.2
+  maxTokens: 4096
+mcpConfig:
+  toolProfile: runner
+runtimeConfig:
+  maxIterations: 100
+  maxDurationMs: 900000
+toolPolicy:
+  mode: allow_all
+`,
+  );
+  writeFileSync(
+    join(runnerDir, "soul.md"),
+    "You are Rusty Crew Runner.\n\nHandle implementation work.",
+  );
+  writeFileSync(join(runnerDir, "memory.md"), "Piper is the project lead.");
+  const runner = await loadProfileContext({
+    profilesDir,
+    profileId: "rusty-crew-runner" as ProfileId,
+  });
+
+  assert.equal(runner.profile.displayName, "Rusty Crew Runner");
+  assert.equal(runner.profile.modelConfig.modelName, "deepseek-flash");
+  assert.equal(runner.profile.modelConfig.temperatureMilli, 200);
+  assert.equal(runner.profile.modelConfig.maxOutputTokens, 4096);
+  assert.equal(runner.profile.runtime?.maxTurns, 100);
+  assert.equal(
+    runner.profile.runtime?.defaultResourceLimits?.maxDurationMs,
+    900000,
+  );
+  assert.equal(runner.profile.mcpConfig?.toolProfile, "runner");
+  assert.match(
+    runner.profile.prompt?.soulMarkdown ?? "",
+    /implementation work/,
+  );
+  assert.match(runner.profile.prompt?.memoryMarkdown ?? "", /Piper/);
+  assert.equal(
+    runner.toolSelection.toolProfile.tools.some(
+      (tool) => tool.name === "git_status",
+    ),
+    true,
+  );
+  assert.equal(
+    runner.toolSelection.toolProfile.tools.some(
+      (tool) => tool.name === "skill_manage",
+    ),
+    true,
+  );
 
   await assert.rejects(
     () =>

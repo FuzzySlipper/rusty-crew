@@ -21,7 +21,9 @@ import type {
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import type { BrainImplementation } from "./index.js";
+import { resolveLocalCodeTools } from "./local-code-tools.js";
 import { createPiAgentBrain } from "./pi-agent-brain.js";
+import type { PiAgentFactory } from "./pi-agent-brain.js";
 import { loadProfileContext } from "./profile-loading.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 
@@ -79,6 +81,9 @@ export async function applyRustyCrewRuntimeConfig(input: {
   bridge: NativeBridgeModule;
   existingBrainHandlesByProfileId?: Record<string, BrainImplementationHandle>;
   createMissingSessions?: boolean;
+  createDenRouterAgentFactory?: (
+    options: Parameters<typeof createDenRouterPiAgentFactory>[0],
+  ) => Promise<PiAgentFactory>;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const createMissingSessions = input.createMissingSessions ?? true;
   const result: RustyCrewRuntimeConfigApplyResult = {
@@ -105,7 +110,11 @@ export async function applyRustyCrewRuntimeConfig(input: {
           toolProfile: profile.toolSelection.toolProfile,
           modelConfig: profile.profile.modelConfig,
         },
-        toBridgeWakeExecutor(await createConfiguredBrain(profile)),
+        toBridgeWakeExecutor(
+          await createConfiguredBrain(profile, {
+            createDenRouterAgentFactory: input.createDenRouterAgentFactory,
+          }),
+        ),
       );
       result.brainHandlesByProfileId[brain.profileId] = handle;
       result.brainsRegistered += 1;
@@ -201,9 +210,16 @@ export async function ensureConfiguredSessionForChannelBinding(input: {
 
 async function createConfiguredBrain(
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
+  options: {
+    createDenRouterAgentFactory?: (
+      options: Parameters<typeof createDenRouterPiAgentFactory>[0],
+    ) => Promise<PiAgentFactory>;
+  } = {},
 ): Promise<BrainImplementation> {
   if (profile.profile.modelConfig.provider === "den-router") {
-    const createAgent = await createDenRouterPiAgentFactory({
+    const createAgent = await (
+      options.createDenRouterAgentFactory ?? createDenRouterPiAgentFactory
+    )({
       modelId: profile.profile.modelConfig.modelName,
       maxTokens: profile.profile.modelConfig.maxOutputTokens,
       temperature:
@@ -214,6 +230,8 @@ async function createConfiguredBrain(
     return createPiAgentBrain({
       createAgent,
       planActions: completionActionFromEvents,
+      resolveTools: resolveLocalCodeTools,
+      toolProfile: profile.toolSelection.toolProfile,
     });
   }
 

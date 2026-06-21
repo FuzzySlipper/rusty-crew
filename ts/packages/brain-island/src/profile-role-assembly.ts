@@ -61,6 +61,8 @@ export function buildProfileRoleAssembly(
 
   const instructions = [
     profileHeader(context),
+    markdownSection("Profile Soul", context.profile.prompt?.soulMarkdown),
+    markdownSection("Profile Memory", context.profile.prompt?.memoryMarkdown),
     instructionSection(context.profile.prompt?.instructions ?? []),
     options.denMemoryContext,
     options.denseProfileMemoryContext,
@@ -165,6 +167,16 @@ function profileHeader(context: LoadedProfileContext): string {
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");
+}
+
+function markdownSection(
+  title: string,
+  body: string | undefined,
+): string | undefined {
+  if (!body?.trim()) {
+    return undefined;
+  }
+  return [`# ${title}`, body.trim()].join("\n");
 }
 
 function instructionSection(

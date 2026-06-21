@@ -5,6 +5,11 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { BrainEventEnvelope } from "@rusty-crew/contracts";
+import {
+  loadNativeBridge,
+  type NativeBridgeModule,
+} from "@rusty-crew/native-bridge";
 import { startRustyCrewServiceHost } from "./service-host.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-den-successor-service-"));
@@ -75,6 +80,7 @@ const gateway = createHttpServer((request, response) => {
                   target_identity: {
                     profile: "field-profile",
                     instance_id: "field-agent@rusty-crew",
+                    session_key: "field-session",
                   },
                   state: "pending",
                   idempotency_key: "wake:ch42:field-profile:nonce",
@@ -96,6 +102,7 @@ const gateway = createHttpServer((request, response) => {
           target_identity: {
             profile: "field-profile",
             instance_id: "field-agent@rusty-crew",
+            session_key: "field-session",
           },
           state: "claimed",
           idempotency_key: "wake:ch42:field-profile:nonce",
@@ -126,7 +133,9 @@ if (typeof gatewayAddress !== "object" || gatewayAddress === null) {
 }
 
 writeRuntimeConfig(root);
+const bridge = withToolEventBridge(await loadNativeBridge());
 const host = await startRustyCrewServiceHost({
+  bridge,
   env: {
     RUSTY_CREW_DATA_DIR: root,
     RUSTY_CREW_ADMIN_HOST: "127.0.0.1",
@@ -177,6 +186,18 @@ try {
     )?.auth,
     "Bearer delivery-token",
   );
+  assert.deepEqual(
+    (
+      gatewayRequests.find(
+        (request) => request.path === "/v1/delivery/intents/91/claim",
+      )?.body as { claimed_by?: unknown } | undefined
+    )?.claimed_by,
+    {
+      profile: "field-profile",
+      instance_id: "field-agent@rusty-crew",
+      session_key: "field-session",
+    },
+  );
   assert.equal(
     gatewayRequests.find(
       (request) => request.path === "/v1/conversation/channels/42/messages",
@@ -190,6 +211,48 @@ try {
         (request.body as { event_type?: string } | undefined)?.event_type,
     );
   assert.deepEqual(lifecycleEvents, ["running", "completed"]);
+  const activityEvents = gatewayRequests
+    .filter((request) => request.path === "/v1/observation/activity-events")
+    .map((request) => request.body as ObservationActivityRequest);
+  assert.deepEqual(
+    activityEvents.map((event) => event.event_type),
+    ["adapter_connected", "tool_call_started", "tool_call_completed"],
+  );
+  assert.deepEqual(activityEvents[1]?.agent_identity, {
+    profile: "field-profile",
+    instance_id: "field-agent@rusty-crew",
+    session_key: "field-session",
+  });
+  assert.equal(
+    activityEvents[1]?.runtime_instance_id,
+    "field-agent@rusty-crew",
+  );
+  assert.equal(activityEvents[1]?.payload.kind, "agent_activity.v1");
+  assert.equal(activityEvents[1]?.payload.tool_name, "den_memory_recall");
+  const toolWorkRef = activityEvents[1]?.payload.work_ref as
+    | {
+        session_id?: string;
+        run_id?: string;
+        channel_id?: number;
+        channel_message_id?: number;
+      }
+    | undefined;
+  assert.deepEqual(
+    {
+      session_id: toolWorkRef?.session_id,
+      channel_id: toolWorkRef?.channel_id,
+      channel_message_id: toolWorkRef?.channel_message_id,
+    },
+    {
+      session_id: "field-session",
+      channel_id: 42,
+      channel_message_id: 7,
+    },
+  );
+  assert.match(
+    toolWorkRef?.run_id ?? "",
+    /^delivery_intent:91;wake:service-field-session-[0-9]+-1$/,
+  );
 
   const diagnostics = await fetch(
     `http://127.0.0.1:${adminPort}/v1/admin/events/recent`,
@@ -221,8 +284,71 @@ try {
   rmSync(root, { recursive: true, force: true });
 }
 
+interface ObservationActivityRequest {
+  event_type: string;
+  agent_identity?: unknown;
+  runtime_instance_id?: string;
+  payload: {
+    kind?: string;
+    tool_name?: string;
+    work_ref?: unknown;
+  };
+}
+
 function requestKey(request: { method: string; path: string }): string {
   return `${request.method} ${request.path}`;
+}
+
+function withToolEventBridge(bridge: NativeBridgeModule): NativeBridgeModule {
+  return {
+    ...bridge,
+    registerBrainRuntime: async (registration, executor) => {
+      const wrappedExecutor: Parameters<
+        NativeBridgeModule["registerBrainRuntime"]
+      >[1] = {
+        wake: async (request, buffers) => {
+          const result = await executor.wake(request, buffers);
+          return {
+            ...result,
+            events: withToolEvents(result.events),
+          };
+        },
+      };
+      return bridge.registerBrainRuntime(registration, wrappedExecutor);
+    },
+  };
+}
+
+function withToolEvents(
+  events: readonly BrainEventEnvelope[],
+): BrainEventEnvelope[] {
+  const started = events[0];
+  if (started === undefined) return [...events];
+  const inserted: BrainEventEnvelope[] = [
+    {
+      wakeId: started.wakeId,
+      sessionId: started.sessionId,
+      event: { type: "tool_call_started", toolName: "den_memory_recall" },
+    },
+    {
+      wakeId: started.wakeId,
+      sessionId: started.sessionId,
+      event: {
+        type: "tool_call_finished",
+        toolName: "den_memory_recall",
+        isError: false,
+      },
+    },
+  ];
+  const finishedIndex = events.findIndex(
+    (event) => event.event.type === "finished",
+  );
+  if (finishedIndex < 0) return [...events, ...inserted];
+  return [
+    ...events.slice(0, finishedIndex),
+    ...inserted,
+    ...events.slice(finishedIndex),
+  ];
 }
 
 async function waitUntil(

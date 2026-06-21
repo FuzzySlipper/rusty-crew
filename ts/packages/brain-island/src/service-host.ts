@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import type {
+  BrainEvent,
   BrainImplementationHandle,
   ChannelBindingRecord,
   CoreEvent,
@@ -23,6 +24,12 @@ import {
   type DenSuccessorDeliveryIntent,
   type DenSuccessorGatewayClient,
 } from "@rusty-crew/adapter-den";
+import {
+  AgentActivityObservationProducer,
+  type AgentActivityObservationEvent,
+  type AgentActivityObservationSink,
+  type AgentActivityWorkRef,
+} from "./agent-activity-observation.js";
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
@@ -68,6 +75,7 @@ import {
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
 } from "./service-runtime-config.js";
+import { createRuntimeActivityObserver } from "./runtime-activity-observer.js";
 
 export interface RustyCrewServiceHostOptions {
   env?: RustyCrewServiceEnv;
@@ -943,6 +951,12 @@ interface ServiceWakeDispatchReport {
   reasonCode?: string;
 }
 
+interface ServiceWakeObservationContext {
+  deliveryIntentId?: number;
+  channelId?: number;
+  channelMessageId?: number;
+}
+
 function startServiceBackgroundLoops(state: ServiceState): void {
   if (state.config.background.schedulerTickIntervalMs > 0) {
     const timer = setInterval(() => {
@@ -1051,7 +1065,7 @@ async function processDenDeliveryIntent(
 ): Promise<void> {
   if (state.denGatewayClient === undefined) return;
   const claimToken = `rusty-crew:${intent.id}:${Date.now()}`;
-  const claimedBy = claimIdentityForDeliveryIntent(intent);
+  const claimedBy = intent.target_identity;
   let claimed = false;
   try {
     await state.denGatewayClient.claimDeliveryIntent({
@@ -1080,6 +1094,11 @@ async function processDenDeliveryIntent(
       body: deliveryBody.body,
       correlationId: `delivery:${intent.id}:${intent.idempotency_key}`,
       source: "delivery",
+      observationContext: {
+        deliveryIntentId: intent.id,
+        channelId: deliveryBody.channelId,
+        channelMessageId: deliveryBody.sourceMessageId,
+      },
     });
     if (wakeReport.status !== "completed") {
       throw new Error(wakeReport.summary);
@@ -1153,6 +1172,7 @@ async function submitServiceTurn(
     body: string;
     correlationId: string;
     source: "delivery" | "direct_debug";
+    observationContext?: ServiceWakeObservationContext;
   },
 ): Promise<ServiceWakeDispatchReport> {
   state.directDispatchSessions.add(input.sessionId);
@@ -1170,6 +1190,7 @@ async function submitServiceTurn(
         sessionId: input.sessionId,
       },
       input.source,
+      input.observationContext,
     );
     suppressNextWakeEvent(state, input.sessionId);
     await drainAndDispatchWakes(state, input.source);
@@ -1179,25 +1200,17 @@ async function submitServiceTurn(
   }
 }
 
-function claimIdentityForDeliveryIntent(
-  intent: DenSuccessorDeliveryIntent,
-): DenSuccessorAgentIdentity {
-  return {
-    profile: intent.target_identity.profile,
-    instance_id: intent.target_identity.instance_id,
-  };
-}
-
 function configuredSessionForDeliveryIntent(
   state: ServiceState,
   intent: DenSuccessorDeliveryIntent,
 ): RustyCrewRuntimeConfig["sessions"][number] | undefined {
-  if (intent.target_identity.session_key !== undefined) return undefined;
   return state.runtimeConfig.sessions.find((session) => {
     const identity = deliveryIdentityForSession(session);
     return (
       intent.target_identity.profile === identity.profile &&
-      intent.target_identity.instance_id === identity.instance_id
+      intent.target_identity.instance_id === identity.instance_id &&
+      (intent.target_identity.session_key === undefined ||
+        intent.target_identity.session_key === identity.session_key)
     );
   });
 }
@@ -1318,6 +1331,7 @@ async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
 async function drainAndDispatchWakes(
   state: ServiceState,
   source: "background" | "direct_debug" | "delivery",
+  observationContext?: ServiceWakeObservationContext,
 ): Promise<ServiceWakeDispatchReport[]> {
   if (state.stopping) return [];
   const events = await state.bridge.drainSubscriptionEvents(
@@ -1334,7 +1348,7 @@ async function drainAndDispatchWakes(
     ) {
       continue;
     }
-    reports.push(await dispatchWake(state, event, source));
+    reports.push(await dispatchWake(state, event, source, observationContext));
   }
   return reports;
 }
@@ -1364,6 +1378,7 @@ async function dispatchWake(
   state: ServiceState,
   event: Extract<CoreEvent, { type: "brain_wake_requested" }>,
   source: "background" | "direct_debug" | "delivery",
+  observationContext?: ServiceWakeObservationContext,
 ): Promise<ServiceWakeDispatchReport> {
   const sessionId = event.sessionId;
   if (state.inFlightWakes.has(sessionId)) {
@@ -1426,6 +1441,13 @@ async function dispatchWake(
       });
       return state.bridge.wakeBrain(request);
     });
+    await publishWakeToolActivity({
+      state,
+      session,
+      wakeId,
+      events: observed.events,
+      observationContext,
+    });
     const accepted = observed.accepted;
     const completionSummary = wakeCompletionSummary(observed.events);
     const report: ServiceWakeDispatchReport = {
@@ -1487,6 +1509,146 @@ async function observeWakeEvents<T>(
   }
 }
 
+async function publishWakeToolActivity(input: {
+  state: ServiceState;
+  session: SessionState;
+  wakeId: string;
+  events: readonly CoreEvent[];
+  observationContext?: ServiceWakeObservationContext;
+}): Promise<void> {
+  if (input.state.denGatewayClient === undefined) return;
+  const toolEvents = input.events.filter((event): event is ObservedToolEvent =>
+    isObservedToolEvent(event, input.wakeId),
+  );
+  if (toolEvents.length === 0) return;
+
+  const observer = createRuntimeActivityObserver({
+    producer: new AgentActivityObservationProducer({
+      sink: createDenGatewayObservationSink(input.state.denGatewayClient),
+      required: true,
+    }),
+    identity: observationIdentityForSession(input.session),
+    runtimeInstanceId: runtimeInstanceIdForSession(input.session),
+  });
+  const workRef = toolActivityWorkRef({
+    sessionId: input.session.sessionId,
+    wakeId: input.wakeId,
+    observationContext: input.observationContext,
+  });
+  let degraded = 0;
+  for (const event of toolEvents) {
+    const toolEvent = event.event;
+    const result = await observer.tool({
+      eventType:
+        toolEvent.type === "tool_call_started"
+          ? "tool_call_started"
+          : toolEvent.isError
+            ? "tool_call_failed"
+            : "tool_call_completed",
+      toolName: toolEvent.toolName,
+      adapter: "pi-crew",
+      summary:
+        toolEvent.type === "tool_call_started"
+          ? `Tool ${toolEvent.toolName} started.`
+          : toolEvent.isError
+            ? `Tool ${toolEvent.toolName} failed.`
+            : `Tool ${toolEvent.toolName} completed.`,
+      longRunningOrRisky: true,
+      workRef,
+      resultRef:
+        toolEvent.type === "tool_call_finished"
+          ? {
+              artifact_path: `runtime://tool/${toolEvent.toolName}/${input.wakeId}`,
+            }
+          : undefined,
+      reasonCode:
+        toolEvent.type === "tool_call_finished" && toolEvent.isError
+          ? "tool_call_failed"
+          : undefined,
+    });
+    if (result.status === "degraded") degraded += 1;
+  }
+  if (degraded > 0) {
+    recordServiceEvent(input.state, {
+      source: "den-successor-gateway",
+      eventType: "den_observation_tool_activity_degraded",
+      severity: "warning",
+      summary: `Publishing ${degraded} tool Observation event(s) degraded for wake ${input.wakeId}.`,
+    });
+  }
+}
+
+type ObservedToolEvent = Extract<
+  CoreEvent,
+  { type: "brain_event_observed" }
+> & {
+  event: Extract<
+    BrainEvent,
+    { type: "tool_call_started" | "tool_call_finished" }
+  >;
+};
+
+function isObservedToolEvent(
+  event: CoreEvent,
+  wakeId: string,
+): event is ObservedToolEvent {
+  return (
+    event.type === "brain_event_observed" &&
+    (event.wakeId === undefined || event.wakeId === wakeId) &&
+    (event.event.type === "tool_call_started" ||
+      event.event.type === "tool_call_finished")
+  );
+}
+
+function createDenGatewayObservationSink(
+  client: DenSuccessorGatewayClient,
+): AgentActivityObservationSink {
+  return {
+    writeAgentActivity(event: AgentActivityObservationEvent): Promise<unknown> {
+      return client.createObservationActivityEvent({
+        source_domain: event.source_domain,
+        event_type: event.event_type,
+        agent_identity: event.agent_identity,
+        runtime_instance_id: event.runtime_instance_id,
+        payload: event.payload as unknown as Record<string, unknown>,
+      });
+    },
+  };
+}
+
+function observationIdentityForSession(
+  session: SessionState,
+): DenSuccessorAgentIdentity {
+  return {
+    profile: session.profileId,
+    instance_id: runtimeInstanceIdForSession(session),
+    session_key: session.sessionId,
+  };
+}
+
+function runtimeInstanceIdForSession(
+  session: Pick<SessionState, "agentId">,
+): string {
+  return `${session.agentId}@rusty-crew`;
+}
+
+function toolActivityWorkRef(input: {
+  sessionId: SessionId;
+  wakeId: string;
+  observationContext?: ServiceWakeObservationContext;
+}): AgentActivityWorkRef {
+  const deliveryIntentId = input.observationContext?.deliveryIntentId;
+  return {
+    session_id: input.sessionId,
+    run_id:
+      deliveryIntentId === undefined
+        ? `wake:${input.wakeId}`
+        : `delivery_intent:${deliveryIntentId};wake:${input.wakeId}`,
+    channel_id: input.observationContext?.channelId,
+    channel_message_id: input.observationContext?.channelMessageId,
+  };
+}
+
 function wakeCompletionSummary(
   events: readonly CoreEvent[],
 ): string | undefined {
@@ -1502,15 +1664,25 @@ function wakeCompletionSummary(
     return packet.packet.summary.trim();
   }
 
-  const text = events
-    .flatMap((event) =>
+  const text = mergeTextParts(
+    events.flatMap((event) =>
       event.type === "brain_event_observed" && event.event.type === "text_delta"
         ? [event.event.text]
         : [],
-    )
-    .join("")
-    .trim();
+    ),
+  ).trim();
   return text ? truncate(text, 480) : undefined;
+}
+
+function mergeTextParts(parts: readonly string[]): string {
+  return parts
+    .filter((part) => part.length > 0)
+    .reduce((merged, part) => {
+      if (!merged) return part;
+      if (part.startsWith(merged)) return part;
+      if (merged.endsWith(part)) return merged;
+      return `${merged}${part}`;
+    }, "");
 }
 
 function truncate(value: string, maxChars: number): string {

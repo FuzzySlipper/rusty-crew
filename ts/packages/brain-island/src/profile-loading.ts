@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   BrainModelConfig,
@@ -16,6 +16,7 @@ import { defaultToolRegistry, type ToolRegistry } from "./tool-registry.js";
 export type ProfileLoadErrorCode =
   | "profile_not_found"
   | "invalid_profile_json"
+  | "invalid_profile_yaml"
   | "invalid_profile_config"
   | "skill_not_found"
   | "invalid_skill_frontmatter";
@@ -39,6 +40,12 @@ export interface ProfileRuntimeConfig {
 export interface ProfilePromptFragments {
   system?: string;
   instructions?: string[];
+  soulMarkdown?: string;
+  memoryMarkdown?: string;
+}
+
+export interface ProfileMcpConfig {
+  toolProfile?: string;
 }
 
 export interface ProfileConfig {
@@ -49,6 +56,7 @@ export interface ProfileConfig {
   toolPolicy?: ProfileToolPolicy;
   prompt?: ProfilePromptFragments;
   skills?: string[];
+  mcpConfig?: ProfileMcpConfig;
 }
 
 export interface LoadedSkill {
@@ -109,11 +117,10 @@ export async function loadProfileConfig(
   try {
     raw = await readFile(profilePath, "utf8");
   } catch (error) {
-    throw new ProfileLoadError(
-      "profile_not_found",
-      `profile ${profileId} was not found at ${profilePath}`,
-      error,
-    );
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return loadProfileDirectoryConfig(profilesDir, profileId, error);
+    }
+    throw error;
   }
 
   let parsed: unknown;
@@ -130,11 +137,50 @@ export async function loadProfileConfig(
   return validateProfileConfig(parsed, profileId, profilePath);
 }
 
+async function loadProfileDirectoryConfig(
+  profilesDir: string,
+  profileId: ProfileId,
+  jsonError: unknown,
+): Promise<ProfileConfig> {
+  const profileDir = join(profilesDir, profileId);
+  const profilePath = join(profileDir, "profile.yaml");
+  let raw: string;
+  try {
+    raw = await readFile(profilePath, "utf8");
+  } catch (error) {
+    throw new ProfileLoadError(
+      "profile_not_found",
+      `profile ${profileId} was not found at ${join(profilesDir, `${profileId}.json`)} or ${profilePath}`,
+      jsonError ?? error,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseSimpleYaml(raw);
+  } catch (error) {
+    throw new ProfileLoadError(
+      "invalid_profile_yaml",
+      `profile ${profileId} is not valid supported YAML`,
+      error,
+    );
+  }
+
+  const [soulMarkdown, memoryMarkdown] = await Promise.all([
+    readOptionalProfileMarkdown(profileDir, "soul.md"),
+    readOptionalProfileMarkdown(profileDir, "memory.md"),
+  ]);
+  return validateProfileConfig(parsed, profileId, profilePath, {
+    soulMarkdown,
+    memoryMarkdown,
+  });
+}
+
 export async function loadSkill(
   skillsDir: string,
   slug: string,
 ): Promise<LoadedSkill> {
-  const sourcePath = join(skillsDir, `${slug}.md`);
+  const sourcePath = await resolveSkillSourcePath(skillsDir, slug);
   let raw: string;
   try {
     raw = await readFile(sourcePath, "utf8");
@@ -147,19 +193,101 @@ export async function loadSkill(
   }
   const { frontmatter, bodyMarkdown } = parseMarkdownFrontmatter(raw, slug);
   return {
-    slug,
-    title: optionalString(frontmatter.title),
-    summary: optionalString(frontmatter.summary),
+    slug: optionalString(frontmatter.name) ?? slug,
+    title:
+      optionalString(frontmatter.title) ?? optionalString(frontmatter.name),
+    summary:
+      optionalString(frontmatter.summary) ??
+      optionalString(frontmatter.description),
     tags: stringList(frontmatter.tags),
     bodyMarkdown,
     sourcePath,
   };
 }
 
+async function resolveSkillSourcePath(
+  skillsDir: string,
+  slug: string,
+): Promise<string> {
+  const directCandidates = [
+    join(skillsDir, `${slug}.md`),
+    join(skillsDir, slug, "SKILL.md"),
+  ];
+  const direct = await firstReadablePath(directCandidates);
+  if (direct !== undefined) return direct;
+
+  if (slug.includes("/")) return directCandidates[0]!;
+
+  const matches = await findSkillDirectoryMatches(skillsDir, slug);
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) {
+    throw new ProfileLoadError(
+      "invalid_profile_config",
+      `skill ${slug} is ambiguous in ${skillsDir}: ${matches.join(", ")}`,
+    );
+  }
+  return directCandidates[0]!;
+}
+
+async function firstReadablePath(
+  candidates: readonly string[],
+): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    try {
+      await readFile(candidate, "utf8");
+      return candidate;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    }
+  }
+  return undefined;
+}
+
+async function findSkillDirectoryMatches(
+  skillsDir: string,
+  slug: string,
+): Promise<string[]> {
+  const matches: string[] = [];
+  await collectSkillDirectoryMatches(skillsDir, slug, matches, 0);
+  return matches.sort();
+}
+
+async function collectSkillDirectoryMatches(
+  dir: string,
+  slug: string,
+  matches: string[],
+  depth: number,
+): Promise<void> {
+  if (depth > 4) return;
+  let entries: Array<{ isDirectory(): boolean; name: string }>;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return;
+    throw error;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const child = join(dir, entry.name);
+    if (entry.name === slug) {
+      const sourcePath = await firstReadablePath([join(child, "SKILL.md")]);
+      if (sourcePath !== undefined) {
+        matches.push(sourcePath);
+      }
+    }
+    await collectSkillDirectoryMatches(child, slug, matches, depth + 1);
+  }
+}
+
 function validateProfileConfig(
   parsed: unknown,
   profileId: ProfileId,
   profilePath: string,
+  fragments: Pick<
+    ProfilePromptFragments,
+    "soulMarkdown" | "memoryMarkdown"
+  > = {},
 ): ProfileConfig {
   if (!isRecord(parsed)) {
     throw invalidProfile(
@@ -168,7 +296,10 @@ function validateProfileConfig(
       "profile root must be an object",
     );
   }
-  const rawProfileId = optionalString(parsed.profileId) ?? profileId;
+  const rawProfileId =
+    optionalString(parsed.profileId) ??
+    optionalString(parsed.profileIdentity) ??
+    profileId;
   if (rawProfileId !== profileId) {
     throw invalidProfile(
       profileId,
@@ -181,7 +312,13 @@ function validateProfileConfig(
     throw invalidProfile(profileId, profilePath, "modelConfig is required");
   }
   const provider = requiredString(modelConfig.provider);
-  const modelName = requiredString(modelConfig.modelName);
+  const modelName = requiredString(modelConfig.modelName ?? modelConfig.model);
+  const temperatureMilli =
+    optionalNumber(modelConfig.temperatureMilli) ??
+    temperatureToMilli(optionalNumber(modelConfig.temperature));
+  const runtimeConfig = isRecord(parsed.runtimeConfig)
+    ? parsed.runtimeConfig
+    : undefined;
 
   return {
     profileId,
@@ -189,8 +326,10 @@ function validateProfileConfig(
     modelConfig: {
       provider,
       modelName,
-      temperatureMilli: optionalNumber(modelConfig.temperatureMilli),
-      maxOutputTokens: optionalNumber(modelConfig.maxOutputTokens),
+      temperatureMilli,
+      maxOutputTokens:
+        optionalNumber(modelConfig.maxOutputTokens) ??
+        optionalNumber(modelConfig.maxTokens),
     },
     runtime: isRecord(parsed.runtime)
       ? {
@@ -209,26 +348,90 @@ function validateProfileConfig(
               }
             : undefined,
         }
-      : undefined,
+      : runtimeConfig
+        ? {
+            maxTurns: optionalNumber(runtimeConfig.maxIterations),
+            defaultResourceLimits: {
+              maxDurationMs: optionalNumber(runtimeConfig.maxDurationMs),
+            },
+          }
+        : undefined,
     toolPolicy: isRecord(parsed.toolPolicy)
-      ? {
-          requestedToolsets: stringList(parsed.toolPolicy.requestedToolsets),
-          requestedTools: stringList(parsed.toolPolicy.requestedTools),
-          deniedTools: stringList(parsed.toolPolicy.deniedTools),
-          includeDeprecated:
-            typeof parsed.toolPolicy.includeDeprecated === "boolean"
-              ? parsed.toolPolicy.includeDeprecated
-              : undefined,
-        }
+      ? profileToolPolicy(parsed.toolPolicy)
       : undefined,
     prompt: isRecord(parsed.prompt)
       ? {
           system: optionalString(parsed.prompt.system),
           instructions: stringList(parsed.prompt.instructions),
+          soulMarkdown:
+            fragments.soulMarkdown ??
+            optionalString(parsed.prompt.soulMarkdown),
+          memoryMarkdown:
+            fragments.memoryMarkdown ??
+            optionalString(parsed.prompt.memoryMarkdown),
+        }
+      : fragments.soulMarkdown || fragments.memoryMarkdown
+        ? {
+            soulMarkdown: fragments.soulMarkdown,
+            memoryMarkdown: fragments.memoryMarkdown,
+          }
+        : undefined,
+    skills: stringList(parsed.skills),
+    mcpConfig: isRecord(parsed.mcpConfig)
+      ? {
+          toolProfile: optionalString(parsed.mcpConfig.toolProfile),
         }
       : undefined,
-    skills: stringList(parsed.skills),
   };
+}
+
+async function readOptionalProfileMarkdown(
+  profileDir: string,
+  filename: string,
+): Promise<string | undefined> {
+  try {
+    const raw = await readFile(join(profileDir, filename), "utf8");
+    const trimmed = raw.trim();
+    return trimmed ? trimmed : undefined;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function profileToolPolicy(raw: Record<string, unknown>): ProfileToolPolicy {
+  if (optionalString(raw.mode) === "allow_all") {
+    return {
+      requestedToolsets: allDefaultToolsets(),
+      deniedTools: stringList(raw.deniedTools),
+      includeDeprecated:
+        typeof raw.includeDeprecated === "boolean"
+          ? raw.includeDeprecated
+          : undefined,
+    };
+  }
+  return {
+    requestedToolsets: stringList(raw.requestedToolsets),
+    requestedTools: stringList(raw.requestedTools),
+    deniedTools: stringList(raw.deniedTools),
+    includeDeprecated:
+      typeof raw.includeDeprecated === "boolean"
+        ? raw.includeDeprecated
+        : undefined,
+  };
+}
+
+function allDefaultToolsets(): string[] {
+  return [
+    ...new Set(defaultToolRegistry.entries.flatMap((entry) => entry.toolsets)),
+  ].sort();
+}
+
+function temperatureToMilli(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return Math.round(value * 1_000);
 }
 
 function parseMarkdownFrontmatter(
@@ -291,6 +494,95 @@ function parseSimpleFrontmatter(
   return result;
 }
 
+function parseSimpleYaml(raw: string): Record<string, unknown> {
+  const lines = raw.split(/\r?\n/);
+  const root: Record<string, unknown> = {};
+  const stack: Array<{
+    indent: number;
+    value: Record<string, unknown> | unknown[];
+  }> = [{ indent: -1, value: root }];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!line.trim() || line.trimStart().startsWith("#")) {
+      continue;
+    }
+    const indent = leadingSpaces(line);
+    const trimmed = line.trim();
+    while (stack.length > 1 && indent <= stack.at(-1)!.indent) {
+      stack.pop();
+    }
+    const parent = stack.at(-1)!.value;
+    if (trimmed.startsWith("- ")) {
+      if (!Array.isArray(parent)) {
+        throw new ProfileLoadError(
+          "invalid_profile_yaml",
+          `unsupported list item outside list: ${line}`,
+        );
+      }
+      parent.push(parseYamlScalar(trimmed.slice(2).trim()));
+      continue;
+    }
+
+    if (Array.isArray(parent)) {
+      throw new ProfileLoadError(
+        "invalid_profile_yaml",
+        `unsupported mapping inside list: ${line}`,
+      );
+    }
+    const match = trimmed.match(/^([A-Za-z][A-Za-z0-9_-]*):(?:\s*(.*))?$/);
+    if (!match) {
+      throw new ProfileLoadError(
+        "invalid_profile_yaml",
+        `unsupported profile YAML line: ${line}`,
+      );
+    }
+    const key = match[1]!;
+    const rest = match[2]?.trim() ?? "";
+    if (rest) {
+      parent[key] = parseYamlScalar(rest);
+      continue;
+    }
+
+    const child: Record<string, unknown> | unknown[] =
+      nextContentLine(lines, index + 1)
+        ?.trim()
+        .startsWith("- ") === true
+        ? []
+        : {};
+    parent[key] = child;
+    stack.push({ indent, value: child });
+  }
+
+  return root;
+}
+
+function parseYamlScalar(raw: string): unknown {
+  if (raw === "[]") return [];
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
+  const quoted = raw.match(/^(['"])(.*)\1$/);
+  return quoted ? quoted[2]! : raw;
+}
+
+function nextContentLine(
+  lines: readonly string[],
+  startIndex: number,
+): string | undefined {
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (line.trim() && !line.trimStart().startsWith("#")) {
+      return line;
+    }
+  }
+  return undefined;
+}
+
+function leadingSpaces(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
 function invalidProfile(
   profileId: ProfileId,
   profilePath: string,
@@ -304,6 +596,10 @@ function invalidProfile(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 function requiredString(value: unknown): string {

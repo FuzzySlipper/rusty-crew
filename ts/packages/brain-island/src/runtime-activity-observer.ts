@@ -53,7 +53,9 @@ export interface RuntimeToolActivityInput {
   eventType: "tool_call_started" | "tool_call_completed" | "tool_call_failed";
   toolName: string;
   summary: string;
+  adapter?: string;
   longRunningOrRisky?: boolean;
+  workRef?: AgentActivityWorkRef;
   resultRef?: AgentActivityResultRef;
   reasonCode?: string;
 }
@@ -119,8 +121,10 @@ export class RuntimeActivityObserver {
       ...toolActivity({
         eventType: input.eventType,
         identity: this.#identity,
+        adapter: input.adapter,
         toolName: input.toolName,
         summary: input.summary,
+        workRef: input.workRef,
         resultRef: input.resultRef,
         reasonCode: input.reasonCode,
       }),

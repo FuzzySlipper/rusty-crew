@@ -51,6 +51,16 @@ class FakeAgent {
     await this.emit({ type: "agent_start" } as PiAgentEvent);
     await this.emit({
       type: "message_update",
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "working",
+        partial: {
+          role: "assistant",
+          content: [{ type: "text", text: "working" }],
+          timestamp: Date.now(),
+        },
+      },
       message: {
         role: "assistant",
         content: [{ type: "text", text: "working" }],
@@ -95,6 +105,55 @@ function isTextContent(
     "text" in content &&
     typeof content.text === "string"
   );
+}
+class CumulativeFakeAgent {
+  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+
+  subscribe(
+    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+  ): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async prompt(): Promise<void> {
+    await this.emit({ type: "agent_start" } as PiAgentEvent);
+    await this.emitUpdate("Hel", "Hel");
+    await this.emitUpdate("lo", "Hello");
+    await this.emitUpdate(".", "Hello.");
+    await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
+  }
+
+  async waitForIdle(): Promise<void> {}
+
+  clearAllQueues(): void {}
+
+  private async emitUpdate(delta: string, text: string): Promise<void> {
+    await this.emit({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta,
+        partial: {
+          role: "assistant",
+          content: [{ type: "text", text }],
+          timestamp: Date.now(),
+        },
+      },
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        timestamp: Date.now(),
+      },
+    } as PiAgentEvent);
+  }
+
+  private async emit(event: PiAgentEvent): Promise<void> {
+    this.listener?.(event, new AbortController().signal);
+  }
 }
 
 const sessionId = "mid-turn-session" as SessionId;
@@ -210,6 +269,45 @@ await toolFilteredBrain.wake({
 
 assert.deepEqual(capturedToolNames, ["read_file"]);
 
+const cumulativeAgent = new CumulativeFakeAgent();
+const cumulativeBrain = createPiAgentBrain({
+  createAgent: () => cumulativeAgent,
+});
+const cumulativeResult = await cumulativeBrain.wake({
+  wakeId: "wake-cumulative",
+  sessionId,
+  systemPrompt: "system",
+  roleAssembly: { instructions: "test cumulative stream updates" },
+  state: {
+    session: {
+      handle: 3 as SessionHandle,
+      sessionId,
+      agentId,
+      profileId: "cumulative-profile" as ProfileId,
+      kind: "full",
+      resourceLimits: {},
+      toolProfile: { tools: [] },
+      status: "idle",
+      brainTurnCount: 0,
+      createdAt: "2026-06-19T00:00:00Z",
+      lastActiveAt: "2026-06-19T00:00:00Z",
+    },
+    pendingMessages: [],
+    recentEvents: [],
+    childCompletions: [],
+    fanOutGroups: [],
+    deltaPolicy: defaultBodyDeltaPolicy,
+  },
+});
+assert.equal(
+  cumulativeResult.events
+    .flatMap((event) =>
+      event.event.type === "text_delta" ? [event.event.text] : [],
+    )
+    .join(""),
+  "Hello.",
+);
+
 const freshDrain = queue.drainForNextWake(sessionId, 1_010);
 assert.deepEqual(
   freshDrain.messages.map((message) => message.body),
@@ -235,6 +333,11 @@ console.log(
       expiredDropped: expiredDrain.droppedExpired,
       clearAllQueuesCalls: fakeAgent.clearAllQueuesCalls,
       filteredTools: capturedToolNames,
+      cumulativeText: cumulativeResult.events
+        .flatMap((event) =>
+          event.event.type === "text_delta" ? [event.event.text] : [],
+        )
+        .join(""),
     },
     null,
     2,

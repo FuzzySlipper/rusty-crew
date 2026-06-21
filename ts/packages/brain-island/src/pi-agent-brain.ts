@@ -10,6 +10,7 @@ import type {
   BrainEvent,
   BrainEventEnvelope,
   ToolDescriptor,
+  ToolProfile,
 } from "@rusty-crew/contracts";
 import type {
   BrainActionPlanner,
@@ -35,6 +36,7 @@ export interface PiAgentBrainOptions {
   createAgent: PiAgentFactory;
   planActions?: BrainActionPlanner;
   resolveTools?: PiAgentToolResolver;
+  toolProfile?: ToolProfile;
 }
 
 export function createPiAgentBrain(
@@ -92,7 +94,11 @@ function buildAgentOptions(
         .filter(Boolean)
         .join("\n\n"),
       messages: toPiMessages(input.roleAssembly, []),
-      tools: resolveAllowedTools(input, options.resolveTools),
+      tools: resolveAllowedTools(
+        input,
+        options.resolveTools,
+        options.toolProfile,
+      ),
     },
     sessionId: input.sessionId,
     steeringMode: "one-at-a-time",
@@ -103,8 +109,9 @@ function buildAgentOptions(
 function resolveAllowedTools(
   input: BrainWakeInput,
   resolveTools: PiAgentToolResolver | undefined,
+  toolProfile: ToolProfile | undefined,
 ): PiAgentTool[] {
-  return resolveToolSession({ wake: input, resolveTools }).tools;
+  return resolveToolSession({ wake: input, resolveTools, toolProfile }).tools;
 }
 
 function toPiMessages(
@@ -124,8 +131,12 @@ function mapPiAgentEvent(event: PiAgentEvent): BrainEvent | undefined {
     case "agent_start":
       return { type: "started" };
     case "message_update": {
-      const text = extractText(event.message);
-      return text ? { type: "text_delta", text } : undefined;
+      if (event.assistantMessageEvent.type !== "text_delta") {
+        return undefined;
+      }
+      return event.assistantMessageEvent.delta
+        ? { type: "text_delta", text: event.assistantMessageEvent.delta }
+        : undefined;
     }
     case "tool_execution_start":
       return { type: "tool_call_started", toolName: event.toolName };
@@ -140,25 +151,4 @@ function mapPiAgentEvent(event: PiAgentEvent): BrainEvent | undefined {
     default:
       return undefined;
   }
-}
-
-function extractText(message: PiAgentMessage): string | undefined {
-  if (!("content" in message) || !Array.isArray(message.content)) {
-    return undefined;
-  }
-
-  const parts = message.content.flatMap((part: unknown) => {
-    if (
-      typeof part === "object" &&
-      part !== null &&
-      "type" in part &&
-      part.type === "text" &&
-      "text" in part &&
-      typeof part.text === "string"
-    ) {
-      return [part.text];
-    }
-    return [];
-  });
-  return parts.join("");
 }

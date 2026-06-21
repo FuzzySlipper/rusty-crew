@@ -56,6 +56,8 @@ try {
         prompt: {
           system: "Profile system prompt wins by default.",
           instructions: ["Inspect before judging.", "Prefer concise findings."],
+          soulMarkdown: "You are a careful reviewer.",
+          memoryMarkdown: "Reviewers prefer concrete evidence.",
         },
         skills: ["review-rubric"],
       },
@@ -125,6 +127,8 @@ Look for concrete regressions and cite evidence.
   const instructions = assembled.roleAssembly.instructions ?? "";
   assertOrder(instructions, [
     "# Profile",
+    "# Profile Soul",
+    "# Profile Memory",
     "# Profile Instructions",
     "# Den Memory",
     "# Dense Profile Memory",
@@ -135,6 +139,8 @@ Look for concrete regressions and cite evidence.
     "# Additional Instructions",
   ]);
   assert.match(instructions, /Review Rubric/);
+  assert.match(instructions, /careful reviewer/);
+  assert.match(instructions, /concrete evidence/);
   assert.match(instructions, /Den-owned memory/);
   assert.match(instructions, /review-style/);
   assert.match(instructions, /Session Search/);

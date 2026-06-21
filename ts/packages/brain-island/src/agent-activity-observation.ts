@@ -277,6 +277,8 @@ export function toolActivity(input: {
   identity: AgentObservationIdentity;
   toolName: string;
   summary: string;
+  adapter?: string;
+  workRef?: AgentActivityWorkRef;
   resultRef?: AgentActivityResultRef;
   reasonCode?: string;
   visibility?: AgentActivityVisibility;
@@ -284,8 +286,10 @@ export function toolActivity(input: {
   return {
     eventType: input.eventType,
     identity: input.identity,
+    adapter: input.adapter,
     toolName: input.toolName,
     summary: input.summary,
+    workRef: input.workRef,
     resultRef: input.resultRef,
     reasonCode: input.reasonCode,
     visibility: input.visibility ?? "debug",

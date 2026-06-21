@@ -44,6 +44,7 @@ const server = createServer((request, response) => {
             target_identity: {
               profile: "field-prime",
               instance_id: "field-prime@rusty-crew",
+              session_key: "session-1",
             },
             state: "pending",
             idempotency_key: "wake:channel:field-prime:nonce",
@@ -101,6 +102,7 @@ const server = createServer((request, response) => {
           target_identity: {
             profile: "field-prime",
             instance_id: "field-prime@rusty-crew",
+            session_key: "session-1",
           },
           state: "claimed",
           idempotency_key: "wake:channel:field-prime:nonce",
@@ -238,6 +240,7 @@ try {
     claimedBy: {
       profile: "field-prime",
       instance_id: "field-prime@rusty-crew",
+      session_key: "session-1",
     },
   });
 
@@ -301,6 +304,11 @@ try {
   assert.equal(requests[4]?.auth, "Bearer runtime-token");
   assert.equal(requests[5]?.auth, "Bearer delivery-token");
   assert.equal(requests[6]?.auth, "Bearer delivery-token");
+  assert.deepEqual((requests[6]?.body as { claimed_by?: unknown }).claimed_by, {
+    profile: "field-prime",
+    instance_id: "field-prime@rusty-crew",
+    session_key: "session-1",
+  });
   assert.equal(requests[7]?.auth, "Bearer conversation-write-token");
   assert.equal(requests[8]?.auth, "Bearer conversation-read-token");
   assert.equal(requests[9]?.auth, "Bearer conversation-write-token");
