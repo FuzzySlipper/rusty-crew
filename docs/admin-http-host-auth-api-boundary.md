@@ -88,9 +88,10 @@ Rules:
 
 - control routes require an authenticated bearer token with write/admin-control
   authorization;
-- read-only diagnostics routes require bearer auth unless a local development
-  config explicitly enables unauthenticated loopback reads;
-- LAN bind must never allow unauthenticated diagnostics;
+- read-only diagnostics routes require bearer auth unless a local/trusted
+  development config explicitly sets `RUSTY_CREW_ADMIN_AUTH_MODE=none`;
+- LAN tokenless mode is only acceptable for trusted field-test environments and
+  must remain an explicit operator choice;
 - health liveness may be unauthenticated only if it returns shallow process
   status and no runtime details;
 - readiness, degraded status, diagnostics, sessions, queues, tools, and errors

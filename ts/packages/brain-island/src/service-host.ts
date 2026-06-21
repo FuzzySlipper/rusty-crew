@@ -1,10 +1,21 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
-import type { EngineHandle, SessionState } from "@rusty-crew/contracts";
+import type {
+  BrainImplementationHandle,
+  CoreEvent,
+  EngineHandle,
+  SessionId,
+  SessionState,
+  SubscriptionHandle,
+} from "@rusty-crew/contracts";
 import {
   loadNativeBridge,
   type NativeBridgeModule,
 } from "@rusty-crew/native-bridge";
+import {
+  McpSurfaceManager,
+  createSimulatedMcpTransportFactory,
+} from "@rusty-crew/adapter-mcp";
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
@@ -17,12 +28,17 @@ import {
   type AdminRouteResult,
 } from "./admin-diagnostics-api.js";
 import {
+  buildAdapterDiagnosticsProjection,
+  type AdapterDiagnosticsProjection,
+} from "./adapter-diagnostics.js";
+import {
   inspectDirectDebugSession,
   requestDirectDebugTurn,
   type DirectDebugResult,
   type DirectDebugServiceContext,
 } from "./direct-debug-service.js";
 import { loadProfileContext } from "./profile-loading.js";
+import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
 import { buildRuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
 import type { RuntimeHealthProjection } from "./runtime-health.js";
 import {
@@ -62,21 +78,44 @@ interface ServiceState {
   readonly engine: EngineHandle;
   readonly lock: RustyCrewServiceLock;
   readonly auditSink: ReturnType<typeof createMemoryAdminControlAuditSink>;
-  readonly runtimeConfig: RustyCrewRuntimeConfig;
-  readonly runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
+  runtimeConfig: RustyCrewRuntimeConfig;
+  runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
+  mcpManager: McpSurfaceManager;
+  readonly wakeSubscription: SubscriptionHandle;
+  readonly timers: Set<NodeJS.Timeout>;
+  readonly inFlightWakes: Set<SessionId>;
+  readonly directDispatchSessions: Set<SessionId>;
+  readonly suppressedWakeEvents: Map<SessionId, number>;
+  readonly recentEvents: ServiceRecentEvent[];
   readonly now: () => string;
+  nextWakeSequence: number;
   stopping: boolean;
 }
 
+interface ServiceRecentEvent {
+  id: string;
+  createdAt: string;
+  source: string;
+  eventType: string;
+  summary: string;
+  severity?: string;
+}
+
+type ServiceRouteResult =
+  | AdminRouteResult
+  | {
+      status: number;
+      headers: Record<string, string>;
+      body: string;
+    };
+
 const CONTROL_ROUTE_PREFIX = "/v1/admin/control/";
+const DEV_NO_AUTH_CONTROL_TOKEN = "__rusty_crew_dev_no_auth__";
 
 export async function startRustyCrewServiceHost(
   options: RustyCrewServiceHostOptions = {},
 ): Promise<RustyCrewServiceHost> {
   const config = options.config ?? loadRustyCrewServiceConfig(options.env);
-  if (!config.admin.token) {
-    throw new Error("RUSTY_CREW_ADMIN_TOKEN is required to start admin HTTP");
-  }
 
   ensureRustyCrewServiceDirectories(config);
   const lock = acquireRustyCrewServiceLock(config);
@@ -97,6 +136,9 @@ export async function startRustyCrewServiceHost(
       runtimeConfig,
       bridge,
     });
+    const wakeSubscription = await bridge.subscribeEvents({
+      eventKinds: ["brain_wake_requested"],
+    });
 
     const state: ServiceState = {
       config,
@@ -106,9 +148,18 @@ export async function startRustyCrewServiceHost(
       auditSink: createMemoryAdminControlAuditSink(),
       runtimeConfig,
       runtimeConfigApplyResult,
+      mcpManager: await createServiceMcpManager(runtimeConfig),
+      wakeSubscription,
+      timers: new Set(),
+      inFlightWakes: new Set(),
+      directDispatchSessions: new Set(),
+      suppressedWakeEvents: new Map(),
+      recentEvents: [],
       now: options.now ?? (() => new Date().toISOString()),
+      nextWakeSequence: 0,
       stopping: false,
     };
+    startServiceBackgroundLoops(state);
     server = createServer((request, response) => {
       void handleHttpRequest(request, state)
         .then((result) => writeJsonResponse(response, result))
@@ -152,8 +203,12 @@ export async function startRustyCrewServiceHost(
 async function handleHttpRequest(
   request: IncomingMessage,
   state: ServiceState,
-): Promise<AdminRouteResult> {
+): Promise<ServiceRouteResult> {
   const url = new URL(request.url ?? "/", "http://rusty-crew.local");
+  if (isAdminPanelRoute(url.pathname)) {
+    return htmlResponse(adminPanelHtml(configRequiresAuth(state.config)));
+  }
+
   if (url.pathname === "/v1/admin/healthz") {
     return handleAdminDiagnosticsRequest(
       {
@@ -165,7 +220,7 @@ async function handleHttpRequest(
     );
   }
 
-  if (!isAuthorized(request, state.config.admin.token)) {
+  if (!isAuthorized(request, state.config.admin.token, state)) {
     return failure(401, requestId(request), {
       code: "unauthorized",
       reason_code: "missing_or_invalid_bearer_token",
@@ -180,13 +235,13 @@ async function handleHttpRequest(
       {
         method: request.method ?? "POST",
         url: url.toString(),
-        headers: headers(request),
+        headers: controlHeaders(request, state),
         body,
         requestId: requestId(request),
       },
       {
         auth: {
-          bearerToken: state.config.admin.token ?? "",
+          bearerToken: controlBearerToken(state),
           operatorId: "local-operator",
         },
         auditSink: state.auditSink,
@@ -290,20 +345,25 @@ async function buildDiagnosticsContext(
   state: ServiceState,
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
-  const [runtimeSummary, tableCounts] = await Promise.all([
-    state.bridge
-      .runtimeSummary({ scopeType: "runtime" })
-      .catch(() => undefined),
-    collectTableCounts(state.bridge),
-  ]);
+  const [runtimeSummary, sessions, tableCounts, databaseSize] =
+    await Promise.all([
+      state.bridge
+        .runtimeSummary({ scopeType: "runtime" })
+        .catch(() => undefined),
+      state.bridge.listSessions().catch(() => []),
+      collectTableCounts(state.bridge),
+      state.bridge.databaseSize().catch(() => undefined),
+    ]);
   const diagnostics = buildRuntimeDiagnosticsProjection({
     now,
     runtimeSummary,
-    sessions: [],
+    sessions,
     delegatedSessions: [],
+    adapters: buildServiceAdapterDiagnostics(state, now),
     persistence: {
       tableCounts,
       searchHealthy: true,
+      databaseBytes: databaseSize?.databaseBytes,
     },
     recentErrors: state.stopping
       ? [
@@ -324,76 +384,190 @@ async function buildDiagnosticsContext(
         createdAt: now,
         source: "service-host",
         eventType: "runtime_config_applied",
-        summary: `Runtime config applied: ${state.runtimeConfigApplyResult.brainsRegistered} brains registered, ${state.runtimeConfigApplyResult.sessionsCreated} sessions created.`,
+        summary: runtimeConfigApplySummary(
+          "Runtime config applied",
+          state.runtimeConfigApplyResult,
+        ),
       },
+      ...state.recentEvents,
     ],
   };
+}
+
+function runtimeConfigApplySummary(
+  prefix: string,
+  result: RustyCrewRuntimeConfigApplyResult,
+): string {
+  return `${prefix}: ${result.brainsRegistered} brains registered, ${result.brainsAlreadyPresent} brains already present, ${result.sessionsCreated} sessions created, ${result.sessionsAlreadyPresent} sessions already present, ${result.sessionsReactivated} sessions reactivated, ${result.sessionsMissing} configured sessions missing.`;
+}
+
+function buildServiceAdapterDiagnostics(
+  state: ServiceState,
+  now: string,
+): AdapterDiagnosticsProjection | undefined {
+  if (
+    state.runtimeConfig.channelBindings.length === 0 &&
+    state.runtimeConfig.mcpBindings.length === 0
+  ) {
+    return undefined;
+  }
+  return buildAdapterDiagnosticsProjection({
+    now,
+    channelBindings: state.runtimeConfig.channelBindings,
+    mcpBindings: state.runtimeConfig.mcpBindings,
+    mcpSurfaces: state.mcpManager.diagnostics(),
+  });
+}
+
+async function createServiceMcpManager(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Promise<McpSurfaceManager> {
+  const manager = new McpSurfaceManager({
+    transports: [
+      createSimulatedMcpTransportFactory("stdio"),
+      createSimulatedMcpTransportFactory("streamable_http"),
+      createSimulatedMcpTransportFactory("websocket"),
+    ],
+  });
+  for (const binding of runtimeConfig.mcpBindings) {
+    await manager.connect(binding);
+  }
+  return manager;
+}
+
+async function reloadServiceRuntimeConfig(
+  state: ServiceState,
+): Promise<RustyCrewRuntimeConfigApplyResult> {
+  const nextRuntimeConfig = await loadRustyCrewRuntimeConfig(state.config);
+  const nextApplyResult = await applyRustyCrewRuntimeConfig({
+    serviceConfig: state.config,
+    runtimeConfig: nextRuntimeConfig,
+    bridge: state.bridge,
+    existingBrainHandlesByProfileId:
+      state.runtimeConfigApplyResult.brainHandlesByProfileId,
+    createMissingSessions: false,
+  });
+  const nextMcpManager = await createServiceMcpManager(nextRuntimeConfig);
+  const previousMcpManager = state.mcpManager;
+  state.runtimeConfig = nextRuntimeConfig;
+  state.runtimeConfigApplyResult = nextApplyResult;
+  state.mcpManager = nextMcpManager;
+  await previousMcpManager.shutdown();
+  recordServiceEvent(state, {
+    source: "service-host",
+    eventType: "runtime_config_reloaded",
+    summary: runtimeConfigApplySummary(
+      "Runtime config reloaded",
+      nextApplyResult,
+    ),
+  });
+  return nextApplyResult;
 }
 
 async function buildDirectDebugContext(
   state: ServiceState,
 ): Promise<DirectDebugServiceContext> {
   const diagnosticsContext = await buildDiagnosticsContext(state);
-  const sessions = await Promise.all(
-    state.runtimeConfig.sessions.map(async (configured, index) => {
-      const profileContext = await loadProfileContext({
-        profilesDir: state.runtimeConfig.profilesDir,
-        skillsDir: state.runtimeConfig.skillsDir,
-        profileId: configured.profileId,
-      });
-      const now = state.now();
-      const session: SessionState = {
-        handle: index as never,
-        sessionId: configured.sessionId,
-        agentId: configured.agentId,
-        profileId: configured.profileId,
-        kind: configured.kind,
-        resourceLimits:
-          profileContext.profile.runtime?.defaultResourceLimits ?? {},
-        toolProfile: profileContext.toolSelection.toolProfile,
-        status: "active",
-        brainTurnCount: 0,
-        createdAt: now,
-        lastActiveAt: now,
-      };
-      return {
-        session,
-        profileContext,
-        toolSelection: profileContext.toolSelection,
-        systemPrompt: profileContext.profile.prompt?.system,
-        roleAssembly: {
-          instructions:
-            profileContext.profile.prompt?.instructions?.join("\n\n"),
-          initialMessages: [],
-        },
-      };
-    }),
+  const runtimeSessions = await state.bridge.listSessions().catch(() => []);
+  const debugSessions =
+    runtimeSessions.length > 0
+      ? runtimeSessions
+      : configuredDebugSessionFallback(state);
+  const sessions = (
+    await Promise.all(
+      debugSessions.map(async (session) => {
+        try {
+          const profileContext = await loadProfileContext({
+            profilesDir: state.runtimeConfig.profilesDir,
+            skillsDir: state.runtimeConfig.skillsDir,
+            profileId: session.profileId,
+          });
+          return {
+            session: {
+              ...session,
+              toolProfile:
+                session.toolProfile.tools.length > 0
+                  ? session.toolProfile
+                  : profileContext.toolSelection.toolProfile,
+            },
+            profileContext,
+            toolSelection: profileContext.toolSelection,
+            systemPrompt: profileContext.profile.prompt?.system,
+            roleAssembly: {
+              instructions:
+                profileContext.profile.prompt?.instructions?.join("\n\n"),
+              initialMessages: [],
+            },
+          };
+        } catch (error) {
+          if (session.status === "archived") return undefined;
+          throw error;
+        }
+      }),
+    )
+  ).filter((session): session is NonNullable<typeof session> =>
+    Boolean(session),
   );
   return {
     diagnostics: diagnosticsContext.diagnostics,
     sessions,
+    adapters: diagnosticsContext.diagnostics.adapters,
     recentEvents: diagnosticsContext.recentEvents,
     allowDirectTurnInjection: true,
     now: state.now,
     turnExecutor: {
       submitDirectDebugTurn: async (input) => {
-        const receipt = await state.bridge.routeAgentMessage(
-          input.actorId,
-          input.session.agentId,
-          input.body,
-          input.idempotencyKey,
-        );
-        const status = receipt.accepted ? "accepted" : "rejected";
-        return {
-          status,
-          summary: receipt.accepted
-            ? "direct debug turn accepted"
-            : "direct debug turn rejected",
-          messageId: String(receipt.sequence),
-        };
+        state.directDispatchSessions.add(input.session.sessionId);
+        try {
+          let wakeReport: ServiceWakeDispatchReport | undefined;
+          const queued = await state.bridge.enqueueBodyFollowUpMessage({
+            sessionId: input.session.sessionId,
+            from: input.actorId as never,
+            body: input.body,
+            correlationId: input.idempotencyKey,
+          });
+          wakeReport = await dispatchWake(
+            state,
+            {
+              type: "brain_wake_requested",
+              sessionId: input.session.sessionId,
+            },
+            "direct_debug",
+          );
+          suppressNextWakeEvent(state, input.session.sessionId);
+          await drainAndDispatchWakes(state, "direct_debug");
+          return {
+            status: "accepted",
+            summary: wakeReport
+              ? wakeReport.summary
+              : "direct debug turn accepted",
+            wakeId: wakeReport?.wakeId,
+            reasonCode: wakeReport?.reasonCode,
+            messageId: queued.messageId,
+          };
+        } finally {
+          state.directDispatchSessions.delete(input.session.sessionId);
+        }
       },
     },
   };
+}
+
+function configuredDebugSessionFallback(state: ServiceState): SessionState[] {
+  const now = state.now();
+  return state.runtimeConfig.sessions.map((configured, index) => ({
+    handle: index as never,
+    sessionId: configured.sessionId,
+    agentId: configured.agentId,
+    profileId: configured.profileId,
+    kind: configured.kind,
+    resourceLimits: {},
+    toolProfile: { tools: [] },
+    status: "active",
+    brainTurnCount: 0,
+    createdAt: now,
+    lastActiveAt: now,
+  }));
 }
 
 function directDebugResult<T>(
@@ -468,6 +642,20 @@ function createServiceControlExecutor(
         result: receipt,
       };
     },
+    reloadConfig: async () => {
+      const result = await reloadServiceRuntimeConfig(state);
+      return {
+        status: "completed",
+        summary: runtimeConfigApplySummary("runtime config reloaded", result),
+        affectedIds: {
+          brainsRegistered: result.brainsRegistered,
+          sessionsCreated: result.sessionsCreated,
+          sessionsReactivated: result.sessionsReactivated,
+          sessionsMissing: result.sessionsMissing,
+        },
+        result,
+      };
+    },
     schedulerTick: async () => {
       const report = await state.bridge.runSchedulerTick();
       return {
@@ -514,6 +702,25 @@ function createServiceControlExecutor(
       return {
         status: "completed",
         summary: "delegated resource cleanup completed",
+        result: report,
+      };
+    },
+    runMaintenance: async (command) => {
+      const report = await state.bridge.runMaintenance({
+        expireQueuedMessagesAt: optionalBodyString(
+          command,
+          "expireQueuedMessagesAt",
+        ),
+        purgeTerminalQueuedMessagesBefore: optionalBodyString(
+          command,
+          "purgeTerminalQueuedMessagesBefore",
+        ),
+        runWalCheckpoint: optionalBodyBoolean(command, "runWalCheckpoint"),
+        runOptimize: optionalBodyBoolean(command, "runOptimize"),
+      });
+      return {
+        status: "completed",
+        summary: "runtime maintenance completed",
         result: report,
       };
     },
@@ -566,14 +773,328 @@ function optionalBodyString(
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function optionalBodyBoolean(
+  command: AdminControlCommand,
+  key: string,
+): boolean | undefined {
+  const value = command.body[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+interface ServiceWakeDispatchReport {
+  sessionId: SessionId;
+  wakeId?: string;
+  status: "completed" | "skipped" | "failed";
+  summary: string;
+  reasonCode?: string;
+}
+
+function startServiceBackgroundLoops(state: ServiceState): void {
+  if (state.config.background.schedulerTickIntervalMs > 0) {
+    const timer = setInterval(() => {
+      void runSchedulerHeartbeat(state).catch((error) =>
+        recordServiceEvent(state, {
+          source: "service-host",
+          eventType: "scheduler_heartbeat_failed",
+          severity: "error",
+          summary: errorMessage(error, "scheduler heartbeat failed"),
+        }),
+      );
+    }, state.config.background.schedulerTickIntervalMs);
+    state.timers.add(timer);
+  }
+
+  if (state.config.background.wakeDispatchIntervalMs > 0) {
+    const timer = setInterval(() => {
+      void drainAndDispatchWakes(state, "background").catch((error) =>
+        recordServiceEvent(state, {
+          source: "service-host",
+          eventType: "wake_dispatch_failed",
+          severity: "error",
+          summary: errorMessage(error, "wake dispatch failed"),
+        }),
+      );
+    }, state.config.background.wakeDispatchIntervalMs);
+    state.timers.add(timer);
+  }
+}
+
+async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
+  if (state.stopping) return;
+  const tick = await state.bridge.runSchedulerTick();
+  const maintenance = await state.bridge.runMaintenance({
+    expireQueuedMessagesAt: state.now(),
+  });
+  if (
+    tick.wakesRequested > 0 ||
+    tick.runsCompleted > 0 ||
+    tick.runsFailed > 0 ||
+    maintenance.expiredQueueMessages > 0
+  ) {
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "scheduler_heartbeat",
+      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} runs completed, ${maintenance.expiredQueueMessages} queued messages expired.`,
+    });
+  }
+}
+
+async function drainAndDispatchWakes(
+  state: ServiceState,
+  source: "background" | "direct_debug",
+): Promise<ServiceWakeDispatchReport[]> {
+  if (state.stopping) return [];
+  const events = await state.bridge.drainSubscriptionEvents(
+    state.wakeSubscription,
+    32,
+  );
+  const reports: ServiceWakeDispatchReport[] = [];
+  for (const event of events) {
+    if (event.type !== "brain_wake_requested") continue;
+    if (consumeSuppressedWakeEvent(state, event.sessionId)) continue;
+    if (
+      source === "background" &&
+      state.directDispatchSessions.has(event.sessionId)
+    ) {
+      continue;
+    }
+    reports.push(await dispatchWake(state, event, source));
+  }
+  return reports;
+}
+
+function suppressNextWakeEvent(
+  state: ServiceState,
+  sessionId: SessionId,
+): void {
+  state.suppressedWakeEvents.set(
+    sessionId,
+    (state.suppressedWakeEvents.get(sessionId) ?? 0) + 1,
+  );
+}
+
+function consumeSuppressedWakeEvent(
+  state: ServiceState,
+  sessionId: SessionId,
+): boolean {
+  const count = state.suppressedWakeEvents.get(sessionId) ?? 0;
+  if (count <= 0) return false;
+  if (count === 1) state.suppressedWakeEvents.delete(sessionId);
+  else state.suppressedWakeEvents.set(sessionId, count - 1);
+  return true;
+}
+
+async function dispatchWake(
+  state: ServiceState,
+  event: Extract<CoreEvent, { type: "brain_wake_requested" }>,
+  source: "background" | "direct_debug",
+): Promise<ServiceWakeDispatchReport> {
+  const sessionId = event.sessionId;
+  if (state.inFlightWakes.has(sessionId)) {
+    return {
+      sessionId,
+      status: "skipped",
+      summary: `wake for ${sessionId} skipped because one is already in flight`,
+      reasonCode: "wake_already_in_flight",
+    };
+  }
+
+  state.inFlightWakes.add(sessionId);
+  try {
+    const session = (await state.bridge.listSessions()).find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (!session) {
+      return wakeDispatchSkipped(
+        state,
+        sessionId,
+        "wake_session_missing",
+        `wake for ${sessionId} skipped because the session is missing`,
+      );
+    }
+    if (session.status === "archived") {
+      return wakeDispatchSkipped(
+        state,
+        sessionId,
+        "wake_session_archived",
+        `wake for ${sessionId} skipped because the session is archived`,
+      );
+    }
+
+    const brain = brainForProfile(state, session.profileId);
+    if (brain === undefined) {
+      return wakeDispatchSkipped(
+        state,
+        sessionId,
+        "wake_brain_missing",
+        `wake for ${sessionId} skipped because profile ${session.profileId} has no registered brain`,
+      );
+    }
+
+    const wakeId = nextWakeId(state, session);
+    const profileContext = await loadProfileContext({
+      profilesDir: state.runtimeConfig.profilesDir,
+      skillsDir: state.runtimeConfig.skillsDir,
+      profileId: session.profileId,
+    });
+    const role = buildProfileRoleAssembly(profileContext);
+    const observed = await observeWakeEvents(state, sessionId, async () => {
+      const request = await state.bridge.buildBrainWakeRequestForSession({
+        brain,
+        sessionId,
+        systemPrompt: role.systemPrompt,
+        roleAssemblyJson: new TextEncoder().encode(
+          JSON.stringify(role.roleAssembly),
+        ),
+        wakeId,
+      });
+      return state.bridge.wakeBrain(request);
+    });
+    const accepted = observed.accepted;
+    const completionSummary = wakeCompletionSummary(observed.events);
+    const report: ServiceWakeDispatchReport = {
+      sessionId,
+      wakeId,
+      status: accepted.accepted ? "completed" : "failed",
+      summary:
+        completionSummary ??
+        (accepted.accepted
+          ? `wake ${wakeId} completed for ${session.agentId}`
+          : `wake ${wakeId} was rejected for ${session.agentId}`),
+      reasonCode: accepted.accepted ? undefined : "wake_rejected",
+    };
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "brain_wake_dispatched",
+      severity: accepted.accepted ? undefined : "error",
+      summary: `${report.summary} (${source}).`,
+    });
+    return report;
+  } catch (error) {
+    const report: ServiceWakeDispatchReport = {
+      sessionId,
+      status: "failed",
+      summary: errorMessage(error, `wake for ${sessionId} failed`),
+      reasonCode: "wake_dispatch_failed",
+    };
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "brain_wake_failed",
+      severity: "error",
+      summary: report.summary,
+    });
+    return report;
+  } finally {
+    state.inFlightWakes.delete(sessionId);
+  }
+}
+
+async function observeWakeEvents<T>(
+  state: ServiceState,
+  sessionId: SessionId,
+  callback: () => Promise<T>,
+): Promise<{ accepted: T; events: CoreEvent[] }> {
+  const subscription = await state.bridge.subscribeEvents({
+    eventKinds: [
+      "brain_event_observed",
+      "brain_actions_accepted",
+      "completion_packet_delivered",
+    ],
+    sessionId,
+  });
+  try {
+    const accepted = await callback();
+    const events = await state.bridge.drainSubscriptionEvents(subscription, 64);
+    return { accepted, events };
+  } finally {
+    await state.bridge.unsubscribeEvents(subscription).catch(() => undefined);
+  }
+}
+
+function wakeCompletionSummary(
+  events: readonly CoreEvent[],
+): string | undefined {
+  const packet = events
+    .filter(
+      (
+        event,
+      ): event is Extract<CoreEvent, { type: "completion_packet_delivered" }> =>
+        event.type === "completion_packet_delivered",
+    )
+    .at(-1);
+  if (packet?.packet.summary.trim()) {
+    return packet.packet.summary.trim();
+  }
+
+  const text = events
+    .flatMap((event) =>
+      event.type === "brain_event_observed" && event.event.type === "text_delta"
+        ? [event.event.text]
+        : [],
+    )
+    .join("")
+    .trim();
+  return text ? truncate(text, 480) : undefined;
+}
+
+function truncate(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}...`;
+}
+
+function wakeDispatchSkipped(
+  state: ServiceState,
+  sessionId: SessionId,
+  reasonCode: string,
+  summary: string,
+): ServiceWakeDispatchReport {
+  recordServiceEvent(state, {
+    source: "service-host",
+    eventType: "brain_wake_skipped",
+    severity: "warning",
+    summary,
+  });
+  return { sessionId, status: "skipped", summary, reasonCode };
+}
+
+function brainForProfile(
+  state: ServiceState,
+  profileId: string,
+): BrainImplementationHandle | undefined {
+  return state.runtimeConfigApplyResult.brainHandlesByProfileId[profileId];
+}
+
+function nextWakeId(state: ServiceState, session: SessionState): string {
+  state.nextWakeSequence += 1;
+  return `service-${session.sessionId}-${Date.now()}-${state.nextWakeSequence}`;
+}
+
+function recordServiceEvent(
+  state: ServiceState,
+  event: Omit<ServiceRecentEvent, "id" | "createdAt">,
+): void {
+  const createdAt = state.now();
+  state.recentEvents.unshift({
+    id: `service-event-${Date.now()}-${state.recentEvents.length}`,
+    createdAt,
+    ...event,
+  });
+  state.recentEvents.splice(50);
+}
+
 async function stopService(
   state: ServiceState,
   server?: Server,
 ): Promise<void> {
   if (state.stopping) return;
   state.stopping = true;
+  for (const timer of state.timers) clearInterval(timer);
+  state.timers.clear();
   if (server) await closeServer(server);
   try {
+    await state.bridge
+      .unsubscribeEvents(state.wakeSubscription)
+      .catch(() => undefined);
+    await state.mcpManager.shutdown();
     await state.bridge.shutdownEngine({
       engine: state.engine,
       drainTimeoutMs: 5_000,
@@ -611,13 +1132,563 @@ function closeServer(server: Server): Promise<void> {
 
 function writeJsonResponse(
   response: import("node:http").ServerResponse,
-  result: AdminRouteResult,
+  result: ServiceRouteResult,
 ): void {
   for (const [name, value] of Object.entries(result.headers)) {
     response.setHeader(name, value);
   }
   response.statusCode = result.status;
-  response.end(JSON.stringify(result.body));
+  response.end(
+    typeof result.body === "string" ? result.body : JSON.stringify(result.body),
+  );
+}
+
+function isAdminPanelRoute(pathname: string): boolean {
+  return pathname === "/" || pathname === "/admin" || pathname === "/admin/";
+}
+
+function htmlResponse(body: string): ServiceRouteResult {
+  return {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+    body,
+  };
+}
+
+function adminPanelHtml(authRequired: boolean): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rusty Crew Admin</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-strong: #eef2f6;
+      --text: #17202a;
+      --muted: #607083;
+      --border: #d7dee7;
+      --good: #147a4a;
+      --warn: #9c5a00;
+      --bad: #b42318;
+      --accent: #2457a6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) minmax(280px, 520px);
+      gap: 20px;
+      align-items: center;
+      padding: 22px 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+    }
+
+    .token-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+
+    input {
+      min-width: 0;
+      height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0 10px;
+      font: inherit;
+      background: #fff;
+      color: var(--text);
+    }
+
+    button {
+      height: 38px;
+      border: 1px solid #1f4f95;
+      border-radius: 6px;
+      padding: 0 14px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      border-color: var(--border);
+      background: #fff;
+      color: var(--text);
+    }
+
+    main {
+      padding: 20px 0 32px;
+    }
+
+    .status-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 10px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .pill.good {
+      border-color: #9fd7b8;
+      color: var(--good);
+      background: #eefaf3;
+    }
+
+    .pill.warn {
+      border-color: #f0c982;
+      color: var(--warn);
+      background: #fff7e8;
+    }
+
+    .pill.bad {
+      border-color: #f1a39d;
+      color: var(--bad);
+      background: #fff1f0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 12px;
+    }
+
+    .panel {
+      grid-column: span 6;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .panel.wide {
+      grid-column: span 12;
+    }
+
+    .panel h2 {
+      margin: 0;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-strong);
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .panel-body {
+      padding: 12px 14px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 8px;
+    }
+
+    .metric {
+      min-height: 72px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      background: #fbfcfd;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 20px;
+      font-weight: 720;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 6px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .empty,
+    .error {
+      color: var(--muted);
+      padding: 12px 0;
+    }
+
+    .error {
+      color: var(--bad);
+    }
+
+    pre {
+      max-height: 280px;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #101820;
+      color: #e8eef5;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 800px) {
+      .topbar,
+      .token-row {
+        grid-template-columns: 1fr;
+      }
+
+      .panel {
+        grid-column: span 12;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell topbar">
+      <div>
+        <h1>Rusty Crew Admin</h1>
+        <p class="subtitle">Service diagnostics for the local field-test runtime</p>
+      </div>
+      <form id="tokenForm" class="token-row"${authRequired ? "" : " hidden"}>
+        <input id="tokenInput" name="token" type="password" autocomplete="current-password" placeholder="Admin bearer token">
+        <button type="submit">Refresh</button>
+        <button id="clearToken" class="secondary" type="button">Clear</button>
+      </form>
+    </div>
+  </header>
+  <main class="shell">
+    <div class="status-line" id="statusLine"></div>
+    <section class="grid">
+      <article class="panel wide">
+        <h2>Overview</h2>
+        <div class="panel-body">
+          <div class="metrics" id="overviewMetrics"></div>
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Persistence</h2>
+        <div class="panel-body" id="persistencePanel"></div>
+      </article>
+      <article class="panel">
+        <h2>Queues And Health</h2>
+        <div class="panel-body" id="healthPanel"></div>
+      </article>
+      <article class="panel">
+        <h2>Channels</h2>
+        <div class="panel-body" id="channelsPanel"></div>
+      </article>
+      <article class="panel">
+        <h2>MCP</h2>
+        <div class="panel-body" id="mcpPanel"></div>
+      </article>
+      <article class="panel wide">
+        <h2>Recent Events</h2>
+        <div class="panel-body" id="eventsPanel"></div>
+      </article>
+      <article class="panel wide">
+        <h2>Raw Diagnostics</h2>
+        <div class="panel-body"><pre id="rawPanel">Waiting for diagnostics...</pre></div>
+      </article>
+    </section>
+  </main>
+  <script>
+    (function () {
+      var authRequired = ${authRequired ? "true" : "false"};
+      var tokenInput = document.getElementById("tokenInput");
+      var statusLine = document.getElementById("statusLine");
+      var savedToken = authRequired ? (localStorage.getItem("rustyCrewAdminToken") || "") : "";
+      tokenInput.value = savedToken;
+
+      document.getElementById("tokenForm").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var token = tokenInput.value.trim();
+        if (token) localStorage.setItem("rustyCrewAdminToken", token);
+        refresh();
+      });
+
+      document.getElementById("clearToken").addEventListener("click", function () {
+        localStorage.removeItem("rustyCrewAdminToken");
+        tokenInput.value = "";
+        refresh();
+      });
+
+      function headers() {
+        var token = tokenInput.value.trim();
+        return authRequired && token ? { authorization: "Bearer " + token } : {};
+      }
+
+      async function api(path, auth) {
+        var response = await fetch(path, { headers: auth ? headers() : {} });
+        var body = await response.json();
+        if (!response.ok || !body.ok) {
+          var message = body.error ? body.error.message : response.statusText;
+          throw new Error(message || ("request failed: " + response.status));
+        }
+        return body.data;
+      }
+
+      function pill(text, kind) {
+        var span = document.createElement("span");
+        span.className = "pill " + (kind || "");
+        span.textContent = text;
+        return span;
+      }
+
+      function setStatus(items) {
+        statusLine.replaceChildren.apply(statusLine, items);
+      }
+
+      function metric(label, value) {
+        var node = document.createElement("div");
+        node.className = "metric";
+        var labelNode = document.createElement("span");
+        labelNode.textContent = label;
+        var valueNode = document.createElement("strong");
+        valueNode.textContent = value === undefined || value === null ? "n/a" : String(value);
+        node.append(labelNode, valueNode);
+        return node;
+      }
+
+      function renderMetrics(id, entries) {
+        var target = document.getElementById(id);
+        target.replaceChildren.apply(target, entries.map(function (entry) {
+          return metric(entry[0], entry[1]);
+        }));
+      }
+
+      function renderObjectTable(id, data) {
+        var target = document.getElementById(id);
+        if (!data) {
+          target.innerHTML = '<div class="empty">No data reported.</div>';
+          return;
+        }
+        var table = document.createElement("table");
+        Object.keys(data).sort().forEach(function (key) {
+          var row = document.createElement("tr");
+          var name = document.createElement("th");
+          var value = document.createElement("td");
+          name.textContent = key;
+          value.textContent = typeof data[key] === "object" ? JSON.stringify(data[key]) : String(data[key]);
+          row.append(name, value);
+          table.append(row);
+        });
+        target.replaceChildren(table);
+      }
+
+      function renderItemsTable(id, items, columns) {
+        var target = document.getElementById(id);
+        if (!items || items.length === 0) {
+          target.innerHTML = '<div class="empty">No records reported.</div>';
+          return;
+        }
+        var table = document.createElement("table");
+        var head = document.createElement("tr");
+        columns.forEach(function (column) {
+          var th = document.createElement("th");
+          th.textContent = column.label;
+          head.append(th);
+        });
+        table.append(head);
+        items.forEach(function (item) {
+          var row = document.createElement("tr");
+          columns.forEach(function (column) {
+            var td = document.createElement("td");
+            var value = column.value(item);
+            td.textContent = value === undefined || value === null || value === "" ? "n/a" : String(value);
+            row.append(td);
+          });
+          table.append(row);
+        });
+        target.replaceChildren(table);
+      }
+
+      function setPanelError(id, error) {
+        document.getElementById(id).innerHTML = '<div class="error">' + escapeHtml(error.message || String(error)) + '</div>';
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, function (char) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char];
+        });
+      }
+
+      async function refresh() {
+        var token = tokenInput.value.trim();
+        setStatus([pill("Loading", "warn")]);
+        try {
+          var health = await api("/v1/admin/healthz", false);
+          var statusPills = [
+            pill("Liveness: " + health.status, health.status === "live" ? "good" : "bad")
+          ];
+          if (authRequired && !token) {
+            setStatus(statusPills.concat([pill("Enter token for diagnostics", "warn")]));
+            return;
+          }
+
+          var results = await Promise.allSettled([
+            api("/v1/admin/readyz", true),
+            api("/v1/admin/diagnostics", true),
+            api("/v1/admin/diagnostics/persistence", true),
+            api("/v1/admin/diagnostics/channels", true),
+            api("/v1/admin/diagnostics/mcp", true),
+            api("/v1/admin/events/recent", true)
+          ]);
+
+          var ready = unwrap(results[0]);
+          var diagnostics = unwrap(results[1]);
+          var persistence = unwrap(results[2]);
+          var channels = unwrap(results[3]);
+          var mcp = unwrap(results[4]);
+          var events = unwrap(results[5]);
+          var overview = diagnostics.overview || {};
+          var summary = overview.summary || {};
+
+          statusPills.push(pill("Readiness: " + ready.status, ready.status === "ready" ? "good" : "warn"));
+          statusPills.push(pill("Generated: " + (overview.generatedAt || "n/a")));
+          if (overview.degraded) statusPills.push(pill("Degraded", "warn"));
+          setStatus(statusPills);
+
+          renderMetrics("overviewMetrics", [
+            ["Sessions", summary.sessions],
+            ["Active", summary.activeSessions],
+            ["Idle", summary.idleSessions],
+            ["Queued", summary.queueDepth],
+            ["Agents", summary.agents],
+            ["Tools", summary.tools],
+            ["Recent errors", summary.recentErrors]
+          ]);
+
+          renderObjectTable("persistencePanel", Object.assign({}, persistence, {
+            tableCounts: JSON.stringify((persistence && persistence.tableCounts) || {})
+          }));
+
+          renderObjectTable("healthPanel", {
+            runtimeHealth: overview.health,
+            degraded: overview.degraded,
+            reasonCodes: (overview.reasonCodes || []).join(", ") || "none",
+            queues: overview.queues ? JSON.stringify(overview.queues) : "none"
+          });
+
+          renderItemsTable("channelsPanel", channels.items || [], [
+            { label: "Binding", value: function (item) { return item.bindingId; } },
+            { label: "Agent", value: function (item) { return item.agentId; } },
+            { label: "Status", value: function (item) { return item.status; } },
+            { label: "Channel", value: function (item) { return item.externalChannelId; } }
+          ]);
+
+          renderItemsTable("mcpPanel", mcp.items || [], [
+            { label: "Binding", value: function (item) { return item.bindingId; } },
+            { label: "Agent", value: function (item) { return item.agentId; } },
+            { label: "Status", value: function (item) { return item.status; } },
+            { label: "Servers", value: function (item) { return (item.serverNames || []).join(", "); } }
+          ]);
+
+          renderItemsTable("eventsPanel", events.items || [], [
+            { label: "Time", value: function (item) { return item.createdAt; } },
+            { label: "Source", value: function (item) { return item.source; } },
+            { label: "Type", value: function (item) { return item.eventType; } },
+            { label: "Summary", value: function (item) { return item.summary; } }
+          ]);
+
+          document.getElementById("rawPanel").textContent = JSON.stringify(diagnostics, null, 2);
+        } catch (error) {
+          setStatus([pill("Diagnostics error", "bad"), pill(error.message || String(error), "bad")]);
+          setPanelError("healthPanel", error);
+        }
+      }
+
+      function unwrap(result) {
+        if (result.status === "fulfilled") return result.value;
+        throw result.reason;
+      }
+
+      refresh();
+      setInterval(refresh, 15000);
+    }());
+  </script>
+</body>
+</html>`;
 }
 
 function failure(
@@ -698,10 +1769,33 @@ function headers(request: IncomingMessage): Record<string, string | undefined> {
   return result;
 }
 
+function controlHeaders(
+  request: IncomingMessage,
+  state: ServiceState,
+): Record<string, string | undefined> {
+  const result = headers(request);
+  if (!configRequiresAuth(state.config)) {
+    result.authorization = `Bearer ${DEV_NO_AUTH_CONTROL_TOKEN}`;
+  }
+  return result;
+}
+
+function controlBearerToken(state: ServiceState): string {
+  return configRequiresAuth(state.config)
+    ? (state.config.admin.token ?? "")
+    : DEV_NO_AUTH_CONTROL_TOKEN;
+}
+
+function configRequiresAuth(config: RustyCrewServiceConfig): boolean {
+  return config.admin.authMode !== "none";
+}
+
 function isAuthorized(
   request: IncomingMessage,
   token: string | undefined,
+  state?: ServiceState,
 ): boolean {
+  if (state && !configRequiresAuth(state.config)) return true;
   return Boolean(token) && request.headers.authorization === `Bearer ${token}`;
 }
 

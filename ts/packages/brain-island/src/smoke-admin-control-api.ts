@@ -118,6 +118,13 @@ const executor: AdminControlExecutor = {
   reloadMcp() {
     throw new Error("reload failed");
   },
+  reloadConfig() {
+    return {
+      status: "completed",
+      summary: "Runtime config reloaded.",
+      affectedIds: { sessionsReactivated: 1 },
+    };
+  },
 };
 
 const context = {
@@ -220,6 +227,20 @@ assert.equal(reloadFailure.status, 500);
 const reloadFailureData = okData<AdminControlResponse>(reloadFailure);
 assert.equal(reloadFailureData.outcome.status, "failed");
 assert.equal(reloadFailureData.outcome.reasonCode, "control_executor_failed");
+
+const reloadConfig = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/config/reload",
+    headers: authHeaders(),
+    body: { reason: "operator edited service config" },
+  },
+  context,
+);
+assert.equal(reloadConfig.status, 200);
+const reloadConfigData = okData<AdminControlResponse>(reloadConfig);
+assert.equal(reloadConfigData.command.name, "reload_config");
+assert.equal(reloadConfigData.outcome.status, "completed");
 
 const curatorStatus = await handleAdminControlRequest(
   {

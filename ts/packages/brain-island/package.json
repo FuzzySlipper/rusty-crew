@@ -76,6 +76,7 @@
     "smoke:patch-tool": "tsx src/smoke-patch-tool.ts",
     "smoke:service-config": "tsx src/smoke-service-config.ts",
     "smoke:service-host": "tsx src/smoke-service-host.ts",
+    "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
     "service:start": "tsx src/service-host.ts"
   },
   "piPackageSource": {

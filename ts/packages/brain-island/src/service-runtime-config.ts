@@ -4,12 +4,23 @@ import type {
   AgentId,
   BrainAction,
   BrainEventEnvelope,
+  BrainImplementationHandle,
   BrainImplementationId,
+  CompletionPacket,
+  ChannelBindingRecord,
+  McpBindingRecord,
   ProfileId,
   SessionId,
   SessionKind,
 } from "@rusty-crew/contracts";
-import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
+import type {
+  BrainWakeExecutor,
+  NativeBridgeModule,
+} from "@rusty-crew/native-bridge";
+import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
+import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
+import type { BrainImplementation } from "./index.js";
+import { createPiAgentBrain } from "./pi-agent-brain.js";
 import { loadProfileContext } from "./profile-loading.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 
@@ -30,6 +41,8 @@ export interface RustyCrewRuntimeConfig {
   skillsDir?: string;
   brains: RustyCrewConfiguredBrain[];
   sessions: RustyCrewConfiguredSession[];
+  channelBindings: ChannelBindingRecord[];
+  mcpBindings: McpBindingRecord[];
 }
 
 export interface RustyCrewRuntimeConfigApplyResult {
@@ -37,6 +50,9 @@ export interface RustyCrewRuntimeConfigApplyResult {
   brainsAlreadyPresent: number;
   sessionsCreated: number;
   sessionsAlreadyPresent: number;
+  sessionsReactivated: number;
+  sessionsMissing: number;
+  brainHandlesByProfileId: Record<string, BrainImplementationHandle>;
 }
 
 export async function loadRustyCrewRuntimeConfig(
@@ -60,12 +76,18 @@ export async function applyRustyCrewRuntimeConfig(input: {
   serviceConfig: RustyCrewServiceConfig;
   runtimeConfig: RustyCrewRuntimeConfig;
   bridge: NativeBridgeModule;
+  existingBrainHandlesByProfileId?: Record<string, BrainImplementationHandle>;
+  createMissingSessions?: boolean;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
+  const createMissingSessions = input.createMissingSessions ?? true;
   const result: RustyCrewRuntimeConfigApplyResult = {
     brainsRegistered: 0,
     brainsAlreadyPresent: 0,
     sessionsCreated: 0,
     sessionsAlreadyPresent: 0,
+    sessionsReactivated: 0,
+    sessionsMissing: 0,
+    brainHandlesByProfileId: {},
   };
 
   for (const brain of input.runtimeConfig.brains) {
@@ -75,63 +97,149 @@ export async function applyRustyCrewRuntimeConfig(input: {
       profileId: brain.profileId,
     });
     try {
-      await input.bridge.registerBrainRuntime(
+      const handle = await input.bridge.registerBrainRuntime(
         {
           implementationId: brain.implementationId,
           profileId: brain.profileId,
           toolProfile: profile.toolSelection.toolProfile,
           modelConfig: profile.profile.modelConfig,
         },
-        {
-          async wake(wake): Promise<{
-            events: BrainEventEnvelope[];
-            actions: BrainAction[];
-          }> {
-            return {
-              events: [
-                {
-                  wakeId: wake.wakeId,
-                  sessionId: wake.sessionId,
-                  event: { type: "started" },
-                },
-                {
-                  wakeId: wake.wakeId,
-                  sessionId: wake.sessionId,
-                  event: { type: "finished" },
-                },
-              ],
-              actions: [
-                {
-                  type: "deliver_completion",
-                  packet: {
-                    sessionId: wake.sessionId,
-                    status: "completed",
-                    summary: "local service brain wake completed",
-                  },
-                },
-              ],
-            };
-          },
-        },
+        toBridgeWakeExecutor(await createConfiguredBrain(profile)),
       );
+      result.brainHandlesByProfileId[brain.profileId] = handle;
       result.brainsRegistered += 1;
     } catch (error) {
       if (!isAlreadyPresentError(error)) throw error;
+      const existingHandle =
+        input.existingBrainHandlesByProfileId?.[brain.profileId];
+      if (existingHandle !== undefined) {
+        result.brainHandlesByProfileId[brain.profileId] = existingHandle;
+      }
       result.brainsAlreadyPresent += 1;
     }
   }
 
+  const existingSessionsById = new Map(
+    (await input.bridge.listSessions()).map((session) => [
+      session.sessionId,
+      session,
+    ]),
+  );
   for (const session of input.runtimeConfig.sessions) {
-    try {
-      await input.bridge.createSession(session);
+    const existing = existingSessionsById.get(session.sessionId);
+    if (!existing && !createMissingSessions) {
+      result.sessionsMissing += 1;
+      continue;
+    }
+    const ensured = await input.bridge.ensureConfiguredSession(session);
+    if (!existing) {
       result.sessionsCreated += 1;
-    } catch (error) {
-      if (!isAlreadyPresentError(error)) throw error;
+    } else if (
+      existing.status === "archived" &&
+      ensured.status !== "archived"
+    ) {
+      result.sessionsReactivated += 1;
+    } else {
       result.sessionsAlreadyPresent += 1;
     }
   }
 
   return result;
+}
+
+async function createConfiguredBrain(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+): Promise<BrainImplementation> {
+  if (profile.profile.modelConfig.provider === "den-router") {
+    const createAgent = await createDenRouterPiAgentFactory({
+      modelId: profile.profile.modelConfig.modelName,
+      maxTokens: profile.profile.modelConfig.maxOutputTokens,
+      temperature:
+        profile.profile.modelConfig.temperatureMilli === undefined
+          ? undefined
+          : profile.profile.modelConfig.temperatureMilli / 1_000,
+    });
+    return createPiAgentBrain({
+      createAgent,
+      planActions: completionActionFromEvents,
+    });
+  }
+
+  return {
+    async wake(wake): Promise<{
+      events: BrainEventEnvelope[];
+      actions: BrainAction[];
+    }> {
+      return {
+        events: [
+          {
+            wakeId: wake.wakeId,
+            sessionId: wake.sessionId,
+            event: { type: "started" },
+          },
+          {
+            wakeId: wake.wakeId,
+            sessionId: wake.sessionId,
+            event: { type: "finished" },
+          },
+        ],
+        actions: [
+          {
+            type: "deliver_completion",
+            packet: {
+              sessionId: wake.sessionId,
+              status: "completed",
+              summary: "local service brain wake completed",
+            },
+          },
+        ],
+      };
+    },
+  };
+}
+
+function toBridgeWakeExecutor(brain: BrainImplementation): BrainWakeExecutor {
+  return {
+    wake(request, buffers) {
+      return wakeBrainFromBridgeRequest(buffers, brain, request);
+    },
+  };
+}
+
+function completionActionFromEvents(input: {
+  wake: { sessionId: SessionId };
+  events: BrainEventEnvelope[];
+}): BrainAction[] {
+  const text = mergeTextDeltas(
+    input.events.flatMap((event) =>
+      event.event.type === "text_delta" ? [event.event.text] : [],
+    ),
+  ).trim();
+  return [
+    {
+      type: "deliver_completion",
+      packet: {
+        sessionId: input.wake.sessionId,
+        status: "completed",
+        summary: text ? truncate(text, 480) : "LLM wake completed.",
+      } satisfies CompletionPacket,
+    },
+  ];
+}
+
+function mergeTextDeltas(parts: readonly string[]): string {
+  return parts
+    .filter((part) => part.length > 0)
+    .reduce((merged, part) => {
+      if (!merged) return part;
+      if (part.startsWith(merged)) return part;
+      if (merged.endsWith(part)) return merged;
+      return `${merged}${part}`;
+    }, "");
+}
+
+function truncate(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}...`;
 }
 
 function emptyRuntimeConfig(
@@ -141,6 +249,8 @@ function emptyRuntimeConfig(
     profilesDir: join(serviceConfig.paths.configDir, "profiles"),
     brains: [],
     sessions: [],
+    channelBindings: [],
+    mcpBindings: [],
   };
 }
 
@@ -165,6 +275,12 @@ function validateRuntimeConfig(
     ),
     sessions: arrayValue(parsed.sessions).map((item, index) =>
       configuredSession(item, index),
+    ),
+    channelBindings: arrayValue(parsed.channelBindings).map((item, index) =>
+      configuredChannelBinding(item, index),
+    ),
+    mcpBindings: arrayValue(parsed.mcpBindings).map((item, index) =>
+      configuredMcpBinding(item, index),
     ),
   };
 }
@@ -217,11 +333,120 @@ function configuredSession(
   };
 }
 
+function configuredChannelBinding(
+  parsed: unknown,
+  index: number,
+): ChannelBindingRecord {
+  if (!isRecord(parsed)) {
+    throw new Error(`configured channel binding ${index} must be an object`);
+  }
+  return {
+    bindingId: requiredString(
+      parsed.bindingId,
+      `channelBindings[${index}].bindingId`,
+    ),
+    adapterId: requiredString(
+      parsed.adapterId,
+      `channelBindings[${index}].adapterId`,
+    ) as never,
+    provider: optionalString(parsed.provider) ?? "den_channels",
+    agentId: requiredString(
+      parsed.agentId,
+      `channelBindings[${index}].agentId`,
+    ) as AgentId,
+    sessionId: optionalString(parsed.sessionId) as SessionId | undefined,
+    profileId: requiredString(
+      parsed.profileId,
+      `channelBindings[${index}].profileId`,
+    ) as ProfileId,
+    externalChannelId: requiredString(
+      parsed.externalChannelId,
+      `channelBindings[${index}].externalChannelId`,
+    ),
+    externalThreadId: optionalString(parsed.externalThreadId),
+    externalUserId: optionalString(parsed.externalUserId),
+    providerSubscriptionId: optionalString(parsed.providerSubscriptionId),
+    cursor: optionalString(parsed.cursor),
+    membershipState: optionalString(parsed.membershipState),
+    presenceState: optionalString(parsed.presenceState),
+    status: externalBindingStatus(parsed.status),
+    degradedReason: optionalString(parsed.degradedReason),
+  };
+}
+
+function configuredMcpBinding(
+  parsed: unknown,
+  index: number,
+): McpBindingRecord {
+  if (!isRecord(parsed)) {
+    throw new Error(`configured MCP binding ${index} must be an object`);
+  }
+  const profileId = requiredString(
+    parsed.profileId,
+    `mcpBindings[${index}].profileId`,
+  );
+  return {
+    bindingId: requiredString(
+      parsed.bindingId,
+      `mcpBindings[${index}].bindingId`,
+    ),
+    adapterId: requiredString(
+      parsed.adapterId,
+      `mcpBindings[${index}].adapterId`,
+    ) as never,
+    agentId: requiredString(
+      parsed.agentId,
+      `mcpBindings[${index}].agentId`,
+    ) as AgentId,
+    sessionId: optionalString(parsed.sessionId) as SessionId | undefined,
+    profileId: profileId as ProfileId,
+    serverNames: stringList(
+      parsed.serverNames,
+      `mcpBindings[${index}].serverNames`,
+    ),
+    endpointRef: requiredString(
+      parsed.endpointRef,
+      `mcpBindings[${index}].endpointRef`,
+    ),
+    transport: optionalString(parsed.transport) ?? "stdio",
+    toolProfileKey: optionalString(parsed.toolProfileKey) ?? `${profileId}-mcp`,
+    discoveredToolRevision: optionalString(parsed.discoveredToolRevision),
+    status: externalBindingStatus(parsed.status),
+    degradedReason: optionalString(parsed.degradedReason),
+    diagnostics: isRecord(parsed.diagnostics)
+      ? {
+          lastError: optionalString(parsed.diagnostics.lastError),
+          lastCheckedAt: optionalString(parsed.diagnostics.lastCheckedAt),
+          notes: optionalString(parsed.diagnostics.notes),
+        }
+      : {},
+  };
+}
+
 function arrayValue(input: unknown): unknown[] {
   if (input === undefined) return [];
   if (!Array.isArray(input))
     throw new Error("runtime config arrays must be arrays");
   return input;
+}
+
+function stringList(input: unknown, name: string): string[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error(`${name} must be a non-empty string array`);
+  }
+  return input.map((item, index) => requiredString(item, `${name}[${index}]`));
+}
+
+function externalBindingStatus(
+  input: unknown,
+): "active" | "degraded" | "archived" {
+  const status = optionalString(input) ?? "active";
+  if (status !== "active" && status !== "degraded" && status !== "archived") {
+    throw new Error(
+      "external binding status must be active, degraded, or archived",
+    );
+  }
+  return status;
 }
 
 function pathValue(input: unknown, fallback?: string): string {

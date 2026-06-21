@@ -17,9 +17,10 @@ use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
     ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
     ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, QueuedMessageRecord,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, ScheduledJobRecord,
-    ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
+    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
+    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeSearchRowType, RuntimeStateSummary, ScheduledJobRecord, ScheduledJobStatus,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
@@ -130,6 +131,17 @@ impl NativeBridge {
         self.engine()?.create_session(config)
     }
 
+    pub fn ensure_configured_session(
+        &self,
+        config: rusty_crew_core_bridge_api::SessionConfig,
+    ) -> CoreResult<rusty_crew_core_bridge_api::SessionState> {
+        self.engine()?.ensure_configured_session(config)
+    }
+
+    pub fn list_sessions(&self) -> CoreResult<Vec<rusty_crew_core_bridge_api::SessionState>> {
+        self.engine()?.list_sessions()
+    }
+
     pub fn route_agent_message(
         &self,
         from: rusty_crew_core_bridge_api::AgentId,
@@ -170,18 +182,16 @@ impl NativeBridge {
     }
 
     pub fn run_scheduler_tick(&self) -> CoreResult<serde_json::Value> {
-        self.engine()?
-            .run_scheduler_tick()
-            .map(|report| {
-                serde_json::json!({
-                    "stale_runs_expired": report.stale_runs_expired,
-                    "due_runs_claimed": report.due_runs_claimed,
-                    "wakes_requested": report.wakes_requested,
-                    "runs_completed": report.runs_completed,
-                    "runs_skipped": report.runs_skipped,
-                    "runs_failed": report.runs_failed,
-                })
+        self.engine()?.run_scheduler_tick().map(|report| {
+            serde_json::json!({
+                "stale_runs_expired": report.stale_runs_expired,
+                "due_runs_claimed": report.due_runs_claimed,
+                "wakes_requested": report.wakes_requested,
+                "runs_completed": report.runs_completed,
+                "runs_skipped": report.runs_skipped,
+                "runs_failed": report.runs_failed,
             })
+        })
     }
 
     pub fn request_scheduled_job_run(
@@ -198,11 +208,7 @@ impl NativeBridge {
         Ok(Unit)
     }
 
-    pub fn resume_scheduled_job(
-        &self,
-        job_id: String,
-        next_due_at: String,
-    ) -> CoreResult<Unit> {
+    pub fn resume_scheduled_job(&self, job_id: String, next_due_at: String) -> CoreResult<Unit> {
         self.engine()?.resume_scheduled_job(&job_id, next_due_at)?;
         Ok(Unit)
     }
@@ -222,6 +228,17 @@ impl NativeBridge {
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         self.engine()?.count_rows(table)
+    }
+
+    pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
+        self.engine()?.database_size()
+    }
+
+    pub fn run_maintenance(
+        &self,
+        policy: &RuntimeMaintenancePolicy,
+    ) -> CoreResult<RuntimeMaintenanceReport> {
+        self.engine()?.run_maintenance(policy)
     }
 
     pub fn list_profile_memory(
@@ -916,6 +933,34 @@ pub struct JsRuntimeCounterSummary {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsRuntimeDatabaseSize {
+    pub database_bytes: f64,
+    pub page_count: f64,
+    pub page_size_bytes: f64,
+    pub freelist_pages: f64,
+    pub freelist_bytes: f64,
+    pub wal_bytes: f64,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeMaintenancePolicy {
+    pub expire_queued_messages_at: Option<String>,
+    pub purge_terminal_queued_messages_before: Option<String>,
+    pub run_wal_checkpoint: Option<bool>,
+    pub run_optimize: Option<bool>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeMaintenanceReport {
+    pub size_before: JsRuntimeDatabaseSize,
+    pub size_after: JsRuntimeDatabaseSize,
+    pub expired_queue_messages: f64,
+    pub purged_terminal_queue_messages: f64,
+    pub wal_checkpoint_ran: bool,
+    pub optimize_ran: bool,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsActionBatchReceipt {
     pub wake_id: String,
     pub accepted_actions: u32,
@@ -1274,21 +1319,29 @@ impl NativeBridgeBinding {
     pub fn create_session(&self, config: JsSessionConfig) -> napi::Result<JsSessionState> {
         let bridge = self.bridge()?;
         let state = bridge
-            .create_session(rusty_crew_core_bridge_api::SessionConfig {
-                session_id: rusty_crew_core_bridge_api::SessionId::new(config.session_id),
-                agent_id: rusty_crew_core_bridge_api::AgentId::new(config.agent_id),
-                profile_id: rusty_crew_core_bridge_api::ProfileId::new(config.profile_id),
-                kind: parse_session_kind(&config.kind)?,
-                delegation: None,
-                resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
-                    workdir: None,
-                    max_duration_ms: None,
-                    max_delegation_depth: None,
-                },
-                tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
-            })
+            .create_session(js_session_config(config)?)
             .map_err(to_napi_error)?;
         Ok(to_js_session_state(state))
+    }
+
+    #[napi]
+    pub fn ensure_configured_session(
+        &self,
+        config: JsSessionConfig,
+    ) -> napi::Result<JsSessionState> {
+        let bridge = self.bridge()?;
+        let state = bridge
+            .ensure_configured_session(js_session_config(config)?)
+            .map_err(to_napi_error)?;
+        Ok(to_js_session_state(state))
+    }
+
+    #[napi]
+    pub fn list_sessions_json(&self) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let sessions = bridge.list_sessions().map_err(to_napi_error)?;
+        serde_json::to_string(&sessions)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 
     #[napi]
@@ -1378,11 +1431,7 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
-    pub fn resume_scheduled_job(
-        &self,
-        job_id: String,
-        next_due_at: String,
-    ) -> napi::Result<()> {
+    pub fn resume_scheduled_job(&self, job_id: String, next_due_at: String) -> napi::Result<()> {
         let bridge = self.bridge()?;
         bridge
             .resume_scheduled_job(job_id, next_due_at)
@@ -1437,6 +1486,30 @@ impl NativeBridgeBinding {
         let bridge = self.bridge()?;
         let count = bridge.count_rows(&table).map_err(to_napi_error)?;
         Ok(count as f64)
+    }
+
+    #[napi]
+    pub fn database_size(&self) -> napi::Result<JsRuntimeDatabaseSize> {
+        let bridge = self.bridge()?;
+        let size = bridge.database_size().map_err(to_napi_error)?;
+        Ok(to_js_runtime_database_size(size))
+    }
+
+    #[napi]
+    pub fn run_maintenance(
+        &self,
+        policy: JsRuntimeMaintenancePolicy,
+    ) -> napi::Result<JsRuntimeMaintenanceReport> {
+        let bridge = self.bridge()?;
+        let report = bridge
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                expire_queued_messages_at: policy.expire_queued_messages_at,
+                purge_terminal_queued_messages_before: policy.purge_terminal_queued_messages_before,
+                run_wal_checkpoint: policy.run_wal_checkpoint.unwrap_or(false),
+                run_optimize: policy.run_optimize.unwrap_or(false),
+            })
+            .map_err(to_napi_error)?;
+        Ok(to_js_runtime_maintenance_report(report))
     }
 
     #[napi]
@@ -1970,6 +2043,30 @@ fn to_js_runtime_counter_summary(summary: RuntimeStateSummary) -> JsRuntimeCount
     }
 }
 
+fn to_js_runtime_database_size(size: RuntimeDatabaseSize) -> JsRuntimeDatabaseSize {
+    JsRuntimeDatabaseSize {
+        database_bytes: size.database_bytes as f64,
+        page_count: size.page_count as f64,
+        page_size_bytes: size.page_size_bytes as f64,
+        freelist_pages: size.freelist_pages as f64,
+        freelist_bytes: size.freelist_bytes as f64,
+        wal_bytes: size.wal_bytes as f64,
+    }
+}
+
+fn to_js_runtime_maintenance_report(
+    report: RuntimeMaintenanceReport,
+) -> JsRuntimeMaintenanceReport {
+    JsRuntimeMaintenanceReport {
+        size_before: to_js_runtime_database_size(report.size_before),
+        size_after: to_js_runtime_database_size(report.size_after),
+        expired_queue_messages: report.expired_queue_messages as f64,
+        purged_terminal_queue_messages: report.purged_terminal_queue_messages as f64,
+        wal_checkpoint_ran: report.wal_checkpoint_ran,
+        optimize_ran: report.optimize_ran,
+    }
+}
+
 fn runtime_counter_scope_parts(scope: RuntimeCounterScope) -> (String, String) {
     match scope {
         RuntimeCounterScope::Runtime => ("runtime".to_string(), "_global".to_string()),
@@ -2009,6 +2106,24 @@ fn parse_session_kind(raw: &str) -> napi::Result<rusty_crew_core_bridge_api::Ses
             format!("unsupported session kind {other}"),
         )),
     }
+}
+
+fn js_session_config(
+    config: JsSessionConfig,
+) -> napi::Result<rusty_crew_core_bridge_api::SessionConfig> {
+    Ok(rusty_crew_core_bridge_api::SessionConfig {
+        session_id: rusty_crew_core_bridge_api::SessionId::new(config.session_id),
+        agent_id: rusty_crew_core_bridge_api::AgentId::new(config.agent_id),
+        profile_id: rusty_crew_core_bridge_api::ProfileId::new(config.profile_id),
+        kind: parse_session_kind(&config.kind)?,
+        delegation: None,
+        resource_limits: rusty_crew_core_bridge_api::ResourceLimits {
+            workdir: None,
+            max_duration_ms: None,
+            max_delegation_depth: None,
+        },
+        tool_profile: rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+    })
 }
 
 fn to_brain_registration(
@@ -2358,10 +2473,7 @@ mod tests {
         let engine = bridge
             .initialize_engine(EngineConfig {
                 engine_data_dir: std::env::temp_dir()
-                    .join(format!(
-                        "rusty-crew-native-shutdown-{}",
-                        std::process::id()
-                    ))
+                    .join(format!("rusty-crew-native-shutdown-{}", std::process::id()))
                     .to_string_lossy()
                     .to_string(),
                 clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {

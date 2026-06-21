@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
 import { createDebugApiClient } from "./debug-api-client.js";
 import { startRustyCrewServiceHost } from "./service-host.js";
 
@@ -16,6 +17,11 @@ let host = await startHost(root, port, token);
 try {
   assert.equal(existsSync(join(root, "data", "engine")), true);
   assert.equal(existsSync(join(root, "run", "service.lock")), true);
+
+  const adminPanel = await getText("/admin");
+  assert.equal(adminPanel.status, 200);
+  assert.match(adminPanel.body, /Rusty Crew Admin/);
+  assert.match(adminPanel.body, /diagnostics/);
 
   const health = await get("/v1/admin/healthz");
   assert.equal(health.status, 200);
@@ -36,19 +42,43 @@ try {
     diagnostics.body.data.overview.persistence.tableCounts.sessions,
     1,
   );
+  assert.equal(diagnostics.body.data.overview.summary.sessions, 1);
+  assert.equal(diagnostics.body.data.overview.summary.idleSessions, 1);
+  assert.equal(
+    typeof diagnostics.body.data.overview.persistence.databaseBytes,
+    "number",
+  );
+
+  const channels = await get("/v1/admin/diagnostics/channels", token);
+  assert.equal(channels.status, 200);
+  assert.equal(channels.body.data.total, 1);
+  assert.equal(channels.body.data.items[0]?.bindingId, "field-channel");
+  assert.equal(channels.body.data.items[0]?.status, "missing");
+
+  const mcp = await get("/v1/admin/diagnostics/mcp", token);
+  assert.equal(mcp.status, 200);
+  assert.equal(mcp.body.data.total, 1);
+  assert.equal(mcp.body.data.items[0]?.bindingId, "field-mcp");
+  assert.equal(mcp.body.data.items[0]?.status, "active");
 
   const recentEvents = await get("/v1/admin/events/recent", token);
   assert.match(
     recentEvents.body.data.items[0]?.summary,
-    /1 brains registered, 1 sessions created/,
+    /1 brains registered.*1 sessions created/,
   );
 
-  const unsupported = await post("/v1/admin/control/maintenance", token, {
+  const maintenance = await post("/v1/admin/control/maintenance", token, {
     reason: "smoke",
+    runWalCheckpoint: true,
+    runOptimize: true,
   });
-  assert.equal(unsupported.status, 412);
-  assert.equal(unsupported.body.ok, false);
-  assert.equal(unsupported.body.error.reason_code, "unsupported_control");
+  assert.equal(maintenance.status, 200);
+  assert.equal(maintenance.body.ok, true);
+  assert.equal(
+    typeof maintenance.body.data.outcome.result.sizeBefore.databaseBytes,
+    "number",
+  );
+  assert.equal(maintenance.body.data.outcome.result.walCheckpointRan, true);
 
   const created = await post("/v1/admin/control/sessions", token, {
     sessionId: "field-session-two",
@@ -65,6 +95,7 @@ try {
   );
 
   const afterCreate = await get("/v1/admin/diagnostics", token);
+  assert.equal(afterCreate.body.data.overview.summary.sessions, 2);
   assert.equal(
     afterCreate.body.data.overview.persistence.tableCounts.sessions,
     2,
@@ -88,21 +119,181 @@ try {
   assert.equal(debugContext.session.sessionId, "field-session");
   assert.equal(debugContext.selectedTools[0]?.name, "read_file");
 
+  const beforeDirectTurn = await get("/v1/admin/diagnostics", token);
+  const completionPacketsBeforeDirectTurn =
+    beforeDirectTurn.body.data.overview.persistence.tableCounts
+      .completion_packets;
+
   const directTurn = await client.requestDirectDebugTurn({
     sessionId: "field-session",
     actorId: "local-operator",
     body: "Exercise direct debug over the service host.",
   });
   assert.equal(directTurn.status, "accepted");
+  assert.match(directTurn.summary, /local service brain wake completed/);
+  assert.match(directTurn.wakeId ?? "", /^service-field-session-/);
+
+  const afterDirectTurn = await get("/v1/admin/diagnostics", token);
+  assert.equal(
+    afterDirectTurn.body.data.overview.persistence.tableCounts
+      .completion_packets,
+    completionPacketsBeforeDirectTurn + 1,
+  );
+  await sleep(350);
+  const afterDirectTurnSettled = await get("/v1/admin/diagnostics", token);
+  assert.equal(
+    afterDirectTurnSettled.body.data.overview.persistence.tableCounts
+      .completion_packets,
+    completionPacketsBeforeDirectTurn + 1,
+  );
+
+  const completionPacketsBeforeScheduledWake =
+    afterDirectTurnSettled.body.data.overview.persistence.tableCounts
+      .completion_packets;
+  await host.bridge.registerScheduledWakeJob({
+    jobId: "field-session-smoke-heartbeat",
+    targetSessionId: "field-session" as SessionId,
+    intervalMs: 60_000,
+    firstDueAt: new Date(Date.now() - 1_000).toISOString(),
+  });
+  await waitUntil(async () => {
+    return (await host.bridge.diagnosticCountRows("scheduled_job_runs")) > 0;
+  }, "scheduled job was claimed by the service heartbeat");
+  await waitUntil(
+    async () => {
+      const scheduledWakeDiagnostics = await get(
+        "/v1/admin/diagnostics",
+        token,
+      );
+      return (
+        scheduledWakeDiagnostics.body.data.overview.persistence.tableCounts
+          .completion_packets > completionPacketsBeforeScheduledWake
+      );
+    },
+    "scheduled wake was dispatched by the service heartbeat",
+    async () => {
+      const diagnostics = await get("/v1/admin/diagnostics", token);
+      return JSON.stringify({
+        runs: await host.bridge.diagnosticCountRows("scheduled_job_runs"),
+        completions:
+          diagnostics.body.data.overview.persistence.tableCounts
+            .completion_packets,
+        recentEvents: diagnostics.body.data.recentEvents,
+      });
+    },
+  );
+
+  await host.bridge.createSession({
+    sessionId: "field-session-expiry" as SessionId,
+    agentId: "expiry-agent" as AgentId,
+    profileId: "missing-expiry-profile" as ProfileId,
+    kind: "full",
+  });
+  const expiring = await host.bridge.enqueueBodyFollowUpMessage({
+    sessionId: "field-session-expiry" as SessionId,
+    from: "local-operator" as AgentId,
+    body: "This queued message should expire under the heartbeat.",
+  });
+  assert.equal(expiring.state, "pending");
+  await waitUntil(
+    async () => {
+      const expiryDiagnostics = await get("/v1/admin/diagnostics", token);
+      return (
+        expiryDiagnostics.body.data.overview.runtime.counters.queueExpirations >
+        0
+      );
+    },
+    "queued message expired under the service heartbeat",
+    async () => {
+      const diagnostics = await get("/v1/admin/diagnostics", token);
+      return JSON.stringify({
+        summary: diagnostics.body.data.overview.summary,
+        counters: diagnostics.body.data.overview.runtime.counters,
+      });
+    },
+    7_000,
+  );
 
   await host.stop();
   host = await startHost(root, port, token);
 
   const restartedDiagnostics = await get("/v1/admin/diagnostics", token);
+  assert.equal(restartedDiagnostics.body.data.overview.summary.sessions, 3);
+  assert.equal(restartedDiagnostics.body.data.overview.summary.idleSessions, 1);
   assert.equal(
-    restartedDiagnostics.body.data.overview.persistence.tableCounts.sessions,
+    restartedDiagnostics.body.data.overview.summary.archivedSessions,
     2,
   );
+  assert.equal(
+    restartedDiagnostics.body.data.overview.persistence.tableCounts.sessions,
+    3,
+  );
+
+  const restartedContext = await client.directDebugContext({
+    sessionId: "field-session",
+  });
+  assert.equal(restartedContext.session.sessionId, "field-session");
+  assert.equal(restartedContext.session.status, "idle");
+  const beforeRestartDirectTurn = await get("/v1/admin/diagnostics", token);
+  const restartDirectTurn = await client.requestDirectDebugTurn({
+    sessionId: "field-session",
+    actorId: "local-operator",
+    body: "Exercise direct debug after service restart.",
+  });
+  assert.equal(restartDirectTurn.status, "accepted");
+  assert.match(restartDirectTurn.summary, /local service brain wake completed/);
+  const afterRestartDirectTurn = await get("/v1/admin/diagnostics", token);
+  assert.equal(
+    afterRestartDirectTurn.body.data.overview.persistence.tableCounts
+      .completion_packets,
+    beforeRestartDirectTurn.body.data.overview.persistence.tableCounts
+      .completion_packets + 1,
+  );
+
+  writeRuntimeConfig(root, { includeExtraMcpBinding: true });
+  const reloadConfig = await post("/v1/admin/control/config/reload", token, {
+    reason: "smoke config reload",
+  });
+  assert.equal(reloadConfig.status, 200);
+  assert.equal(reloadConfig.body.ok, true);
+  assert.equal(reloadConfig.body.data.outcome.result.sessionsAlreadyPresent, 1);
+  assert.equal(reloadConfig.body.data.outcome.result.sessionsMissing, 0);
+  const mcpAfterReload = await get("/v1/admin/diagnostics/mcp", token);
+  assert.equal(mcpAfterReload.body.data.total, 2);
+  assert.deepEqual(
+    mcpAfterReload.body.data.items
+      .map((item: { bindingId: string }) => item.bindingId)
+      .sort(),
+    ["field-mcp", "field-mcp-extra"],
+  );
+
+  await host.stop();
+
+  const noAuthRoot = mkdtempSync(join(tmpdir(), "rusty-crew-service-noauth-"));
+  const noAuthPort = await openPort();
+  writeRuntimeConfig(noAuthRoot);
+  const noAuthHost = await startNoAuthHost(noAuthRoot, noAuthPort);
+  try {
+    const noAuthPanel = await getText("/admin", noAuthPort);
+    assert.equal(noAuthPanel.status, 200);
+    assert.match(noAuthPanel.body, /tokenForm" class="token-row" hidden/);
+
+    const noAuthReady = await get("/v1/admin/readyz", undefined, noAuthPort);
+    assert.equal(noAuthReady.status, 200);
+    assert.equal(noAuthReady.body.ok, true);
+
+    const noAuthControl = await post(
+      "/v1/admin/control/scheduler/tick",
+      undefined,
+      { reason: "smoke no-auth mode" },
+      noAuthPort,
+    );
+    assert.equal(noAuthControl.status, 200);
+    assert.equal(noAuthControl.body.ok, true);
+  } finally {
+    await noAuthHost.stop();
+    rmSync(noAuthRoot, { recursive: true, force: true });
+  }
 } finally {
   await host.stop();
   assert.equal(existsSync(join(root, "run", "service.lock")), false);
@@ -111,8 +302,8 @@ try {
 
 console.log("service host smoke passed");
 
-async function get(path: string, bearer?: string) {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+async function get(path: string, bearer?: string, requestPort = port) {
+  const response = await fetch(`http://127.0.0.1:${requestPort}${path}`, {
     headers: bearer ? { authorization: `Bearer ${bearer}` } : undefined,
   });
   return {
@@ -121,11 +312,25 @@ async function get(path: string, bearer?: string) {
   };
 }
 
-async function post(path: string, bearer: string, body: unknown) {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+async function getText(path: string, requestPort = port) {
+  const response = await fetch(`http://127.0.0.1:${requestPort}${path}`);
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    body: await response.text(),
+  };
+}
+
+async function post(
+  path: string,
+  bearer: string | undefined,
+  body: unknown,
+  requestPort = port,
+) {
+  const response = await fetch(`http://127.0.0.1:${requestPort}${path}`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${bearer}`,
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
@@ -164,33 +369,109 @@ async function startHost(root: string, port: number, token: string) {
       RUSTY_CREW_ADMIN_ALLOW_LAN: "false",
       RUSTY_CREW_ADMIN_PORT: String(port),
       RUSTY_CREW_ADMIN_TOKEN: token,
+      RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "100",
+      RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "50",
     },
-    now: () => "2026-06-21T03:30:00.000Z",
   });
 }
 
-function writeRuntimeConfig(root: string): void {
+async function startNoAuthHost(root: string, port: number) {
+  return startRustyCrewServiceHost({
+    env: {
+      RUSTY_CREW_DATA_DIR: root,
+      RUSTY_CREW_ADMIN_HOST: "127.0.0.1",
+      RUSTY_CREW_ADMIN_ALLOW_LAN: "false",
+      RUSTY_CREW_ADMIN_PORT: String(port),
+      RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+      RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "100",
+      RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "50",
+    },
+  });
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntil(
+  predicate: () => Promise<boolean>,
+  description: string,
+  details?: () => Promise<string>,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const detailText = details ? `: ${await details()}` : "";
+  assert.fail(`timed out waiting for ${description}${detailText}`);
+}
+
+function writeRuntimeConfig(
+  root: string,
+  options: { includeExtraMcpBinding?: boolean } = {},
+): void {
   const configDir = join(root, "config");
   const profilesDir = join(configDir, "profiles");
   mkdirSync(profilesDir, { recursive: true });
+  const runtimeConfig = {
+    profilesDir,
+    brains: [{ profileId: "field-profile" }],
+    sessions: [
+      {
+        sessionId: "field-session",
+        agentId: "field-agent",
+        profileId: "field-profile",
+        kind: "full",
+      },
+    ],
+    channelBindings: [
+      {
+        bindingId: "field-channel",
+        adapterId: "den-channel-main",
+        provider: "den_channels",
+        agentId: "field-agent",
+        sessionId: "field-session",
+        profileId: "field-profile",
+        externalChannelId: "field-room",
+        externalThreadId: "field-thread",
+        externalUserId: "field-agent-external",
+        status: "active",
+      },
+    ],
+    mcpBindings: [
+      {
+        bindingId: "field-mcp",
+        adapterId: "mcp-ts-main",
+        agentId: "field-agent",
+        sessionId: "field-session",
+        profileId: "field-profile",
+        serverNames: ["field"],
+        endpointRef: "config://mcp/field",
+        transport: "stdio",
+        toolProfileKey: "field-profile-mcp",
+        status: "active",
+      },
+    ],
+  };
+  if (options.includeExtraMcpBinding) {
+    runtimeConfig.mcpBindings.push({
+      bindingId: "field-mcp-extra",
+      adapterId: "mcp-ts-extra",
+      agentId: "field-agent",
+      sessionId: "field-session",
+      profileId: "field-profile",
+      serverNames: ["field-extra"],
+      endpointRef: "config://mcp/field-extra",
+      transport: "stdio",
+      toolProfileKey: "field-profile-mcp-extra",
+      status: "active",
+    });
+  }
   writeFileSync(
     join(configDir, "service.json"),
-    JSON.stringify(
-      {
-        profilesDir,
-        brains: [{ profileId: "field-profile" }],
-        sessions: [
-          {
-            sessionId: "field-session",
-            agentId: "field-agent",
-            profileId: "field-profile",
-            kind: "full",
-          },
-        ],
-      },
-      null,
-      2,
-    ),
+    JSON.stringify(runtimeConfig, null, 2),
   );
   writeFileSync(
     join(profilesDir, "field-profile.json"),

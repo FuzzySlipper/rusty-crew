@@ -12,7 +12,10 @@ export interface RustyCrewServiceEnv {
   RUSTY_CREW_ADMIN_HOST?: string;
   RUSTY_CREW_ADMIN_PORT?: string;
   RUSTY_CREW_ADMIN_ALLOW_LAN?: string;
+  RUSTY_CREW_ADMIN_AUTH_MODE?: string;
   RUSTY_CREW_ADMIN_TOKEN?: string;
+  RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS?: string;
+  RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS?: string;
 }
 
 export interface RustyCrewServicePaths {
@@ -31,12 +34,19 @@ export interface RustyCrewAdminConfig {
   host: string;
   port: number;
   allowLan: boolean;
+  authMode: "bearer" | "none";
   token?: string;
+}
+
+export interface RustyCrewBackgroundConfig {
+  schedulerTickIntervalMs: number;
+  wakeDispatchIntervalMs: number;
 }
 
 export interface RustyCrewServiceConfig {
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
+  background: RustyCrewBackgroundConfig;
 }
 
 export interface RustyCrewServiceLock {
@@ -89,11 +99,24 @@ export function loadRustyCrewServiceConfig(
       true,
       "RUSTY_CREW_ADMIN_ALLOW_LAN",
     ),
+    authMode: parseAuthMode(env.RUSTY_CREW_ADMIN_AUTH_MODE),
     token: normalizeOptional(env.RUSTY_CREW_ADMIN_TOKEN),
   };
+  const background: RustyCrewBackgroundConfig = {
+    schedulerTickIntervalMs: parseNonNegativeInteger(
+      env.RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS,
+      1_000,
+      "RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS",
+    ),
+    wakeDispatchIntervalMs: parseNonNegativeInteger(
+      env.RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS,
+      250,
+      "RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS",
+    ),
+  };
 
-  validateRustyCrewServiceConfig({ paths, admin });
-  return { paths, admin };
+  validateRustyCrewServiceConfig({ paths, admin, background });
+  return { paths, admin, background };
 }
 
 export function validateRustyCrewServiceConfig(
@@ -111,6 +134,12 @@ export function validateRustyCrewServiceConfig(
   if (!isLoopbackHost(config.admin.host) && !config.admin.allowLan) {
     throw new Error(
       "RUSTY_CREW_ADMIN_ALLOW_LAN must be true when binding admin HTTP to a non-loopback host",
+    );
+  }
+
+  if (config.admin.authMode === "bearer" && !config.admin.token) {
+    throw new Error(
+      "RUSTY_CREW_ADMIN_TOKEN is required when RUSTY_CREW_ADMIN_AUTH_MODE=bearer",
     );
   }
 }
@@ -199,6 +228,23 @@ function parsePort(
   return port;
 }
 
+function parseNonNegativeInteger(
+  input: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  const value = normalizeOptional(input);
+  if (value === undefined) return fallback;
+  if (!/^[0-9]+$/.test(value)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
 function parseBoolean(
   input: string | undefined,
   fallback: boolean,
@@ -219,6 +265,21 @@ function parseBoolean(
       return false;
     default:
       throw new Error(`${name} must be a boolean`);
+  }
+}
+
+function parseAuthMode(
+  input: string | undefined,
+): RustyCrewAdminConfig["authMode"] {
+  const value = normalizeOptional(input);
+  if (value === undefined) return "bearer";
+  switch (value.toLowerCase()) {
+    case "bearer":
+      return "bearer";
+    case "none":
+      return "none";
+    default:
+      throw new Error("RUSTY_CREW_ADMIN_AUTH_MODE must be bearer or none");
   }
 }
 

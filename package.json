@@ -74,6 +74,7 @@
     "smoke:patch-tool": "npm run smoke:patch-tool -w @rusty-crew/brain-island",
     "smoke:service-config": "npm run smoke:service-config -w @rusty-crew/brain-island",
     "smoke:service-host": "npm run smoke:service-host -w @rusty-crew/brain-island",
+    "service:debug-turn": "npm run service:debug-turn -w @rusty-crew/brain-island --",
     "service:start": "npm run service:start -w @rusty-crew/brain-island",
     "smoke:den": "npm run smoke -w @rusty-crew/adapter-den",
     "smoke:den-router-metadata": "npm run smoke:router-metadata -w @rusty-crew/adapter-den",

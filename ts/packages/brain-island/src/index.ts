@@ -131,6 +131,7 @@ export {
   validateRustyCrewServiceConfig,
 } from "./service-config.js";
 export type {
+  RustyCrewBackgroundConfig,
   RustyCrewAdminConfig,
   RustyCrewServiceConfig,
   RustyCrewServiceEnv,

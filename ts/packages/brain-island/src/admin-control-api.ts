@@ -16,6 +16,7 @@ export type AdminControlCommandName =
   | "new_session"
   | "cancel_delegation"
   | "request_delegated_checkpoint"
+  | "reload_config"
   | "reload_mcp"
   | "run_maintenance"
   | "scheduler_tick"
@@ -97,6 +98,9 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   requestDelegatedCheckpoint?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  reloadConfig?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   reloadMcp?(
@@ -406,6 +410,24 @@ function parseControlCommand(
   }
 
   if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "config" &&
+    parts[4] === "reload"
+  ) {
+    return {
+      ok: true,
+      command: {
+        ...commandBase,
+        name: "reload_config",
+        target: {},
+      },
+    };
+  }
+
+  if (
     parts.length === 6 &&
     parts[0] === "v1" &&
     parts[1] === "admin" &&
@@ -669,6 +691,8 @@ function executorForCommand(
       return executor.cancelDelegation;
     case "request_delegated_checkpoint":
       return executor.requestDelegatedCheckpoint;
+    case "reload_config":
+      return executor.reloadConfig;
     case "reload_mcp":
       return executor.reloadMcp;
     case "run_maintenance":

@@ -8,9 +8,10 @@ use rusty_crew_core_persistence::{
     CoordinationStore, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
     ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
     QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeStateSummary, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
+    RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary,
+    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord,
+    ScheduledRunStatus, ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
@@ -134,8 +135,42 @@ impl CoreEngine {
         Ok(state)
     }
 
+    pub fn ensure_configured_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
+        match self.sessions.get_session(&config.session_id) {
+            Ok(existing) => {
+                if existing.agent_id != config.agent_id
+                    || existing.profile_id != config.profile_id
+                    || existing.kind != config.kind
+                    || existing.delegation != config.delegation
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::AlreadyExists,
+                        format!(
+                            "session {} already exists with a different configured identity",
+                            config.session_id
+                        ),
+                    ));
+                }
+                if existing.status == SessionStatus::Archived {
+                    let now = self.now();
+                    self.store.expire_queued_messages_at(&now)?;
+                    let state = self.sessions.reactivate_session(&config.session_id, now)?;
+                    self.store.save_session(&state)?;
+                    return Ok(state);
+                }
+                Ok(existing)
+            }
+            Err(error) if error.kind == CoreErrorKind::NotFound => self.create_session(config),
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn get_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
         self.sessions.get_session(session_id)
+    }
+
+    pub fn list_sessions(&self) -> CoreResult<Vec<SessionState>> {
+        self.sessions.all_sessions()
     }
 
     pub fn archive_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
@@ -340,6 +375,17 @@ impl CoreEngine {
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         self.store.count_rows(table)
+    }
+
+    pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
+        self.store.database_size()
+    }
+
+    pub fn run_maintenance(
+        &self,
+        policy: &RuntimeMaintenancePolicy,
+    ) -> CoreResult<RuntimeMaintenanceReport> {
+        self.store.run_maintenance(policy)
     }
 
     pub fn list_profile_memory(
@@ -1643,6 +1689,63 @@ mod tests {
         assert_eq!(summary.dropped_subscriptions, 2);
         assert_receiver_disconnects_after_buffered_events(first_receiver);
         assert_receiver_disconnects_after_buffered_events(second_receiver);
+    }
+
+    #[test]
+    fn ensure_configured_session_reactivates_archived_session_without_replacement() {
+        let data_dir = unique_data_dir("ensure-configured-session");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let config = session_config(
+            "configured-session",
+            "prime",
+            "prime-profile",
+            SessionKind::Full,
+        );
+        let created = engine.create_session(config.clone()).unwrap();
+        engine.archive_session(&created.session_id).unwrap();
+
+        let store = CoordinationStore::open(data_dir).unwrap();
+        store
+            .save_queued_message(&QueuedMessageRecord {
+                message_id: "stale-follow-up".to_string(),
+                owner_session_id: Some(created.session_id.clone()),
+                owner_agent_id: created.agent_id.clone(),
+                message: AgentMessage {
+                    from: AgentId::new("operator"),
+                    to: created.agent_id.clone(),
+                    body: "do not resurrect this stale message".to_string(),
+                    correlation_id: None,
+                },
+                source_sequence: None,
+                enqueued_at: "2026-06-18T23:59:00Z".to_string(),
+                expires_at: "2026-06-18T23:59:01Z".to_string(),
+                ttl_ms: 1_000,
+                delivery_attempts: 0,
+                state: QueuedMessageState::Pending,
+                terminal_at: None,
+                state_reason: None,
+            })
+            .unwrap();
+
+        let reactivated = engine.ensure_configured_session(config).unwrap();
+
+        assert_eq!(reactivated.session_id, created.session_id);
+        assert_eq!(reactivated.handle, created.handle);
+        assert_eq!(reactivated.status, SessionStatus::Idle);
+        let body = engine.prepare_body_state_for_wake(&created.session_id).unwrap();
+        assert!(body.pending_messages.is_empty());
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Expired),
+                    owner_session_id: Some(created.session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            1,
+        );
     }
 
     #[test]

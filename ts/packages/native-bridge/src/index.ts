@@ -122,12 +122,26 @@ interface NativeBridgeBinding {
   drainDelegatedSessions(parentSessionId?: string): string[];
   cleanupDelegatedResourcesJson(): string;
   delegatedSessionStatusJson(delegatedSessionId: string): string;
+  listSessionsJson(): string;
   submitBrainTextDelta(
     wakeId: string,
     sessionId: string,
     text: string,
   ): { accepted: boolean; sequence: number };
   createSession(config: {
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: string;
+  }): {
+    handle: number;
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: string;
+    status: string;
+  };
+  ensureConfiguredSession(config: {
     sessionId: string;
     agentId: string;
     profileId: string;
@@ -196,6 +210,10 @@ interface NativeBridgeBinding {
     rejectedActionsJson: string;
   };
   countRows(table: string): number;
+  databaseSize(): NativeRuntimeDatabaseSize;
+  runMaintenance(
+    policy: NativeRuntimeMaintenancePolicy,
+  ): NativeRuntimeMaintenanceReport;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): NativeProfileMemoryRecord[];
@@ -396,6 +414,31 @@ export interface NativeRuntimeCounterSummary {
   queueExpirations: number;
 }
 
+export interface NativeRuntimeDatabaseSize {
+  databaseBytes: number;
+  pageCount: number;
+  pageSizeBytes: number;
+  freelistPages: number;
+  freelistBytes: number;
+  walBytes: number;
+}
+
+export interface NativeRuntimeMaintenancePolicy {
+  expireQueuedMessagesAt?: string;
+  purgeTerminalQueuedMessagesBefore?: string;
+  runWalCheckpoint?: boolean;
+  runOptimize?: boolean;
+}
+
+export interface NativeRuntimeMaintenanceReport {
+  sizeBefore: NativeRuntimeDatabaseSize;
+  sizeAfter: NativeRuntimeDatabaseSize;
+  expiredQueueMessages: number;
+  purgedTerminalQueueMessages: number;
+  walCheckpointRan: boolean;
+  optimizeRan: boolean;
+}
+
 export interface NativeQueuedMessageRecord {
   messageId: string;
   ownerSessionId?: string;
@@ -448,6 +491,7 @@ export interface NativeBridgeModule {
   delegatedSessionStatus(
     delegatedSessionId: SessionId,
   ): Promise<DelegatedSessionRuntimeStatus>;
+  listSessions(): Promise<SessionState[]>;
   subscribeEvents(subscription: EventSubscription): Promise<SubscriptionHandle>;
   unsubscribeEvents(handle: SubscriptionHandle): Promise<Unit>;
   drainSubscriptionEvents(
@@ -459,6 +503,12 @@ export interface NativeBridgeModule {
    * agent; it is not a brain wake-loop diagnostic bypass.
    */
   createSession(config: {
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: "full" | "worker" | "delegated";
+  }): Promise<NativeSessionStateSummary>;
+  ensureConfiguredSession(config: {
     sessionId: string;
     agentId: string;
     profileId: string;
@@ -510,6 +560,10 @@ export interface NativeBridgeModule {
     actions: BrainActionBatch["actions"],
   ): Promise<ActionBatchReceipt>;
   diagnosticCountRows(table: string): Promise<number>;
+  databaseSize(): Promise<NativeRuntimeDatabaseSize>;
+  runMaintenance(
+    policy: NativeRuntimeMaintenancePolicy,
+  ): Promise<NativeRuntimeMaintenanceReport>;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
@@ -564,6 +618,7 @@ export const nativeManifestOperationNames = [
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
+  "ensure_configured_session",
   "register_scheduled_wake_job",
   "run_scheduler_tick",
   "request_scheduled_job_run",
@@ -574,6 +629,9 @@ export const nativeManifestOperationNames = [
   "drain_delegated_sessions",
   "cleanup_delegated_resources",
   "delegated_session_status",
+  "list_sessions",
+  "database_size",
+  "run_maintenance",
   "subscribe_events",
   "unsubscribe_events",
   "get_buffer",
@@ -604,6 +662,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
+    ensureConfiguredSession: unavailable("ensure_configured_session"),
     registerScheduledWakeJob: unavailable("register_scheduled_wake_job"),
     runSchedulerTick: unavailable("run_scheduler_tick"),
     requestScheduledJobRun: unavailable("request_scheduled_job_run"),
@@ -614,6 +673,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     drainDelegatedSessions: unavailable("drain_delegated_sessions"),
     cleanupDelegatedResources: unavailable("cleanup_delegated_resources"),
     delegatedSessionStatus: unavailable("delegated_session_status"),
+    listSessions: unavailable("list_sessions"),
     subscribeEvents: unavailable("subscribe_events"),
     unsubscribeEvents: unavailable("unsubscribe_events"),
     drainSubscriptionEvents: unavailable("subscribe_events"),
@@ -624,6 +684,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     diagnosticProjectBodyStateJson: unavailable("wake_brain"),
     diagnosticSubmitBrainActionsJson: unavailable("submit_brain_actions"),
     diagnosticCountRows: unavailable("initialize_engine"),
+    databaseSize: unavailable("initialize_engine"),
+    runMaintenance: unavailable("initialize_engine"),
     listProfileMemory: unavailable("initialize_engine"),
     getProfileMemory: unavailable("initialize_engine"),
     addProfileMemory: unavailable("initialize_engine"),
@@ -795,6 +857,10 @@ function createNativeBridgeModule(
           binding.delegatedSessionStatusJson(delegatedSessionId),
         ) as RawDelegatedSessionRuntimeStatus,
       ),
+    listSessions: async () =>
+      (JSON.parse(binding.listSessionsJson()) as RawSessionState[]).map(
+        toSessionState,
+      ),
     subscribeEvents: async (subscription) =>
       binding.subscribeEvents({
         eventKinds: subscription.eventKinds,
@@ -811,6 +877,8 @@ function createNativeBridgeModule(
         .drainSubscriptionEvents(handle, maxEvents)
         .map((eventJson) => toCoreEvent(JSON.parse(eventJson) as RawCoreEvent)),
     createSession: async (config) => binding.createSession(config),
+    ensureConfiguredSession: async (config) =>
+      binding.ensureConfiguredSession(config),
     routeAgentMessage: async (from, to, body, correlationId) =>
       binding.routeAgentMessage(from, to, body, correlationId),
     enqueueBodyFollowUpMessage: async (input) =>
@@ -901,6 +969,8 @@ function createNativeBridgeModule(
       };
     },
     diagnosticCountRows: async (table) => binding.countRows(table),
+    databaseSize: async () => binding.databaseSize(),
+    runMaintenance: async (policy) => binding.runMaintenance(policy),
     listProfileMemory: async (query) => binding.listProfileMemory(query),
     getProfileMemory: async (input) =>
       binding.getProfileMemory(

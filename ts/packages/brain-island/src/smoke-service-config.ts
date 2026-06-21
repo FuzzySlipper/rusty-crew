@@ -12,11 +12,18 @@ import {
   RUSTY_CREW_DEFAULT_DATA_DIR,
 } from "./service-config.js";
 
-const defaultConfig = loadRustyCrewServiceConfig({});
+assert.throws(() => loadRustyCrewServiceConfig({}), /RUSTY_CREW_ADMIN_TOKEN/);
+
+const defaultConfig = loadRustyCrewServiceConfig({
+  RUSTY_CREW_ADMIN_TOKEN: "default-token",
+});
 assert.equal(defaultConfig.paths.dataDir, RUSTY_CREW_DEFAULT_DATA_DIR);
 assert.equal(defaultConfig.admin.host, RUSTY_CREW_DEFAULT_ADMIN_HOST);
 assert.equal(defaultConfig.admin.port, RUSTY_CREW_DEFAULT_ADMIN_PORT);
 assert.equal(defaultConfig.admin.allowLan, true);
+assert.equal(defaultConfig.admin.authMode, "bearer");
+assert.equal(defaultConfig.background.schedulerTickIntervalMs, 1_000);
+assert.equal(defaultConfig.background.wakeDispatchIntervalMs, 250);
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
@@ -24,6 +31,8 @@ try {
     RUSTY_CREW_DATA_DIR: root,
     RUSTY_CREW_ADMIN_PORT: "19447",
     RUSTY_CREW_ADMIN_TOKEN: "local-token",
+    RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "2000",
+    RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "500",
   });
 
   assert.equal(config.paths.configDir, join(root, "config"));
@@ -36,7 +45,17 @@ try {
   assert.equal(config.paths.runDir, join(root, "run"));
   assert.equal(config.paths.artifactDir, join(root, "artifacts"));
   assert.equal(config.paths.backupDir, join(root, "backups"));
+  assert.equal(config.admin.authMode, "bearer");
   assert.equal(config.admin.token, "local-token");
+  assert.equal(config.background.schedulerTickIntervalMs, 2_000);
+  assert.equal(config.background.wakeDispatchIntervalMs, 500);
+
+  const noAuth = loadRustyCrewServiceConfig({
+    RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+  });
+  assert.equal(noAuth.admin.authMode, "none");
+  assert.equal(noAuth.admin.token, undefined);
 
   ensureRustyCrewServiceDirectories(config);
   for (const path of [
@@ -78,6 +97,7 @@ try {
     RUSTY_CREW_DATA_DIR: root,
     RUSTY_CREW_ADMIN_HOST: "127.0.0.1",
     RUSTY_CREW_ADMIN_ALLOW_LAN: "false",
+    RUSTY_CREW_ADMIN_TOKEN: "loopback-token",
   });
   assert.equal(loopback.admin.allowLan, false);
 } finally {
