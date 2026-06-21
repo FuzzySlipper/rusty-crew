@@ -7,6 +7,7 @@ import {
   dispatchChannelActivityProjection,
   dispatchChannelMessageProjection,
   ingestAcceptedChannelDecision,
+  ingestChannelInboundMessage,
   InMemoryDenChannelsCursorStore,
   projectAgentMessageToChannel,
   projectCoreEventToChannelActivity,
@@ -17,17 +18,32 @@ import type {
   AgentId,
   ChannelBindingRecord,
   CoreEvent,
+  NormalizedChannelInboundMessage,
   NormalizedChannelActivityProjection,
   NormalizedChannelOutboundMessage,
   ProfileId,
   SessionId,
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import { ensureConfiguredSessionForChannelBinding } from "./service-runtime-config.js";
+import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 
 const adapterId = "den-channel-main" as AdapterId;
 const bindings: ChannelBindingRecord[] = [
   channelBinding("binding-alpha", "agent-alpha", "session-alpha", "prime"),
   channelBinding("binding-beta", "agent-beta", "session-beta", "review"),
+  channelBinding(
+    "binding-alpha-telegram",
+    "agent-alpha",
+    "session-alpha",
+    "prime",
+    {
+      provider: "telegram",
+      externalChannelId: "telegram-room",
+      externalThreadId: "telegram-thread",
+      externalUserId: "telegram-user-alpha",
+    },
+  ),
 ];
 const alphaTransport = createSimulatedDenChannelsTransport("alpha-ws");
 const betaTransport = createSimulatedDenChannelsTransport("beta-ws");
@@ -49,18 +65,26 @@ const engine = await native.initializeEngine({
 });
 
 try {
-  await native.createSession({
-    sessionId: "session-alpha",
-    agentId: "agent-alpha",
-    profileId: "prime",
-    kind: "full",
-  });
-  await native.createSession({
-    sessionId: "session-beta",
-    agentId: "agent-beta",
-    profileId: "review",
-    kind: "full",
-  });
+  const runtimeConfig: RustyCrewRuntimeConfig = {
+    profilesDir: engineDataDir,
+    brains: [],
+    sessions: [
+      {
+        sessionId: "session-alpha" as SessionId,
+        agentId: "agent-alpha" as AgentId,
+        profileId: "prime" as ProfileId,
+        kind: "full",
+      },
+      {
+        sessionId: "session-beta" as SessionId,
+        agentId: "agent-beta" as AgentId,
+        profileId: "review" as ProfileId,
+        kind: "full",
+      },
+    ],
+    channelBindings: bindings,
+    mcpBindings: [],
+  };
   const events = await native.subscribeEvents({
     eventKinds: ["agent_message_routed", "brain_wake_requested"],
   });
@@ -80,6 +104,14 @@ try {
       );
     },
   };
+  const ensureSessionForRoute = async (request: {
+    binding: ChannelBindingRecord;
+  }) =>
+    ensureConfiguredSessionForChannelBinding({
+      bridge: native,
+      runtimeConfig,
+      binding: request.binding,
+    });
 
   const alphaInbound = await alphaController.acceptInbound(
     {
@@ -113,23 +145,82 @@ try {
   const alphaIngress = await ingestAcceptedChannelDecision(alphaInbound, {
     bridge,
     bindings,
+    ensureSessionForRoute,
     now: "2026-06-20T11:30:02.000Z",
   });
   const betaIngress = await ingestAcceptedChannelDecision(betaInbound, {
     bridge,
     bindings,
+    ensureSessionForRoute,
     now: "2026-06-20T11:30:04.000Z",
   });
+  const alphaTelegramIngress = await ingestChannelInboundMessage(
+    {
+      kind: "channel_inbound_message.v1",
+      adapterId,
+      bindingId: "binding-alpha-telegram",
+      runtime: {
+        agentId: "agent-alpha" as AgentId,
+        sessionId: "session-alpha" as SessionId,
+        profileId: "prime" as ProfileId,
+      },
+      providerRefs: {
+        provider: "telegram",
+        externalChannelId: "telegram-room",
+        externalThreadId: "telegram-thread",
+        externalMessageId: "telegram-alpha-1",
+        externalUserId: "telegram-user-alpha",
+      },
+      author: { externalUserId: "telegram-user-alpha", displayLabel: "Ada" },
+      body: "alpha asks from telegram too",
+      attachments: [],
+      mentions: [],
+      receivedAt: "2026-06-20T11:30:05.000Z",
+      ttlMs: 5_000,
+      expiresAt: "2026-06-20T11:30:10.000Z",
+      cursor: "telegram-1",
+      idempotencyKey: "telegram-alpha-1",
+      visibility: "conversation",
+      provenance: {},
+    } satisfies NormalizedChannelInboundMessage,
+    {
+      bridge,
+      bindings,
+      ensureSessionForRoute,
+      now: "2026-06-20T11:30:06.000Z",
+    },
+  );
 
   assert.equal(alphaIngress.status, "routed");
   assert.equal(betaIngress.status, "routed");
-  if (alphaIngress.status !== "routed" || betaIngress.status !== "routed") {
-    throw new Error("expected both channel messages to route");
+  assert.equal(alphaTelegramIngress.status, "routed");
+  if (
+    alphaIngress.status !== "routed" ||
+    betaIngress.status !== "routed" ||
+    alphaTelegramIngress.status !== "routed"
+  ) {
+    throw new Error("expected channel messages to route");
   }
+  assert.equal(alphaIngress.session?.sessionId, "session-alpha");
+  assert.equal(betaIngress.session?.sessionId, "session-beta");
+  assert.equal(alphaTelegramIngress.session?.sessionId, "session-alpha");
   assert.equal(alphaIngress.routedMessage.to, "agent-alpha");
   assert.equal(betaIngress.routedMessage.to, "agent-beta");
+  assert.equal(alphaTelegramIngress.routedMessage.to, "agent-alpha");
   assert.match(alphaIngress.routedMessage.correlationId ?? "", /^channel:/);
   assert.match(betaIngress.routedMessage.correlationId ?? "", /^channel:/);
+  assert.match(
+    alphaTelegramIngress.routedMessage.correlationId ?? "",
+    /^channel:binding-alpha-telegram:/,
+  );
+
+  const activeSessions = (await native.listSessions()).filter(
+    (session) => session.status !== "archived",
+  );
+  assert.deepEqual(activeSessions.map((session) => session.sessionId).sort(), [
+    "session-alpha",
+    "session-beta",
+  ]);
 
   const routedEvents = await native.drainSubscriptionEvents(events, 12);
   assert.equal(
@@ -146,6 +237,14 @@ try {
         event.type === "brain_wake_requested" &&
         event.sessionId === "session-beta",
     ),
+    true,
+  );
+  assert.equal(
+    routedEvents.filter(
+      (event) =>
+        event.type === "brain_wake_requested" &&
+        event.sessionId === "session-alpha",
+    ).length >= 2,
     true,
   );
 
@@ -275,6 +374,7 @@ try {
         projectedMessages: projectedMessages.length,
         projectedActivities: projectedActivities.length,
         internalRoute: internalRoute.accepted,
+        sessions: activeSessions.length,
       },
       null,
       2,
@@ -310,17 +410,24 @@ function channelBinding(
   agentId: string,
   sessionId: string,
   profileId: string,
+  options: {
+    provider?: string;
+    externalChannelId?: string;
+    externalThreadId?: string;
+    externalUserId?: string;
+  } = {},
 ): ChannelBindingRecord {
   return {
     bindingId,
     adapterId,
-    provider: "den_channels",
+    provider: options.provider ?? "den_channels",
     agentId: agentId as AgentId,
     sessionId: sessionId as SessionId,
     profileId: profileId as ProfileId,
-    externalChannelId: "crew-room",
-    externalThreadId: bindingId.replace("binding-", "thread-"),
-    externalUserId: `${agentId}-external`,
+    externalChannelId: options.externalChannelId ?? "crew-room",
+    externalThreadId:
+      options.externalThreadId ?? bindingId.replace("binding-", "thread-"),
+    externalUserId: options.externalUserId ?? `${agentId}-external`,
     status: "active",
   };
 }

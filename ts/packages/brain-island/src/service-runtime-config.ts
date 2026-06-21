@@ -16,6 +16,7 @@ import type {
 import type {
   BrainWakeExecutor,
   NativeBridgeModule,
+  NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
@@ -145,6 +146,57 @@ export async function applyRustyCrewRuntimeConfig(input: {
   }
 
   return result;
+}
+
+export function configuredSessionForChannelBinding(
+  runtimeConfig: RustyCrewRuntimeConfig,
+  binding: ChannelBindingRecord,
+): RustyCrewConfiguredSession | undefined {
+  const matchingSessions =
+    binding.sessionId === undefined
+      ? runtimeConfig.sessions.filter(
+          (session) => session.agentId === binding.agentId,
+        )
+      : runtimeConfig.sessions.filter(
+          (session) => session.sessionId === binding.sessionId,
+        );
+
+  if (matchingSessions.length === 0) return undefined;
+  if (matchingSessions.length > 1) {
+    throw new Error(
+      `channel binding ${binding.bindingId} matches multiple configured sessions for agent ${binding.agentId}`,
+    );
+  }
+
+  const session = matchingSessions[0]!;
+  if (session.agentId !== binding.agentId) {
+    throw new Error(
+      `channel binding ${binding.bindingId} targets agent ${binding.agentId} but configured session ${session.sessionId} belongs to ${session.agentId}`,
+    );
+  }
+  if (session.profileId !== binding.profileId) {
+    throw new Error(
+      `channel binding ${binding.bindingId} targets profile ${binding.profileId} but configured session ${session.sessionId} uses ${session.profileId}`,
+    );
+  }
+  return session;
+}
+
+export async function ensureConfiguredSessionForChannelBinding(input: {
+  bridge: Pick<NativeBridgeModule, "ensureConfiguredSession">;
+  runtimeConfig: RustyCrewRuntimeConfig;
+  binding: ChannelBindingRecord;
+}): Promise<NativeSessionStateSummary> {
+  const session = configuredSessionForChannelBinding(
+    input.runtimeConfig,
+    input.binding,
+  );
+  if (session === undefined) {
+    throw new Error(
+      `channel binding ${input.binding.bindingId} has no matching configured session`,
+    );
+  }
+  return input.bridge.ensureConfiguredSession(session);
 }
 
 async function createConfiguredBrain(

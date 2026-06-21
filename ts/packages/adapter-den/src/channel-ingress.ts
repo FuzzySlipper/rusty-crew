@@ -10,7 +10,10 @@ import {
   isExpiredChannelInboundMessage,
 } from "./den-channels.js";
 import type { DenChannelsInboundDecision } from "./den-channel-transport.js";
-import type { ChannelRoutingOptions } from "./channel-routing.js";
+import type {
+  ChannelRouteRequest,
+  ChannelRoutingOptions,
+} from "./channel-routing.js";
 import { resolveChannelRoute } from "./channel-routing.js";
 
 export interface ChannelIngressBridge {
@@ -22,10 +25,25 @@ export interface ChannelIngressBridge {
   ): Promise<EventReceipt> | EventReceipt;
 }
 
+export interface ChannelSessionBootstrapRequest {
+  message: NormalizedChannelInboundMessage;
+  binding: ChannelBindingRecord;
+  route: ChannelRouteRequest;
+}
+
+export interface ChannelSessionBootstrapResult {
+  sessionId: string;
+  agentId?: string;
+  profileId?: string;
+  kind?: string;
+  status?: string;
+}
+
 export type ChannelIngressResult =
   | {
       status: "routed";
       message: NormalizedChannelInboundMessage;
+      session?: ChannelSessionBootstrapResult;
       externalEvent: ExternalEvent;
       externalReceipt: EventReceipt;
       routedMessage: AgentMessage;
@@ -47,6 +65,14 @@ export type ChannelIngressResult =
 export interface ChannelIngressOptions {
   bridge: ChannelIngressBridge;
   bindings: readonly ChannelBindingRecord[];
+  ensureSessionForRoute?:
+    | ((
+        request: ChannelSessionBootstrapRequest,
+      ) =>
+        | Promise<ChannelSessionBootstrapResult | undefined>
+        | ChannelSessionBootstrapResult
+        | undefined)
+    | undefined;
   now?: string;
   routing?: ChannelRoutingOptions;
 }
@@ -92,6 +118,11 @@ export async function ingestChannelInboundMessage(
     };
   }
 
+  const session = await options.ensureSessionForRoute?.({
+    message,
+    binding: resolution.binding,
+    route: resolution.route,
+  });
   const externalEvent = denChannelsInboundToChannelExternalEvent(
     message,
     resolution.route.correlationId,
@@ -109,6 +140,7 @@ export async function ingestChannelInboundMessage(
   return {
     status: "routed",
     message,
+    session,
     externalEvent,
     externalReceipt,
     routedMessage,

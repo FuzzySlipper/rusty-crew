@@ -512,15 +512,19 @@ assert.equal(staleInbound.reason, "stale_cursor");
 
 const channelIngressEvents: ExternalEvent[] = [];
 const channelIngressRoutes: AgentMessage[] = [];
+const channelIngressBootstraps: string[] = [];
+const channelIngressOrder: string[] = [];
 let channelIngressSequence = 100;
 const channelIngressBridge = {
   injectExternalEvent(event: ExternalEvent): EventReceipt {
     channelIngressEvents.push(event);
+    channelIngressOrder.push("inject");
     channelIngressSequence += 1;
     return { accepted: true, sequence: channelIngressSequence };
   },
   routeAgentMessage(message: AgentMessage): EventReceipt {
     channelIngressRoutes.push(message);
+    channelIngressOrder.push("route");
     channelIngressSequence += 1;
     return { accepted: true, sequence: channelIngressSequence };
   },
@@ -529,10 +533,21 @@ const channelIngressBridge = {
 const acceptedIngress = await ingestAcceptedChannelDecision(acceptedInbound, {
   bridge: channelIngressBridge,
   bindings: sharedChannelBindings,
+  ensureSessionForRoute(request) {
+    channelIngressBootstraps.push(request.binding.bindingId);
+    channelIngressOrder.push("bootstrap");
+    return {
+      sessionId: request.binding.sessionId ?? "session-alpha",
+      agentId: request.binding.agentId,
+      profileId: request.binding.profileId,
+      status: "active",
+    };
+  },
   now: "2026-06-20T05:01:01.000Z",
 });
 assert.equal(acceptedIngress.status, "routed");
 if (acceptedIngress.status === "routed") {
+  assert.equal(acceptedIngress.session?.sessionId, "session-alpha");
   assert.equal(acceptedIngress.externalEvent.payload.type, "channel_message");
   assert.equal(acceptedIngress.routedMessage.to, "agent-alpha");
   assert.match(
@@ -542,6 +557,8 @@ if (acceptedIngress.status === "routed") {
 }
 assert.equal(channelIngressEvents.length, 1);
 assert.equal(channelIngressRoutes.length, 1);
+assert.deepEqual(channelIngressBootstraps, ["binding-alpha"]);
+assert.deepEqual(channelIngressOrder, ["bootstrap", "inject", "route"]);
 
 const duplicateIngress = await ingestAcceptedChannelDecision(duplicateInbound, {
   bridge: channelIngressBridge,
@@ -551,6 +568,7 @@ const duplicateIngress = await ingestAcceptedChannelDecision(duplicateInbound, {
 assert.equal(duplicateIngress.status, "duplicate");
 assert.equal(channelIngressEvents.length, 1);
 assert.equal(channelIngressRoutes.length, 1);
+assert.equal(channelIngressBootstraps.length, 1);
 
 const staleIngress = await ingestAcceptedChannelDecision(staleInbound, {
   bridge: channelIngressBridge,
@@ -560,6 +578,7 @@ const staleIngress = await ingestAcceptedChannelDecision(staleInbound, {
 assert.equal(staleIngress.status, "stale_cursor");
 assert.equal(channelIngressEvents.length, 1);
 assert.equal(channelIngressRoutes.length, 1);
+assert.equal(channelIngressBootstraps.length, 1);
 
 const expiredInbound = await transportController.acceptInbound(
   {
@@ -586,6 +605,7 @@ const expiredIngress = await ingestAcceptedChannelDecision(expiredInbound, {
 assert.equal(expiredIngress.status, "expired");
 assert.equal(channelIngressEvents.length, 1);
 assert.equal(channelIngressRoutes.length, 1);
+assert.equal(channelIngressBootstraps.length, 1);
 
 const replyCorrelation =
   acceptedIngress.status === "routed"
