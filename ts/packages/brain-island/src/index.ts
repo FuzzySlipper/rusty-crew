@@ -61,6 +61,7 @@ export function registerBrainImplementationRuntime(
 export type BrainActionPlanner = (input: {
   wake: BrainWakeInput;
   events: BrainEventEnvelope[];
+  toolActions?: readonly BrainAction[];
 }) => Promise<BrainAction[]> | BrainAction[];
 
 export function createLocalBrain(
@@ -252,6 +253,19 @@ export type {
   LocalToolContext,
   LocalToolProcessResult,
 } from "./local-code-tools.js";
+export {
+  delegationTools,
+  fanOutSubagentsTool,
+  findRelevantPathsTool,
+  resolveDelegationTools,
+  scoutCodebaseTool,
+  spawnSubagentTool,
+  summarizeFilesTool,
+} from "./delegation-tools.js";
+export type {
+  DelegationToolContext,
+  DelegationToolDetails,
+} from "./delegation-tools.js";
 export {
   createDenMemoryToolResolver,
   denMemoryProposeTool,
@@ -464,20 +478,46 @@ export type {
   CuratorCandidateSourceRef,
   CuratorCandidateStatus,
 } from "./curator-candidates.js";
+export { runCuratorLifecycleTransitions } from "./curator-lifecycle.js";
+export type {
+  CuratorLifecyclePolicy,
+  CuratorLifecycleReport,
+  CuratorLifecycleTransition,
+} from "./curator-lifecycle.js";
+export {
+  listCuratorArchivedSkills,
+  listCuratorPinnedSkills,
+  pinCuratorSkill,
+  restoreCuratorArchivedSkill,
+  unpinCuratorSkill,
+} from "./curator-skill-admin.js";
+export type {
+  CuratorArchivedSkill,
+  CuratorPinnedSkill,
+  CuratorSkillPinResult,
+  CuratorSkillRestoreResult,
+  CuratorSkillUnpinResult,
+} from "./curator-skill-admin.js";
 export {
   createCuratorGovernanceExecutor,
   curatorSkillSourceRef,
   executeCuratorGovernanceRequest,
+  FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
   rollbackCuratorMutation,
 } from "./curator-mutations.js";
 export type {
   CuratorApprovalRecord,
+  CuratorCandidateLifecycle,
+  CuratorCandidateLifecycleState,
+  CuratorGovernanceStoreSnapshot,
   CuratorGovernanceExecutorOptions,
   CuratorMutationCandidate,
   CuratorMutationOperation,
   CuratorMutationRecord,
   CuratorMutationStatus,
+  CuratorStoredCandidate,
+  CuratorStoredCandidateStatus,
   CuratorSnapshotRef,
 } from "./curator-mutations.js";
 export { createCuratorAdminControlExecutor } from "./curator-admin-control.js";

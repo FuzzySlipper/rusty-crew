@@ -1,10 +1,21 @@
 import type { AgentTool as PiAgentTool } from "@earendil-works/pi-agent-core";
-import type { ToolDescriptor, ToolProfile } from "@rusty-crew/contracts";
+import type {
+  BrainAction,
+  ToolDescriptor,
+  ToolProfile,
+} from "@rusty-crew/contracts";
 import type { BrainWakeInput } from "./index.js";
+
+export interface BrainActionCollector {
+  add(action: BrainAction): void;
+  addMany(actions: readonly BrainAction[]): void;
+  readonly actions: readonly BrainAction[];
+}
 
 export type PiAgentToolResolver = (input: {
   wake: BrainWakeInput;
   tools: ToolDescriptor[];
+  actions?: BrainActionCollector;
 }) => PiAgentTool[];
 
 export type ToolSessionSelectionStatus =
@@ -25,6 +36,7 @@ export interface ToolSessionSelectionInput {
   wake: BrainWakeInput;
   toolProfile?: ToolProfile;
   resolveTools?: PiAgentToolResolver;
+  actions?: BrainActionCollector;
 }
 
 export interface ToolSessionSelection {
@@ -52,7 +64,11 @@ export function resolveToolSession(
   );
   const requestedNames = new Set(descriptorsByName.keys());
   const implementationsByName = groupToolsByName(
-    input.resolveTools?.({ wake: input.wake, tools: descriptors }) ?? [],
+    input.resolveTools?.({
+      wake: input.wake,
+      tools: descriptors,
+      actions: input.actions,
+    }) ?? [],
   );
 
   const descriptorItems = descriptors.map<ToolSessionSelectionItem>(

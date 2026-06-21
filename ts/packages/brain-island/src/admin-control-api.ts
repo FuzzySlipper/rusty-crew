@@ -30,6 +30,11 @@ export type AdminControlCommandName =
   | "curator_approve_candidate"
   | "curator_apply_candidate"
   | "curator_rollback_mutation"
+  | "curator_pin_skill"
+  | "curator_unpin_skill"
+  | "curator_restore_skill"
+  | "curator_list_pinned_skills"
+  | "curator_list_archived_skills"
   | "shutdown";
 
 export type AdminControlStatus = "completed" | "failed";
@@ -140,6 +145,21 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   curatorRollbackMutation?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorPinSkill?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorUnpinSkill?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorRestoreSkill?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorListPinnedSkills?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorListArchivedSkills?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   shutdown?(
@@ -597,6 +617,59 @@ function parseControlCommand(
         },
       };
     }
+    if (parts.length === 6 && parts[4] === "pinned" && parts[5] === "list") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "curator_list_pinned_skills",
+          target: {},
+        },
+      };
+    }
+    if (parts.length === 6 && parts[4] === "archives" && parts[5] === "list") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "curator_list_archived_skills",
+          target: {},
+        },
+      };
+    }
+    if (parts.length === 7 && parts[4] === "skills") {
+      const slug = parts[5] ?? "";
+      if (!slug) return invalidTarget(requestId, "missing_skill_slug");
+      switch (parts[6]) {
+        case "pin":
+          return {
+            ok: true,
+            command: {
+              ...commandBase,
+              name: "curator_pin_skill",
+              target: { slug },
+            },
+          };
+        case "unpin":
+          return {
+            ok: true,
+            command: {
+              ...commandBase,
+              name: "curator_unpin_skill",
+              target: { slug },
+            },
+          };
+        case "restore":
+          return {
+            ok: true,
+            command: {
+              ...commandBase,
+              name: "curator_restore_skill",
+              target: { slug },
+            },
+          };
+      }
+    }
     if (parts.length === 7 && parts[4] === "candidates") {
       const candidateId = parts[5] ?? "";
       if (!candidateId) return invalidTarget(requestId, "missing_candidate_id");
@@ -719,6 +792,16 @@ function executorForCommand(
       return executor.curatorApplyCandidate;
     case "curator_rollback_mutation":
       return executor.curatorRollbackMutation;
+    case "curator_pin_skill":
+      return executor.curatorPinSkill;
+    case "curator_unpin_skill":
+      return executor.curatorUnpinSkill;
+    case "curator_restore_skill":
+      return executor.curatorRestoreSkill;
+    case "curator_list_pinned_skills":
+      return executor.curatorListPinnedSkills;
+    case "curator_list_archived_skills":
+      return executor.curatorListArchivedSkills;
     case "shutdown":
       return executor.shutdown;
   }

@@ -1,51 +1,106 @@
 # rusty-crew
 
-Rusty-Crew is the Rust coordination-core rewrite for pi-crew. The current
-scaffold is intentionally small: it establishes crate/package boundaries and
-keeps the implementation pointed at the unified architecture before the deeper
-bridge, persistence, and brain-island work begins.
+Rusty Crew is the Rust-owned coordination runtime for agent services that grew
+out of pi-crew. The near-term goal is a local service that can host multiple
+full/prime agents, delegate bounded subagent work, connect to Den services, and
+keep deterministic coordination state in Rust while TypeScript owns LLM calls,
+tools, profiles, skills, MCP, and platform adapters.
 
-The authoritative design lives in Den project `pi-crew`, document
-`rusty-crew-unified-architecture`. Local docs in `docs/` are supporting
-material. When they conflict, the unified architecture wins.
+This repository is no longer a bare scaffold. It has a working Rust engine,
+native bridge, TypeScript brain island, service host, profile loading, tool
+registry, admin diagnostics/control surfaces, Den successor adapters, and local
+field-test configuration under `/home/agents/rusty-crew`.
+
+## Source Of Truth
+
+- The architecture principles live in Den project `rusty-crew`, especially
+  `rusty-crew-unified-architecture` and `brain-body-architecture`.
+- Local docs in `docs/` are implementation notes and ADRs. When an older parity
+  audit conflicts with current code or the unified architecture, treat the audit
+  as feature inventory rather than binding design.
+- The current README is intended as the quick operational map for agents.
 
 ## Current Shape
 
-- `crates/core/core-protocol` — transport-free protocol types shared by the
-  Rust core and bridge API.
-- `crates/core/core-bus` — in-process coordination bus for agent-to-agent
-  routing and event fanout.
-- `crates/core/core-session` — session registry for full, worker, and delegated
-  sessions.
-- `crates/core/core-persistence` — SQLite-backed local coordination store for
-  sessions, message history, worker-run records, completion packets, and
-  restart hydration. Den product data is intentionally excluded.
-- `crates/core/core-body` — body-loop wake threshold and deterministic state
-  projection surface.
-- `crates/core/core-engine` — composition crate for the Rust coordination
-  service.
-- `crates/bridge/core-bridge-api` — stable bridge-facing facade with no native
-  transport dependency. Its `bridge-manifest.toml` is the active unified
-  manifest scaffold. It also owns the shared runtime-buffer lease protocol used
-  by bridge transports.
-- `crates/bridge/core-bridge-node` — native Node transport boundary. napi-rs
-  glue belongs here; the current slice exposes the manifest surface and tests
-  runtime-buffer ownership without leaking native dependencies into core crates.
-- `crates/bridge/core-bridge-mock` — in-process bridge for early integration
-  tests.
-- `crates/bridge/core-bridge-codegen` — manifest/codegen placeholder.
-- `ts/packages/contracts` — TypeScript contract placeholder until codegen owns
-  this package.
-- `ts/packages/core-bridge` and `ts/packages/native-bridge` — TS bridge facade
-  and native loader placeholder.
-- `ts/packages/brain-island` — TS brain island boundary. This is where the
-  current `@earendil-works/pi-*` Agent/LLM dependency belongs.
-- `ts/packages/adapter-den` — first platform adapter boundary. It injects Den
-  product-data updates into the Rust bus and projects internal coordination
-  events back to Den as best-effort observability.
-- `ts/packages/adapter-*` — remaining platform adapter package placeholders.
+- `crates/core/core-protocol` defines transport-free protocol types,
+  `BrainAction`, sessions, tool profiles, channel records, MCP records, and
+  coordination event shapes.
+- `crates/core/core-engine` owns deterministic coordination: sessions,
+  messages, body projection, brain action validation, delegation lifecycle,
+  fan-out accounting, completion routing, counters, and SQLite persistence.
+- `crates/bridge/core-bridge-api` is the stable bridge-facing Rust facade.
+  `crates/bridge/core-bridge-node` exposes the native Node transport.
+- `ts/packages/contracts` mirrors bridge-visible TypeScript contracts.
+- `ts/packages/native-bridge` loads the native bridge and maps Rust wire shapes
+  into TypeScript.
+- `ts/packages/brain-island` owns profile loading, role assembly, pi-agent
+  integration, model calls, model-callable tools, service runtime config,
+  admin/debug APIs, and production brain wake wiring.
+- `ts/packages/adapter-den` owns Den successor Gateway integration,
+  observation/conversation/delivery/timeline projections, and Den memory
+  client helpers.
+- `ts/packages/adapter-mcp`, `adapter-telegram`, and `adapter-tui` are adapter
+  boundaries for MCP, Telegram, and operator TUI/debug surfaces.
+
+## Service Layout
+
+The local service is expected to use:
+
+- config: `/home/agents/rusty-crew/config`
+- data: `/home/agents/rusty-crew/data`
+- logs: `/home/agents/rusty-crew/logs`
+- run state: `/home/agents/rusty-crew/run`
+
+The service host should bind admin/debug HTTP surfaces on `0.0.0.0` in this
+trusted LAN development environment. Tokens and service URLs belong in local
+config/env files, not in repo docs.
+
+Useful commands:
+
+```sh
+npm run service:start
+npm run service:debug-turn -- --help
+npm run smoke:service-host
+npm run smoke:admin-diagnostics-api
+npm run smoke:admin-control-api
+```
+
+## Tools And Delegation
+
+Tool availability is profile-based. Profiles request toolsets or concrete tool
+names; the canonical registry in `ts/packages/brain-island/src/tool-registry.ts`
+produces the selected `ToolProfile` that Rust records on the session. Do not
+reintroduce pi-crew's older `WorkerPolicy` allow/deny model as the primary tool
+gate.
+
+The production brain resolver currently includes local code tools, web/browser
+tools, Den memory tools, dense profile memory, skills tools, planning tools,
+curator execution, channel readback, and delegation tools. Delegation tools are
+model-callable helpers that enqueue `BrainAction::RequestDelegation` actions;
+Rust still owns child session creation, wake scheduling, lineage, fan-out
+policy, completion routing, timeout, cancellation, and cleanup.
+
+Delegation toolset:
+
+- `spawn_subagent`
+- `fan_out_subagents`
+- `scout_codebase`
+- `summarize_files`
+- `find_relevant_paths`
+
+Proof commands:
+
+```sh
+npm run smoke:delegation-tools
+npm run smoke:delegated-slice
+npm run smoke:delegated-role-assembly
+npm run smoke:delegated-resource-cleanup
+npm run smoke:production-delegation-wake
+```
 
 ## Build And Test
+
+Use focused smokes while developing, then broaden before handoff:
 
 ```sh
 cargo fmt --all --check
@@ -54,63 +109,41 @@ cargo test --workspace
 npm install
 npm run typecheck
 npm run format
-npm run smoke:den
-npm run smoke:bridge-wake
 ```
 
-## Throughput Measurement
-
-The pre-napi native-facade benchmark is documented in
-`docs/ffi-throughput-pre-napi.md`.
+Common focused checks:
 
 ```sh
-RUSTY_CREW_THROUGHPUT_EVENTS=10000 \
-RUSTY_CREW_THROUGHPUT_BATCHES=1,16,64 \
-RUSTY_CREW_THROUGHPUT_TEXT_BYTES=64 \
-cargo run --release -p rusty-crew-core-bridge-node --bin measure_brain_event_throughput
+npm run smoke:tool-registry
+npm run smoke:tool-profile-selection
+npm run smoke:tool-session-selection
+npm run smoke:local-code-tools
+npm run smoke:memory-skills-wake
+npm run smoke:planning-runtime-wake
+npm run smoke:mcp-surfaces-e2e
+npm run smoke:den-successor-service
 ```
+
+## Pi Packages
+
+Use the current `https://github.com/earendil-works/pi` source and the published
+`@earendil-works/pi-*` packages for the TypeScript brain island. Older local
+checkout references in docs are historical audit context only. The current
+package pin is tracked in `docs/pi-package-source-lock.md`.
 
 ## Architecture Rules
 
-- Rust owns deterministic coordination: bus routing, sessions, body state, wake
-  thresholds, action validation, packet lifecycle, and coordination
-  persistence.
-- Rust persistence stores coordination state under `engine_data_dir`; Den
-  task/project/document records remain in Den and are not mirrored into the
-  SQLite store.
-- TypeScript owns the brain island, tool execution, LLM provider calls, profile
-  composition, and platform adapters.
-- Den is product data and observability. It is not the coordination bus.
-  Projection failures are explicit degraded/dropped observability state; they
-  must not block internal agent-to-agent routing.
-- Worker spawning and prompting are internal Rust lifecycle/activation
-  operations, not TS-called FFI verbs.
-- Large bridge wake payloads cross as `RuntimeBufferHandle`s. See
-  `docs/runtime-buffer-ownership.md` for acquire/release rules.
-- Tool availability is profile-based. Do not reintroduce a `WorkerPolicy`
-  allow/deny gate as the main tool model.
-- Use the current `https://github.com/earendil-works/pi` source for the pi
-  packages. Older local checkout references in docs are historical audit
-  context only. The current package pin is tracked in
-  `docs/pi-package-source-lock.md`.
-
-## Integrated Milestones
-
-The project should build toward the architecture open questions in place:
-
-1. Reconcile docs, scaffold, and manifest with the unified architecture.
-2. Define a unified manifest/codegen source of truth.
-3. Build the real Rust coordination substrate: bus, sessions, body state, and
-   action validation.
-4. Wire the TS brain island to current pi packages.
-5. Add the Den adapter as data/observability projection, not coordination
-   authority.
-6. Add Rust-owned coordination persistence.
-7. Implement the native bridge and settle `RuntimeBufferHandle` ownership in the
-   real wake path.
-8. Measure FFI event throughput through that integrated path.
-9. Resolve mid-turn delta behavior against the real upstream Agent hooks.
-10. Prove a planner-to-worker delegated slice end to end.
-
-Avoid mock-only spikes for the open questions unless the mock is directly
-exercising the same path that will become production.
+- Rust owns deterministic coordination, persistence, lifecycle validation,
+  action acceptance/rejection, body projection, wake thresholds, delegation,
+  completion routing, and runtime counters.
+- TypeScript owns LLM providers, pi-agent integration, profile composition,
+  model-callable tool definitions/execution, MCP clients, skills, memory
+  clients, and platform adapters.
+- Den is product data plus observability. Den services are not the internal
+  coordination bus.
+- Platform adapters should be isolated so Den Channels, Telegram, MCP, and
+  future connectors can change without reshaping Rust coordination state.
+- Queues must be treated cautiously. Durable or body-owned queues require
+  explicit TTL and should never resurrect expired instructions or messages.
+- Intentional stubs/fakes need an attached follow-up task so temporary behavior
+  does not disappear into the codebase.

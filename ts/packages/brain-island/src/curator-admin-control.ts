@@ -9,13 +9,24 @@ import type {
   AdminControlOutcome,
 } from "./admin-control-api.js";
 import type { CuratorMutationRecord } from "./curator-mutations.js";
+import type { CuratorLifecycleReport } from "./curator-lifecycle.js";
+import {
+  listCuratorArchivedSkills,
+  listCuratorPinnedSkills,
+  pinCuratorSkill,
+  restoreCuratorArchivedSkill,
+  unpinCuratorSkill,
+} from "./curator-skill-admin.js";
 
 export interface CuratorAdminStatus {
   status: "available" | "paused" | "degraded";
   candidateCount?: number;
   mutationCount?: number;
+  pinnedSkillCount?: number;
+  archivedSkillCount?: number;
   lastRunAt?: string;
   lastError?: string;
+  lifecycle?: CuratorLifecycleReport;
 }
 
 export interface CuratorAdminControlOptions {
@@ -26,6 +37,7 @@ export interface CuratorAdminControlOptions {
   rollbackMutation?: (
     mutationId: string,
   ) => Promise<CuratorMutationRecord> | CuratorMutationRecord;
+  skillsDir?: string;
 }
 
 export function createCuratorAdminControlExecutor(
@@ -38,6 +50,11 @@ export function createCuratorAdminControlExecutor(
   | "curatorApproveCandidate"
   | "curatorApplyCandidate"
   | "curatorRollbackMutation"
+  | "curatorPinSkill"
+  | "curatorUnpinSkill"
+  | "curatorRestoreSkill"
+  | "curatorListPinnedSkills"
+  | "curatorListArchivedSkills"
 > {
   return {
     curatorStatus: async () => {
@@ -115,6 +132,66 @@ export function createCuratorAdminControlExecutor(
         },
       };
     },
+    curatorPinSkill: async (command) => {
+      const skillsDir = requiredSkillsDir(options);
+      const slug = command.target.slug ?? "";
+      const result = await pinCuratorSkill({
+        skillsDir,
+        slug,
+        reason: command.reason,
+        operatorId: command.actor.operatorId,
+      });
+      return {
+        status: "completed",
+        summary: `Pinned skill ${slug}.`,
+        affectedIds: { slug },
+        result,
+      };
+    },
+    curatorUnpinSkill: async (command) => {
+      const skillsDir = requiredSkillsDir(options);
+      const slug = command.target.slug ?? "";
+      const result = await unpinCuratorSkill({ skillsDir, slug });
+      return {
+        status: "completed",
+        summary: `Unpinned skill ${slug}.`,
+        affectedIds: { slug },
+        result,
+      };
+    },
+    curatorRestoreSkill: async (command) => {
+      const skillsDir = requiredSkillsDir(options);
+      const slug = command.target.slug ?? "";
+      const result = await restoreCuratorArchivedSkill({
+        skillsDir,
+        slug,
+        manifestPath: stringBody(command, "manifestPath"),
+      });
+      return {
+        status: "completed",
+        summary: `Restored archived skill ${slug}.`,
+        affectedIds: { slug },
+        result,
+      };
+    },
+    curatorListPinnedSkills: async () => {
+      const skillsDir = requiredSkillsDir(options);
+      const result = await listCuratorPinnedSkills(skillsDir);
+      return {
+        status: "completed",
+        summary: `Found ${result.length} pinned skill(s).`,
+        result,
+      };
+    },
+    curatorListArchivedSkills: async () => {
+      const skillsDir = requiredSkillsDir(options);
+      const result = await listCuratorArchivedSkills(skillsDir);
+      return {
+        status: "completed",
+        summary: `Found ${result.length} archived skill(s).`,
+        result,
+      };
+    },
   };
 }
 
@@ -159,4 +236,11 @@ function boolBody(
 ): boolean | undefined {
   const value = command.body[key];
   return typeof value === "boolean" ? value : undefined;
+}
+
+function requiredSkillsDir(options: CuratorAdminControlOptions): string {
+  if (!options.skillsDir) {
+    throw new Error("curator_skill_admin_unavailable");
+  }
+  return options.skillsDir;
 }

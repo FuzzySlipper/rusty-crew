@@ -6,6 +6,7 @@ import type {
   AgentTool as PiAgentTool,
 } from "@earendil-works/pi-agent-core";
 import type {
+  BrainAction,
   AgentMessage as RustyAgentMessage,
   BrainEvent,
   BrainEventEnvelope,
@@ -20,6 +21,7 @@ import type {
   BrainWakeResult,
 } from "./index.js";
 import {
+  type BrainActionCollector,
   resolveToolSession,
   type PiAgentToolResolver,
 } from "./tool-session-selection.js";
@@ -45,7 +47,10 @@ export function createPiAgentBrain(
   return {
     async wake(input: BrainWakeInput): Promise<BrainWakeResult> {
       const events: BrainWakeResult["events"] = [];
-      const agent = options.createAgent(buildAgentOptions(input, options));
+      const actions = createBrainActionCollector();
+      const agent = options.createAgent(
+        buildAgentOptions(input, options, actions),
+      );
       const unsubscribe = agent.subscribe((event) => {
         const mapped = mapPiAgentEvent(event);
         if (mapped) {
@@ -63,11 +68,16 @@ export function createPiAgentBrain(
         unsubscribe();
       }
 
+      const plannedActions = options.planActions
+        ? await options.planActions({
+            wake: input,
+            events,
+            toolActions: actions.actions,
+          })
+        : [];
       return {
         events,
-        actions: options.planActions
-          ? await options.planActions({ wake: input, events })
-          : [],
+        actions: [...actions.actions, ...plannedActions],
       };
     },
   };
@@ -87,6 +97,7 @@ function envelope(
 function buildAgentOptions(
   input: BrainWakeInput,
   options: PiAgentBrainOptions,
+  actions: BrainActionCollector,
 ): PiAgentOptions {
   return {
     initialState: {
@@ -98,6 +109,7 @@ function buildAgentOptions(
         input,
         options.resolveTools,
         options.toolProfile,
+        actions,
       ),
     },
     sessionId: input.sessionId,
@@ -110,8 +122,10 @@ function resolveAllowedTools(
   input: BrainWakeInput,
   resolveTools: PiAgentToolResolver | undefined,
   toolProfile: ToolProfile | undefined,
+  actions: BrainActionCollector,
 ): PiAgentTool[] {
-  return resolveToolSession({ wake: input, resolveTools, toolProfile }).tools;
+  return resolveToolSession({ wake: input, resolveTools, toolProfile, actions })
+    .tools;
 }
 
 function toPiMessages(
@@ -151,4 +165,19 @@ function mapPiAgentEvent(event: PiAgentEvent): BrainEvent | undefined {
     default:
       return undefined;
   }
+}
+
+function createBrainActionCollector(): BrainActionCollector {
+  const actions: BrainAction[] = [];
+  return {
+    add(action) {
+      actions.push(action);
+    },
+    addMany(nextActions) {
+      actions.push(...nextActions);
+    },
+    get actions() {
+      return actions;
+    },
+  };
 }

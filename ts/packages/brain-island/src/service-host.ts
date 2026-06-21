@@ -72,7 +72,16 @@ import {
   type CuratorCandidateBatch,
 } from "./curator-candidates.js";
 import {
+  runCuratorLifecycleTransitions,
+  type CuratorLifecycleReport,
+} from "./curator-lifecycle.js";
+import {
+  listCuratorArchivedSkills,
+  listCuratorPinnedSkills,
+} from "./curator-skill-admin.js";
+import {
   createCuratorGovernanceExecutor,
+  FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
   rollbackCuratorMutation,
   type CuratorMutationCandidate,
@@ -144,6 +153,8 @@ interface ServiceCuratorRuntime {
   runtimeConfig: RustyCrewRuntimeConfig;
   lastRunAt?: string;
   lastError?: string;
+  lastLifecycleRunAt?: string;
+  lastLifecycleReport?: CuratorLifecycleReport;
 }
 
 interface ServiceRecentEvent {
@@ -511,7 +522,9 @@ function createServiceCuratorRuntime(input: {
   bridge: NativeBridgeModule;
   now: () => string;
 }): ServiceCuratorRuntime {
-  const store = new MemoryCuratorGovernanceStore();
+  const store = new FileCuratorGovernanceStore(
+    join(input.config.paths.dataDir, "data", "curator-governance.json"),
+  );
   const runtime: ServiceCuratorRuntime = {
     store,
     runtimeConfig: input.runtimeConfig,
@@ -683,13 +696,21 @@ function curatorSkillsDir(runtimeConfig: RustyCrewRuntimeConfig): string {
   return runtimeConfig.skillsDir ?? join(runtimeConfig.profilesDir, "skills");
 }
 
-function curatorStatus(state: ServiceState): CuratorAdminStatus {
+async function curatorStatus(state: ServiceState): Promise<CuratorAdminStatus> {
+  const skillsDir = curatorSkillsDir(state.curator.runtimeConfig);
+  const [pinnedSkills, archivedSkills] = await Promise.all([
+    listCuratorPinnedSkills(skillsDir),
+    listCuratorArchivedSkills(skillsDir),
+  ]);
   return {
     status: state.curator.lastError ? "degraded" : "available",
     candidateCount: state.curator.store.candidates.size,
     mutationCount: state.curator.store.mutations.size,
+    pinnedSkillCount: pinnedSkills.length,
+    archivedSkillCount: archivedSkills.length,
     lastRunAt: state.curator.lastRunAt,
     lastError: state.curator.lastError,
+    lifecycle: state.curator.lastLifecycleReport,
   };
 }
 
@@ -991,6 +1012,7 @@ function createServiceControlExecutor(
       rollbackMutation: (mutationId) =>
         rollbackCuratorMutation(state.curator.store, mutationId),
       status: () => curatorStatus(state),
+      skillsDir: curatorSkillsDir(state.curator.runtimeConfig),
     }),
     createSession: async (command) => {
       const sessionId = requiredBodyString(command, "sessionId");
@@ -1053,10 +1075,12 @@ function createServiceControlExecutor(
     },
     schedulerTick: async () => {
       const report = await state.bridge.runSchedulerTick();
+      const curatorLifecycle =
+        await runServiceCuratorLifecycleTransitions(state);
       return {
         status: "completed",
         summary: "scheduler tick completed",
-        result: report,
+        result: { scheduler: report, curatorLifecycle },
       };
     },
     schedulerRunJob: async (command) => {
@@ -1544,6 +1568,7 @@ function channelIdFromDeliveryIntent(
 async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
   if (state.stopping) return;
   const tick = await state.bridge.runSchedulerTick();
+  const curatorLifecycle = await runServiceCuratorLifecycleTransitions(state);
   const maintenance = await state.bridge.runMaintenance({
     expireQueuedMessagesAt: state.now(),
   });
@@ -1551,14 +1576,28 @@ async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
     tick.wakesRequested > 0 ||
     tick.runsCompleted > 0 ||
     tick.runsFailed > 0 ||
+    curatorLifecycle.transitions.length > 0 ||
     maintenance.expiredQueueMessages > 0
   ) {
     recordServiceEvent(state, {
       source: "service-host",
       eventType: "scheduler_heartbeat",
-      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} runs completed, ${maintenance.expiredQueueMessages} queued messages expired.`,
+      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} runs completed, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`,
     });
   }
+}
+
+async function runServiceCuratorLifecycleTransitions(
+  state: ServiceState,
+): Promise<CuratorLifecycleReport> {
+  const report = await runCuratorLifecycleTransitions({
+    store: state.curator.store,
+    skillsDir: curatorSkillsDir(state.curator.runtimeConfig),
+    now: state.now(),
+  });
+  state.curator.lastLifecycleRunAt = report.checkedAt;
+  state.curator.lastLifecycleReport = report;
+  return report;
 }
 
 async function drainAndDispatchWakes(

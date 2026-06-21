@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   createCuratorGovernanceExecutor,
   curatorSkillSourceRef,
+  FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
   rollbackCuratorMutation,
   type CuratorMutationCandidate,
@@ -130,5 +131,61 @@ await assert.rejects(
     }),
   /curator_candidate_stale/,
 );
+
+const persistedStatePath = join(root, "curator-state", "governance.json");
+const persistedSourceRef = await curatorSkillSourceRef(skillsDir, "managed");
+const persistedCandidate: CuratorMutationCandidate = {
+  ...patchCandidate,
+  candidateId: "curator:batch-1:persisted-managed",
+  fingerprint: "candidate-fingerprint-persisted",
+  sourceRefs: [persistedSourceRef],
+  mutation: {
+    type: "skill_patch",
+    slug: "managed",
+    oldString: "Original body.",
+    newString: "Persisted curated body.",
+  },
+};
+const firstFileStore = new FileCuratorGovernanceStore(persistedStatePath);
+firstFileStore.upsertCandidate(persistedCandidate);
+const firstFileExecutor = createCuratorGovernanceExecutor({
+  skillsDir,
+  store: firstFileStore,
+  now: () => new Date("2026-06-21T13:00:00.000Z"),
+});
+const persistedPreview = await firstFileExecutor({
+  action: "preview_candidate",
+  candidateId: persistedCandidate.candidateId,
+  dryRun: true,
+});
+assert.equal(persistedPreview.status, "previewed");
+const persistedApproval = await firstFileExecutor({
+  action: "approve_candidate",
+  candidateId: persistedCandidate.candidateId,
+  reason: "persist approval across restart",
+  dryRun: false,
+});
+assert.equal(persistedApproval.status, "approved");
+assert.equal(existsSync(persistedStatePath), true);
+
+const reloadedFileStore = new FileCuratorGovernanceStore(persistedStatePath);
+assert.equal(
+  reloadedFileStore.getCandidate(persistedCandidate.candidateId)?.status,
+  "approved",
+);
+const reloadedExecutor = createCuratorGovernanceExecutor({
+  skillsDir,
+  store: reloadedFileStore,
+  now: () => new Date("2026-06-21T13:01:00.000Z"),
+});
+const persistedApplied = await reloadedExecutor({
+  action: "apply_candidate",
+  candidateId: persistedCandidate.candidateId,
+  reason: "apply after restart",
+  dryRun: false,
+});
+assert.equal(persistedApplied.status, "applied");
+assert.match(readFileSync(join(skillsDir, "managed.md"), "utf8"), /Persisted/);
+assert.equal(reloadedFileStore.mutations.size, 1);
 
 console.log("curator mutation smoke passed");

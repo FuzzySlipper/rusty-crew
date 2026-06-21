@@ -36,6 +36,7 @@ import {
   type DenseProfileMemoryMode,
 } from "./dense-profile-memory-tool.js";
 import { resolveDenMemoryTools } from "./den-memory-tools.js";
+import { resolveDelegationTools } from "./delegation-tools.js";
 import type { BrainImplementation } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
 import { createPiAgentBrain } from "./pi-agent-brain.js";
@@ -435,6 +436,7 @@ function createServiceToolResolver(
           : profile.profile.skills,
       manageMode: serviceSkillManageMode(profile),
     }),
+    resolveDelegationTools,
     createPlanningToolResolver({
       bridge: options.bridge,
       runtimeConfig: options.runtimeConfig,
@@ -580,7 +582,13 @@ function toBridgeWakeExecutor(brain: BrainImplementation): BrainWakeExecutor {
 function completionActionFromEvents(input: {
   wake: { sessionId: SessionId };
   events: BrainEventEnvelope[];
+  toolActions?: readonly BrainAction[];
 }): BrainAction[] {
+  if (
+    input.toolActions?.some((action) => action.type === "request_delegation")
+  ) {
+    return [];
+  }
   const text = mergeTextDeltas(
     input.events.flatMap((event) =>
       event.event.type === "text_delta" ? [event.event.text] : [],

@@ -1,4 +1,11 @@
 import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import type {
@@ -98,17 +105,48 @@ export interface CuratorGovernanceExecutorOptions {
   ) => Promise<CuratorCandidateBatch> | CuratorCandidateBatch;
 }
 
-interface StoredCandidate {
+export type CuratorStoredCandidateStatus =
+  | CuratorCandidate["status"]
+  | "previewed"
+  | "approved"
+  | "applied";
+
+export type CuratorCandidateLifecycleState = "active" | "stale" | "archived";
+
+export interface CuratorCandidateLifecycle {
+  state: CuratorCandidateLifecycleState;
+  reasonCode?: string;
+  lastTransitionAt?: string;
+  staleAt?: string;
+  archivedAt?: string;
+  reactivatedAt?: string;
+}
+
+export interface CuratorStoredCandidate {
   candidate: CuratorMutationCandidate;
   approval?: CuratorApprovalRecord;
   previewedAt?: string;
-  status: CuratorCandidate["status"] | "previewed" | "approved" | "applied";
+  status: CuratorStoredCandidateStatus;
+  lifecycle?: CuratorCandidateLifecycle;
+}
+
+export interface CuratorGovernanceStoreSnapshot {
+  schemaVersion: 1;
+  batches: readonly CuratorCandidateBatch[];
+  candidates: readonly CuratorStoredCandidate[];
+  mutations: readonly CuratorMutationRecord[];
 }
 
 export class MemoryCuratorGovernanceStore {
   readonly batches = new Map<string, CuratorCandidateBatch>();
-  readonly candidates = new Map<string, StoredCandidate>();
+  readonly candidates = new Map<string, CuratorStoredCandidate>();
   readonly mutations = new Map<string, CuratorMutationRecord>();
+
+  constructor(snapshot?: CuratorGovernanceStoreSnapshot) {
+    if (snapshot) {
+      this.replaceSnapshot(snapshot);
+    }
+  }
 
   upsertBatch(
     batch: CuratorCandidateBatch,
@@ -130,14 +168,14 @@ export class MemoryCuratorGovernanceStore {
     });
   }
 
-  getCandidate(candidateId: string): StoredCandidate | undefined {
+  getCandidate(candidateId: string): CuratorStoredCandidate | undefined {
     return this.candidates.get(candidateId);
   }
 
   approve(
     candidateId: string,
     approval: CuratorApprovalRecord,
-  ): StoredCandidate {
+  ): CuratorStoredCandidate {
     const stored = requiredCandidate(this, candidateId);
     const next = {
       ...stored,
@@ -148,7 +186,10 @@ export class MemoryCuratorGovernanceStore {
     return next;
   }
 
-  recordPreview(candidateId: string, previewedAt: string): StoredCandidate {
+  recordPreview(
+    candidateId: string,
+    previewedAt: string,
+  ): CuratorStoredCandidate {
     const stored = requiredCandidate(this, candidateId);
     const next = {
       ...stored,
@@ -176,6 +217,109 @@ export class MemoryCuratorGovernanceStore {
       status,
       rollbackRef: `curator-rollback:${mutationId}`,
     });
+  }
+
+  updateCandidateLifecycle(
+    candidateId: string,
+    lifecycle: CuratorCandidateLifecycle,
+  ): CuratorStoredCandidate {
+    const stored = requiredCandidate(this, candidateId);
+    const next = {
+      ...stored,
+      lifecycle,
+    };
+    this.candidates.set(candidateId, next);
+    return next;
+  }
+
+  snapshot(): CuratorGovernanceStoreSnapshot {
+    return {
+      schemaVersion: 1,
+      batches: [...this.batches.values()],
+      candidates: [...this.candidates.values()],
+      mutations: [...this.mutations.values()],
+    };
+  }
+
+  protected replaceSnapshot(snapshot: CuratorGovernanceStoreSnapshot): void {
+    if (snapshot.schemaVersion !== 1) {
+      throw new CuratorExecuteError("curator_store_schema_unsupported");
+    }
+    this.batches.clear();
+    this.candidates.clear();
+    this.mutations.clear();
+    for (const batch of snapshot.batches) {
+      this.batches.set(batch.batchId, batch);
+    }
+    for (const candidate of snapshot.candidates) {
+      this.candidates.set(candidate.candidate.candidateId, candidate);
+    }
+    for (const mutation of snapshot.mutations) {
+      this.mutations.set(mutation.mutationId, mutation);
+    }
+  }
+}
+
+export class FileCuratorGovernanceStore extends MemoryCuratorGovernanceStore {
+  constructor(readonly stateFilePath: string) {
+    super(loadGovernanceSnapshot(stateFilePath));
+  }
+
+  override upsertBatch(
+    batch: CuratorCandidateBatch,
+    mutationCandidates: readonly CuratorMutationCandidate[] = [],
+  ): void {
+    super.upsertBatch(batch, mutationCandidates);
+    this.persist();
+  }
+
+  override upsertCandidate(candidate: CuratorMutationCandidate): void {
+    super.upsertCandidate(candidate);
+    this.persist();
+  }
+
+  override approve(
+    candidateId: string,
+    approval: CuratorApprovalRecord,
+  ): CuratorStoredCandidate {
+    const stored = super.approve(candidateId, approval);
+    this.persist();
+    return stored;
+  }
+
+  override recordPreview(
+    candidateId: string,
+    previewedAt: string,
+  ): CuratorStoredCandidate {
+    const stored = super.recordPreview(candidateId, previewedAt);
+    this.persist();
+    return stored;
+  }
+
+  override recordApplied(record: CuratorMutationRecord): void {
+    super.recordApplied(record);
+    this.persist();
+  }
+
+  override recordRollback(
+    mutationId: string,
+    status: CuratorMutationStatus,
+  ): void {
+    super.recordRollback(mutationId, status);
+    this.persist();
+  }
+
+  override updateCandidateLifecycle(
+    candidateId: string,
+    lifecycle: CuratorCandidateLifecycle,
+  ): CuratorStoredCandidate {
+    const stored = super.updateCandidateLifecycle(candidateId, lifecycle);
+    this.persist();
+    return stored;
+  }
+
+  private persist(): void {
+    writeGovernanceSnapshot(this.stateFilePath, this.snapshot());
   }
 }
 
@@ -206,6 +350,7 @@ export async function executeCuratorGovernanceRequest(
     }
     case "preview_candidate": {
       const stored = requiredCandidate(options.store, request.candidateId);
+      assertCandidateNotArchived(stored);
       await assertCandidateCurrent(options.skillsDir, stored.candidate);
       const management = await runSkillMutation(
         options,
@@ -220,6 +365,7 @@ export async function executeCuratorGovernanceRequest(
     }
     case "approve_candidate": {
       const stored = requiredCandidate(options.store, request.candidateId);
+      assertCandidateNotArchived(stored);
       assertNotExpired(stored.candidate, now);
       await assertCandidateCurrent(options.skillsDir, stored.candidate);
       options.store.approve(stored.candidate.candidateId, {
@@ -236,6 +382,7 @@ export async function executeCuratorGovernanceRequest(
     }
     case "apply_candidate": {
       const stored = requiredCandidate(options.store, request.candidateId);
+      assertCandidateNotArchived(stored);
       assertNotExpired(stored.candidate, now);
       await assertCandidateCurrent(options.skillsDir, stored.candidate);
       if (request.dryRun) {
@@ -496,12 +643,38 @@ function assertNotExpired(
 function requiredCandidate(
   store: MemoryCuratorGovernanceStore,
   candidateId: string | undefined,
-): StoredCandidate {
+): CuratorStoredCandidate {
   if (!candidateId)
     throw new CuratorExecuteError("curator_candidate_id_required");
   const stored = store.getCandidate(candidateId);
   if (!stored) throw new CuratorExecuteError("curator_candidate_not_found");
   return stored;
+}
+
+function assertCandidateNotArchived(stored: CuratorStoredCandidate): void {
+  if (stored.lifecycle?.state === "archived") {
+    throw new CuratorExecuteError("curator_candidate_archived");
+  }
+}
+
+function loadGovernanceSnapshot(
+  stateFilePath: string,
+): CuratorGovernanceStoreSnapshot | undefined {
+  if (!existsSync(stateFilePath)) return undefined;
+  const parsed = JSON.parse(
+    readFileSync(stateFilePath, "utf8"),
+  ) as CuratorGovernanceStoreSnapshot;
+  return parsed;
+}
+
+function writeGovernanceSnapshot(
+  stateFilePath: string,
+  snapshot: CuratorGovernanceStoreSnapshot,
+): void {
+  mkdirSync(dirname(stateFilePath), { recursive: true });
+  const tempPath = `${stateFilePath}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+  renameSync(tempPath, stateFilePath);
 }
 
 function receipt(
