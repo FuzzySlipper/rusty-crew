@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createSimulatedDenChannelsTransport,
   DenChannelsTransportController,
   dispatchChannelActivityProjection,
   dispatchChannelMessageProjection,
@@ -12,6 +11,7 @@ import {
   projectAgentMessageToChannel,
   projectCoreEventToChannelActivity,
 } from "@rusty-crew/adapter-den";
+import { createSimulatedDenChannelsTransport } from "@rusty-crew/adapter-den/test-support";
 import type {
   AdapterId,
   AgentId,

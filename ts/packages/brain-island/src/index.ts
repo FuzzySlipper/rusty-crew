@@ -141,7 +141,6 @@ export {
   adminCommandActivity,
   AgentActivityObservationProducer,
   createAgentActivityObservationEvent,
-  createMemoryAgentActivityObservationSink,
   sessionActivity,
   toolActivity,
   workActivity,
@@ -158,7 +157,6 @@ export type {
   AgentActivityVisibility,
   AgentActivityWorkRef,
   AgentObservationIdentity,
-  MemoryAgentActivityObservationSink,
   ObservationSourceDomain,
 } from "./agent-activity-observation.js";
 export {
@@ -179,6 +177,22 @@ export type {
   BackgroundGovernanceObservationInput,
   BackgroundGovernancePhase,
 } from "./background-governance-observation.js";
+export { buildBackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
+export type {
+  BackgroundReviewDiagnostics,
+  BackgroundServiceDiagnosticsInput,
+  BackgroundServiceDiagnosticsProjection,
+  BackgroundServiceHealth,
+  BackgroundServiceIssue,
+  CleanupBackgroundDiagnostics,
+  CuratorBackgroundDiagnostics,
+  SchedulerBackgroundDiagnostics,
+} from "./background-service-diagnostics.js";
+export { createBackgroundAdminControlExecutor } from "./background-admin-control.js";
+export type {
+  BackgroundAdminControlOptions,
+  SchedulerAdminControlOptions,
+} from "./background-admin-control.js";
 export {
   createDenRouterPiAgentFactory,
   resolveDenRouterModel,
@@ -577,10 +591,7 @@ export type {
   AdminRecentEvent,
   AdminRouteResult,
 } from "./admin-diagnostics-api.js";
-export {
-  createMemoryAdminControlAuditSink,
-  handleAdminControlRequest,
-} from "./admin-control-api.js";
+export { handleAdminControlRequest } from "./admin-control-api.js";
 export type {
   AdminControlActor,
   AdminControlAuditEvent,
@@ -594,7 +605,6 @@ export type {
   AdminControlResponse,
   AdminControlRouteRequest,
   AdminControlStatus,
-  MemoryAdminControlAuditSink,
 } from "./admin-control-api.js";
 export { routeSlashCommand } from "./slash-command-router.js";
 export type {
@@ -610,24 +620,16 @@ export type {
 } from "./slash-command-router.js";
 export { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
 export type { SlashCommandResponseContext } from "./slash-command-responses.js";
-export {
-  createMemoryNewSessionLifecycleAuditSink,
-  createNewSessionLifecycleExecutor,
-} from "./new-session-lifecycle.js";
+export { createNewSessionLifecycleExecutor } from "./new-session-lifecycle.js";
 export type {
-  MemoryNewSessionLifecycleAuditSink,
   NewSessionLifecycleAuditEvent,
   NewSessionLifecycleAuditSink,
   NewSessionLifecycleOptions,
   NewSessionLifecyclePhase,
   NewSessionTemplate,
 } from "./new-session-lifecycle.js";
-export {
-  createMemoryReloadMcpLifecycleAuditSink,
-  createReloadMcpControlExecutor,
-} from "./reload-mcp-control.js";
+export { createReloadMcpControlExecutor } from "./reload-mcp-control.js";
 export type {
-  MemoryReloadMcpLifecycleAuditSink,
   ReloadMcpControlOptions,
   ReloadMcpLifecycleAuditEvent,
   ReloadMcpLifecycleAuditSink,

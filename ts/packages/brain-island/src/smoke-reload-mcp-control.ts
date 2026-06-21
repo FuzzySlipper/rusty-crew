@@ -12,14 +12,16 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
-  createMemoryAdminControlAuditSink,
-  createMemoryAgentActivityObservationSink,
-  createMemoryReloadMcpLifecycleAuditSink,
   createReloadMcpControlExecutor,
   handleAdminControlRequest,
   type AdminControlResponse,
   type AdminRouteResult,
 } from "./index.js";
+import {
+  createMemoryAdminControlAuditSink,
+  createMemoryAgentActivityObservationSink,
+  createMemoryReloadMcpLifecycleAuditSink,
+} from "./test-support.js";
 
 const adapterId = "mcp-main" as AdapterId;
 const alphaBinding = binding(

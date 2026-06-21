@@ -6,14 +6,16 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
-  createMemoryAdminControlAuditSink,
-  createMemoryAgentActivityObservationSink,
   createRuntimeActivityObserver,
   handleAdminControlRequest,
   type AgentActivityObservationEvent,
   type AdminControlResponse,
   type AdminRouteResult,
 } from "./index.js";
+import {
+  createMemoryAdminControlAuditSink,
+  createMemoryAgentActivityObservationSink,
+} from "./test-support.js";
 
 const sink = createMemoryAgentActivityObservationSink();
 const producer = new AgentActivityObservationProducer({ sink, required: true });

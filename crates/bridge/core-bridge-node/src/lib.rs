@@ -18,7 +18,8 @@ use rusty_crew_core_persistence::{
     ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
     ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, QueuedMessageRecord,
     RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
+    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, ScheduledJobRecord,
+    ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
@@ -76,14 +77,16 @@ impl NativeBridge {
         Ok(handle)
     }
 
-    pub fn shutdown_engine(&mut self, _request: ShutdownRequest) -> CoreResult<ShutdownSummary> {
+    pub fn shutdown_engine(&mut self, request: ShutdownRequest) -> CoreResult<ShutdownSummary> {
         let engine = self.engine.take().ok_or_else(|| {
             CoreError::new(
                 CoreErrorKind::NotFound,
                 "native bridge engine is not initialized",
             )
         })?;
-        engine.shutdown()
+        let summary = engine.shutdown_with_timeout(request.drain_timeout_ms)?;
+        self.subscriptions.clear();
+        Ok(summary)
     }
 
     pub fn register_brain_implementation(
@@ -152,6 +155,56 @@ impl NativeBridge {
     ) -> CoreResult<QueuedMessageRecord> {
         self.engine()?
             .enqueue_body_follow_up_message(&session_id, from, body, correlation_id)
+    }
+
+    pub fn register_scheduled_wake_job(
+        &self,
+        job_id: String,
+        target_session_id: SessionId,
+        interval_ms: Option<u64>,
+        first_due_at: String,
+    ) -> CoreResult<serde_json::Value> {
+        self.engine()?
+            .register_scheduled_wake_job(job_id, target_session_id, interval_ms, first_due_at)
+            .map(scheduled_job_json)
+    }
+
+    pub fn run_scheduler_tick(&self) -> CoreResult<serde_json::Value> {
+        self.engine()?
+            .run_scheduler_tick()
+            .map(|report| {
+                serde_json::json!({
+                    "stale_runs_expired": report.stale_runs_expired,
+                    "due_runs_claimed": report.due_runs_claimed,
+                    "wakes_requested": report.wakes_requested,
+                    "runs_completed": report.runs_completed,
+                    "runs_skipped": report.runs_skipped,
+                    "runs_failed": report.runs_failed,
+                })
+            })
+    }
+
+    pub fn request_scheduled_job_run(
+        &self,
+        job_id: String,
+    ) -> CoreResult<Option<serde_json::Value>> {
+        self.engine()?
+            .request_scheduled_job_run(&job_id)
+            .map(|run| run.map(scheduled_run_json))
+    }
+
+    pub fn pause_scheduled_job(&self, job_id: String) -> CoreResult<Unit> {
+        self.engine()?.pause_scheduled_job(&job_id)?;
+        Ok(Unit)
+    }
+
+    pub fn resume_scheduled_job(
+        &self,
+        job_id: String,
+        next_due_at: String,
+    ) -> CoreResult<Unit> {
+        self.engine()?.resume_scheduled_job(&job_id, next_due_at)?;
+        Ok(Unit)
     }
 
     pub fn project_body_state_json(
@@ -559,6 +612,10 @@ impl SubscriptionRegistry {
                 format!("subscription handle {} is not registered", handle.get()),
             )
         })
+    }
+
+    fn clear(&mut self) {
+        self.by_handle.clear();
     }
 
     fn drain(&self, handle: SubscriptionHandle, max_events: u32) -> CoreResult<Vec<CoreEvent>> {
@@ -1275,6 +1332,65 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn register_scheduled_wake_job_json(
+        &self,
+        job_id: String,
+        target_session_id: String,
+        interval_ms: Option<f64>,
+        first_due_at: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let job = bridge
+            .register_scheduled_wake_job(
+                job_id,
+                SessionId::new(target_session_id),
+                interval_ms.map(|value| value as u64),
+                first_due_at,
+            )
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&job)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn run_scheduler_tick_json(&self) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let report = bridge.run_scheduler_tick().map_err(to_napi_error)?;
+        serde_json::to_string(&report)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn request_scheduled_job_run_json(&self, job_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let run = bridge
+            .request_scheduled_job_run(job_id)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&run)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn pause_scheduled_job(&self, job_id: String) -> napi::Result<()> {
+        let bridge = self.bridge()?;
+        bridge.pause_scheduled_job(job_id).map_err(to_napi_error)?;
+        Ok(())
+    }
+
+    #[napi]
+    pub fn resume_scheduled_job(
+        &self,
+        job_id: String,
+        next_due_at: String,
+    ) -> napi::Result<()> {
+        let bridge = self.bridge()?;
+        bridge
+            .resume_scheduled_job(job_id, next_due_at)
+            .map_err(to_napi_error)?;
+        Ok(())
+    }
+
+    #[napi]
     pub fn project_body_state_json(
         &self,
         session_id: String,
@@ -1579,6 +1695,65 @@ fn to_js_queued_message_record(record: QueuedMessageRecord) -> JsQueuedMessageRe
         state: format!("{:?}", record.state).to_ascii_lowercase(),
         terminal_at: record.terminal_at,
         state_reason: record.state_reason,
+    }
+}
+
+fn scheduled_job_json(record: ScheduledJobRecord) -> serde_json::Value {
+    serde_json::json!({
+        "job_id": record.job_id,
+        "job_kind": record.job_kind,
+        "target_session_id": record.target_session_id.map(|session_id| session_id.0),
+        "interval_ms": record.interval_ms,
+        "next_due_at": record.next_due_at,
+        "status": scheduled_job_status_as_str(record.status),
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "paused_at": record.paused_at,
+    })
+}
+
+fn scheduled_run_json(record: ScheduledRunRecord) -> serde_json::Value {
+    serde_json::json!({
+        "run_id": record.run_id.0,
+        "job_id": record.job_id,
+        "job_kind": record.job_kind,
+        "target_session_id": record.target_session_id.map(|session_id| session_id.0),
+        "status": scheduled_run_status_as_str(record.status),
+        "trigger": scheduled_run_trigger_as_str(record.trigger),
+        "scheduled_for": record.scheduled_for,
+        "claimed_at": record.claimed_at,
+        "claim_deadline_at": record.claim_deadline_at,
+        "completed_at": record.completed_at,
+        "error": record.error,
+        "output": record.output_json,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    })
+}
+
+fn scheduled_job_status_as_str(status: ScheduledJobStatus) -> &'static str {
+    match status {
+        ScheduledJobStatus::Active => "active",
+        ScheduledJobStatus::Paused => "paused",
+        ScheduledJobStatus::Archived => "archived",
+    }
+}
+
+fn scheduled_run_status_as_str(status: ScheduledRunStatus) -> &'static str {
+    match status {
+        ScheduledRunStatus::Claimed => "claimed",
+        ScheduledRunStatus::Completed => "completed",
+        ScheduledRunStatus::Skipped => "skipped",
+        ScheduledRunStatus::Failed => "failed",
+        ScheduledRunStatus::Expired => "expired",
+        ScheduledRunStatus::Cancelled => "cancelled",
+    }
+}
+
+fn scheduled_run_trigger_as_str(trigger: ScheduledRunTrigger) -> &'static str {
+    match trigger {
+        ScheduledRunTrigger::Due => "due",
+        ScheduledRunTrigger::Manual => "manual",
     }
 }
 
@@ -1960,8 +2135,8 @@ mod tests {
     use super::*;
     use rusty_crew_core_bridge_api::{
         AgentId, BrainAction, BrainActionBatch, BrainImplementationHandle, BrainImplementationId,
-        BrainModelConfig, ProfileId, ResourceLimits, SessionConfig, SessionId, SessionKind,
-        ToolDescriptor, ToolProfile,
+        BrainModelConfig, CoreEventKind, EventSubscription, ProfileId, ResourceLimits,
+        SessionConfig, SessionId, SessionKind, ShutdownRequest, ToolDescriptor, ToolProfile,
     };
 
     #[test]
@@ -2175,6 +2350,64 @@ mod tests {
             .unwrap();
 
         assert!(receipt.accepted);
+    }
+
+    #[test]
+    fn native_bridge_shutdown_reports_and_clears_subscriptions() {
+        let mut bridge = NativeBridge::new();
+        let engine = bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: std::env::temp_dir()
+                    .join(format!(
+                        "rusty-crew-native-shutdown-{}",
+                        std::process::id()
+                    ))
+                    .to_string_lossy()
+                    .to_string(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                    at: "2026-06-19T00:00:00Z".to_string(),
+                },
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1000,
+            })
+            .unwrap();
+        bridge
+            .create_session(SessionConfig {
+                session_id: SessionId::new("shutdown-session"),
+                agent_id: AgentId::new("shutdown-agent"),
+                profile_id: ProfileId::new("shutdown-profile"),
+                kind: SessionKind::Full,
+                delegation: None,
+                resource_limits: ResourceLimits {
+                    workdir: None,
+                    max_duration_ms: None,
+                    max_delegation_depth: None,
+                },
+                tool_profile: ToolProfile { tools: vec![] },
+            })
+            .unwrap();
+        let subscription = bridge
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::SessionArchived],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        let summary = bridge
+            .shutdown_engine(ShutdownRequest {
+                engine,
+                drain_timeout_ms: 25,
+            })
+            .unwrap();
+
+        assert_eq!(summary.archived_sessions, 1);
+        assert_eq!(summary.dropped_subscriptions, 1);
+        let error = bridge
+            .drain_subscription_events(subscription, 1)
+            .expect_err("shutdown should clear native subscription handles");
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
     }
 
     fn brain_registration(

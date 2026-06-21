@@ -8,6 +8,7 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   buildAdapterDiagnosticsProjection,
+  buildBackgroundServiceDiagnosticsProjection,
   buildRuntimeDiagnosticsProjection,
   buildToolRegistryDiagnostics,
   handleAdminDiagnosticsRequest,
@@ -96,6 +97,33 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
     }),
   ],
   observation: { enabled: true, writerAvailable: true },
+});
+const background = buildBackgroundServiceDiagnosticsProjection({
+  now,
+  scheduler: {
+    jobCount: 3,
+    activeJobs: 2,
+    pausedJobs: 1,
+    staleRuns: 1,
+    nextDueAt: "2026-06-20T14:05:00.000Z",
+  },
+  curator: {
+    status: "available",
+    candidateCount: 4,
+    mutationCount: 1,
+  },
+  backgroundReview: {
+    enabled: true,
+    recentFindings: 2,
+  },
+  cleanup: {
+    lastRunAt: "2026-06-20T13:55:00.000Z",
+    terminalArchived: 1,
+    orphanedArchived: 0,
+    expiredArchived: 1,
+    adapterReleased: 1,
+    adapterDegraded: 0,
+  },
 });
 
 const overview = handleAdminDiagnosticsRequest(
@@ -190,6 +218,24 @@ const metrics = handleAdminDiagnosticsRequest(
 const metricPage = okData<AdminPage<unknown>>(metrics);
 assert.equal(metricPage.limit, 250);
 
+const backgroundRoute = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/background" },
+  { diagnostics, background },
+);
+assert.equal(backgroundRoute.status, 200);
+assert.equal(
+  okData<{ summary: { activeJobs: number; cleanupArchived: number } }>(
+    backgroundRoute,
+  ).summary.activeJobs,
+  2,
+);
+assert.equal(
+  okData<{ summary: { activeJobs: number; cleanupArchived: number } }>(
+    backgroundRoute,
+  ).summary.cleanupArchived,
+  2,
+);
+
 const wrongMethod = handleAdminDiagnosticsRequest(
   { method: "POST", url: "/v1/admin/diagnostics" },
   { diagnostics },
@@ -213,6 +259,7 @@ console.log(
       channels: channelPage.total,
       redacted: eventPage.items[0]?.token,
       metricsLimit: metricPage.limit,
+      backgroundHealth: okData<{ health: string }>(backgroundRoute).health,
     },
     null,
     2,

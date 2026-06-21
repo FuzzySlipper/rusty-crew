@@ -18,6 +18,11 @@ export type AdminControlCommandName =
   | "request_delegated_checkpoint"
   | "reload_mcp"
   | "run_maintenance"
+  | "scheduler_tick"
+  | "scheduler_run_job"
+  | "scheduler_pause_job"
+  | "scheduler_resume_job"
+  | "cleanup_delegated_resources"
   | "curator_status"
   | "curator_run_scan"
   | "curator_preview_candidate"
@@ -98,6 +103,21 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   runMaintenance?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  schedulerTick?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  schedulerRunJob?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  schedulerPauseJob?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  schedulerResumeJob?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  cleanupDelegatedResources?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   curatorStatus?(
@@ -460,6 +480,79 @@ function parseControlCommand(
     parts[0] === "v1" &&
     parts[1] === "admin" &&
     parts[2] === "control" &&
+    parts[3] === "scheduler"
+  ) {
+    if (parts.length === 5 && parts[4] === "tick") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "scheduler_tick",
+          target: {},
+        },
+      };
+    }
+    if (parts.length === 7 && parts[4] === "jobs") {
+      const jobId = parts[5] ?? "";
+      if (!jobId) return invalidTarget(requestId, "missing_job_id");
+      const action = parts[6];
+      if (action === "run") {
+        return {
+          ok: true,
+          command: {
+            ...commandBase,
+            name: "scheduler_run_job",
+            target: { jobId },
+          },
+        };
+      }
+      if (action === "pause") {
+        return {
+          ok: true,
+          command: {
+            ...commandBase,
+            name: "scheduler_pause_job",
+            target: { jobId },
+          },
+        };
+      }
+      if (action === "resume") {
+        return {
+          ok: true,
+          command: {
+            ...commandBase,
+            name: "scheduler_resume_job",
+            target: { jobId },
+          },
+        };
+      }
+    }
+  }
+
+  if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "cleanup" &&
+    parts[4] === "delegated" &&
+    parts[5] === "run"
+  ) {
+    return {
+      ok: true,
+      command: {
+        ...commandBase,
+        name: "cleanup_delegated_resources",
+        target: {},
+      },
+    };
+  }
+
+  if (
+    parts.length >= 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
     parts[3] === "curator"
   ) {
     if (parts.length === 5 && parts[4] === "status") {
@@ -580,6 +673,16 @@ function executorForCommand(
       return executor.reloadMcp;
     case "run_maintenance":
       return executor.runMaintenance;
+    case "scheduler_tick":
+      return executor.schedulerTick;
+    case "scheduler_run_job":
+      return executor.schedulerRunJob;
+    case "scheduler_pause_job":
+      return executor.schedulerPauseJob;
+    case "scheduler_resume_job":
+      return executor.schedulerResumeJob;
+    case "cleanup_delegated_resources":
+      return executor.cleanupDelegatedResources;
     case "curator_status":
       return executor.curatorStatus;
     case "curator_run_scan":

@@ -10,12 +10,12 @@ import {
   adminCommandActivity,
   AgentActivityObservationProducer,
   createAgentActivityObservationEvent,
-  createMemoryAgentActivityObservationSink,
   sessionActivity,
   toolActivity,
   workActivity,
   type AgentObservationIdentity,
 } from "./index.js";
+import { createMemoryAgentActivityObservationSink } from "./test-support.js";
 
 const identity: AgentObservationIdentity = {
   profile: "prime" as ProfileId,

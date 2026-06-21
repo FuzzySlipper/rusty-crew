@@ -22,6 +22,9 @@ import type {
   SessionId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  ScheduledJobSummary,
+  ScheduledRunSummary,
+  SchedulerTickReport,
   ShutdownRequest,
   ShutdownSummary,
   SubscriptionHandle,
@@ -97,6 +100,36 @@ export class CoreBridge {
       message.body,
       message.correlationId,
     );
+  }
+
+  async registerScheduledWakeJob(input: {
+    jobId: string;
+    targetSessionId: SessionId;
+    intervalMs?: number;
+    firstDueAt: string;
+  }): Promise<ScheduledJobSummary> {
+    return this.native.registerScheduledWakeJob(input);
+  }
+
+  async runSchedulerTick(): Promise<SchedulerTickReport> {
+    return this.native.runSchedulerTick();
+  }
+
+  async requestScheduledJobRun(
+    jobId: string,
+  ): Promise<ScheduledRunSummary | undefined> {
+    return this.native.requestScheduledJobRun(jobId);
+  }
+
+  async pauseScheduledJob(jobId: string): Promise<Unit> {
+    return this.native.pauseScheduledJob(jobId);
+  }
+
+  async resumeScheduledJob(input: {
+    jobId: string;
+    nextDueAt: string;
+  }): Promise<Unit> {
+    return this.native.resumeScheduledJob(input);
   }
 
   async cancelDelegatedSession(

@@ -3,10 +3,10 @@ import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
 import {
   buildToolContextDiagnosticsReport,
   buildToolRegistryDiagnostics,
-  createMemoryAgentActivityObservationSink,
   runBackgroundMemorySkillReview,
 } from "./index.js";
 import type { LoadedSkill } from "./profile-loading.js";
+import { createMemoryAgentActivityObservationSink } from "./test-support.js";
 
 const now = "2026-06-20T14:00:00.000Z";
 const profileId = "prime" as ProfileId;

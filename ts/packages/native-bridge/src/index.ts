@@ -31,6 +31,12 @@ import type {
   RunId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  ScheduledJobStatus,
+  ScheduledJobSummary,
+  ScheduledRunStatus,
+  ScheduledRunSummary,
+  ScheduledRunTrigger,
+  SchedulerTickReport,
   SessionId,
   SessionState,
   ShutdownRequest,
@@ -146,6 +152,16 @@ interface NativeBridgeBinding {
     body: string,
     correlationId?: string,
   ): NativeQueuedMessageRecord;
+  registerScheduledWakeJobJson(
+    jobId: string,
+    targetSessionId: string,
+    intervalMs: number | undefined,
+    firstDueAt: string,
+  ): string;
+  runSchedulerTickJson(): string;
+  requestScheduledJobRunJson(jobId: string): string;
+  pauseScheduledJob(jobId: string): void;
+  resumeScheduledJob(jobId: string, nextDueAt: string): void;
   buildBrainWakeRequest(
     brain: number,
     sessionId: string,
@@ -464,6 +480,21 @@ export interface NativeBridgeModule {
     body: string;
     correlationId?: string;
   }): Promise<NativeQueuedMessageRecord>;
+  registerScheduledWakeJob(input: {
+    jobId: string;
+    targetSessionId: SessionId;
+    intervalMs?: number;
+    firstDueAt: string;
+  }): Promise<ScheduledJobSummary>;
+  runSchedulerTick(): Promise<SchedulerTickReport>;
+  requestScheduledJobRun(
+    jobId: string,
+  ): Promise<ScheduledRunSummary | undefined>;
+  pauseScheduledJob(jobId: string): Promise<Unit>;
+  resumeScheduledJob(input: {
+    jobId: string;
+    nextDueAt: string;
+  }): Promise<Unit>;
   /**
    * Runtime-local helper: projects body state in Rust and builds the three
    * runtime-buffer handles used by a registered brain wake.
@@ -533,6 +564,11 @@ export const nativeManifestOperationNames = [
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
+  "register_scheduled_wake_job",
+  "run_scheduler_tick",
+  "request_scheduled_job_run",
+  "pause_scheduled_job",
+  "resume_scheduled_job",
   "cancel_delegated_session",
   "request_delegated_checkpoint",
   "drain_delegated_sessions",
@@ -568,6 +604,11 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
+    registerScheduledWakeJob: unavailable("register_scheduled_wake_job"),
+    runSchedulerTick: unavailable("run_scheduler_tick"),
+    requestScheduledJobRun: unavailable("request_scheduled_job_run"),
+    pauseScheduledJob: unavailable("pause_scheduled_job"),
+    resumeScheduledJob: unavailable("resume_scheduled_job"),
     cancelDelegatedSession: unavailable("cancel_delegated_session"),
     requestDelegatedCheckpoint: unavailable("request_delegated_checkpoint"),
     drainDelegatedSessions: unavailable("drain_delegated_sessions"),
@@ -779,6 +820,35 @@ function createNativeBridgeModule(
         input.body,
         input.correlationId,
       ),
+    registerScheduledWakeJob: async (input) =>
+      toScheduledJobSummary(
+        JSON.parse(
+          binding.registerScheduledWakeJobJson(
+            input.jobId,
+            input.targetSessionId,
+            input.intervalMs,
+            input.firstDueAt,
+          ),
+        ) as RawScheduledJobSummary,
+      ),
+    runSchedulerTick: async () =>
+      toSchedulerTickReport(
+        JSON.parse(binding.runSchedulerTickJson()) as RawSchedulerTickReport,
+      ),
+    requestScheduledJobRun: async (jobId) => {
+      const raw = JSON.parse(
+        binding.requestScheduledJobRunJson(jobId),
+      ) as RawScheduledRunSummary | null;
+      return raw ? toScheduledRunSummary(raw) : undefined;
+    },
+    pauseScheduledJob: async (jobId) => {
+      binding.pauseScheduledJob(jobId);
+      return {};
+    },
+    resumeScheduledJob: async (input) => {
+      binding.resumeScheduledJob(input.jobId, input.nextDueAt);
+      return {};
+    },
     buildBrainWakeRequest: async (input) => {
       const buffered = binding.buildBrainWakeRequest(
         input.brain,
@@ -1092,6 +1162,56 @@ function toDelegatedResourceCleanupReport(
   };
 }
 
+function toScheduledJobSummary(
+  raw: RawScheduledJobSummary,
+): ScheduledJobSummary {
+  return {
+    jobId: raw.job_id,
+    jobKind: raw.job_kind,
+    targetSessionId: raw.target_session_id,
+    intervalMs: raw.interval_ms,
+    nextDueAt: raw.next_due_at,
+    status: raw.status,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    pausedAt: raw.paused_at,
+  };
+}
+
+function toScheduledRunSummary(
+  raw: RawScheduledRunSummary,
+): ScheduledRunSummary {
+  return {
+    runId: raw.run_id,
+    jobId: raw.job_id,
+    jobKind: raw.job_kind,
+    targetSessionId: raw.target_session_id,
+    status: raw.status,
+    trigger: raw.trigger,
+    scheduledFor: raw.scheduled_for,
+    claimedAt: raw.claimed_at,
+    claimDeadlineAt: raw.claim_deadline_at,
+    completedAt: raw.completed_at,
+    error: raw.error,
+    output: raw.output,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+  };
+}
+
+function toSchedulerTickReport(
+  raw: RawSchedulerTickReport,
+): SchedulerTickReport {
+  return {
+    staleRunsExpired: raw.stale_runs_expired,
+    dueRunsClaimed: raw.due_runs_claimed,
+    wakesRequested: raw.wakes_requested,
+    runsCompleted: raw.runs_completed,
+    runsSkipped: raw.runs_skipped,
+    runsFailed: raw.runs_failed,
+  };
+}
+
 function toSessionState(state: RawSessionState): SessionState {
   return {
     handle: state.handle as SessionState["handle"],
@@ -1314,6 +1434,44 @@ interface RawDelegatedResourceCleanupReport {
   orphaned_archived: SessionId[];
   expired_archived: SessionId[];
   resources_released: number;
+}
+
+interface RawScheduledJobSummary {
+  job_id: string;
+  job_kind: string;
+  target_session_id?: SessionId;
+  interval_ms?: number;
+  next_due_at?: string;
+  status: ScheduledJobStatus;
+  created_at: string;
+  updated_at: string;
+  paused_at?: string;
+}
+
+interface RawScheduledRunSummary {
+  run_id: RunId;
+  job_id: string;
+  job_kind: string;
+  target_session_id?: SessionId;
+  status: ScheduledRunStatus;
+  trigger: ScheduledRunTrigger;
+  scheduled_for?: string;
+  claimed_at: string;
+  claim_deadline_at: string;
+  completed_at?: string;
+  error?: string;
+  output?: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawSchedulerTickReport {
+  stale_runs_expired: number;
+  due_runs_claimed: number;
+  wakes_requested: number;
+  runs_completed: number;
+  runs_skipped: number;
+  runs_failed: number;
 }
 
 interface RawSessionState {

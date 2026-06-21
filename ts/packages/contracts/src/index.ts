@@ -641,6 +641,54 @@ export interface PlatformAdapterRegistration {
   displayName: string;
 }
 
+export type ScheduledJobStatus = "active" | "paused" | "archived";
+export type ScheduledRunStatus =
+  | "claimed"
+  | "completed"
+  | "skipped"
+  | "failed"
+  | "expired"
+  | "cancelled";
+export type ScheduledRunTrigger = "due" | "manual";
+
+export interface ScheduledJobSummary {
+  jobId: string;
+  jobKind: string;
+  targetSessionId?: SessionId;
+  intervalMs?: number;
+  nextDueAt?: string;
+  status: ScheduledJobStatus;
+  createdAt: string;
+  updatedAt: string;
+  pausedAt?: string;
+}
+
+export interface ScheduledRunSummary {
+  runId: RunId;
+  jobId: string;
+  jobKind: string;
+  targetSessionId?: SessionId;
+  status: ScheduledRunStatus;
+  trigger: ScheduledRunTrigger;
+  scheduledFor?: string;
+  claimedAt: string;
+  claimDeadlineAt: string;
+  completedAt?: string;
+  error?: string;
+  output?: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchedulerTickReport {
+  staleRunsExpired: number;
+  dueRunsClaimed: number;
+  wakesRequested: number;
+  runsCompleted: number;
+  runsSkipped: number;
+  runsFailed: number;
+}
+
 export const manifestOperationNames = [
   "initialize_engine",
   "shutdown_engine",
@@ -652,6 +700,11 @@ export const manifestOperationNames = [
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
+  "register_scheduled_wake_job",
+  "run_scheduler_tick",
+  "request_scheduled_job_run",
+  "pause_scheduled_job",
+  "resume_scheduled_job",
   "cancel_delegated_session",
   "request_delegated_checkpoint",
   "drain_delegated_sessions",

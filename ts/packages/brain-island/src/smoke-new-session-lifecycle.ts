@@ -6,15 +6,17 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
-  createMemoryAdminControlAuditSink,
-  createMemoryAgentActivityObservationSink,
-  createMemoryNewSessionLifecycleAuditSink,
   createNewSessionLifecycleExecutor,
   handleAdminControlRequest,
   type AdminControlResponse,
   type AdminRouteResult,
   type NewSessionTemplate,
 } from "./index.js";
+import {
+  createMemoryAdminControlAuditSink,
+  createMemoryAgentActivityObservationSink,
+  createMemoryNewSessionLifecycleAuditSink,
+} from "./test-support.js";
 
 const order: string[] = [];
 const lifecycleAudit = createMemoryNewSessionLifecycleAuditSink();

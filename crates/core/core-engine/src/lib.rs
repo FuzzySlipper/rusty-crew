@@ -690,6 +690,10 @@ impl CoreEngine {
     }
 
     pub fn shutdown(self) -> CoreResult<ShutdownSummary> {
+        self.shutdown_with_timeout(0)
+    }
+
+    pub fn shutdown_with_timeout(self, drain_timeout_ms: u32) -> CoreResult<ShutdownSummary> {
         let active_sessions = self
             .sessions
             .all_sessions()?
@@ -702,10 +706,16 @@ impl CoreEngine {
                 self.archive_session(&session.session_id)?;
             }
         }
+        // Shutdown is currently synchronous: session archive events are
+        // published before subscriber senders are dropped, so there is no
+        // async work to wait for. The timeout becomes meaningful once the
+        // engine owns background tasks that require bounded joins.
+        let _ = drain_timeout_ms;
+        let dropped_subscriptions = self.bus.shutdown_subscribers()?;
         Ok(ShutdownSummary {
             engine: self.handle,
             archived_sessions,
-            dropped_subscriptions: 0,
+            dropped_subscriptions,
         })
     }
 
@@ -1589,6 +1599,50 @@ mod tests {
             .recent_events
             .iter()
             .any(|event| matches!(event, CoreEvent::SessionCreated { .. })));
+    }
+
+    #[test]
+    fn shutdown_archives_sessions_and_releases_subscribers() {
+        let engine = test_engine();
+        engine
+            .create_session(session_config(
+                "prime-session",
+                "prime",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .create_session(session_config(
+                "worker-session",
+                "worker",
+                "worker-profile",
+                SessionKind::Worker,
+            ))
+            .unwrap();
+        let (_first_id, first_receiver) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::SessionArchived],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+        let (_second_id, second_receiver) = engine
+            .subscribe_events(EventSubscription {
+                event_kinds: vec![CoreEventKind::SessionArchived],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        let summary = engine.shutdown_with_timeout(25).unwrap();
+
+        assert_eq!(summary.archived_sessions, 2);
+        assert_eq!(summary.dropped_subscriptions, 2);
+        assert_receiver_disconnects_after_buffered_events(first_receiver);
+        assert_receiver_disconnects_after_buffered_events(second_receiver);
     }
 
     #[test]
@@ -3992,6 +4046,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&path);
         let _ = std::fs::remove_file(&path);
         path
+    }
+
+    fn assert_receiver_disconnects_after_buffered_events(
+        receiver: std::sync::mpsc::Receiver<CoreEvent>,
+    ) {
+        for _ in 0..8 {
+            match receiver.recv_timeout(Duration::from_millis(10)) {
+                Ok(_) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    panic!("subscriber receiver remained open after shutdown")
+                }
+            }
+        }
+        panic!("subscriber receiver still had buffered events after shutdown");
     }
 
     fn spawn_delegated(

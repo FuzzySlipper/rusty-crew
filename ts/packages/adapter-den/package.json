@@ -10,7 +10,8 @@
     "smoke:memory-client": "tsx src/smoke-memory-client.ts"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./test-support": "./src/test-support.ts"
   },
   "dependencies": {
     "@rusty-crew/contracts": "0.1.0"

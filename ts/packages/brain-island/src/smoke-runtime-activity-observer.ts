@@ -6,10 +6,10 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
-  createMemoryAgentActivityObservationSink,
   createRuntimeActivityObserver,
   type AgentObservationIdentity,
 } from "./index.js";
+import { createMemoryAgentActivityObservationSink } from "./test-support.js";
 
 const identity: AgentObservationIdentity = {
   profile: "prime" as ProfileId,

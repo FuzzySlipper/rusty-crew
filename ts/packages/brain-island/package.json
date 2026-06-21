@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./test-support": "./src/test-support.ts"
   },
   "scripts": {
     "smoke:wake": "tsx src/smoke-wake.ts",
@@ -41,6 +42,7 @@
     "smoke:background-memory-skill-review": "tsx src/smoke-background-memory-skill-review.ts",
     "smoke:curator-candidates": "tsx src/smoke-curator-candidates.ts",
     "smoke:curator-mutations": "tsx src/smoke-curator-mutations.ts",
+    "smoke:curator-review-e2e": "tsx src/smoke-curator-review-e2e.ts",
     "smoke:delegated-resource-cleanup": "tsx src/smoke-delegated-resource-cleanup.ts",
     "smoke:background-governance-observation": "tsx src/smoke-background-governance-observation.ts",
     "smoke:agent-activity-observation": "tsx src/smoke-agent-activity-observation.ts",
@@ -50,6 +52,7 @@
     "smoke:direct-debug-service": "tsx src/smoke-direct-debug-service.ts",
     "smoke:debug-api-client": "tsx src/smoke-debug-api-client.ts",
     "smoke:admin-control-api": "tsx src/smoke-admin-control-api.ts",
+    "smoke:scheduler-cleanup-e2e": "tsx src/smoke-scheduler-cleanup-e2e.ts",
     "smoke:slash-command-router": "tsx src/smoke-slash-command-router.ts",
     "smoke:slash-command-e2e": "tsx src/smoke-slash-command-e2e.ts",
     "smoke:new-session-lifecycle": "tsx src/smoke-new-session-lifecycle.ts",

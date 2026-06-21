@@ -6,14 +6,17 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
+  createBackgroundAdminControlExecutor,
   createCuratorAdminControlExecutor,
-  createMemoryAdminControlAuditSink,
-  createMemoryAgentActivityObservationSink,
   handleAdminControlRequest,
   type AdminControlExecutor,
   type AdminControlResponse,
   type AdminRouteResult,
 } from "./index.js";
+import {
+  createMemoryAdminControlAuditSink,
+  createMemoryAgentActivityObservationSink,
+} from "./test-support.js";
 
 const auditSink = createMemoryAdminControlAuditSink();
 const observationSink = createMemoryAgentActivityObservationSink();
@@ -22,7 +25,39 @@ const observationProducer = new AgentActivityObservationProducer({
   required: true,
 });
 const curatorRequests: unknown[] = [];
+const schedulerCalls: string[] = [];
 const executor: AdminControlExecutor = {
+  ...createBackgroundAdminControlExecutor({
+    scheduler: {
+      tick: () => {
+        schedulerCalls.push("tick");
+        return { dueRunsClaimed: 1, runsCompleted: 1 };
+      },
+      runJob: (jobId) => {
+        schedulerCalls.push(`run:${jobId}`);
+        return { jobId, status: "completed" };
+      },
+      pauseJob: (jobId) => {
+        schedulerCalls.push(`pause:${jobId}`);
+        return { jobId, status: "paused" };
+      },
+      resumeJob: (jobId, nextDueAt) => {
+        schedulerCalls.push(`resume:${jobId}:${nextDueAt ?? ""}`);
+        return { jobId, nextDueAt, status: "active" };
+      },
+    },
+    cleanupDelegatedResources: () => ({
+      runtime: {
+        cleanedAt: "2026-06-20T15:00:00.000Z",
+        terminalArchived: ["delegated-terminal" as SessionId],
+        orphanedArchived: [],
+        expiredArchived: ["delegated-expired" as SessionId],
+        resourcesReleased: 0,
+      },
+      adapters: [],
+      observation: {},
+    }),
+  }),
   ...createCuratorAdminControlExecutor({
     curatorExecutor(request) {
       curatorRequests.push(request);
@@ -258,6 +293,56 @@ assert.equal(
   "mutation-alpha",
 );
 
+const schedulerTick = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/scheduler/tick",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(schedulerTick.status, 200);
+assert.equal(schedulerCalls.at(-1), "tick");
+
+const schedulerRun = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/scheduler/jobs/wake-prime/run",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(schedulerRun.status, 200);
+assert.equal(schedulerCalls.at(-1), "run:wake-prime");
+
+const schedulerResume = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/scheduler/jobs/wake-prime/resume",
+    headers: authHeaders(),
+    body: { nextDueAt: "2026-06-20T15:05:00.000Z" },
+  },
+  context,
+);
+assert.equal(schedulerResume.status, 200);
+assert.equal(
+  schedulerCalls.at(-1),
+  "resume:wake-prime:2026-06-20T15:05:00.000Z",
+);
+
+const cleanupRun = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/cleanup/delegated/run",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(cleanupRun.status, 200);
+const cleanupRunData = okData<AdminControlResponse>(cleanupRun);
+assert.equal(cleanupRunData.command.name, "cleanup_delegated_resources");
+assert.equal(cleanupRunData.outcome.status, "completed");
+
 const auditUnavailable = createMemoryAdminControlAuditSink();
 auditUnavailable.failNext();
 const auditFailure = await handleAdminControlRequest(
@@ -293,6 +378,8 @@ console.log(
       reloadFailure: reloadFailureData.outcome.reasonCode,
       curatorApply: curatorApplyData.outcome.status,
       curatorRollback: curatorRollbackData.outcome.status,
+      schedulerRun: okData<AdminControlResponse>(schedulerRun).outcome.status,
+      cleanupRun: cleanupRunData.outcome.status,
       auditFailure: auditFailure.status,
     },
     null,

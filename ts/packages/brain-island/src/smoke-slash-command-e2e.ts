@@ -17,10 +17,6 @@ import {
   buildAdapterDiagnosticsProjection,
   buildReadOnlySlashCommandResponse,
   buildRuntimeDiagnosticsProjection,
-  createMemoryAdminControlAuditSink,
-  createMemoryAgentActivityObservationSink,
-  createMemoryNewSessionLifecycleAuditSink,
-  createMemoryReloadMcpLifecycleAuditSink,
   createNewSessionLifecycleExecutor,
   createReloadMcpControlExecutor,
   handleAdminControlRequest,
@@ -31,6 +27,12 @@ import {
   type SlashCommandRouteResult,
   type SlashCommandSession,
 } from "./index.js";
+import {
+  createMemoryAdminControlAuditSink,
+  createMemoryAgentActivityObservationSink,
+  createMemoryNewSessionLifecycleAuditSink,
+  createMemoryReloadMcpLifecycleAuditSink,
+} from "./test-support.js";
 
 const now = "2026-06-20T19:00:00.000Z";
 const adapterId = "mcp-main" as AdapterId;

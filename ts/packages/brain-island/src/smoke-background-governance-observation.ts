@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import {
   AgentActivityObservationProducer,
-  createMemoryAgentActivityObservationSink,
   publishBackgroundGovernanceObservation,
 } from "./index.js";
+import { createMemoryAgentActivityObservationSink } from "./test-support.js";
 
 const sink = createMemoryAgentActivityObservationSink();
 const producer = new AgentActivityObservationProducer({ sink, required: true });

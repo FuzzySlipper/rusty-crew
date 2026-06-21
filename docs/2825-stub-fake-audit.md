@@ -31,23 +31,30 @@ Task status: closed.
 
 ### 2827: Shutdown No-Op
 
-Outcome: partially resolved; keep open with narrowed scope.
+Outcome: resolved.
 
 Current code:
 
 - `CoreEngine::shutdown()` now iterates active sessions and archives them.
 - The returned `archived_sessions` count is real.
-- `NativeBridge::shutdown_engine()` delegates to `engine.shutdown()`.
+- `CoreBus::shutdown_subscribers()` drops all active subscriber senders and
+  returns the dropped count, releasing blocked receivers once buffered events
+  are drained.
+- `CoreEngine::shutdown_with_timeout()` publishes session archive events, closes
+  subscribers, and reports `dropped_subscriptions`.
+- `NativeBridge::shutdown_engine()` passes through `drain_timeout_ms`, delegates
+  to `engine.shutdown_with_timeout()`, and clears local subscription handles.
 - The mock bridge delegates to `engine.shutdown()`.
 
-Remaining gap:
+Timeout semantics:
 
-- `dropped_subscriptions` is still always `0`.
-- `drain_timeout_ms` is accepted by the native bridge but ignored.
-- `CoreBus` has unsubscribe support but no shutdown/drain operation that drops
-  all subscribers and reports the count.
+- Shutdown is currently synchronous and in-process. Session archive events are
+  published before subscriber senders are dropped, so there are no background
+  joins to wait on yet. `drain_timeout_ms` is accepted and passed into the
+  engine as the future bounded-join budget for when the engine owns async
+  background tasks.
 
-Task status: keep open as the remaining shutdown drain/subscription stub.
+Task status: closed.
 
 ### 2828: Resource Limits Not Enforced
 
@@ -91,20 +98,26 @@ Task status: closed.
 
 ### 3036: Public Failure-Injection Fakes
 
-Outcome: real future cleanup item.
+Outcome: resolved.
 
-Current code still publicly exposes test seams such as:
+Current code:
 
-- `MemoryDenProjectionSink.failNext`;
-- `MemoryAgentActivityObservationSink.failNext`;
-- `MemoryAdminControlAuditSink.failNext`;
-- Den channel fake transport helpers such as `failNextOpen`.
+- `@rusty-crew/adapter-den` exposes production adapter/channel APIs from its
+  root entrypoint.
+- `@rusty-crew/adapter-den/test-support` exposes
+  `createMemoryDenProjectionSink`, `MemoryDenProjectionSink`,
+  `createSimulatedDenChannelsTransport`, and `SimulatedDenChannelsTransport`.
+- `@rusty-crew/brain-island` exposes production observation/control interfaces,
+  producers, executors, and route handlers from its root entrypoint.
+- `@rusty-crew/brain-island/test-support` exposes memory observation/admin
+  audit/lifecycle sinks.
+- Smokes import failure-injection helpers from test-support paths.
 
-ADR 0015 decides these are test-support APIs, not production APIs. Task 3036
-tracks moving them behind explicit test-support exports or smoke/internal
-modules.
+ADR 0015 remains the rule: future memory fakes and failure-injection helpers
+belong behind explicit test-support exports or smoke/internal modules, not root
+production package entrypoints.
 
-Task status: keep open.
+Task status: closed.
 
 ## Other Hits Reviewed
 

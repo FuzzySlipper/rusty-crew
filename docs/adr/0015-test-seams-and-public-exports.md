@@ -60,6 +60,15 @@ memory fakes through their root export. Existing smokes can migrate first.
 Production imports should then be updated to use only production interfaces and
 constructors.
 
+Implemented split:
+
+- `@rusty-crew/adapter-den/test-support` owns Den memory projection sinks and
+  simulated Den Channels transports.
+- `@rusty-crew/brain-island/test-support` owns memory observation, admin audit,
+  new-session lifecycle, and MCP reload lifecycle sinks.
+- Smoke files import shared failure-injection helpers from these test-support
+  paths instead of root package entrypoints.
+
 ## Consequences
 
 This keeps failure injection available without blessing it as runtime API.

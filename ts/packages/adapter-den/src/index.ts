@@ -9,7 +9,22 @@ import type {
 } from "@rusty-crew/contracts";
 
 export * from "./den-channels.js";
-export * from "./den-channel-transport.js";
+export {
+  DenChannelsTransportController,
+  InMemoryDenChannelsCursorStore,
+} from "./den-channel-transport.js";
+export type {
+  DenChannelsConnectivityState,
+  DenChannelsCursorStore,
+  DenChannelsInboundDecision,
+  DenChannelsReconnectAttempt,
+  DenChannelsRetryPolicy,
+  DenChannelsTransport,
+  DenChannelsTransportControllerOptions,
+  DenChannelsTransportKind,
+  DenChannelsTransportOpenRequest,
+  DenChannelsTransportStatus,
+} from "./den-channel-transport.js";
 export * from "./channel-routing.js";
 export * from "./channel-presence.js";
 export * from "./channel-ingress.js";
@@ -72,11 +87,6 @@ export interface DenAdapter {
     payload: ExternalEventPayload,
   ): Promise<EventReceipt>;
   projectEvent(event: CoreEvent): Promise<DenProjectionResult>;
-}
-
-export interface MemoryDenProjectionSink extends DenProjectionSink {
-  readonly projections: DenProjection[];
-  failNext(error?: Error): void;
 }
 
 export function createDenAdapterRegistration(
@@ -143,29 +153,6 @@ export function createDenAdapter(options: DenAdapterOptions): DenAdapter {
 
         return { accepted: false, dropped: true, reason };
       }
-    },
-  };
-}
-
-export function createMemoryDenProjectionSink(): MemoryDenProjectionSink {
-  const projections: DenProjection[] = [];
-  let nextFailure: Error | undefined;
-
-  return {
-    projections,
-
-    failNext(error = new Error("Den projection sink unavailable")): void {
-      nextFailure = error;
-    },
-
-    project(projection): void {
-      if (nextFailure) {
-        const error = nextFailure;
-        nextFailure = undefined;
-        throw error;
-      }
-
-      projections.push(projection);
     },
   };
 }

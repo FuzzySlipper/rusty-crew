@@ -9,6 +9,9 @@ The route layer maps `POST /v1/admin/control/...` requests into explicit command
 Curator status, scan, candidate preview/approve/apply, and rollback commands now
 use the same guarded surface. See `curator-admin-control-routes.md`.
 
+Scheduler tick/job controls and delegated cleanup controls also use this
+surface. See `background-service-diagnostics-admin-controls.md`.
+
 ## Boundary
 
 `handleAdminControlRequest` requires:
@@ -32,6 +35,11 @@ Initial route families:
 - `POST /v1/admin/control/delegations/{session_id}/checkpoint`
 - `POST /v1/admin/control/mcp/{session_id}/reload`
 - `POST /v1/admin/control/maintenance`
+- `POST /v1/admin/control/scheduler/tick`
+- `POST /v1/admin/control/scheduler/jobs/{job_id}/run`
+- `POST /v1/admin/control/scheduler/jobs/{job_id}/pause`
+- `POST /v1/admin/control/scheduler/jobs/{job_id}/resume`
+- `POST /v1/admin/control/cleanup/delegated/run`
 - `POST /v1/admin/control/shutdown`
 
 Each route becomes an `AdminControlCommand` with:
@@ -75,6 +83,8 @@ Configured executor methods can cover:
 - request delegated checkpoint;
 - reload per-session MCP;
 - run explicit maintenance;
+- run scheduler tick/job controls;
+- run delegated resource cleanup;
 - shutdown.
 
 Absent executor methods are explicit unsupported controls.

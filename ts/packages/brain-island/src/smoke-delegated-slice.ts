@@ -18,10 +18,8 @@ import type {
   SessionId,
   TaskId,
 } from "@rusty-crew/contracts";
-import {
-  createDenAdapter,
-  createMemoryDenProjectionSink,
-} from "@rusty-crew/adapter-den";
+import { createDenAdapter } from "@rusty-crew/adapter-den";
+import { createMemoryDenProjectionSink } from "@rusty-crew/adapter-den/test-support";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   createDenRouterPiAgentFactory,

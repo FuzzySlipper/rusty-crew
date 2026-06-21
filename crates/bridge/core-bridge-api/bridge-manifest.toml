@@ -125,6 +125,55 @@ output = "queued_message_record"
 errors = "core_protocol::CoreError"
 summary = "Queue a steer/follow-up message for the next Rust-owned wake with body-policy TTL and cap enforcement."
 
+# Scheduler operator controls. The scheduler remains Rust-owned; these bridge
+# calls are deliberate host/admin entrypoints for registering wake jobs,
+# triggering ticks, manual runs, and pausing/resuming durable jobs.
+
+[[operation]]
+name = "register_scheduled_wake_job"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(job_id: String, target_session_id: core_protocol::SessionId, interval_ms: Option<u64>, first_due_at: IsoTimestamp)"
+output = "scheduled_job_summary"
+errors = "core_protocol::CoreError"
+summary = "Create or replace a Rust-owned scheduled wake job for an existing wakeable session."
+
+[[operation]]
+name = "run_scheduler_tick"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "scheduler_tick_report"
+errors = "core_protocol::CoreError"
+summary = "Run one Rust-owned scheduler tick and return compact execution counts."
+
+[[operation]]
+name = "request_scheduled_job_run"
+surface = "stable"
+direction = "ts_to_rust"
+input = "job_id: String"
+output = "Option<scheduled_run_summary>"
+errors = "core_protocol::CoreError"
+summary = "Request a manual run for a non-archived scheduled job."
+
+[[operation]]
+name = "pause_scheduled_job"
+surface = "stable"
+direction = "ts_to_rust"
+input = "job_id: String"
+output = "core_protocol::Unit"
+errors = "core_protocol::CoreError"
+summary = "Pause a Rust-owned scheduled job."
+
+[[operation]]
+name = "resume_scheduled_job"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(job_id: String, next_due_at: IsoTimestamp)"
+output = "core_protocol::Unit"
+errors = "core_protocol::CoreError"
+summary = "Resume a Rust-owned scheduled job with an explicit next due time."
+
 # Delegation operator controls. These are typed control requests into the Rust
 # lifecycle state machine; adapters must not edit Den state as if it were
 # coordination state.

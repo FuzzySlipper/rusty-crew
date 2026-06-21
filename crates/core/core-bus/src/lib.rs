@@ -101,6 +101,15 @@ impl CoreBus {
         Ok(())
     }
 
+    pub fn shutdown_subscribers(&self) -> CoreResult<u32> {
+        let mut subscribers = self.inner.subscribers.lock().map_err(|_| {
+            CoreError::new(CoreErrorKind::InternalError, "subscriber lock poisoned")
+        })?;
+        let dropped = subscribers.len() as u32;
+        subscribers.clear();
+        Ok(dropped)
+    }
+
     pub fn route_message(
         &self,
         from: AgentId,

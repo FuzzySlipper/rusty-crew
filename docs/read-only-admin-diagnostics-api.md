@@ -33,6 +33,7 @@ Implemented read-only route families:
 - `GET /v1/admin/diagnostics/channels`
 - `GET /v1/admin/diagnostics/persistence`
 - `GET /v1/admin/diagnostics/observation`
+- `GET /v1/admin/diagnostics/background`
 - `GET /v1/admin/diagnostics/metrics`
 - `GET /v1/admin/events/recent`
 
@@ -77,6 +78,7 @@ The redactor is a guardrail, not a license to put raw prompts, full tool outputs
 - stable success and error envelopes;
 - readiness and overview routes;
 - sessions, agents, channels, tools, metrics, and recent events routes;
+- background service diagnostics route;
 - pagination and filters;
 - method rejection and unknown route handling;
 - secret-like field redaction.

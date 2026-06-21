@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import type { SessionId } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
-  createMemoryAgentActivityObservationSink,
   runDelegatedResourceCleanup,
 } from "./index.js";
+import { createMemoryAgentActivityObservationSink } from "./test-support.js";
 
 const observationSink = createMemoryAgentActivityObservationSink();
 const result = await runDelegatedResourceCleanup({

@@ -20,8 +20,6 @@ import type {
 import {
   ChannelBindingActivityTracker,
   createDenAdapter,
-  createMemoryDenProjectionSink,
-  createSimulatedDenChannelsTransport,
   denChannelsInboundToExternalEvent,
   DenChannelsTransportController,
   InMemoryDenChannelsCursorStore,
@@ -38,6 +36,10 @@ import {
   toDenChannelsActivityRequest,
   toDenChannelsPostMessageRequest,
 } from "./index.js";
+import {
+  createMemoryDenProjectionSink,
+  createSimulatedDenChannelsTransport,
+} from "./test-support.js";
 
 const adapterId = "den" as AdapterId;
 let sequence = 0;
