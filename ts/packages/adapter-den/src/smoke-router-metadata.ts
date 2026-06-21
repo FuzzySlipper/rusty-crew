@@ -8,6 +8,7 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   createDenRouterMetadataProjection,
+  createMemoryDenRouterMetadataStore,
   denProductWorkRef,
 } from "./index.js";
 
@@ -78,6 +79,54 @@ assert.equal(projection.provenance.rawPrompt, "[redacted]");
 assert.equal(projection.provenance.rawToolOutput, "[redacted]");
 assert.equal(projection.provenance.source, "smoke");
 
+const store = createMemoryDenRouterMetadataStore({
+  now: () => "2026-06-20T08:01:00Z",
+});
+store.upsertRouterMetadata(projection);
+store.upsertRouterMetadata(
+  createDenRouterMetadataProjection({
+    adapterId,
+    bindingId: "binding-beta",
+    runtime: {
+      agentId: "agent-beta" as AgentId,
+      sessionId: "session-beta" as SessionId,
+      profileId,
+    },
+    providerRefs: {
+      provider: "den_channels",
+      externalChannelId: "channel-2",
+    },
+    denWorkRefs: [{ refKind: "task", id: "9999" }],
+    status: "degraded",
+    degradedReason: "missing subscription",
+    provenance: {
+      source: "smoke",
+      credentialHint: "should-not-leak",
+    },
+  }),
+);
+
+const alphaByBinding = store.queryRouterMetadata({
+  bindingId: "binding-alpha",
+});
+assert.equal(alphaByBinding.total, 1);
+assert.equal(alphaByBinding.items[0]?.runtime.sessionId, sessionId);
+
+const alphaByRuntime = store.queryRouterMetadata({
+  agentId,
+  sessionId,
+  profileId,
+  provider: "den_channels",
+  externalChannelId: "channel-1",
+});
+assert.equal(alphaByRuntime.total, 1);
+assert.equal(alphaByRuntime.items[0]?.bindingId, "binding-alpha");
+
+const degraded = store.queryRouterMetadata({ status: "degraded" });
+assert.equal(degraded.total, 1);
+assert.equal(degraded.items[0]?.bindingId, "binding-beta");
+assert.equal(degraded.items[0]?.provenance.credentialHint, "[redacted]");
+
 console.log(
   JSON.stringify(
     {
@@ -93,6 +142,11 @@ console.log(
         projection.provenance.rawPrompt,
         projection.provenance.rawToolOutput,
       ],
+      query: {
+        byBinding: alphaByBinding.total,
+        byRuntime: alphaByRuntime.total,
+        degraded: degraded.total,
+      },
     },
     null,
     2,

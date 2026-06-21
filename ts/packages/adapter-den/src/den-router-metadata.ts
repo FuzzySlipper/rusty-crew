@@ -41,8 +41,77 @@ export interface DenRouterMetadataProjectionInput {
   provenance?: Record<string, unknown>;
 }
 
+export interface DenRouterMetadataQuery {
+  bindingId?: string;
+  adapterId?: AdapterId | string;
+  agentId?: string;
+  sessionId?: string;
+  profileId?: string;
+  provider?: string;
+  externalChannelId?: string;
+  status?: ExternalBindingStatus;
+  limit?: number;
+}
+
+export interface DenRouterMetadataQueryResult {
+  generatedAt: string;
+  total: number;
+  items: DenRouterMetadataProjection[];
+}
+
+export interface DenRouterMetadataReader {
+  queryRouterMetadata(
+    query?: DenRouterMetadataQuery,
+  ): DenRouterMetadataQueryResult;
+}
+
+export interface DenRouterMetadataStore extends DenRouterMetadataReader {
+  upsertRouterMetadata(projection: DenRouterMetadataProjection): void;
+}
+
+export interface MemoryDenRouterMetadataStoreOptions {
+  now?: () => string;
+  maxRecords?: number;
+  defaultLimit?: number;
+  maxLimit?: number;
+}
+
 const SENSITIVE_PROVENANCE_KEY =
   /(token|secret|password|credential|prompt|raw.?output|tool.?output)/i;
+
+export function createMemoryDenRouterMetadataStore(
+  options: MemoryDenRouterMetadataStoreOptions = {},
+): DenRouterMetadataStore {
+  const records = new Map<string, DenRouterMetadataProjection>();
+  const now = options.now ?? (() => new Date().toISOString());
+  const maxRecords = options.maxRecords ?? 1_000;
+  const defaultLimit = options.defaultLimit ?? 50;
+  const maxLimit = options.maxLimit ?? 200;
+
+  return {
+    upsertRouterMetadata(projection): void {
+      records.set(metadataKey(projection), sanitizeProjection(projection));
+      if (records.size > maxRecords) {
+        const overflow = records.size - maxRecords;
+        for (const key of [...records.keys()].slice(0, overflow)) {
+          records.delete(key);
+        }
+      }
+    },
+
+    queryRouterMetadata(query = {}): DenRouterMetadataQueryResult {
+      const limit = clamp(query.limit ?? defaultLimit, 1, maxLimit);
+      const items = [...records.values()]
+        .filter((projection) => matchesRouterMetadataQuery(projection, query))
+        .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+      return {
+        generatedAt: now(),
+        total: items.length,
+        items: items.slice(0, limit).map(copyProjection),
+      };
+    },
+  };
+}
 
 export function denProductWorkRef(
   input: DenProductWorkRefInput,
@@ -89,4 +158,70 @@ export function sanitizeRouterMetadataProvenance(
       SENSITIVE_PROVENANCE_KEY.test(key) ? "[redacted]" : value,
     ]),
   );
+}
+
+function matchesRouterMetadataQuery(
+  projection: DenRouterMetadataProjection,
+  query: DenRouterMetadataQuery,
+): boolean {
+  if (query.bindingId && projection.bindingId !== query.bindingId) {
+    return false;
+  }
+  if (query.adapterId && projection.adapterId !== query.adapterId) {
+    return false;
+  }
+  if (query.agentId && projection.runtime.agentId !== query.agentId) {
+    return false;
+  }
+  if (query.sessionId && projection.runtime.sessionId !== query.sessionId) {
+    return false;
+  }
+  if (query.profileId && projection.runtime.profileId !== query.profileId) {
+    return false;
+  }
+  if (query.status && projection.status !== query.status) {
+    return false;
+  }
+  if (query.provider && projection.providerRefs?.provider !== query.provider) {
+    return false;
+  }
+  if (
+    query.externalChannelId &&
+    projection.providerRefs?.externalChannelId !== query.externalChannelId
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function sanitizeProjection(
+  projection: DenRouterMetadataProjection,
+): DenRouterMetadataProjection {
+  return {
+    ...projection,
+    workRefs: projection.workRefs.map((ref) => ({ ...ref })),
+    resultRefs: projection.resultRefs?.map((ref) => ({ ...ref })),
+    mcpSurfaceRefs: projection.mcpSurfaceRefs
+      ? [...projection.mcpSurfaceRefs]
+      : undefined,
+    providerRefs: projection.providerRefs
+      ? { ...projection.providerRefs }
+      : undefined,
+    runtime: { ...projection.runtime },
+    provenance: sanitizeRouterMetadataProvenance(projection.provenance),
+  };
+}
+
+function copyProjection(
+  projection: DenRouterMetadataProjection,
+): DenRouterMetadataProjection {
+  return sanitizeProjection(projection);
+}
+
+function metadataKey(projection: DenRouterMetadataProjection): string {
+  return `${projection.adapterId}:${projection.bindingId}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.trunc(value)));
 }

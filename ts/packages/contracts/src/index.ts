@@ -265,6 +265,8 @@ export interface NormalizedChannelActivityProjection {
   severity: ChannelSeverity;
   workRef?: string;
   resultRef?: string;
+  workRefs?: WorkReference[];
+  resultRefs?: ResultReference[];
   createdAt: string;
 }
 

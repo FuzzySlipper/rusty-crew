@@ -27,6 +27,8 @@ export type {
 } from "./den-channel-transport.js";
 export * from "./channel-routing.js";
 export * from "./channel-readback.js";
+export * from "./completion-evidence-projection.js";
+export * from "./den-product-ingress.js";
 export * from "./den-router-metadata.js";
 export * from "./channel-presence.js";
 export * from "./channel-ingress.js";
