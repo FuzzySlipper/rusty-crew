@@ -49,19 +49,26 @@ TS admin host responsibilities:
 
 ## Bind And Deployment Posture
 
-Default bind is loopback only:
+The initial local-machine deployment binds on the local network because the
+operator normally reaches this host over SSH/LAN:
+
+- host: `0.0.0.0`
+- port: explicit config or the documented local default
+
+This is a trusted-environment deployment posture, not a browser/public internet
+posture. Other deployments can still choose loopback-only:
 
 - host: `127.0.0.1`
 - port: explicit config or a documented development default
-- no LAN bind by accident
 
-LAN bind requires an explicit double opt-in:
+When LAN binding is disabled by config, startup must fail closed if a
+non-loopback bind host is requested. The local service config uses:
 
-- a non-loopback bind host, such as `0.0.0.0`;
-- a separate allow flag, such as `RUSTY_CREW_ADMIN_ALLOW_LAN=true`.
+- `RUSTY_CREW_ADMIN_HOST=0.0.0.0`
+- `RUSTY_CREW_ADMIN_ALLOW_LAN=true`
 
-If either is missing, startup must fail closed rather than quietly exposing
-admin routes.
+If `RUSTY_CREW_ADMIN_ALLOW_LAN=false`, a non-loopback host must fail closed
+rather than quietly exposing admin routes contrary to the operator's config.
 
 Future Den/Gateway deployment can proxy read routes to browser clients, but
 write/control routes must not be exposed to untrusted browser contexts without

@@ -1,0 +1,18 @@
+[Unit]
+Description=Rusty Crew local agent runtime
+Documentation=file:/home/dev/rusty-crew/docs/local-service-runbook.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dev/rusty-crew
+EnvironmentFile=/home/agents/rusty-crew/config/service.env
+ExecStart=/usr/bin/env npm run service:start
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=default.target

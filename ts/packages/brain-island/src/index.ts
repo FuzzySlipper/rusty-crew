@@ -121,6 +121,27 @@ export type {
   PiAgentLike,
 } from "./pi-agent-brain.js";
 export { createPiAgentBrain } from "./pi-agent-brain.js";
+export {
+  acquireRustyCrewServiceLock,
+  ensureRustyCrewServiceDirectories,
+  loadRustyCrewServiceConfig,
+  RUSTY_CREW_DEFAULT_ADMIN_HOST,
+  RUSTY_CREW_DEFAULT_ADMIN_PORT,
+  RUSTY_CREW_DEFAULT_DATA_DIR,
+  validateRustyCrewServiceConfig,
+} from "./service-config.js";
+export type {
+  RustyCrewAdminConfig,
+  RustyCrewServiceConfig,
+  RustyCrewServiceEnv,
+  RustyCrewServiceLock,
+  RustyCrewServicePaths,
+} from "./service-config.js";
+export { startRustyCrewServiceHost } from "./service-host.js";
+export type {
+  RustyCrewServiceHost,
+  RustyCrewServiceHostOptions,
+} from "./service-host.js";
 export { resolveToolSession } from "./tool-session-selection.js";
 export type {
   PiAgentToolResolver,
@@ -141,6 +162,7 @@ export {
   adminCommandActivity,
   AgentActivityObservationProducer,
   createAgentActivityObservationEvent,
+  createMemoryAgentActivityObservationSink,
   sessionActivity,
   toolActivity,
   workActivity,
@@ -157,6 +179,7 @@ export type {
   AgentActivityVisibility,
   AgentActivityWorkRef,
   AgentObservationIdentity,
+  MemoryAgentActivityObservationSink,
   ObservationSourceDomain,
 } from "./agent-activity-observation.js";
 export {
@@ -595,7 +618,10 @@ export type {
   AdminRecentEvent,
   AdminRouteResult,
 } from "./admin-diagnostics-api.js";
-export { handleAdminControlRequest } from "./admin-control-api.js";
+export {
+  createMemoryAdminControlAuditSink,
+  handleAdminControlRequest,
+} from "./admin-control-api.js";
 export type {
   AdminControlActor,
   AdminControlAuditEvent,
@@ -609,6 +635,7 @@ export type {
   AdminControlResponse,
   AdminControlRouteRequest,
   AdminControlStatus,
+  MemoryAdminControlAuditSink,
 } from "./admin-control-api.js";
 export { routeSlashCommand } from "./slash-command-router.js";
 export type {

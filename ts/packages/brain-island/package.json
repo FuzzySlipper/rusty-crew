@@ -73,7 +73,10 @@
     "smoke:profile-role-assembly": "tsx src/smoke-profile-role-assembly.ts",
     "smoke:tool-session-selection": "tsx src/smoke-tool-session-selection.ts",
     "smoke:local-code-tools": "tsx src/smoke-local-code-tools.ts",
-    "smoke:patch-tool": "tsx src/smoke-patch-tool.ts"
+    "smoke:patch-tool": "tsx src/smoke-patch-tool.ts",
+    "smoke:service-config": "tsx src/smoke-service-config.ts",
+    "smoke:service-host": "tsx src/smoke-service-host.ts",
+    "service:start": "tsx src/service-host.ts"
   },
   "piPackageSource": {
     "repository": "https://github.com/earendil-works/pi",
