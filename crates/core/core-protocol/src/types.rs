@@ -519,6 +519,15 @@ pub struct DelegatedSessionRuntimeStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedResourceCleanupReport {
+    pub cleaned_at: IsoTimestamp,
+    pub terminal_archived: Vec<SessionId>,
+    pub orphaned_archived: Vec<SessionId>,
+    pub expired_archived: Vec<SessionId>,
+    pub resources_released: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoreEvent {
     SessionCreated {

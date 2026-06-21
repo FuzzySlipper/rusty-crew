@@ -267,7 +267,8 @@ Observation failure is a diagnostics issue. It does not roll back cleanup.
 1. Add scheduler job/run persistence and stale-run reconciliation.
 2. Expose queued-message expiry/purge through scheduled job executor.
 3. Promote existing delegated orphan cleanup into a scheduled/admin callable
-   operation.
+   operation. The first implementation is documented in
+   `delegated-resource-cleanup-loop.md`.
 4. Add adapter cleanup reports for MCP and channel surfaces.
 5. Add cleanup diagnostics projection.
 6. Prove restart-safe cleanup e2e.

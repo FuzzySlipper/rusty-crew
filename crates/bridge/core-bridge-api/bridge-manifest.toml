@@ -157,6 +157,15 @@ errors = "core_protocol::CoreError"
 summary = "Cancel active delegated sessions, optionally scoped to one parent session."
 
 [[operation]]
+name = "cleanup_delegated_resources"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "core_protocol::DelegatedResourceCleanupReport"
+errors = "core_protocol::CoreError"
+summary = "Run the Rust-owned delegated session cleanup loop and return a compact evidence report."
+
+[[operation]]
 name = "delegated_session_status"
 surface = "stable"
 direction = "ts_to_rust"

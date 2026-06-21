@@ -15,6 +15,7 @@ import type {
   BrainWakeAccepted,
   BrainWakeRequest,
   CoreEvent,
+  DelegatedResourceCleanupReport,
   DelegatedSessionRuntimeStatus,
   DenDataUpdate,
   EngineConfig,
@@ -113,6 +114,7 @@ interface NativeBridgeBinding {
     reason: string,
   ): { accepted: boolean; sequence: number };
   drainDelegatedSessions(parentSessionId?: string): string[];
+  cleanupDelegatedResourcesJson(): string;
   delegatedSessionStatusJson(delegatedSessionId: string): string;
   submitBrainTextDelta(
     wakeId: string,
@@ -426,6 +428,7 @@ export interface NativeBridgeModule {
   drainDelegatedSessions(input?: {
     parentSessionId?: SessionId;
   }): Promise<SessionId[]>;
+  cleanupDelegatedResources(): Promise<DelegatedResourceCleanupReport>;
   delegatedSessionStatus(
     delegatedSessionId: SessionId,
   ): Promise<DelegatedSessionRuntimeStatus>;
@@ -533,6 +536,7 @@ export const nativeManifestOperationNames = [
   "cancel_delegated_session",
   "request_delegated_checkpoint",
   "drain_delegated_sessions",
+  "cleanup_delegated_resources",
   "delegated_session_status",
   "subscribe_events",
   "unsubscribe_events",
@@ -567,6 +571,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     cancelDelegatedSession: unavailable("cancel_delegated_session"),
     requestDelegatedCheckpoint: unavailable("request_delegated_checkpoint"),
     drainDelegatedSessions: unavailable("drain_delegated_sessions"),
+    cleanupDelegatedResources: unavailable("cleanup_delegated_resources"),
     delegatedSessionStatus: unavailable("delegated_session_status"),
     subscribeEvents: unavailable("subscribe_events"),
     unsubscribeEvents: unavailable("unsubscribe_events"),
@@ -737,6 +742,12 @@ function createNativeBridgeModule(
       ),
     drainDelegatedSessions: async (input) =>
       binding.drainDelegatedSessions(input?.parentSessionId) as SessionId[],
+    cleanupDelegatedResources: async () =>
+      toDelegatedResourceCleanupReport(
+        JSON.parse(
+          binding.cleanupDelegatedResourcesJson(),
+        ) as RawDelegatedResourceCleanupReport,
+      ),
     delegatedSessionStatus: async (delegatedSessionId) =>
       toDelegatedSessionRuntimeStatus(
         JSON.parse(
@@ -1069,6 +1080,18 @@ function toDelegatedSessionRuntimeStatus(
   };
 }
 
+function toDelegatedResourceCleanupReport(
+  report: RawDelegatedResourceCleanupReport,
+): DelegatedResourceCleanupReport {
+  return {
+    cleanedAt: report.cleaned_at,
+    terminalArchived: report.terminal_archived,
+    orphanedArchived: report.orphaned_archived,
+    expiredArchived: report.expired_archived,
+    resourcesReleased: report.resources_released,
+  };
+}
+
 function toSessionState(state: RawSessionState): SessionState {
   return {
     handle: state.handle as SessionState["handle"],
@@ -1283,6 +1306,14 @@ interface RawDelegatedSessionRuntimeStatus {
   run_id?: RunId;
   run_status?: DelegatedSessionRuntimeStatus["runStatus"];
   terminal: boolean;
+}
+
+interface RawDelegatedResourceCleanupReport {
+  cleaned_at: string;
+  terminal_archived: SessionId[];
+  orphaned_archived: SessionId[];
+  expired_archived: SessionId[];
+  resources_released: number;
 }
 
 interface RawSessionState {

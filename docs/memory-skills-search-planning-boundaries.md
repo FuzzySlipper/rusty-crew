@@ -163,6 +163,11 @@ Policy:
 `curator_execute` is a governance/control affordance. It must not become a side
 channel around future curator/governance loops.
 
+The first implementation is documented in `curator-execute-boundary.md`. It
+returns audited receipts through an injected governance executor and fails
+closed when no executor is configured; it does not mutate skill, memory, Den, or
+runtime state directly.
+
 Implementation boundary:
 
 - TypeScript may expose a narrow model-callable wrapper.

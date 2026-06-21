@@ -180,6 +180,71 @@ export interface CounterResetToolContext {
   allowReset?: boolean;
 }
 
+export type CuratorExecuteAction =
+  | "request_scan"
+  | "preview_candidate"
+  | "approve_candidate"
+  | "apply_candidate";
+
+export type CuratorScopeType =
+  | "profile"
+  | "skills_root"
+  | "project"
+  | "session";
+
+export type CuratorExecutionStatus =
+  | "requested"
+  | "previewed"
+  | "approved"
+  | "applied"
+  | "denied";
+
+export interface CuratorExecuteRequest {
+  action: CuratorExecuteAction;
+  scopeType?: CuratorScopeType;
+  scopeId?: string;
+  candidateId?: string;
+  actorId?: string;
+  sessionId?: string;
+  profileId?: string;
+  reason?: string;
+  dryRun: boolean;
+}
+
+export interface CuratorExecuteReceipt {
+  receiptId: string;
+  status: Exclude<CuratorExecutionStatus, "denied">;
+  candidateId?: string;
+  auditRef?: string;
+  observationRef?: string;
+  summary: string;
+}
+
+export interface CuratorExecuteContext {
+  executor?: (
+    request: CuratorExecuteRequest,
+  ) => Promise<CuratorExecuteReceipt> | CuratorExecuteReceipt;
+  allowedActions?: readonly CuratorExecuteAction[];
+  actorId?: string;
+  sessionId?: string;
+  profileId?: string;
+  requireApplyConfirmation?: boolean;
+}
+
+export interface CuratorExecuteToolDetails {
+  ok: boolean;
+  action: CuratorExecuteAction;
+  status: CuratorExecutionStatus;
+  reasonCode?: string;
+  dryRun: boolean;
+  scope?: {
+    type: CuratorScopeType;
+    id: string;
+  };
+  candidateId?: string;
+  receipt?: CuratorExecuteReceipt;
+}
+
 export interface CounterResetToolDetails {
   ok: boolean;
   operation: "query" | "summary" | "reset";
@@ -263,6 +328,32 @@ const counterResetParameters = Type.Object({
 });
 
 type CounterResetParams = Static<typeof counterResetParameters>;
+
+const curatorActionSchema = Type.Union([
+  Type.Literal("request_scan"),
+  Type.Literal("preview_candidate"),
+  Type.Literal("approve_candidate"),
+  Type.Literal("apply_candidate"),
+]);
+
+const curatorScopeTypeSchema = Type.Union([
+  Type.Literal("profile"),
+  Type.Literal("skills_root"),
+  Type.Literal("project"),
+  Type.Literal("session"),
+]);
+
+const curatorExecuteParameters = Type.Object({
+  action: curatorActionSchema,
+  scopeType: Type.Optional(curatorScopeTypeSchema),
+  scopeId: Type.Optional(Type.String({ minLength: 1 })),
+  candidateId: Type.Optional(Type.String({ minLength: 1 })),
+  reason: Type.Optional(Type.String({ minLength: 1 })),
+  dryRun: Type.Optional(Type.Boolean()),
+  confirm: Type.Optional(Type.Boolean()),
+});
+
+type CuratorExecuteParams = Static<typeof curatorExecuteParameters>;
 
 export function todoTool(
   context: TodoToolContext,
@@ -515,6 +606,70 @@ export function counterResetTool(
   };
 }
 
+export function curatorExecuteTool(
+  context: CuratorExecuteContext,
+): PiAgentTool<typeof curatorExecuteParameters, CuratorExecuteToolDetails> {
+  return {
+    name: "curator_execute",
+    label: "Curator execute",
+    description:
+      "Request a narrow audited curator/governance action. This tool returns receipts and cannot mutate state without a configured executor.",
+    parameters: curatorExecuteParameters,
+    execute: async (_toolCallId, params: CuratorExecuteParams) => {
+      const dryRun = params.dryRun ?? params.action !== "apply_candidate";
+      const denied = validateCuratorRequest(context, params, dryRun);
+      if (denied) {
+        return curatorResult({
+          ok: false,
+          action: params.action,
+          status: "denied",
+          dryRun,
+          reasonCode: denied,
+          scope: curatorScope(params),
+          candidateId: params.candidateId,
+        });
+      }
+
+      try {
+        const request = {
+          action: params.action,
+          scopeType: params.scopeType,
+          scopeId: params.scopeId,
+          candidateId: params.candidateId,
+          actorId: context.actorId,
+          sessionId: context.sessionId,
+          profileId: context.profileId,
+          reason: params.reason,
+          dryRun,
+        } satisfies CuratorExecuteRequest;
+        const receipt = await context.executor!(request);
+        return curatorResult({
+          ok: true,
+          action: params.action,
+          status: receipt.status,
+          dryRun,
+          scope: curatorScope(params),
+          candidateId: params.candidateId ?? receipt.candidateId,
+          receipt,
+        });
+      } catch (error) {
+        return curatorResult({
+          ok: false,
+          action: params.action,
+          status: "denied",
+          dryRun,
+          scope: curatorScope(params),
+          candidateId: params.candidateId,
+          reasonCode:
+            error instanceof CuratorExecuteError
+              ? error.reasonCode
+              : "curator_execute_failed",
+        });
+      }
+    },
+  };
+}
+
 function todoResult(
   details: TodoToolDetails,
 ): AgentToolResult<TodoToolDetails> {
@@ -581,6 +736,15 @@ function counterResult(
   };
 }
 
+function curatorResult(
+  details: CuratorExecuteToolDetails,
+): AgentToolResult<CuratorExecuteToolDetails> {
+  return {
+    content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
+    details,
+  };
+}
+
 function result(
   details: SessionSearchToolDetails,
 ): AgentToolResult<SessionSearchToolDetails> {
@@ -588,4 +752,60 @@ function result(
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,
   };
+}
+
+function validateCuratorRequest(
+  context: CuratorExecuteContext,
+  params: CuratorExecuteParams,
+  dryRun: boolean,
+): string | undefined {
+  if (!context.executor) return "curator_executor_unavailable";
+  if (
+    context.allowedActions &&
+    !context.allowedActions.includes(params.action)
+  ) {
+    return "curator_action_not_allowed";
+  }
+  if (params.action === "request_scan") {
+    if (!params.scopeType || !params.scopeId?.trim()) {
+      return "curator_scope_required";
+    }
+    return undefined;
+  }
+  if (!params.candidateId?.trim()) {
+    return "curator_candidate_id_required";
+  }
+  if (
+    (params.action === "approve_candidate" ||
+      params.action === "apply_candidate") &&
+    !params.reason?.trim()
+  ) {
+    return "curator_reason_required";
+  }
+  if (
+    params.action === "apply_candidate" &&
+    !dryRun &&
+    context.requireApplyConfirmation !== false &&
+    params.confirm !== true
+  ) {
+    return "curator_apply_confirmation_required";
+  }
+  return undefined;
+}
+
+function curatorScope(
+  params: CuratorExecuteParams,
+): CuratorExecuteToolDetails["scope"] {
+  if (!params.scopeType || !params.scopeId) return undefined;
+  return {
+    type: params.scopeType,
+    id: params.scopeId,
+  };
+}
+
+export class CuratorExecuteError extends Error {
+  constructor(readonly reasonCode: string) {
+    super(reasonCode);
+    this.name = "CuratorExecuteError";
+  }
 }

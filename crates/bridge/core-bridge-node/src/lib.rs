@@ -276,6 +276,12 @@ impl NativeBridge {
             .drain_delegated_sessions(parent_session_id.as_ref())
     }
 
+    pub fn cleanup_delegated_resources(
+        &self,
+    ) -> CoreResult<rusty_crew_core_bridge_api::DelegatedResourceCleanupReport> {
+        self.engine()?.cleanup_delegated_resources()
+    }
+
     pub fn delegated_session_status(
         &self,
         delegated_session_id: SessionId,
@@ -1144,6 +1150,16 @@ impl NativeBridgeBinding {
             .drain_delegated_sessions(parent_session_id.map(SessionId::new))
             .map_err(to_napi_error)?;
         Ok(drained.into_iter().map(|session_id| session_id.0).collect())
+    }
+
+    #[napi]
+    pub fn cleanup_delegated_resources_json(&self) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let report = bridge
+            .cleanup_delegated_resources()
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&report)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 
     #[napi]

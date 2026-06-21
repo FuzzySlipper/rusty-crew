@@ -6,6 +6,7 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
+  createCuratorAdminControlExecutor,
   createMemoryAdminControlAuditSink,
   createMemoryAgentActivityObservationSink,
   handleAdminControlRequest,
@@ -20,7 +21,50 @@ const observationProducer = new AgentActivityObservationProducer({
   sink: observationSink,
   required: true,
 });
+const curatorRequests: unknown[] = [];
 const executor: AdminControlExecutor = {
+  ...createCuratorAdminControlExecutor({
+    curatorExecutor(request) {
+      curatorRequests.push(request);
+      return {
+        receiptId: `curator-${curatorRequests.length}`,
+        status:
+          request.action === "approve_candidate"
+            ? "approved"
+            : request.action === "apply_candidate"
+              ? "applied"
+              : request.action === "preview_candidate"
+                ? "previewed"
+                : "requested",
+        candidateId: request.candidateId,
+        auditRef: `audit-${curatorRequests.length}`,
+        summary: `Curator ${request.action} completed.`,
+      };
+    },
+    status: () => ({
+      status: "available",
+      candidateCount: 1,
+      mutationCount: 0,
+    }),
+    rollbackMutation: (mutationId) => ({
+      mutationId,
+      candidateId: "candidate-alpha",
+      action: "skill_patch",
+      actorId: "operator-alpha",
+      reason: "rollback smoke",
+      appliedAt: "2026-06-20T15:00:00.000Z",
+      status: "rolled_back",
+      rollbackRef: `curator-rollback:${mutationId}`,
+      snapshot: {
+        snapshotId: "snapshot-alpha",
+        snapshotDir: "/tmp/snapshot-alpha",
+        createdAt: "2026-06-20T15:00:00.000Z",
+        skillPath: "/tmp/skill.md",
+        skillExisted: true,
+      },
+      changedPaths: ["/tmp/skill.md"],
+    }),
+  }),
   archiveSession(command) {
     return {
       status: "completed",
@@ -142,6 +186,78 @@ const reloadFailureData = okData<AdminControlResponse>(reloadFailure);
 assert.equal(reloadFailureData.outcome.status, "failed");
 assert.equal(reloadFailureData.outcome.reasonCode, "control_executor_failed");
 
+const curatorStatus = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/curator/status",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(curatorStatus.status, 200);
+const curatorStatusData = okData<AdminControlResponse>(curatorStatus);
+assert.equal(curatorStatusData.command.name, "curator_status");
+assert.equal(
+  (curatorStatusData.outcome.result as { status?: string }).status,
+  "available",
+);
+
+const curatorRun = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/curator/run",
+    headers: authHeaders(),
+    body: { scopeType: "profile", scopeId: "prime", dryRun: true },
+  },
+  context,
+);
+assert.equal(curatorRun.status, 200);
+assert.equal(
+  (curatorRequests.at(-1) as { action?: string; scopeId?: string }).action,
+  "request_scan",
+);
+assert.equal(
+  (curatorRequests.at(-1) as { action?: string; scopeId?: string }).scopeId,
+  "prime",
+);
+
+const curatorApply = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/curator/candidates/candidate-alpha/apply",
+    headers: authHeaders(),
+    body: { reason: "operator apply", dryRun: false },
+  },
+  context,
+);
+assert.equal(curatorApply.status, 200);
+const curatorApplyData = okData<AdminControlResponse>(curatorApply);
+assert.equal(curatorApplyData.command.name, "curator_apply_candidate");
+assert.equal(
+  (curatorRequests.at(-1) as { action?: string; dryRun?: boolean }).action,
+  "apply_candidate",
+);
+assert.equal(
+  (curatorRequests.at(-1) as { action?: string; dryRun?: boolean }).dryRun,
+  false,
+);
+
+const curatorRollback = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/curator/mutations/mutation-alpha/rollback",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(curatorRollback.status, 200);
+const curatorRollbackData = okData<AdminControlResponse>(curatorRollback);
+assert.equal(curatorRollbackData.command.name, "curator_rollback_mutation");
+assert.equal(
+  curatorRollbackData.outcome.affectedIds?.mutationId,
+  "mutation-alpha",
+);
+
 const auditUnavailable = createMemoryAdminControlAuditSink();
 auditUnavailable.failNext();
 const auditFailure = await handleAdminControlRequest(
@@ -175,6 +291,8 @@ console.log(
       cancelActor: cancelData.command.actor.operatorId,
       invalidCheckpoint: invalidCheckpoint.status,
       reloadFailure: reloadFailureData.outcome.reasonCode,
+      curatorApply: curatorApplyData.outcome.status,
+      curatorRollback: curatorRollbackData.outcome.status,
       auditFailure: auditFailure.status,
     },
     null,

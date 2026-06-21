@@ -210,8 +210,8 @@ Payload:
 
 Effects:
 
+- produce a static candidate/report packet via the curator discovery surface;
 - create candidate batch records after curator persistence exists;
-- produce report output;
 - no mutation without later approval.
 
 Result refs:
@@ -282,10 +282,13 @@ Controls call typed scheduler APIs. They do not edit tables directly.
 
 Each job may emit compact `agent_activity.v1` events:
 
-- `background_job_started`
-- `background_job_completed`
-- `background_job_failed`
-- `background_job_skipped`
+- `work_started`
+- `work_completed`
+- `work_failed`
+- optional `adapter_degraded` / `adapter_recovered`
+
+Use `publishBackgroundGovernanceObservation` for the shared compact projection
+shape when the host has an observation producer.
 
 Observation is display-only. The scheduler run record remains the authoritative
 job outcome.

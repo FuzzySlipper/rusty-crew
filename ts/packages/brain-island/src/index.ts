@@ -173,6 +173,12 @@ export type {
   RuntimeToolActivityInput,
   RuntimeWorkActivityInput,
 } from "./runtime-activity-observer.js";
+export { publishBackgroundGovernanceObservation } from "./background-governance-observation.js";
+export type {
+  BackgroundGovernanceLoopKind,
+  BackgroundGovernanceObservationInput,
+  BackgroundGovernancePhase,
+} from "./background-governance-observation.js";
 export {
   createDenRouterPiAgentFactory,
   resolveDenRouterModel,
@@ -266,6 +272,7 @@ export type {
   DenseProfileMemoryToolDetails,
 } from "./dense-profile-memory-tool.js";
 export {
+  curatorExecuteTool,
   counterResetTool,
   MemorySessionTodoStore,
   renderSessionTodoContext,
@@ -276,6 +283,13 @@ export type {
   CounterResetToolContext,
   CounterResetToolDetails,
   CounterResetTriggerType,
+  CuratorExecuteAction,
+  CuratorExecuteContext,
+  CuratorExecuteReceipt,
+  CuratorExecuteRequest,
+  CuratorExecuteToolDetails,
+  CuratorExecutionStatus,
+  CuratorScopeType,
   MemorySessionTodoStoreOptions,
   SessionSearchResult,
   SessionSearchToolContext,
@@ -392,6 +406,46 @@ export {
   buildToolContextDiagnosticsReport,
   formatToolContextDiagnosticsMarkdown,
 } from "./tool-context-diagnostics.js";
+export {
+  discoverCuratorCandidates,
+  renderCuratorCandidateReport,
+} from "./curator-candidates.js";
+export type {
+  CuratorCandidate,
+  CuratorCandidateBatch,
+  CuratorCandidateDiscoveryInput,
+  CuratorCandidateKind,
+  CuratorCandidateSourceRef,
+  CuratorCandidateStatus,
+} from "./curator-candidates.js";
+export {
+  createCuratorGovernanceExecutor,
+  curatorSkillSourceRef,
+  executeCuratorGovernanceRequest,
+  MemoryCuratorGovernanceStore,
+  rollbackCuratorMutation,
+} from "./curator-mutations.js";
+export type {
+  CuratorApprovalRecord,
+  CuratorGovernanceExecutorOptions,
+  CuratorMutationCandidate,
+  CuratorMutationOperation,
+  CuratorMutationRecord,
+  CuratorMutationStatus,
+  CuratorSnapshotRef,
+} from "./curator-mutations.js";
+export { createCuratorAdminControlExecutor } from "./curator-admin-control.js";
+export type {
+  CuratorAdminControlOptions,
+  CuratorAdminStatus,
+} from "./curator-admin-control.js";
+export { runDelegatedResourceCleanup } from "./delegated-resource-cleanup.js";
+export type {
+  AdapterCleanupResult,
+  DelegatedResourceAdapterCleanup,
+  DelegatedResourceCleanupInput,
+  DelegatedResourceCleanupResult,
+} from "./delegated-resource-cleanup.js";
 export { runBackgroundMemorySkillReview } from "./background-memory-skill-review.js";
 export type {
   BackgroundReviewCandidateKind,

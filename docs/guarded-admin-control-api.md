@@ -6,6 +6,9 @@ Rusty Crew now has a framework-neutral guarded admin control route layer in `@ru
 
 The route layer maps `POST /v1/admin/control/...` requests into explicit command objects and dispatches them through a configured `AdminControlExecutor`. It does not reach into storage, adapter maps, MCP clients, queues, or runtime internals directly.
 
+Curator status, scan, candidate preview/approve/apply, and rollback commands now
+use the same guarded surface. See `curator-admin-control-routes.md`.
+
 ## Boundary
 
 `handleAdminControlRequest` requires:

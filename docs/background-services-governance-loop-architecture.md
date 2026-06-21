@@ -33,6 +33,9 @@ Allowed paths:
 - call typed admin/control APIs;
 - emit display-only observation events.
 
+Shared observation projection for background loops is documented in
+`background-governance-observation-projection.md`.
+
 Disallowed paths:
 
 - directly invoking a TS brain because a cron tick fired;
@@ -120,6 +123,9 @@ it does not invent scheduler truth.
 
 Curator work is a governance/control capability, not a general tool escape
 hatch.
+
+The detailed state, snapshot, approval, and mutation boundary for curator work
+is documented in `curator-state-snapshots-mutation-boundaries.md`.
 
 Curator candidate discovery and report generation can be TypeScript-owned
 because they inspect skill/profile files and compose operator-readable reports.

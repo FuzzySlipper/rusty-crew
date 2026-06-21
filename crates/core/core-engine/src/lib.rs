@@ -15,12 +15,12 @@ use rusty_crew_core_persistence::{
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
     BrainActionBatch, BrainEvent, BrainEventEnvelope, ClockConfig, CompletionStatus, CoreError,
-    CoreErrorKind, CoreEvent, CoreResult, DelegatedRunStatus, DelegatedSessionRuntimeStatus,
-    DelegationLifecycleEvent, DelegationLifecyclePhase, DelegationLineage, DenDataUpdate,
-    EngineConfig, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
-    FanOutFailurePolicy, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ResourceLimits, RunId,
-    SessionConfig, SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary,
-    ToolProfile,
+    CoreErrorKind, CoreEvent, CoreResult, DelegatedResourceCleanupReport, DelegatedRunStatus,
+    DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
+    DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
+    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, ParentConsumptionPolicy, ProfileId,
+    ResourceLimits, RunId, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
+    ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -625,6 +625,20 @@ impl CoreEngine {
         self.expire_delegated_sessions_at(self.now())
     }
 
+    pub fn cleanup_delegated_resources(&self) -> CoreResult<DelegatedResourceCleanupReport> {
+        let cleaned_at = self.now();
+        let terminal_archived = self.archive_terminal_delegated_sessions()?;
+        let orphaned_archived = self.cleanup_orphaned_delegated_sessions()?;
+        let expired_archived = self.expire_delegated_sessions_at(cleaned_at.clone())?;
+        Ok(DelegatedResourceCleanupReport {
+            cleaned_at,
+            resources_released: 0,
+            terminal_archived,
+            orphaned_archived,
+            expired_archived,
+        })
+    }
+
     pub fn expire_delegated_sessions_at(&self, now: IsoTimestamp) -> CoreResult<Vec<SessionId>> {
         let now_time = parse_rfc3339(&now)?;
         let mut expired = Vec::new();
@@ -1051,6 +1065,40 @@ impl CoreEngine {
             }
         }
         Ok(cleaned)
+    }
+
+    fn archive_terminal_delegated_sessions(&self) -> CoreResult<Vec<SessionId>> {
+        let mut archived = Vec::new();
+        for session in self.sessions.all_sessions()? {
+            if session.kind != SessionKind::Delegated || session.status == SessionStatus::Archived {
+                continue;
+            }
+            let Some(run) = self
+                .store
+                .load_worker_run_by_delegated_session(&session.session_id)?
+            else {
+                continue;
+            };
+            if !run.status.is_terminal() {
+                continue;
+            }
+            let archived_session = self
+                .sessions
+                .archive_session(&session.session_id, self.now())?;
+            self.store.save_session(&archived_session)?;
+            self.bus.publish(CoreEvent::SessionArchived {
+                session_id: archived_session.session_id.clone(),
+            })?;
+            self.publish_delegation_lifecycle(
+                &archived_session,
+                Some(&run.source_wake_id),
+                run.source_action_index,
+                delegation_phase_for_worker_status(run.status),
+                Some("cleanup archived terminal delegated session".to_string()),
+            )?;
+            archived.push(archived_session.session_id);
+        }
+        Ok(archived)
     }
 
     fn archive_delegated_session_if_nonterminal(
@@ -3418,6 +3466,55 @@ mod tests {
                         && lifecycle.phase == DelegationLifecyclePhase::TimedOut
             )
         }));
+    }
+
+    #[test]
+    fn delegated_resource_cleanup_archives_terminal_sessions() {
+        let data_dir = unique_data_dir("delegated-resource-cleanup");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let terminal = spawn_delegated(&engine, &planner, "planner-wake-terminal", Some(30_000));
+
+        engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "terminal-wake".to_string(),
+                session_id: terminal.clone(),
+                actions: vec![BrainAction::DeliverCompletion {
+                    packet: CompletionPacket {
+                        session_id: terminal.clone(),
+                        status: CompletionStatus::Completed,
+                        summary: "delegated terminal cleanup proof".to_string(),
+                    },
+                }],
+            })
+            .unwrap();
+
+        let report = engine.cleanup_delegated_resources().unwrap();
+        assert_eq!(report.terminal_archived, vec![terminal.clone()]);
+        assert!(report.expired_archived.is_empty());
+        assert!(report.orphaned_archived.is_empty());
+        assert_eq!(report.resources_released, 0);
+
+        assert_eq!(
+            engine.get_session(&terminal).unwrap().status,
+            SessionStatus::Archived
+        );
+        let store = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(
+            store
+                .load_worker_run_by_delegated_session(&terminal)
+                .unwrap()
+                .unwrap()
+                .status,
+            WorkerRunStatus::Completed
+        );
     }
 
     #[test]

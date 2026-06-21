@@ -27,6 +27,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "cancel_delegated_session",
     "request_delegated_checkpoint",
     "drain_delegated_sessions",
+    "cleanup_delegated_resources",
     "delegated_session_status",
     "subscribe_events",
     "unsubscribe_events",

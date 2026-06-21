@@ -18,6 +18,12 @@ export type AdminControlCommandName =
   | "request_delegated_checkpoint"
   | "reload_mcp"
   | "run_maintenance"
+  | "curator_status"
+  | "curator_run_scan"
+  | "curator_preview_candidate"
+  | "curator_approve_candidate"
+  | "curator_apply_candidate"
+  | "curator_rollback_mutation"
   | "shutdown";
 
 export type AdminControlStatus = "completed" | "failed";
@@ -92,6 +98,24 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   runMaintenance?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorStatus?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorRunScan?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorPreviewCandidate?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorApproveCandidate?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorApplyCandidate?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  curatorRollbackMutation?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   shutdown?(
@@ -431,6 +455,86 @@ function parseControlCommand(
     };
   }
 
+  if (
+    parts.length >= 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "curator"
+  ) {
+    if (parts.length === 5 && parts[4] === "status") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "curator_status",
+          target: {},
+        },
+      };
+    }
+    if (parts.length === 5 && parts[4] === "run") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "curator_run_scan",
+          target: {},
+        },
+      };
+    }
+    if (parts.length === 7 && parts[4] === "candidates") {
+      const candidateId = parts[5] ?? "";
+      if (!candidateId) return invalidTarget(requestId, "missing_candidate_id");
+      const action = parts[6];
+      if (action === "preview") {
+        return {
+          ok: true,
+          command: {
+            ...commandBase,
+            name: "curator_preview_candidate",
+            target: { candidateId },
+          },
+        };
+      }
+      if (action === "approve") {
+        return {
+          ok: true,
+          command: {
+            ...commandBase,
+            name: "curator_approve_candidate",
+            target: { candidateId },
+          },
+        };
+      }
+      if (action === "apply") {
+        return {
+          ok: true,
+          command: {
+            ...commandBase,
+            name: "curator_apply_candidate",
+            target: { candidateId },
+          },
+        };
+      }
+    }
+    if (
+      parts.length === 7 &&
+      parts[4] === "mutations" &&
+      parts[6] === "rollback"
+    ) {
+      const mutationId = parts[5] ?? "";
+      if (!mutationId) return invalidTarget(requestId, "missing_mutation_id");
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: "curator_rollback_mutation",
+          target: { mutationId },
+        },
+      };
+    }
+  }
+
   if (url.pathname === "/v1/admin/control/shutdown") {
     return {
       ok: true,
@@ -476,6 +580,18 @@ function executorForCommand(
       return executor.reloadMcp;
     case "run_maintenance":
       return executor.runMaintenance;
+    case "curator_status":
+      return executor.curatorStatus;
+    case "curator_run_scan":
+      return executor.curatorRunScan;
+    case "curator_preview_candidate":
+      return executor.curatorPreviewCandidate;
+    case "curator_approve_candidate":
+      return executor.curatorApproveCandidate;
+    case "curator_apply_candidate":
+      return executor.curatorApplyCandidate;
+    case "curator_rollback_mutation":
+      return executor.curatorRollbackMutation;
     case "shutdown":
       return executor.shutdown;
   }

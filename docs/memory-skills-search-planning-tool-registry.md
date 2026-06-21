@@ -81,6 +81,10 @@ This lets future loaders explain disabled states such as:
 - curator disabled by policy;
 - skill root not writable.
 
+`curator_execute` now has a narrow executor implementation documented in
+`curator-execute-boundary.md`; without a configured governance executor it
+returns `curator_executor_unavailable`.
+
 The selected/denied/missing/collided inventory path remains the supported way to
 explain why an agent has or lacks a memory, skill, search, or planning tool.
 

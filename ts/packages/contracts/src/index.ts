@@ -458,6 +458,14 @@ export interface DelegatedSessionRuntimeStatus {
   terminal: boolean;
 }
 
+export interface DelegatedResourceCleanupReport {
+  cleanedAt: string;
+  terminalArchived: SessionId[];
+  orphanedArchived: SessionId[];
+  expiredArchived: SessionId[];
+  resourcesReleased: number;
+}
+
 export interface DelegatedFanOutGroup {
   groupId: string;
   total: number;
@@ -647,6 +655,7 @@ export const manifestOperationNames = [
   "cancel_delegated_session",
   "request_delegated_checkpoint",
   "drain_delegated_sessions",
+  "cleanup_delegated_resources",
   "delegated_session_status",
   "subscribe_events",
   "unsubscribe_events",

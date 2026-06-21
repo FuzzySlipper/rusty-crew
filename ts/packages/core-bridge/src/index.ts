@@ -8,6 +8,7 @@ import type {
   BrainWakeAccepted,
   BrainWakeRequest,
   CoreEvent,
+  DelegatedResourceCleanupReport,
   DelegatedSessionRuntimeStatus,
   DenDataUpdate,
   EngineConfig,
@@ -118,6 +119,10 @@ export class CoreBridge {
     parentSessionId?: SessionId;
   }): Promise<SessionId[]> {
     return this.native.drainDelegatedSessions(input);
+  }
+
+  async cleanupDelegatedResources(): Promise<DelegatedResourceCleanupReport> {
+    return this.native.cleanupDelegatedResources();
   }
 
   async delegatedSessionStatus(
