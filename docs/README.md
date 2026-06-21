@@ -174,6 +174,18 @@ for task 2988 is recorded in `adr/0004-wake-scheduler-ownership.md`, and the
 implementation contract for task 2830 is recorded in
 `production-wake-path-contract.md`.
 
+The remaining 2824 architecture open questions are recorded in:
+`2824-architecture-decision-index.md`,
+`adr/0012-single-engine-service-scope.md`,
+`adr/0013-wake-buffer-assembly-ownership.md`,
+`adr/0014-tool-profile-enforcement.md`, and
+`adr/0011-steer-followup-frozen-snapshot.md`.
+
+Stub, fake, placeholder, failure-injection, and clock policy decisions are
+recorded in `stubs-fakes-placeholders-policy.md`,
+`adr/0015-test-seams-and-public-exports.md`, and
+`adr/0016-runtime-clock-policy.md`.
+
 Bridge helper classification for task 2839 is recorded in
 `adr/0005-bridge-surface-and-diagnostics.md`: the manifest is the stable
 protocol spec for v1, while hand-written bindings may expose explicitly

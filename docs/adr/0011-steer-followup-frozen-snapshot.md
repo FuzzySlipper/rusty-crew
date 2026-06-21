@@ -69,6 +69,10 @@ Any implementation of task 2981 must preserve:
 - query/readback tooling for expired messages that does not move them back to
   pending.
 
+The queued-message retention state is documented in
+`../queued-message-retention-state.md`. Expired-message pull tooling should
+query terminal queue rows and must not redeliver or re-mark them pending.
+
 ## Reopening Criteria
 
 ADR 0003 can be reopened only with evidence that next-wake deltas are

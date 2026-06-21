@@ -4,6 +4,8 @@ Status: Accepted design note for task 2853
 
 Date: 2026-06-20
 
+Related decision: `adr/0014-tool-profile-enforcement.md`.
+
 ## Context
 
 The authoritative Rusty Crew architecture assigns deterministic coordination to

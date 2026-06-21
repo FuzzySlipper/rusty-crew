@@ -4,6 +4,10 @@ Date: 2026-06-20
 
 Status: Implementation contract for task 2830.
 
+Related decisions: `adr/0004-wake-scheduler-ownership.md`,
+`adr/0012-single-engine-service-scope.md`, and
+`adr/0013-wake-buffer-assembly-ownership.md`.
+
 ## Scope
 
 This contract defines the first production wake lifecycle. It replaces the
