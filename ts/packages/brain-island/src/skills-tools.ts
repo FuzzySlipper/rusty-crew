@@ -6,7 +6,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import type {
   AgentTool as PiAgentTool,
   AgentToolResult,
@@ -14,6 +14,7 @@ import type {
 import { Type, type Static } from "typebox";
 import {
   loadSkill,
+  listAvailableSkillSlugs,
   ProfileLoadError,
   type LoadedSkill,
 } from "./profile-loading.js";
@@ -302,12 +303,7 @@ async function listSkillSlugs(
   if (allowedSkills) {
     return [...allowedSkills].filter(isSafeSkillSlug).sort();
   }
-  const entries = await readdir(skillsDir, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-    .map((entry) => basename(entry.name, ".md"))
-    .filter(isSafeSkillSlug)
-    .sort();
+  return listAvailableSkillSlugs(skillsDir);
 }
 
 async function loadSkillListItem(

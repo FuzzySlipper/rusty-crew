@@ -43,6 +43,21 @@ title: Large Skill
 ${"x".repeat(80)}
 `,
   );
+  mkdirSync(join(skillsDir, "autonomous-ai-agents", "codex"), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(skillsDir, "autonomous-ai-agents", "codex", "SKILL.md"),
+    `---
+name: codex
+description: Delegate coding work through Codex CLI.
+tags:
+  - coding
+---
+
+Use Codex for bounded coding delegation.
+`,
+  );
   writeFileSync(
     join(skillsDir, "broken.md"),
     `---
@@ -79,6 +94,7 @@ broken
     listed.details.skills?.map((skill) => [skill.slug, skill.status]),
     [
       ["broken", "invalid"],
+      ["codex", "available"],
       ["large-skill", "available"],
       ["repo-orientation", "available"],
     ],
@@ -87,7 +103,7 @@ broken
   const hiddenInvalid = await skillsListTool(context).execute("list", {});
   assert.deepEqual(
     hiddenInvalid.details.skills?.map((skill) => skill.slug),
-    ["large-skill", "repo-orientation"],
+    ["codex", "large-skill", "repo-orientation"],
   );
 
   const viewed = await skillViewTool(context).execute("view", {
@@ -96,6 +112,15 @@ broken
   assert.equal(viewed.details.ok, true);
   assert.equal(viewed.details.skill?.title, "Repo Orientation");
   assert.match(viewed.details.skill?.bodyMarkdown ?? "", /Read README/);
+
+  const viewedNested = await skillViewTool(context).execute("view-nested", {
+    slug: "codex",
+  });
+  assert.equal(
+    viewedNested.details.skill?.summary,
+    "Delegate coding work through Codex CLI.",
+  );
+  assert.match(viewedNested.details.skill?.sourcePath ?? "", /SKILL\.md$/);
 
   const truncated = await skillViewTool(context).execute("view-large", {
     slug: "large-skill",
@@ -250,6 +275,7 @@ Original managed body.
         listed: listed.details.skills?.length,
         visible: hiddenInvalid.details.skills?.length,
         viewed: viewed.details.skill?.slug,
+        viewedNested: viewedNested.details.skill?.slug,
         truncated: truncated.details.skill?.truncated,
         denied: denied.details.reasonCode,
         missingRoot: missingRoot.details.reasonCode,

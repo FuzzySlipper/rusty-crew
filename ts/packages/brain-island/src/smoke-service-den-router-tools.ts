@@ -22,6 +22,19 @@ const root = mkdtempSync(
   join(tmpdir(), "rusty-crew-service-den-router-tools-"),
 );
 const native = await loadNativeBridge();
+const requestedToolNames = [
+  "browser_snapshot",
+  "channel_readback",
+  "counter_reset",
+  "curator_execute",
+  "den_memory_recall",
+  "dense_profile_memory",
+  "git_status",
+  "session_search",
+  "skills_list",
+  "todo",
+  "web_search",
+].sort();
 
 class ToolCallingFakeAgent {
   private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
@@ -143,7 +156,7 @@ try {
     const events = await native.drainSubscriptionEvents(subscription, 16);
     await native.unsubscribeEvents(subscription);
 
-    assert.deepEqual(selectedToolNames, ["git_status"]);
+    assert.deepEqual([...selectedToolNames].sort(), requestedToolNames);
     assert.match(outputs.git_status ?? "", /git status --short/);
     assert.equal(await native.diagnosticCountRows("tool_call_history"), 2);
     assert.deepEqual(
@@ -213,7 +226,7 @@ function writeRuntimeConfig(targetRoot: string): void {
           modelName: "fake-router-model",
         },
         toolPolicy: {
-          requestedTools: ["git_status"],
+          requestedTools: requestedToolNames,
         },
       },
       null,

@@ -11,6 +11,7 @@ import type {
   AgentTool as PiAgentTool,
 } from "@earendil-works/pi-agent-core";
 import {
+  combineResolvers,
   createPiAgentBrain,
   defaultBodyDeltaPolicy,
   resolveToolSession,
@@ -18,6 +19,7 @@ import {
 
 const sessionId = "tool-session" as SessionId;
 const agentId = "tool-agent" as AgentId;
+
 const wake = {
   wakeId: "wake-tool-session",
   sessionId,
@@ -50,6 +52,24 @@ const wake = {
     deltaPolicy: defaultBodyDeltaPolicy,
   },
 };
+
+assert.deepEqual(
+  combineResolvers()({ wake, tools: [] }).map((tool) => tool.name),
+  [],
+);
+assert.deepEqual(
+  combineResolvers(() => [fakeTool("single")])({ wake, tools: [] }).map(
+    (tool) => tool.name,
+  ),
+  ["single"],
+);
+assert.deepEqual(
+  combineResolvers(
+    () => [fakeTool("first")],
+    () => [fakeTool("second"), fakeTool("third")],
+  )({ wake, tools: [] }).map((tool) => tool.name),
+  ["first", "second", "third"],
+);
 
 const selection = resolveToolSession({
   wake,

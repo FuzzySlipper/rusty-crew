@@ -20,14 +20,41 @@ import type {
   NativeBridgeModule,
   NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
+import {
+  createBrowserToolResolver,
+  MemoryBrowserScreenshotStore,
+} from "./browser-tools.js";
+import { BrowserSessionManager } from "./browser-session-manager.js";
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
+import {
+  denseProfileMemoryTool,
+  type DenseProfileMemoryMode,
+} from "./dense-profile-memory-tool.js";
+import { resolveDenMemoryTools } from "./den-memory-tools.js";
 import type { BrainImplementation } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
 import { createPiAgentBrain } from "./pi-agent-brain.js";
 import type { PiAgentFactory } from "./pi-agent-brain.js";
+import {
+  channelReadbackTool,
+  counterResetTool,
+  curatorExecuteTool,
+  MemorySessionTodoStore,
+  sessionSearchTool,
+  todoTool,
+} from "./planning-tools.js";
 import { loadProfileConfig, loadProfileContext } from "./profile-loading.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
+import {
+  createSkillsToolResolver,
+  type SkillManageMode,
+} from "./skills-tools.js";
+import {
+  combineResolvers,
+  type PiAgentToolResolver,
+} from "./tool-session-selection.js";
+import { createWebToolResolver } from "./web-tools.js";
 
 export interface RustyCrewConfiguredBrain {
   implementationId: BrainImplementationId;
@@ -191,6 +218,9 @@ export async function applyRustyCrewRuntimeConfig(input: {
         toBridgeWakeExecutor(
           await createConfiguredBrain(profile, {
             createDenRouterAgentFactory: input.createDenRouterAgentFactory,
+            bridge: input.bridge,
+            runtimeConfig: input.runtimeConfig,
+            serviceConfig: input.serviceConfig,
           }),
         ),
       );
@@ -309,6 +339,9 @@ async function createConfiguredBrain(
     createDenRouterAgentFactory?: (
       options: Parameters<typeof createDenRouterPiAgentFactory>[0],
     ) => Promise<PiAgentFactory>;
+    bridge?: NativeBridgeModule;
+    runtimeConfig?: RustyCrewRuntimeConfig;
+    serviceConfig?: RustyCrewServiceConfig;
   } = {},
 ): Promise<BrainImplementation> {
   if (profile.profile.modelConfig.provider === "den-router") {
@@ -328,7 +361,7 @@ async function createConfiguredBrain(
     return createPiAgentBrain({
       createAgent,
       planActions: completionActionFromEvents,
-      resolveTools: resolveLocalCodeTools,
+      resolveTools: createServiceToolResolver(profile, options),
       toolProfile: profile.toolSelection.toolProfile,
     });
   }
@@ -364,6 +397,149 @@ async function createConfiguredBrain(
       };
     },
   };
+}
+
+function createServiceToolResolver(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+  options: {
+    bridge?: NativeBridgeModule;
+    runtimeConfig?: RustyCrewRuntimeConfig;
+    serviceConfig?: RustyCrewServiceConfig;
+  },
+): PiAgentToolResolver {
+  const todoStore = new MemorySessionTodoStore();
+  const browserManager = new BrowserSessionManager();
+  const browserScreenshotStore = new MemoryBrowserScreenshotStore();
+  return combineResolvers(
+    resolveLocalCodeTools,
+    createWebToolResolver({}),
+    createBrowserToolResolver({
+      manager: browserManager,
+      screenshotStore: browserScreenshotStore,
+    }),
+    createMemoryToolResolver(profile, options),
+    createSkillsToolResolver({
+      skillsDir: serviceSkillsDir(profile, options.runtimeConfig),
+      allowedSkills:
+        profile.profile.skillsMode === "all"
+          ? undefined
+          : profile.profile.skills,
+      manageMode: serviceSkillManageMode(profile),
+    }),
+    createPlanningToolResolver({
+      bridge: options.bridge,
+      runtimeConfig: options.runtimeConfig,
+      todoStore,
+    }),
+  );
+}
+
+function createMemoryToolResolver(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+  options: {
+    bridge?: NativeBridgeModule;
+    serviceConfig?: RustyCrewServiceConfig;
+  },
+): PiAgentToolResolver {
+  return ({ wake }) => [
+    ...resolveDenMemoryTools({
+      policy: {
+        mode: "metadata",
+        defaultAudience: [profile.profile.profileId],
+      },
+      runtimeContext: {
+        projectId: options.serviceConfig?.denConversationProjectId,
+      },
+      session: wake.state.session,
+    }),
+    denseProfileMemoryTool({
+      client: options.bridge,
+      mode: denseProfileMemoryMode(profile),
+      session: wake.state.session,
+    }),
+  ];
+}
+
+function denseProfileMemoryMode(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+): DenseProfileMemoryMode {
+  return profile.toolSelection.toolProfile.tools.some(
+    (tool) => tool.name === "dense_profile_memory",
+  )
+    ? "read_write"
+    : "read_only";
+}
+
+function createPlanningToolResolver(input: {
+  bridge?: NativeBridgeModule;
+  runtimeConfig?: RustyCrewRuntimeConfig;
+  todoStore: MemorySessionTodoStore;
+}): PiAgentToolResolver {
+  return ({ wake }) => {
+    const session = wake.state.session;
+    const allowedBindingIds = channelBindingIdsForSession(
+      input.runtimeConfig,
+      session.sessionId,
+      session.agentId,
+      session.profileId,
+    );
+    return [
+      todoTool({ store: input.todoStore, sessionId: session.sessionId }),
+      sessionSearchTool({ client: input.bridge }),
+      channelReadbackTool({
+        requester: {
+          agentId: session.agentId,
+          sessionId: session.sessionId,
+          profileId: session.profileId,
+        },
+        allowedBindingIds,
+      }),
+      counterResetTool({ client: input.bridge }),
+      curatorExecuteTool({
+        actorId: session.agentId,
+        sessionId: session.sessionId,
+        profileId: session.profileId,
+      }),
+    ];
+  };
+}
+
+function channelBindingIdsForSession(
+  runtimeConfig: RustyCrewRuntimeConfig | undefined,
+  sessionId: SessionId,
+  agentId: AgentId,
+  profileId: ProfileId,
+): string[] {
+  return (runtimeConfig?.channelBindings ?? [])
+    .filter(
+      (binding) =>
+        binding.status === "active" &&
+        binding.agentId === agentId &&
+        binding.profileId === profileId &&
+        (binding.sessionId === undefined || binding.sessionId === sessionId),
+    )
+    .map((binding) => binding.bindingId);
+}
+
+function serviceSkillsDir(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+  runtimeConfig: RustyCrewRuntimeConfig | undefined,
+): string | undefined {
+  return (
+    profile.profile.profileSkillsDir ??
+    runtimeConfig?.skillsDir ??
+    (runtimeConfig ? join(runtimeConfig.profilesDir, "skills") : undefined)
+  );
+}
+
+function serviceSkillManageMode(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+): SkillManageMode {
+  return profile.profile.toolPolicy?.requestedToolsets?.includes(
+    "skills_manage",
+  )
+    ? "profile"
+    : "off";
 }
 
 function toBridgeWakeExecutor(brain: BrainImplementation): BrainWakeExecutor {

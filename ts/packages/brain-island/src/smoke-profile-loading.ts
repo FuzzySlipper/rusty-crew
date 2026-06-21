@@ -195,6 +195,46 @@ toolPolicy:
     true,
   );
 
+  const skillAllDir = join(profilesDir, "skill-all-profile");
+  mkdirSync(join(skillAllDir, "skills", "local-skill-smoke"), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(skillAllDir, "profile.yaml"),
+    `name: "Skill All Profile"
+profileIdentity: skill-all-profile
+skills: all
+modelConfig:
+  provider: den-router
+  model: local-deterministic
+`,
+  );
+  writeFileSync(
+    join(skillAllDir, "skills", "local-skill-smoke", "SKILL.md"),
+    `---
+name: local-skill-smoke
+description: Profile-local smoke skill.
+---
+
+Use the profile-local skill source.
+`,
+  );
+  const skillAll = await loadProfileContext({
+    profilesDir,
+    skillsDir,
+    profileId: "skill-all-profile" as ProfileId,
+  });
+  assert.deepEqual(skillAll.skills.map((skill) => skill.slug).sort(), [
+    "codex",
+    "local-skill-smoke",
+    "repo-orientation",
+  ]);
+  assert.match(
+    skillAll.skills.find((skill) => skill.slug === "local-skill-smoke")
+      ?.bodyMarkdown ?? "",
+    /profile-local/,
+  );
+
   await assert.rejects(
     () =>
       loadProfileContext({

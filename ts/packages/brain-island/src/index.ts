@@ -143,7 +143,10 @@ export type {
   RustyCrewServiceHost,
   RustyCrewServiceHostOptions,
 } from "./service-host.js";
-export { resolveToolSession } from "./tool-session-selection.js";
+export {
+  combineResolvers,
+  resolveToolSession,
+} from "./tool-session-selection.js";
 export type {
   PiAgentToolResolver,
   ToolSessionSelection,

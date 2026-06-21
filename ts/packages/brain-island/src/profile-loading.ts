@@ -54,12 +54,15 @@ export interface ProfileMcpConfig {
 
 export interface ProfileConfig {
   profileId: ProfileId;
+  profileDir?: string;
+  profileSkillsDir?: string;
   displayName?: string;
   modelConfig: BrainModelConfig;
   runtime?: ProfileRuntimeConfig;
   toolPolicy?: ProfileToolPolicy;
   prompt?: ProfilePromptFragments;
   skills?: string[];
+  skillsMode?: "listed" | "all";
   mcpConfig?: ProfileMcpConfig;
 }
 
@@ -92,10 +95,9 @@ export async function loadProfileContext(
 ): Promise<LoadedProfileContext> {
   const registry = input.registry ?? defaultToolRegistry;
   const profile = await loadProfileConfig(input.profilesDir, input.profileId);
-  const skills = await Promise.all(
-    (profile.skills ?? []).map((slug) =>
-      loadSkill(input.skillsDir ?? join(input.profilesDir, "skills"), slug),
-    ),
+  const skills = await loadProfileSkills(
+    profile,
+    input.skillsDir ?? join(input.profilesDir, "skills"),
   );
   const toolSelection = selectToolProfile({
     profileId: profile.profileId,
@@ -138,7 +140,9 @@ export async function loadProfileConfig(
     );
   }
 
-  return validateProfileConfig(parsed, profileId, profilePath);
+  return validateProfileConfig(parsed, profileId, profilePath, {
+    profileDir: profilesDir,
+  });
 }
 
 async function loadProfileDirectoryConfig(
@@ -175,9 +179,65 @@ async function loadProfileDirectoryConfig(
     readOptionalProfileMarkdown(profileDir, "memory.md"),
   ]);
   return validateProfileConfig(parsed, profileId, profilePath, {
+    profileDir,
     soulMarkdown,
     memoryMarkdown,
   });
+}
+
+async function loadProfileSkills(
+  profile: ProfileConfig,
+  globalSkillsDir: string,
+): Promise<LoadedSkill[]> {
+  const roots = skillRoots(profile, globalSkillsDir);
+  const slugs =
+    profile.skillsMode === "all"
+      ? await listSkillSlugsAcrossRoots(roots)
+      : (profile.skills ?? []);
+  return Promise.all(slugs.map((slug) => loadSkillFromRoots(roots, slug)));
+}
+
+function skillRoots(profile: ProfileConfig, globalSkillsDir: string): string[] {
+  return [profile.profileSkillsDir, globalSkillsDir].filter(
+    (root): root is string => root !== undefined,
+  );
+}
+
+async function loadSkillFromRoots(
+  skillsDirs: readonly string[],
+  slug: string,
+): Promise<LoadedSkill> {
+  let firstError: unknown;
+  for (const skillsDir of skillsDirs) {
+    try {
+      return await loadSkill(skillsDir, slug);
+    } catch (error) {
+      if (
+        error instanceof ProfileLoadError &&
+        error.code === "skill_not_found"
+      ) {
+        firstError ??= error;
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw (
+    firstError ??
+    new ProfileLoadError("skill_not_found", `skill ${slug} was not found`)
+  );
+}
+
+async function listSkillSlugsAcrossRoots(
+  skillsDirs: readonly string[],
+): Promise<string[]> {
+  const slugs = new Set<string>();
+  for (const skillsDir of skillsDirs) {
+    for (const slug of await listAvailableSkillSlugs(skillsDir)) {
+      slugs.add(slug);
+    }
+  }
+  return [...slugs].sort();
 }
 
 export async function loadSkill(
@@ -207,6 +267,50 @@ export async function loadSkill(
     bodyMarkdown,
     sourcePath,
   };
+}
+
+export async function listAvailableSkillSlugs(
+  skillsDir: string,
+): Promise<string[]> {
+  return [...new Set(await collectSkillSlugs(skillsDir, 0))].sort();
+}
+
+async function collectSkillSlugs(
+  dir: string,
+  depth: number,
+): Promise<string[]> {
+  if (depth > 4) return [];
+  let entries: Array<{
+    isDirectory(): boolean;
+    isFile(): boolean;
+    name: string;
+  }>;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return [];
+    throw error;
+  }
+
+  const slugs: string[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    if (depth === 0 && entry.isFile() && entry.name.endsWith(".md")) {
+      const slug = entry.name.slice(0, -".md".length);
+      if (isSafeSkillSlug(slug)) slugs.push(slug);
+      continue;
+    }
+    if (!entry.isDirectory()) continue;
+    const child = join(dir, entry.name);
+    if (
+      isSafeSkillSlug(entry.name) &&
+      (await firstReadablePath([join(child, "SKILL.md")])) !== undefined
+    ) {
+      slugs.push(entry.name);
+    }
+    slugs.push(...(await collectSkillSlugs(child, depth + 1)));
+  }
+  return slugs;
 }
 
 async function resolveSkillSourcePath(
@@ -288,10 +392,9 @@ function validateProfileConfig(
   parsed: unknown,
   profileId: ProfileId,
   profilePath: string,
-  fragments: Pick<
-    ProfilePromptFragments,
-    "soulMarkdown" | "memoryMarkdown"
-  > = {},
+  fragments: Pick<ProfilePromptFragments, "soulMarkdown" | "memoryMarkdown"> & {
+    profileDir?: string;
+  } = {},
 ): ProfileConfig {
   if (!isRecord(parsed)) {
     throw invalidProfile(
@@ -326,6 +429,11 @@ function validateProfileConfig(
 
   return {
     profileId,
+    profileDir: fragments.profileDir,
+    profileSkillsDir:
+      fragments.profileDir === undefined
+        ? undefined
+        : join(fragments.profileDir, "skills"),
     displayName: optionalString(parsed.displayName),
     modelConfig: {
       provider,
@@ -383,7 +491,8 @@ function validateProfileConfig(
             memoryMarkdown: fragments.memoryMarkdown,
           }
         : undefined,
-    skills: stringList(parsed.skills),
+    skills: parsed.skills === "all" ? [] : stringList(parsed.skills),
+    skillsMode: parsed.skills === "all" ? "all" : "listed",
     mcpConfig: isRecord(parsed.mcpConfig)
       ? {
           bindingId: optionalString(parsed.mcpConfig.bindingId),
@@ -607,6 +716,10 @@ function invalidProfile(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSafeSkillSlug(slug: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

@@ -32,6 +32,16 @@ export interface ToolSessionSelection {
   items: ToolSessionSelectionItem[];
 }
 
+/**
+ * Compose resolver implementations only. ToolProfile filtering and duplicate
+ * detection remain centralized in resolveToolSession.
+ */
+export function combineResolvers(
+  ...resolvers: readonly PiAgentToolResolver[]
+): PiAgentToolResolver {
+  return (input) => resolvers.flatMap((resolver) => resolver(input));
+}
+
 export function resolveToolSession(
   input: ToolSessionSelectionInput,
 ): ToolSessionSelection {
