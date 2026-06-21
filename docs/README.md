@@ -186,6 +186,9 @@ recorded in `stubs-fakes-placeholders-policy.md`,
 `adr/0015-test-seams-and-public-exports.md`, and
 `adr/0016-runtime-clock-policy.md`.
 
+The current 2825 stub/fake reconciliation audit is recorded in
+`2825-stub-fake-audit.md`.
+
 Bridge helper classification for task 2839 is recorded in
 `adr/0005-bridge-surface-and-diagnostics.md`: the manifest is the stable
 protocol spec for v1, while hand-written bindings may expose explicitly
