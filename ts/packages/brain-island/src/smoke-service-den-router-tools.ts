@@ -22,6 +22,12 @@ const root = mkdtempSync(
   join(tmpdir(), "rusty-crew-service-den-router-tools-"),
 );
 const native = await loadNativeBridge();
+const originalFetch = globalThis.fetch;
+const memoryRequests: Array<{
+  url: string;
+  authorization?: string;
+  body: Record<string, unknown>;
+}> = [];
 const requestedToolNames = [
   "browser_snapshot",
   "channel_readback",
@@ -62,6 +68,9 @@ class ToolCallingFakeAgent {
     _input: PiAgentMessage | PiAgentMessage[] | string,
   ): Promise<void> {
     await this.emit({ type: "agent_start" } as PiAgentEvent);
+    await this.callTool("den_memory_recall", {
+      prompt: "What memory guidance is relevant?",
+    });
     await this.callTool("git_status", {});
     await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
   }
@@ -112,10 +121,42 @@ class ToolCallingFakeAgent {
 }
 
 try {
+  globalThis.fetch = (async (input, init) => {
+    const url = new URL(String(input));
+    const body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : {};
+    memoryRequests.push({
+      url: url.toString(),
+      authorization: header(init?.headers, "authorization"),
+      body,
+    });
+    assert.equal(url.pathname, "/memory/recall");
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: {
+          memories: [
+            {
+              id: "service-memory-1",
+              summary: "Den memory is available through service config.",
+            },
+          ],
+          total: 1,
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) satisfies typeof fetch;
+
   writeRuntimeConfig(root);
   const serviceConfig = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
     RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+    RUSTY_CREW_DEN_MEMORY_BASE_URL: "http://den-memory.local",
+    RUSTY_CREW_DEN_MEMORY_TOKEN: "memory-token",
+    RUSTY_CREW_DEN_MEMORY_RECALL_PATH: "/memory/recall",
   });
   const runtimeConfig = await loadRustyCrewRuntimeConfig(serviceConfig);
   const engine = await native.initializeEngine({
@@ -158,7 +199,17 @@ try {
 
     assert.deepEqual([...selectedToolNames].sort(), requestedToolNames);
     assert.match(outputs.git_status ?? "", /git status --short/);
-    assert.equal(await native.diagnosticCountRows("tool_call_history"), 2);
+    assert.match(
+      outputs.den_memory_recall ?? "",
+      /Den memory is available through service config/,
+    );
+    assert.equal(memoryRequests.length, 1);
+    assert.equal(memoryRequests[0]?.authorization, "Bearer memory-token");
+    assert.equal(
+      memoryRequests[0]?.body["prompt"],
+      "What memory guidance is relevant?",
+    );
+    assert.equal(await native.diagnosticCountRows("tool_call_history"), 4);
     assert.deepEqual(
       events
         .filter((event) => event.type === "brain_event_observed")
@@ -169,7 +220,12 @@ try {
             : undefined,
         )
         .filter(Boolean),
-      ["tool_call_started", "tool_call_finished"],
+      [
+        "tool_call_started",
+        "tool_call_finished",
+        "tool_call_started",
+        "tool_call_finished",
+      ],
     );
 
     console.log(
@@ -178,6 +234,7 @@ try {
           selectedToolNames,
           toolHistoryRows:
             await native.diagnosticCountRows("tool_call_history"),
+          memoryRequests: memoryRequests.length,
           gitStatusFirstLine: outputs.git_status?.split("\n")[0],
         },
         null,
@@ -188,6 +245,7 @@ try {
     await native.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
   }
 } finally {
+  globalThis.fetch = originalFetch;
   rmSync(root, { force: true, recursive: true });
 }
 
@@ -233,4 +291,16 @@ function writeRuntimeConfig(targetRoot: string): void {
       2,
     ),
   );
+}
+
+function header(
+  headers: HeadersInit | undefined,
+  name: string,
+): string | undefined {
+  if (!headers) return undefined;
+  if (headers instanceof Headers) return headers.get(name) ?? undefined;
+  if (Array.isArray(headers)) {
+    return headers.find(([key]) => key.toLowerCase() === name)?.[1];
+  }
+  return headers[name];
 }

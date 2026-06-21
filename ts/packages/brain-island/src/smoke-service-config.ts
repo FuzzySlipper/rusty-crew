@@ -24,6 +24,8 @@ assert.equal(defaultConfig.admin.allowLan, true);
 assert.equal(defaultConfig.admin.authMode, "bearer");
 assert.equal(defaultConfig.background.schedulerTickIntervalMs, 1_000);
 assert.equal(defaultConfig.background.wakeDispatchIntervalMs, 250);
+assert.equal(defaultConfig.denMemory.baseUrl, undefined);
+assert.equal(defaultConfig.denMemory.timeoutMs, 5_000);
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
@@ -33,6 +35,10 @@ try {
     RUSTY_CREW_ADMIN_TOKEN: "local-token",
     RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "2000",
     RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "500",
+    RUSTY_CREW_DEN_MEMORY_BASE_URL: "http://127.0.0.1:19999",
+    RUSTY_CREW_DEN_MEMORY_TOKEN: "memory-token",
+    RUSTY_CREW_DEN_MEMORY_TIMEOUT_MS: "7500",
+    RUSTY_CREW_DEN_MEMORY_RECALL_PATH: "/memory/recall",
   });
 
   assert.equal(config.paths.configDir, join(root, "config"));
@@ -49,6 +55,10 @@ try {
   assert.equal(config.admin.token, "local-token");
   assert.equal(config.background.schedulerTickIntervalMs, 2_000);
   assert.equal(config.background.wakeDispatchIntervalMs, 500);
+  assert.equal(config.denMemory.baseUrl, "http://127.0.0.1:19999");
+  assert.equal(config.denMemory.bearerToken, "memory-token");
+  assert.equal(config.denMemory.timeoutMs, 7_500);
+  assert.equal(config.denMemory.paths.recall, "/memory/recall");
 
   const noAuth = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
@@ -100,6 +110,26 @@ try {
     RUSTY_CREW_ADMIN_TOKEN: "loopback-token",
   });
   assert.equal(loopback.admin.allowLan, false);
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_DEN_MEMORY_TOKEN: "token-without-endpoint",
+      }),
+    /DEN_MEMORY_BASE_URL/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_DEN_MEMORY_BASE_URL: "not a url",
+      }),
+    /DEN_MEMORY_BASE_URL/,
+  );
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

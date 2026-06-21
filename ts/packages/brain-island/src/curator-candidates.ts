@@ -18,7 +18,12 @@ export type CuratorCandidateKind =
 export type CuratorCandidateStatus = "proposed";
 
 export interface CuratorCandidateSourceRef {
-  kind: "skill" | "dense_profile_memory" | "profile" | "diagnostics";
+  kind:
+    | "skill"
+    | "dense_profile_memory"
+    | "profile"
+    | "diagnostics"
+    | "observed_behavior";
   ref: string;
   hash?: string;
 }
@@ -52,6 +57,19 @@ export interface CuratorCandidateBatch {
   skippedReasons: readonly string[];
 }
 
+export interface CuratorObservedBehaviorEvidence {
+  evidenceId: string;
+  summary: string;
+  suggestedSkillSlug?: string;
+  suggestedTitle?: string;
+  suggestedSummary?: string;
+  workflowMarkdown?: string;
+  occurrences?: number;
+  confidence?: number;
+  tags?: readonly string[];
+  sourceRefs?: readonly CuratorCandidateSourceRef[];
+}
+
 export interface CuratorCandidateDiscoveryInput {
   batchId: string;
   now: string;
@@ -61,6 +79,7 @@ export interface CuratorCandidateDiscoveryInput {
   skills?: readonly LoadedSkill[];
   expectedSkillSlugs?: readonly string[];
   denseProfileMemory?: readonly BackgroundReviewDenseMemoryRecord[];
+  observedBehavior?: readonly CuratorObservedBehaviorEvidence[];
   maxCandidates?: number;
   dryRun?: boolean;
 }
@@ -82,6 +101,7 @@ export function discoverCuratorCandidates(
     ...skillCandidates(input),
     ...skillCoverageCandidates(input),
     ...denseMemoryCandidates(input),
+    ...observedBehaviorCandidates(input),
   ].slice(0, maxCandidates);
   if (candidates.length === maxCandidates) {
     skippedReasons.push("candidate_limit_reached");
@@ -297,6 +317,37 @@ function denseMemoryCandidates(
   });
 }
 
+function observedBehaviorCandidates(
+  input: CuratorCandidateDiscoveryInput,
+): CuratorCandidate[] {
+  const evidence = input.observedBehavior ?? [];
+  if (evidence.length === 0) return [];
+  const existing = new Set((input.skills ?? []).map((skill) => skill.slug));
+  return evidence.flatMap((item) => {
+    const slug = observedSkillSlug(item);
+    if (existing.has(slug)) return [];
+    const sourceRefs: CuratorCandidateSourceRef[] = [
+      ...(item.sourceRefs ?? []),
+      observedBehaviorRef(item),
+    ];
+    return [
+      candidate(input, {
+        kind: "skill_create",
+        targetRef: `skill:${slug}`,
+        sourceRefs,
+        severity: observedBehaviorSeverity(item),
+        confidence: observedBehaviorConfidence(item),
+        summary: `Observed workflow '${item.summary}' should become skill '${slug}'.`,
+        proposedAction:
+          "Create a governed skill from repeated observed behavior evidence.",
+        previewSummary:
+          "Would create a reusable skill draft from observed workflow evidence.",
+        rollbackSupported: true,
+      }),
+    ];
+  });
+}
+
 function candidate(
   input: CuratorCandidateDiscoveryInput,
   value: Omit<
@@ -340,6 +391,49 @@ function memoryRef(
   };
 }
 
+function observedBehaviorRef(
+  evidence: CuratorObservedBehaviorEvidence,
+): CuratorCandidateSourceRef {
+  return {
+    kind: "observed_behavior",
+    ref: evidence.evidenceId,
+    hash: fingerprint(
+      evidence.summary,
+      evidence.workflowMarkdown ?? "",
+      `${evidence.occurrences ?? ""}`,
+      `${evidence.confidence ?? ""}`,
+    ).slice(0, 16),
+  };
+}
+
+function observedSkillSlug(evidence: CuratorObservedBehaviorEvidence): string {
+  return safeSlug(
+    evidence.suggestedSkillSlug ??
+      evidence.suggestedTitle ??
+      evidence.summary ??
+      evidence.evidenceId,
+  );
+}
+
+function observedBehaviorSeverity(
+  evidence: CuratorObservedBehaviorEvidence,
+): BackgroundReviewSeverity {
+  if ((evidence.occurrences ?? 0) >= 3) return "warning";
+  return "info";
+}
+
+function observedBehaviorConfidence(
+  evidence: CuratorObservedBehaviorEvidence,
+): number {
+  if (evidence.confidence !== undefined) {
+    return clampNumber(evidence.confidence, 0.1, 0.99);
+  }
+  const occurrences = evidence.occurrences ?? 1;
+  if (occurrences >= 5) return 0.9;
+  if (occurrences >= 3) return 0.82;
+  return 0.7;
+}
+
 function duplicateValues(values: readonly string[]): Set<string> {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -359,6 +453,17 @@ function todoLike(value: string): boolean {
 
 function normalizeText(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function safeSlug(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96)
+    .replace(/-+$/g, "");
+  return slug || "observed-workflow";
 }
 
 function countBy<T>(
@@ -391,4 +496,9 @@ function clampPositive(
     return fallback;
   }
   return Math.min(Math.floor(value), max);
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
 }

@@ -3,6 +3,7 @@ import {
   discoverCuratorCandidates,
   renderCuratorCandidateReport,
   type CuratorCandidateKind,
+  type CuratorObservedBehaviorEvidence,
 } from "./index.js";
 import type { BackgroundReviewDenseMemoryRecord } from "./background-memory-skill-review.js";
 import type { LoadedSkill } from "./profile-loading.js";
@@ -48,6 +49,22 @@ const denseProfileMemory: BackgroundReviewDenseMemoryRecord[] = [
   },
 ];
 
+const observedBehavior: CuratorObservedBehaviorEvidence[] = [
+  {
+    evidenceId: "observed:review-loop:1",
+    summary: "Repeatedly check review feedback before applying final changes",
+    suggestedSkillSlug: "review-loop-checklist",
+    suggestedTitle: "Review Loop Checklist",
+    suggestedSummary:
+      "Use this when turning repeated review-loop behavior into a reusable workflow.",
+    workflowMarkdown:
+      "Check unresolved review feedback, apply the smallest useful fix, and re-run the focused smoke.",
+    occurrences: 4,
+    confidence: 0.88,
+    tags: ["review", "curator"],
+  },
+];
+
 const batch = discoverCuratorCandidates({
   batchId: "batch-1",
   now: "2026-06-21T00:00:00.000Z",
@@ -57,6 +74,7 @@ const batch = discoverCuratorCandidates({
   skills,
   expectedSkillSlugs: ["coding-a", "missing-skill"],
   denseProfileMemory,
+  observedBehavior,
 });
 
 assert.equal(batch.batchId, "batch-1");
@@ -72,6 +90,15 @@ assert.ok(kinds.has("skill_create"));
 assert.ok(kinds.has("diagnostics_only"));
 assert.ok(kinds.has("dense_memory_prune"));
 assert.ok(kinds.has("dense_memory_merge"));
+
+const observedCandidate = batch.candidates.find(
+  (candidate) => candidate.targetRef === "skill:review-loop-checklist",
+);
+assert.equal(observedCandidate?.kind, "skill_create");
+assert.equal(observedCandidate?.severity, "warning");
+assert.ok(
+  observedCandidate?.sourceRefs.some((ref) => ref.kind === "observed_behavior"),
+);
 
 const candidateIds = batch.candidates.map((candidate) => candidate.candidateId);
 assert.equal(candidateIds.length, new Set(candidateIds).size);
@@ -89,6 +116,7 @@ const repeated = discoverCuratorCandidates({
   skills,
   expectedSkillSlugs: ["coding-a", "missing-skill"],
   denseProfileMemory,
+  observedBehavior,
 });
 assert.deepEqual(
   repeated.candidates.map((candidate) => candidate.candidateId),

@@ -4,6 +4,7 @@ import {
   loadDenSuccessorGatewayConfig,
   type DenSuccessorGatewayConfig,
   type DenSuccessorGatewayEnv,
+  type DenMemoryClientPaths,
 } from "@rusty-crew/adapter-den";
 
 export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
@@ -24,6 +25,15 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS?: string;
   RUSTY_CREW_DEN_DELIVERY_POLL_INTERVAL_MS?: string;
   RUSTY_CREW_DEN_CONVERSATION_PROJECT_ID?: string;
+  RUSTY_CREW_DEN_MEMORY_BASE_URL?: string;
+  RUSTY_CREW_DEN_MEMORY_TOKEN?: string;
+  RUSTY_CREW_DEN_MEMORY_BEARER_TOKEN?: string;
+  RUSTY_CREW_DEN_MEMORY_TIMEOUT_MS?: string;
+  RUSTY_CREW_DEN_MEMORY_READ_PATH?: string;
+  RUSTY_CREW_DEN_MEMORY_SEARCH_PATH?: string;
+  RUSTY_CREW_DEN_MEMORY_RECALL_PATH?: string;
+  RUSTY_CREW_DEN_MEMORY_STORE_PATH?: string;
+  RUSTY_CREW_DEN_MEMORY_PROPOSE_PATH?: string;
 }
 
 export interface RustyCrewServicePaths {
@@ -53,11 +63,19 @@ export interface RustyCrewBackgroundConfig {
   denDeliveryPollIntervalMs: number;
 }
 
+export interface RustyCrewDenMemoryConfig {
+  baseUrl?: string;
+  bearerToken?: string;
+  timeoutMs: number;
+  paths: Partial<DenMemoryClientPaths>;
+}
+
 export interface RustyCrewServiceConfig {
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
   background: RustyCrewBackgroundConfig;
   denConversationProjectId: string;
+  denMemory: RustyCrewDenMemoryConfig;
   denSuccessorGateway?: DenSuccessorGatewayConfig;
 }
 
@@ -141,12 +159,14 @@ export function loadRustyCrewServiceConfig(
   const denConversationProjectId =
     normalizeOptional(env.RUSTY_CREW_DEN_CONVERSATION_PROJECT_ID) ??
     "rusty-crew";
+  const denMemory = loadRustyCrewDenMemoryConfig(env);
 
   validateRustyCrewServiceConfig({
     paths,
     admin,
     background,
     denConversationProjectId,
+    denMemory,
     denSuccessorGateway,
   });
   return {
@@ -154,6 +174,7 @@ export function loadRustyCrewServiceConfig(
     admin,
     background,
     denConversationProjectId,
+    denMemory,
     denSuccessorGateway,
   };
 }
@@ -181,6 +202,8 @@ export function validateRustyCrewServiceConfig(
       "RUSTY_CREW_ADMIN_TOKEN is required when RUSTY_CREW_ADMIN_AUTH_MODE=bearer",
     );
   }
+
+  validateDenMemoryConfig(config.denMemory);
 }
 
 export function ensureRustyCrewServiceDirectories(
@@ -284,6 +307,18 @@ function parseNonNegativeInteger(
   return parsed;
 }
 
+function parsePositiveInteger(
+  input: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  const parsed = parseNonNegativeInteger(input, fallback, name);
+  if (parsed < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
 function parseBoolean(
   input: string | undefined,
   fallback: boolean,
@@ -325,6 +360,53 @@ function parseAuthMode(
 function normalizeOptional(input: string | undefined): string | undefined {
   const value = input?.trim();
   return value ? value : undefined;
+}
+
+function loadRustyCrewDenMemoryConfig(
+  env: RustyCrewServiceEnv,
+): RustyCrewDenMemoryConfig {
+  return {
+    baseUrl: normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_BASE_URL),
+    bearerToken:
+      normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_BEARER_TOKEN) ??
+      normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_TOKEN),
+    timeoutMs: parsePositiveInteger(
+      env.RUSTY_CREW_DEN_MEMORY_TIMEOUT_MS,
+      5_000,
+      "RUSTY_CREW_DEN_MEMORY_TIMEOUT_MS",
+    ),
+    paths: {
+      read: normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_READ_PATH),
+      search: normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_SEARCH_PATH),
+      recall: normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_RECALL_PATH),
+      store: normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_STORE_PATH),
+      propose: normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_PROPOSE_PATH),
+    },
+  };
+}
+
+function validateDenMemoryConfig(config: RustyCrewDenMemoryConfig): void {
+  if (!config.baseUrl && hasDenMemorySettings(config)) {
+    throw new Error(
+      "RUSTY_CREW_DEN_MEMORY_BASE_URL is required when Den memory token, timeout, or paths are configured",
+    );
+  }
+  if (!config.baseUrl) return;
+  try {
+    new URL(config.baseUrl);
+  } catch (error) {
+    throw new Error("RUSTY_CREW_DEN_MEMORY_BASE_URL must be a valid URL", {
+      cause: error,
+    });
+  }
+}
+
+function hasDenMemorySettings(config: RustyCrewDenMemoryConfig): boolean {
+  return Boolean(
+    config.bearerToken ||
+    config.timeoutMs !== 5_000 ||
+    Object.values(config.paths).some((value) => value !== undefined),
+  );
 }
 
 function isLoopbackHost(host: string): boolean {

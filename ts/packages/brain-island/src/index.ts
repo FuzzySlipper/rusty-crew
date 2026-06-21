@@ -460,6 +460,7 @@ export type {
   CuratorCandidateBatch,
   CuratorCandidateDiscoveryInput,
   CuratorCandidateKind,
+  CuratorObservedBehaviorEvidence,
   CuratorCandidateSourceRef,
   CuratorCandidateStatus,
 } from "./curator-candidates.js";

@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
@@ -20,6 +26,7 @@ import {
   type AdminRouteResult,
   type BackgroundServiceDiagnosticsProjection,
   type CuratorMutationCandidate,
+  type CuratorObservedBehaviorEvidence,
 } from "./index.js";
 import type { LoadedSkill } from "./profile-loading.js";
 import { createMemoryAgentActivityObservationSink } from "./test-support.js";
@@ -76,6 +83,23 @@ const denseProfileMemory = [
     updatedAt: now,
   },
 ];
+const autoSkillSlug = "review-loop-checklist";
+const observedWorkflow =
+  "Check unresolved review feedback, apply the smallest useful fix, and re-run the focused smoke before reporting back.";
+const observedBehavior: CuratorObservedBehaviorEvidence[] = [
+  {
+    evidenceId: "observed:review-loop:curator-e2e",
+    summary: "Repeatedly run the review loop before final handoff",
+    suggestedSkillSlug: autoSkillSlug,
+    suggestedTitle: "Review Loop Checklist",
+    suggestedSummary:
+      "Use when repeated review-loop behavior should become profile skill guidance.",
+    workflowMarkdown: observedWorkflow,
+    occurrences: 5,
+    confidence: 0.91,
+    tags: ["review", "curator", "auto-skill"],
+  },
+];
 const diagnostics = buildToolContextDiagnosticsReport({
   now,
   session: {
@@ -120,13 +144,24 @@ const batch = discoverCuratorCandidates({
   skills,
   expectedSkillSlugs: ["managed", "missing-skill"],
   denseProfileMemory,
+  observedBehavior,
 });
 const report = renderCuratorCandidateReport(batch);
 assert.equal(batch.dryRun, true);
 assert.equal(batch.candidateCount > 0, true);
 assert.match(report, /Curator Candidate Report/);
 assert.match(report, /missing-skill/);
+assert.match(report, /review-loop-checklist/);
 
+const autoSkillCandidate = batch.candidates.find(
+  (candidate) => candidate.targetRef === `skill:${autoSkillSlug}`,
+);
+assert.equal(autoSkillCandidate?.kind, "skill_create");
+assert.ok(
+  autoSkillCandidate?.sourceRefs.some(
+    (ref) => ref.kind === "observed_behavior",
+  ),
+);
 const sourceRef = await curatorSkillSourceRef(skillsDir, "managed");
 const mutationCandidate: CuratorMutationCandidate = {
   candidateId: "curator:e2e:patch-managed",
@@ -149,8 +184,28 @@ const mutationCandidate: CuratorMutationCandidate = {
     newString: "Curated body.",
   },
 };
+const autoSkillMutationCandidate: CuratorMutationCandidate = {
+  ...autoSkillCandidate!,
+  mutation: {
+    type: "skill_create",
+    slug: autoSkillSlug,
+    content: [
+      "---",
+      "title: Review Loop Checklist",
+      "summary: Use when repeated review-loop behavior should become profile skill guidance.",
+      "tags:",
+      "  - review",
+      "  - curator",
+      "  - auto-skill",
+      "---",
+      "",
+      observedWorkflow,
+      "",
+    ].join("\n"),
+  },
+};
 const store = new MemoryCuratorGovernanceStore();
-store.upsertBatch(batch, [mutationCandidate]);
+store.upsertBatch(batch, [mutationCandidate, autoSkillMutationCandidate]);
 const curatorExecutor = createCuratorGovernanceExecutor({
   skillsDir,
   store,
@@ -166,6 +221,92 @@ assert.equal(preview.status, "previewed");
 assert.match(preview.summary, /changed=false/);
 assert.match(readFileSync(join(skillsDir, "managed.md"), "utf8"), /Original/);
 assert.equal(store.mutations.size, 0);
+
+const autoSkillPath = join(skillsDir, `${autoSkillSlug}.md`);
+const autoSkillPreview = await curatorExecutor({
+  action: "preview_candidate",
+  candidateId: autoSkillMutationCandidate.candidateId,
+  dryRun: true,
+  reason: "e2e observed-behavior auto-skill preview",
+});
+assert.equal(autoSkillPreview.status, "previewed");
+assert.match(autoSkillPreview.summary, /changed=false/);
+assert.equal(existsSync(autoSkillPath), false);
+
+const autoSkillApproval = await curatorExecutor({
+  action: "approve_candidate",
+  candidateId: autoSkillMutationCandidate.candidateId,
+  reason: "observed behavior should become reusable skill guidance",
+  dryRun: false,
+});
+assert.equal(autoSkillApproval.status, "approved");
+
+const autoSkillApplied = await curatorExecutor({
+  action: "apply_candidate",
+  candidateId: autoSkillMutationCandidate.candidateId,
+  reason: "create observed-behavior auto-skill",
+  dryRun: false,
+});
+assert.equal(autoSkillApplied.status, "applied");
+assert.match(readFileSync(autoSkillPath, "utf8"), /Review Loop Checklist/);
+assert.match(readFileSync(autoSkillPath, "utf8"), /focused smoke/);
+assert.equal(store.mutations.size, 1);
+
+const autoSkillSourceRef = await curatorSkillSourceRef(
+  skillsDir,
+  autoSkillSlug,
+);
+const retireAutoSkillCandidate: CuratorMutationCandidate = {
+  candidateId: "curator:e2e:archive-review-loop-checklist",
+  batchId: batch.batchId,
+  kind: "skill_archive",
+  sourceRefs: [autoSkillSourceRef],
+  targetRef: `skill:${autoSkillSlug}`,
+  summary: "Retire observed-behavior auto-skill after governance review.",
+  severity: "info",
+  confidence: 0.9,
+  proposedAction: "Archive the auto-created skill after it is absorbed.",
+  previewSummary: "Would archive the auto-created observed-behavior skill.",
+  fingerprint: "curator-e2e-archive-fingerprint",
+  status: "proposed",
+  rollbackSupported: true,
+  mutation: {
+    type: "skill_archive",
+    slug: autoSkillSlug,
+    absorbedInto: "managed",
+  },
+};
+store.upsertCandidate(retireAutoSkillCandidate);
+
+const retirePreview = await curatorExecutor({
+  action: "preview_candidate",
+  candidateId: retireAutoSkillCandidate.candidateId,
+  dryRun: true,
+  reason: "e2e retire preview",
+});
+assert.equal(retirePreview.status, "previewed");
+assert.equal(existsSync(autoSkillPath), true);
+
+const retireApproval = await curatorExecutor({
+  action: "approve_candidate",
+  candidateId: retireAutoSkillCandidate.candidateId,
+  reason: "auto-skill was absorbed into managed workflow",
+  dryRun: false,
+});
+assert.equal(retireApproval.status, "approved");
+
+const retired = await curatorExecutor({
+  action: "apply_candidate",
+  candidateId: retireAutoSkillCandidate.candidateId,
+  reason: "retire observed-behavior auto-skill",
+  dryRun: false,
+});
+assert.equal(retired.status, "applied");
+assert.equal(existsSync(autoSkillPath), false);
+assert.equal(store.mutations.size, 2);
+const retireMutation = [...store.mutations.values()].at(-1)!;
+assert.equal(retireMutation.action, "skill_archive");
+assert.equal(existsSync(retireMutation.management?.archivePath ?? ""), true);
 
 const observationSink = createMemoryAgentActivityObservationSink();
 const producer = new AgentActivityObservationProducer({
@@ -286,6 +427,8 @@ console.log(
     {
       curatorCandidates: batch.candidateCount,
       previewStatus: preview.status,
+      autoSkillStatus: autoSkillApplied.status,
+      retireStatus: retired.status,
       mutationsWritten: store.mutations.size,
       reviewFindings: review.findingCount,
       diagnostics: background.summary,

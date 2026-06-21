@@ -15,6 +15,10 @@ import type {
   SessionKind,
   ToolProfile,
 } from "@rusty-crew/contracts";
+import {
+  createDenMemoryClient,
+  type DenMemoryClient,
+} from "@rusty-crew/adapter-den";
 import type {
   BrainWakeExecutor,
   NativeBridgeModule,
@@ -447,8 +451,10 @@ function createMemoryToolResolver(
     serviceConfig?: RustyCrewServiceConfig;
   },
 ): PiAgentToolResolver {
+  const denMemoryClient = createServiceDenMemoryClient(options.serviceConfig);
   return ({ wake }) => [
     ...resolveDenMemoryTools({
+      client: denMemoryClient,
       policy: {
         mode: "metadata",
         defaultAudience: [profile.profile.profileId],
@@ -464,6 +470,19 @@ function createMemoryToolResolver(
       session: wake.state.session,
     }),
   ];
+}
+
+function createServiceDenMemoryClient(
+  serviceConfig: RustyCrewServiceConfig | undefined,
+): DenMemoryClient | undefined {
+  const config = serviceConfig?.denMemory;
+  if (!config?.baseUrl) return undefined;
+  return createDenMemoryClient({
+    baseUrl: config.baseUrl,
+    bearerToken: config.bearerToken,
+    timeoutMs: config.timeoutMs,
+    paths: config.paths,
+  });
 }
 
 function denseProfileMemoryMode(
