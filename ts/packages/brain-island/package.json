@@ -61,6 +61,7 @@
     "smoke:slash-command-responses": "tsx src/smoke-slash-command-responses.ts",
     "smoke:adapter-diagnostics": "tsx src/smoke-adapter-diagnostics.ts",
     "smoke:den-channels-e2e": "tsx src/smoke-den-channels-e2e.ts",
+    "smoke:den-successor-service": "tsx src/smoke-den-successor-service.ts",
     "smoke:den-assignment-evidence-e2e": "tsx src/smoke-den-assignment-evidence-e2e.ts",
     "smoke:mcp-tool-registry": "tsx src/smoke-mcp-tool-registry.ts",
     "smoke:mcp-reload": "tsx src/smoke-mcp-reload.ts",

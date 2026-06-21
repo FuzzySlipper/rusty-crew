@@ -10,7 +10,8 @@
     "smoke:router-metadata": "tsx src/smoke-router-metadata.ts",
     "smoke:completion-evidence": "tsx src/smoke-completion-evidence.ts",
     "smoke:product-ingress": "tsx src/smoke-product-ingress.ts",
-    "smoke:memory-client": "tsx src/smoke-memory-client.ts"
+    "smoke:memory-client": "tsx src/smoke-memory-client.ts",
+    "smoke:successor-gateway": "tsx src/smoke-successor-gateway.ts"
   },
   "exports": {
     ".": "./src/index.ts",

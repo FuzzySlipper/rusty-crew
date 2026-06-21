@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import type {
   BrainImplementationHandle,
+  ChannelBindingRecord,
   CoreEvent,
   EngineHandle,
   SessionId,
@@ -16,6 +17,12 @@ import {
   McpSurfaceManager,
   createSimulatedMcpTransportFactory,
 } from "@rusty-crew/adapter-mcp";
+import {
+  createDenSuccessorGatewayClient,
+  type DenSuccessorAgentIdentity,
+  type DenSuccessorDeliveryIntent,
+  type DenSuccessorGatewayClient,
+} from "@rusty-crew/adapter-den";
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
@@ -41,6 +48,12 @@ import { loadProfileContext } from "./profile-loading.js";
 import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
 import { buildRuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
 import type { RuntimeHealthProjection } from "./runtime-health.js";
+import {
+  announceConfiguredSessionsToDenGateway,
+  denGatewayStartupSummary,
+  heartbeatConfiguredSessionsToDenRuntime,
+  type DenSuccessorGatewayStartupReport,
+} from "./den-successor-service.js";
 import {
   acquireRustyCrewServiceLock,
   ensureRustyCrewServiceDirectories,
@@ -80,10 +93,14 @@ interface ServiceState {
   readonly auditSink: ReturnType<typeof createMemoryAdminControlAuditSink>;
   runtimeConfig: RustyCrewRuntimeConfig;
   runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
+  denGatewayClient?: DenSuccessorGatewayClient;
+  denGatewayStartupReport?: DenSuccessorGatewayStartupReport;
+  readonly denConversationChannelIdsByExternalId: Map<string, number>;
   mcpManager: McpSurfaceManager;
   readonly wakeSubscription: SubscriptionHandle;
   readonly timers: Set<NodeJS.Timeout>;
   readonly inFlightWakes: Set<SessionId>;
+  readonly claimedDeliveryIntentIds: Set<number>;
   readonly directDispatchSessions: Set<SessionId>;
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
@@ -148,10 +165,16 @@ export async function startRustyCrewServiceHost(
       auditSink: createMemoryAdminControlAuditSink(),
       runtimeConfig,
       runtimeConfigApplyResult,
+      denGatewayClient:
+        config.denSuccessorGateway === undefined
+          ? undefined
+          : createDenSuccessorGatewayClient(config.denSuccessorGateway),
+      denConversationChannelIdsByExternalId: new Map(),
       mcpManager: await createServiceMcpManager(runtimeConfig),
       wakeSubscription,
       timers: new Set(),
       inFlightWakes: new Set(),
+      claimedDeliveryIntentIds: new Set(),
       directDispatchSessions: new Set(),
       suppressedWakeEvents: new Map(),
       recentEvents: [],
@@ -159,6 +182,8 @@ export async function startRustyCrewServiceHost(
       nextWakeSequence: 0,
       stopping: false,
     };
+    state.denGatewayStartupReport = await connectDenSuccessorGateway(state);
+    await ensureDenConversationChannels(state);
     startServiceBackgroundLoops(state);
     server = createServer((request, response) => {
       void handleHttpRequest(request, state)
@@ -435,6 +460,134 @@ async function createServiceMcpManager(
   return manager;
 }
 
+async function connectDenSuccessorGateway(
+  state: ServiceState,
+): Promise<DenSuccessorGatewayStartupReport | undefined> {
+  if (state.config.denSuccessorGateway === undefined) {
+    return undefined;
+  }
+  if (state.denGatewayClient === undefined) {
+    return undefined;
+  }
+  let report: DenSuccessorGatewayStartupReport;
+  try {
+    report = await announceConfiguredSessionsToDenGateway({
+      client: state.denGatewayClient,
+      sessions: state.runtimeConfig.sessions,
+      now: state.now(),
+    });
+  } catch (error) {
+    report = {
+      enabled: true,
+      sessionsAnnounced: 0,
+      runtimeInstancesRegistered: 0,
+      runtimeInstancesHeartbeated: 0,
+      failures: [
+        errorMessage(error, "Den successor Gateway connection failed"),
+      ],
+    };
+  }
+  recordServiceEvent(state, {
+    source: "den-successor-gateway",
+    eventType:
+      report.failures.length === 0
+        ? "den_successor_gateway_connected"
+        : "den_successor_gateway_degraded",
+    summary: denGatewayStartupSummary(report),
+    severity: report.failures.length === 0 ? "info" : "warning",
+  });
+  return report;
+}
+
+async function ensureDenConversationChannels(
+  state: ServiceState,
+): Promise<void> {
+  if (state.denGatewayClient === undefined) return;
+  const bindings = activeDenChannelBindings(
+    state.runtimeConfig.channelBindings,
+  );
+  if (bindings.length === 0) {
+    state.denConversationChannelIdsByExternalId.clear();
+    return;
+  }
+
+  try {
+    const channels = await state.denGatewayClient.listConversationChannels({
+      projectId: state.config.denConversationProjectId,
+      limit: 100,
+    });
+    const channelsBySlug = new Map(
+      channels.map((channel) => [channel.slug, channel]),
+    );
+    const nextChannelIds = new Map<string, number>();
+    let created = 0;
+    for (const binding of bindings) {
+      const existing = channelsBySlug.get(binding.externalChannelId);
+      if (existing !== undefined) {
+        nextChannelIds.set(binding.externalChannelId, existing.id);
+        continue;
+      }
+      const channel = await state.denGatewayClient.createConversationChannel({
+        slug: binding.externalChannelId,
+        display_name: displayNameForConversationBinding(binding),
+        kind: "agent_channel",
+        project_id: state.config.denConversationProjectId,
+        created_by: "rusty-crew",
+        visibility: "normal",
+        settings: {
+          adapter_id: binding.adapterId,
+          binding_id: binding.bindingId,
+          provider: binding.provider,
+          profile_id: binding.profileId,
+          agent_id: binding.agentId,
+        },
+      });
+      created += 1;
+      channelsBySlug.set(channel.slug, channel);
+      nextChannelIds.set(binding.externalChannelId, channel.id);
+    }
+    state.denConversationChannelIdsByExternalId.clear();
+    for (const [externalChannelId, channelId] of nextChannelIds) {
+      state.denConversationChannelIdsByExternalId.set(
+        externalChannelId,
+        channelId,
+      );
+    }
+    recordServiceEvent(state, {
+      source: "den-successor-gateway",
+      eventType: "den_conversation_channels_resolved",
+      summary: `Resolved ${nextChannelIds.size} Den Conversation channel(s), created ${created}.`,
+    });
+  } catch (error) {
+    recordServiceEvent(state, {
+      source: "den-successor-gateway",
+      eventType: "den_conversation_channels_degraded",
+      severity: "warning",
+      summary: errorMessage(
+        error,
+        "Den Conversation channel resolution failed",
+      ),
+    });
+  }
+}
+
+function activeDenChannelBindings(
+  bindings: readonly ChannelBindingRecord[],
+): ChannelBindingRecord[] {
+  return bindings.filter(
+    (binding) =>
+      binding.status === "active" &&
+      binding.provider === "den_channels" &&
+      binding.externalChannelId.trim(),
+  );
+}
+
+function displayNameForConversationBinding(
+  binding: ChannelBindingRecord,
+): string {
+  return `${binding.agentId} (${binding.externalChannelId})`;
+}
+
 async function reloadServiceRuntimeConfig(
   state: ServiceState,
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
@@ -453,6 +606,7 @@ async function reloadServiceRuntimeConfig(
   state.runtimeConfigApplyResult = nextApplyResult;
   state.mcpManager = nextMcpManager;
   await previousMcpManager.shutdown();
+  await ensureDenConversationChannels(state);
   recordServiceEvent(state, {
     source: "service-host",
     eventType: "runtime_config_reloaded",
@@ -817,6 +971,328 @@ function startServiceBackgroundLoops(state: ServiceState): void {
     }, state.config.background.wakeDispatchIntervalMs);
     state.timers.add(timer);
   }
+
+  if (
+    state.denGatewayClient !== undefined &&
+    state.config.background.denRuntimeHeartbeatIntervalMs > 0
+  ) {
+    const timer = setInterval(() => {
+      void heartbeatDenRuntimeInstances(state).catch((error) =>
+        recordServiceEvent(state, {
+          source: "den-successor-gateway",
+          eventType: "den_runtime_heartbeat_failed",
+          severity: "error",
+          summary: errorMessage(error, "Den Runtime heartbeat failed"),
+        }),
+      );
+    }, state.config.background.denRuntimeHeartbeatIntervalMs);
+    state.timers.add(timer);
+  }
+
+  if (
+    state.denGatewayClient !== undefined &&
+    state.config.background.denDeliveryPollIntervalMs > 0
+  ) {
+    const timer = setInterval(() => {
+      void pollDenDeliveryIntents(state).catch((error) =>
+        recordServiceEvent(state, {
+          source: "den-successor-gateway",
+          eventType: "den_delivery_poll_failed",
+          severity: "error",
+          summary: errorMessage(error, "Den Delivery poll failed"),
+        }),
+      );
+    }, state.config.background.denDeliveryPollIntervalMs);
+    state.timers.add(timer);
+  }
+}
+
+async function heartbeatDenRuntimeInstances(
+  state: ServiceState,
+): Promise<void> {
+  if (state.stopping || state.denGatewayClient === undefined) return;
+  const report = await heartbeatConfiguredSessionsToDenRuntime({
+    client: state.denGatewayClient,
+    sessions: state.runtimeConfig.sessions,
+  });
+  if (report.failures.length > 0) {
+    recordServiceEvent(state, {
+      source: "den-successor-gateway",
+      eventType: "den_runtime_heartbeat_degraded",
+      severity: "warning",
+      summary: `Den Runtime heartbeat: ${report.heartbeated} session(s) heartbeated, ${report.failures.length} failure(s): ${report.failures.join("; ")}`,
+    });
+  }
+}
+
+async function pollDenDeliveryIntents(state: ServiceState): Promise<void> {
+  if (state.stopping || state.denGatewayClient === undefined) return;
+  const intents = await state.denGatewayClient.listDeliveryIntents("pending");
+  for (const intent of intents) {
+    if (state.claimedDeliveryIntentIds.has(intent.id)) continue;
+    const session = configuredSessionForDeliveryIntent(state, intent);
+    if (session === undefined) continue;
+    state.claimedDeliveryIntentIds.add(intent.id);
+    void processDenDeliveryIntent(state, intent, session).catch((error) =>
+      recordServiceEvent(state, {
+        source: "den-successor-gateway",
+        eventType: "den_delivery_intent_failed",
+        severity: "error",
+        summary: errorMessage(error, `Den Delivery intent ${intent.id} failed`),
+      }),
+    );
+  }
+}
+
+async function processDenDeliveryIntent(
+  state: ServiceState,
+  intent: DenSuccessorDeliveryIntent,
+  session: RustyCrewRuntimeConfig["sessions"][number],
+): Promise<void> {
+  if (state.denGatewayClient === undefined) return;
+  const claimToken = `rusty-crew:${intent.id}:${Date.now()}`;
+  const claimedBy = claimIdentityForDeliveryIntent(intent);
+  let claimed = false;
+  try {
+    await state.denGatewayClient.claimDeliveryIntent({
+      id: intent.id,
+      claimToken,
+      claimedBy,
+    });
+    claimed = true;
+    await state.denGatewayClient.reportDeliveryIntentEvent({
+      id: intent.id,
+      claimToken,
+      eventType: "running",
+      payload: { source: "rusty-crew", session_id: session.sessionId },
+    });
+
+    const deliveryBody = await deliveryIntentBody(state, intent, session);
+    if (!deliveryBody.body.trim()) {
+      throw new Error(
+        "Delivery intent has no body in source_ref or channel message",
+      );
+    }
+
+    const wakeReport = await submitServiceTurn(state, {
+      sessionId: session.sessionId,
+      from: "den-delivery",
+      body: deliveryBody.body,
+      correlationId: `delivery:${intent.id}:${intent.idempotency_key}`,
+      source: "delivery",
+    });
+    if (wakeReport.status !== "completed") {
+      throw new Error(wakeReport.summary);
+    }
+
+    if (deliveryBody.channelId !== undefined) {
+      await state.denGatewayClient.appendConversationMessage({
+        channelId: deliveryBody.channelId,
+        idempotencyKey: `rusty-crew-delivery:${intent.id}:completion`,
+        message: {
+          sender_type: "agent",
+          sender_identity: session.agentId,
+          body: wakeReport.summary,
+          message_kind: "message",
+          source_kind: "rusty-crew",
+          source_id: String(intent.id),
+          profile_identity: session.profileId,
+          agent_instance_id: claimedBy.instance_id,
+          session_id: session.sessionId,
+          metadata: {
+            delivery_intent_id: intent.id,
+            delivery_idempotency_key: intent.idempotency_key,
+            source_message_id: intent.channel_message_id,
+            wake_id: wakeReport.wakeId,
+          },
+          dedupe_key: `rusty-crew-delivery:${intent.id}:completion`,
+        },
+      });
+    }
+
+    await state.denGatewayClient.reportDeliveryIntentEvent({
+      id: intent.id,
+      claimToken,
+      eventType: "completed",
+      payload: {
+        source: "rusty-crew",
+        session_id: session.sessionId,
+        summary: wakeReport.summary,
+        wake_id: wakeReport.wakeId,
+      },
+    });
+    recordServiceEvent(state, {
+      source: "den-successor-gateway",
+      eventType: "den_delivery_intent_completed",
+      summary: `Den Delivery intent ${intent.id} completed for ${session.agentId}.`,
+    });
+  } catch (error) {
+    if (claimed && state.denGatewayClient !== undefined) {
+      await state.denGatewayClient
+        .reportDeliveryIntentEvent({
+          id: intent.id,
+          claimToken,
+          eventType: "failed",
+          payload: {
+            source: "rusty-crew",
+            session_id: session.sessionId,
+            reason: errorMessage(error, "Delivery intent failed"),
+          },
+        })
+        .catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+async function submitServiceTurn(
+  state: ServiceState,
+  input: {
+    sessionId: SessionId;
+    from: string;
+    body: string;
+    correlationId: string;
+    source: "delivery" | "direct_debug";
+  },
+): Promise<ServiceWakeDispatchReport> {
+  state.directDispatchSessions.add(input.sessionId);
+  try {
+    await state.bridge.enqueueBodyFollowUpMessage({
+      sessionId: input.sessionId,
+      from: input.from as never,
+      body: input.body,
+      correlationId: input.correlationId,
+    });
+    const wakeReport = await dispatchWake(
+      state,
+      {
+        type: "brain_wake_requested",
+        sessionId: input.sessionId,
+      },
+      input.source,
+    );
+    suppressNextWakeEvent(state, input.sessionId);
+    await drainAndDispatchWakes(state, input.source);
+    return wakeReport;
+  } finally {
+    state.directDispatchSessions.delete(input.sessionId);
+  }
+}
+
+function claimIdentityForDeliveryIntent(
+  intent: DenSuccessorDeliveryIntent,
+): DenSuccessorAgentIdentity {
+  return {
+    profile: intent.target_identity.profile,
+    instance_id: intent.target_identity.instance_id,
+  };
+}
+
+function configuredSessionForDeliveryIntent(
+  state: ServiceState,
+  intent: DenSuccessorDeliveryIntent,
+): RustyCrewRuntimeConfig["sessions"][number] | undefined {
+  if (intent.target_identity.session_key !== undefined) return undefined;
+  return state.runtimeConfig.sessions.find((session) => {
+    const identity = deliveryIdentityForSession(session);
+    return (
+      intent.target_identity.profile === identity.profile &&
+      intent.target_identity.instance_id === identity.instance_id
+    );
+  });
+}
+
+function deliveryIdentityForSession(
+  session: RustyCrewRuntimeConfig["sessions"][number],
+): DenSuccessorAgentIdentity {
+  return {
+    profile: session.profileId,
+    instance_id: `${session.agentId}@rusty-crew`,
+    session_key: session.sessionId,
+  };
+}
+
+async function deliveryIntentBody(
+  state: ServiceState,
+  intent: DenSuccessorDeliveryIntent,
+  session: RustyCrewRuntimeConfig["sessions"][number],
+): Promise<{ body: string; channelId?: number; sourceMessageId?: number }> {
+  const sourceBody = bodyFromWakeSourceRef(intent.source_ref);
+  const channelId =
+    channelIdFromDeliveryIntent(intent) ??
+    channelIdForConfiguredSession(state, session);
+  if (sourceBody !== undefined) {
+    return {
+      body: sourceBody,
+      channelId,
+      sourceMessageId: intent.channel_message_id,
+    };
+  }
+  if (
+    state.denGatewayClient !== undefined &&
+    intent.channel_message_id !== undefined &&
+    channelId !== undefined
+  ) {
+    const messages = await state.denGatewayClient.listConversationMessages({
+      channelId,
+      limit: 50,
+    });
+    const message = messages.find(
+      (candidate) => candidate.id === intent.channel_message_id,
+    );
+    if (message !== undefined) {
+      return {
+        body: message.body,
+        channelId: message.channel_id,
+        sourceMessageId: message.id,
+      };
+    }
+  }
+  return { body: "", channelId, sourceMessageId: intent.channel_message_id };
+}
+
+function channelIdForConfiguredSession(
+  state: ServiceState,
+  session: RustyCrewRuntimeConfig["sessions"][number],
+): number | undefined {
+  const binding = activeDenChannelBindings(
+    state.runtimeConfig.channelBindings,
+  ).find(
+    (candidate) =>
+      candidate.agentId === session.agentId &&
+      candidate.profileId === session.profileId &&
+      (candidate.sessionId === undefined ||
+        candidate.sessionId === session.sessionId),
+  );
+  if (binding === undefined) return undefined;
+  return state.denConversationChannelIdsByExternalId.get(
+    binding.externalChannelId,
+  );
+}
+
+function bodyFromWakeSourceRef(
+  sourceRef: string | undefined,
+): string | undefined {
+  if (!sourceRef?.trim()) return undefined;
+  try {
+    const parsed = new URL(sourceRef);
+    const body = parsed.searchParams.get("body");
+    return body?.trim() ? body : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function channelIdFromDeliveryIntent(
+  intent: DenSuccessorDeliveryIntent,
+): number | undefined {
+  const [, channelPart] = intent.idempotency_key.split(":");
+  const raw = channelPart?.startsWith("ch")
+    ? channelPart.slice(2)
+    : channelPart;
+  if (!raw || !/^[0-9]+$/.test(raw)) return undefined;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
@@ -841,7 +1317,7 @@ async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
 
 async function drainAndDispatchWakes(
   state: ServiceState,
-  source: "background" | "direct_debug",
+  source: "background" | "direct_debug" | "delivery",
 ): Promise<ServiceWakeDispatchReport[]> {
   if (state.stopping) return [];
   const events = await state.bridge.drainSubscriptionEvents(
@@ -887,7 +1363,7 @@ function consumeSuppressedWakeEvent(
 async function dispatchWake(
   state: ServiceState,
   event: Extract<CoreEvent, { type: "brain_wake_requested" }>,
-  source: "background" | "direct_debug",
+  source: "background" | "direct_debug" | "delivery",
 ): Promise<ServiceWakeDispatchReport> {
   const sessionId = event.sessionId;
   if (state.inFlightWakes.has(sessionId)) {

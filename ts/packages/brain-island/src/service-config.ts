@@ -1,7 +1,12 @@
 import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import {
+  loadDenSuccessorGatewayConfig,
+  type DenSuccessorGatewayConfig,
+  type DenSuccessorGatewayEnv,
+} from "@rusty-crew/adapter-den";
 
-export interface RustyCrewServiceEnv {
+export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_DATA_DIR?: string;
   RUSTY_CREW_CONFIG_DIR?: string;
   RUSTY_CREW_ENGINE_DATA_DIR?: string;
@@ -16,6 +21,9 @@ export interface RustyCrewServiceEnv {
   RUSTY_CREW_ADMIN_TOKEN?: string;
   RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS?: string;
   RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS?: string;
+  RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS?: string;
+  RUSTY_CREW_DEN_DELIVERY_POLL_INTERVAL_MS?: string;
+  RUSTY_CREW_DEN_CONVERSATION_PROJECT_ID?: string;
 }
 
 export interface RustyCrewServicePaths {
@@ -41,12 +49,16 @@ export interface RustyCrewAdminConfig {
 export interface RustyCrewBackgroundConfig {
   schedulerTickIntervalMs: number;
   wakeDispatchIntervalMs: number;
+  denRuntimeHeartbeatIntervalMs: number;
+  denDeliveryPollIntervalMs: number;
 }
 
 export interface RustyCrewServiceConfig {
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
   background: RustyCrewBackgroundConfig;
+  denConversationProjectId: string;
+  denSuccessorGateway?: DenSuccessorGatewayConfig;
 }
 
 export interface RustyCrewServiceLock {
@@ -113,10 +125,37 @@ export function loadRustyCrewServiceConfig(
       250,
       "RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS",
     ),
+    denRuntimeHeartbeatIntervalMs: parseNonNegativeInteger(
+      env.RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS,
+      30_000,
+      "RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS",
+    ),
+    denDeliveryPollIntervalMs: parseNonNegativeInteger(
+      env.RUSTY_CREW_DEN_DELIVERY_POLL_INTERVAL_MS,
+      2_000,
+      "RUSTY_CREW_DEN_DELIVERY_POLL_INTERVAL_MS",
+    ),
   };
 
-  validateRustyCrewServiceConfig({ paths, admin, background });
-  return { paths, admin, background };
+  const denSuccessorGateway = loadDenSuccessorGatewayConfig(env);
+  const denConversationProjectId =
+    normalizeOptional(env.RUSTY_CREW_DEN_CONVERSATION_PROJECT_ID) ??
+    "rusty-crew";
+
+  validateRustyCrewServiceConfig({
+    paths,
+    admin,
+    background,
+    denConversationProjectId,
+    denSuccessorGateway,
+  });
+  return {
+    paths,
+    admin,
+    background,
+    denConversationProjectId,
+    denSuccessorGateway,
+  };
 }
 
 export function validateRustyCrewServiceConfig(
