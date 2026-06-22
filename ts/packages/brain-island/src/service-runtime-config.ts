@@ -11,6 +11,7 @@ import type {
   McpBindingRecord,
   ProfileId,
   ResourceLimits,
+  ScheduledJobSummary,
   SessionId,
   SessionKind,
   ToolProfile,
@@ -30,6 +31,7 @@ import {
 } from "./browser-tools.js";
 import { BrowserSessionManager } from "./browser-session-manager.js";
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
+import { nextCronDueAt } from "./cron-expression.js";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import {
   denseProfileMemoryTool,
@@ -76,11 +78,26 @@ export interface RustyCrewConfiguredSession {
   toolProfile?: ToolProfile;
 }
 
+export type RustyCrewScheduledJobShape =
+  | "session_wake"
+  | "script_only"
+  | "data_collection";
+
+export interface RustyCrewScheduledJob {
+  id: string;
+  schedule: string;
+  shape: RustyCrewScheduledJobShape;
+  targetSessionId?: SessionId;
+  script?: string;
+  deliveryChannelId?: string;
+}
+
 export interface RustyCrewRuntimeConfig {
   profilesDir: string;
   skillsDir?: string;
   brains: RustyCrewConfiguredBrain[];
   sessions: RustyCrewConfiguredSession[];
+  scheduledJobs: RustyCrewScheduledJob[];
   channelBindings: ChannelBindingRecord[];
   mcpBindings: McpBindingRecord[];
 }
@@ -92,7 +109,13 @@ export interface RustyCrewRuntimeConfigApplyResult {
   sessionsAlreadyPresent: number;
   sessionsReactivated: number;
   sessionsMissing: number;
+  scheduledJobsRegistered: number;
   brainHandlesByProfileId: Record<string, BrainImplementationHandle>;
+}
+
+export interface ScheduledJobRegistrationResult {
+  registered: number;
+  jobs: ScheduledJobSummary[];
 }
 
 export async function loadRustyCrewRuntimeConfig(
@@ -209,6 +232,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
     sessionsAlreadyPresent: 0,
     sessionsReactivated: 0,
     sessionsMissing: 0,
+    scheduledJobsRegistered: 0,
     brainHandlesByProfileId: {},
   };
 
@@ -273,7 +297,42 @@ export async function applyRustyCrewRuntimeConfig(input: {
     }
   }
 
+  const scheduledJobs = await registerConfiguredScheduledJobs({
+    bridge: input.bridge,
+    runtimeConfig: input.runtimeConfig,
+  });
+  result.scheduledJobsRegistered = scheduledJobs.registered;
+
   return result;
+}
+
+export async function registerConfiguredScheduledJobs(input: {
+  bridge: Pick<NativeBridgeModule, "registerScheduledWakeJob">;
+  runtimeConfig: RustyCrewRuntimeConfig;
+  now?: () => string;
+}): Promise<ScheduledJobRegistrationResult> {
+  const now = input.now ?? (() => new Date().toISOString());
+  const jobs: ScheduledJobSummary[] = [];
+  for (const job of input.runtimeConfig.scheduledJobs) {
+    if (job.shape !== "session_wake") {
+      throw new Error(
+        `scheduled job ${job.id} shape ${job.shape} is not executable in Rusty Crew v1`,
+      );
+    }
+    if (!job.targetSessionId) {
+      throw new Error(
+        `scheduled job ${job.id} requires targetSessionId for session_wake`,
+      );
+    }
+    jobs.push(
+      await input.bridge.registerScheduledWakeJob({
+        jobId: job.id,
+        targetSessionId: job.targetSessionId,
+        firstDueAt: nextCronDueAt(job.schedule, now()),
+      }),
+    );
+  }
+  return { registered: jobs.length, jobs };
 }
 
 function sessionWithProfileDefaults(
@@ -628,6 +687,7 @@ function emptyRuntimeConfig(
     profilesDir: join(serviceConfig.paths.configDir, "profiles"),
     brains: [],
     sessions: [],
+    scheduledJobs: [],
     channelBindings: [],
     mcpBindings: [],
   };
@@ -655,6 +715,9 @@ function validateRuntimeConfig(
     sessions: arrayValue(parsed.sessions).map((item, index) =>
       configuredSession(item, index),
     ),
+    scheduledJobs: arrayValue(parsed.scheduledJobs).map((item, index) =>
+      configuredScheduledJob(item, index),
+    ),
     channelBindings: arrayValue(parsed.channelBindings).map((item, index) =>
       configuredChannelBinding(item, index),
     ),
@@ -662,6 +725,52 @@ function validateRuntimeConfig(
       configuredMcpBinding(item, index),
     ),
   };
+}
+
+function configuredScheduledJob(
+  parsed: unknown,
+  index: number,
+): RustyCrewScheduledJob {
+  if (!isRecord(parsed)) {
+    throw new Error(`configured scheduled job ${index} must be an object`);
+  }
+  const shape = optionalString(parsed.shape) ?? "session_wake";
+  if (
+    shape !== "session_wake" &&
+    shape !== "script_only" &&
+    shape !== "data_collection"
+  ) {
+    throw new Error(
+      `scheduledJobs[${index}].shape must be session_wake, script_only, or data_collection`,
+    );
+  }
+
+  const job = {
+    id: requiredString(parsed.id, `scheduledJobs[${index}].id`),
+    schedule: requiredString(
+      parsed.schedule,
+      `scheduledJobs[${index}].schedule`,
+    ),
+    shape,
+    targetSessionId: optionalString(parsed.targetSessionId) as
+      | SessionId
+      | undefined,
+    script: optionalString(parsed.script),
+    deliveryChannelId: optionalString(parsed.deliveryChannelId),
+  } satisfies RustyCrewScheduledJob;
+
+  nextCronDueAt(job.schedule, new Date("2026-06-21T00:00:00Z"));
+  if (job.shape === "session_wake" && !job.targetSessionId) {
+    throw new Error(
+      `scheduledJobs[${index}].targetSessionId is required for session_wake`,
+    );
+  }
+  if (job.shape !== "session_wake") {
+    throw new Error(
+      `scheduledJobs[${index}].shape ${job.shape} is parsed for compatibility but not executable in Rusty Crew v1`,
+    );
+  }
+  return job;
 }
 
 function configuredBrain(

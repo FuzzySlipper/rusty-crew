@@ -22,6 +22,8 @@
     "smoke:planning-runtime-wake": "tsx src/smoke-planning-runtime-wake.ts",
     "smoke:delegated-role-assembly": "tsx src/smoke-delegated-role-assembly.ts",
     "smoke:delegation-tools": "tsx src/smoke-delegation-tools.ts",
+    "smoke:cron-expression": "tsx src/smoke-cron-expression.ts",
+    "smoke:cron-runtime-config": "tsx src/smoke-cron-runtime-config.ts",
     "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts",
     "smoke:delegated-slice": "tsx src/smoke-delegated-slice.ts",
     "smoke:tool-registry": "tsx src/smoke-tool-registry.ts",
@@ -82,6 +84,7 @@
     "smoke:service-host": "tsx src/smoke-service-host.ts",
     "smoke:service-den-router-tools": "tsx src/smoke-service-den-router-tools.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
+    "cron": "tsx src/cron-cli.ts",
     "service:start": "tsx src/service-host.ts"
   },
   "piPackageSource": {

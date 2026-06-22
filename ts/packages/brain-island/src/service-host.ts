@@ -101,6 +101,7 @@ import {
 import {
   applyRustyCrewRuntimeConfig,
   loadRustyCrewRuntimeConfig,
+  registerConfiguredScheduledJobs,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
 } from "./service-runtime-config.js";
@@ -479,7 +480,7 @@ function runtimeConfigApplySummary(
   prefix: string,
   result: RustyCrewRuntimeConfigApplyResult,
 ): string {
-  return `${prefix}: ${result.brainsRegistered} brains registered, ${result.brainsAlreadyPresent} brains already present, ${result.sessionsCreated} sessions created, ${result.sessionsAlreadyPresent} sessions already present, ${result.sessionsReactivated} sessions reactivated, ${result.sessionsMissing} configured sessions missing.`;
+  return `${prefix}: ${result.brainsRegistered} brains registered, ${result.brainsAlreadyPresent} brains already present, ${result.sessionsCreated} sessions created, ${result.sessionsAlreadyPresent} sessions already present, ${result.sessionsReactivated} sessions reactivated, ${result.sessionsMissing} configured sessions missing, ${result.scheduledJobsRegistered} scheduled jobs registered.`;
 }
 
 function buildServiceAdapterDiagnostics(
@@ -1568,6 +1569,11 @@ function channelIdFromDeliveryIntent(
 async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
   if (state.stopping) return;
   const tick = await state.bridge.runSchedulerTick();
+  const scheduledJobs = await registerConfiguredScheduledJobs({
+    bridge: state.bridge,
+    runtimeConfig: state.runtimeConfig,
+    now: state.now,
+  });
   const curatorLifecycle = await runServiceCuratorLifecycleTransitions(state);
   const maintenance = await state.bridge.runMaintenance({
     expireQueuedMessagesAt: state.now(),
@@ -1576,13 +1582,14 @@ async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
     tick.wakesRequested > 0 ||
     tick.runsCompleted > 0 ||
     tick.runsFailed > 0 ||
+    scheduledJobs.registered > 0 ||
     curatorLifecycle.transitions.length > 0 ||
     maintenance.expiredQueueMessages > 0
   ) {
     recordServiceEvent(state, {
       source: "service-host",
       eventType: "scheduler_heartbeat",
-      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} runs completed, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`,
+      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`,
     });
   }
 }

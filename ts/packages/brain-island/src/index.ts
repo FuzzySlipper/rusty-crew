@@ -241,6 +241,14 @@ export type {
   DelegationRoleContext,
 } from "./delegated-role-assembly.js";
 export {
+  CronExpression,
+  CronExpressionError,
+  nextCronDueAt,
+} from "./cron-expression.js";
+export type { CronFieldRange, CronNextOptions } from "./cron-expression.js";
+export { parseCronArgs, runRustyCrewCronCli } from "./cron-cli.js";
+export type { CronCliCommand, CronCliOptions } from "./cron-cli.js";
+export {
   gitDiffTool,
   gitStatusTool,
   readFileTool,

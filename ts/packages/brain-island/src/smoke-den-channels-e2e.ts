@@ -82,6 +82,7 @@ try {
         kind: "full",
       },
     ],
+    scheduledJobs: [],
     channelBindings: bindings,
     mcpBindings: [],
   };
