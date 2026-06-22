@@ -88,6 +88,7 @@ export interface LoadProfileContextInput {
   registry?: ToolRegistry;
   session?: SessionToolConstraints;
   catalogId?: string;
+  extraRequestedToolsets?: readonly string[];
 }
 
 export async function loadProfileContext(
@@ -101,7 +102,10 @@ export async function loadProfileContext(
   );
   const toolSelection = selectToolProfile({
     profileId: profile.profileId,
-    policy: profile.toolPolicy ?? {},
+    policy: withExtraRequestedToolsets(
+      profile.toolPolicy ?? {},
+      input.extraRequestedToolsets,
+    ),
     session: input.session,
     registry,
     catalogId: input.catalogId,
@@ -547,6 +551,24 @@ function allDefaultToolsets(): string[] {
   return [
     ...new Set(defaultToolRegistry.entries.flatMap((entry) => entry.toolsets)),
   ].sort();
+}
+
+function withExtraRequestedToolsets(
+  policy: ProfileToolPolicy,
+  extraRequestedToolsets: readonly string[] | undefined,
+): ProfileToolPolicy {
+  if (!extraRequestedToolsets || extraRequestedToolsets.length === 0) {
+    return policy;
+  }
+  return {
+    ...policy,
+    requestedToolsets: [
+      ...new Set([
+        ...(policy.requestedToolsets ?? []),
+        ...extraRequestedToolsets,
+      ]),
+    ].sort(),
+  };
 }
 
 function temperatureToMilli(value: number | undefined): number | undefined {

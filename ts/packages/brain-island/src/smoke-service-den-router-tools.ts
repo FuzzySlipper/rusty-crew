@@ -8,7 +8,13 @@ import type {
   AgentOptions as PiAgentOptions,
   AgentTool,
 } from "@earendil-works/pi-agent-core";
-import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
+import type { McpToolExecutor } from "@rusty-crew/adapter-mcp";
+import type {
+  AgentId,
+  BrainEvent,
+  ProfileId,
+  SessionId,
+} from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { loadRustyCrewServiceConfig } from "./service-config.js";
 import {
@@ -35,6 +41,7 @@ const requestedToolNames = [
   "curator_execute",
   "den_memory_recall",
   "dense_profile_memory",
+  "field_search",
   "git_status",
   "session_search",
   "skills_list",
@@ -71,6 +78,7 @@ class ToolCallingFakeAgent {
     await this.callTool("den_memory_recall", {
       prompt: "What memory guidance is relevant?",
     });
+    await this.callTool("field_search", { query: "runner mcp tools" });
     await this.callTool("git_status", {});
     await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
   }
@@ -167,13 +175,53 @@ try {
   });
   const outputs: Record<string, string> = {};
   const selectedToolNames: string[] = [];
+  const mcpCalls: Array<{
+    bindingId: string;
+    toolName: string;
+    arguments: unknown;
+  }> = [];
   try {
+    const mcpExecutor: McpToolExecutor = {
+      callTool(input) {
+        mcpCalls.push({
+          bindingId: input.binding.bindingId,
+          toolName: input.toolName,
+          arguments: input.arguments,
+        });
+        return {
+          content: `mcp:${input.binding.bindingId}:${input.toolName}`,
+          details: {
+            bindingId: input.binding.bindingId,
+            sourceToolName: input.toolName,
+          },
+        };
+      },
+    };
     const applyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig,
       runtimeConfig,
       bridge: native,
       createDenRouterAgentFactory: async () => (options) =>
         new ToolCallingFakeAgent(options, outputs, selectedToolNames),
+      mcpToolDiscoveryClientFactory: (binding) =>
+        binding.bindingId === "field-mcp"
+          ? {
+              listTools: () => [
+                {
+                  name: "search",
+                  description: "Search field MCP profile resources.",
+                  inputSchema: {
+                    type: "object",
+                    properties: {
+                      query: { type: "string", minLength: 1 },
+                    },
+                    required: ["query"],
+                  },
+                },
+              ],
+            }
+          : undefined,
+      mcpToolExecutorFactory: () => mcpExecutor,
     });
     const brain = applyResult.brainHandlesByProfileId["field-profile"];
     assert.ok(brain, "field-profile brain should be registered");
@@ -199,6 +247,14 @@ try {
 
     assert.deepEqual([...selectedToolNames].sort(), requestedToolNames);
     assert.match(outputs.git_status ?? "", /git status --short/);
+    assert.equal(outputs.field_search, "mcp:field-mcp:search");
+    assert.deepEqual(mcpCalls, [
+      {
+        bindingId: "field-mcp",
+        toolName: "search",
+        arguments: { query: "runner mcp tools" },
+      },
+    ]);
     assert.match(
       outputs.den_memory_recall ?? "",
       /Den memory is available through service config/,
@@ -209,23 +265,28 @@ try {
       memoryRequests[0]?.body["prompt"],
       "What memory guidance is relevant?",
     );
-    assert.equal(await native.diagnosticCountRows("tool_call_history"), 4);
+    assert.equal(await native.diagnosticCountRows("tool_call_history"), 8);
+    const mcpTelemetry = events.filter(
+      (event) =>
+        event.type === "brain_event_observed" &&
+        isToolCallEvent(event.event) &&
+        event.event.metadata?.source === "mcp",
+    );
     assert.deepEqual(
-      events
-        .filter((event) => event.type === "brain_event_observed")
-        .map((event) =>
-          event.event.type === "tool_call_started" ||
-          event.event.type === "tool_call_finished"
-            ? event.event.type
-            : undefined,
-        )
-        .filter(Boolean),
-      [
-        "tool_call_started",
-        "tool_call_finished",
-        "tool_call_started",
-        "tool_call_finished",
-      ],
+      mcpTelemetry.map((event) =>
+        event.type === "brain_event_observed" && isToolCallEvent(event.event)
+          ? event.event.type
+          : undefined,
+      ),
+      ["tool_call_started", "tool_call_finished"],
+    );
+    assert.deepEqual(
+      mcpTelemetry.map((event) =>
+        event.type === "brain_event_observed" && isToolCallEvent(event.event)
+          ? event.event.metadata?.bindingId
+          : undefined,
+      ),
+      ["field-mcp", "field-mcp"],
     );
 
     console.log(
@@ -235,6 +296,7 @@ try {
           toolHistoryRows:
             await native.diagnosticCountRows("tool_call_history"),
           memoryRequests: memoryRequests.length,
+          mcpCalls,
           gitStatusFirstLine: outputs.git_status?.split("\n")[0],
         },
         null,
@@ -268,7 +330,21 @@ function writeRuntimeConfig(targetRoot: string): void {
           },
         ],
         channelBindings: [],
-        mcpBindings: [],
+        mcpBindings: [
+          {
+            bindingId: "field-mcp",
+            adapterId: "mcp-ts-main",
+            agentId: "field-agent",
+            sessionId: "field-session",
+            profileId: "field-profile",
+            serverNames: ["field"],
+            endpointRef: "config://mcp/field",
+            transport: "stdio",
+            toolProfileKey: "field-profile-mcp",
+            status: "active",
+            diagnostics: {},
+          },
+        ],
       },
       null,
       2,
@@ -285,6 +361,9 @@ function writeRuntimeConfig(targetRoot: string): void {
         },
         toolPolicy: {
           requestedTools: requestedToolNames,
+        },
+        mcpConfig: {
+          toolProfile: "field-profile-mcp",
         },
       },
       null,
@@ -303,4 +382,15 @@ function header(
     return headers.find(([key]) => key.toLowerCase() === name)?.[1];
   }
   return headers[name];
+}
+
+function isToolCallEvent(
+  event: BrainEvent,
+): event is Extract<
+  BrainEvent,
+  { type: "tool_call_started" | "tool_call_finished" }
+> {
+  return (
+    event.type === "tool_call_started" || event.type === "tool_call_finished"
+  );
 }

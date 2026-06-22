@@ -9,6 +9,7 @@ import type {
   CompletionPacket,
   ChannelBindingRecord,
   McpBindingRecord,
+  McpSurfaceDiagnostics,
   ProfileId,
   ResourceLimits,
   ScheduledJobSummary,
@@ -53,6 +54,13 @@ import {
   todoTool,
 } from "./planning-tools.js";
 import { loadProfileConfig, loadProfileContext } from "./profile-loading.js";
+import {
+  buildServiceMcpToolCatalog,
+  createServiceMcpToolResolver,
+  type ServiceMcpToolCatalog,
+  type ServiceMcpToolDiscoveryClientFactory,
+  type ServiceMcpToolExecutorFactory,
+} from "./service-mcp-tools.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import {
   createSkillsToolResolver,
@@ -211,8 +219,16 @@ export async function applyRustyCrewRuntimeConfig(input: {
     options: Parameters<typeof createDenRouterPiAgentFactory>[0],
   ) => Promise<PiAgentFactory>;
   curatorExecutor?: CuratorExecuteContext["executor"];
+  mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
+  mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
+  mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const createMissingSessions = input.createMissingSessions ?? true;
+  const mcpToolCatalog = await buildServiceMcpToolCatalog({
+    runtimeConfig: input.runtimeConfig,
+    discoveryClientFactory: input.mcpToolDiscoveryClientFactory,
+    surfaceDiagnostics: input.mcpSurfaceDiagnostics,
+  });
   const profileContexts = new Map<
     ProfileId,
     Awaited<ReturnType<typeof loadProfileContext>>
@@ -224,6 +240,12 @@ export async function applyRustyCrewRuntimeConfig(input: {
       profilesDir: input.runtimeConfig.profilesDir,
       skillsDir: input.runtimeConfig.skillsDir,
       profileId,
+      registry: mcpToolCatalog.registryForProfile(profileId),
+      extraRequestedToolsets: mcpToolCatalog.toolsetsForProfile(profileId),
+      catalogId:
+        mcpToolCatalog.toolsetsForProfile(profileId).length > 0
+          ? `service:mcp:${profileId}`
+          : undefined,
     });
     profileContexts.set(profileId, profile);
     return profile;
@@ -256,6 +278,8 @@ export async function applyRustyCrewRuntimeConfig(input: {
             runtimeConfig: input.runtimeConfig,
             serviceConfig: input.serviceConfig,
             curatorExecutor: input.curatorExecutor,
+            mcpToolCatalog,
+            mcpToolExecutorFactory: input.mcpToolExecutorFactory,
           }),
         ),
       );
@@ -433,6 +457,8 @@ async function createConfiguredBrain(
     runtimeConfig?: RustyCrewRuntimeConfig;
     serviceConfig?: RustyCrewServiceConfig;
     curatorExecutor?: CuratorExecuteContext["executor"];
+    mcpToolCatalog?: ServiceMcpToolCatalog;
+    mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   } = {},
 ): Promise<BrainImplementation> {
   if (profile.profile.modelConfig.provider === "den-router") {
@@ -497,6 +523,8 @@ function createServiceToolResolver(
     runtimeConfig?: RustyCrewRuntimeConfig;
     serviceConfig?: RustyCrewServiceConfig;
     curatorExecutor?: CuratorExecuteContext["executor"];
+    mcpToolCatalog?: ServiceMcpToolCatalog;
+    mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   },
 ): PiAgentToolResolver {
   const todoStore = new MemorySessionTodoStore();
@@ -510,6 +538,13 @@ function createServiceToolResolver(
       screenshotStore: browserScreenshotStore,
     }),
     createMemoryToolResolver(profile, options),
+    options.mcpToolCatalog
+      ? createServiceMcpToolResolver({
+          catalog: options.mcpToolCatalog,
+          bridge: options.bridge,
+          executorFactory: options.mcpToolExecutorFactory,
+        })
+      : () => [],
     createSkillsToolResolver({
       skillsDir: serviceSkillsDir(profile, options.runtimeConfig),
       allowedSkills:

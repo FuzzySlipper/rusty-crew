@@ -205,6 +205,7 @@ export async function startRustyCrewServiceHost(
       defaultIdleTimeoutMs: 30_000,
     });
     const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
+    const mcpManager = await createServiceMcpManager(runtimeConfig);
     const curator = createServiceCuratorRuntime({
       config,
       runtimeConfig,
@@ -216,6 +217,7 @@ export async function startRustyCrewServiceHost(
       runtimeConfig,
       bridge,
       curatorExecutor: curator.executor,
+      mcpSurfaceDiagnostics: mcpManager.diagnostics(),
     });
     const wakeSubscription = await bridge.subscribeEvents({
       eventKinds: ["brain_wake_requested"],
@@ -235,7 +237,7 @@ export async function startRustyCrewServiceHost(
           : createDenSuccessorGatewayClient(config.denSuccessorGateway),
       denConversationChannelIdsByExternalId: new Map(),
       curator,
-      mcpManager: await createServiceMcpManager(runtimeConfig),
+      mcpManager,
       wakeSubscription,
       timers: new Set(),
       inFlightWakes: new Set(),
@@ -919,6 +921,7 @@ async function reloadServiceRuntimeConfig(
   state: ServiceState,
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
   const nextRuntimeConfig = await loadRustyCrewRuntimeConfig(state.config);
+  const nextMcpManager = await createServiceMcpManager(nextRuntimeConfig);
   const nextApplyResult = await applyRustyCrewRuntimeConfig({
     serviceConfig: state.config,
     runtimeConfig: nextRuntimeConfig,
@@ -927,8 +930,8 @@ async function reloadServiceRuntimeConfig(
       state.runtimeConfigApplyResult.brainHandlesByProfileId,
     createMissingSessions: false,
     curatorExecutor: state.curator.executor,
+    mcpSurfaceDiagnostics: nextMcpManager.diagnostics(),
   });
-  const nextMcpManager = await createServiceMcpManager(nextRuntimeConfig);
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
   state.runtimeConfigApplyResult = nextApplyResult;
