@@ -35,6 +35,8 @@ export class ProfileLoadError extends Error {
 export interface ProfileRuntimeConfig {
   maxTurns?: number;
   defaultResourceLimits?: ResourceLimits;
+  maxTokensPerTurn?: number;
+  maxTurnDurationMs?: number;
 }
 
 export interface ProfilePromptFragments {
@@ -65,6 +67,22 @@ export interface ProfileBackgroundReviewConfig {
   dryRun?: boolean;
 }
 
+export interface ProfileMemoryConfig {
+  enabled?: boolean;
+  denMemory?: boolean;
+  denseProfileMemory?: boolean;
+}
+
+export interface ProfileSessionDefaultsConfig {
+  ownerId?: string;
+  maxHistoryMessages?: number;
+  turnTimeoutMs?: number;
+}
+
+export interface ProfileChannelDefaultsConfig {
+  wakePolicy?: "subscription" | "manual" | "disabled";
+}
+
 export interface ProfileConfig {
   profileId: ProfileId;
   profileDir?: string;
@@ -78,6 +96,9 @@ export interface ProfileConfig {
   skillsMode?: "listed" | "all";
   mcpConfig?: ProfileMcpConfig;
   backgroundReview?: ProfileBackgroundReviewConfig;
+  memoryConfig?: ProfileMemoryConfig;
+  sessionDefaults?: ProfileSessionDefaultsConfig;
+  channelDefaults?: ProfileChannelDefaultsConfig;
 }
 
 export interface LoadedSkill {
@@ -467,6 +488,8 @@ function validateProfileConfig(
     runtime: isRecord(parsed.runtime)
       ? {
           maxTurns: optionalNumber(parsed.runtime.maxTurns),
+          maxTokensPerTurn: optionalNumber(parsed.runtime.maxTokensPerTurn),
+          maxTurnDurationMs: optionalNumber(parsed.runtime.maxTurnDurationMs),
           defaultResourceLimits: isRecord(parsed.runtime.defaultResourceLimits)
             ? {
                 workdir: optionalString(
@@ -484,6 +507,8 @@ function validateProfileConfig(
       : runtimeConfig
         ? {
             maxTurns: optionalNumber(runtimeConfig.maxIterations),
+            maxTokensPerTurn: optionalNumber(runtimeConfig.maxTokensPerTurn),
+            maxTurnDurationMs: optionalNumber(runtimeConfig.maxTurnDurationMs),
             defaultResourceLimits: {
               maxDurationMs: optionalNumber(runtimeConfig.maxDurationMs),
             },
@@ -522,6 +547,23 @@ function validateProfileConfig(
       : undefined,
     backgroundReview: isRecord(parsed.backgroundReview)
       ? profileBackgroundReviewConfig(parsed.backgroundReview)
+      : undefined,
+    memoryConfig: isRecord(parsed.memoryConfig)
+      ? profileMemoryConfig(parsed.memoryConfig)
+      : undefined,
+    sessionDefaults: isRecord(parsed.sessionDefaults)
+      ? {
+          ownerId: optionalString(parsed.sessionDefaults.ownerId),
+          maxHistoryMessages: optionalNumber(
+            parsed.sessionDefaults.maxHistoryMessages,
+          ),
+          turnTimeoutMs: optionalNumber(parsed.sessionDefaults.turnTimeoutMs),
+        }
+      : undefined,
+    channelDefaults: isRecord(parsed.channelDefaults)
+      ? {
+          wakePolicy: wakePolicy(parsed.channelDefaults.wakePolicy),
+        }
       : undefined,
   };
 }
@@ -588,6 +630,28 @@ function backgroundReviewType(
   value: unknown,
 ): ProfileBackgroundReviewConfig["reviewType"] {
   if (value === "memory" || value === "skills" || value === "combined") {
+    return value;
+  }
+  return undefined;
+}
+
+function profileMemoryConfig(
+  raw: Record<string, unknown>,
+): ProfileMemoryConfig {
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : undefined,
+    denMemory: typeof raw.denMemory === "boolean" ? raw.denMemory : undefined,
+    denseProfileMemory:
+      typeof raw.denseProfileMemory === "boolean"
+        ? raw.denseProfileMemory
+        : undefined,
+  };
+}
+
+function wakePolicy(
+  value: unknown,
+): ProfileChannelDefaultsConfig["wakePolicy"] {
+  if (value === "subscription" || value === "manual" || value === "disabled") {
     return value;
   }
   return undefined;

@@ -149,9 +149,19 @@ mcpConfig:
   toolProfile: runner
 runtimeConfig:
   maxIterations: 100
+  maxTokensPerTurn: 8192
   maxDurationMs: 900000
+  maxTurnDurationMs: 180000
 toolPolicy:
   mode: allow_all
+memoryConfig:
+  enabled: true
+sessionDefaults:
+  ownerId: "owner:den-k8plus:rusty-crew-runner"
+  maxHistoryMessages: 200
+  turnTimeoutMs: 1800000
+channelDefaults:
+  wakePolicy: subscription
 backgroundReview:
   enabled: true
   reviewType: combined
@@ -185,7 +195,17 @@ backgroundReview:
     runner.profile.runtime?.defaultResourceLimits?.maxDurationMs,
     900000,
   );
+  assert.equal(runner.profile.runtime?.maxTokensPerTurn, 8192);
+  assert.equal(runner.profile.runtime?.maxTurnDurationMs, 180000);
   assert.equal(runner.profile.mcpConfig?.toolProfile, "runner");
+  assert.equal(runner.profile.memoryConfig?.enabled, true);
+  assert.equal(
+    runner.profile.sessionDefaults?.ownerId,
+    "owner:den-k8plus:rusty-crew-runner",
+  );
+  assert.equal(runner.profile.sessionDefaults?.maxHistoryMessages, 200);
+  assert.equal(runner.profile.sessionDefaults?.turnTimeoutMs, 1800000);
+  assert.equal(runner.profile.channelDefaults?.wakePolicy, "subscription");
   assert.equal(runner.profile.backgroundReview?.enabled, true);
   assert.equal(runner.profile.backgroundReview?.reviewType, "combined");
   assert.equal(runner.profile.backgroundReview?.schedule, "0 3 * * *");

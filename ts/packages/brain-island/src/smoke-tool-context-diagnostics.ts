@@ -70,11 +70,24 @@ const profileContext = {
     },
     runtime: {
       maxTurns: 4,
+      maxTokensPerTurn: 8192,
+      maxTurnDurationMs: 180_000,
       defaultResourceLimits: {
         workdir: "/home/dev/rusty-crew",
         maxDurationMs: 30_000,
         maxDelegationDepth: 2,
       },
+    },
+    memoryConfig: {
+      enabled: true,
+    },
+    sessionDefaults: {
+      ownerId: "owner:diagnostics",
+      maxHistoryMessages: 200,
+      turnTimeoutMs: 1_800_000,
+    },
+    channelDefaults: {
+      wakePolicy: "subscription",
     },
     toolPolicy: policy,
     prompt: {
@@ -231,6 +244,12 @@ assert.equal(
   true,
 );
 assert.equal(
+  report.issues.some(
+    (issue) => issue.code === "profile_operational_default_declarative",
+  ),
+  true,
+);
+assert.equal(
   report.issues.some((issue) => issue.code === "session_search_unavailable"),
   true,
 );
@@ -244,6 +263,36 @@ assert.equal(report.resources.workdirScoped, true);
 assert.equal(report.adapters.mcp.degraded, 1);
 assert.equal(
   report.issues.some((issue) => issue.code === "mcp_surface_degraded"),
+  true,
+);
+
+const missingMemoryConfigReport = buildToolContextDiagnosticsReport({
+  now: "2026-06-20T00:00:00Z",
+  session: {
+    sessionId: "memory-config-session",
+    agentId: "memory-config-agent",
+    profileId,
+  },
+  toolDiagnostics,
+  toolSelection,
+  profileContext,
+  memorySkillsPlanning: {
+    denMemory: {
+      configured: false,
+      clientAvailable: false,
+      endpointConfigured: false,
+      mode: "metadata",
+    },
+    denseProfileMemory: {
+      clientAvailable: true,
+      recordCount: 0,
+    },
+  },
+});
+assert.equal(
+  missingMemoryConfigReport.issues.some(
+    (issue) => issue.code === "profile_memory_unconfigured",
+  ),
   true,
 );
 

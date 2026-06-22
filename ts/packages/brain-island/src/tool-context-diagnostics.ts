@@ -36,6 +36,8 @@ export type ToolContextReasonCode =
   | "adapter_unavailable"
   | "workdir_limited"
   | "resource_limited"
+  | "profile_memory_unconfigured"
+  | "profile_operational_default_declarative"
   | "den_memory_unavailable"
   | "skill_root_unavailable"
   | "dense_profile_memory_unavailable"
@@ -308,6 +310,7 @@ export function buildToolContextDiagnosticsReport(
   const adapters = adapterSummary(input);
   const issues = [
     ...toolIssues(tools),
+    ...profileConfigIssues(input, memorySkillsPlanning),
     ...memorySkillsPlanningIssues(memorySkillsPlanning),
     ...resourceIssues(resources),
     ...adapterIssues(adapters),
@@ -856,6 +859,67 @@ function toolIssues(
       },
     ] satisfies ToolContextDiagnosticsIssue[];
   });
+}
+
+function profileConfigIssues(
+  input: ToolContextDiagnosticsInput,
+  memorySkillsPlanning: ToolContextMemorySkillsPlanningSummary,
+): ToolContextDiagnosticsIssue[] {
+  const profile = input.profileContext?.profile;
+  if (!profile) return [];
+  const issues: ToolContextDiagnosticsIssue[] = [];
+  const memoryConfig = profile.memoryConfig;
+  const wantsDenMemory =
+    memoryConfig?.denMemory === true ||
+    (memoryConfig?.enabled === true && memoryConfig.denMemory !== false);
+  const wantsDenseProfileMemory =
+    memoryConfig?.denseProfileMemory === true ||
+    (memoryConfig?.enabled === true &&
+      memoryConfig.denseProfileMemory !== false);
+  if (wantsDenMemory && !memorySkillsPlanning.denMemory.configured) {
+    issues.push({
+      code: "profile_memory_unconfigured",
+      severity: "warning",
+      message:
+        "profile memoryConfig requests Den memory, but service Den memory is not configured",
+      toolName: "den_memory_recall",
+    });
+  }
+  if (
+    wantsDenseProfileMemory &&
+    !memorySkillsPlanning.denseProfileMemory.clientAvailable
+  ) {
+    issues.push({
+      code: "profile_memory_unconfigured",
+      severity: "warning",
+      message:
+        "profile memoryConfig requests dense profile memory, but the dense memory client is unavailable",
+      toolName: "dense_profile_memory",
+    });
+  }
+
+  const declarativeNotes = [
+    profile.sessionDefaults
+      ? "sessionDefaults are preserved for diagnostics; service sessions still come from runtime config"
+      : undefined,
+    profile.channelDefaults?.wakePolicy
+      ? "channelDefaults.wakePolicy is declarative; a runtime channel binding is still required"
+      : undefined,
+    profile.runtime?.maxTokensPerTurn
+      ? "runtimeConfig.maxTokensPerTurn is preserved; modelConfig.maxTokens/maxOutputTokens drives current model output limits"
+      : undefined,
+    profile.runtime?.maxTurnDurationMs
+      ? "runtimeConfig.maxTurnDurationMs is preserved for diagnostics but is not yet enforced as a per-turn timeout"
+      : undefined,
+  ].filter((note): note is string => Boolean(note));
+  for (const note of declarativeNotes) {
+    issues.push({
+      code: "profile_operational_default_declarative",
+      severity: "warning",
+      message: note,
+    });
+  }
+  return issues;
 }
 
 function memorySkillsPlanningIssues(
