@@ -32,6 +32,10 @@ import type {
   RunId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  ScheduledHostJobManualRunRequest,
+  ScheduledHostJobRegistrationInput,
+  ScheduledHostRunClaimQuery,
+  ScheduledHostRunCompletionInput,
   ScheduledJobListQuery,
   ScheduledJobStatus,
   ScheduledJobSummary,
@@ -189,6 +193,13 @@ interface NativeBridgeBinding {
     intervalMs: number | undefined,
     firstDueAt: string,
   ): string;
+  registerScheduledHostJobJson(
+    jobId: string,
+    jobKind: string,
+    intervalMs: number | undefined,
+    firstDueAt: string,
+    payloadJson: string,
+  ): string;
   listScheduledJobsJson(
     status?: ScheduledJobStatus,
     jobKind?: string,
@@ -203,6 +214,20 @@ interface NativeBridgeBinding {
     limit?: number,
     offset?: number,
   ): string;
+  claimScheduledHostRunsJson(
+    supportedJobKinds: string[],
+    limit?: number,
+  ): string;
+  requestScheduledHostJobRunJson(
+    jobId: string,
+    supportedJobKinds: string[],
+  ): string;
+  completeScheduledHostRun(
+    runId: string,
+    status: ScheduledHostRunCompletionInput["status"],
+    outputJson: string,
+    error?: string,
+  ): void;
   runSchedulerTickJson(): string;
   requestScheduledJobRunJson(jobId: string): string;
   pauseScheduledJob(jobId: string): void;
@@ -561,12 +586,24 @@ export interface NativeBridgeModule {
     intervalMs?: number;
     firstDueAt: string;
   }): Promise<ScheduledJobSummary>;
+  registerScheduledHostJob(
+    input: ScheduledHostJobRegistrationInput,
+  ): Promise<ScheduledJobSummary>;
   listScheduledJobs(
     query?: ScheduledJobListQuery,
   ): Promise<ScheduledJobSummary[]>;
   listScheduledRuns(
     query?: ScheduledRunListQuery,
   ): Promise<ScheduledRunSummary[]>;
+  claimScheduledHostRuns(
+    query: ScheduledHostRunClaimQuery,
+  ): Promise<ScheduledRunSummary[]>;
+  requestScheduledHostJobRun(
+    input: ScheduledHostJobManualRunRequest,
+  ): Promise<ScheduledRunSummary | undefined>;
+  completeScheduledHostRun(
+    input: ScheduledHostRunCompletionInput,
+  ): Promise<Unit>;
   runSchedulerTick(): Promise<SchedulerTickReport>;
   requestScheduledJobRun(
     jobId: string,
@@ -695,8 +732,12 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
     ensureConfiguredSession: unavailable("ensure_configured_session"),
     registerScheduledWakeJob: unavailable("register_scheduled_wake_job"),
+    registerScheduledHostJob: unavailable("register_scheduled_host_job"),
     listScheduledJobs: unavailable("list_scheduled_jobs"),
     listScheduledRuns: unavailable("list_scheduled_runs"),
+    claimScheduledHostRuns: unavailable("claim_scheduled_host_runs"),
+    requestScheduledHostJobRun: unavailable("request_scheduled_host_job_run"),
+    completeScheduledHostRun: unavailable("complete_scheduled_host_run"),
     runSchedulerTick: unavailable("run_scheduler_tick"),
     requestScheduledJobRun: unavailable("request_scheduled_job_run"),
     pauseScheduledJob: unavailable("pause_scheduled_job"),
@@ -932,6 +973,18 @@ function createNativeBridgeModule(
           ),
         ) as RawScheduledJobSummary,
       ),
+    registerScheduledHostJob: async (input) =>
+      toScheduledJobSummary(
+        JSON.parse(
+          binding.registerScheduledHostJobJson(
+            input.jobId,
+            input.jobKind,
+            input.intervalMs,
+            input.firstDueAt,
+            JSON.stringify(input.payload ?? {}),
+          ),
+        ) as RawScheduledJobSummary,
+      ),
     listScheduledJobs: async (query = {}) =>
       (
         JSON.parse(
@@ -956,6 +1009,33 @@ function createNativeBridgeModule(
           ),
         ) as RawScheduledRunSummary[]
       ).map(toScheduledRunSummary),
+    claimScheduledHostRuns: async (query) =>
+      (
+        JSON.parse(
+          binding.claimScheduledHostRunsJson(
+            query.supportedJobKinds,
+            query.limit,
+          ),
+        ) as RawScheduledRunSummary[]
+      ).map(toScheduledRunSummary),
+    requestScheduledHostJobRun: async (input) => {
+      const raw = JSON.parse(
+        binding.requestScheduledHostJobRunJson(
+          input.jobId,
+          input.supportedJobKinds,
+        ),
+      ) as RawScheduledRunSummary | null;
+      return raw ? toScheduledRunSummary(raw) : undefined;
+    },
+    completeScheduledHostRun: async (input) => {
+      binding.completeScheduledHostRun(
+        input.runId,
+        input.status,
+        JSON.stringify(input.output ?? {}),
+        input.error,
+      );
+      return {};
+    },
     runSchedulerTick: async () =>
       toSchedulerTickReport(
         JSON.parse(binding.runSchedulerTickJson()) as RawSchedulerTickReport,

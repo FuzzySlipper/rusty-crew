@@ -79,6 +79,7 @@ export interface RustyCrewConfiguredSession {
 }
 
 export type RustyCrewScheduledJobShape =
+  | "host_job"
   | "session_wake"
   | "script_only"
   | "data_collection";
@@ -87,7 +88,9 @@ export interface RustyCrewScheduledJob {
   id: string;
   schedule: string;
   shape: RustyCrewScheduledJobShape;
+  jobKind?: string;
   targetSessionId?: SessionId;
+  payload?: unknown;
   script?: string;
   deliveryChannelId?: string;
 }
@@ -307,29 +310,49 @@ export async function applyRustyCrewRuntimeConfig(input: {
 }
 
 export async function registerConfiguredScheduledJobs(input: {
-  bridge: Pick<NativeBridgeModule, "registerScheduledWakeJob">;
+  bridge: Pick<
+    NativeBridgeModule,
+    "registerScheduledWakeJob" | "registerScheduledHostJob"
+  >;
   runtimeConfig: RustyCrewRuntimeConfig;
   now?: () => string;
 }): Promise<ScheduledJobRegistrationResult> {
   const now = input.now ?? (() => new Date().toISOString());
   const jobs: ScheduledJobSummary[] = [];
   for (const job of input.runtimeConfig.scheduledJobs) {
-    if (job.shape !== "session_wake") {
-      throw new Error(
-        `scheduled job ${job.id} shape ${job.shape} is not executable in Rusty Crew v1`,
+    if (job.shape === "session_wake") {
+      if (!job.targetSessionId) {
+        throw new Error(
+          `scheduled job ${job.id} requires targetSessionId for session_wake`,
+        );
+      }
+      jobs.push(
+        await input.bridge.registerScheduledWakeJob({
+          jobId: job.id,
+          targetSessionId: job.targetSessionId,
+          firstDueAt: nextCronDueAt(job.schedule, now()),
+        }),
       );
+      continue;
     }
-    if (!job.targetSessionId) {
-      throw new Error(
-        `scheduled job ${job.id} requires targetSessionId for session_wake`,
+    if (job.shape === "host_job") {
+      if (!job.jobKind) {
+        throw new Error(
+          `scheduled job ${job.id} requires jobKind for host_job`,
+        );
+      }
+      jobs.push(
+        await input.bridge.registerScheduledHostJob({
+          jobId: job.id,
+          jobKind: job.jobKind,
+          firstDueAt: nextCronDueAt(job.schedule, now()),
+          payload: job.payload ?? {},
+        }),
       );
+      continue;
     }
-    jobs.push(
-      await input.bridge.registerScheduledWakeJob({
-        jobId: job.id,
-        targetSessionId: job.targetSessionId,
-        firstDueAt: nextCronDueAt(job.schedule, now()),
-      }),
+    throw new Error(
+      `scheduled job ${job.id} shape ${job.shape} is not executable in Rusty Crew v1`,
     );
   }
   return { registered: jobs.length, jobs };
@@ -736,12 +759,13 @@ function configuredScheduledJob(
   }
   const shape = optionalString(parsed.shape) ?? "session_wake";
   if (
+    shape !== "host_job" &&
     shape !== "session_wake" &&
     shape !== "script_only" &&
     shape !== "data_collection"
   ) {
     throw new Error(
-      `scheduledJobs[${index}].shape must be session_wake, script_only, or data_collection`,
+      `scheduledJobs[${index}].shape must be host_job, session_wake, script_only, or data_collection`,
     );
   }
 
@@ -752,9 +776,11 @@ function configuredScheduledJob(
       `scheduledJobs[${index}].schedule`,
     ),
     shape,
+    jobKind: optionalString(parsed.jobKind),
     targetSessionId: optionalString(parsed.targetSessionId) as
       | SessionId
       | undefined,
+    payload: parsed.payload,
     script: optionalString(parsed.script),
     deliveryChannelId: optionalString(parsed.deliveryChannelId),
   } satisfies RustyCrewScheduledJob;
@@ -765,7 +791,10 @@ function configuredScheduledJob(
       `scheduledJobs[${index}].targetSessionId is required for session_wake`,
     );
   }
-  if (job.shape !== "session_wake") {
+  if (job.shape === "host_job" && !job.jobKind) {
+    throw new Error(`scheduledJobs[${index}].jobKind is required for host_job`);
+  }
+  if (job.shape !== "session_wake" && job.shape !== "host_job") {
     throw new Error(
       `scheduledJobs[${index}].shape ${job.shape} is parsed for compatibility but not executable in Rusty Crew v1`,
     );

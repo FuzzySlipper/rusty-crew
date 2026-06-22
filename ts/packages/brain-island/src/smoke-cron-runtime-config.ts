@@ -56,6 +56,13 @@ try {
             targetSessionId: "cron-session",
             deliveryChannelId: "ops",
           },
+          {
+            id: "cron-diagnostics",
+            schedule: "*/15 9-10 * * 1-5",
+            shape: "host_job",
+            jobKind: "runtime.diagnostics.snapshot",
+            payload: { schema_version: 1 },
+          },
         ],
       },
       null,
@@ -95,12 +102,21 @@ try {
     RUSTY_CREW_ADMIN_AUTH_MODE: "none",
   });
   const runtimeConfig = await loadRustyCrewRuntimeConfig(serviceConfig);
-  assert.equal(runtimeConfig.scheduledJobs.length, 1);
+  assert.equal(runtimeConfig.scheduledJobs.length, 2);
   assert.equal(runtimeConfig.scheduledJobs[0]?.id, "cron-wake");
+  assert.equal(
+    runtimeConfig.scheduledJobs[1]?.jobKind,
+    "runtime.diagnostics.snapshot",
+  );
 
   const registered: Array<{
     jobId: string;
     targetSessionId: SessionId;
+    firstDueAt: string;
+  }> = [];
+  const registeredHost: Array<{
+    jobId: string;
+    jobKind: string;
     firstDueAt: string;
   }> = [];
   const result = await registerConfiguredScheduledJobs({
@@ -119,10 +135,22 @@ try {
           updatedAt: "2026-06-15T09:01:10.000Z",
         } satisfies ScheduledJobSummary;
       },
+      registerScheduledHostJob: async (input) => {
+        registeredHost.push(input);
+        return {
+          jobId: input.jobId,
+          jobKind: input.jobKind,
+          nextDueAt: input.firstDueAt,
+          status: "active",
+          createdAt: "2026-06-15T09:01:10.000Z",
+          updatedAt: "2026-06-15T09:01:10.000Z",
+        } satisfies ScheduledJobSummary;
+      },
     },
   });
-  assert.equal(result.registered, 1);
+  assert.equal(result.registered, 2);
   assert.equal(registered[0]?.firstDueAt, "2026-06-15T09:15:00.000Z");
+  assert.equal(registeredHost[0]?.jobKind, "runtime.diagnostics.snapshot");
 
   const outputs: string[] = [];
   await runRustyCrewCronCli({

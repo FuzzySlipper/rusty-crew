@@ -236,6 +236,44 @@ try {
     },
   );
 
+  await host.bridge.registerScheduledHostJob({
+    jobId: "field-diagnostics-snapshot",
+    jobKind: "runtime.diagnostics.snapshot",
+    firstDueAt: new Date(Date.now() - 1_000).toISOString(),
+    payload: { schema_version: 1 },
+  });
+  await waitUntil(async () => {
+    const runs = await get(
+      "/v1/admin/scheduler/runs?jobId=field-diagnostics-snapshot&limit=5",
+      token,
+    );
+    return runs.body.data.runs.some(
+      (run: { status?: string; output?: { outcome?: string } }) =>
+        run.status === "completed" && run.output?.outcome === "completed",
+    );
+  }, "scheduled host diagnostics job completed by the service heartbeat");
+  const manualHostRun = await post(
+    "/v1/admin/control/scheduler/jobs/field-diagnostics-snapshot/run",
+    token,
+    { reason: "manual host diagnostics proof" },
+  );
+  assert.equal(manualHostRun.status, 200);
+  assert.equal(manualHostRun.body.data.outcome.status, "completed");
+  assert.match(
+    manualHostRun.body.data.outcome.summary,
+    /scheduled host job field-diagnostics-snapshot completed/,
+  );
+  const hostRuns = await get(
+    "/v1/admin/scheduler/runs?jobId=field-diagnostics-snapshot&limit=5",
+    token,
+  );
+  assert.equal(
+    hostRuns.body.data.runs.filter(
+      (run: { status?: string }) => run.status === "completed",
+    ).length >= 2,
+    true,
+  );
+
   await host.bridge.createSession({
     sessionId: "field-session-expiry" as SessionId,
     agentId: "expiry-agent" as AgentId,

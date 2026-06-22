@@ -109,6 +109,11 @@ import {
   type RustyCrewRuntimeConfigApplyResult,
 } from "./service-runtime-config.js";
 import { createRuntimeActivityObserver } from "./runtime-activity-observer.js";
+import {
+  executeScheduledHostRun,
+  runScheduledHostExecutors,
+  scheduledHostJobKinds,
+} from "./scheduled-host-executors.js";
 
 export interface RustyCrewServiceHostOptions {
   env?: RustyCrewServiceEnv;
@@ -1152,16 +1157,57 @@ function createServiceControlExecutor(
       };
     },
     schedulerRunJob: async (command) => {
+      const job = (await state.bridge.listScheduledJobs({ limit: 100 })).find(
+        (candidate) => candidate.jobId === command.target.jobId,
+      );
+      if (job && scheduledHostJobKinds.includes(job.jobKind as never)) {
+        const run = await state.bridge.requestScheduledHostJobRun({
+          jobId: command.target.jobId,
+          supportedJobKinds: [...scheduledHostJobKinds],
+        });
+        if (!run) {
+          return {
+            status: "completed",
+            summary: `scheduled host job ${command.target.jobId} was not found`,
+            result: null,
+          };
+        }
+        const outcome = await executeScheduledHostRun(
+          {
+            bridge: state.bridge,
+            diagnostics: () => buildDiagnosticsContext(state),
+          },
+          run,
+        );
+        const affectedIds: Record<string, string | number> = {
+          jobId: command.target.jobId,
+          runId: run.runId,
+        };
+        return {
+          status: outcome === "completed" ? "completed" : "failed",
+          summary: `scheduled host job ${command.target.jobId} ${outcome}`,
+          affectedIds,
+          result: run,
+        };
+      }
       const run = await state.bridge.requestScheduledJobRun(
         command.target.jobId,
       );
+      if (!run) {
+        return {
+          status: "completed",
+          summary: `scheduled job ${command.target.jobId} was not due or not found`,
+          result: null,
+        };
+      }
+      const affectedIds: Record<string, string | number> = {
+        jobId: command.target.jobId,
+      };
       return {
         status: "completed",
-        summary: run
-          ? `scheduled job ${command.target.jobId} run requested`
-          : `scheduled job ${command.target.jobId} was not due or not found`,
-        affectedIds: run ? { jobId: command.target.jobId } : undefined,
-        result: run ?? null,
+        summary: `scheduled job ${command.target.jobId} run requested`,
+        affectedIds,
+        result: run,
       };
     },
     schedulerPauseJob: async (command) => {
@@ -1636,6 +1682,10 @@ function channelIdFromDeliveryIntent(
 async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
   if (state.stopping) return;
   const tick = await state.bridge.runSchedulerTick();
+  const hostRuns = await runScheduledHostExecutors({
+    bridge: state.bridge,
+    diagnostics: () => buildDiagnosticsContext(state),
+  });
   const scheduledJobs = await registerConfiguredScheduledJobs({
     bridge: state.bridge,
     runtimeConfig: state.runtimeConfig,
@@ -1649,6 +1699,7 @@ async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
     tick.wakesRequested > 0 ||
     tick.runsCompleted > 0 ||
     tick.runsFailed > 0 ||
+    hostRuns.claimed > 0 ||
     scheduledJobs.registered > 0 ||
     curatorLifecycle.transitions.length > 0 ||
     maintenance.expiredQueueMessages > 0
@@ -1656,7 +1707,7 @@ async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
     recordServiceEvent(state, {
       source: "service-host",
       eventType: "scheduler_heartbeat",
-      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`,
+      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`,
     });
   }
 }

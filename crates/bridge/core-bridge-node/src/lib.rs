@@ -181,6 +181,19 @@ impl NativeBridge {
             .map(scheduled_job_json)
     }
 
+    pub fn register_scheduled_host_job(
+        &self,
+        job_id: String,
+        job_kind: String,
+        interval_ms: Option<u64>,
+        first_due_at: String,
+        payload_json: serde_json::Value,
+    ) -> CoreResult<serde_json::Value> {
+        self.engine()?
+            .register_scheduled_host_job(job_id, job_kind, interval_ms, first_due_at, payload_json)
+            .map(scheduled_job_json)
+    }
+
     pub fn list_scheduled_jobs(
         &self,
         status: Option<String>,
@@ -224,6 +237,39 @@ impl NativeBridge {
                 offset,
             )
             .map(|runs| runs.into_iter().map(scheduled_run_json).collect())
+    }
+
+    pub fn claim_scheduled_host_runs(
+        &self,
+        supported_job_kinds: Vec<String>,
+        limit: Option<u32>,
+    ) -> CoreResult<Vec<serde_json::Value>> {
+        self.engine()?
+            .claim_scheduled_host_runs(supported_job_kinds, limit)
+            .map(|runs| runs.into_iter().map(scheduled_run_json).collect())
+    }
+
+    pub fn request_scheduled_host_job_run(
+        &self,
+        job_id: String,
+        supported_job_kinds: Vec<String>,
+    ) -> CoreResult<Option<serde_json::Value>> {
+        self.engine()?
+            .request_scheduled_host_job_run(&job_id, supported_job_kinds)
+            .map(|run| run.map(scheduled_run_json))
+    }
+
+    pub fn complete_scheduled_host_run(
+        &self,
+        run_id: rusty_crew_core_bridge_api::RunId,
+        status: String,
+        output_json: serde_json::Value,
+        error: Option<String>,
+    ) -> CoreResult<Unit> {
+        let status = scheduled_run_status_from_str(&status)?;
+        self.engine()?
+            .complete_scheduled_host_run(&run_id, status, output_json, error)?;
+        Ok(Unit)
     }
 
     pub fn run_scheduler_tick(&self) -> CoreResult<serde_json::Value> {
@@ -1460,6 +1506,31 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn register_scheduled_host_job_json(
+        &self,
+        job_id: String,
+        job_kind: String,
+        interval_ms: Option<f64>,
+        first_due_at: String,
+        payload_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let payload_json = serde_json::from_str(&payload_json)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        let job = bridge
+            .register_scheduled_host_job(
+                job_id,
+                job_kind,
+                interval_ms.map(|value| value as u64),
+                first_due_at,
+                payload_json,
+            )
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&job)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
     pub fn list_scheduled_jobs_json(
         &self,
         status: Option<String>,
@@ -1503,6 +1574,56 @@ impl NativeBridgeBinding {
             .map_err(to_napi_error)?;
         serde_json::to_string(&runs)
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn claim_scheduled_host_runs_json(
+        &self,
+        supported_job_kinds: Vec<String>,
+        limit: Option<f64>,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let runs = bridge
+            .claim_scheduled_host_runs(supported_job_kinds, limit.map(|value| value as u32))
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&runs)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn request_scheduled_host_job_run_json(
+        &self,
+        job_id: String,
+        supported_job_kinds: Vec<String>,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let run = bridge
+            .request_scheduled_host_job_run(job_id, supported_job_kinds)
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&run)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn complete_scheduled_host_run(
+        &self,
+        run_id: String,
+        status: String,
+        output_json: String,
+        error: Option<String>,
+    ) -> napi::Result<()> {
+        let bridge = self.bridge()?;
+        let output_json = serde_json::from_str(&output_json)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+        bridge
+            .complete_scheduled_host_run(
+                rusty_crew_core_bridge_api::RunId::new(run_id),
+                status,
+                output_json,
+                error,
+            )
+            .map_err(to_napi_error)?;
+        Ok(())
     }
 
     #[napi]

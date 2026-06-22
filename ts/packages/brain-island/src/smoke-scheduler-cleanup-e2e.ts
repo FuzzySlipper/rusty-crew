@@ -79,6 +79,43 @@ try {
   assert.equal(await native.diagnosticCountRows("scheduled_job_runs"), 1);
   await native.unsubscribeEvents(wakeSubscription);
 
+  const hostJob = await native.registerScheduledHostJob({
+    jobId: "diagnostics-snapshot",
+    jobKind: "runtime.diagnostics.snapshot",
+    firstDueAt: "2026-06-20T00:00:00Z",
+    payload: { schema_version: 1 },
+  });
+  assert.equal(hostJob.status, "active");
+  const hostTick = await native.runSchedulerTick();
+  assert.equal(hostTick.dueRunsClaimed, 0);
+  const hostRuns = await native.claimScheduledHostRuns({
+    supportedJobKinds: ["runtime.diagnostics.snapshot"],
+    limit: 2,
+  });
+  assert.equal(hostRuns.length, 1);
+  assert.equal(hostRuns[0]?.status, "claimed");
+  await native.completeScheduledHostRun({
+    runId: hostRuns[0]!.runId,
+    status: "completed",
+    output: { outcome: "completed", summary: "native host proof" },
+  });
+  const duplicateHostRuns = await native.claimScheduledHostRuns({
+    supportedJobKinds: ["runtime.diagnostics.snapshot"],
+    limit: 2,
+  });
+  assert.equal(duplicateHostRuns.length, 0);
+  const manualHostRun = await native.requestScheduledHostJobRun({
+    jobId: "diagnostics-snapshot",
+    supportedJobKinds: ["runtime.diagnostics.snapshot"],
+  });
+  assert.equal(manualHostRun?.status, "claimed");
+  await native.completeScheduledHostRun({
+    runId: manualHostRun!.runId,
+    status: "failed",
+    output: { outcome: "failed", summary: "manual host proof" },
+    error: "manual proof failure",
+  });
+
   const plannerSessionId = "cleanup-planner-session" as SessionId;
   const coderProfileId = "cleanup-coder-profile" as ProfileId;
   await native.createSession({
@@ -210,7 +247,12 @@ try {
   const postRestartTick = await native.runSchedulerTick();
   assert.equal(postRestartTick.dueRunsClaimed, 0);
   assert.equal(postRestartTick.wakesRequested, 0);
-  assert.equal(await native.diagnosticCountRows("scheduled_job_runs"), 1);
+  assert.equal(await native.diagnosticCountRows("scheduled_job_runs"), 3);
+  const postRestartHostRuns = await native.claimScheduledHostRuns({
+    supportedJobKinds: ["runtime.diagnostics.snapshot"],
+    limit: 2,
+  });
+  assert.equal(postRestartHostRuns.length, 0);
   const postRestartCleanup = await native.cleanupDelegatedResources();
   assert.deepEqual(postRestartCleanup.terminalArchived, []);
   assert.deepEqual(postRestartCleanup.orphanedArchived, []);
@@ -221,6 +263,8 @@ try {
       {
         scheduledJob: job.jobId,
         listedRuns: listedRuns.map((run) => run.status),
+        hostRuns: hostRuns.map((run) => run.status),
+        manualHostRun: manualHostRun?.status,
         tick,
         cleanupArchived: cleanup.runtime.terminalArchived,
         diagnostics: diagnostics.summary,

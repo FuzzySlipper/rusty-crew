@@ -105,6 +105,7 @@ export async function runRustyCrewCronCli(
             id: job.id,
             schedule: job.schedule,
             shape: job.shape,
+            jobKind: job.jobKind,
             targetSessionId: job.targetSessionId,
             deliveryChannelId: job.deliveryChannelId,
           })),

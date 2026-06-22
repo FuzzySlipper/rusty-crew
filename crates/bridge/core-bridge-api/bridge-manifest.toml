@@ -148,6 +148,15 @@ errors = "core_protocol::CoreError"
 summary = "Create or replace a Rust-owned scheduled wake job for an existing wakeable session."
 
 [[operation]]
+name = "register_scheduled_host_job"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(job_id: String, job_kind: String, interval_ms: Option<u64>, first_due_at: IsoTimestamp, payload_json: JsonValue)"
+output = "scheduled_job_summary"
+errors = "core_protocol::CoreError"
+summary = "Create or replace a Rust-owned scheduled host-executable job with a typed non-wake job kind."
+
+[[operation]]
 name = "list_scheduled_jobs"
 surface = "stable"
 direction = "ts_to_rust"
@@ -164,6 +173,33 @@ input = "(job_id: Option<String>, status: Option<scheduled_run_status>, trigger:
 output = "Vec<scheduled_run_summary>"
 errors = "core_protocol::CoreError"
 summary = "List scheduled job run history for admin diagnostics and operator tooling."
+
+[[operation]]
+name = "claim_scheduled_host_runs"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(supported_job_kinds: Vec<String>, limit: Option<u32>)"
+output = "Vec<scheduled_run_summary>"
+errors = "core_protocol::CoreError"
+summary = "Claim due host-executable scheduled runs for supported job kinds without executing them in Rust."
+
+[[operation]]
+name = "request_scheduled_host_job_run"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(job_id: String, supported_job_kinds: Vec<String>)"
+output = "Option<scheduled_run_summary>"
+errors = "core_protocol::CoreError"
+summary = "Request and claim a manual run for a supported host-executable scheduled job."
+
+[[operation]]
+name = "complete_scheduled_host_run"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(run_id: core_protocol::RunId, status: scheduled_run_status, output_json: JsonValue, error: Option<String>)"
+output = "core_protocol::Unit"
+errors = "core_protocol::CoreError"
+summary = "Complete, fail, skip, or cancel a claimed host-executable scheduled run with bounded output."
 
 [[operation]]
 name = "run_scheduler_tick"

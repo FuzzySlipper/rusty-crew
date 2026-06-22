@@ -825,6 +825,37 @@ export interface ScheduledRunListQuery {
   offset?: number;
 }
 
+export interface ScheduledHostJobRegistrationInput {
+  jobId: string;
+  jobKind: string;
+  intervalMs?: number;
+  firstDueAt: string;
+  payload?: unknown;
+}
+
+export interface ScheduledHostRunClaimQuery {
+  supportedJobKinds: string[];
+  limit?: number;
+}
+
+export interface ScheduledHostJobManualRunRequest {
+  jobId: string;
+  supportedJobKinds: string[];
+}
+
+export type ScheduledHostRunCompletionStatus =
+  | "completed"
+  | "skipped"
+  | "failed"
+  | "cancelled";
+
+export interface ScheduledHostRunCompletionInput {
+  runId: RunId;
+  status: ScheduledHostRunCompletionStatus;
+  output?: unknown;
+  error?: string;
+}
+
 export interface SchedulerTickReport {
   staleRunsExpired: number;
   dueRunsClaimed: number;
@@ -847,8 +878,12 @@ export const manifestOperationNames = [
   "enqueue_body_follow_up_message",
   "ensure_configured_session",
   "register_scheduled_wake_job",
+  "register_scheduled_host_job",
   "list_scheduled_jobs",
   "list_scheduled_runs",
+  "claim_scheduled_host_runs",
+  "request_scheduled_host_job_run",
+  "complete_scheduled_host_run",
   "run_scheduler_tick",
   "request_scheduled_job_run",
   "pause_scheduled_job",

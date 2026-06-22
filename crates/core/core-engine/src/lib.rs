@@ -488,6 +488,38 @@ impl CoreEngine {
         Ok(record)
     }
 
+    pub fn register_scheduled_host_job(
+        &self,
+        job_id: impl Into<String>,
+        job_kind: impl Into<String>,
+        interval_ms: Option<u64>,
+        first_due_at: IsoTimestamp,
+        payload_json: serde_json::Value,
+    ) -> CoreResult<ScheduledJobRecord> {
+        let job_kind = job_kind.into();
+        if job_kind.trim().is_empty() || job_kind == SCHEDULED_WAKE_JOB_KIND {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "scheduled host job requires a non-wake job kind",
+            ));
+        }
+        let now = self.now();
+        let record = ScheduledJobRecord {
+            job_id: job_id.into(),
+            job_kind,
+            target_session_id: None,
+            interval_ms,
+            next_due_at: Some(first_due_at),
+            payload_json,
+            status: ScheduledJobStatus::Active,
+            created_at: now.clone(),
+            updated_at: now,
+            paused_at: None,
+        };
+        self.store.upsert_scheduled_job(&record)?;
+        Ok(record)
+    }
+
     pub fn list_scheduled_jobs(
         &self,
         status: Option<ScheduledJobStatus>,
@@ -522,6 +554,94 @@ impl CoreEngine {
         })
     }
 
+    pub fn claim_scheduled_host_runs(
+        &self,
+        supported_job_kinds: Vec<String>,
+        limit: Option<u32>,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        let _guard = self.scheduler_tick_lock.lock().map_err(|_| {
+            CoreError::new(CoreErrorKind::InternalError, "scheduler tick lock poisoned")
+        })?;
+        let supported_job_kinds = normalized_supported_host_job_kinds(supported_job_kinds)?;
+        let now = self.now();
+        self.store.expire_stale_scheduled_runs(&now, &now)?;
+        let mut claimed = Vec::new();
+        let max_claims = limit.unwrap_or(10).clamp(1, 100);
+        for job_kind in supported_job_kinds {
+            if claimed.len() >= max_claims as usize {
+                break;
+            }
+            let remaining = max_claims.saturating_sub(claimed.len() as u32);
+            let due_jobs = self.store.query_scheduled_jobs(&ScheduledJobQuery {
+                status: Some(ScheduledJobStatus::Active),
+                job_kind: Some(job_kind),
+                due_at_or_before: Some(now.clone()),
+                page: Some(QueryPage {
+                    limit: Some(remaining),
+                    offset: None,
+                }),
+            })?;
+            for job in due_jobs {
+                claimed.push(self.claim_scheduled_run(
+                    &job,
+                    ScheduledRunTrigger::Due,
+                    job.next_due_at.clone(),
+                )?);
+            }
+        }
+        Ok(claimed)
+    }
+
+    pub fn request_scheduled_host_job_run(
+        &self,
+        job_id: &str,
+        supported_job_kinds: Vec<String>,
+    ) -> CoreResult<Option<ScheduledRunRecord>> {
+        let supported_job_kinds = normalized_supported_host_job_kinds(supported_job_kinds)?;
+        let Some(job) = self.store.load_scheduled_job(job_id)? else {
+            return Ok(None);
+        };
+        if job.status == ScheduledJobStatus::Archived {
+            return Ok(None);
+        }
+        if !supported_job_kinds.contains(&job.job_kind) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("scheduled job kind {} is not host-supported", job.job_kind),
+            ));
+        }
+        self.claim_scheduled_run(&job, ScheduledRunTrigger::Manual, None)
+            .map(Some)
+    }
+
+    pub fn complete_scheduled_host_run(
+        &self,
+        run_id: &RunId,
+        status: ScheduledRunStatus,
+        output_json: serde_json::Value,
+        error: Option<String>,
+    ) -> CoreResult<()> {
+        if !matches!(
+            status,
+            ScheduledRunStatus::Completed
+                | ScheduledRunStatus::Skipped
+                | ScheduledRunStatus::Failed
+                | ScheduledRunStatus::Cancelled
+        ) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "scheduled host run completion requires a terminal host status",
+            ));
+        }
+        self.store.complete_scheduled_run(
+            run_id,
+            status,
+            &self.now(),
+            &output_json,
+            error.as_deref(),
+        )
+    }
+
     pub fn pause_scheduled_job(&self, job_id: &str) -> CoreResult<()> {
         self.store.pause_scheduled_job(job_id, &self.now())
     }
@@ -553,9 +673,9 @@ impl CoreEngine {
         let stale_runs = self.store.expire_stale_scheduled_runs(&now, &now)?;
         let due_jobs = self.store.query_scheduled_jobs(&ScheduledJobQuery {
             status: Some(ScheduledJobStatus::Active),
+            job_kind: Some(SCHEDULED_WAKE_JOB_KIND.to_string()),
             due_at_or_before: Some(now.clone()),
             page: None,
-            ..ScheduledJobQuery::default()
         })?;
         let mut report = SchedulerTickReport {
             stale_runs_expired: stale_runs.len() as u32,
@@ -1531,6 +1651,29 @@ fn next_scheduled_run_id(job_id: &str) -> RunId {
         .map_or(0, |duration| duration.as_nanos());
     let sequence = NEXT_SCHEDULED_RUN.fetch_add(1, Ordering::Relaxed);
     RunId::new(format!("scheduled:{job_id}:{nanos}:{sequence}"))
+}
+
+fn normalized_supported_host_job_kinds(job_kinds: Vec<String>) -> CoreResult<Vec<String>> {
+    let mut normalized = Vec::new();
+    for job_kind in job_kinds {
+        let job_kind = job_kind.trim().to_string();
+        if job_kind.is_empty() || job_kind == SCHEDULED_WAKE_JOB_KIND {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "host scheduler claims require non-wake job kinds",
+            ));
+        }
+        if !normalized.contains(&job_kind) {
+            normalized.push(job_kind);
+        }
+    }
+    if normalized.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "host scheduler claims require at least one supported job kind",
+        ));
+    }
+    Ok(normalized)
 }
 
 fn next_queued_message_id(session_id: &SessionId) -> String {

@@ -22,6 +22,10 @@ import type {
   SessionId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  ScheduledHostJobManualRunRequest,
+  ScheduledHostJobRegistrationInput,
+  ScheduledHostRunClaimQuery,
+  ScheduledHostRunCompletionInput,
   ScheduledJobListQuery,
   ScheduledJobSummary,
   ScheduledRunListQuery,
@@ -113,6 +117,12 @@ export class CoreBridge {
     return this.native.registerScheduledWakeJob(input);
   }
 
+  async registerScheduledHostJob(
+    input: ScheduledHostJobRegistrationInput,
+  ): Promise<ScheduledJobSummary> {
+    return this.native.registerScheduledHostJob(input);
+  }
+
   async listScheduledJobs(
     query?: ScheduledJobListQuery,
   ): Promise<ScheduledJobSummary[]> {
@@ -123,6 +133,24 @@ export class CoreBridge {
     query?: ScheduledRunListQuery,
   ): Promise<ScheduledRunSummary[]> {
     return this.native.listScheduledRuns(query);
+  }
+
+  async claimScheduledHostRuns(
+    query: ScheduledHostRunClaimQuery,
+  ): Promise<ScheduledRunSummary[]> {
+    return this.native.claimScheduledHostRuns(query);
+  }
+
+  async requestScheduledHostJobRun(
+    input: ScheduledHostJobManualRunRequest,
+  ): Promise<ScheduledRunSummary | undefined> {
+    return this.native.requestScheduledHostJobRun(input);
+  }
+
+  async completeScheduledHostRun(
+    input: ScheduledHostRunCompletionInput,
+  ): Promise<Unit> {
+    return this.native.completeScheduledHostRun(input);
   }
 
   async runSchedulerTick(): Promise<SchedulerTickReport> {

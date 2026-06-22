@@ -249,6 +249,16 @@ export type { CronFieldRange, CronNextOptions } from "./cron-expression.js";
 export { parseCronArgs, runRustyCrewCronCli } from "./cron-cli.js";
 export type { CronCliCommand, CronCliOptions } from "./cron-cli.js";
 export {
+  executeScheduledHostRun,
+  RUNTIME_DIAGNOSTICS_SNAPSHOT_JOB_KIND,
+  runScheduledHostExecutors,
+  scheduledHostJobKinds,
+} from "./scheduled-host-executors.js";
+export type {
+  ScheduledHostExecutorContext,
+  ScheduledHostExecutorReport,
+} from "./scheduled-host-executors.js";
+export {
   gitDiffTool,
   gitStatusTool,
   readFileTool,
