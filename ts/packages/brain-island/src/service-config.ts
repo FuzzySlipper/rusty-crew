@@ -38,6 +38,14 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_DEN_MEMORY_PROPOSE_PATH?: string;
   RUSTY_CREW_MCP_BASE_URL?: string;
   RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS?: string;
+  RUSTY_CREW_TELEGRAM_ENABLED?: string;
+  RUSTY_CREW_TELEGRAM_BOT_TOKEN?: string;
+  RUSTY_CREW_TELEGRAM_API_BASE_URL?: string;
+  RUSTY_CREW_TELEGRAM_POLL_INTERVAL_MS?: string;
+  RUSTY_CREW_TELEGRAM_POLL_TIMEOUT_SECONDS?: string;
+  RUSTY_CREW_TELEGRAM_UPDATE_LIMIT?: string;
+  RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS?: string;
+  RUSTY_CREW_TELEGRAM_ADAPTER_ID?: string;
 }
 
 export interface RustyCrewServicePaths {
@@ -80,6 +88,17 @@ export interface RustyCrewMcpConfig {
   requestTimeoutMs: number;
 }
 
+export interface RustyCrewTelegramConfig {
+  enabled: boolean;
+  adapterId: string;
+  botToken?: string;
+  apiBaseUrl?: string;
+  pollIntervalMs: number;
+  pollTimeoutSeconds: number;
+  updateLimit: number;
+  messageTtlMs: number;
+}
+
 export interface RustyCrewServiceConfig {
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
@@ -87,6 +106,7 @@ export interface RustyCrewServiceConfig {
   denConversationProjectId: string;
   denMemory: RustyCrewDenMemoryConfig;
   mcp: RustyCrewMcpConfig;
+  telegram: RustyCrewTelegramConfig;
   denSuccessorGateway?: DenSuccessorGatewayConfig;
 }
 
@@ -172,6 +192,7 @@ export function loadRustyCrewServiceConfig(
     "rusty-crew";
   const denMemory = loadRustyCrewDenMemoryConfig(env);
   const mcp = loadRustyCrewMcpConfig(env);
+  const telegram = loadRustyCrewTelegramConfig(env);
 
   validateRustyCrewServiceConfig({
     paths,
@@ -180,6 +201,7 @@ export function loadRustyCrewServiceConfig(
     denConversationProjectId,
     denMemory,
     mcp,
+    telegram,
     denSuccessorGateway,
   });
   return {
@@ -189,6 +211,7 @@ export function loadRustyCrewServiceConfig(
     denConversationProjectId,
     denMemory,
     mcp,
+    telegram,
     denSuccessorGateway,
   };
 }
@@ -219,6 +242,7 @@ export function validateRustyCrewServiceConfig(
 
   validateDenMemoryConfig(config.denMemory);
   validateMcpConfig(config.mcp);
+  validateTelegramConfig(config.telegram);
 }
 
 export function ensureRustyCrewServiceDirectories(
@@ -457,6 +481,69 @@ function validateMcpConfig(config: RustyCrewMcpConfig): void {
     throw new Error("RUSTY_CREW_MCP_BASE_URL must be a valid HTTP(S) URL", {
       cause: error,
     });
+  }
+}
+
+function loadRustyCrewTelegramConfig(
+  env: RustyCrewServiceEnv,
+): RustyCrewTelegramConfig {
+  const botToken = normalizeOptional(env.RUSTY_CREW_TELEGRAM_BOT_TOKEN);
+  return {
+    enabled: parseBoolean(
+      env.RUSTY_CREW_TELEGRAM_ENABLED,
+      false,
+      "RUSTY_CREW_TELEGRAM_ENABLED",
+    ),
+    adapterId:
+      normalizeOptional(env.RUSTY_CREW_TELEGRAM_ADAPTER_ID) ?? "telegram-main",
+    botToken,
+    apiBaseUrl: normalizeOptional(env.RUSTY_CREW_TELEGRAM_API_BASE_URL),
+    pollIntervalMs: parsePositiveInteger(
+      env.RUSTY_CREW_TELEGRAM_POLL_INTERVAL_MS,
+      2_000,
+      "RUSTY_CREW_TELEGRAM_POLL_INTERVAL_MS",
+    ),
+    pollTimeoutSeconds: parseNonNegativeInteger(
+      env.RUSTY_CREW_TELEGRAM_POLL_TIMEOUT_SECONDS,
+      20,
+      "RUSTY_CREW_TELEGRAM_POLL_TIMEOUT_SECONDS",
+    ),
+    updateLimit: parsePositiveInteger(
+      env.RUSTY_CREW_TELEGRAM_UPDATE_LIMIT,
+      50,
+      "RUSTY_CREW_TELEGRAM_UPDATE_LIMIT",
+    ),
+    messageTtlMs: parsePositiveInteger(
+      env.RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS,
+      5 * 60 * 1_000,
+      "RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS",
+    ),
+  };
+}
+
+function validateTelegramConfig(config: RustyCrewTelegramConfig): void {
+  if (config.enabled && !config.botToken) {
+    throw new Error(
+      "RUSTY_CREW_TELEGRAM_BOT_TOKEN is required when RUSTY_CREW_TELEGRAM_ENABLED=true",
+    );
+  }
+  if (config.updateLimit > 100) {
+    throw new Error("RUSTY_CREW_TELEGRAM_UPDATE_LIMIT must be at most 100");
+  }
+  if (config.apiBaseUrl !== undefined) {
+    try {
+      const url = new URL(config.apiBaseUrl);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("protocol must be http or https");
+      }
+    } catch (error) {
+      throw new Error(
+        "RUSTY_CREW_TELEGRAM_API_BASE_URL must be a valid HTTP(S) URL",
+        {
+          cause: error,
+        },
+      );
+    }
   }
 }
 

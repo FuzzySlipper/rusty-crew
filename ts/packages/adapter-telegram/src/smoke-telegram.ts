@@ -9,10 +9,14 @@ import type {
 import {
   createTelegramAdapterRegistration,
   createTelegramChannelAdapter,
+  MemoryTelegramUpdateOffsetStore,
   normalizeTelegramUpdate,
+  TelegramChannelConnector,
   telegramBindingFromChat,
   toTelegramSendMessageRequest,
+  type TelegramGetUpdatesRequest,
   type TelegramSendMessageRequest,
+  type TelegramUpdate,
 } from "./index.js";
 
 const adapterId = "telegram-main" as AdapterId;
@@ -131,6 +135,145 @@ assert.equal(
 await adapter.sendOutbound(outbound);
 assert.deepEqual(sent, [request]);
 
+const connectorUpdates: TelegramUpdate[] = [
+  {
+    update_id: 10,
+    message: {
+      message_id: 70,
+      message_thread_id: 42,
+      date: 1_781_976_001,
+      chat: {
+        id: -100123,
+        type: "supergroup",
+        title: "Crew Room",
+      },
+      from: {
+        id: 1001,
+        first_name: "Ada",
+      },
+      text: "first live connector message",
+    },
+  },
+  {
+    update_id: 11,
+    message: {
+      message_id: 71,
+      date: 1_781_976_002,
+      chat: {
+        id: -999,
+        type: "supergroup",
+        title: "Unbound Room",
+      },
+      from: {
+        id: 1002,
+        first_name: "Grace",
+      },
+      text: "unbound should not route",
+    },
+  },
+  {
+    update_id: 12,
+    message: {
+      message_id: 72,
+      message_thread_id: 42,
+      date: 1_781_976_003,
+      chat: {
+        id: -100123,
+        type: "supergroup",
+        title: "Crew Room",
+      },
+      from: {
+        id: 1001,
+        first_name: "Ada",
+      },
+      text: "second live connector message",
+    },
+  },
+];
+
+const getUpdatesRequests: TelegramGetUpdatesRequest[] = [];
+const connectorSent: TelegramSendMessageRequest[] = [];
+const bot = {
+  getUpdates(request: TelegramGetUpdatesRequest = {}) {
+    getUpdatesRequests.push({ ...request });
+    const offset = request.offset ?? 0;
+    return connectorUpdates.filter((update) => update.update_id >= offset);
+  },
+  sendMessage(message: TelegramSendMessageRequest) {
+    connectorSent.push(message);
+    return { ok: true };
+  },
+};
+
+const routedBodies: string[] = [];
+const offsetStore = new MemoryTelegramUpdateOffsetStore();
+const connector = new TelegramChannelConnector({
+  adapterId,
+  bot,
+  offsetStore,
+  bindings: () => [binding],
+  ttlMs: 60_000,
+  pollTimeoutSeconds: 0,
+  ingest(message) {
+    routedBodies.push(message.body);
+    return { status: "routed" };
+  },
+});
+
+await connector.pollOnce();
+assert.deepEqual(routedBodies, [
+  "first live connector message",
+  "second live connector message",
+]);
+assert.equal(await offsetStore.read(), 13);
+assert.equal(connector.diagnostics().inbound.routed, 2);
+assert.equal(connector.diagnostics().inbound.unbound, 1);
+assert.equal(connector.diagnostics().lastUpdateId, 12);
+
+connectorUpdates.push({
+  update_id: 13,
+  message: {
+    message_id: 73,
+    message_thread_id: 42,
+    date: 1_781_976_004,
+    chat: {
+      id: -100123,
+      type: "supergroup",
+      title: "Crew Room",
+    },
+    from: {
+      id: 1001,
+      first_name: "Ada",
+    },
+    text: "post restart message",
+  },
+});
+
+const restartedConnector = new TelegramChannelConnector({
+  adapterId,
+  bot,
+  offsetStore,
+  bindings: () => [binding],
+  ttlMs: 60_000,
+  pollTimeoutSeconds: 0,
+  ingest(message) {
+    routedBodies.push(message.body);
+    return { status: "routed" };
+  },
+});
+await restartedConnector.pollOnce();
+assert.equal(getUpdatesRequests.at(-1)?.offset, 13);
+assert.deepEqual(routedBodies, [
+  "first live connector message",
+  "second live connector message",
+  "post restart message",
+]);
+assert.equal(await offsetStore.read(), 14);
+
+await restartedConnector.sendOutbound(outbound);
+assert.deepEqual(connectorSent, [request]);
+assert.equal(restartedConnector.diagnostics().outbound.sent, 1);
+
 console.log(
   JSON.stringify(
     {
@@ -139,6 +282,8 @@ console.log(
       mention: inbound.mentions[0],
       chatId: request.chat_id,
       sent: sent.length,
+      connectorRouted: routedBodies.length,
+      connectorOffset: await offsetStore.read(),
     },
     null,
     2,

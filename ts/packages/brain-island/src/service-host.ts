@@ -33,10 +33,20 @@ import {
 } from "@rusty-crew/adapter-mcp";
 import {
   createDenSuccessorGatewayClient,
+  dispatchChannelMessageProjection,
+  ingestChannelInboundMessage,
+  projectAgentMessageToChannel,
   type DenSuccessorAgentIdentity,
   type DenSuccessorDeliveryIntent,
   type DenSuccessorGatewayClient,
+  type ChannelBindingDiagnostics,
 } from "@rusty-crew/adapter-den";
+import {
+  createTelegramAdapterRegistration,
+  createTelegramBotApiHttpClient,
+  FileTelegramUpdateOffsetStore,
+  TelegramChannelConnector,
+} from "@rusty-crew/adapter-telegram";
 import {
   AgentActivityObservationProducer,
   type AgentActivityObservationEvent,
@@ -67,6 +77,7 @@ import {
 import {
   buildAdapterDiagnosticsProjection,
   type ChannelAdapterBindingDiagnostics,
+  type ChannelProjectionFailureRecord,
   type AdapterDiagnosticsProjection,
 } from "./adapter-diagnostics.js";
 import { buildBackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
@@ -150,6 +161,7 @@ import {
   effectiveWakeTimeoutMs,
   loadRustyCrewRuntimeConfig,
   registerConfiguredScheduledJobs,
+  ensureConfiguredSessionForChannelBinding,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
 } from "./service-runtime-config.js";
@@ -193,6 +205,8 @@ interface ServiceState {
   runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
   denGatewayClient?: DenSuccessorGatewayClient;
   denGatewayStartupReport?: DenSuccessorGatewayStartupReport;
+  telegramConnector?: TelegramChannelConnector;
+  telegramOutboundSubscription?: SubscriptionHandle;
   readonly curator: ServiceCuratorRuntime;
   readonly backgroundReview: ServiceBackgroundReviewRuntime;
   readonly denConversationChannelIdsByExternalId: Map<string, number>;
@@ -200,6 +214,7 @@ interface ServiceState {
     string,
     ChannelAdapterBindingDiagnostics
   >;
+  readonly channelProjectionFailures: ChannelProjectionFailureRecord[];
   profileChannelWakePolicies: Map<string, ChannelWakePolicy>;
   mcpManager: McpSurfaceManager;
   readonly wakeSubscription: SubscriptionHandle;
@@ -314,6 +329,7 @@ export async function startRustyCrewServiceHost(
           : createDenSuccessorGatewayClient(config.denSuccessorGateway),
       denConversationChannelIdsByExternalId: new Map(),
       dynamicDenChannelBindings: new Map(),
+      channelProjectionFailures: [],
       profileChannelWakePolicies,
       curator,
       backgroundReview: createServiceBackgroundReviewRuntime(runtimeConfig),
@@ -335,6 +351,7 @@ export async function startRustyCrewServiceHost(
     };
     state.denGatewayStartupReport = await connectDenSuccessorGateway(state);
     await ensureDenConversationChannels(state);
+    await startTelegramConnector(state);
     startServiceBackgroundLoops(state);
     server = createServer((request, response) => {
       void handleHttpRequest(request, state)
@@ -396,7 +413,10 @@ async function handleHttpRequest(
     );
   }
 
-  if (isChatRoute(url.pathname) && (request.method ?? "GET").toUpperCase() === "OPTIONS") {
+  if (
+    isChatRoute(url.pathname) &&
+    (request.method ?? "GET").toUpperCase() === "OPTIONS"
+  ) {
     return chatCorsPreflightResponse(request);
   }
 
@@ -900,6 +920,8 @@ function buildServiceAdapterDiagnostics(
     now,
     channelBindings: state.runtimeConfig.channelBindings,
     dynamicChannelBindings: [...state.dynamicDenChannelBindings.values()],
+    channelActivity: telegramChannelActivityDiagnostics(state, now),
+    channelProjectionFailures: state.channelProjectionFailures,
     channelWakePolicies: channelWakePoliciesByBinding(state),
     mcpBindings: state.runtimeConfig.mcpBindings,
     mcpSurfaces: state.mcpManager.diagnostics(),
@@ -1317,6 +1339,220 @@ function displayNameForConversationBinding(
   return `${binding.agentId} (${binding.externalChannelId})`;
 }
 
+async function startTelegramConnector(state: ServiceState): Promise<void> {
+  if (!state.config.telegram.enabled) return;
+  const token = state.config.telegram.botToken;
+  if (!token) return;
+  const adapterId = state.config.telegram.adapterId as never;
+  try {
+    await state.bridge.registerPlatformAdapter(
+      createTelegramAdapterRegistration(adapterId),
+    );
+  } catch (error) {
+    recordServiceEvent(state, {
+      source: "telegram",
+      eventType: "telegram_adapter_registration_degraded",
+      severity: "warning",
+      summary: errorMessage(error, "Telegram adapter registration failed"),
+    });
+  }
+
+  const connector = new TelegramChannelConnector({
+    adapterId,
+    bot: createTelegramBotApiHttpClient({
+      token,
+      baseUrl: state.config.telegram.apiBaseUrl,
+      timeoutMs:
+        Math.max(1, state.config.telegram.pollTimeoutSeconds) * 1_000 + 5_000,
+    }),
+    offsetStore: new FileTelegramUpdateOffsetStore(
+      join(
+        state.config.paths.dataDir,
+        "data",
+        "telegram",
+        `${state.config.telegram.adapterId}-offset.json`,
+      ),
+    ),
+    bindings: () =>
+      activeTelegramChannelBindings(
+        state.runtimeConfig.channelBindings,
+        state.config.telegram.adapterId,
+      ),
+    ttlMs: state.config.telegram.messageTtlMs,
+    pollIntervalMs: state.config.telegram.pollIntervalMs,
+    pollTimeoutSeconds: state.config.telegram.pollTimeoutSeconds,
+    updateLimit: state.config.telegram.updateLimit,
+    now: state.now,
+    ingest: async (message) =>
+      ingestChannelInboundMessage(message, {
+        bridge: {
+          injectExternalEvent: (event) =>
+            state.bridge.injectExternalEvent(event),
+          routeAgentMessage: (agentMessage) =>
+            state.bridge.routeAgentMessage(
+              agentMessage.from,
+              agentMessage.to,
+              agentMessage.body,
+              agentMessage.correlationId,
+            ),
+        },
+        bindings: state.runtimeConfig.channelBindings,
+        ensureSessionForRoute: ({ binding }) =>
+          ensureConfiguredSessionForChannelBinding({
+            bridge: state.bridge,
+            runtimeConfig: state.runtimeConfig,
+            binding,
+          }),
+        now: state.now(),
+      }),
+  });
+  const outboundSubscription = await state.bridge.subscribeEvents({
+    eventKinds: ["agent_message_routed"],
+  });
+  state.telegramConnector = connector;
+  state.telegramOutboundSubscription = outboundSubscription;
+  await connector.start();
+  recordServiceEvent(state, {
+    source: "telegram",
+    eventType: "telegram_connector_started",
+    summary: `Telegram connector started with ${connector.diagnostics().bindingCount} active binding(s).`,
+  });
+}
+
+async function restartTelegramConnector(state: ServiceState): Promise<void> {
+  await stopTelegramConnector(state);
+  await startTelegramConnector(state);
+}
+
+async function stopTelegramConnector(state: ServiceState): Promise<void> {
+  state.telegramConnector?.stop();
+  state.telegramConnector = undefined;
+  const subscription = state.telegramOutboundSubscription;
+  state.telegramOutboundSubscription = undefined;
+  if (subscription !== undefined) {
+    await state.bridge.unsubscribeEvents(subscription).catch(() => undefined);
+  }
+}
+
+function activeTelegramChannelBindings(
+  bindings: readonly ChannelBindingRecord[],
+  adapterId: string,
+): ChannelBindingRecord[] {
+  return bindings.filter(
+    (binding) =>
+      binding.status === "active" &&
+      binding.provider === "telegram" &&
+      binding.adapterId === adapterId,
+  );
+}
+
+async function drainTelegramOutboundMessages(
+  state: ServiceState,
+): Promise<void> {
+  const connector = state.telegramConnector;
+  const subscription = state.telegramOutboundSubscription;
+  if (state.stopping || connector === undefined || subscription === undefined) {
+    return;
+  }
+  const events = await state.bridge.drainSubscriptionEvents(subscription, 128);
+  for (const event of events) {
+    if (event.type !== "agent_message_routed") continue;
+    const projection = projectAgentMessageToChannel(
+      event.message,
+      activeTelegramChannelBindings(
+        state.runtimeConfig.channelBindings,
+        state.config.telegram.adapterId,
+      ),
+      { now: state.now() },
+    );
+    if (projection.status === "projected") {
+      const dispatch = await dispatchChannelMessageProjection(
+        {
+          sendMessage: (message) => connector.sendOutbound(message),
+          sendActivity: () => undefined,
+        },
+        projection.message,
+      );
+      if (!dispatch.accepted) {
+        recordChannelProjectionFailure(
+          state,
+          projection.binding.bindingId,
+          dispatch.kind,
+          dispatch.degradedReason,
+        );
+      }
+      continue;
+    }
+    if (projection.status !== "not_channel_target") {
+      recordChannelProjectionFailure(
+        state,
+        projection.candidates[0]?.bindingId ?? "telegram:unresolved",
+        "message",
+        projection.reason,
+      );
+    }
+  }
+}
+
+function recordChannelProjectionFailure(
+  state: ServiceState,
+  bindingId: string,
+  kind: ChannelProjectionFailureRecord["kind"],
+  degradedReason: string,
+): void {
+  state.channelProjectionFailures.push({
+    bindingId,
+    kind,
+    degradedReason,
+    observedAt: state.now(),
+  });
+  state.channelProjectionFailures.splice(
+    0,
+    Math.max(0, state.channelProjectionFailures.length - 100),
+  );
+  recordServiceEvent(state, {
+    source: "telegram",
+    eventType: "telegram_projection_degraded",
+    severity: "warning",
+    summary: `${bindingId}: ${degradedReason}`,
+  });
+}
+
+function telegramChannelActivityDiagnostics(
+  state: ServiceState,
+  now: string,
+): ChannelBindingDiagnostics[] {
+  const connector = state.telegramConnector;
+  const diagnostics = connector?.diagnostics();
+  return activeTelegramChannelBindings(
+    state.runtimeConfig.channelBindings,
+    state.config.telegram.adapterId,
+  ).map((binding) => ({
+    bindingId: binding.bindingId,
+    adapterId: binding.adapterId,
+    membershipStatus: "joined",
+    presenceStatus: connector === undefined ? "offline" : "online",
+    subscriptionStatus:
+      connector === undefined
+        ? "disconnected"
+        : diagnostics?.lastError
+          ? "degraded"
+          : "active",
+    degradedReason:
+      connector === undefined
+        ? state.config.telegram.enabled
+          ? "telegram connector is not running"
+          : "telegram connector is disabled"
+        : diagnostics?.lastError,
+    stale:
+      connector === undefined ||
+      (diagnostics?.lastPollAt === undefined
+        ? false
+        : Date.parse(now) - Date.parse(diagnostics.lastPollAt) >
+          Math.max(30_000, state.config.telegram.pollIntervalMs * 5)),
+  }));
+}
+
 async function reloadServiceRuntimeConfig(
   state: ServiceState,
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
@@ -1344,6 +1580,7 @@ async function reloadServiceRuntimeConfig(
   state.mcpManager = nextMcpManager;
   await previousMcpManager.shutdown();
   await ensureDenConversationChannels(state);
+  await restartTelegramConnector(state);
   recordServiceEvent(state, {
     source: "service-host",
     eventType: "runtime_config_reloaded",
@@ -1519,7 +1756,10 @@ function createServiceControlExecutor(
     newSession: createNewSessionLifecycleExecutor({
       loadTemplate: async (currentSessionId) => {
         const session = await serviceSessionById(state, currentSessionId);
-        const channelBinding = channelBindingForSession(state, currentSessionId);
+        const channelBinding = channelBindingForSession(
+          state,
+          currentSessionId,
+        );
         return {
           agentId: session.agentId,
           profileId: session.profileId,
@@ -1540,7 +1780,10 @@ function createServiceControlExecutor(
         return [
           template.agentId,
           "session",
-          state.now().replace(/[^0-9A-Za-z]/g, "").slice(0, 17),
+          state
+            .now()
+            .replace(/[^0-9A-Za-z]/g, "")
+            .slice(0, 17),
           state.nextWakeSequence,
         ].join("-");
       },
@@ -1919,6 +2162,23 @@ function startServiceBackgroundLoops(state: ServiceState): void {
     }, state.config.background.denDeliveryPollIntervalMs);
     state.timers.add(timer);
   }
+
+  if (state.telegramConnector !== undefined) {
+    const timer = setInterval(
+      () => {
+        void drainTelegramOutboundMessages(state).catch((error) =>
+          recordServiceEvent(state, {
+            source: "telegram",
+            eventType: "telegram_outbound_drain_failed",
+            severity: "error",
+            summary: errorMessage(error, "Telegram outbound drain failed"),
+          }),
+        );
+      },
+      Math.max(250, state.config.telegram.pollIntervalMs),
+    );
+    state.timers.add(timer);
+  }
 }
 
 async function heartbeatDenRuntimeInstances(
@@ -2183,7 +2443,8 @@ async function submitRustyViewChatMessage(
     message_id: messageId,
     wake_id: wakeReport.wakeId,
     correlation_id: correlationId,
-    latest_cursor: latestChatCursor(state, input.session.sessionId) ?? inbound.event_id,
+    latest_cursor:
+      latestChatCursor(state, input.session.sessionId) ?? inbound.event_id,
     reason_code: wakeReport.reasonCode,
   };
   rememberChatMessageReceipt(state, receiptKey, result);
@@ -2218,7 +2479,8 @@ async function executeRustyViewChatCommand(
     return completeChatCommand(state, input.session.sessionId, {
       status: "rejected",
       command_name: "unknown",
-      summary: "Only slash commands can be executed through the chat command API.",
+      summary:
+        "Only slash commands can be executed through the chat command API.",
       latest_cursor: started.event_id,
       reason_code: "not_a_slash_command",
     });
@@ -3152,18 +3414,23 @@ async function dispatchWake(
       }),
     );
     const observed = await withWakeTimeout(
-      observeWakeEvents(state, sessionId, async () => {
-        const request = await state.bridge.buildBrainWakeRequestForSession({
-          brain,
-          sessionId,
-          systemPrompt: role.systemPrompt,
-          roleAssemblyJson: new TextEncoder().encode(
-            JSON.stringify(role.roleAssembly),
-          ),
-          wakeId,
-        });
-        return state.bridge.wakeBrain(request);
-      }, (events) => appendCoreEventsToChatLog(state, session, events)),
+      observeWakeEvents(
+        state,
+        sessionId,
+        async () => {
+          const request = await state.bridge.buildBrainWakeRequestForSession({
+            brain,
+            sessionId,
+            systemPrompt: role.systemPrompt,
+            roleAssemblyJson: new TextEncoder().encode(
+              JSON.stringify(role.roleAssembly),
+            ),
+            wakeId,
+          });
+          return state.bridge.wakeBrain(request);
+        },
+        (events) => appendCoreEventsToChatLog(state, session, events),
+      ),
       {
         wakeId,
         sessionId,
@@ -3519,6 +3786,7 @@ async function stopService(
   state.timers.clear();
   if (server) await closeServer(server);
   try {
+    await stopTelegramConnector(state);
     await state.bridge
       .unsubscribeEvents(state.wakeSubscription)
       .catch(() => undefined);
@@ -3579,7 +3847,9 @@ function isChatRoute(pathname: string): boolean {
   return pathname === "/v1/chat" || pathname.startsWith("/v1/chat/");
 }
 
-function chatCorsPreflightResponse(request: IncomingMessage): ServiceRouteResult {
+function chatCorsPreflightResponse(
+  request: IncomingMessage,
+): ServiceRouteResult {
   return {
     status: 204,
     headers: chatCorsHeaders(request),
@@ -4309,7 +4579,9 @@ function compactRecord(
   value: Record<string, unknown>,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== null && entry !== undefined),
+    Object.entries(value).filter(
+      ([, entry]) => entry !== null && entry !== undefined,
+    ),
   );
 }
 

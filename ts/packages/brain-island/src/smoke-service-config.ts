@@ -29,6 +29,12 @@ assert.equal(defaultConfig.denMemory.apiMode, "v1");
 assert.equal(defaultConfig.denMemory.timeoutMs, 5_000);
 assert.equal(defaultConfig.mcp.baseUrl, undefined);
 assert.equal(defaultConfig.mcp.requestTimeoutMs, 30_000);
+assert.equal(defaultConfig.telegram.enabled, false);
+assert.equal(defaultConfig.telegram.adapterId, "telegram-main");
+assert.equal(defaultConfig.telegram.pollIntervalMs, 2_000);
+assert.equal(defaultConfig.telegram.pollTimeoutSeconds, 20);
+assert.equal(defaultConfig.telegram.updateLimit, 50);
+assert.equal(defaultConfig.telegram.messageTtlMs, 300_000);
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
@@ -45,6 +51,14 @@ try {
     RUSTY_CREW_DEN_MEMORY_RECALL_PATH: "/memory/recall",
     RUSTY_CREW_MCP_BASE_URL: "http://127.0.0.1:5199/mcp",
     RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS: "12000",
+    RUSTY_CREW_TELEGRAM_ENABLED: "true",
+    RUSTY_CREW_TELEGRAM_BOT_TOKEN: "telegram-token",
+    RUSTY_CREW_TELEGRAM_API_BASE_URL: "http://127.0.0.1:19998",
+    RUSTY_CREW_TELEGRAM_POLL_INTERVAL_MS: "3000",
+    RUSTY_CREW_TELEGRAM_POLL_TIMEOUT_SECONDS: "0",
+    RUSTY_CREW_TELEGRAM_UPDATE_LIMIT: "10",
+    RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS: "60000",
+    RUSTY_CREW_TELEGRAM_ADAPTER_ID: "telegram-field",
   });
 
   assert.equal(config.paths.configDir, join(root, "config"));
@@ -68,6 +82,14 @@ try {
   assert.equal(config.denMemory.paths.recall, "/memory/recall");
   assert.equal(config.mcp.baseUrl, "http://127.0.0.1:5199/mcp");
   assert.equal(config.mcp.requestTimeoutMs, 12_000);
+  assert.equal(config.telegram.enabled, true);
+  assert.equal(config.telegram.botToken, "telegram-token");
+  assert.equal(config.telegram.apiBaseUrl, "http://127.0.0.1:19998");
+  assert.equal(config.telegram.pollIntervalMs, 3_000);
+  assert.equal(config.telegram.pollTimeoutSeconds, 0);
+  assert.equal(config.telegram.updateLimit, 10);
+  assert.equal(config.telegram.messageTtlMs, 60_000);
+  assert.equal(config.telegram.adapterId, "telegram-field");
 
   const noAuth = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
@@ -168,6 +190,36 @@ try {
         RUSTY_CREW_MCP_BASE_URL: "config://mcp/runner",
       }),
     /MCP_BASE_URL/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_TELEGRAM_ENABLED: "true",
+      }),
+    /TELEGRAM_BOT_TOKEN/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_TELEGRAM_API_BASE_URL: "file:///tmp/bot",
+      }),
+    /TELEGRAM_API_BASE_URL/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_TELEGRAM_UPDATE_LIMIT: "101",
+      }),
+    /TELEGRAM_UPDATE_LIMIT/,
   );
 } finally {
   rmSync(root, { recursive: true, force: true });

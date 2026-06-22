@@ -9,7 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "smoke": "tsx src/smoke-telegram.ts"
+    "smoke": "tsx src/smoke-telegram.ts",
+    "smoke:live": "tsx src/smoke-telegram-live.ts"
   },
   "dependencies": {
     "@rusty-crew/contracts": "0.1.0"

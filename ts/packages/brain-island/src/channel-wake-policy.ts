@@ -66,12 +66,11 @@ export function deliveryIntentWakeDecision(input: {
   }
 }
 
-function deliveryIntentExpired(expiresAtValue: string, nowValue: string): boolean {
+function deliveryIntentExpired(
+  expiresAtValue: string,
+  nowValue: string,
+): boolean {
   const expiresAt = Date.parse(expiresAtValue);
   const now = Date.parse(nowValue);
-  return (
-    Number.isFinite(expiresAt) &&
-    Number.isFinite(now) &&
-    expiresAt <= now
-  );
+  return Number.isFinite(expiresAt) && Number.isFinite(now) && expiresAt <= now;
 }

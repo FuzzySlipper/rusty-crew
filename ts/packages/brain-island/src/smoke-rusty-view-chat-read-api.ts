@@ -16,7 +16,10 @@ const mcpServer = await startMcpServer(mcpPort);
 let host = await startHost();
 
 try {
-  const preflight = await options("/v1/chat/sessions", "http://rusty-view.local");
+  const preflight = await options(
+    "/v1/chat/sessions",
+    "http://rusty-view.local",
+  );
   assert.equal(preflight.status, 204);
   assert.equal(
     preflight.headers.get("access-control-allow-origin"),
@@ -100,7 +103,11 @@ try {
   assert.ok(
     streamResponse.headers.get("content-type")?.includes("text/event-stream"),
   );
-  const streamedEventsPromise = collectSseEvents(streamResponse, 5, streamAbort);
+  const streamedEventsPromise = collectSseEvents(
+    streamResponse,
+    5,
+    streamAbort,
+  );
 
   const sent = await post(
     "/v1/chat/sessions/chat-session/messages",
@@ -181,7 +188,9 @@ try {
   const registry = await get("/v1/chat/commands", token);
   assert.equal(registry.status, 200);
   assert.deepEqual(
-    registry.body.data.commands.map((command: { name: string }) => command.name),
+    registry.body.data.commands.map(
+      (command: { name: string }) => command.name,
+    ),
     ["help", "status", "session", "new", "reload-mcp"],
   );
 
@@ -350,7 +359,9 @@ async function getSseOnce(path: string, bearer: string): Promise<SseEvent[]> {
     headers: { authorization: `Bearer ${bearer}` },
   });
   assert.equal(response.status, 200);
-  assert.ok(response.headers.get("content-type")?.includes("text/event-stream"));
+  assert.ok(
+    response.headers.get("content-type")?.includes("text/event-stream"),
+  );
   const text = await response.text();
   return parseSseEvents(text);
 }
@@ -371,7 +382,10 @@ async function collectSseEvents(
       const read = await Promise.race([
         reader.read(),
         new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined }), remaining),
+          setTimeout(
+            () => resolve({ done: true, value: undefined }),
+            remaining,
+          ),
         ),
       ]);
       if (read.done) break;

@@ -692,7 +692,10 @@ function parseOptionalActor(
   const record = value as Record<string, unknown>;
   const id = stringValue(record.id);
   const kind = stringValue(record.kind);
-  if (id === undefined || (kind !== "human" && kind !== "agent" && kind !== "system")) {
+  if (
+    id === undefined ||
+    (kind !== "human" && kind !== "agent" && kind !== "system")
+  ) {
     return {
       ok: false,
       reasonCode: "invalid_chat_actor",
@@ -713,8 +716,18 @@ function chatCommandRegistry(): ChatCommandRegistry {
   return {
     commands: [
       descriptor("help", "Show available slash commands.", true, false),
-      descriptor("status", "Show runtime status for this service.", true, false),
-      descriptor("session", "Show details for the current session.", true, false),
+      descriptor(
+        "status",
+        "Show runtime status for this service.",
+        true,
+        false,
+      ),
+      descriptor(
+        "session",
+        "Show details for the current session.",
+        true,
+        false,
+      ),
       descriptor(
         "new",
         "Archive the current session and create a fresh replacement session.",
@@ -745,7 +758,9 @@ function descriptor(
     read_only: readOnly,
     mutating,
     scope: "session",
-    allowed_session_kinds: mutating ? ["full"] : ["full", "worker", "delegated"],
+    allowed_session_kinds: mutating
+      ? ["full"]
+      : ["full", "worker", "delegated"],
     requires_control_auth: mutating,
   };
 }

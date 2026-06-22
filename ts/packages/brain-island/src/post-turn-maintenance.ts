@@ -38,7 +38,8 @@ export function postTurnMaintenanceDecision(
     return {
       action: "noop",
       reasonCode: "completion_unavailable",
-      summary: "post-turn maintenance skipped because no completion summary was available",
+      summary:
+        "post-turn maintenance skipped because no completion summary was available",
     };
   }
 

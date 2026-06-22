@@ -371,10 +371,9 @@ export async function applyRustyCrewRuntimeConfig(input: {
       result.sessionsMissing += 1;
       continue;
     }
-    const ensured =
-      await input.bridge.ensureConfiguredSession(
-        nativeSessionConfig(configuredSession),
-      );
+    const ensured = await input.bridge.ensureConfiguredSession(
+      nativeSessionConfig(configuredSession),
+    );
     if (!existing) {
       result.sessionsCreated += 1;
     } else if (
@@ -472,7 +471,8 @@ export function effectiveSessionDefaults(
     ownerId: session.ownerId ?? profile.sessionDefaults?.ownerId,
     maxHistoryMessages:
       session.maxHistoryMessages ?? profile.sessionDefaults?.maxHistoryMessages,
-    turnTimeoutMs: session.turnTimeoutMs ?? profile.sessionDefaults?.turnTimeoutMs,
+    turnTimeoutMs:
+      session.turnTimeoutMs ?? profile.sessionDefaults?.turnTimeoutMs,
   });
 }
 

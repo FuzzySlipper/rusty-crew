@@ -42,9 +42,7 @@ const profileContext = {
     catalogId: "session-defaults-smoke",
     inventory: {
       selectedTools: [],
-      selectedDescriptors: [
-        { name: "read_file", description: "Read a file." },
-      ],
+      selectedDescriptors: [{ name: "read_file", description: "Read a file." }],
       items: [],
     },
     toolProfile: {
@@ -82,10 +80,7 @@ assert.deepEqual(effectiveSessionDefaults(explicit, profile), {
   maxHistoryMessages: 25,
   turnTimeoutMs: 45_000,
 });
-assert.equal(
-  effectiveWakeTimeoutMs({ session: explicit, profile }),
-  45_000,
-);
+assert.equal(effectiveWakeTimeoutMs({ session: explicit, profile }), 45_000);
 assert.equal(effectiveWakeTimeoutMs({ profile }), 180_000);
 
 const diagnostics = buildRuntimeDiagnosticsProjection({

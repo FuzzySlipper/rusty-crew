@@ -73,6 +73,7 @@
     "smoke:slash-command-responses": "tsx src/smoke-slash-command-responses.ts",
     "smoke:adapter-diagnostics": "tsx src/smoke-adapter-diagnostics.ts",
     "smoke:den-channels-e2e": "tsx src/smoke-den-channels-e2e.ts",
+    "smoke:telegram-service-connector": "tsx src/smoke-telegram-service-connector.ts",
     "smoke:den-successor-service": "tsx src/smoke-den-successor-service.ts",
     "smoke:den-assignment-evidence-e2e": "tsx src/smoke-den-assignment-evidence-e2e.ts",
     "smoke:mcp-tool-registry": "tsx src/smoke-mcp-tool-registry.ts",
@@ -108,6 +109,7 @@
     "@earendil-works/pi-ai": "0.79.8",
     "@rusty-crew/adapter-den": "0.1.0",
     "@rusty-crew/adapter-mcp": "0.1.0",
+    "@rusty-crew/adapter-telegram": "0.1.0",
     "@rusty-crew/native-bridge": "0.1.0",
     "@rusty-crew/contracts": "0.1.0"
   },

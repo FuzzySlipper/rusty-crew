@@ -305,15 +305,14 @@ try {
         .filter((request) => request.sessionId === "fake-mcp-session")
         .filter(
           (request) =>
-            request.method === "tools/list" ||
-            request.method === "tools/call",
+            request.method === "tools/list" || request.method === "tools/call",
         )
         .map((request) => ({
-        method: request.method,
-        toolProfile: request.toolProfile,
-        toolName: request.toolName,
-        arguments: request.arguments,
-      })),
+          method: request.method,
+          toolProfile: request.toolProfile,
+          toolName: request.toolName,
+          arguments: request.arguments,
+        })),
       [
         {
           method: "tools/list",
@@ -334,8 +333,7 @@ try {
         .filter((request) => request.sessionId === "fake-mcp-session")
         .filter(
           (request) =>
-            request.method === "tools/list" ||
-            request.method === "tools/call",
+            request.method === "tools/list" || request.method === "tools/call",
         )
         .map((request) => request.url),
       [
