@@ -69,6 +69,7 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
       bindings: [
         {
           bindingId: "channel-debug",
+          bindingSource: "configured",
           adapterId: "den",
           agentId: session.agentId,
           sessionId: session.sessionId,

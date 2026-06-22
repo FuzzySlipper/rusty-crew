@@ -78,6 +78,7 @@ export interface RuntimeDiagnosticsInput {
   now: string;
   runtimeSummary?: RuntimeCounterSummary;
   sessions?: readonly SessionState[];
+  sessionDefaults?: ReadonlyMap<SessionId, RuntimeSessionEffectiveDefaults>;
   delegatedSessions?: readonly DelegatedSessionRuntimeStatus[];
   queues?: QueueDiagnosticsInput;
   persistence?: PersistenceDiagnosticsInput;
@@ -136,6 +137,14 @@ export interface RuntimeSessionDiagnostics {
   brainTurnCount: number;
   lastActiveAt: string;
   stale: boolean;
+  effectiveDefaults?: RuntimeSessionEffectiveDefaults;
+}
+
+export interface RuntimeSessionEffectiveDefaults {
+  ownerId?: string;
+  maxHistoryMessages?: number;
+  turnTimeoutMs?: number;
+  wakeTimeoutMs?: number;
 }
 
 export interface RuntimeDelegationDiagnostics {
@@ -173,7 +182,12 @@ export function buildRuntimeDiagnosticsProjection(
 ): RuntimeDiagnosticsProjection {
   const staleSessionMs = input.staleSessionMs ?? 15 * 60 * 1000;
   const sessions = (input.sessions ?? []).map((session) =>
-    sessionDiagnostics(session, input.now, staleSessionMs),
+    sessionDiagnostics(
+      session,
+      input.now,
+      staleSessionMs,
+      input.sessionDefaults?.get(session.sessionId),
+    ),
   );
   const delegatedSessions = (input.delegatedSessions ?? []).map(
     delegationDiagnostics,
@@ -242,6 +256,7 @@ function sessionDiagnostics(
   session: SessionState,
   now: string,
   staleSessionMs: number,
+  effectiveDefaults: RuntimeSessionEffectiveDefaults | undefined,
 ): RuntimeSessionDiagnostics {
   const ageMs = Date.parse(now) - Date.parse(session.lastActiveAt);
   return {
@@ -257,6 +272,7 @@ function sessionDiagnostics(
       session.status !== "archived" &&
       Number.isFinite(ageMs) &&
       ageMs > staleSessionMs,
+    effectiveDefaults,
   };
 }
 

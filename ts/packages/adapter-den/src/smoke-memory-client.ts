@@ -196,6 +196,11 @@ const v0Recall = await v0Client.recall({
 });
 assert.equal(v0Recall.memories[0]?.id, "recall-v0-1");
 assert.equal(v0Recall.total, 1);
+assert.equal(
+  (v0Recall.memories[0]?.metadata as { rootMatchCount?: number })
+    .rootMatchCount,
+  1,
+);
 const v0RecallCall = calls.find((call) => call.url.endsWith("/api/recall"));
 assert.equal(v0RecallCall?.body["query"], "v0 recall works");
 assert.equal(

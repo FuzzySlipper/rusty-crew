@@ -353,7 +353,7 @@ function resultDetails(
     result,
   } satisfies DenMemoryToolDetails;
   return {
-    content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
+    content: [{ type: "text", text: memoryToolResultText(details) }],
     details,
   };
 }
@@ -373,7 +373,7 @@ function deniedResult(
     retryable,
   } satisfies DenMemoryToolDetails;
   return {
-    content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
+    content: [{ type: "text", text: memoryToolResultText(details) }],
     details,
   };
 }
@@ -400,7 +400,20 @@ function errorResult(
     },
   } satisfies DenMemoryToolDetails;
   return {
-    content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
+    content: [{ type: "text", text: memoryToolResultText(details) }],
     details,
   };
+}
+
+function memoryToolResultText(details: DenMemoryToolDetails): string {
+  const status = details.ok ? "ok=true" : "ok=false";
+  const reason = details.reasonCode ? ` reason=${details.reasonCode}` : "";
+  const interpretation = details.ok
+    ? "The tool call completed successfully; answer tool-status questions with ok=true even if the result contains zero matching memories."
+    : "The tool call did not complete successfully; answer tool-status questions with ok=false.";
+  return [
+    `DEN_MEMORY_TOOL_RESULT ${status} operation=${details.operation} action=${details.action}${reason}`,
+    interpretation,
+    JSON.stringify(details, null, 2),
+  ].join("\n");
 }

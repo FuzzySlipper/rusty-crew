@@ -86,6 +86,29 @@ await mcpManager.connect(mcpBindings[1]!);
 const diagnostics = buildAdapterDiagnosticsProjection({
   now: "2026-06-20T11:10:15.000Z",
   channelBindings,
+  dynamicChannelBindings: [
+    {
+      bindingId: "gateway-delivery-session-alpha-42",
+      bindingSource: "gateway_delivery",
+      adapterId: "den-successor-gateway",
+      provider: "den_successor_gateway",
+      agentId: "agent-alpha",
+      sessionId: "session-alpha",
+      profileId: "prime",
+      externalChannelId: "conversation:42",
+      conversationChannelId: 42,
+      sourceMessageId: 7,
+      deliveryIntentId: 91,
+      lastObservedAt: "2026-06-20T11:10:14.000Z",
+      wakePolicy: "subscription",
+      status: "active",
+      membershipStatus: "dynamic",
+      presenceStatus: "delivery_intent",
+      subscriptionStatus: "active",
+      stalePresence: false,
+      droppedProjections: 0,
+    },
+  ],
   channelActivity: activity.diagnostics("2026-06-20T11:10:15.000Z"),
   channelProjectionFailures: projectionFailures,
   mcpBindings,
@@ -117,10 +140,34 @@ const diagnostics = buildAdapterDiagnosticsProjection({
 });
 
 assert.equal(diagnostics.degraded, true);
-assert.equal(diagnostics.channels.totalBindings, 2);
-assert.equal(diagnostics.channels.activeBindings, 1);
+assert.equal(diagnostics.channels.totalBindings, 3);
+assert.equal(diagnostics.channels.activeBindings, 2);
 assert.equal(diagnostics.channels.degradedBindings, 1);
 assert.equal(diagnostics.channels.droppedProjections, 1);
+assert.equal(
+  diagnostics.channels.bindings.find(
+    (item) => item.bindingId === "binding-alpha",
+  )?.bindingSource,
+  "configured",
+);
+assert.equal(
+  diagnostics.channels.bindings.find(
+    (item) => item.bindingId === "gateway-delivery-session-alpha-42",
+  )?.bindingSource,
+  "gateway_delivery",
+);
+assert.equal(
+  diagnostics.channels.bindings.find(
+    (item) => item.bindingId === "gateway-delivery-session-alpha-42",
+  )?.conversationChannelId,
+  42,
+);
+assert.equal(
+  diagnostics.channels.bindings.find(
+    (item) => item.bindingId === "gateway-delivery-session-alpha-42",
+  )?.wakePolicy,
+  "subscription",
+);
 assert.equal(
   diagnostics.channels.bindings.find(
     (item) => item.bindingId === "binding-alpha",

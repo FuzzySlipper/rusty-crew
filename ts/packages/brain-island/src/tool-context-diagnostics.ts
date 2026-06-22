@@ -900,10 +900,10 @@ function profileConfigIssues(
 
   const declarativeNotes = [
     profile.sessionDefaults
-      ? "sessionDefaults are preserved for diagnostics; service sessions still come from runtime config"
+      ? "sessionDefaults are applied as effective service defaults for configured sessions; maxHistoryMessages still requires a core prompt-history window"
       : undefined,
     profile.channelDefaults?.wakePolicy
-      ? "channelDefaults.wakePolicy is declarative; a runtime channel binding is still required"
+      ? `channelDefaults.wakePolicy=${profile.channelDefaults.wakePolicy} is enforced for Gateway delivery intents`
       : undefined,
     profile.runtime?.maxTokensPerTurn
       ? `runtimeConfig.maxTokensPerTurn caps model output tokens at ${Math.min(
@@ -912,7 +912,7 @@ function profileConfigIssues(
         )}`
       : undefined,
     profile.runtime?.maxTurnDurationMs
-      ? "runtimeConfig.maxTurnDurationMs is preserved for diagnostics but is not yet enforced as a per-turn timeout"
+      ? `runtimeConfig.maxTurnDurationMs enforces a host-side wake timeout at ${profile.runtime.maxTurnDurationMs}ms`
       : undefined,
   ].filter((note): note is string => Boolean(note));
   for (const note of declarativeNotes) {

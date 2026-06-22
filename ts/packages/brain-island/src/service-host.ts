@@ -38,6 +38,12 @@ import {
   type AgentActivityWorkRef,
 } from "./agent-activity-observation.js";
 import {
+  deliveryIntentWakeDecision,
+  normalizeChannelWakePolicy,
+  type ChannelWakePolicy,
+  type DeliveryIntentWakeDecision,
+} from "./channel-wake-policy.js";
+import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
   type AdminControlExecutor,
@@ -50,6 +56,7 @@ import {
 } from "./admin-diagnostics-api.js";
 import {
   buildAdapterDiagnosticsProjection,
+  type ChannelAdapterBindingDiagnostics,
   type AdapterDiagnosticsProjection,
 } from "./adapter-diagnostics.js";
 import { buildBackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
@@ -64,9 +71,12 @@ import {
   type DirectDebugResult,
   type DirectDebugServiceContext,
 } from "./direct-debug-service.js";
-import { loadProfileContext } from "./profile-loading.js";
+import { loadProfileConfig, loadProfileContext } from "./profile-loading.js";
 import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
-import { buildRuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
+import {
+  buildRuntimeDiagnosticsProjection,
+  type RuntimeSessionEffectiveDefaults,
+} from "./runtime-diagnostics.js";
 import type { RuntimeHealthProjection } from "./runtime-health.js";
 import {
   announceConfiguredSessionsToDenGateway,
@@ -82,6 +92,7 @@ import {
   discoverCuratorCandidates,
   type CuratorCandidateBatch,
 } from "./curator-candidates.js";
+import { postTurnMaintenanceDecision } from "./post-turn-maintenance.js";
 import {
   runCuratorLifecycleTransitions,
   type CuratorLifecycleReport,
@@ -111,6 +122,8 @@ import {
 } from "./service-config.js";
 import {
   applyRustyCrewRuntimeConfig,
+  effectiveSessionDefaults,
+  effectiveWakeTimeoutMs,
   loadRustyCrewRuntimeConfig,
   registerConfiguredScheduledJobs,
   type RustyCrewRuntimeConfig,
@@ -124,6 +137,11 @@ import {
 } from "./scheduled-host-executors.js";
 import { buildToolRegistryDiagnostics } from "./tool-registry-diagnostics.js";
 import { buildToolContextDiagnosticsReport } from "./tool-context-diagnostics.js";
+import {
+  effectiveTurnTimeoutMs,
+  WakeDispatchTimeoutError,
+  withWakeTimeout,
+} from "./wake-timeout.js";
 
 export interface RustyCrewServiceHostOptions {
   env?: RustyCrewServiceEnv;
@@ -154,6 +172,11 @@ interface ServiceState {
   readonly curator: ServiceCuratorRuntime;
   readonly backgroundReview: ServiceBackgroundReviewRuntime;
   readonly denConversationChannelIdsByExternalId: Map<string, number>;
+  readonly dynamicDenChannelBindings: Map<
+    string,
+    ChannelAdapterBindingDiagnostics
+  >;
+  profileChannelWakePolicies: Map<string, ChannelWakePolicy>;
   mcpManager: McpSurfaceManager;
   readonly wakeSubscription: SubscriptionHandle;
   readonly timers: Set<NodeJS.Timeout>;
@@ -223,6 +246,8 @@ export async function startRustyCrewServiceHost(
       defaultIdleTimeoutMs: 30_000,
     });
     const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
+    const profileChannelWakePolicies =
+      await loadProfileChannelWakePolicies(runtimeConfig);
     const mcpManager = await createServiceMcpManager(runtimeConfig);
     const curator = createServiceCuratorRuntime({
       config,
@@ -254,6 +279,8 @@ export async function startRustyCrewServiceHost(
           ? undefined
           : createDenSuccessorGatewayClient(config.denSuccessorGateway),
       denConversationChannelIdsByExternalId: new Map(),
+      dynamicDenChannelBindings: new Map(),
+      profileChannelWakePolicies,
       curator,
       backgroundReview: createServiceBackgroundReviewRuntime(runtimeConfig),
       mcpManager,
@@ -529,10 +556,12 @@ async function buildDiagnosticsContext(
       collectTableCounts(state.bridge),
       state.bridge.databaseSize().catch(() => undefined),
     ]);
+  const sessionDefaults = await effectiveSessionDefaultsById(state, sessions);
   const diagnostics = buildRuntimeDiagnosticsProjection({
     now,
     runtimeSummary,
     sessions,
+    sessionDefaults,
     delegatedSessions: [],
     adapters: buildServiceAdapterDiagnostics(state, now),
     persistence: {
@@ -568,6 +597,53 @@ async function buildDiagnosticsContext(
       ...state.recentEvents,
     ],
   };
+}
+
+async function effectiveSessionDefaultsById(
+  state: ServiceState,
+  sessions: readonly SessionState[],
+): Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>> {
+  const entries = await Promise.all(
+    sessions.map(async (session) => {
+      const configured = configuredSessionForRuntimeSession(
+        state.runtimeConfig,
+        session,
+      );
+      try {
+        const profile = await loadProfileConfig(
+          state.runtimeConfig.profilesDir,
+          session.profileId,
+        );
+        return [
+          session.sessionId,
+          {
+            ...effectiveSessionDefaults(configured ?? {}, profile),
+            wakeTimeoutMs: effectiveWakeTimeoutMs({
+              session: configured,
+              profile,
+            }),
+          },
+        ] as const;
+      } catch {
+        return [
+          session.sessionId,
+          effectiveSessionDefaults(configured ?? {}, {}),
+        ] as const;
+      }
+    }),
+  );
+  return new Map(entries);
+}
+
+function configuredSessionForRuntimeSession(
+  runtimeConfig: RustyCrewRuntimeConfig,
+  session: Pick<SessionState, "sessionId" | "profileId">,
+): RustyCrewRuntimeConfig["sessions"][number] | undefined {
+  return runtimeConfig.sessions.find(
+    (configured) =>
+      configured.sessionId === session.sessionId &&
+      configured.profileId === session.profileId,
+  );
 }
 
 async function buildServiceBackgroundDiagnostics(
@@ -628,6 +704,7 @@ function buildServiceAdapterDiagnostics(
 ): AdapterDiagnosticsProjection | undefined {
   if (
     state.runtimeConfig.channelBindings.length === 0 &&
+    state.dynamicDenChannelBindings.size === 0 &&
     state.runtimeConfig.mcpBindings.length === 0
   ) {
     return undefined;
@@ -635,6 +712,8 @@ function buildServiceAdapterDiagnostics(
   return buildAdapterDiagnosticsProjection({
     now,
     channelBindings: state.runtimeConfig.channelBindings,
+    dynamicChannelBindings: [...state.dynamicDenChannelBindings.values()],
+    channelWakePolicies: channelWakePoliciesByBinding(state),
     mcpBindings: state.runtimeConfig.mcpBindings,
     mcpSurfaces: state.mcpManager.diagnostics(),
   });
@@ -654,6 +733,47 @@ async function createServiceMcpManager(
     await manager.connect(binding);
   }
   return manager;
+}
+
+async function loadProfileChannelWakePolicies(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Promise<Map<string, ChannelWakePolicy>> {
+  const policies = new Map<string, ChannelWakePolicy>();
+  const profileIds = [
+    ...new Set(runtimeConfig.sessions.map((session) => session.profileId)),
+  ];
+  for (const profileId of profileIds) {
+    const profile = await loadProfileConfig(
+      runtimeConfig.profilesDir,
+      profileId,
+    );
+    policies.set(
+      profileId,
+      normalizeChannelWakePolicy(profile.channelDefaults?.wakePolicy),
+    );
+  }
+  return policies;
+}
+
+function channelWakePolicyForSession(
+  state: ServiceState,
+  session: RustyCrewRuntimeConfig["sessions"][number],
+): ChannelWakePolicy {
+  return (
+    state.profileChannelWakePolicies.get(session.profileId) ?? "subscription"
+  );
+}
+
+function channelWakePoliciesByBinding(
+  state: ServiceState,
+): Record<string, ChannelWakePolicy> {
+  const policies: Record<string, ChannelWakePolicy> = {};
+  for (const binding of state.runtimeConfig.channelBindings) {
+    policies[binding.bindingId] =
+      state.profileChannelWakePolicies.get(binding.profileId) ??
+      "subscription";
+  }
+  return policies;
 }
 
 function createServiceCuratorRuntime(input: {
@@ -1015,6 +1135,8 @@ async function reloadServiceRuntimeConfig(
   state: ServiceState,
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
   const nextRuntimeConfig = await loadRustyCrewRuntimeConfig(state.config);
+  const nextProfileChannelWakePolicies =
+    await loadProfileChannelWakePolicies(nextRuntimeConfig);
   const nextMcpManager = await createServiceMcpManager(nextRuntimeConfig);
   const nextApplyResult = await applyRustyCrewRuntimeConfig({
     serviceConfig: state.config,
@@ -1028,6 +1150,7 @@ async function reloadServiceRuntimeConfig(
   });
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
+  state.profileChannelWakePolicies = nextProfileChannelWakePolicies;
   state.runtimeConfigApplyResult = nextApplyResult;
   state.curator.runtimeConfig = nextRuntimeConfig;
   state.backgroundReview.enabled =
@@ -1513,6 +1636,58 @@ async function pollDenDeliveryIntents(state: ServiceState): Promise<void> {
     if (state.claimedDeliveryIntentIds.has(intent.id)) continue;
     const session = configuredSessionForDeliveryIntent(state, intent);
     if (session === undefined) continue;
+    const decision = deliveryIntentWakeDecision({
+      wakePolicy: channelWakePolicyForSession(state, session),
+      expiresAt: intent.expires_at,
+      now: state.now(),
+    });
+    if (decision.action === "skip_expired") {
+      state.claimedDeliveryIntentIds.add(intent.id);
+      recordServiceEvent(state, {
+        source: "den-successor-gateway",
+        eventType: "den_delivery_intent_expired",
+        severity: "warning",
+        summary: `Skipped expired Den Delivery intent ${intent.id} for ${intent.target_identity.profile}.`,
+      });
+      continue;
+    }
+    if (decision.action === "manual_wait") {
+      state.claimedDeliveryIntentIds.add(intent.id);
+      recordDynamicDenDeliveryChannel(state, intent, session, {
+        channelId: channelIdFromDeliveryIntent(intent),
+        sourceMessageId: intent.channel_message_id,
+        wakePolicy: decision.wakePolicy,
+        subscriptionStatus: "manual",
+      });
+      recordServiceEvent(state, {
+        source: "den-successor-gateway",
+        eventType: "den_delivery_intent_manual",
+        summary: `Left Den Delivery intent ${intent.id} pending for manual wake policy on ${session.agentId}; Gateway TTL remains authoritative.`,
+      });
+      continue;
+    }
+    if (decision.action === "reject") {
+      state.claimedDeliveryIntentIds.add(intent.id);
+      recordDynamicDenDeliveryChannel(state, intent, session, {
+        channelId: channelIdFromDeliveryIntent(intent),
+        sourceMessageId: intent.channel_message_id,
+        wakePolicy: decision.wakePolicy,
+        subscriptionStatus: "disabled",
+      });
+      void rejectDenDeliveryIntent(state, intent, session, decision).catch(
+        (error) =>
+          recordServiceEvent(state, {
+            source: "den-successor-gateway",
+            eventType: "den_delivery_intent_reject_failed",
+            severity: "error",
+            summary: errorMessage(
+              error,
+              `Den Delivery intent ${intent.id} reject failed`,
+            ),
+          }),
+      );
+      continue;
+    }
     state.claimedDeliveryIntentIds.add(intent.id);
     void processDenDeliveryIntent(state, intent, session).catch((error) =>
       recordServiceEvent(state, {
@@ -1554,6 +1729,7 @@ async function processDenDeliveryIntent(
         "Delivery intent has no body in source_ref or channel message",
       );
     }
+    recordDynamicDenDeliveryChannel(state, intent, session, deliveryBody);
 
     const wakeReport = await submitServiceTurn(state, {
       sessionId: session.sessionId,
@@ -1629,6 +1805,38 @@ async function processDenDeliveryIntent(
     }
     throw error;
   }
+}
+
+async function rejectDenDeliveryIntent(
+  state: ServiceState,
+  intent: DenSuccessorDeliveryIntent,
+  session: RustyCrewRuntimeConfig["sessions"][number],
+  decision: Extract<DeliveryIntentWakeDecision, { action: "reject" }>,
+): Promise<void> {
+  if (state.denGatewayClient === undefined) return;
+  const claimToken = `rusty-crew:${intent.id}:${Date.now()}`;
+  const claimedBy = intent.target_identity;
+  await state.denGatewayClient.claimDeliveryIntent({
+    id: intent.id,
+    claimToken,
+    claimedBy,
+  });
+  await state.denGatewayClient.reportDeliveryIntentEvent({
+    id: intent.id,
+    claimToken,
+    eventType: "failed",
+    payload: {
+      source: "rusty-crew",
+      session_id: session.sessionId,
+      reason: decision.reasonCode,
+      summary: decision.summary,
+    },
+  });
+  recordServiceEvent(state, {
+    source: "den-successor-gateway",
+    eventType: "den_delivery_intent_rejected",
+    summary: `Rejected Den Delivery intent ${intent.id} for ${session.agentId}: ${decision.summary}.`,
+  });
 }
 
 async function submitServiceTurn(
@@ -1766,6 +1974,8 @@ function bodyFromWakeSourceRef(
 function channelIdFromDeliveryIntent(
   intent: DenSuccessorDeliveryIntent,
 ): number | undefined {
+  const sourceChannelId = channelIdFromWakeSourceRef(intent.source_ref);
+  if (sourceChannelId !== undefined) return sourceChannelId;
   const [, channelPart] = intent.idempotency_key.split(":");
   const raw = channelPart?.startsWith("ch")
     ? channelPart.slice(2)
@@ -1773,6 +1983,64 @@ function channelIdFromDeliveryIntent(
   if (!raw || !/^[0-9]+$/.test(raw)) return undefined;
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function channelIdFromWakeSourceRef(
+  sourceRef: string | undefined,
+): number | undefined {
+  if (!sourceRef?.trim()) return undefined;
+  try {
+    const parsed = new URL(sourceRef);
+    for (const key of ["channel_id", "conversation_channel_id"]) {
+      const value = parsed.searchParams.get(key);
+      if (value !== null && /^[0-9]+$/.test(value)) {
+        const channelId = Number(value);
+        if (Number.isSafeInteger(channelId)) return channelId;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function recordDynamicDenDeliveryChannel(
+  state: ServiceState,
+  intent: DenSuccessorDeliveryIntent,
+  session: RustyCrewRuntimeConfig["sessions"][number],
+  deliveryBody: {
+    channelId?: number;
+    sourceMessageId?: number;
+    wakePolicy?: ChannelWakePolicy;
+    subscriptionStatus?: string;
+    lastError?: string;
+  },
+): void {
+  if (deliveryBody.channelId === undefined) return;
+  const bindingId = `gateway-delivery:${session.sessionId}:${deliveryBody.channelId}`;
+  state.dynamicDenChannelBindings.set(bindingId, {
+    bindingId,
+    bindingSource: "gateway_delivery",
+    adapterId: "den-successor-gateway",
+    agentId: session.agentId,
+    sessionId: session.sessionId,
+    profileId: session.profileId,
+    provider: "den_successor_gateway",
+    externalChannelId: `conversation:${deliveryBody.channelId}`,
+    conversationChannelId: deliveryBody.channelId,
+    sourceMessageId: deliveryBody.sourceMessageId,
+    deliveryIntentId: intent.id,
+    lastObservedAt: state.now(),
+    wakePolicy:
+      deliveryBody.wakePolicy ?? channelWakePolicyForSession(state, session),
+    status: "active",
+    membershipStatus: "dynamic",
+    presenceStatus: "delivery_intent",
+    subscriptionStatus: deliveryBody.subscriptionStatus ?? "active",
+    stalePresence: false,
+    droppedProjections: 0,
+    lastError: deliveryBody.lastError,
+  });
 }
 
 function scheduledHostExecutorContext(
@@ -1909,6 +2177,72 @@ async function runServiceBackgroundReview(
     });
     throw error;
   }
+}
+
+async function runPostTurnMaintenance(input: {
+  state: ServiceState;
+  session: SessionState;
+  profileContext: Awaited<ReturnType<typeof loadProfileContext>>;
+  wakeId: string;
+  source: "background" | "direct_debug" | "delivery";
+  observedEvents: readonly CoreEvent[];
+  completionSummary?: string;
+}): Promise<void> {
+  const decision = postTurnMaintenanceDecision({
+    profileId: input.session.profileId,
+    wakeId: input.wakeId,
+    source: input.source,
+    backgroundReviewEnabled:
+      input.profileContext.profile.backgroundReview?.enabled ?? false,
+    events: input.observedEvents,
+    completionSummary: input.completionSummary,
+  });
+  if (decision.action === "noop") {
+    recordServiceEvent(input.state, {
+      source: "post-turn-maintenance",
+      eventType: "post_turn_auto_maintenance_noop",
+      summary: `${decision.summary} for wake ${input.wakeId}.`,
+    });
+    return;
+  }
+
+  const batch = discoverCuratorCandidates({
+    batchId: [
+      "post-turn",
+      input.session.profileId,
+      input.wakeId.replace(/[^0-9A-Za-z_-]/g, ""),
+    ].join(":"),
+    now: input.state.now(),
+    scopeType: "profile",
+    scopeId: input.session.profileId,
+    profileId: input.session.profileId,
+    skills: input.profileContext.skills,
+    expectedSkillSlugs:
+      input.profileContext.profile.skillsMode === "all"
+        ? []
+        : input.profileContext.profile.skills,
+    observedBehavior: [decision.evidence],
+    maxCandidates: 1,
+    dryRun: true,
+  });
+  input.state.curator.store.upsertBatch(
+    batch,
+    batch.candidates.flatMap((candidate) =>
+      mutationForServiceCuratorCandidate(candidate),
+    ),
+  );
+  input.state.curator.lastRunAt = input.state.now();
+  recordServiceEvent(input.state, {
+    source: "post-turn-maintenance",
+    eventType:
+      batch.candidateCount > 0
+        ? "post_turn_curator_candidate_created"
+        : "post_turn_auto_maintenance_noop",
+    summary:
+      batch.candidateCount > 0
+        ? `Post-turn maintenance proposed ${batch.candidateCount} curator candidate(s) for wake ${input.wakeId}.`
+        : `Post-turn maintenance observed reusable behavior for wake ${input.wakeId}, but no new candidate was needed.`,
+  });
 }
 
 function configuredSessionForProfile(
@@ -2084,19 +2418,36 @@ async function dispatchWake(
       skillsDir: state.runtimeConfig.skillsDir,
       profileId: session.profileId,
     });
+    const configured = configuredSessionForRuntimeSession(
+      state.runtimeConfig,
+      session,
+    );
     const role = buildProfileRoleAssembly(profileContext);
-    const observed = await observeWakeEvents(state, sessionId, async () => {
-      const request = await state.bridge.buildBrainWakeRequestForSession({
-        brain,
-        sessionId,
-        systemPrompt: role.systemPrompt,
-        roleAssemblyJson: new TextEncoder().encode(
-          JSON.stringify(role.roleAssembly),
-        ),
+    const turnTimeoutMs = effectiveTurnTimeoutMs(
+      effectiveWakeTimeoutMs({
+        session: configured,
+        profile: profileContext.profile,
+      }),
+    );
+    const observed = await withWakeTimeout(
+      observeWakeEvents(state, sessionId, async () => {
+        const request = await state.bridge.buildBrainWakeRequestForSession({
+          brain,
+          sessionId,
+          systemPrompt: role.systemPrompt,
+          roleAssemblyJson: new TextEncoder().encode(
+            JSON.stringify(role.roleAssembly),
+          ),
+          wakeId,
+        });
+        return state.bridge.wakeBrain(request);
+      }),
+      {
         wakeId,
-      });
-      return state.bridge.wakeBrain(request);
-    });
+        sessionId,
+        timeoutMs: turnTimeoutMs,
+      },
+    );
     await publishWakeToolActivity({
       state,
       session,
@@ -2123,8 +2474,35 @@ async function dispatchWake(
       severity: accepted.accepted ? undefined : "error",
       summary: `${report.summary} (${source}).`,
     });
+    if (report.status === "completed") {
+      await runPostTurnMaintenance({
+        state,
+        session,
+        profileContext,
+        wakeId,
+        source,
+        observedEvents: observed.events,
+        completionSummary: report.summary,
+      });
+    }
     return report;
   } catch (error) {
+    if (error instanceof WakeDispatchTimeoutError) {
+      const report: ServiceWakeDispatchReport = {
+        sessionId,
+        wakeId: error.wakeId,
+        status: "failed",
+        summary: `wake ${error.wakeId} timed out after ${error.timeoutMs}ms`,
+        reasonCode: "wake_timeout",
+      };
+      recordServiceEvent(state, {
+        source: "service-host",
+        eventType: "brain_wake_timeout",
+        severity: "error",
+        summary: `${report.summary} (${source}).`,
+      });
+      return report;
+    }
     const report: ServiceWakeDispatchReport = {
       sessionId,
       status: "failed",
@@ -2158,11 +2536,29 @@ async function observeWakeEvents<T>(
   });
   try {
     const accepted = await callback();
-    const events = await state.bridge.drainSubscriptionEvents(subscription, 64);
+    const events = await drainSubscriptionEventsUntilIdle(
+      state.bridge,
+      subscription,
+    );
     return { accepted, events };
   } finally {
     await state.bridge.unsubscribeEvents(subscription).catch(() => undefined);
   }
+}
+
+async function drainSubscriptionEventsUntilIdle(
+  bridge: Pick<NativeBridgeModule, "drainSubscriptionEvents">,
+  subscription: SubscriptionHandle,
+): Promise<CoreEvent[]> {
+  const chunkSize = 128;
+  const maxEvents = 2_048;
+  const events: CoreEvent[] = [];
+  while (events.length < maxEvents) {
+    const chunk = await bridge.drainSubscriptionEvents(subscription, chunkSize);
+    events.push(...chunk);
+    if (chunk.length < chunkSize) break;
+  }
+  return events;
 }
 
 async function publishWakeToolActivity(input: {

@@ -37,6 +37,8 @@ const memoryRequests: Array<{
 const mcpRequests: Array<{
   url: string;
   method?: string;
+  accept?: string;
+  sessionId?: string;
   toolProfile?: string | null;
   toolName?: string;
   arguments?: unknown;
@@ -175,10 +177,43 @@ try {
       mcpRequests.push({
         url: url.toString(),
         method,
+        accept: header(init?.headers, "accept"),
+        sessionId: header(init?.headers, "mcp-session-id"),
         toolProfile: url.searchParams.get("tool_profile"),
         toolName,
         arguments: isRecord(params) ? params.arguments : undefined,
       });
+      if (method === "initialize") {
+        return sseJsonRpcResponse(
+          body.id,
+          {
+            protocolVersion: "2024-11-05",
+            capabilities: {
+              tools: {
+                listChanged: true,
+              },
+            },
+            serverInfo: {
+              name: "fake-mcp",
+              version: "0.1.0",
+            },
+          },
+          "fake-mcp-session",
+        );
+      }
+      if (method === "notifications/initialized") {
+        assert.equal(
+          header(init?.headers, "mcp-session-id"),
+          "fake-mcp-session",
+        );
+        return new Response(null, { status: 202 });
+      }
+      if (header(init?.headers, "mcp-session-id") !== "fake-mcp-session") {
+        return new Response(
+          "A new session can only be created by an initialize request. Include a valid Mcp-Session-Id header for non-initialize requests.",
+          { status: 400, headers: { "content-type": "text/plain" } },
+        );
+      }
       if (method === "tools/list") {
         return jsonRpcResponse(body.id, {
           tools: [
@@ -266,7 +301,14 @@ try {
     assert.match(outputs.git_status ?? "", /git status --short/);
     assert.equal(outputs.field_search, "mcp:field-mcp:search");
     assert.deepEqual(
-      mcpRequests.map((request) => ({
+      mcpRequests
+        .filter((request) => request.sessionId === "fake-mcp-session")
+        .filter(
+          (request) =>
+            request.method === "tools/list" ||
+            request.method === "tools/call",
+        )
+        .map((request) => ({
         method: request.method,
         toolProfile: request.toolProfile,
         toolName: request.toolName,
@@ -288,7 +330,14 @@ try {
       ],
     );
     assert.deepEqual(
-      mcpRequests.map((request) => request.url),
+      mcpRequests
+        .filter((request) => request.sessionId === "fake-mcp-session")
+        .filter(
+          (request) =>
+            request.method === "tools/list" ||
+            request.method === "tools/call",
+        )
+        .map((request) => request.url),
       [
         "http://mcp.local/mcp?tool_profile=field-profile-mcp",
         "http://mcp.local/mcp?tool_profile=field-profile-mcp",
@@ -297,6 +346,7 @@ try {
     assert.deepEqual(
       mcpRequests
         .filter((request) => request.method === "tools/call")
+        .filter((request) => request.sessionId === "fake-mcp-session")
         .map((request) => ({
           bindingId: "field-mcp",
           toolName: request.toolName,
@@ -307,6 +357,55 @@ try {
           bindingId: "field-mcp",
           toolName: "search",
           arguments: { query: "runner mcp tools" },
+        },
+      ],
+    );
+    assert.deepEqual(
+      mcpRequests.map((request) => ({
+        method: request.method,
+        sessionId: request.sessionId,
+        accept: request.accept,
+      })),
+      [
+        {
+          method: "tools/list",
+          sessionId: undefined,
+          accept: "application/json, text/event-stream",
+        },
+        {
+          method: "initialize",
+          sessionId: undefined,
+          accept: "application/json, text/event-stream",
+        },
+        {
+          method: "notifications/initialized",
+          sessionId: "fake-mcp-session",
+          accept: "application/json, text/event-stream",
+        },
+        {
+          method: "tools/list",
+          sessionId: "fake-mcp-session",
+          accept: "application/json, text/event-stream",
+        },
+        {
+          method: "tools/call",
+          sessionId: undefined,
+          accept: "application/json, text/event-stream",
+        },
+        {
+          method: "initialize",
+          sessionId: undefined,
+          accept: "application/json, text/event-stream",
+        },
+        {
+          method: "notifications/initialized",
+          sessionId: "fake-mcp-session",
+          accept: "application/json, text/event-stream",
+        },
+        {
+          method: "tools/call",
+          sessionId: "fake-mcp-session",
+          accept: "application/json, text/event-stream",
         },
       ],
     );
@@ -440,7 +539,9 @@ function header(
   if (Array.isArray(headers)) {
     return headers.find(([key]) => key.toLowerCase() === name)?.[1];
   }
-  return headers[name];
+  return Object.entries(headers).find(
+    ([key]) => key.toLowerCase() === name,
+  )?.[1];
 }
 
 function jsonRpcResponse(id: unknown, result: unknown): Response {
@@ -451,6 +552,27 @@ function jsonRpcResponse(id: unknown, result: unknown): Response {
       result,
     }),
     { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function sseJsonRpcResponse(
+  id: unknown,
+  result: unknown,
+  sessionId: string,
+): Response {
+  return new Response(
+    `event: message\ndata: ${JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      result,
+    })}\n\n`,
+    {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "mcp-session-id": sessionId,
+      },
+    },
   );
 }
 

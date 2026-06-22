@@ -179,6 +179,7 @@ const report = buildToolContextDiagnosticsReport({
       bindings: [
         {
           bindingId: "channel-main",
+          bindingSource: "configured",
           adapterId: "den",
           agentId: "diagnostics-agent",
           sessionId,

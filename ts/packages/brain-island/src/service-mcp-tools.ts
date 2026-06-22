@@ -83,6 +83,7 @@ interface ProfileMcpAccumulator {
 }
 
 const JSON_RPC_VERSION = "2.0";
+const MCP_PROTOCOL_VERSION = "2024-11-05";
 
 export async function buildServiceMcpToolCatalog(
   input: ServiceMcpToolCatalogInput,
@@ -287,14 +288,10 @@ function createDefaultMcpDiscoveryClient(
 ): McpToolDiscoveryClient | undefined {
   const endpoint = endpointForBinding(binding, config);
   if (!endpoint) return undefined;
+  const client = new DefaultMcpHttpClient(endpoint.url, endpoint.timeoutMs);
   return {
     async listTools() {
-      const response = await postJsonRpc(
-        endpoint.url,
-        "tools/list",
-        {},
-        endpoint.timeoutMs,
-      );
+      const response = await client.request("tools/list", {});
       const result = jsonRpcResult(response);
       const tools = resultRecord(result).tools;
       return Array.isArray(tools) ? tools : [];
@@ -308,17 +305,13 @@ function createDefaultMcpToolExecutor(
 ): McpToolExecutor | undefined {
   const endpoint = endpointForBinding(binding, config);
   if (!endpoint) return undefined;
+  const client = new DefaultMcpHttpClient(endpoint.url, endpoint.timeoutMs);
   return {
     async callTool(input) {
-      const response = await postJsonRpc(
-        endpoint.url,
-        "tools/call",
-        {
-          name: input.toolName,
-          arguments: input.arguments,
-        },
-        endpoint.timeoutMs,
-      );
+      const response = await client.request("tools/call", {
+        name: input.toolName,
+        arguments: input.arguments,
+      });
       const result = jsonRpcResult(response);
       const record = resultRecord(result);
       return {
@@ -374,42 +367,189 @@ function configuredMcpEndpoint(
   }
 }
 
-async function postJsonRpc(
-  endpoint: URL,
-  method: string,
-  params: Record<string, unknown>,
-  timeoutMs: number | undefined,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const timeout =
-    timeoutMs === undefined
-      ? undefined
-      : setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        jsonrpc: JSON_RPC_VERSION,
-        id: `${Date.now()}:${method}`,
+class DefaultMcpHttpClient {
+  private sessionId: string | undefined;
+
+  constructor(
+    private readonly endpoint: URL,
+    private readonly timeoutMs: number | undefined,
+  ) {}
+
+  async request(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (this.sessionId) {
+      return (
+        await postJsonRpc({
+          endpoint: this.endpoint,
+          method,
+          params,
+          sessionId: this.sessionId,
+          timeoutMs: this.timeoutMs,
+        })
+      ).body;
+    }
+
+    try {
+      const response = await postJsonRpc({
+        endpoint: this.endpoint,
         method,
         params,
+        timeoutMs: this.timeoutMs,
+      });
+      this.sessionId = response.sessionId ?? this.sessionId;
+      return response.body;
+    } catch (error) {
+      if (!requiresInitializedMcpSession(error)) throw error;
+    }
+
+    await this.initialize();
+    return (
+      await postJsonRpc({
+        endpoint: this.endpoint,
+        method,
+        params,
+        sessionId: this.sessionId,
+        timeoutMs: this.timeoutMs,
+      })
+    ).body;
+  }
+
+  private async initialize(): Promise<void> {
+    const response = await postJsonRpc({
+      endpoint: this.endpoint,
+      method: "initialize",
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: {
+          name: "rusty-crew",
+          version: "0.1.0",
+        },
+      },
+      timeoutMs: this.timeoutMs,
+    });
+    if (!response.sessionId) {
+      throw new Error("MCP initialize response did not include a session id");
+    }
+    this.sessionId = response.sessionId;
+    await postJsonRpc({
+      endpoint: this.endpoint,
+      method: "notifications/initialized",
+      params: {},
+      sessionId: this.sessionId,
+      timeoutMs: this.timeoutMs,
+      expectResponse: false,
+    });
+  }
+}
+
+interface JsonRpcPostInput {
+  endpoint: URL;
+  method: string;
+  params: Record<string, unknown>;
+  timeoutMs: number | undefined;
+  sessionId?: string;
+  expectResponse?: boolean;
+}
+
+interface JsonRpcPostResponse {
+  body: unknown;
+  sessionId?: string;
+}
+
+class McpHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly bodyText: string,
+  ) {
+    super(message);
+  }
+}
+
+async function postJsonRpc(
+  input: JsonRpcPostInput,
+): Promise<JsonRpcPostResponse> {
+  const controller = new AbortController();
+  const timeout =
+    input.timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const headers: Record<string, string> = {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+    };
+    if (input.sessionId) {
+      headers["Mcp-Session-Id"] = input.sessionId;
+    }
+    const response = await fetch(input.endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers,
+      body: JSON.stringify({
+        jsonrpc: JSON_RPC_VERSION,
+        ...(input.expectResponse === false
+          ? {}
+          : { id: `${Date.now()}:${input.method}` }),
+        method: input.method,
+        params: input.params,
       }),
     });
-    const body = await response.json();
+    const bodyText = await response.text();
     if (!response.ok) {
-      throw new Error(`MCP ${method} failed with HTTP ${response.status}`);
+      throw new McpHttpError(
+        `MCP ${input.method} failed with HTTP ${response.status}`,
+        response.status,
+        bodyText,
+      );
     }
-    return body;
+    return {
+      body:
+        input.expectResponse === false
+          ? undefined
+          : parseMcpResponseBody(bodyText, response.headers),
+      sessionId: response.headers.get("mcp-session-id") ?? undefined,
+    };
   } finally {
     if (timeout !== undefined) {
       clearTimeout(timeout);
     }
   }
+}
+
+function requiresInitializedMcpSession(error: unknown): boolean {
+  if (!(error instanceof McpHttpError)) return false;
+  return (
+    error.status === 400 &&
+    /session|initialize|Mcp-Session-Id/i.test(error.bodyText)
+  );
+}
+
+function parseMcpResponseBody(bodyText: string, headers: Headers): unknown {
+  if (bodyText.trim().length === 0) return undefined;
+  const contentType = headers.get("content-type") ?? "";
+  if (contentType.includes("text/event-stream")) {
+    return parseServerSentJson(bodyText);
+  }
+  return JSON.parse(bodyText);
+}
+
+function parseServerSentJson(bodyText: string): unknown {
+  for (const eventBlock of bodyText.split(/\r?\n\r?\n/)) {
+    const data = eventBlock
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice("data:".length).trimStart())
+      .join("\n")
+      .trim();
+    if (data.length > 0) {
+      return JSON.parse(data);
+    }
+  }
+  throw new Error("MCP SSE response did not include a data event");
 }
 
 function jsonRpcResult(response: unknown): unknown {

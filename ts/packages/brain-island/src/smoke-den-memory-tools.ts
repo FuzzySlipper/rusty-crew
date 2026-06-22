@@ -101,6 +101,10 @@ assertDetails(recall.details, {
   operation: "recall",
   action: "read",
 });
+assert.match(
+  textContent(recall),
+  /^DEN_MEMORY_TOOL_RESULT ok=true operation=recall action=read/m,
+);
 assert.equal(
   (calls.find((call) => call.method === "recall")?.payload as { role?: string })
     .role,
@@ -217,6 +221,10 @@ const offRecall = await denMemoryRecallTool({
   prompt: "No memory.",
 });
 assert.equal(offRecall.details.reasonCode, "den_memory_policy_off");
+assert.match(
+  textContent(offRecall),
+  /^DEN_MEMORY_TOOL_RESULT ok=false operation=recall action=denied reason=den_memory_policy_off/m,
+);
 
 const missingClient = await denMemorySearchTool({
   policy: { mode: "permissive" },
@@ -267,6 +275,14 @@ function assertDetails(
   assert.ok(details);
   assert.equal(details.operation, expected.operation);
   assert.equal(details.action, expected.action);
+}
+
+function textContent(result: {
+  content: Array<{ type: string; text?: string }>;
+}): string {
+  return result.content
+    .map((item) => (item.type === "text" ? (item.text ?? "") : ""))
+    .join("\n");
 }
 
 function lastCall(

@@ -7,6 +7,7 @@ import type {
   McpBindingRecord,
   McpSurfaceDiagnostics,
 } from "@rusty-crew/contracts";
+import type { ChannelWakePolicy } from "./channel-wake-policy.js";
 import type { McpSurfaceReloadReport } from "./mcp-surface-reload.js";
 
 export type AdapterHealthStatus =
@@ -22,9 +23,13 @@ export interface ChannelProjectionFailureRecord {
   observedAt: string;
 }
 
+export type ChannelAdapterBindingSource = "configured" | "gateway_delivery";
+
 export interface AdapterDiagnosticsInput {
   now: string;
   channelBindings: readonly ChannelBindingRecord[];
+  dynamicChannelBindings?: readonly ChannelAdapterBindingDiagnostics[];
+  channelWakePolicies?: Record<string, ChannelWakePolicy>;
   channelActivity?: readonly ChannelBindingDiagnostics[];
   channelProjectionFailures?: readonly ChannelProjectionFailureRecord[];
   denAdapterStatuses?: readonly DenAdapterStatus[];
@@ -35,11 +40,19 @@ export interface AdapterDiagnosticsInput {
 
 export interface ChannelAdapterBindingDiagnostics {
   bindingId: string;
+  bindingSource: ChannelAdapterBindingSource;
   adapterId: string;
   agentId: string;
   sessionId?: string;
   profileId: string;
   provider: string;
+  externalChannelId?: string;
+  externalThreadId?: string;
+  conversationChannelId?: number;
+  sourceMessageId?: number;
+  deliveryIntentId?: number;
+  lastObservedAt?: string;
+  wakePolicy?: ChannelWakePolicy;
   status: AdapterHealthStatus;
   membershipStatus: string;
   presenceStatus: string;
@@ -98,13 +111,19 @@ export function buildAdapterDiagnosticsProjection(
   const projectionFailures = groupByBinding(
     input.channelProjectionFailures ?? [],
   );
-  const channelBindings = input.channelBindings.map((binding) =>
+  const configuredChannelBindings = input.channelBindings.map((binding) =>
     channelBindingDiagnostics(
       binding,
       channelActivity.get(binding.bindingId),
       projectionFailures.get(binding.bindingId) ?? [],
+      input.channelWakePolicies?.[binding.bindingId],
     ),
   );
+  const dynamicChannelBindings = [...(input.dynamicChannelBindings ?? [])];
+  const channelBindings = [
+    ...configuredChannelBindings,
+    ...dynamicChannelBindings,
+  ];
   const denAdapterDropped = (input.denAdapterStatuses ?? []).reduce(
     (sum, status) => sum + status.droppedProjections,
     0,
@@ -183,16 +202,21 @@ function channelBindingDiagnostics(
   binding: ChannelBindingRecord,
   activity: ChannelBindingDiagnostics | undefined,
   failures: readonly ChannelProjectionFailureRecord[],
+  wakePolicy: ChannelWakePolicy | undefined,
 ): ChannelAdapterBindingDiagnostics {
   const lastFailure = latestProjectionFailure(failures);
   const status = channelStatus(binding, activity, failures);
   return {
     bindingId: binding.bindingId,
+    bindingSource: "configured",
     adapterId: binding.adapterId,
     agentId: binding.agentId,
     sessionId: binding.sessionId,
     profileId: binding.profileId,
     provider: binding.provider,
+    externalChannelId: binding.externalChannelId,
+    externalThreadId: binding.externalThreadId,
+    wakePolicy,
     status,
     membershipStatus: activity?.membershipStatus ?? "missing",
     presenceStatus: activity?.presenceStatus ?? "missing",

@@ -21,6 +21,7 @@ const gatewayRequests: {
   migrated?: string;
   body?: unknown;
 }[] = [];
+const finalCompletionText = "FINAL_COMPLETION_TEXT_FROM_PACKET";
 let deliveryListCount = 0;
 const gateway = createHttpServer((request, response) => {
   let body = "";
@@ -76,6 +77,21 @@ const gateway = createHttpServer((request, response) => {
           deliveryListCount === 1
             ? [
                 {
+                  id: 90,
+                  target_identity: {
+                    profile: "field-profile",
+                    instance_id: "field-agent@rusty-crew",
+                    session_key: "field-session",
+                  },
+                  state: "pending",
+                  idempotency_key: "wake:ch42:field-profile:expired",
+                  source_ref:
+                    "wake://field-profile?body=stale%20message&channel_id=42",
+                  channel_message_id: 6,
+                  created_at: "2026-06-21T11:00:00Z",
+                  expires_at: "2026-06-21T11:59:00Z",
+                },
+                {
                   id: 91,
                   target_identity: {
                     profile: "field-profile",
@@ -84,7 +100,8 @@ const gateway = createHttpServer((request, response) => {
                   },
                   state: "pending",
                   idempotency_key: "wake:ch42:field-profile:nonce",
-                  source_ref: "wake://field-profile?body=hello%20from%20den",
+                  source_ref:
+                    "wake://field-profile?body=hello%20from%20den&channel_id=42",
                   channel_message_id: 7,
                   created_at: "2026-06-21T12:00:00Z",
                   expires_at: "2026-06-21T12:05:00Z",
@@ -150,6 +167,7 @@ const host = await startRustyCrewServiceHost({
     RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS: "0",
     RUSTY_CREW_DEN_DELIVERY_POLL_INTERVAL_MS: "50",
   },
+  now: () => "2026-06-21T12:01:00.000Z",
 });
 
 try {
@@ -181,6 +199,12 @@ try {
     "delivery intent completion was projected to Conversation",
   );
   assert.equal(
+    gatewayRequests.some(
+      (request) => request.path === "/v1/delivery/intents/90/claim",
+    ),
+    false,
+  );
+  assert.equal(
     gatewayRequests.find(
       (request) => request.path === "/v1/delivery/intents/91/claim",
     )?.auth,
@@ -203,6 +227,14 @@ try {
       (request) => request.path === "/v1/conversation/channels/42/messages",
     )?.auth,
     "Bearer conversation-write-token",
+  );
+  assert.match(
+    (
+      gatewayRequests.find(
+        (request) => request.path === "/v1/conversation/channels/42/messages",
+      )?.body as { body?: string } | undefined
+    )?.body ?? "",
+    new RegExp(finalCompletionText),
   );
   const lifecycleEvents = gatewayRequests
     .filter((request) => request.path === "/v1/delivery/intents/91/events")
@@ -266,6 +298,48 @@ try {
     ),
     true,
   );
+  assert.equal(
+    body.data.items.some(
+      (event) => event.eventType === "den_delivery_intent_expired",
+    ),
+    true,
+  );
+  const channelDiagnostics = await fetch(
+    `http://127.0.0.1:${adminPort}/v1/admin/diagnostics/channels`,
+  );
+  const channelBody = (await channelDiagnostics.json()) as {
+    data: {
+      items: {
+        bindingSource?: string;
+        status?: string;
+        conversationChannelId?: number;
+        deliveryIntentId?: number;
+      }[];
+    };
+  };
+  assert.deepEqual(channelBody.data.items, [
+    {
+      bindingId: "gateway-delivery:field-session:42",
+      bindingSource: "gateway_delivery",
+      adapterId: "den-successor-gateway",
+      agentId: "field-agent",
+      sessionId: "field-session",
+      profileId: "field-profile",
+      provider: "den_successor_gateway",
+      externalChannelId: "conversation:42",
+      conversationChannelId: 42,
+      sourceMessageId: 7,
+      deliveryIntentId: 91,
+      lastObservedAt: "2026-06-21T12:01:00.000Z",
+      wakePolicy: "subscription",
+      status: "active",
+      membershipStatus: "dynamic",
+      presenceStatus: "delivery_intent",
+      subscriptionStatus: "active",
+      stalePresence: false,
+      droppedProjections: 0,
+    },
+  ]);
 
   console.log(
     JSON.stringify(
@@ -273,6 +347,7 @@ try {
         gatewayRequests: gatewayRequests.length,
         startupEvent: body.data.items[0]?.eventType,
         lifecycleEvents,
+        dynamicChannels: channelBody.data.items.length,
       },
       null,
       2,
@@ -310,7 +385,18 @@ function withToolEventBridge(bridge: NativeBridgeModule): NativeBridgeModule {
           const result = await executor.wake(request, buffers);
           return {
             ...result,
-            events: withToolEvents(result.events),
+            events: withToolAndStreamingEvents(result.events),
+            actions: result.actions.map((action) =>
+              action.type === "deliver_completion"
+                ? {
+                    ...action,
+                    packet: {
+                      ...action.packet,
+                      summary: finalCompletionText,
+                    },
+                  }
+                : action,
+            ),
           };
         },
       };
@@ -319,7 +405,7 @@ function withToolEventBridge(bridge: NativeBridgeModule): NativeBridgeModule {
   };
 }
 
-function withToolEvents(
+function withToolAndStreamingEvents(
   events: readonly BrainEventEnvelope[],
 ): BrainEventEnvelope[] {
   const started = events[0];
@@ -340,13 +426,22 @@ function withToolEvents(
       },
     },
   ];
+  const textEvents = Array.from({ length: 70 }, (_, index) => ({
+    wakeId: started.wakeId,
+    sessionId: started.sessionId,
+    event: {
+      type: "text_delta" as const,
+      text: index === 69 ? finalCompletionText : "x",
+    },
+  }));
   const finishedIndex = events.findIndex(
     (event) => event.event.type === "finished",
   );
-  if (finishedIndex < 0) return [...events, ...inserted];
+  if (finishedIndex < 0) return [...events, ...inserted, ...textEvents];
   return [
     ...events.slice(0, finishedIndex),
     ...inserted,
+    ...textEvents,
     ...events.slice(finishedIndex),
   ];
 }

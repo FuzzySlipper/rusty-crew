@@ -236,7 +236,7 @@ class DenMemoryV0Client implements DenMemoryClient {
           },
         },
       ],
-      total: rootMatches.length,
+      total: 1,
     };
   }
 

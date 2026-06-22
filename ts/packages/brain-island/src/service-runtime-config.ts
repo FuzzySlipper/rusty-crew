@@ -53,7 +53,11 @@ import {
   sessionSearchTool,
   todoTool,
 } from "./planning-tools.js";
-import { loadProfileConfig, loadProfileContext } from "./profile-loading.js";
+import {
+  loadProfileConfig,
+  loadProfileContext,
+  type ProfileConfig,
+} from "./profile-loading.js";
 import {
   buildServiceMcpToolCatalog,
   createServiceMcpToolResolver,
@@ -85,6 +89,15 @@ export interface RustyCrewConfiguredSession {
   kind: SessionKind;
   resourceLimits?: ResourceLimits;
   toolProfile?: ToolProfile;
+  ownerId?: string;
+  maxHistoryMessages?: number;
+  turnTimeoutMs?: number;
+}
+
+export interface EffectiveSessionDefaults {
+  ownerId?: string;
+  maxHistoryMessages?: number;
+  turnTimeoutMs?: number;
 }
 
 export type RustyCrewScheduledJobShape =
@@ -359,7 +372,9 @@ export async function applyRustyCrewRuntimeConfig(input: {
       continue;
     }
     const ensured =
-      await input.bridge.ensureConfiguredSession(configuredSession);
+      await input.bridge.ensureConfiguredSession(
+        nativeSessionConfig(configuredSession),
+      );
     if (!existing) {
       result.sessionsCreated += 1;
     } else if (
@@ -430,10 +445,11 @@ export async function registerConfiguredScheduledJobs(input: {
   return { registered: jobs.length, jobs };
 }
 
-function sessionWithProfileDefaults(
+export function sessionWithProfileDefaults(
   session: RustyCrewConfiguredSession,
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
 ): RustyCrewConfiguredSession {
+  const defaults = effectiveSessionDefaults(session, profile.profile);
   return {
     ...session,
     resourceLimits:
@@ -441,6 +457,59 @@ function sessionWithProfileDefaults(
       profile.profile.runtime?.defaultResourceLimits ??
       undefined,
     toolProfile: session.toolProfile ?? profile.toolSelection.toolProfile,
+    ...defaults,
+  };
+}
+
+export function effectiveSessionDefaults(
+  session: Pick<
+    RustyCrewConfiguredSession,
+    "ownerId" | "maxHistoryMessages" | "turnTimeoutMs"
+  >,
+  profile: Pick<ProfileConfig, "sessionDefaults">,
+): EffectiveSessionDefaults {
+  return definedDefaults({
+    ownerId: session.ownerId ?? profile.sessionDefaults?.ownerId,
+    maxHistoryMessages:
+      session.maxHistoryMessages ?? profile.sessionDefaults?.maxHistoryMessages,
+    turnTimeoutMs: session.turnTimeoutMs ?? profile.sessionDefaults?.turnTimeoutMs,
+  });
+}
+
+export function effectiveWakeTimeoutMs(input: {
+  session?: Pick<RustyCrewConfiguredSession, "turnTimeoutMs">;
+  profile: Pick<ProfileConfig, "runtime" | "sessionDefaults">;
+}): number | undefined {
+  return (
+    input.session?.turnTimeoutMs ??
+    input.profile.runtime?.maxTurnDurationMs ??
+    input.profile.sessionDefaults?.turnTimeoutMs
+  );
+}
+
+function definedDefaults(
+  defaults: EffectiveSessionDefaults,
+): EffectiveSessionDefaults {
+  return Object.fromEntries(
+    Object.entries(defaults).filter(([, value]) => value !== undefined),
+  ) as EffectiveSessionDefaults;
+}
+
+function nativeSessionConfig(session: RustyCrewConfiguredSession): {
+  sessionId: SessionId;
+  agentId: AgentId;
+  profileId: ProfileId;
+  kind: SessionKind;
+  resourceLimits?: ResourceLimits;
+  toolProfile?: ToolProfile;
+} {
+  return {
+    sessionId: session.sessionId,
+    agentId: session.agentId,
+    profileId: session.profileId,
+    kind: session.kind,
+    resourceLimits: session.resourceLimits,
+    toolProfile: session.toolProfile,
   };
 }
 
@@ -492,7 +561,7 @@ export async function ensureConfiguredSessionForChannelBinding(input: {
       `channel binding ${input.binding.bindingId} has no matching configured session`,
     );
   }
-  return input.bridge.ensureConfiguredSession(session);
+  return input.bridge.ensureConfiguredSession(nativeSessionConfig(session));
 }
 
 async function createConfiguredBrain(
@@ -944,6 +1013,9 @@ function configuredSession(
     resourceLimits: isRecord(parsed.resourceLimits)
       ? resourceLimits(parsed.resourceLimits)
       : undefined,
+    ownerId: optionalString(parsed.ownerId),
+    maxHistoryMessages: optionalNumber(parsed.maxHistoryMessages),
+    turnTimeoutMs: optionalNumber(parsed.turnTimeoutMs),
   };
 }
 

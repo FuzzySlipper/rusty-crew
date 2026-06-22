@@ -11,6 +11,7 @@ import type { AdminRecentEvent } from "./admin-diagnostics-api.js";
 import type { BrainRoleAssembly } from "./index.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
 import type { RuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
+import type { RuntimeSessionEffectiveDefaults } from "./runtime-diagnostics.js";
 import {
   buildToolContextDiagnosticsReport,
   type TextSurfaceSummary,
@@ -103,6 +104,7 @@ export interface DirectDebugSessionSummary {
   lastActiveAt: string;
   toolCount: number;
   workdir?: string;
+  effectiveDefaults?: RuntimeSessionEffectiveDefaults;
 }
 
 export interface DirectDebugRuntimeSummary {
@@ -206,7 +208,7 @@ export function inspectDirectDebugSession(
     data: {
       generatedAt: context.now?.() ?? new Date().toISOString(),
       source: "direct_debug",
-      session: sessionSummary(source.session),
+      session: sessionSummary(source.session, context),
       diagnostics: runtimeSummary(source.session.sessionId, context),
       selectedTools: source.session.toolProfile.tools,
       toolContext,
@@ -314,7 +316,13 @@ function toolContextForSource(
   });
 }
 
-function sessionSummary(session: SessionState): DirectDebugSessionSummary {
+function sessionSummary(
+  session: SessionState,
+  context: DirectDebugServiceContext,
+): DirectDebugSessionSummary {
+  const diagnostics = context.diagnostics.runtime.sessions.find(
+    (candidate) => candidate.sessionId === session.sessionId,
+  );
   return {
     sessionId: session.sessionId,
     agentId: session.agentId,
@@ -326,6 +334,7 @@ function sessionSummary(session: SessionState): DirectDebugSessionSummary {
     lastActiveAt: session.lastActiveAt,
     toolCount: session.toolProfile.tools.length,
     workdir: session.resourceLimits.workdir,
+    effectiveDefaults: diagnostics?.effectiveDefaults,
   };
 }
 
