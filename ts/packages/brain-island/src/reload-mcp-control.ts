@@ -45,6 +45,10 @@ export interface ReloadMcpControlOptions {
   ): Promise<McpBindingRecord | undefined> | McpBindingRecord | undefined;
   manager: McpSurfaceManager;
   discoveryClient: McpToolDiscoveryClient;
+  discoveryClientForBinding?(
+    binding: McpBindingRecord,
+    command: AdminControlCommand,
+  ): McpToolDiscoveryClient | undefined;
   catalogId(binding: McpBindingRecord, command: AdminControlCommand): string;
   previousToolNames?(
     binding: McpBindingRecord,
@@ -101,10 +105,13 @@ export function createReloadMcpControlExecutor(
       reason,
     });
 
+    const discoveryClient =
+      options.discoveryClientForBinding?.(binding, command) ??
+      options.discoveryClient;
     const report = await reloadMcpSurface({
       binding,
       manager: options.manager,
-      discoveryClient: options.discoveryClient,
+      discoveryClient,
       catalogId: options.catalogId(binding, command),
       previousToolNames: options.previousToolNames?.(binding, command),
       inventoryRequest: options.inventoryRequest?.(binding, command),

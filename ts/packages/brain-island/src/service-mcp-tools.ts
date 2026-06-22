@@ -282,7 +282,7 @@ function matchesSession(
   );
 }
 
-function createDefaultMcpDiscoveryClient(
+export function createDefaultMcpDiscoveryClient(
   binding: McpBindingRecord,
   config?: ServiceMcpEndpointConfig,
 ): McpToolDiscoveryClient | undefined {

@@ -178,6 +178,14 @@ interface NativeBridgeBinding {
     kind: string;
     status: string;
   };
+  archiveSession(sessionId: string): {
+    handle: number;
+    sessionId: string;
+    agentId: string;
+    profileId: string;
+    kind: string;
+    status: string;
+  };
   routeAgentMessage(
     from: string,
     to: string,
@@ -567,6 +575,7 @@ export interface NativeBridgeModule {
   ensureConfiguredSession(
     config: NativeSessionConfigInput,
   ): Promise<NativeSessionStateSummary>;
+  archiveSession(sessionId: SessionId): Promise<NativeSessionStateSummary>;
   /**
    * Internal agent-to-agent routing trigger. This publishes through
    * CoreEngine::route_agent_message and runs scheduler evaluation.
@@ -689,6 +698,7 @@ export const nativeManifestOperationNames = [
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
+  "archive_session",
   "ensure_configured_session",
   "register_scheduled_wake_job",
   "run_scheduler_tick",
@@ -733,6 +743,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
+    archiveSession: unavailable("archive_session"),
     ensureConfiguredSession: unavailable("ensure_configured_session"),
     registerScheduledWakeJob: unavailable("register_scheduled_wake_job"),
     registerScheduledHostJob: unavailable("register_scheduled_host_job"),
@@ -956,6 +967,7 @@ function createNativeBridgeModule(
     createSession: async (config) => binding.createSession(config),
     ensureConfiguredSession: async (config) =>
       binding.ensureConfiguredSession(config),
+    archiveSession: async (sessionId) => binding.archiveSession(sessionId),
     routeAgentMessage: async (from, to, body, correlationId) =>
       binding.routeAgentMessage(from, to, body, correlationId),
     enqueueBodyFollowUpMessage: async (input) =>

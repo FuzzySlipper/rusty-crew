@@ -1,6 +1,6 @@
 # Rusty View Chat API Contract
 
-Status: v0 contract spike for task 3171.
+Status: v0 implemented contract for the Rusty View chat support tasks.
 
 Rusty View needs a durable browser-facing chat protocol over Rusty Crew sessions.
 The existing admin diagnostics and direct-debug endpoints are useful references,
@@ -60,12 +60,12 @@ them generically from `payload.summary` or raw JSON.
 
 ## Command Support
 
-Rusty already has slash command routing for `/help`, `/status`, `/session`,
-`/new`, and `/reload-mcp`. That is not yet a command registry API.
+Rusty has slash command routing and chat command discovery for `/help`,
+`/status`, `/session`, `/new`, and `/reload-mcp`.
 
-The chat contract adds a discoverable registry containing command metadata:
-name, aliases, description, argument schema, session-kind constraints,
-read-only versus mutating behavior, and auth/control requirements.
+The chat registry contains command metadata: name, aliases, description,
+argument schema, session-kind constraints, read-only versus mutating behavior,
+and auth/control requirements.
 
 `/new` keeps archive-and-create semantics. It never clears context in place and
 never creates a new session implicitly from a normal message.
@@ -76,6 +76,26 @@ Chat routes are browser-facing and distinct from admin/control routes. They must
 support CORS and SSE headers deliberately without broadening admin mutability.
 No endpoint should expose bearer tokens, profile secrets, full prompts, or full
 tool payloads unless a separate debug route explicitly asks for them.
+
+Auth posture:
+
+- Household/LAN development may run with `RUSTY_CREW_ADMIN_AUTH_MODE=none`.
+  In that mode Rusty View can connect to `/v1/chat/*` without a bearer token.
+- Protected/local-token mode uses the existing bearer token requirement. Rusty
+  View should send `Authorization: Bearer <token>` for chat requests when the
+  service is configured with `RUSTY_CREW_ADMIN_AUTH_MODE=bearer`.
+- Normal messages never create sessions implicitly. A new session remains an
+  explicit command/control action such as `/new`.
+
+CORS posture:
+
+- CORS and `OPTIONS` preflight support are intentionally limited to
+  `/v1/chat/*`.
+- Chat preflight allows `GET`, `POST`, and `OPTIONS`, plus `authorization`,
+  `content-type`, `idempotency-key`, `last-event-id`, and `x-request-id`
+  request headers.
+- SSE responses from `/v1/chat/sessions/{session_id}/stream` include the same
+  chat CORS headers and keep admin/control routes outside this browser surface.
 
 ## Implementation Notes
 

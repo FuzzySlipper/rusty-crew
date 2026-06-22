@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { createServer as createHttpServer, type Server } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentId } from "@rusty-crew/contracts";
@@ -8,18 +9,51 @@ import { startRustyCrewServiceHost } from "./service-host.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-read-api-"));
 const port = await openPort();
+const mcpPort = await openPort();
 const token = "rusty-view-chat-token";
-writeRuntimeConfig(root);
+writeRuntimeConfig(root, mcpPort);
+const mcpServer = await startMcpServer(mcpPort);
 let host = await startHost();
 
 try {
-  const unauthorized = await get("/v1/chat/sessions");
-  assert.equal(unauthorized.status, 401);
+  const preflight = await options("/v1/chat/sessions", "http://rusty-view.local");
+  assert.equal(preflight.status, 204);
+  assert.equal(
+    preflight.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+  assert.ok(
+    preflight.headers
+      .get("access-control-allow-headers")
+      ?.includes("authorization"),
+  );
 
-  const page = await get("/v1/chat/sessions", token);
+  const unauthorized = await get("/v1/chat/sessions", undefined, {
+    origin: "http://rusty-view.local",
+  });
+  assert.equal(unauthorized.status, 401);
+  assert.equal(
+    unauthorized.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+
+  const adminPreflight = await options(
+    "/v1/admin/diagnostics",
+    "http://rusty-view.local",
+  );
+  assert.equal(adminPreflight.status, 401);
+  assert.equal(adminPreflight.headers.get("access-control-allow-origin"), null);
+
+  const page = await get("/v1/chat/sessions", token, {
+    origin: "http://rusty-view.local",
+  });
   assert.equal(page.status, 200);
+  assert.equal(
+    page.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
   assert.equal(page.body.ok, true);
-  assert.equal(page.body.data.total, 1);
+  assert.equal(page.body.data.total, 2);
   assert.equal(page.body.data.items[0]?.session_id, "chat-session");
   assert.equal(typeof page.body.data.items[0]?.latest_cursor, "string");
 
@@ -51,11 +85,18 @@ try {
   const streamResponse = await fetch(
     `http://127.0.0.1:${port}/v1/chat/sessions/chat-session/stream`,
     {
-      headers: { authorization: `Bearer ${token}` },
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "http://rusty-view.local",
+      },
       signal: streamAbort.signal,
     },
   );
   assert.equal(streamResponse.status, 200);
+  assert.equal(
+    streamResponse.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
   assert.ok(
     streamResponse.headers.get("content-type")?.includes("text/event-stream"),
   );
@@ -169,16 +210,30 @@ try {
   assert.equal(unknownCommand.body.data.reason_code, "unknown_command");
 
   const reloadCommand = await post(
-    "/v1/chat/sessions/chat-session/commands",
+    "/v1/chat/sessions/mcp-session/commands",
     token,
     {
       command: "/reload-mcp",
       actor: { id: "human-operator", kind: "human" },
     },
   );
-  assert.equal(reloadCommand.status, 409);
+  assert.equal(reloadCommand.status, 200);
   assert.equal(reloadCommand.body.data.command_name, "reload-mcp");
-  assert.equal(reloadCommand.body.data.status, "failed");
+  assert.equal(reloadCommand.body.data.status, "completed");
+
+  const newCommand = await post(
+    "/v1/chat/sessions/chat-session/commands",
+    token,
+    {
+      command: "/new fresh start",
+      actor: { id: "human-operator", kind: "human" },
+    },
+  );
+  assert.equal(newCommand.status, 200);
+  assert.equal(newCommand.body.data.command_name, "new");
+  assert.equal(newCommand.body.data.status, "completed");
+  assert.equal(newCommand.body.data.old_session_id, "chat-session");
+  assert.equal(typeof newCommand.body.data.new_session_id, "string");
 
   await host.stop();
   host = await startHost();
@@ -187,6 +242,18 @@ try {
   assert.equal(restarted.status, 200);
   assert.equal(restarted.body.data.events[0]?.kind, "session_snapshot");
   assert.equal(restarted.body.data.session.session_id, "chat-session");
+
+  await host.stop();
+  host = await startHost({ RUSTY_CREW_ADMIN_AUTH_MODE: "none" });
+  const noAuth = await get("/v1/chat/commands", undefined, {
+    origin: "http://rusty-view.local",
+  });
+  assert.equal(noAuth.status, 200);
+  assert.equal(noAuth.body.ok, true);
+  assert.equal(
+    noAuth.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
 
   console.log(
     JSON.stringify(
@@ -204,10 +271,11 @@ try {
   );
 } finally {
   await host.stop().catch(() => undefined);
+  await closeServer(mcpServer).catch(() => undefined);
   rmSync(root, { recursive: true, force: true });
 }
 
-async function startHost() {
+async function startHost(extraEnv: Record<string, string> = {}) {
   return startRustyCrewServiceHost({
     env: {
       RUSTY_CREW_DATA_DIR: root,
@@ -217,17 +285,41 @@ async function startHost() {
       RUSTY_CREW_ADMIN_TOKEN: token,
       RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "0",
       RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "0",
+      ...extraEnv,
     },
   });
 }
 
-async function get(path: string, bearer?: string) {
+async function get(
+  path: string,
+  bearer?: string,
+  extraHeaders: Record<string, string> = {},
+) {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-    headers: bearer ? { authorization: `Bearer ${bearer}` } : undefined,
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      ...extraHeaders,
+    },
   });
   return {
     status: response.status,
+    headers: response.headers,
     body: (await response.json()) as any,
+  };
+}
+
+async function options(path: string, origin: string) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "OPTIONS",
+    headers: {
+      origin,
+      "access-control-request-method": "GET",
+      "access-control-request-headers": "authorization,content-type",
+    },
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
   };
 }
 
@@ -248,6 +340,7 @@ async function post(
   });
   return {
     status: response.status,
+    headers: response.headers,
     body: (await response.json()) as any,
   };
 }
@@ -317,7 +410,7 @@ interface SseEvent {
   kind: string;
 }
 
-function writeRuntimeConfig(dataRoot: string): void {
+function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
   const configDir = join(dataRoot, "config");
   const profilesDir = join(configDir, "profiles");
   const skillsDir = join(configDir, "skills");
@@ -336,6 +429,27 @@ function writeRuntimeConfig(dataRoot: string): void {
             agentId: "chat-agent",
             profileId: "chat-profile",
             kind: "full",
+          },
+          {
+            sessionId: "mcp-session",
+            agentId: "mcp-agent",
+            profileId: "chat-profile",
+            kind: "full",
+          },
+        ],
+        mcpBindings: [
+          {
+            bindingId: "mcp-binding",
+            adapterId: "mcp-ts-main",
+            agentId: "mcp-agent",
+            sessionId: "mcp-session",
+            profileId: "chat-profile",
+            serverNames: ["mcp-smoke"],
+            endpointRef: `http://127.0.0.1:${mcpServerPort}/mcp`,
+            transport: "streamable_http",
+            toolProfileKey: "chat-profile",
+            status: "active",
+            diagnostics: {},
           },
         ],
       },
@@ -366,9 +480,38 @@ function writeRuntimeConfig(dataRoot: string): void {
   );
 }
 
+function startMcpServer(portToListen: number): Promise<Server> {
+  const server = createHttpServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/mcp") {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          tools: [
+            {
+              name: "smoke_tool",
+              description: "Smoke MCP tool.",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+        },
+      }),
+    );
+  });
+  return new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(portToListen, "127.0.0.1", () => resolveListen(server));
+  });
+}
+
 function openPort(): Promise<number> {
   return new Promise((resolveOpenPort, rejectOpenPort) => {
-    const server = createServer();
+    const server = createTcpServer();
     server.once("error", rejectOpenPort);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
@@ -383,5 +526,11 @@ function openPort(): Promise<number> {
         else resolveOpenPort(open);
       });
     });
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolveClose, rejectClose) => {
+    server.close((error) => (error ? rejectClose(error) : resolveClose()));
   });
 }

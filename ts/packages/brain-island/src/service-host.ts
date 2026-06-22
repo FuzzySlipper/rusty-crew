@@ -12,6 +12,7 @@ import type {
   ChannelBindingRecord,
   CoreEvent,
   EngineHandle,
+  McpBindingRecord,
   ProfileId,
   ScheduledJobStatus,
   ScheduledRunSummary,
@@ -55,6 +56,9 @@ import {
   type AdminControlResponse,
   handleAdminControlRequest,
 } from "./admin-control-api.js";
+import { createNewSessionLifecycleExecutor } from "./new-session-lifecycle.js";
+import { createReloadMcpControlExecutor } from "./reload-mcp-control.js";
+import { createDefaultMcpDiscoveryClient } from "./service-mcp-tools.js";
 import {
   handleAdminDiagnosticsRequest,
   type AdminDiagnosticsContext,
@@ -392,13 +396,20 @@ async function handleHttpRequest(
     );
   }
 
+  if (isChatRoute(url.pathname) && (request.method ?? "GET").toUpperCase() === "OPTIONS") {
+    return chatCorsPreflightResponse(request);
+  }
+
   if (!isAuthorized(request, state.config.admin.token, state)) {
-    return failure(401, requestId(request), {
+    const unauthorized = failure(401, requestId(request), {
       code: "unauthorized",
       reason_code: "missing_or_invalid_bearer_token",
       message: "admin HTTP requires a valid bearer token",
       retryable: false,
     });
+    return isChatRoute(url.pathname)
+      ? withChatCors(unauthorized, request)
+      : unauthorized;
   }
 
   if (url.pathname.startsWith(CONTROL_ROUTE_PREFIX)) {
@@ -424,18 +435,18 @@ async function handleHttpRequest(
     return result;
   }
 
-  if (url.pathname.startsWith("/v1/chat/")) {
+  if (isChatRoute(url.pathname)) {
     const streamResult = await handleRustyViewChatStreamRequest(
       request,
       url,
       state,
     );
-    if (streamResult !== undefined) return streamResult;
+    if (streamResult !== undefined) return withChatCors(streamResult, request);
     const body =
       (request.method ?? "GET").toUpperCase() === "POST"
         ? await readJsonBody(request)
         : undefined;
-    return handleRustyViewChatRequest(
+    const result = await handleRustyViewChatRequest(
       {
         method: request.method ?? "GET",
         url: url.toString(),
@@ -454,6 +465,7 @@ async function handleHttpRequest(
         now: state.now,
       },
     );
+    return withChatCors(result, request);
   }
 
   if (url.pathname.startsWith("/v1/debug/")) {
@@ -663,6 +675,7 @@ async function handleRustyViewChatStreamRequest(
         session,
         replay,
         closeAfterReplay,
+        request,
         response,
       });
     },
@@ -674,6 +687,7 @@ function writeRustyViewChatSseStream(input: {
   session: SessionState;
   replay: readonly ChatEvent[];
   closeAfterReplay: boolean;
+  request: IncomingMessage;
   response: ServerResponse;
 }): void {
   const { state, session, response } = input;
@@ -682,6 +696,7 @@ function writeRustyViewChatSseStream(input: {
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
     "x-accel-buffering": "no",
+    ...chatCorsHeaders(input.request),
   });
   for (const event of input.replay) {
     writeSseEvent(response, event);
@@ -1501,6 +1516,93 @@ function createServiceControlExecutor(
         result: session,
       };
     },
+    newSession: createNewSessionLifecycleExecutor({
+      loadTemplate: async (currentSessionId) => {
+        const session = await serviceSessionById(state, currentSessionId);
+        const channelBinding = channelBindingForSession(state, currentSessionId);
+        return {
+          agentId: session.agentId,
+          profileId: session.profileId,
+          kind: session.kind,
+          channelBindingId: channelBinding?.bindingId,
+          channelId: channelBinding?.externalChannelId,
+          toolProfileKey: mcpBindingForSession(state, currentSessionId)
+            ?.toolProfileKey,
+          sessionConfig: {
+            resourceLimits: session.resourceLimits,
+            toolProfile: session.toolProfile,
+            historyWindow: session.historyWindow,
+          },
+        };
+      },
+      generateSessionId: (template) => {
+        state.nextWakeSequence += 1;
+        return [
+          template.agentId,
+          "session",
+          state.now().replace(/[^0-9A-Za-z]/g, "").slice(0, 17),
+          state.nextWakeSequence,
+        ].join("-");
+      },
+      archiveSession: async ({ sessionId }) => {
+        await state.bridge.archiveSession(sessionId as SessionId);
+      },
+      createSession: async ({ sessionId, template }) => {
+        const sessionConfig = optionalRecord(template.sessionConfig) ?? {};
+        await state.bridge.createSession({
+          sessionId,
+          agentId: template.agentId,
+          profileId: template.profileId,
+          kind: template.kind,
+          resourceLimits: compactRecord(
+            optionalRecord(sessionConfig.resourceLimits) ?? {},
+          ),
+          toolProfile:
+            optionalRecord(sessionConfig.toolProfile) === undefined
+              ? undefined
+              : (sessionConfig.toolProfile as never),
+          historyWindow:
+            optionalRecord(sessionConfig.historyWindow) === undefined
+              ? undefined
+              : (compactRecord(sessionConfig.historyWindow as never) as never),
+        });
+      },
+      auditSink: {
+        writeNewSessionLifecycleAudit(event) {
+          recordServiceEvent(state, {
+            source: "service-host",
+            eventType: `new_session_${event.phase}`,
+            summary: `New-session lifecycle ${event.phase} for ${event.oldSessionId}.`,
+          });
+        },
+      },
+      now: state.now,
+    }),
+    reloadMcp: createReloadMcpControlExecutor({
+      resolveBinding: (sessionId) => mcpBindingForSession(state, sessionId),
+      manager: state.mcpManager,
+      discoveryClient: {
+        listTools: () => [],
+      },
+      discoveryClientForBinding: (binding) =>
+        createDefaultMcpDiscoveryClient(binding, state.config.mcp),
+      catalogId: (binding) => `mcp:${binding.toolProfileKey}`,
+      previousToolNames: () => [],
+      inventoryRequest: (binding) => ({
+        requestedToolsets: [`mcp:${binding.toolProfileKey}`],
+      }),
+      auditSink: {
+        writeReloadMcpLifecycleAudit(event) {
+          recordServiceEvent(state, {
+            source: "service-host",
+            eventType: `reload_mcp_${event.phase}`,
+            severity: event.phase === "degraded" ? "warning" : undefined,
+            summary: `Reload MCP lifecycle ${event.phase} for ${event.sessionId}.`,
+          });
+        },
+      },
+      now: state.now,
+    }),
     cancelDelegation: async (command) => {
       const session = await state.bridge.cancelDelegatedSession(
         command.target.sessionId as never,
@@ -1658,6 +1760,37 @@ function createServiceControlExecutor(
       };
     },
   };
+}
+
+async function serviceSessionById(
+  state: ServiceState,
+  sessionId: string,
+): Promise<SessionState> {
+  const session = (await state.bridge.listSessions()).find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  if (!session) {
+    throw new Error(`session ${sessionId} was not found`);
+  }
+  return session;
+}
+
+function channelBindingForSession(
+  state: ServiceState,
+  sessionId: string,
+): ChannelBindingRecord | undefined {
+  return state.runtimeConfig.channelBindings.find(
+    (binding) => binding.sessionId === sessionId,
+  );
+}
+
+function mcpBindingForSession(
+  state: ServiceState,
+  sessionId: string,
+): McpBindingRecord | undefined {
+  return state.runtimeConfig.mcpBindings.find(
+    (binding) => binding.sessionId === sessionId,
+  );
 }
 
 async function collectTableCounts(
@@ -3442,6 +3575,45 @@ function writeJsonResponse(
   );
 }
 
+function isChatRoute(pathname: string): boolean {
+  return pathname === "/v1/chat" || pathname.startsWith("/v1/chat/");
+}
+
+function chatCorsPreflightResponse(request: IncomingMessage): ServiceRouteResult {
+  return {
+    status: 204,
+    headers: chatCorsHeaders(request),
+    body: "",
+  };
+}
+
+function withChatCors<T extends ServiceRouteResult>(
+  result: T,
+  request: IncomingMessage,
+): T {
+  if (isRawServiceRouteResult(result)) return result;
+  return {
+    ...result,
+    headers: {
+      ...result.headers,
+      ...chatCorsHeaders(request),
+    },
+  };
+}
+
+function chatCorsHeaders(request: IncomingMessage): Record<string, string> {
+  const origin = stringHeader(request, "origin") ?? "*";
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers":
+      "authorization,content-type,idempotency-key,last-event-id,x-request-id",
+    "access-control-expose-headers": "content-type",
+    "access-control-max-age": "600",
+    vary: origin === "*" ? "Origin" : "Origin",
+  };
+}
+
 function isRawServiceRouteResult(
   result: ServiceRouteResult,
 ): result is RawServiceRouteResult {
@@ -4125,6 +4297,20 @@ function recordBody(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function compactRecord(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== null && entry !== undefined),
+  );
 }
 
 function requestId(request: IncomingMessage): string {

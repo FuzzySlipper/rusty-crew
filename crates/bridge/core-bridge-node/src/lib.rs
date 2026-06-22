@@ -138,6 +138,13 @@ impl NativeBridge {
         self.engine()?.ensure_configured_session(config)
     }
 
+    pub fn archive_session(
+        &self,
+        session_id: SessionId,
+    ) -> CoreResult<rusty_crew_core_bridge_api::SessionState> {
+        self.engine()?.archive_session(&session_id)
+    }
+
     pub fn list_sessions(&self) -> CoreResult<Vec<rusty_crew_core_bridge_api::SessionState>> {
         self.engine()?.list_sessions()
     }
@@ -1439,6 +1446,15 @@ impl NativeBridgeBinding {
         let bridge = self.bridge()?;
         let state = bridge
             .ensure_configured_session(js_session_config(config)?)
+            .map_err(to_napi_error)?;
+        Ok(to_js_session_state(state))
+    }
+
+    #[napi]
+    pub fn archive_session(&self, session_id: String) -> napi::Result<JsSessionState> {
+        let bridge = self.bridge()?;
+        let state = bridge
+            .archive_session(SessionId::new(session_id))
             .map_err(to_napi_error)?;
         Ok(to_js_session_state(state))
     }

@@ -881,6 +881,7 @@ export const manifestOperationNames = [
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
+  "archive_session",
   "ensure_configured_session",
   "register_scheduled_wake_job",
   "register_scheduled_host_job",
