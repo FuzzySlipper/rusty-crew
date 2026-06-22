@@ -29,6 +29,7 @@ import type { ToolRegistry } from "./tool-registry.js";
 
 export type ServiceMcpToolDiscoveryClientFactory = (
   binding: McpBindingRecord,
+  config?: ServiceMcpEndpointConfig,
 ) =>
   | McpToolDiscoveryClient
   | undefined
@@ -36,12 +37,19 @@ export type ServiceMcpToolDiscoveryClientFactory = (
 
 export type ServiceMcpToolExecutorFactory = (
   binding: McpBindingRecord,
+  config?: ServiceMcpEndpointConfig,
 ) => McpToolExecutor | undefined;
+
+export interface ServiceMcpEndpointConfig {
+  baseUrl?: string;
+  requestTimeoutMs?: number;
+}
 
 export interface ServiceMcpToolCatalogInput {
   runtimeConfig: {
     mcpBindings: readonly McpBindingRecord[];
   };
+  mcpConfig?: ServiceMcpEndpointConfig;
   discoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   surfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
 }
@@ -101,7 +109,7 @@ export async function buildServiceMcpToolCatalog(
 
     const discoveryClient = await (
       input.discoveryClientFactory ?? createDefaultMcpDiscoveryClient
-    )(binding);
+    )(binding, input.mcpConfig);
     if (!discoveryClient) {
       profile.unavailableBindings.push(binding.bindingId);
       continue;
@@ -177,6 +185,7 @@ export async function buildServiceMcpToolCatalog(
 export function createServiceMcpToolResolver(input: {
   catalog: ServiceMcpToolCatalog;
   bridge?: Pick<NativeBridgeModule, "submitBrainEvent">;
+  mcpConfig?: ServiceMcpEndpointConfig;
   executorFactory?: ServiceMcpToolExecutorFactory;
 }): PiAgentToolResolver {
   return ({ wake }) =>
@@ -185,7 +194,7 @@ export function createServiceMcpToolResolver(input: {
       .flatMap(({ binding, candidate }) => {
         const executor = (
           input.executorFactory ?? createDefaultMcpToolExecutor
-        )(binding);
+        )(binding, input.mcpConfig);
         if (!executor) return [];
         const decision = evaluateMcpResourceHooks({
           binding,
@@ -274,12 +283,18 @@ function matchesSession(
 
 function createDefaultMcpDiscoveryClient(
   binding: McpBindingRecord,
+  config?: ServiceMcpEndpointConfig,
 ): McpToolDiscoveryClient | undefined {
-  const endpoint = httpEndpoint(binding.endpointRef);
+  const endpoint = endpointForBinding(binding, config);
   if (!endpoint) return undefined;
   return {
     async listTools() {
-      const response = await postJsonRpc(endpoint, "tools/list", {});
+      const response = await postJsonRpc(
+        endpoint.url,
+        "tools/list",
+        {},
+        endpoint.timeoutMs,
+      );
       const result = jsonRpcResult(response);
       const tools = resultRecord(result).tools;
       return Array.isArray(tools) ? tools : [];
@@ -289,15 +304,21 @@ function createDefaultMcpDiscoveryClient(
 
 function createDefaultMcpToolExecutor(
   binding: McpBindingRecord,
+  config?: ServiceMcpEndpointConfig,
 ): McpToolExecutor | undefined {
-  const endpoint = httpEndpoint(binding.endpointRef);
+  const endpoint = endpointForBinding(binding, config);
   if (!endpoint) return undefined;
   return {
     async callTool(input) {
-      const response = await postJsonRpc(endpoint, "tools/call", {
-        name: input.toolName,
-        arguments: input.arguments,
-      });
+      const response = await postJsonRpc(
+        endpoint.url,
+        "tools/call",
+        {
+          name: input.toolName,
+          arguments: input.arguments,
+        },
+        endpoint.timeoutMs,
+      );
       const result = jsonRpcResult(response);
       const record = resultRecord(result);
       return {
@@ -307,6 +328,21 @@ function createDefaultMcpToolExecutor(
       } satisfies McpToolExecutionResult;
     },
   };
+}
+
+function endpointForBinding(
+  binding: McpBindingRecord,
+  config: ServiceMcpEndpointConfig | undefined,
+): { url: URL; timeoutMs: number | undefined } | undefined {
+  const direct = httpEndpoint(binding.endpointRef);
+  if (direct) {
+    return { url: direct, timeoutMs: config?.requestTimeoutMs };
+  }
+  const configured = configuredMcpEndpoint(binding, config);
+  if (configured) {
+    return { url: configured, timeoutMs: config?.requestTimeoutMs };
+  }
+  return undefined;
 }
 
 function httpEndpoint(endpointRef: string): URL | undefined {
@@ -320,29 +356,60 @@ function httpEndpoint(endpointRef: string): URL | undefined {
   }
 }
 
+function configuredMcpEndpoint(
+  binding: McpBindingRecord,
+  config: ServiceMcpEndpointConfig | undefined,
+): URL | undefined {
+  if (!config?.baseUrl) return undefined;
+  try {
+    const endpointRef = new URL(binding.endpointRef);
+    if (endpointRef.protocol !== "config:" || endpointRef.hostname !== "mcp") {
+      return undefined;
+    }
+    const url = new URL(config.baseUrl);
+    url.searchParams.set("tool_profile", binding.toolProfileKey);
+    return url;
+  } catch {
+    return undefined;
+  }
+}
+
 async function postJsonRpc(
   endpoint: URL,
   method: string,
   params: Record<string, unknown>,
+  timeoutMs: number | undefined,
 ): Promise<unknown> {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: JSON_RPC_VERSION,
-      id: `${Date.now()}:${method}`,
-      method,
-      params,
-    }),
-  });
-  const body = await response.json();
-  if (!response.ok) {
-    throw new Error(`MCP ${method} failed with HTTP ${response.status}`);
+  const controller = new AbortController();
+  const timeout =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: JSON_RPC_VERSION,
+        id: `${Date.now()}:${method}`,
+        method,
+        params,
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(`MCP ${method} failed with HTTP ${response.status}`);
+    }
+    return body;
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
   }
-  return body;
 }
 
 function jsonRpcResult(response: unknown): unknown {

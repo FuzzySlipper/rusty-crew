@@ -4,6 +4,7 @@ import {
   loadDenSuccessorGatewayConfig,
   type DenSuccessorGatewayConfig,
   type DenSuccessorGatewayEnv,
+  type DenMemoryApiMode,
   type DenMemoryClientPaths,
 } from "@rusty-crew/adapter-den";
 
@@ -28,12 +29,15 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_DEN_MEMORY_BASE_URL?: string;
   RUSTY_CREW_DEN_MEMORY_TOKEN?: string;
   RUSTY_CREW_DEN_MEMORY_BEARER_TOKEN?: string;
+  RUSTY_CREW_DEN_MEMORY_API_MODE?: string;
   RUSTY_CREW_DEN_MEMORY_TIMEOUT_MS?: string;
   RUSTY_CREW_DEN_MEMORY_READ_PATH?: string;
   RUSTY_CREW_DEN_MEMORY_SEARCH_PATH?: string;
   RUSTY_CREW_DEN_MEMORY_RECALL_PATH?: string;
   RUSTY_CREW_DEN_MEMORY_STORE_PATH?: string;
   RUSTY_CREW_DEN_MEMORY_PROPOSE_PATH?: string;
+  RUSTY_CREW_MCP_BASE_URL?: string;
+  RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS?: string;
 }
 
 export interface RustyCrewServicePaths {
@@ -66,8 +70,14 @@ export interface RustyCrewBackgroundConfig {
 export interface RustyCrewDenMemoryConfig {
   baseUrl?: string;
   bearerToken?: string;
+  apiMode: DenMemoryApiMode;
   timeoutMs: number;
   paths: Partial<DenMemoryClientPaths>;
+}
+
+export interface RustyCrewMcpConfig {
+  baseUrl?: string;
+  requestTimeoutMs: number;
 }
 
 export interface RustyCrewServiceConfig {
@@ -76,6 +86,7 @@ export interface RustyCrewServiceConfig {
   background: RustyCrewBackgroundConfig;
   denConversationProjectId: string;
   denMemory: RustyCrewDenMemoryConfig;
+  mcp: RustyCrewMcpConfig;
   denSuccessorGateway?: DenSuccessorGatewayConfig;
 }
 
@@ -160,6 +171,7 @@ export function loadRustyCrewServiceConfig(
     normalizeOptional(env.RUSTY_CREW_DEN_CONVERSATION_PROJECT_ID) ??
     "rusty-crew";
   const denMemory = loadRustyCrewDenMemoryConfig(env);
+  const mcp = loadRustyCrewMcpConfig(env);
 
   validateRustyCrewServiceConfig({
     paths,
@@ -167,6 +179,7 @@ export function loadRustyCrewServiceConfig(
     background,
     denConversationProjectId,
     denMemory,
+    mcp,
     denSuccessorGateway,
   });
   return {
@@ -175,6 +188,7 @@ export function loadRustyCrewServiceConfig(
     background,
     denConversationProjectId,
     denMemory,
+    mcp,
     denSuccessorGateway,
   };
 }
@@ -204,6 +218,7 @@ export function validateRustyCrewServiceConfig(
   }
 
   validateDenMemoryConfig(config.denMemory);
+  validateMcpConfig(config.mcp);
 }
 
 export function ensureRustyCrewServiceDirectories(
@@ -370,6 +385,7 @@ function loadRustyCrewDenMemoryConfig(
     bearerToken:
       normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_BEARER_TOKEN) ??
       normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_TOKEN),
+    apiMode: parseDenMemoryApiMode(env.RUSTY_CREW_DEN_MEMORY_API_MODE),
     timeoutMs: parsePositiveInteger(
       env.RUSTY_CREW_DEN_MEMORY_TIMEOUT_MS,
       5_000,
@@ -383,6 +399,15 @@ function loadRustyCrewDenMemoryConfig(
       propose: normalizeOptional(env.RUSTY_CREW_DEN_MEMORY_PROPOSE_PATH),
     },
   };
+}
+
+function parseDenMemoryApiMode(input: string | undefined): DenMemoryApiMode {
+  const value = normalizeOptional(input);
+  if (value === undefined || value === "v1") return "v1";
+  if (value === "den-memories-v0") return "den-memories-v0";
+  throw new Error(
+    "RUSTY_CREW_DEN_MEMORY_API_MODE must be v1 or den-memories-v0",
+  );
 }
 
 function validateDenMemoryConfig(config: RustyCrewDenMemoryConfig): void {
@@ -404,9 +429,35 @@ function validateDenMemoryConfig(config: RustyCrewDenMemoryConfig): void {
 function hasDenMemorySettings(config: RustyCrewDenMemoryConfig): boolean {
   return Boolean(
     config.bearerToken ||
+    config.apiMode !== "v1" ||
     config.timeoutMs !== 5_000 ||
     Object.values(config.paths).some((value) => value !== undefined),
   );
+}
+
+function loadRustyCrewMcpConfig(env: RustyCrewServiceEnv): RustyCrewMcpConfig {
+  return {
+    baseUrl: normalizeOptional(env.RUSTY_CREW_MCP_BASE_URL),
+    requestTimeoutMs: parsePositiveInteger(
+      env.RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS,
+      30_000,
+      "RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS",
+    ),
+  };
+}
+
+function validateMcpConfig(config: RustyCrewMcpConfig): void {
+  if (!config.baseUrl) return;
+  try {
+    const url = new URL(config.baseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("protocol must be http or https");
+    }
+  } catch (error) {
+    throw new Error("RUSTY_CREW_MCP_BASE_URL must be a valid HTTP(S) URL", {
+      cause: error,
+    });
+  }
 }
 
 function isLoopbackHost(host: string): boolean {

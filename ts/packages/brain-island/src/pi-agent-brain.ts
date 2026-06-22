@@ -152,6 +152,12 @@ function mapPiAgentEvent(event: PiAgentEvent): BrainEvent | undefined {
         ? { type: "text_delta", text: event.assistantMessageEvent.delta }
         : undefined;
     }
+    case "message_end": {
+      const text = assistantMessageText(event.message);
+      if (text) return { type: "text_delta", text };
+      const errorText = assistantMessageErrorText(event.message);
+      return errorText ? { type: "text_delta", text: errorText } : undefined;
+    }
     case "tool_execution_start":
       return { type: "tool_call_started", toolName: event.toolName };
     case "tool_execution_end":
@@ -165,6 +171,31 @@ function mapPiAgentEvent(event: PiAgentEvent): BrainEvent | undefined {
     default:
       return undefined;
   }
+}
+
+function assistantMessageText(message: PiAgentMessage): string | undefined {
+  if (message.role !== "assistant") return undefined;
+  const content = Array.isArray(message.content) ? message.content : [];
+  const text = content
+    .flatMap((item) =>
+      item.type === "text" && typeof item.text === "string" ? [item.text] : [],
+    )
+    .join("");
+  return text.trim() ? text : undefined;
+}
+
+function assistantMessageErrorText(
+  message: PiAgentMessage,
+): string | undefined {
+  if (message.role !== "assistant") return undefined;
+  const maybeError = message as {
+    stopReason?: string;
+    errorMessage?: string;
+  };
+  if (maybeError.stopReason !== "error" || !maybeError.errorMessage?.trim()) {
+    return undefined;
+  }
+  return `LLM error: ${maybeError.errorMessage.trim()}`;
 }
 
 function createBrainActionCollector(): BrainActionCollector {

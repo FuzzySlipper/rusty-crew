@@ -906,7 +906,10 @@ function profileConfigIssues(
       ? "channelDefaults.wakePolicy is declarative; a runtime channel binding is still required"
       : undefined,
     profile.runtime?.maxTokensPerTurn
-      ? "runtimeConfig.maxTokensPerTurn is preserved; modelConfig.maxTokens/maxOutputTokens drives current model output limits"
+      ? `runtimeConfig.maxTokensPerTurn caps model output tokens at ${Math.min(
+          profile.modelConfig.maxOutputTokens ?? 128,
+          profile.runtime.maxTokensPerTurn,
+        )}`
       : undefined,
     profile.runtime?.maxTurnDurationMs
       ? "runtimeConfig.maxTurnDurationMs is preserved for diagnostics but is not yet enforced as a per-turn timeout"

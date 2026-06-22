@@ -8,7 +8,6 @@ import type {
   AgentOptions as PiAgentOptions,
   AgentTool,
 } from "@earendil-works/pi-agent-core";
-import type { McpToolExecutor } from "@rusty-crew/adapter-mcp";
 import type {
   AgentId,
   BrainEvent,
@@ -21,6 +20,7 @@ import {
   applyRustyCrewRuntimeConfig,
   loadRustyCrewRuntimeConfig,
 } from "./service-runtime-config.js";
+import type { DenRouterAgentOptions } from "./den-router-agent.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;
@@ -33,6 +33,13 @@ const memoryRequests: Array<{
   url: string;
   authorization?: string;
   body: Record<string, unknown>;
+}> = [];
+const mcpRequests: Array<{
+  url: string;
+  method?: string;
+  toolProfile?: string | null;
+  toolName?: string;
+  arguments?: unknown;
 }> = [];
 const requestedToolNames = [
   "browser_snapshot",
@@ -135,27 +142,70 @@ try {
       typeof init?.body === "string"
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : {};
-    memoryRequests.push({
-      url: url.toString(),
-      authorization: header(init?.headers, "authorization"),
-      body,
-    });
-    assert.equal(url.pathname, "/memory/recall");
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        data: {
-          memories: [
+    if (url.hostname === "den-memory.local") {
+      memoryRequests.push({
+        url: url.toString(),
+        authorization: header(init?.headers, "authorization"),
+        body,
+      });
+      assert.equal(url.pathname, "/memory/recall");
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          data: {
+            memories: [
+              {
+                id: "service-memory-1",
+                summary: "Den memory is available through service config.",
+              },
+            ],
+            total: 1,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url.hostname === "mcp.local") {
+      const method = typeof body.method === "string" ? body.method : undefined;
+      const params = isRecord(body.params) ? body.params : {};
+      const toolName =
+        isRecord(params) && typeof params.name === "string"
+          ? params.name
+          : undefined;
+      mcpRequests.push({
+        url: url.toString(),
+        method,
+        toolProfile: url.searchParams.get("tool_profile"),
+        toolName,
+        arguments: isRecord(params) ? params.arguments : undefined,
+      });
+      if (method === "tools/list") {
+        return jsonRpcResponse(body.id, {
+          tools: [
             {
-              id: "service-memory-1",
-              summary: "Den memory is available through service config.",
+              name: "search",
+              description: "Search field MCP profile resources.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  query: { type: "string", minLength: 1 },
+                },
+                required: ["query"],
+              },
             },
           ],
-          total: 1,
-        },
-      }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
+        });
+      }
+      if (method === "tools/call") {
+        return jsonRpcResponse(body.id, {
+          content: `mcp:field-mcp:${toolName}`,
+          details: {
+            sourceToolName: toolName,
+          },
+        });
+      }
+    }
+    throw new Error(`unexpected fetch to ${url.toString()}`);
   }) satisfies typeof fetch;
 
   writeRuntimeConfig(root);
@@ -165,6 +215,8 @@ try {
     RUSTY_CREW_DEN_MEMORY_BASE_URL: "http://den-memory.local",
     RUSTY_CREW_DEN_MEMORY_TOKEN: "memory-token",
     RUSTY_CREW_DEN_MEMORY_RECALL_PATH: "/memory/recall",
+    RUSTY_CREW_MCP_BASE_URL: "http://mcp.local/mcp",
+    RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS: "10000",
   });
   const runtimeConfig = await loadRustyCrewRuntimeConfig(serviceConfig);
   const engine = await native.initializeEngine({
@@ -175,53 +227,17 @@ try {
   });
   const outputs: Record<string, string> = {};
   const selectedToolNames: string[] = [];
-  const mcpCalls: Array<{
-    bindingId: string;
-    toolName: string;
-    arguments: unknown;
-  }> = [];
+  const denRouterOptions: DenRouterAgentOptions[] = [];
   try {
-    const mcpExecutor: McpToolExecutor = {
-      callTool(input) {
-        mcpCalls.push({
-          bindingId: input.binding.bindingId,
-          toolName: input.toolName,
-          arguments: input.arguments,
-        });
-        return {
-          content: `mcp:${input.binding.bindingId}:${input.toolName}`,
-          details: {
-            bindingId: input.binding.bindingId,
-            sourceToolName: input.toolName,
-          },
-        };
-      },
-    };
     const applyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig,
       runtimeConfig,
       bridge: native,
-      createDenRouterAgentFactory: async () => (options) =>
-        new ToolCallingFakeAgent(options, outputs, selectedToolNames),
-      mcpToolDiscoveryClientFactory: (binding) =>
-        binding.bindingId === "field-mcp"
-          ? {
-              listTools: () => [
-                {
-                  name: "search",
-                  description: "Search field MCP profile resources.",
-                  inputSchema: {
-                    type: "object",
-                    properties: {
-                      query: { type: "string", minLength: 1 },
-                    },
-                    required: ["query"],
-                  },
-                },
-              ],
-            }
-          : undefined,
-      mcpToolExecutorFactory: () => mcpExecutor,
+      createDenRouterAgentFactory: async (options) => {
+        denRouterOptions.push(options ?? {});
+        return (agentOptions) =>
+          new ToolCallingFakeAgent(agentOptions, outputs, selectedToolNames);
+      },
     });
     const brain = applyResult.brainHandlesByProfileId["field-profile"];
     assert.ok(brain, "field-profile brain should be registered");
@@ -245,16 +261,55 @@ try {
     const events = await native.drainSubscriptionEvents(subscription, 16);
     await native.unsubscribeEvents(subscription);
 
+    assert.equal(denRouterOptions[0]?.maxTokens, 128);
     assert.deepEqual([...selectedToolNames].sort(), requestedToolNames);
     assert.match(outputs.git_status ?? "", /git status --short/);
     assert.equal(outputs.field_search, "mcp:field-mcp:search");
-    assert.deepEqual(mcpCalls, [
-      {
-        bindingId: "field-mcp",
-        toolName: "search",
-        arguments: { query: "runner mcp tools" },
-      },
-    ]);
+    assert.deepEqual(
+      mcpRequests.map((request) => ({
+        method: request.method,
+        toolProfile: request.toolProfile,
+        toolName: request.toolName,
+        arguments: request.arguments,
+      })),
+      [
+        {
+          method: "tools/list",
+          toolProfile: "field-profile-mcp",
+          toolName: undefined,
+          arguments: undefined,
+        },
+        {
+          method: "tools/call",
+          toolProfile: "field-profile-mcp",
+          toolName: "search",
+          arguments: { query: "runner mcp tools" },
+        },
+      ],
+    );
+    assert.deepEqual(
+      mcpRequests.map((request) => request.url),
+      [
+        "http://mcp.local/mcp?tool_profile=field-profile-mcp",
+        "http://mcp.local/mcp?tool_profile=field-profile-mcp",
+      ],
+    );
+    assert.deepEqual(
+      mcpRequests
+        .filter((request) => request.method === "tools/call")
+        .map((request) => ({
+          bindingId: "field-mcp",
+          toolName: request.toolName,
+          arguments: request.arguments,
+        })),
+      [
+        {
+          bindingId: "field-mcp",
+          toolName: "search",
+          arguments: { query: "runner mcp tools" },
+        },
+      ],
+    );
     assert.match(
       outputs.den_memory_recall ?? "",
       /Den memory is available through service config/,
@@ -296,7 +351,7 @@ try {
           toolHistoryRows:
             await native.diagnosticCountRows("tool_call_history"),
           memoryRequests: memoryRequests.length,
-          mcpCalls,
+          mcpRequests,
           gitStatusFirstLine: outputs.git_status?.split("\n")[0],
         },
         null,
@@ -358,6 +413,10 @@ function writeRuntimeConfig(targetRoot: string): void {
         modelConfig: {
           provider: "den-router",
           modelName: "fake-router-model",
+          maxTokens: 512,
+        },
+        runtimeConfig: {
+          maxTokensPerTurn: 128,
         },
         toolPolicy: {
           requestedTools: requestedToolNames,
@@ -382,6 +441,21 @@ function header(
     return headers.find(([key]) => key.toLowerCase() === name)?.[1];
   }
   return headers[name];
+}
+
+function jsonRpcResponse(id: unknown, result: unknown): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      result,
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return Boolean(input && typeof input === "object" && !Array.isArray(input));
 }
 
 function isToolCallEvent(

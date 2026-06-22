@@ -273,6 +273,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
     runtimeConfig: input.runtimeConfig,
+    mcpConfig: input.serviceConfig.mcp,
     discoveryClientFactory: input.mcpToolDiscoveryClientFactory,
     surfaceDiagnostics: input.mcpSurfaceDiagnostics,
   });
@@ -513,7 +514,7 @@ async function createConfiguredBrain(
       options.createDenRouterAgentFactory ?? createDenRouterPiAgentFactory
     )({
       modelId: profile.profile.modelConfig.modelName,
-      maxTokens: profile.profile.modelConfig.maxOutputTokens,
+      maxTokens: effectiveModelMaxTokens(profile),
       baseUrl: profile.profile.modelConfig.baseUrl,
       api: profile.profile.modelConfig.api,
       apiKeyEnv: profile.profile.modelConfig.apiKeyEnv,
@@ -563,6 +564,15 @@ async function createConfiguredBrain(
   };
 }
 
+function effectiveModelMaxTokens(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+): number {
+  const modelMaxTokens = profile.profile.modelConfig.maxOutputTokens ?? 128;
+  const turnMaxTokens = profile.profile.runtime?.maxTokensPerTurn;
+  if (turnMaxTokens === undefined) return modelMaxTokens;
+  return Math.min(modelMaxTokens, turnMaxTokens);
+}
+
 function createServiceToolResolver(
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
   options: {
@@ -589,6 +599,7 @@ function createServiceToolResolver(
       ? createServiceMcpToolResolver({
           catalog: options.mcpToolCatalog,
           bridge: options.bridge,
+          mcpConfig: options.serviceConfig?.mcp,
           executorFactory: options.mcpToolExecutorFactory,
         })
       : () => [],
@@ -646,6 +657,7 @@ function createServiceDenMemoryClient(
   return createDenMemoryClient({
     baseUrl: config.baseUrl,
     bearerToken: config.bearerToken,
+    apiMode: config.apiMode,
     timeoutMs: config.timeoutMs,
     paths: config.paths,
   });

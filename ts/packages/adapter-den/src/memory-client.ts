@@ -6,7 +6,10 @@ export interface DenMemoryClientOptions {
   fetchImpl?: DenMemoryFetch;
   timeoutMs?: number;
   paths?: Partial<DenMemoryClientPaths>;
+  apiMode?: DenMemoryApiMode;
 }
+
+export type DenMemoryApiMode = "v1" | "den-memories-v0";
 
 export interface DenMemoryClientPaths {
   read: string;
@@ -138,6 +141,9 @@ const defaultPaths = {
 export function createDenMemoryClient(
   options: DenMemoryClientOptions,
 ): DenMemoryClient {
+  if (options.apiMode === "den-memories-v0") {
+    return new DenMemoryV0Client(options);
+  }
   const transport = new DenMemoryHttpTransport(options);
   return {
     read: (request) => transport.post<DenMemoryRecord>("read", request),
@@ -150,6 +156,118 @@ export function createDenMemoryClient(
     propose: (request) =>
       transport.post<DenMemoryMutationResponse>("propose", request),
   };
+}
+
+class DenMemoryV0Client implements DenMemoryClient {
+  private readonly transport: DenMemoryHttpTransport;
+
+  constructor(options: DenMemoryClientOptions) {
+    this.transport = new DenMemoryHttpTransport({
+      ...options,
+      paths: {
+        recall: "/api/recall",
+        read: "/api/memory-entries",
+        search: "/api/memory-entries/search",
+        store: "/api/memory-entries",
+        propose: "/api/candidates",
+        ...options.paths,
+      },
+    });
+  }
+
+  async read(request: DenMemoryReadRequest): Promise<DenMemoryRecord> {
+    const slug = request.slug ?? request.id;
+    if (!slug) {
+      throw new DenMemoryClientError(
+        "invalid_request",
+        "Den Memories v0 read requires id or slug",
+        { retryable: false },
+      );
+    }
+    const entry = await this.transport.request<DenMemoryV0Record>(
+      "GET",
+      `${this.transport.path("read")}/${encodeURIComponent(slug)}`,
+    );
+    return memoryRecordFromV0(entry);
+  }
+
+  async search(
+    request: DenMemorySearchRequest,
+  ): Promise<DenMemoryListResponse> {
+    const response = await this.transport.post<DenMemoryV0Record[]>("search", {
+      query: request.query,
+      limit: request.limit,
+      runtime_context: runtimeContextV0(request.context, request),
+    });
+    const records = Array.isArray(response) ? response : [];
+    return {
+      memories: records.map(memoryRecordFromV0),
+      total: records.length,
+    };
+  }
+
+  async recall(
+    request: DenMemoryRecallRequest,
+  ): Promise<DenMemoryListResponse> {
+    const packet = await this.transport.post<DenMemoryV0RecallPacket>(
+      "recall",
+      {
+        query: request.prompt,
+        runtime_context: runtimeContextV0(request.context, request),
+        audience: request.audience,
+        mode: request.mode,
+        budget_tokens: request.metadata?.budgetTokens,
+      },
+    );
+    const rootMatches = Array.isArray(packet.root_matches)
+      ? packet.root_matches
+      : [];
+    const packetMarkdown = stringValue(packet.packet_md) ?? "";
+    return {
+      memories: [
+        {
+          id: stringValue(packet.packet_id) ?? "den-memory-recall-packet",
+          title: "Den Memories recall packet",
+          summary: packetMarkdown,
+          bodyMarkdown: packetMarkdown,
+          metadata: {
+            packet,
+            rootMatchCount: rootMatches.length,
+          },
+        },
+      ],
+      total: rootMatches.length,
+    };
+  }
+
+  async store(
+    request: DenMemoryStoreRequest,
+  ): Promise<DenMemoryMutationResponse> {
+    const entry = await this.transport.post<DenMemoryV0Record>("store", {
+      ...entryPayloadV0(request),
+      created_by: request.context?.agentId ?? request.context?.profileId,
+    });
+    return {
+      accepted: true,
+      memory: memoryRecordFromV0(entry),
+    };
+  }
+
+  async propose(
+    request: DenMemoryProposeRequest,
+  ): Promise<DenMemoryMutationResponse> {
+    const candidate = await this.transport.post<DenMemoryV0Record>("propose", {
+      ...entryPayloadV0(request),
+      proposer_identity: request.context?.agentId ?? request.context?.profileId,
+      proposer_kind: "rusty_crew",
+      proposed_kind: request.proposalKind ?? "fact",
+    });
+    return {
+      accepted: true,
+      proposalId: stringValue(candidate.id) ?? stringValue(candidate.slug),
+      memory: memoryRecordFromV0(candidate),
+    };
+  }
 }
 
 class DenMemoryHttpTransport {
@@ -171,14 +289,18 @@ class DenMemoryHttpTransport {
     pathKey: keyof DenMemoryClientPaths,
     body: unknown,
   ): Promise<T> {
+    return this.request<T>("POST", this.paths[pathKey], body);
+  }
+
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetchImpl(this.url(this.paths[pathKey]), {
-        method: "POST",
+      const response = await this.fetchImpl(this.url(path), {
+        method,
         signal: controller.signal,
         headers: this.headers(),
-        body: JSON.stringify(body),
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
       return await decodeMemoryResponse<T>(response);
     } catch (error) {
@@ -186,6 +308,10 @@ class DenMemoryHttpTransport {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  path(pathKey: keyof DenMemoryClientPaths): string {
+    return this.paths[pathKey];
   }
 
   private url(path: string): string {
@@ -201,6 +327,125 @@ class DenMemoryHttpTransport {
         : {}),
     };
   }
+}
+
+interface DenMemoryV0RecallPacket {
+  packet_id?: unknown;
+  packet_md?: unknown;
+  root_matches?: unknown;
+  included_nodes?: unknown;
+  skipped?: unknown;
+  warnings?: unknown;
+  provenance?: unknown;
+}
+
+type DenMemoryV0Record = Record<string, unknown>;
+
+function runtimeContextV0(
+  context: DenMemoryRuntimeContext | undefined,
+  scope: DenMemoryScope,
+): Record<string, unknown> {
+  return stripUndefined({
+    runtime: "pi_crew",
+    agent_identity: context?.agentId,
+    profile_id: context?.profileId ?? context?.agentId,
+    agent_instance_id: context?.agentId
+      ? `${context.agentId}@rusty-crew`
+      : undefined,
+    session_id: context?.sessionId,
+    session_key: context?.sessionId,
+    session_kind: "durable_agent",
+    project_id: context?.projectId,
+    task_id: context?.taskId,
+    run_id: context?.runId,
+    role: scope.role ?? "runner",
+    audience: scope.audience,
+    mode: scope.mode ?? "general",
+    source_surface: "rusty_crew",
+  });
+}
+
+function entryPayloadV0(
+  request: DenMemoryStoreRequest | DenMemoryProposeRequest,
+): Record<string, unknown> {
+  return stripUndefined({
+    slug: request.title ? slugify(request.title) : undefined,
+    title: request.title ?? "Rusty Crew memory",
+    summary: request.summary,
+    body_md: request.bodyMarkdown,
+    proposed_kind:
+      "proposalKind" in request ? (request.proposalKind ?? "fact") : "fact",
+    kind: "fact",
+    scope_kind: request.mode ?? "project",
+    scope_id: request.context?.projectId,
+    authority_scope_kind: request.mode ?? "project",
+    authority_scope_id: request.context?.projectId,
+    discovery_scope: "same_project",
+    claim_strength: "observation",
+    audience: request.audience,
+    source_refs: request.sourceRefs?.map(sourceRefV0),
+    runtime_context: runtimeContextV0(request.context, request),
+  });
+}
+
+function sourceRefV0(ref: DenMemorySourceRef): Record<string, unknown> {
+  return stripUndefined({
+    source_kind: ref.kind,
+    source_id: ref.ref,
+    source_summary: ref.label,
+  });
+}
+
+function memoryRecordFromV0(record: DenMemoryV0Record): DenMemoryRecord {
+  return {
+    id: String(record.id ?? record.slug ?? "den-memory-v0-record"),
+    slug: stringValue(record.slug),
+    title: stringValue(record.title),
+    summary: stringValue(record.summary),
+    bodyMarkdown:
+      stringValue(record.body_md) ?? stringValue(record.bodyMarkdown),
+    audience:
+      stringArrayValue(record.audience_json) ??
+      stringArrayValue(record.audience),
+    role: stringValue(record.role),
+    mode: stringValue(record.scope_kind),
+    metadata: {
+      v0: record,
+    },
+    createdAt: stringValue(record.created_at),
+    updatedAt: stringValue(record.updated_at),
+  };
+}
+
+function stripUndefined(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  );
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function stringArrayValue(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return stringArrayValue(parsed);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 async function decodeMemoryResponse<T>(response: Response): Promise<T> {

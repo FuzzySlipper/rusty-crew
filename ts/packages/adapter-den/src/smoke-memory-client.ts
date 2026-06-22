@@ -25,6 +25,16 @@ const fetchImpl: DenMemoryFetch = async (input, init) => {
   });
 
   switch (url.pathname) {
+    case "/api/recall":
+      return json({
+        packet_id: "recall-v0-1",
+        packet_md: `# Recall\n\n${body["query"]}`,
+        root_matches: [{ id: "root-1" }],
+        included_nodes: [],
+        skipped: [],
+        warnings: [],
+        provenance: [],
+      });
     case "/memory/read":
       return json({
         ok: true,
@@ -170,6 +180,30 @@ const proposal = await client.propose({
 });
 assert.equal(proposal.proposalId, "proposal-1");
 
+const v0Client = createDenMemoryClient({
+  baseUrl: "http://den.local",
+  fetchImpl,
+  apiMode: "den-memories-v0",
+});
+const v0Recall = await v0Client.recall({
+  prompt: "v0 recall works",
+  context: {
+    projectId: "rusty-crew",
+    sessionId: "session-memory",
+    agentId: "rusty-crew-runner",
+    profileId: "rusty-crew-runner",
+  },
+});
+assert.equal(v0Recall.memories[0]?.id, "recall-v0-1");
+assert.equal(v0Recall.total, 1);
+const v0RecallCall = calls.find((call) => call.url.endsWith("/api/recall"));
+assert.equal(v0RecallCall?.body["query"], "v0 recall works");
+assert.equal(
+  (v0RecallCall?.body["runtime_context"] as Record<string, unknown>)
+    .session_kind,
+  "durable_agent",
+);
+
 const failingClient = createDenMemoryClient({
   baseUrl: "http://den.local",
   fetchImpl,
@@ -203,6 +237,7 @@ console.log(
       recallTotal: recall.total,
       storeAccepted: store.accepted,
       proposal: proposal.proposalId,
+      v0Recall: v0Recall.memories[0]?.id,
       calls: calls.length,
       errorCode: caught instanceof DenMemoryClientError ? caught.code : "none",
     },

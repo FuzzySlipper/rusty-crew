@@ -25,7 +25,10 @@ assert.equal(defaultConfig.admin.authMode, "bearer");
 assert.equal(defaultConfig.background.schedulerTickIntervalMs, 1_000);
 assert.equal(defaultConfig.background.wakeDispatchIntervalMs, 250);
 assert.equal(defaultConfig.denMemory.baseUrl, undefined);
+assert.equal(defaultConfig.denMemory.apiMode, "v1");
 assert.equal(defaultConfig.denMemory.timeoutMs, 5_000);
+assert.equal(defaultConfig.mcp.baseUrl, undefined);
+assert.equal(defaultConfig.mcp.requestTimeoutMs, 30_000);
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
@@ -37,8 +40,11 @@ try {
     RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "500",
     RUSTY_CREW_DEN_MEMORY_BASE_URL: "http://127.0.0.1:19999",
     RUSTY_CREW_DEN_MEMORY_TOKEN: "memory-token",
+    RUSTY_CREW_DEN_MEMORY_API_MODE: "den-memories-v0",
     RUSTY_CREW_DEN_MEMORY_TIMEOUT_MS: "7500",
     RUSTY_CREW_DEN_MEMORY_RECALL_PATH: "/memory/recall",
+    RUSTY_CREW_MCP_BASE_URL: "http://127.0.0.1:5199/mcp",
+    RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS: "12000",
   });
 
   assert.equal(config.paths.configDir, join(root, "config"));
@@ -57,8 +63,11 @@ try {
   assert.equal(config.background.wakeDispatchIntervalMs, 500);
   assert.equal(config.denMemory.baseUrl, "http://127.0.0.1:19999");
   assert.equal(config.denMemory.bearerToken, "memory-token");
+  assert.equal(config.denMemory.apiMode, "den-memories-v0");
   assert.equal(config.denMemory.timeoutMs, 7_500);
   assert.equal(config.denMemory.paths.recall, "/memory/recall");
+  assert.equal(config.mcp.baseUrl, "http://127.0.0.1:5199/mcp");
+  assert.equal(config.mcp.requestTimeoutMs, 12_000);
 
   const noAuth = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
@@ -129,6 +138,36 @@ try {
         RUSTY_CREW_DEN_MEMORY_BASE_URL: "not a url",
       }),
     /DEN_MEMORY_BASE_URL/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_DEN_MEMORY_API_MODE: "den-memories-v0",
+      }),
+    /DEN_MEMORY_BASE_URL/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_DEN_MEMORY_API_MODE: "unknown",
+      }),
+    /DEN_MEMORY_API_MODE/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_MCP_BASE_URL: "config://mcp/runner",
+      }),
+    /MCP_BASE_URL/,
   );
 } finally {
   rmSync(root, { recursive: true, force: true });

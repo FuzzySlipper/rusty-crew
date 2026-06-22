@@ -81,6 +81,7 @@
     "smoke:service-config": "npm run smoke:service-config -w @rusty-crew/brain-island",
     "smoke:service-host": "npm run smoke:service-host -w @rusty-crew/brain-island",
     "smoke:service-den-router-tools": "npm run smoke:service-den-router-tools -w @rusty-crew/brain-island",
+    "smoke:pi-agent-brain-events": "npm run smoke:pi-agent-brain-events -w @rusty-crew/brain-island",
     "service:debug-turn": "npm run service:debug-turn -w @rusty-crew/brain-island --",
     "cron": "npm run cron -w @rusty-crew/brain-island --",
     "service:start": "npm run service:start -w @rusty-crew/brain-island",
