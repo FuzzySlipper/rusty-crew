@@ -152,6 +152,15 @@ runtimeConfig:
   maxDurationMs: 900000
 toolPolicy:
   mode: allow_all
+backgroundReview:
+  enabled: true
+  reviewType: combined
+  schedule: "0 3 * * *"
+  memoryNudgeInterval: 2
+  skillNudgeInterval: 2
+  maxTokens: 5000
+  maxFindings: 12
+  maxCandidates: 50
 `,
   );
   writeFileSync(
@@ -177,6 +186,14 @@ toolPolicy:
     900000,
   );
   assert.equal(runner.profile.mcpConfig?.toolProfile, "runner");
+  assert.equal(runner.profile.backgroundReview?.enabled, true);
+  assert.equal(runner.profile.backgroundReview?.reviewType, "combined");
+  assert.equal(runner.profile.backgroundReview?.schedule, "0 3 * * *");
+  assert.equal(runner.profile.backgroundReview?.memoryNudgeInterval, 2);
+  assert.equal(runner.profile.backgroundReview?.skillNudgeInterval, 2);
+  assert.equal(runner.profile.backgroundReview?.maxTokens, 5000);
+  assert.equal(runner.profile.backgroundReview?.maxFindings, 12);
+  assert.equal(runner.profile.backgroundReview?.maxCandidates, 50);
   assert.match(
     runner.profile.prompt?.soulMarkdown ?? "",
     /implementation work/,

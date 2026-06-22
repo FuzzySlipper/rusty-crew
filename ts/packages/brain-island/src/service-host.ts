@@ -9,6 +9,7 @@ import type {
   EngineHandle,
   ProfileId,
   ScheduledJobStatus,
+  ScheduledRunSummary,
   ScheduledRunStatus,
   ScheduledRunTrigger,
   SessionId,
@@ -17,6 +18,7 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   loadNativeBridge,
+  type NativeProfileMemoryRecord,
   type NativeBridgeModule,
 } from "@rusty-crew/native-bridge";
 import {
@@ -50,6 +52,12 @@ import {
   buildAdapterDiagnosticsProjection,
   type AdapterDiagnosticsProjection,
 } from "./adapter-diagnostics.js";
+import { buildBackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
+import {
+  runBackgroundMemorySkillReview,
+  type BackgroundReviewPayload,
+  type BackgroundReviewResult,
+} from "./background-memory-skill-review.js";
 import {
   inspectDirectDebugSession,
   requestDirectDebugTurn,
@@ -114,6 +122,8 @@ import {
   runScheduledHostExecutors,
   scheduledHostJobKinds,
 } from "./scheduled-host-executors.js";
+import { buildToolRegistryDiagnostics } from "./tool-registry-diagnostics.js";
+import { buildToolContextDiagnosticsReport } from "./tool-context-diagnostics.js";
 
 export interface RustyCrewServiceHostOptions {
   env?: RustyCrewServiceEnv;
@@ -142,6 +152,7 @@ interface ServiceState {
   denGatewayClient?: DenSuccessorGatewayClient;
   denGatewayStartupReport?: DenSuccessorGatewayStartupReport;
   readonly curator: ServiceCuratorRuntime;
+  readonly backgroundReview: ServiceBackgroundReviewRuntime;
   readonly denConversationChannelIdsByExternalId: Map<string, number>;
   mcpManager: McpSurfaceManager;
   readonly wakeSubscription: SubscriptionHandle;
@@ -154,6 +165,13 @@ interface ServiceState {
   readonly now: () => string;
   nextWakeSequence: number;
   stopping: boolean;
+}
+
+interface ServiceBackgroundReviewRuntime {
+  enabled: boolean;
+  recentFindings: number;
+  lastRunAt?: string;
+  lastError?: string;
 }
 
 interface ServiceCuratorRuntime {
@@ -237,6 +255,7 @@ export async function startRustyCrewServiceHost(
           : createDenSuccessorGatewayClient(config.denSuccessorGateway),
       denConversationChannelIdsByExternalId: new Map(),
       curator,
+      backgroundReview: createServiceBackgroundReviewRuntime(runtimeConfig),
       mcpManager,
       wakeSubscription,
       timers: new Set(),
@@ -534,6 +553,7 @@ async function buildDiagnosticsContext(
   });
   return {
     diagnostics,
+    background: await buildServiceBackgroundDiagnostics(state, now),
     recentEvents: [
       {
         id: "service-runtime-config",
@@ -548,6 +568,51 @@ async function buildDiagnosticsContext(
       ...state.recentEvents,
     ],
   };
+}
+
+async function buildServiceBackgroundDiagnostics(
+  state: ServiceState,
+  now: string,
+): Promise<ReturnType<typeof buildBackgroundServiceDiagnosticsProjection>> {
+  const [jobs, runs] = await Promise.all([
+    state.bridge.listScheduledJobs({ limit: 100 }).catch(() => []),
+    state.bridge.listScheduledRuns({ limit: 100 }).catch(() => []),
+  ]);
+  const activeJobs = jobs.filter((job) => job.status === "active");
+  const pausedJobs = jobs.filter((job) => job.status === "paused");
+  const failedRuns = runs.filter((run) => run.status === "failed");
+  const runningRuns = runs.filter((run) => run.status === "claimed");
+  const lastRun = latestCompletedOrFailedRun(runs);
+  const reviewJobs = jobs.filter(
+    (job) => job.jobKind === "runtime.review.memory_skills",
+  );
+  return buildBackgroundServiceDiagnosticsProjection({
+    now,
+    scheduler: {
+      jobCount: jobs.length,
+      activeJobs: activeJobs.length,
+      pausedJobs: pausedJobs.length,
+      staleRuns: 0,
+      runningRuns: runningRuns.length,
+      failedRuns: failedRuns.length,
+      nextDueAt: earliestDueAt(activeJobs),
+      lastRunAt: lastRun?.completedAt,
+      lastError: failedRuns[0]?.error,
+    },
+    curator: {
+      status: "available",
+      candidateCount: state.curator.store.candidates.size,
+      lastRunAt: state.curator.lastRunAt,
+      lastError: state.curator.lastError,
+    },
+    backgroundReview: {
+      enabled: state.backgroundReview.enabled || reviewJobs.length > 0,
+      recentFindings: state.backgroundReview.recentFindings,
+      lastRunAt: state.backgroundReview.lastRunAt,
+      lastError: state.backgroundReview.lastError,
+    },
+    cleanup: {},
+  });
 }
 
 function runtimeConfigApplySummary(
@@ -632,6 +697,35 @@ function createServiceCuratorRuntime(input: {
     },
   });
   return runtime;
+}
+
+function createServiceBackgroundReviewRuntime(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): ServiceBackgroundReviewRuntime {
+  return {
+    enabled: runtimeConfig.scheduledJobs.some(
+      (job) => job.jobKind === "runtime.review.memory_skills",
+    ),
+    recentFindings: 0,
+  };
+}
+
+function earliestDueAt(
+  jobs: readonly { nextDueAt?: string }[],
+): string | undefined {
+  return jobs
+    .flatMap((job) => (job.nextDueAt ? [job.nextDueAt] : []))
+    .sort()[0];
+}
+
+function latestCompletedOrFailedRun(
+  runs: readonly ScheduledRunSummary[],
+): ScheduledRunSummary | undefined {
+  return [...runs]
+    .filter((run) => run.completedAt)
+    .sort((left, right) =>
+      (right.completedAt ?? "").localeCompare(left.completedAt ?? ""),
+    )[0];
 }
 
 async function scanServiceCuratorCandidates(
@@ -936,6 +1030,8 @@ async function reloadServiceRuntimeConfig(
   state.runtimeConfig = nextRuntimeConfig;
   state.runtimeConfigApplyResult = nextApplyResult;
   state.curator.runtimeConfig = nextRuntimeConfig;
+  state.backgroundReview.enabled =
+    createServiceBackgroundReviewRuntime(nextRuntimeConfig).enabled;
   state.mcpManager = nextMcpManager;
   await previousMcpManager.shutdown();
   await ensureDenConversationChannels(state);
@@ -1176,10 +1272,7 @@ function createServiceControlExecutor(
           };
         }
         const outcome = await executeScheduledHostRun(
-          {
-            bridge: state.bridge,
-            diagnostics: () => buildDiagnosticsContext(state),
-          },
+          scheduledHostExecutorContext(state),
           run,
         );
         const affectedIds: Record<string, string | number> = {
@@ -1682,12 +1775,175 @@ function channelIdFromDeliveryIntent(
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
+function scheduledHostExecutorContext(
+  state: ServiceState,
+): Parameters<typeof runScheduledHostExecutors>[0] {
+  return {
+    bridge: state.bridge,
+    diagnostics: () => buildDiagnosticsContext(state),
+    jobPayload: (run) => configuredScheduledJobPayload(state, run.jobId),
+    backgroundReview: (run, payload) =>
+      runServiceBackgroundReview(state, run, payload),
+  };
+}
+
+function configuredScheduledJobPayload(
+  state: ServiceState,
+  jobId: string,
+): unknown {
+  return state.runtimeConfig.scheduledJobs.find((job) => job.id === jobId)
+    ?.payload;
+}
+
+async function runServiceBackgroundReview(
+  state: ServiceState,
+  run: ScheduledRunSummary,
+  payload: BackgroundReviewPayload,
+): Promise<BackgroundReviewResult> {
+  try {
+    const now = state.now();
+    const profileId = String(payload.profileId);
+    const profileContext = await loadProfileContext({
+      profilesDir: state.runtimeConfig.profilesDir,
+      skillsDir: state.runtimeConfig.skillsDir,
+      profileId: profileId as ProfileId,
+    });
+    const sessions = await state.bridge.listSessions().catch(() => []);
+    const session =
+      sessions.find((candidate) => candidate.profileId === profileId) ??
+      configuredSessionForProfile(state.runtimeConfig, profileId);
+    if (!session) {
+      throw new Error(`no configured session found for profile ${profileId}`);
+    }
+    const denseProfileMemory =
+      payload.includeDenseProfileMemory === false
+        ? []
+        : await state.bridge
+            .listProfileMemory({
+              profileId,
+              limit: payload.maxCandidates ?? 100,
+            })
+            .catch(() => []);
+    const role = buildProfileRoleAssembly(profileContext, {
+      includeSkillBodies: false,
+    });
+    const toolDiagnostics = buildToolRegistryDiagnostics({
+      catalogId: profileContext.toolSelection.catalogId,
+      inventoryRequest: {
+        requestedTools: profileContext.toolSelection.toolProfile.tools.map(
+          (tool) => tool.name,
+        ),
+      },
+    });
+    const diagnostics = buildToolContextDiagnosticsReport({
+      now,
+      session: {
+        sessionId: session.sessionId,
+        agentId: session.agentId,
+        profileId: session.profileId,
+        kind: session.kind,
+      },
+      toolDiagnostics,
+      toolSelection: profileContext.toolSelection,
+      profileContext,
+      toolPolicy: profileContext.profile.toolPolicy,
+      roleAssembly: role.roleAssembly,
+      systemPrompt: role.systemPrompt,
+      resourceLimits: session.resourceLimits,
+      adapters: buildServiceAdapterDiagnostics(state, now),
+      memorySkillsPlanning: {
+        denMemory: {
+          configured: Boolean(state.config.denMemory.baseUrl),
+          clientAvailable: Boolean(state.config.denMemory.baseUrl),
+          mode: "metadata",
+          endpointConfigured: Boolean(state.config.denMemory.baseUrl),
+        },
+        skills: {
+          rootConfigured: Boolean(state.runtimeConfig.skillsDir),
+          rootReadable: true,
+          profileSkillCount: profileContext.profile.skills?.length ?? 0,
+          loadedSkillCount: profileContext.skills.length,
+          missingSkillCount: Math.max(
+            0,
+            (profileContext.profile.skills?.length ?? 0) -
+              profileContext.skills.length,
+          ),
+          invalidSkillCount: 0,
+        },
+        denseProfileMemory: {
+          clientAvailable: true,
+          recordCount: denseProfileMemory.length,
+        },
+        sessionSearch: { available: true },
+        todo: { available: true },
+        counters: { available: true, resetAllowed: false },
+      },
+    });
+    const result = await runBackgroundMemorySkillReview({
+      runId: String(run.runId),
+      now,
+      payload,
+      diagnostics,
+      skills: profileContext.skills,
+      denseProfileMemory: denseProfileMemory.map(toBackgroundMemoryRecord),
+    });
+    state.backgroundReview.lastRunAt = result.finishedAt;
+    state.backgroundReview.lastError = undefined;
+    state.backgroundReview.recentFindings = result.findingCount;
+    recordServiceEvent(state, {
+      source: "background-review",
+      eventType: "memory_skills_review_completed",
+      summary: `Background ${result.reviewType} review for ${result.profileId} produced ${result.findingCount} finding(s).`,
+    });
+    return result;
+  } catch (error) {
+    state.backgroundReview.lastError = errorMessage(
+      error,
+      "background review failed",
+    );
+    recordServiceEvent(state, {
+      source: "background-review",
+      eventType: "memory_skills_review_failed",
+      summary: state.backgroundReview.lastError,
+      severity: "warning",
+    });
+    throw error;
+  }
+}
+
+function configuredSessionForProfile(
+  runtimeConfig: RustyCrewRuntimeConfig,
+  profileId: string,
+): RustyCrewRuntimeConfig["sessions"][number] | undefined {
+  return runtimeConfig.sessions.find(
+    (session) => session.profileId === profileId,
+  );
+}
+
+function toBackgroundMemoryRecord(record: NativeProfileMemoryRecord) {
+  return {
+    profileId: record.profileId,
+    key: record.key,
+    content: record.content,
+    revision: record.revision,
+    updatedAt: record.updatedAt,
+    metadata: parseJson(record.metadataJson),
+  };
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return {};
+  }
+}
+
 async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
   if (state.stopping) return;
   const tick = await state.bridge.runSchedulerTick();
   const hostRuns = await runScheduledHostExecutors({
-    bridge: state.bridge,
-    diagnostics: () => buildDiagnosticsContext(state),
+    ...scheduledHostExecutorContext(state),
   });
   const scheduledJobs = await registerConfiguredScheduledJobs({
     bridge: state.bridge,

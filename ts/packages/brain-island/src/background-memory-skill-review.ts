@@ -38,6 +38,11 @@ export interface BackgroundReviewPayload {
   triggerSource?: string;
   maxFindings?: number;
   maxCandidates?: number;
+  maxTokens?: number;
+  memoryNudgeInterval?: number;
+  skillNudgeInterval?: number;
+  includeDenseProfileMemory?: boolean;
+  includeDenMemoryDiagnostics?: boolean;
   llmReviewEnabled?: boolean;
   dryRun?: boolean;
   reason?: string;

@@ -62,6 +62,7 @@ import {
   type ServiceMcpToolExecutorFactory,
 } from "./service-mcp-tools.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
+import { RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND } from "./scheduled-host-executors.js";
 import {
   createSkillsToolResolver,
   type SkillManageMode,
@@ -152,11 +153,27 @@ async function expandRuntimeConfigFromProfiles(
   runtimeConfig: RustyCrewRuntimeConfig,
 ): Promise<RustyCrewRuntimeConfig> {
   const mcpBindings = [...runtimeConfig.mcpBindings];
+  const scheduledJobs = [...runtimeConfig.scheduledJobs];
+  const scheduledJobIds = new Set(scheduledJobs.map((job) => job.id));
+  const profilesWithReviewJobs = new Set<ProfileId>();
   for (const session of runtimeConfig.sessions) {
     const profile = await loadProfileConfig(
       runtimeConfig.profilesDir,
       session.profileId,
     );
+    const reviewConfig = profile.backgroundReview;
+    if (
+      reviewConfig?.enabled &&
+      !profilesWithReviewJobs.has(profile.profileId)
+    ) {
+      profilesWithReviewJobs.add(profile.profileId);
+      const job = backgroundReviewScheduledJob(profile);
+      if (!scheduledJobIds.has(job.id)) {
+        scheduledJobs.push(job);
+        scheduledJobIds.add(job.id);
+      }
+    }
+
     const mcpConfig = profile.mcpConfig;
     if (mcpConfig?.toolProfile === undefined) continue;
     const bindingId = mcpConfig.bindingId ?? `${session.agentId}-mcp`;
@@ -189,7 +206,37 @@ async function expandRuntimeConfigFromProfiles(
   }
   return {
     ...runtimeConfig,
+    scheduledJobs,
     mcpBindings,
+  };
+}
+
+function backgroundReviewScheduledJob(
+  profile: Awaited<ReturnType<typeof loadProfileConfig>>,
+): RustyCrewScheduledJob {
+  const review = profile.backgroundReview;
+  const profileId = profile.profileId;
+  return {
+    id: `background-review-${profileId}`,
+    schedule: review?.schedule ?? "0 3 * * *",
+    shape: "host_job",
+    jobKind: RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND,
+    payload: {
+      schemaVersion: 1,
+      reviewType: review?.reviewType ?? "combined",
+      profileId,
+      triggerSource: "profile_background_review",
+      includeDenseProfileMemory: true,
+      includeDenMemoryDiagnostics: true,
+      memoryNudgeInterval: review?.memoryNudgeInterval,
+      skillNudgeInterval: review?.skillNudgeInterval,
+      maxTokens: review?.maxTokens,
+      maxFindings: review?.maxFindings,
+      maxCandidates: review?.maxCandidates,
+      llmReviewEnabled: review?.llmReviewEnabled ?? false,
+      dryRun: review?.dryRun ?? true,
+      reason: `profile ${profileId} backgroundReview`,
+    },
   };
 }
 

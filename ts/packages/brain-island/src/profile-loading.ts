@@ -52,6 +52,19 @@ export interface ProfileMcpConfig {
   toolProfile?: string;
 }
 
+export interface ProfileBackgroundReviewConfig {
+  enabled: boolean;
+  reviewType?: "memory" | "skills" | "combined";
+  schedule?: string;
+  memoryNudgeInterval?: number;
+  skillNudgeInterval?: number;
+  maxTokens?: number;
+  maxFindings?: number;
+  maxCandidates?: number;
+  llmReviewEnabled?: boolean;
+  dryRun?: boolean;
+}
+
 export interface ProfileConfig {
   profileId: ProfileId;
   profileDir?: string;
@@ -64,6 +77,7 @@ export interface ProfileConfig {
   skills?: string[];
   skillsMode?: "listed" | "all";
   mcpConfig?: ProfileMcpConfig;
+  backgroundReview?: ProfileBackgroundReviewConfig;
 }
 
 export interface LoadedSkill {
@@ -506,6 +520,9 @@ function validateProfileConfig(
           toolProfile: optionalString(parsed.mcpConfig.toolProfile),
         }
       : undefined,
+    backgroundReview: isRecord(parsed.backgroundReview)
+      ? profileBackgroundReviewConfig(parsed.backgroundReview)
+      : undefined,
   };
 }
 
@@ -545,6 +562,35 @@ function profileToolPolicy(raw: Record<string, unknown>): ProfileToolPolicy {
         ? raw.includeDeprecated
         : undefined,
   };
+}
+
+function profileBackgroundReviewConfig(
+  raw: Record<string, unknown>,
+): ProfileBackgroundReviewConfig {
+  return {
+    enabled: raw.enabled === true,
+    reviewType: backgroundReviewType(raw.reviewType),
+    schedule: optionalString(raw.schedule),
+    memoryNudgeInterval: optionalNumber(raw.memoryNudgeInterval),
+    skillNudgeInterval: optionalNumber(raw.skillNudgeInterval),
+    maxTokens: optionalNumber(raw.maxTokens),
+    maxFindings: optionalNumber(raw.maxFindings),
+    maxCandidates: optionalNumber(raw.maxCandidates),
+    llmReviewEnabled:
+      typeof raw.llmReviewEnabled === "boolean"
+        ? raw.llmReviewEnabled
+        : undefined,
+    dryRun: typeof raw.dryRun === "boolean" ? raw.dryRun : undefined,
+  };
+}
+
+function backgroundReviewType(
+  value: unknown,
+): ProfileBackgroundReviewConfig["reviewType"] {
+  if (value === "memory" || value === "skills" || value === "combined") {
+    return value;
+  }
+  return undefined;
 }
 
 function allDefaultToolsets(): string[] {

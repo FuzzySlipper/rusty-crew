@@ -273,6 +273,31 @@ try {
     ).length >= 2,
     true,
   );
+  const manualReviewRun = await post(
+    "/v1/admin/control/scheduler/jobs/background-review-field-profile/run",
+    token,
+    { reason: "manual background review proof" },
+  );
+  assert.equal(manualReviewRun.status, 200);
+  assert.equal(manualReviewRun.body.data.outcome.status, "completed");
+  assert.match(
+    manualReviewRun.body.data.outcome.summary,
+    /scheduled host job background-review-field-profile completed/,
+  );
+  const backgroundDiagnostics = await get(
+    "/v1/admin/diagnostics/background",
+    token,
+  );
+  assert.equal(backgroundDiagnostics.status, 200);
+  assert.equal(backgroundDiagnostics.body.data.backgroundReview.enabled, true);
+  assert.equal(
+    backgroundDiagnostics.body.data.backgroundReview.recentFindings > 0,
+    true,
+  );
+  assert.equal(
+    typeof backgroundDiagnostics.body.data.backgroundReview.lastRunAt,
+    "string",
+  );
 
   await host.bridge.createSession({
     sessionId: "field-session-expiry" as SessionId,
@@ -579,6 +604,14 @@ function writeRuntimeConfig(
           requestedTools: ["read_file"],
         },
         skills: "all",
+        backgroundReview: {
+          enabled: true,
+          reviewType: "combined",
+          schedule: "0 3 * * *",
+          maxFindings: 10,
+          maxCandidates: 25,
+          dryRun: true,
+        },
       },
       null,
       2,
