@@ -99,6 +99,11 @@ export interface SessionConfig {
   delegation?: DelegationLineage;
   resourceLimits: ResourceLimits;
   toolProfile: ToolProfile;
+  historyWindow?: SessionHistoryWindow;
+}
+
+export interface SessionHistoryWindow {
+  maxMessages?: number;
 }
 
 export interface SessionState extends SessionConfig {

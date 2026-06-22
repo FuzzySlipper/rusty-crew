@@ -102,6 +102,11 @@ function toBodyState(value: unknown): BodyState {
       toolProfile: {
         tools: state.session.tool_profile?.tools ?? [],
       },
+      historyWindow: state.session.history_window
+        ? {
+            maxMessages: state.session.history_window.max_messages,
+          }
+        : undefined,
       status: state.session.status,
       brainTurnCount: state.session.brain_turn_count,
       createdAt: state.session.created_at,
@@ -299,6 +304,9 @@ interface RustSessionStateJson {
     max_delegation_depth?: number;
   };
   tool_profile?: BodyState["session"]["toolProfile"];
+  history_window?: {
+    max_messages?: number;
+  };
   status: BodyState["session"]["status"];
   brain_turn_count: number;
   created_at: string;

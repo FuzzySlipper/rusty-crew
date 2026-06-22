@@ -2598,7 +2598,11 @@ async function publishWakeToolActivity(input: {
             ? "tool_call_failed"
             : "tool_call_completed",
       toolName: toolEvent.toolName,
-      adapter: "pi-crew",
+      adapter: "rusty-crew",
+      visibility:
+        input.observationContext?.channelId === undefined
+          ? undefined
+          : "channel",
       summary:
         toolEvent.type === "tool_call_started"
           ? `Tool ${toolEvent.toolName} started.`

@@ -62,6 +62,7 @@ interface NativeSessionConfigInput {
   kind: "full" | "worker" | "delegated";
   resourceLimits?: ResourceLimits;
   toolProfile?: ToolProfile;
+  historyWindow?: SessionState["historyWindow"];
 }
 
 interface NativeAddon {
@@ -152,6 +153,7 @@ interface NativeBridgeBinding {
     kind: string;
     resourceLimits?: ResourceLimits;
     toolProfile?: ToolProfile;
+    historyWindow?: SessionState["historyWindow"];
   }): {
     handle: number;
     sessionId: string;
@@ -167,6 +169,7 @@ interface NativeBridgeBinding {
     kind: string;
     resourceLimits?: ResourceLimits;
     toolProfile?: ToolProfile;
+    historyWindow?: SessionState["historyWindow"];
   }): {
     handle: number;
     sessionId: string;
@@ -1444,6 +1447,11 @@ function toSessionState(state: RawSessionState): SessionState {
     toolProfile: {
       tools: state.tool_profile?.tools ?? [],
     },
+    historyWindow: state.history_window
+      ? {
+          maxMessages: state.history_window.max_messages,
+        }
+      : undefined,
     status: state.status,
     brainTurnCount: state.brain_turn_count,
     createdAt: state.created_at,
@@ -1701,6 +1709,9 @@ interface RawSessionState {
     max_delegation_depth?: number;
   };
   tool_profile?: SessionState["toolProfile"];
+  history_window?: {
+    max_messages?: number;
+  };
   status: SessionState["status"];
   brain_turn_count: number;
   created_at: string;

@@ -882,6 +882,7 @@ pub struct JsSessionConfig {
     pub kind: String,
     pub resource_limits: Option<JsResourceLimits>,
     pub tool_profile: Option<JsToolProfile>,
+    pub history_window: Option<JsSessionHistoryWindow>,
 }
 
 #[napi_derive::napi(object)]
@@ -892,6 +893,12 @@ pub struct JsSessionState {
     pub profile_id: String,
     pub kind: String,
     pub status: String,
+    pub history_window: Option<JsSessionHistoryWindow>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSessionHistoryWindow {
+    pub max_messages: Option<u32>,
 }
 
 #[napi_derive::napi(object)]
@@ -1954,6 +1961,9 @@ fn to_js_session_state(state: rusty_crew_core_bridge_api::SessionState) -> JsSes
         profile_id: state.profile_id.0,
         kind: format!("{:?}", state.kind).to_ascii_lowercase(),
         status: format!("{:?}", state.status).to_ascii_lowercase(),
+        history_window: state.history_window.map(|window| JsSessionHistoryWindow {
+            max_messages: window.max_messages,
+        }),
     }
 }
 
@@ -2372,6 +2382,7 @@ fn js_session_config(
 ) -> napi::Result<rusty_crew_core_bridge_api::SessionConfig> {
     let resource_limits = config.resource_limits;
     let tool_profile = config.tool_profile;
+    let history_window = config.history_window;
     Ok(rusty_crew_core_bridge_api::SessionConfig {
         session_id: rusty_crew_core_bridge_api::SessionId::new(config.session_id),
         agent_id: rusty_crew_core_bridge_api::AgentId::new(config.agent_id),
@@ -2406,6 +2417,9 @@ fn js_session_config(
             },
             None => rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
         },
+        history_window: history_window.map(|window| rusty_crew_core_bridge_api::SessionHistoryWindow {
+            max_messages: window.max_messages,
+        }),
     })
 }
 
@@ -2681,6 +2695,7 @@ mod tests {
                         input_schema: None,
                     }],
                 },
+                history_window: None,
             })
             .unwrap();
 
@@ -2779,6 +2794,7 @@ mod tests {
                     max_delegation_depth: None,
                 },
                 tool_profile: ToolProfile { tools: vec![] },
+                history_window: None,
             })
             .unwrap();
         let subscription = bridge

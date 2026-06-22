@@ -70,6 +70,7 @@ impl SessionRegistry {
             delegation: config.delegation,
             resource_limits: config.resource_limits,
             tool_profile: config.tool_profile,
+            history_window: config.history_window,
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: now.clone(),
@@ -107,6 +108,7 @@ impl SessionRegistry {
         })?;
         state.resource_limits = config.resource_limits.clone();
         state.tool_profile = config.tool_profile.clone();
+        state.history_window = config.history_window.clone();
         Ok(state.clone())
     }
 

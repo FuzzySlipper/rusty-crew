@@ -301,6 +301,7 @@ pub struct SessionConfig {
     pub delegation: Option<DelegationLineage>,
     pub resource_limits: ResourceLimits,
     pub tool_profile: ToolProfile,
+    pub history_window: Option<SessionHistoryWindow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,10 +314,16 @@ pub struct SessionState {
     pub delegation: Option<DelegationLineage>,
     pub resource_limits: ResourceLimits,
     pub tool_profile: ToolProfile,
+    pub history_window: Option<SessionHistoryWindow>,
     pub status: SessionStatus,
     pub brain_turn_count: u32,
     pub created_at: IsoTimestamp,
     pub last_active_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionHistoryWindow {
+    pub max_messages: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

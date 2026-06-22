@@ -95,6 +95,7 @@
     "smoke:channel-wake-policy": "npm run smoke:channel-wake-policy -w @rusty-crew/brain-island",
     "smoke:wake-timeout": "npm run smoke:wake-timeout -w @rusty-crew/brain-island",
     "smoke:session-defaults": "npm run smoke:session-defaults -w @rusty-crew/brain-island",
+    "smoke:session-history-window": "npm run smoke:session-history-window -w @rusty-crew/brain-island",
     "smoke:post-turn-maintenance": "npm run smoke:post-turn-maintenance -w @rusty-crew/brain-island",
     "smoke:telegram": "npm run smoke -w @rusty-crew/adapter-telegram",
     "smoke:mcp": "npm run smoke -w @rusty-crew/adapter-mcp",

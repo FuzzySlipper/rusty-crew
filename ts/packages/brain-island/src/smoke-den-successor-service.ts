@@ -261,6 +261,8 @@ try {
   );
   assert.equal(activityEvents[1]?.payload.kind, "agent_activity.v1");
   assert.equal(activityEvents[1]?.payload.tool_name, "den_memory_recall");
+  assert.equal(activityEvents[1]?.payload.adapter, "rusty-crew");
+  assert.equal(activityEvents[1]?.payload.visibility, "channel");
   const toolWorkRef = activityEvents[1]?.payload.work_ref as
     | {
         session_id?: string;
@@ -365,7 +367,9 @@ interface ObservationActivityRequest {
   runtime_instance_id?: string;
   payload: {
     kind?: string;
+    adapter?: string;
     tool_name?: string;
+    visibility?: string;
     work_ref?: unknown;
   };
 }

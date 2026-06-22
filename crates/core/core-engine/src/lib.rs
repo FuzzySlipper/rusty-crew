@@ -1,7 +1,8 @@
 //! Coordination engine composition.
 
 use rusty_crew_core_body::{
-    session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
+    apply_history_window, session_kind_can_wake, BodyProjector, BrainActionExecutor,
+    DefaultWakeThreshold, WakeThreshold,
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
@@ -210,7 +211,13 @@ impl CoreEngine {
 
     pub fn prepare_body_state_for_wake(&self, session_id: &SessionId) -> CoreResult<BodyState> {
         let mut state = self.project_body_state(session_id)?;
-        let queued = self.drain_body_follow_up_messages_for_wake(session_id)?;
+        let queued_capacity = state
+            .session
+            .history_window
+            .as_ref()
+            .and_then(|window| window.max_messages)
+            .map(|max_messages| max_messages.saturating_sub(state.pending_messages.len() as u32));
+        let queued = self.drain_body_follow_up_messages_for_wake(session_id, queued_capacity)?;
         state
             .pending_messages
             .extend(queued.into_iter().map(|record| record.message));
@@ -934,6 +941,7 @@ impl CoreEngine {
     fn drain_body_follow_up_messages_for_wake(
         &self,
         session_id: &SessionId,
+        max_delivered_messages: Option<u32>,
     ) -> CoreResult<Vec<QueuedMessageRecord>> {
         let now = self.now();
         self.store.expire_queued_messages_at(&now)?;
@@ -943,14 +951,34 @@ impl CoreEngine {
             owner_agent_id: None,
             limit: None,
         })?;
+        let delivered_ids = apply_history_window(
+            pending
+                .iter()
+                .map(|record| record.message_id.clone())
+                .collect::<Vec<_>>(),
+            max_delivered_messages,
+        )
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
         let mut delivered = Vec::new();
         for mut record in pending {
-            record.state = QueuedMessageState::Delivered;
+            let include_in_wake = delivered_ids.contains(&record.message_id);
+            record.state = if include_in_wake {
+                QueuedMessageState::Delivered
+            } else {
+                QueuedMessageState::Discarded
+            };
             record.delivery_attempts += 1;
             record.terminal_at = Some(now.clone());
-            record.state_reason = Some("delivered_for_wake".to_string());
+            record.state_reason = Some(if include_in_wake {
+                "delivered_for_wake".to_string()
+            } else {
+                "history_window_exceeded".to_string()
+            });
             self.store.save_queued_message(&record)?;
-            delivered.push(record);
+            if include_in_wake {
+                delivered.push(record);
+            }
         }
         Ok(delivered)
     }
@@ -1157,6 +1185,7 @@ impl CoreEngine {
                     max_delegation_depth: Some(0),
                 }),
                 tool_profile: self.tool_profile_for_profile(profile_id)?,
+                history_window: parent.history_window.clone(),
             };
             let state = self.sessions.create_session(config.clone(), self.now())?;
             self.store.save_worker_run_requested(&WorkerRunRecord {
@@ -1762,6 +1791,7 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_persistence::{
         AgentMessageQuery, CompletionPacketQuery, CoordinationStore, QueryPage,
         QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope,
@@ -2166,6 +2196,196 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn session_history_window_bounds_wake_messages_without_resurrecting_queue_overflow() {
+        let engine = test_engine();
+        let mut config = session_config(
+            "prime-session",
+            "prime",
+            "prime-profile",
+            SessionKind::Full,
+        );
+        config.history_window = Some(SessionHistoryWindow {
+            max_messages: Some(2),
+        });
+        let prime = engine.create_session(config).unwrap();
+
+        for index in 1..=4 {
+            engine
+                .route_agent_message(AgentMessage {
+                    from: AgentId::new("operator"),
+                    to: prime.agent_id.clone(),
+                    body: format!("bus-message-{index}"),
+                    correlation_id: Some(format!("bus-{index}")),
+                })
+                .unwrap();
+        }
+        let diagnostic = engine.project_body_state(&prime.session_id).unwrap();
+        assert_eq!(
+            diagnostic
+                .pending_messages
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bus-message-3", "bus-message-4"]
+        );
+
+        for index in 1..=4 {
+            engine
+                .enqueue_body_follow_up_message(
+                    &prime.session_id,
+                    AgentId::new("operator"),
+                    format!("queued-message-{index}"),
+                    Some(format!("queued-{index}")),
+                )
+                .unwrap();
+        }
+        let prepared = engine
+            .prepare_body_state_for_wake(&prime.session_id)
+            .unwrap();
+        assert_eq!(
+            prepared
+                .pending_messages
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bus-message-3", "bus-message-4"]
+        );
+
+        let second = engine
+            .prepare_body_state_for_wake(&prime.session_id)
+            .unwrap();
+        assert_eq!(
+            second
+                .pending_messages
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bus-message-3", "bus-message-4"]
+        );
+
+        let store = CoordinationStore::open(engine.config.engine_data_dir.clone()).unwrap();
+        let discarded = store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Discarded),
+                owner_session_id: Some(prime.session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(discarded.len(), 4);
+        assert!(discarded
+            .iter()
+            .all(|record| record.state_reason.as_deref() == Some("history_window_exceeded")));
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(prime.session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            0
+        );
+
+        let mut queue_only_config = session_config(
+            "queue-session",
+            "queue-agent",
+            "prime-profile",
+            SessionKind::Full,
+        );
+        queue_only_config.history_window = Some(SessionHistoryWindow {
+            max_messages: Some(2),
+        });
+        let queue_only = engine.create_session(queue_only_config).unwrap();
+        for index in 1..=4 {
+            engine
+                .enqueue_body_follow_up_message(
+                    &queue_only.session_id,
+                    AgentId::new("operator"),
+                    format!("queue-only-{index}"),
+                    Some(format!("queue-only-{index}")),
+                )
+                .unwrap();
+        }
+        let queue_only_wake = engine
+            .prepare_body_state_for_wake(&queue_only.session_id)
+            .unwrap();
+        assert_eq!(
+            queue_only_wake
+                .pending_messages
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["queue-only-3", "queue-only-4"]
+        );
+        assert_eq!(
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(queue_only.session_id.clone()),
+                    owner_agent_id: None,
+                    limit: None,
+                })
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn session_history_window_survives_engine_restart() {
+        let data_dir = unique_data_dir("history-window-restart");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let mut config = session_config(
+            "prime-session",
+            "prime",
+            "prime-profile",
+            SessionKind::Full,
+        );
+        config.history_window = Some(SessionHistoryWindow {
+            max_messages: Some(1),
+        });
+        let prime = engine.create_session(config).unwrap();
+        engine
+            .route_agent_message(AgentMessage {
+                from: AgentId::new("operator"),
+                to: prime.agent_id.clone(),
+                body: "first".to_string(),
+                correlation_id: None,
+            })
+            .unwrap();
+        engine
+            .route_agent_message(AgentMessage {
+                from: AgentId::new("operator"),
+                to: prime.agent_id.clone(),
+                body: "second".to_string(),
+                correlation_id: None,
+            })
+            .unwrap();
+        drop(engine);
+
+        let restarted = test_engine_with_data_dir(data_dir);
+        let session = restarted.get_session(&prime.session_id).unwrap();
+        assert_eq!(
+            session
+                .history_window
+                .as_ref()
+                .and_then(|window| window.max_messages),
+            Some(1)
+        );
+        let body = restarted.project_body_state(&prime.session_id).unwrap();
+        assert_eq!(
+            body.pending_messages
+                .iter()
+                .map(|message| message.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["second"]
         );
     }
 
@@ -4484,6 +4704,7 @@ mod tests {
                     input_schema: None,
                 }],
             },
+            history_window: None,
         }
     }
 }

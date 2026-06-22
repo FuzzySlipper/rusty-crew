@@ -502,6 +502,7 @@ function nativeSessionConfig(session: RustyCrewConfiguredSession): {
   kind: SessionKind;
   resourceLimits?: ResourceLimits;
   toolProfile?: ToolProfile;
+  historyWindow?: { maxMessages?: number };
 } {
   return {
     sessionId: session.sessionId,
@@ -510,6 +511,10 @@ function nativeSessionConfig(session: RustyCrewConfiguredSession): {
     kind: session.kind,
     resourceLimits: session.resourceLimits,
     toolProfile: session.toolProfile,
+    historyWindow:
+      session.maxHistoryMessages === undefined
+        ? undefined
+        : { maxMessages: session.maxHistoryMessages },
   };
 }
 

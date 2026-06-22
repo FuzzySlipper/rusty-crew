@@ -54,6 +54,7 @@ export interface RuntimeToolActivityInput {
   toolName: string;
   summary: string;
   adapter?: string;
+  visibility?: "channel" | "task" | "agent" | "debug";
   longRunningOrRisky?: boolean;
   workRef?: AgentActivityWorkRef;
   resultRef?: AgentActivityResultRef;
@@ -127,6 +128,7 @@ export class RuntimeActivityObserver {
         workRef: input.workRef,
         resultRef: input.resultRef,
         reasonCode: input.reasonCode,
+        visibility: input.visibility,
       }),
       runtimeInstanceId: this.#runtimeInstanceId,
     });

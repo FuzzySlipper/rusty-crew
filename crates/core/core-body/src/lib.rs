@@ -30,7 +30,10 @@ impl BodyProjector {
 
     pub fn project(&self, session_id: &SessionId) -> CoreResult<BodyState> {
         let session = self.sessions.get_session(session_id)?;
-        let pending_messages = self.bus.pending_messages_for_agent(&session.agent_id)?;
+        let pending_messages = apply_history_window(
+            self.bus.pending_messages_for_agent(&session.agent_id)?,
+            session.history_window.as_ref().and_then(|window| window.max_messages),
+        );
         let recent_events = self
             .bus
             .recent_events_for_session(session_id, self.recent_event_limit)?;
@@ -44,6 +47,21 @@ impl BodyProjector {
             delta_policy: default_delta_policy(),
         })
     }
+}
+
+pub fn apply_history_window<T>(items: Vec<T>, max_items: Option<u32>) -> Vec<T> {
+    let Some(max_items) = max_items else {
+        return items;
+    };
+    let max_items = max_items as usize;
+    if max_items == 0 {
+        return Vec::new();
+    }
+    let len = items.len();
+    if len <= max_items {
+        return items;
+    }
+    items.into_iter().skip(len - max_items).collect()
 }
 
 pub const fn default_delta_policy() -> BodyDeltaPolicy {

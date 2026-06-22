@@ -40,6 +40,7 @@
     "smoke:channel-wake-policy": "tsx src/smoke-channel-wake-policy.ts",
     "smoke:wake-timeout": "tsx src/smoke-wake-timeout.ts",
     "smoke:session-defaults": "tsx src/smoke-session-defaults.ts",
+    "smoke:session-history-window": "tsx src/smoke-session-history-window.ts",
     "smoke:post-turn-maintenance": "tsx src/smoke-post-turn-maintenance.ts",
     "smoke:todo-tool": "tsx src/smoke-todo-tool.ts",
     "smoke:counter-reset-tool": "tsx src/smoke-counter-reset-tool.ts",

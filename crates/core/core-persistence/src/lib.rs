@@ -10,8 +10,9 @@ use rusty_crew_core_protocol::{
     DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
     DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
     FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId, ResourceLimits,
-    RunId, SessionConfig, SessionHandle, SessionId, SessionIdentityRecord, SessionKind,
-    SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
+    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
+    ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -21,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 14;
+const CURRENT_SCHEMA_VERSION: i64 = 15;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -114,6 +115,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 14,
         description: "add scheduler job and run persistence",
         apply: migrate_v14_add_scheduler_persistence,
+    },
+    SchemaMigration {
+        version: 15,
+        description: "add session history window persistence",
+        apply: migrate_v15_add_session_history_window,
     },
 ];
 
@@ -1373,7 +1379,8 @@ impl CoordinationStore {
                     status_json,
                     brain_turn_count,
                     created_at,
-                    last_active_at
+                    last_active_at,
+                    history_window_json
                 FROM sessions
                 ORDER BY handle ASC",
             )
@@ -1392,6 +1399,7 @@ impl CoordinationStore {
                     .map(from_json_text::<DelegationLineage>)
                     .transpose()
                     .map_err(to_sql_error)?;
+                let history_window_json: Option<String> = row.get(12)?;
                 let resource_limits = resource_limits_json
                     .as_deref()
                     .map(from_json_text::<ResourceLimits>)
@@ -1408,6 +1416,11 @@ impl CoordinationStore {
                     .transpose()
                     .map_err(to_sql_error)?
                     .unwrap_or(ToolProfile { tools: Vec::new() });
+                let history_window = history_window_json
+                    .as_deref()
+                    .map(from_json_text::<SessionHistoryWindow>)
+                    .transpose()
+                    .map_err(to_sql_error)?;
                 let status = from_json_text::<SessionStatus>(&status_json).map_err(to_sql_error)?;
                 Ok(SessionState {
                     session_id: SessionId(row.get(0)?),
@@ -1418,6 +1431,7 @@ impl CoordinationStore {
                     delegation,
                     resource_limits,
                     tool_profile,
+                    history_window,
                     status,
                     brain_turn_count: row.get::<_, i64>(9)? as u32,
                     created_at: row.get(10)?,
@@ -3035,6 +3049,10 @@ fn migrate_v14_add_scheduler_persistence(tx: &rusqlite::Transaction<'_>) -> Core
     .map_err(|error| persistence_error("apply schema migration 14", error))
 }
 
+fn migrate_v15_add_session_history_window(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    add_missing_column(tx, "sessions", "history_window_json", "TEXT")
+}
+
 fn save_queued_message_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record: &QueuedMessageRecord,
@@ -3674,7 +3692,8 @@ fn query_sessions(conn: &Connection, query: &SessionQuery) -> CoreResult<Vec<Ses
                 status_json,
                 brain_turn_count,
                 created_at,
-                last_active_at
+                last_active_at,
+                history_window_json
              FROM sessions
              WHERE (?1 IS NULL OR agent_id = ?1)
                AND (?2 IS NULL OR profile_id = ?2)
@@ -3700,6 +3719,7 @@ fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionStat
     let resource_limits_json: Option<String> = row.get(6)?;
     let tool_profile_json: Option<String> = row.get(7)?;
     let status_json: String = row.get(8)?;
+    let history_window_json: Option<String> = row.get(12)?;
     Ok(SessionState {
         session_id: SessionId(row.get(0)?),
         handle: SessionHandle::new(row.get::<_, i64>(1)? as u64),
@@ -3727,6 +3747,11 @@ fn row_to_session_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionStat
             .transpose()
             .map_err(to_sql_error)?
             .unwrap_or(ToolProfile { tools: Vec::new() }),
+        history_window: history_window_json
+            .as_deref()
+            .map(from_json_text::<SessionHistoryWindow>)
+            .transpose()
+            .map_err(to_sql_error)?,
         status: from_json_text::<SessionStatus>(&status_json).map_err(to_sql_error)?,
         brain_turn_count: row.get::<_, i64>(9)? as u32,
         created_at: row.get(10)?,
@@ -5162,6 +5187,7 @@ fn save_session_state_in_tx(
     let status_json = to_json_text(&state.status)?;
     let resource_limits_json = to_json_text(&state.resource_limits)?;
     let tool_profile_json = to_json_text(&state.tool_profile)?;
+    let history_window_json = state.history_window.as_ref().map(to_json_text).transpose()?;
     let delegation_json = state.delegation.as_ref().map(to_json_text).transpose()?;
     tx.execute(
         "INSERT INTO sessions (
@@ -5176,8 +5202,9 @@ fn save_session_state_in_tx(
             status_json,
             brain_turn_count,
             created_at,
-            last_active_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            last_active_at,
+            history_window_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ON CONFLICT(session_id) DO UPDATE SET
             handle = excluded.handle,
             agent_id = excluded.agent_id,
@@ -5186,6 +5213,7 @@ fn save_session_state_in_tx(
             delegation_json = excluded.delegation_json,
             resource_limits_json = excluded.resource_limits_json,
             tool_profile_json = excluded.tool_profile_json,
+            history_window_json = excluded.history_window_json,
             status_json = excluded.status_json,
             brain_turn_count = excluded.brain_turn_count,
             last_active_at = excluded.last_active_at",
@@ -5202,6 +5230,7 @@ fn save_session_state_in_tx(
             state.brain_turn_count as i64,
             state.created_at,
             state.last_active_at,
+            history_window_json,
         ],
     )
     .map_err(|error| persistence_error("save session", error))?;
@@ -7604,6 +7633,7 @@ mod tests {
             delegation: None,
             resource_limits: sample_resource_limits(),
             tool_profile: sample_tool_profile(),
+            history_window: None,
         };
         let beta = SessionState {
             handle: SessionHandle::new(2),
@@ -7614,6 +7644,7 @@ mod tests {
             delegation: None,
             resource_limits: beta_config.resource_limits.clone(),
             tool_profile: beta_config.tool_profile.clone(),
+            history_window: beta_config.history_window.clone(),
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: "2026-06-20T00:01:00Z".to_string(),
@@ -7784,6 +7815,7 @@ mod tests {
                 delegation: None,
                 resource_limits: sample_resource_limits(),
                 tool_profile: sample_tool_profile(),
+                history_window: None,
             };
             store
                 .save_session_with_config(
@@ -7796,6 +7828,7 @@ mod tests {
                         delegation: None,
                         resource_limits: sample_resource_limits(),
                         tool_profile: sample_tool_profile(),
+                        history_window: None,
                         status: SessionStatus::Idle,
                         brain_turn_count: 0,
                         created_at: format!("2026-06-20T00:{index:02}:00Z"),
@@ -8081,6 +8114,7 @@ mod tests {
             delegation: None,
             resource_limits: sample_resource_limits(),
             tool_profile: sample_tool_profile(),
+            history_window: None,
             status: SessionStatus::Idle,
             brain_turn_count: 0,
             created_at: "2026-06-20T00:00:00Z".to_string(),
@@ -8112,6 +8146,7 @@ mod tests {
             delegation: None,
             resource_limits: sample_resource_limits(),
             tool_profile: sample_tool_profile(),
+            history_window: None,
         }
     }
 
