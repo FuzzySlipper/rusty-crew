@@ -1,0 +1,602 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rusty View Chat API",
+    "version": "0.1.0",
+    "description": "Browser-facing chat contract for Rusty View clients connecting to Rusty Crew sessions."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:9347",
+      "description": "Local Rusty Crew service"
+    }
+  ],
+  "paths": {
+    "/v1/chat/sessions": {
+      "get": {
+        "operationId": "listChatSessions",
+        "summary": "List chat-capable Rusty Crew sessions",
+        "parameters": [
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" },
+          {
+            "name": "profile_id",
+            "in": "query",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/ChatSessionStatus" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chat session page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ChatSessionPage" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}": {
+      "get": {
+        "operationId": "openChatSession",
+        "summary": "Open a chat session with an initial transcript page",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/Limit" },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Return events before this session cursor.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "include_tool_payloads",
+            "in": "query",
+            "description": "Debug-only hint. Implementations may ignore or deny this in chat-safe mode.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chat session snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ChatSessionOpenResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/events": {
+      "get": {
+        "operationId": "replayChatSessionEvents",
+        "summary": "Replay chat events after a cursor",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/Cursor" },
+          { "$ref": "#/components/parameters/Limit" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chat event page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ChatEventPage" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/stream": {
+      "get": {
+        "operationId": "streamChatSessionEvents",
+        "summary": "Stream live chat events with optional replay",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/Cursor" },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "SSE replay cursor. Equivalent to the cursor query when both are not supplied.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream of ChatEvent objects. Each SSE event uses ChatEvent.event_id as the SSE id.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-sent events whose data field is a JSON ChatEvent."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/messages": {
+      "post": {
+        "operationId": "sendChatMessage",
+        "summary": "Append a user message and request a wake",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SendChatMessageRequest" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Message accepted for wake dispatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/SendChatMessageResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/commands": {
+      "get": {
+        "operationId": "listChatCommands",
+        "summary": "List chat command registry entries",
+        "responses": {
+          "200": {
+            "description": "Command registry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ChatCommandRegistry" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/commands": {
+      "post": {
+        "operationId": "executeChatCommand",
+        "summary": "Execute a slash/debug command for one chat session",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/IdempotencyKey" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExecuteChatCommandRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ExecuteChatCommandResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "SessionId": {
+        "name": "session_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "minLength": 1 }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "description": "Opaque chat event cursor. Implementations may encode the latest sequence id.",
+        "schema": { "type": "string" }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 }
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 0, "default": 0 }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "schema": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "schemas": {
+      "ApiEnvelope": {
+        "type": "object",
+        "required": ["ok", "meta"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "data": {},
+          "error": { "$ref": "#/components/schemas/ApiError" },
+          "meta": { "$ref": "#/components/schemas/ApiMeta" }
+        },
+        "additionalProperties": false
+      },
+      "ApiMeta": {
+        "type": "object",
+        "required": ["request_id", "schema_version"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "schema_version": { "type": "integer", "const": 1 }
+        },
+        "additionalProperties": false
+      },
+      "ApiError": {
+        "type": "object",
+        "required": ["code", "reason_code", "message", "retryable"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": ["unauthorized", "forbidden", "not_found", "invalid_input", "failed_precondition", "conflict", "internal_error"]
+          },
+          "reason_code": { "type": "string" },
+          "message": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ChatSessionStatus": {
+        "type": "string",
+        "enum": ["active", "idle", "archived", "blocked"]
+      },
+      "ChatSessionSummary": {
+        "type": "object",
+        "required": ["session_id", "agent_id", "profile_id", "kind", "status", "latest_cursor", "updated_at"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "agent_id": { "type": "string" },
+          "profile_id": { "type": "string" },
+          "kind": { "type": "string", "enum": ["full", "worker", "delegated"] },
+          "status": { "$ref": "#/components/schemas/ChatSessionStatus" },
+          "title": { "type": "string" },
+          "latest_cursor": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "message_count": { "type": "integer", "minimum": 0 },
+          "tool_event_count": { "type": "integer", "minimum": 0 },
+          "effective_defaults": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": false
+      },
+      "ChatSessionPage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatSessionSummary" }
+          },
+          "total": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ChatSessionOpenResult": {
+        "type": "object",
+        "required": ["session", "events", "latest_cursor", "has_more_before"],
+        "properties": {
+          "session": { "$ref": "#/components/schemas/ChatSessionSummary" },
+          "events": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatEvent" }
+          },
+          "latest_cursor": { "type": "string" },
+          "has_more_before": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ChatEventPage": {
+        "type": "object",
+        "required": ["items", "latest_cursor", "has_more"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatEvent" }
+          },
+          "latest_cursor": { "type": "string" },
+          "has_more": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ChatEvent": {
+        "type": "object",
+        "required": ["event_id", "session_id", "sequence_id", "created_at", "kind", "payload"],
+        "properties": {
+          "event_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "sequence_id": { "type": "integer", "minimum": 0 },
+          "created_at": { "type": "string", "format": "date-time" },
+          "kind": { "$ref": "#/components/schemas/ChatEventKind" },
+          "payload": { "$ref": "#/components/schemas/ChatEventPayload" }
+        },
+        "additionalProperties": false
+      },
+      "ChatEventKind": {
+        "type": "string",
+        "enum": [
+          "session_snapshot",
+          "message_created",
+          "assistant_turn_started",
+          "assistant_text_delta",
+          "assistant_message_completed",
+          "assistant_turn_finished",
+          "tool_call_started",
+          "tool_call_completed",
+          "tool_call_failed",
+          "command_started",
+          "command_completed",
+          "command_failed",
+          "stream_error",
+          "unknown"
+        ]
+      },
+      "ChatEventPayload": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/SessionSnapshotPayload" },
+          { "$ref": "#/components/schemas/MessageCreatedPayload" },
+          { "$ref": "#/components/schemas/AssistantTextDeltaPayload" },
+          { "$ref": "#/components/schemas/AssistantMessageCompletedPayload" },
+          { "$ref": "#/components/schemas/ToolCallPayload" },
+          { "$ref": "#/components/schemas/CommandPayload" },
+          { "$ref": "#/components/schemas/StreamErrorPayload" },
+          { "$ref": "#/components/schemas/UnknownEventPayload" }
+        ]
+      },
+      "SessionSnapshotPayload": {
+        "type": "object",
+        "required": ["session"],
+        "properties": {
+          "session": { "$ref": "#/components/schemas/ChatSessionSummary" }
+        },
+        "additionalProperties": false
+      },
+      "MessageCreatedPayload": {
+        "type": "object",
+        "required": ["message_id", "role", "body"],
+        "properties": {
+          "message_id": { "type": "string" },
+          "client_message_id": { "type": "string" },
+          "role": { "type": "string", "enum": ["user", "assistant", "system", "tool"] },
+          "body": { "type": "string" },
+          "correlation_id": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "AssistantTextDeltaPayload": {
+        "type": "object",
+        "required": ["message_id", "delta"],
+        "properties": {
+          "message_id": { "type": "string" },
+          "delta": { "type": "string" },
+          "coalesced": { "type": "boolean", "default": false }
+        },
+        "additionalProperties": false
+      },
+      "AssistantMessageCompletedPayload": {
+        "type": "object",
+        "required": ["message_id", "body"],
+        "properties": {
+          "message_id": { "type": "string" },
+          "body": { "type": "string" },
+          "wake_id": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ToolCallPayload": {
+        "type": "object",
+        "required": ["tool_call_id", "tool_name", "summary"],
+        "properties": {
+          "tool_call_id": { "type": "string" },
+          "tool_name": { "type": "string" },
+          "summary": { "type": "string" },
+          "status": { "type": "string", "enum": ["started", "completed", "failed"] },
+          "result_ref": { "type": "object", "additionalProperties": true },
+          "reason_code": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "CommandPayload": {
+        "type": "object",
+        "required": ["command_name", "summary", "status"],
+        "properties": {
+          "command_name": { "type": "string" },
+          "summary": { "type": "string" },
+          "status": { "type": "string", "enum": ["started", "completed", "failed"] },
+          "old_session_id": { "type": "string" },
+          "new_session_id": { "type": "string" },
+          "reason_code": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "StreamErrorPayload": {
+        "type": "object",
+        "required": ["message", "retryable"],
+        "properties": {
+          "message": { "type": "string" },
+          "reason_code": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "UnknownEventPayload": {
+        "type": "object",
+        "required": ["summary", "raw"],
+        "properties": {
+          "summary": { "type": "string" },
+          "raw": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": false
+      },
+      "SendChatMessageRequest": {
+        "type": "object",
+        "required": ["actor", "body"],
+        "properties": {
+          "actor": { "$ref": "#/components/schemas/ChatActor" },
+          "body": { "type": "string", "minLength": 1, "maxLength": 20000 },
+          "client_message_id": { "type": "string", "maxLength": 200 },
+          "reason": { "type": "string", "maxLength": 500 }
+        },
+        "additionalProperties": false
+      },
+      "ChatActor": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string", "enum": ["human", "agent", "system"] },
+          "display_name": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "SendChatMessageResult": {
+        "type": "object",
+        "required": ["status", "message_id", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["accepted", "duplicate", "rejected"] },
+          "message_id": { "type": "string" },
+          "wake_id": { "type": "string" },
+          "correlation_id": { "type": "string" },
+          "latest_cursor": { "type": "string" },
+          "reason_code": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandRegistry": {
+        "type": "object",
+        "required": ["commands"],
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandDescriptor" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandDescriptor": {
+        "type": "object",
+        "required": ["name", "description", "read_only", "mutating", "scope"],
+        "properties": {
+          "name": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "description": { "type": "string" },
+          "args_schema": { "type": "object", "additionalProperties": true },
+          "read_only": { "type": "boolean" },
+          "mutating": { "type": "boolean" },
+          "scope": { "type": "string", "enum": ["session", "profile", "service"] },
+          "allowed_session_kinds": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["full", "worker", "delegated"] }
+          },
+          "requires_control_auth": { "type": "boolean", "default": false }
+        },
+        "additionalProperties": false
+      },
+      "ExecuteChatCommandRequest": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string", "description": "Raw slash command text such as /status or /new fresh start." },
+          "actor": { "$ref": "#/components/schemas/ChatActor" }
+        },
+        "additionalProperties": false
+      },
+      "ExecuteChatCommandResult": {
+        "type": "object",
+        "required": ["status", "command_name", "summary", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["completed", "failed", "rejected"] },
+          "command_name": { "type": "string" },
+          "summary": { "type": "string" },
+          "latest_cursor": { "type": "string" },
+          "old_session_id": { "type": "string" },
+          "new_session_id": { "type": "string" },
+          "reason_code": { "type": "string" },
+          "response": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -1,0 +1,110 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const contractPath = resolve(
+  process.cwd(),
+  "../../../docs/rusty-view-chat-api-v0.openapi.json",
+);
+const contract = JSON.parse(readFileSync(contractPath, "utf8")) as OpenApiDoc;
+
+const requiredPaths = [
+  "/v1/chat/sessions",
+  "/v1/chat/sessions/{session_id}",
+  "/v1/chat/sessions/{session_id}/events",
+  "/v1/chat/sessions/{session_id}/stream",
+  "/v1/chat/sessions/{session_id}/messages",
+  "/v1/chat/commands",
+  "/v1/chat/sessions/{session_id}/commands",
+];
+
+for (const path of requiredPaths) {
+  assert.ok(contract.paths[path], `missing path ${path}`);
+}
+
+assert.equal(contract.openapi, "3.1.0");
+assert.equal(
+  contract.paths["/v1/chat/sessions/{session_id}/stream"]?.get?.responses["200"]
+    ?.content?.["text/event-stream"]?.schema?.type,
+  "string",
+);
+
+const chatEvent = schema("ChatEvent");
+assert.deepEqual(chatEvent.required, [
+  "event_id",
+  "session_id",
+  "sequence_id",
+  "created_at",
+  "kind",
+  "payload",
+]);
+
+const eventKinds = schema("ChatEventKind").enum ?? [];
+for (const kind of [
+  "message_created",
+  "assistant_turn_started",
+  "assistant_text_delta",
+  "assistant_message_completed",
+  "assistant_turn_finished",
+  "tool_call_started",
+  "tool_call_completed",
+  "tool_call_failed",
+  "command_completed",
+  "unknown",
+]) {
+  assert.ok(eventKinds.includes(kind), `missing event kind ${kind}`);
+}
+
+const commandDescriptor = schema("ChatCommandDescriptor");
+assert.ok(commandDescriptor.required?.includes("read_only"));
+assert.ok(commandDescriptor.required?.includes("mutating"));
+assert.ok(commandDescriptor.required?.includes("scope"));
+
+console.log(
+  JSON.stringify(
+    {
+      title: contract.info.title,
+      paths: requiredPaths.length,
+      eventKinds: eventKinds.length,
+    },
+    null,
+    2,
+  ),
+);
+
+function schema(name: string): JsonSchema {
+  const value = contract.components.schemas[name];
+  assert.ok(value, `missing schema ${name}`);
+  return value;
+}
+
+interface OpenApiDoc {
+  openapi: string;
+  info: { title: string; version: string };
+  paths: Record<
+    string,
+    {
+      get?: Operation;
+      post?: Operation;
+    }
+  >;
+  components: {
+    schemas: Record<string, JsonSchema>;
+  };
+}
+
+interface Operation {
+  responses: Record<
+    string,
+    {
+      content?: Record<string, { schema?: JsonSchema }>;
+    }
+  >;
+}
+
+interface JsonSchema {
+  type?: string;
+  enum?: string[];
+  required?: string[];
+  properties?: Record<string, JsonSchema>;
+}

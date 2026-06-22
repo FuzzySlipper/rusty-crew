@@ -42,6 +42,8 @@
     "smoke:session-defaults": "tsx src/smoke-session-defaults.ts",
     "smoke:session-history-window": "tsx src/smoke-session-history-window.ts",
     "smoke:post-turn-maintenance": "tsx src/smoke-post-turn-maintenance.ts",
+    "smoke:rusty-view-chat-contract": "tsx src/smoke-rusty-view-chat-contract.ts",
+    "smoke:rusty-view-chat-read-api": "tsx src/smoke-rusty-view-chat-read-api.ts",
     "smoke:todo-tool": "tsx src/smoke-todo-tool.ts",
     "smoke:counter-reset-tool": "tsx src/smoke-counter-reset-tool.ts",
     "smoke:curator-execute-tool": "tsx src/smoke-curator-execute-tool.ts",

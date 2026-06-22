@@ -1,4 +1,9 @@
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -47,6 +52,7 @@ import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
   type AdminControlExecutor,
+  type AdminControlResponse,
   handleAdminControlRequest,
 } from "./admin-control-api.js";
 import {
@@ -77,6 +83,20 @@ import {
   buildRuntimeDiagnosticsProjection,
   type RuntimeSessionEffectiveDefaults,
 } from "./runtime-diagnostics.js";
+import {
+  handleRustyViewChatRequest,
+  cursorSequence,
+  type ChatEvent,
+  type ChatSendMessageInput,
+  type ExecuteChatCommandInput,
+  type ExecuteChatCommandResult,
+  type SendChatMessageResult,
+} from "./rusty-view-chat-api.js";
+import { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
+import {
+  routeSlashCommand,
+  type SlashCommandSession,
+} from "./slash-command-router.js";
 import type { RuntimeHealthProjection } from "./runtime-health.js";
 import {
   announceConfiguredSessionsToDenGateway,
@@ -183,6 +203,10 @@ interface ServiceState {
   readonly inFlightWakes: Set<SessionId>;
   readonly claimedDeliveryIntentIds: Set<number>;
   readonly directDispatchSessions: Set<SessionId>;
+  readonly chatMessageReceipts: Map<string, SendChatMessageResult>;
+  readonly chatEventsBySession: Map<SessionId, ChatEvent[]>;
+  readonly chatSequencesBySession: Map<SessionId, number>;
+  readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
   readonly now: () => string;
@@ -216,8 +240,14 @@ interface ServiceRecentEvent {
   severity?: string;
 }
 
+interface RawServiceRouteResult {
+  kind: "raw";
+  write(response: ServerResponse): void;
+}
+
 type ServiceRouteResult =
   | AdminRouteResult
+  | RawServiceRouteResult
   | {
       status: number;
       headers: Record<string, string>;
@@ -289,6 +319,10 @@ export async function startRustyCrewServiceHost(
       inFlightWakes: new Set(),
       claimedDeliveryIntentIds: new Set(),
       directDispatchSessions: new Set(),
+      chatMessageReceipts: new Map(),
+      chatEventsBySession: new Map(),
+      chatSequencesBySession: new Map(),
+      chatSubscribersBySession: new Map(),
       suppressedWakeEvents: new Map(),
       recentEvents: [],
       now: options.now ?? (() => new Date().toISOString()),
@@ -388,6 +422,38 @@ async function handleHttpRequest(
       },
     );
     return result;
+  }
+
+  if (url.pathname.startsWith("/v1/chat/")) {
+    const streamResult = await handleRustyViewChatStreamRequest(
+      request,
+      url,
+      state,
+    );
+    if (streamResult !== undefined) return streamResult;
+    const body =
+      (request.method ?? "GET").toUpperCase() === "POST"
+        ? await readJsonBody(request)
+        : undefined;
+    return handleRustyViewChatRequest(
+      {
+        method: request.method ?? "GET",
+        url: url.toString(),
+        headers: headers(request),
+        body,
+        requestId: requestId(request),
+      },
+      {
+        listSessions: () => state.bridge.listSessions(),
+        projectBodyStateJson: (sessionId) =>
+          state.bridge.projectBodyStateJson(sessionId),
+        listChatEvents: (session, cursor, limit) =>
+          listChatEventsAfterCursor(state, session, cursor, limit),
+        executeCommand: (input) => executeRustyViewChatCommand(state, input),
+        sendMessage: (input) => submitRustyViewChatMessage(state, input),
+        now: state.now,
+      },
+    );
   }
 
   if (url.pathname.startsWith("/v1/debug/")) {
@@ -541,6 +607,112 @@ async function handleDirectDebugRequest(
     message: `unknown debug route ${url.pathname}`,
     retryable: false,
   });
+}
+
+async function handleRustyViewChatStreamRequest(
+  request: IncomingMessage,
+  url: URL,
+  state: ServiceState,
+): Promise<ServiceRouteResult | undefined> {
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (
+    parts.length !== 5 ||
+    parts[0] !== "v1" ||
+    parts[1] !== "chat" ||
+    parts[2] !== "sessions" ||
+    parts[4] !== "stream"
+  ) {
+    return undefined;
+  }
+
+  const requestIdValue = requestId(request);
+  if ((request.method ?? "GET").toUpperCase() !== "GET") {
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "chat_stream_requires_get",
+      message: "Rusty View chat stream routes only support GET",
+      retryable: false,
+    });
+  }
+
+  const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
+  const sessions = await state.bridge.listSessions();
+  const session = sessions.find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  if (!session) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "chat_session_not_found",
+      message: `chat session ${sessionId} was not found`,
+      retryable: false,
+    });
+  }
+
+  const cursor =
+    stringHeader(request, "last-event-id") ?? stringParam(url, "cursor");
+  const replay = streamReplayEvents(state, session, cursor, url);
+  const closeAfterReplay =
+    url.searchParams.get("once") === "true" ||
+    url.searchParams.get("close_after_replay") === "true";
+  return {
+    kind: "raw",
+    write(response) {
+      writeRustyViewChatSseStream({
+        state,
+        session,
+        replay,
+        closeAfterReplay,
+        response,
+      });
+    },
+  };
+}
+
+function writeRustyViewChatSseStream(input: {
+  state: ServiceState;
+  session: SessionState;
+  replay: readonly ChatEvent[];
+  closeAfterReplay: boolean;
+  response: ServerResponse;
+}): void {
+  const { state, session, response } = input;
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  for (const event of input.replay) {
+    writeSseEvent(response, event);
+  }
+  if (input.closeAfterReplay) {
+    response.end();
+    return;
+  }
+
+  const subscriber: ChatStreamSubscriber = {
+    write(event) {
+      writeSseEvent(response, event);
+    },
+  };
+  const subscribers = chatSubscribers(state, session.sessionId);
+  subscribers.add(subscriber);
+  const heartbeat = setInterval(() => {
+    if (!response.destroyed) response.write(": keep-alive\n\n");
+  }, 15_000);
+  state.timers.add(heartbeat);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    state.timers.delete(heartbeat);
+    subscribers.delete(subscriber);
+    if (subscribers.size === 0) {
+      state.chatSubscribersBySession.delete(session.sessionId);
+    }
+  };
+  response.on("close", cleanup);
+  response.on("error", cleanup);
 }
 
 async function buildDiagnosticsContext(
@@ -770,8 +942,7 @@ function channelWakePoliciesByBinding(
   const policies: Record<string, ChannelWakePolicy> = {};
   for (const binding of state.runtimeConfig.channelBindings) {
     policies[binding.bindingId] =
-      state.profileChannelWakePolicies.get(binding.profileId) ??
-      "subscription";
+      state.profileChannelWakePolicies.get(binding.profileId) ?? "subscription";
   }
   return policies;
 }
@@ -1541,11 +1712,17 @@ interface ServiceWakeDispatchReport {
   reasonCode?: string;
 }
 
+interface ChatStreamSubscriber {
+  write(event: ChatEvent): void;
+}
+
 interface ServiceWakeObservationContext {
   deliveryIntentId?: number;
   channelId?: number;
   channelMessageId?: number;
 }
+
+type ServiceWakeSource = "background" | "direct_debug" | "delivery" | "chat";
 
 function startServiceBackgroundLoops(state: ServiceState): void {
   if (state.config.background.schedulerTickIntervalMs > 0) {
@@ -1839,6 +2016,418 @@ async function rejectDenDeliveryIntent(
   });
 }
 
+async function submitRustyViewChatMessage(
+  state: ServiceState,
+  input: ChatSendMessageInput,
+): Promise<SendChatMessageResult> {
+  const receiptKey = `${input.session.sessionId}:${input.idempotencyKey}`;
+  const existing = state.chatMessageReceipts.get(receiptKey);
+  if (existing !== undefined) {
+    return { ...existing, status: "duplicate" };
+  }
+  const messageId = input.clientMessageId ?? `chat:${input.idempotencyKey}`;
+  const correlationId = `chat:${input.idempotencyKey}`;
+  const inbound = appendChatEvent(state, input.session.sessionId, {
+    kind: "message_created",
+    payload: {
+      message_id: messageId,
+      role: input.actor.kind === "agent" ? "assistant" : "user",
+      actor: input.actor,
+      body: input.body,
+      correlation_id: correlationId,
+      reason: input.reason,
+    },
+  });
+  const wakeReport = await submitServiceTurn(state, {
+    sessionId: input.session.sessionId,
+    from: input.actor.id,
+    body: input.body,
+    correlationId,
+    source: "chat",
+  });
+  const result: SendChatMessageResult = {
+    status: wakeReport.status === "completed" ? "accepted" : "rejected",
+    message_id: messageId,
+    wake_id: wakeReport.wakeId,
+    correlation_id: correlationId,
+    latest_cursor: latestChatCursor(state, input.session.sessionId) ?? inbound.event_id,
+    reason_code: wakeReport.reasonCode,
+  };
+  rememberChatMessageReceipt(state, receiptKey, result);
+  return result;
+}
+
+async function executeRustyViewChatCommand(
+  state: ServiceState,
+  input: ExecuteChatCommandInput,
+): Promise<ExecuteChatCommandResult> {
+  const started = appendChatEvent(state, input.session.sessionId, {
+    kind: "command_started",
+    payload: {
+      command: input.command,
+      actor: input.actor,
+      request_id: input.requestId,
+    },
+  });
+  const routed = routeSlashCommand({
+    text: input.command,
+    session: slashCommandSession(input.session),
+    actor: {
+      id: input.actor.id,
+      displayName: input.actor.display_name,
+    },
+    options: {
+      primeProfiles: [input.session.profileId],
+      allowNonPrimeReadCommands: true,
+    },
+  });
+  if (routed.kind === "pass_through") {
+    return completeChatCommand(state, input.session.sessionId, {
+      status: "rejected",
+      command_name: "unknown",
+      summary: "Only slash commands can be executed through the chat command API.",
+      latest_cursor: started.event_id,
+      reason_code: "not_a_slash_command",
+    });
+  }
+  if (routed.status !== "ok") {
+    return completeChatCommand(state, input.session.sessionId, {
+      status: "rejected",
+      command_name: routed.commandName,
+      summary: routed.response.summary,
+      latest_cursor: started.event_id,
+      reason_code:
+        routed.status === "denied" ? "slash_command_denied" : "unknown_command",
+      response: routed.response,
+    });
+  }
+  if (
+    routed.commandName === "help" ||
+    routed.commandName === "status" ||
+    routed.commandName === "session"
+  ) {
+    const diagnosticsContext = await buildDiagnosticsContext(state);
+    const response = buildReadOnlySlashCommandResponse(routed.commandName, {
+      diagnostics: diagnosticsContext.diagnostics,
+      session: slashCommandSession(input.session),
+      options: {
+        primeProfiles: [input.session.profileId],
+        allowNonPrimeReadCommands: true,
+      },
+    });
+    return completeChatCommand(state, input.session.sessionId, {
+      status: "completed",
+      command_name: routed.commandName,
+      summary: response.summary,
+      latest_cursor: started.event_id,
+      response,
+    });
+  }
+  if (routed.controlRequest) {
+    const control = await handleAdminControlRequest(
+      {
+        method: "POST",
+        url: controlUrlForSlashCommand(
+          routed.controlRequest.commandName,
+          input.session.sessionId,
+        ),
+        headers: {
+          authorization: `Bearer ${controlBearerToken(state)}`,
+          "x-rusty-crew-operator": input.actor.id,
+        },
+        body: {
+          ...routed.controlRequest.body,
+          reason: routed.controlRequest.reason,
+          reasonCode: routed.controlRequest.reasonCode,
+        },
+        requestId: input.requestId,
+      },
+      {
+        auth: {
+          bearerToken: controlBearerToken(state),
+          operatorId: input.actor.id,
+        },
+        auditSink: state.auditSink,
+        executor: createServiceControlExecutor(state),
+        now: state.now,
+      },
+    );
+    const result: Pick<AdminControlResponse, "outcome"> = control.body.ok
+      ? (control.body.data as AdminControlResponse)
+      : {
+          outcome: {
+            status: "failed" as const,
+            summary: control.body.error.message,
+            reasonCode: control.body.error.reason_code,
+          },
+        };
+    const outcome = result.outcome;
+    const affected = outcome.affectedIds ?? {};
+    return completeChatCommand(state, input.session.sessionId, {
+      status: outcome.status === "completed" ? "completed" : "failed",
+      command_name: routed.commandName,
+      summary: outcome.summary,
+      latest_cursor: started.event_id,
+      old_session_id: stringRecordValue(affected, "oldSessionId"),
+      new_session_id: stringRecordValue(affected, "newSessionId"),
+      reason_code: outcome.reasonCode,
+      response: { outcome, control_status: control.status },
+    });
+  }
+  return completeChatCommand(state, input.session.sessionId, {
+    status: "failed",
+    command_name: routed.commandName,
+    summary: "Slash command did not produce an executable action.",
+    latest_cursor: started.event_id,
+    reason_code: "missing_command_action",
+  });
+}
+
+function completeChatCommand(
+  state: ServiceState,
+  sessionId: SessionId,
+  result: ExecuteChatCommandResult,
+): ExecuteChatCommandResult {
+  const completed = appendChatEvent(state, sessionId, {
+    kind:
+      result.status === "completed" ? "command_completed" : "command_failed",
+    payload: { ...result },
+  });
+  return {
+    ...result,
+    latest_cursor: completed.event_id,
+  };
+}
+
+function slashCommandSession(session: SessionState): SlashCommandSession {
+  return {
+    sessionId: session.sessionId,
+    agentId: session.agentId,
+    profileId: session.profileId,
+    kind: session.kind,
+  };
+}
+
+function controlUrlForSlashCommand(
+  commandName: string,
+  sessionId: SessionId,
+): string {
+  if (commandName === "new_session") {
+    return `/v1/admin/control/sessions/${sessionId}/new`;
+  }
+  if (commandName === "reload_mcp") {
+    return `/v1/admin/control/mcp/${sessionId}/reload`;
+  }
+  return `/v1/admin/control/unsupported/${commandName}`;
+}
+
+function stringRecordValue(
+  record: Record<string, string | number>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function rememberChatMessageReceipt(
+  state: ServiceState,
+  key: string,
+  result: SendChatMessageResult,
+): void {
+  state.chatMessageReceipts.set(key, result);
+  if (state.chatMessageReceipts.size <= 500) return;
+  const first = state.chatMessageReceipts.keys().next().value;
+  if (typeof first === "string") {
+    state.chatMessageReceipts.delete(first);
+  }
+}
+
+function appendCoreEventsToChatLog(
+  state: ServiceState,
+  session: SessionState,
+  events: readonly CoreEvent[],
+): void {
+  for (const event of events) {
+    if (
+      event.type === "brain_event_observed" &&
+      event.sessionId === session.sessionId
+    ) {
+      appendBrainEventToChatLog(state, session, event.wakeId, event.event);
+    } else if (
+      event.type === "completion_packet_delivered" &&
+      event.packet.sessionId === session.sessionId
+    ) {
+      appendChatEvent(state, session.sessionId, {
+        kind: "assistant_message_completed",
+        payload: {
+          status: event.packet.status,
+          summary: event.packet.summary,
+        },
+      });
+    } else if (
+      event.type === "brain_actions_accepted" &&
+      event.sessionId === session.sessionId
+    ) {
+      appendChatEvent(state, session.sessionId, {
+        kind: "unknown",
+        payload: {
+          source_event_type: event.type,
+          accepted_action_count: event.count,
+        },
+      });
+    }
+  }
+}
+
+function appendBrainEventToChatLog(
+  state: ServiceState,
+  session: SessionState,
+  wakeId: string | undefined,
+  event: BrainEvent,
+): void {
+  switch (event.type) {
+    case "started":
+      appendChatEvent(state, session.sessionId, {
+        kind: "assistant_turn_started",
+        payload: { wake_id: wakeId },
+      });
+      return;
+    case "text_delta":
+      appendChatEvent(state, session.sessionId, {
+        kind: "assistant_text_delta",
+        payload: { wake_id: wakeId, text: event.text },
+      });
+      return;
+    case "tool_call_started":
+      appendChatEvent(state, session.sessionId, {
+        kind: "tool_call_started",
+        payload: {
+          wake_id: wakeId,
+          tool_name: event.toolName,
+          metadata: event.metadata,
+        },
+      });
+      return;
+    case "tool_call_finished":
+      appendChatEvent(state, session.sessionId, {
+        kind: event.isError ? "tool_call_failed" : "tool_call_completed",
+        payload: {
+          wake_id: wakeId,
+          tool_name: event.toolName,
+          is_error: event.isError,
+          metadata: event.metadata,
+        },
+      });
+      return;
+    case "finished":
+      appendChatEvent(state, session.sessionId, {
+        kind: "assistant_turn_finished",
+        payload: { wake_id: wakeId },
+      });
+      return;
+  }
+}
+
+function appendChatEvent(
+  state: ServiceState,
+  sessionId: SessionId,
+  event: Pick<ChatEvent, "kind" | "payload">,
+): ChatEvent {
+  const sequence = (state.chatSequencesBySession.get(sessionId) ?? 0) + 1;
+  state.chatSequencesBySession.set(sessionId, sequence);
+  const chatEvent: ChatEvent = {
+    event_id: `${sessionId}:${sequence}`,
+    session_id: sessionId,
+    sequence_id: sequence,
+    created_at: state.now(),
+    kind: event.kind,
+    payload: event.payload,
+  };
+  const events = state.chatEventsBySession.get(sessionId) ?? [];
+  events.push(chatEvent);
+  if (events.length > 1_000) {
+    events.splice(0, events.length - 1_000);
+  }
+  state.chatEventsBySession.set(sessionId, events);
+  const subscribers = state.chatSubscribersBySession.get(sessionId);
+  if (subscribers !== undefined) {
+    for (const subscriber of subscribers) {
+      subscriber.write(chatEvent);
+    }
+  }
+  return chatEvent;
+}
+
+function listChatEventsAfterCursor(
+  state: ServiceState,
+  session: SessionState,
+  cursor: string | undefined,
+  limit: number,
+): readonly ChatEvent[] {
+  const after = cursorSequence(cursor, session.sessionId);
+  return (state.chatEventsBySession.get(session.sessionId) ?? [])
+    .filter((event) => event.sequence_id > after)
+    .slice(0, limit);
+}
+
+function streamReplayEvents(
+  state: ServiceState,
+  session: SessionState,
+  cursor: string | undefined,
+  url: URL,
+): readonly ChatEvent[] {
+  const limit = optionalInteger(url.searchParams.get("limit")) ?? 500;
+  const after = cursorSequence(cursor, session.sessionId);
+  const events = listChatEventsAfterCursor(
+    state,
+    session,
+    cursor,
+    Math.min(Math.max(limit, 1), 1_000),
+  );
+  if (after > 0) return events;
+  return [
+    {
+      event_id: `${session.sessionId}:0`,
+      session_id: session.sessionId,
+      sequence_id: 0,
+      created_at: session.lastActiveAt,
+      kind: "session_snapshot",
+      payload: {
+        session_id: session.sessionId,
+        agent_id: session.agentId,
+        profile_id: session.profileId,
+        status: session.status,
+      },
+    },
+    ...events,
+  ];
+}
+
+function latestChatCursor(
+  state: ServiceState,
+  sessionId: SessionId,
+): string | undefined {
+  return state.chatEventsBySession.get(sessionId)?.at(-1)?.event_id;
+}
+
+function chatSubscribers(
+  state: ServiceState,
+  sessionId: SessionId,
+): Set<ChatStreamSubscriber> {
+  const existing = state.chatSubscribersBySession.get(sessionId);
+  if (existing !== undefined) return existing;
+  const subscribers = new Set<ChatStreamSubscriber>();
+  state.chatSubscribersBySession.set(sessionId, subscribers);
+  return subscribers;
+}
+
+function writeSseEvent(response: ServerResponse, event: ChatEvent): void {
+  if (response.destroyed) return;
+  response.write(`id: ${event.event_id}\n`);
+  response.write(`event: ${event.kind}\n`);
+  response.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
 async function submitServiceTurn(
   state: ServiceState,
   input: {
@@ -1846,7 +2435,7 @@ async function submitServiceTurn(
     from: string;
     body: string;
     correlationId: string;
-    source: "delivery" | "direct_debug";
+    source: Exclude<ServiceWakeSource, "background">;
     observationContext?: ServiceWakeObservationContext;
   },
 ): Promise<ServiceWakeDispatchReport> {
@@ -2184,7 +2773,7 @@ async function runPostTurnMaintenance(input: {
   session: SessionState;
   profileContext: Awaited<ReturnType<typeof loadProfileContext>>;
   wakeId: string;
-  source: "background" | "direct_debug" | "delivery";
+  source: ServiceWakeSource;
   observedEvents: readonly CoreEvent[];
   completionSummary?: string;
 }): Promise<void> {
@@ -2320,7 +2909,7 @@ async function runServiceCuratorLifecycleTransitions(
 
 async function drainAndDispatchWakes(
   state: ServiceState,
-  source: "background" | "direct_debug" | "delivery",
+  source: ServiceWakeSource,
   observationContext?: ServiceWakeObservationContext,
 ): Promise<ServiceWakeDispatchReport[]> {
   if (state.stopping) return [];
@@ -2367,7 +2956,7 @@ function consumeSuppressedWakeEvent(
 async function dispatchWake(
   state: ServiceState,
   event: Extract<CoreEvent, { type: "brain_wake_requested" }>,
-  source: "background" | "direct_debug" | "delivery",
+  source: ServiceWakeSource,
   observationContext?: ServiceWakeObservationContext,
 ): Promise<ServiceWakeDispatchReport> {
   const sessionId = event.sessionId;
@@ -2441,7 +3030,7 @@ async function dispatchWake(
           wakeId,
         });
         return state.bridge.wakeBrain(request);
-      }),
+      }, (events) => appendCoreEventsToChatLog(state, session, events)),
       {
         wakeId,
         sessionId,
@@ -2525,6 +3114,7 @@ async function observeWakeEvents<T>(
   state: ServiceState,
   sessionId: SessionId,
   callback: () => Promise<T>,
+  onEvents?: (events: readonly CoreEvent[]) => void,
 ): Promise<{ accepted: T; events: CoreEvent[] }> {
   const subscription = await state.bridge.subscribeEvents({
     eventKinds: [
@@ -2540,6 +3130,7 @@ async function observeWakeEvents<T>(
       state.bridge,
       subscription,
     );
+    if (events.length > 0) onEvents?.(events);
     return { accepted, events };
   } finally {
     await state.bridge.unsubscribeEvents(subscription).catch(() => undefined);
@@ -2835,9 +3426,13 @@ function closeServer(server: Server): Promise<void> {
 }
 
 function writeJsonResponse(
-  response: import("node:http").ServerResponse,
+  response: ServerResponse,
   result: ServiceRouteResult,
 ): void {
+  if (isRawServiceRouteResult(result)) {
+    result.write(response);
+    return;
+  }
   for (const [name, value] of Object.entries(result.headers)) {
     response.setHeader(name, value);
   }
@@ -2845,6 +3440,12 @@ function writeJsonResponse(
   response.end(
     typeof result.body === "string" ? result.body : JSON.stringify(result.body),
   );
+}
+
+function isRawServiceRouteResult(
+  result: ServiceRouteResult,
+): result is RawServiceRouteResult {
+  return "kind" in result && result.kind === "raw";
 }
 
 function isAdminPanelRoute(pathname: string): boolean {
@@ -3531,6 +4132,15 @@ function requestId(request: IncomingMessage): string {
   return typeof value === "string" && value.trim()
     ? value.trim()
     : `req_${Date.now()}`;
+}
+
+function stringHeader(
+  request: IncomingMessage,
+  name: string,
+): string | undefined {
+  const value = request.headers[name.toLowerCase()];
+  if (Array.isArray(value)) return value.find((candidate) => candidate.trim());
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function headers(request: IncomingMessage): Record<string, string | undefined> {

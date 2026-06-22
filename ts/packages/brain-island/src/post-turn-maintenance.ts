@@ -18,7 +18,7 @@ export type PostTurnMaintenanceDecision =
 export interface PostTurnMaintenanceInput {
   profileId: string;
   wakeId: string;
-  source: "background" | "direct_debug" | "delivery";
+  source: "background" | "direct_debug" | "delivery" | "chat";
   backgroundReviewEnabled: boolean;
   events: readonly CoreEvent[];
   completionSummary?: string;
