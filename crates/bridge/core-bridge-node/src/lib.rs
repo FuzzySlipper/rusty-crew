@@ -181,6 +181,51 @@ impl NativeBridge {
             .map(scheduled_job_json)
     }
 
+    pub fn list_scheduled_jobs(
+        &self,
+        status: Option<String>,
+        job_kind: Option<String>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> CoreResult<Vec<serde_json::Value>> {
+        let status = status
+            .as_deref()
+            .map(scheduled_job_status_from_str)
+            .transpose()?;
+        self.engine()?
+            .list_scheduled_jobs(status, job_kind, limit, offset)
+            .map(|jobs| jobs.into_iter().map(scheduled_job_json).collect())
+    }
+
+    pub fn list_scheduled_runs(
+        &self,
+        job_id: Option<String>,
+        status: Option<String>,
+        trigger: Option<String>,
+        target_session_id: Option<String>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> CoreResult<Vec<serde_json::Value>> {
+        let status = status
+            .as_deref()
+            .map(scheduled_run_status_from_str)
+            .transpose()?;
+        let trigger = trigger
+            .as_deref()
+            .map(scheduled_run_trigger_from_str)
+            .transpose()?;
+        self.engine()?
+            .list_scheduled_runs(
+                job_id,
+                status,
+                trigger,
+                target_session_id.map(SessionId::new),
+                limit,
+                offset,
+            )
+            .map(|runs| runs.into_iter().map(scheduled_run_json).collect())
+    }
+
     pub fn run_scheduler_tick(&self) -> CoreResult<serde_json::Value> {
         self.engine()?.run_scheduler_tick().map(|report| {
             serde_json::json!({
@@ -1415,6 +1460,52 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn list_scheduled_jobs_json(
+        &self,
+        status: Option<String>,
+        job_kind: Option<String>,
+        limit: Option<f64>,
+        offset: Option<f64>,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let jobs = bridge
+            .list_scheduled_jobs(
+                status,
+                job_kind,
+                limit.map(|value| value as u32),
+                offset.map(|value| value as u32),
+            )
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&jobs)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn list_scheduled_runs_json(
+        &self,
+        job_id: Option<String>,
+        status: Option<String>,
+        trigger: Option<String>,
+        target_session_id: Option<String>,
+        limit: Option<f64>,
+        offset: Option<f64>,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let runs = bridge
+            .list_scheduled_runs(
+                job_id,
+                status,
+                trigger,
+                target_session_id,
+                limit.map(|value| value as u32),
+                offset.map(|value| value as u32),
+            )
+            .map_err(to_napi_error)?;
+        serde_json::to_string(&runs)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
     pub fn run_scheduler_tick_json(&self) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let report = bridge.run_scheduler_tick().map_err(to_napi_error)?;
@@ -1821,6 +1912,18 @@ fn scheduled_job_status_as_str(status: ScheduledJobStatus) -> &'static str {
     }
 }
 
+fn scheduled_job_status_from_str(raw: &str) -> CoreResult<ScheduledJobStatus> {
+    match raw {
+        "active" => Ok(ScheduledJobStatus::Active),
+        "paused" => Ok(ScheduledJobStatus::Paused),
+        "archived" => Ok(ScheduledJobStatus::Archived),
+        other => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("unknown scheduled job status {other}"),
+        )),
+    }
+}
+
 fn scheduled_run_status_as_str(status: ScheduledRunStatus) -> &'static str {
     match status {
         ScheduledRunStatus::Claimed => "claimed",
@@ -1832,10 +1935,36 @@ fn scheduled_run_status_as_str(status: ScheduledRunStatus) -> &'static str {
     }
 }
 
+fn scheduled_run_status_from_str(raw: &str) -> CoreResult<ScheduledRunStatus> {
+    match raw {
+        "claimed" => Ok(ScheduledRunStatus::Claimed),
+        "completed" => Ok(ScheduledRunStatus::Completed),
+        "skipped" => Ok(ScheduledRunStatus::Skipped),
+        "failed" => Ok(ScheduledRunStatus::Failed),
+        "expired" => Ok(ScheduledRunStatus::Expired),
+        "cancelled" => Ok(ScheduledRunStatus::Cancelled),
+        other => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("unknown scheduled run status {other}"),
+        )),
+    }
+}
+
 fn scheduled_run_trigger_as_str(trigger: ScheduledRunTrigger) -> &'static str {
     match trigger {
         ScheduledRunTrigger::Due => "due",
         ScheduledRunTrigger::Manual => "manual",
+    }
+}
+
+fn scheduled_run_trigger_from_str(raw: &str) -> CoreResult<ScheduledRunTrigger> {
+    match raw {
+        "due" => Ok(ScheduledRunTrigger::Due),
+        "manual" => Ok(ScheduledRunTrigger::Manual),
+        other => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("unknown scheduled run trigger {other}"),
+        )),
     }
 }
 

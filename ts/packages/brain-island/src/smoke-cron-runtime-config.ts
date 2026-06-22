@@ -85,6 +85,10 @@ try {
       nextDueAt: "2026-06-21T00:00:00Z",
     },
   );
+  assert.deepEqual(parseCronArgs(["runs", "--job", "cron-wake"]), {
+    kind: "runs",
+    jobId: "cron-wake",
+  });
 
   const serviceConfig = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
@@ -129,11 +133,37 @@ try {
   assert.match(outputs[0] ?? "", /cron-wake/);
   assert.match(outputs[0] ?? "", /session_wake/);
 
-  await runRustyCrewCronCli({
-    args: ["runs", "--job", "cron-wake", "--limit", "2"],
-    write: (text) => outputs.push(text),
-  });
-  assert.match(outputs[1] ?? "", /scheduler_run_history_api_missing/);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.pathname, "/v1/admin/scheduler/runs");
+    assert.equal(url.searchParams.get("jobId"), "cron-wake");
+    assert.equal(url.searchParams.get("limit"), "2");
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: {
+          runs: [
+            {
+              runId: "scheduled:cron-wake:1",
+              jobId: "cron-wake",
+              status: "completed",
+            },
+          ],
+        },
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  try {
+    await runRustyCrewCronCli({
+      args: ["runs", "--job", "cron-wake", "--limit", "2"],
+      write: (text) => outputs.push(text),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.match(outputs[1] ?? "", /scheduled:cron-wake:1/);
 
   writeFileSync(
     configPath,
@@ -162,7 +192,7 @@ try {
       {
         listed: runtimeConfig.scheduledJobs.map((job) => job.id),
         registeredFirstDueAt: registered[0]?.firstDueAt,
-        runsCommand: JSON.parse(outputs[1] ?? "{}").reasonCode,
+        runsCommand: JSON.parse(outputs[1] ?? "{}").data.runs[0].runId,
       },
       null,
       2,

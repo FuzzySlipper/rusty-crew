@@ -194,6 +194,24 @@ try {
   await waitUntil(async () => {
     return (await host.bridge.diagnosticCountRows("scheduled_job_runs")) > 0;
   }, "scheduled job was claimed by the service heartbeat");
+  const schedulerJobs = await get(
+    "/v1/admin/scheduler/jobs?status=active",
+    token,
+  );
+  assert.equal(schedulerJobs.status, 200);
+  assert.equal(
+    schedulerJobs.body.data.jobs.some(
+      (job: { jobId?: string }) =>
+        job.jobId === "field-session-smoke-heartbeat",
+    ),
+    true,
+  );
+  const schedulerRuns = await get(
+    "/v1/admin/scheduler/runs?jobId=field-session-smoke-heartbeat&limit=5",
+    token,
+  );
+  assert.equal(schedulerRuns.status, 200);
+  assert.equal(schedulerRuns.body.data.runs[0]?.status, "completed");
   await waitUntil(
     async () => {
       const scheduledWakeDiagnostics = await get(

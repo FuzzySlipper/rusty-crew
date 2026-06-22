@@ -22,7 +22,9 @@ import type {
   SessionId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  ScheduledJobListQuery,
   ScheduledJobSummary,
+  ScheduledRunListQuery,
   ScheduledRunSummary,
   SchedulerTickReport,
   ShutdownRequest,
@@ -109,6 +111,18 @@ export class CoreBridge {
     firstDueAt: string;
   }): Promise<ScheduledJobSummary> {
     return this.native.registerScheduledWakeJob(input);
+  }
+
+  async listScheduledJobs(
+    query?: ScheduledJobListQuery,
+  ): Promise<ScheduledJobSummary[]> {
+    return this.native.listScheduledJobs(query);
+  }
+
+  async listScheduledRuns(
+    query?: ScheduledRunListQuery,
+  ): Promise<ScheduledRunSummary[]> {
+    return this.native.listScheduledRuns(query);
   }
 
   async runSchedulerTick(): Promise<SchedulerTickReport> {

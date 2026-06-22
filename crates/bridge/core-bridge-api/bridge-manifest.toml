@@ -148,6 +148,24 @@ errors = "core_protocol::CoreError"
 summary = "Create or replace a Rust-owned scheduled wake job for an existing wakeable session."
 
 [[operation]]
+name = "list_scheduled_jobs"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(status: Option<scheduled_job_status>, job_kind: Option<String>, limit: Option<u32>, offset: Option<u32>)"
+output = "Vec<scheduled_job_summary>"
+errors = "core_protocol::CoreError"
+summary = "List Rust-owned scheduled jobs for admin diagnostics and operator tooling."
+
+[[operation]]
+name = "list_scheduled_runs"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(job_id: Option<String>, status: Option<scheduled_run_status>, trigger: Option<scheduled_run_trigger>, target_session_id: Option<core_protocol::SessionId>, limit: Option<u32>, offset: Option<u32>)"
+output = "Vec<scheduled_run_summary>"
+errors = "core_protocol::CoreError"
+summary = "List scheduled job run history for admin diagnostics and operator tooling."
+
+[[operation]]
 name = "run_scheduler_tick"
 surface = "stable"
 direction = "ts_to_rust"

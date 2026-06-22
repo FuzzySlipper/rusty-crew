@@ -64,6 +64,15 @@ try {
   assert.equal(scheduledWake?.sessionId, scheduledSessionId);
   assert.equal(await native.diagnosticCountRows("scheduled_jobs"), 1);
   assert.equal(await native.diagnosticCountRows("scheduled_job_runs"), 1);
+  const listedJobs = await native.listScheduledJobs({ status: "active" });
+  assert.equal(listedJobs[0]?.jobId, "wake-prime");
+  const listedRuns = await native.listScheduledRuns({
+    jobId: "wake-prime",
+    limit: 5,
+  });
+  assert.equal(listedRuns.length, 1);
+  assert.equal(listedRuns[0]?.status, "completed");
+  assert.equal(listedRuns[0]?.trigger, "due");
 
   const duplicateTick = await native.runSchedulerTick();
   assert.equal(duplicateTick.dueRunsClaimed, 0);
@@ -211,6 +220,7 @@ try {
     JSON.stringify(
       {
         scheduledJob: job.jobId,
+        listedRuns: listedRuns.map((run) => run.status),
         tick,
         cleanupArchived: cleanup.runtime.terminalArchived,
         diagnostics: diagnostics.summary,

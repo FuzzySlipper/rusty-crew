@@ -32,8 +32,10 @@ import type {
   RunId,
   RuntimeBufferHandle,
   RuntimeBufferView,
+  ScheduledJobListQuery,
   ScheduledJobStatus,
   ScheduledJobSummary,
+  ScheduledRunListQuery,
   ScheduledRunStatus,
   ScheduledRunSummary,
   ScheduledRunTrigger,
@@ -186,6 +188,20 @@ interface NativeBridgeBinding {
     targetSessionId: string,
     intervalMs: number | undefined,
     firstDueAt: string,
+  ): string;
+  listScheduledJobsJson(
+    status?: ScheduledJobStatus,
+    jobKind?: string,
+    limit?: number,
+    offset?: number,
+  ): string;
+  listScheduledRunsJson(
+    jobId?: string,
+    status?: ScheduledRunStatus,
+    trigger?: ScheduledRunTrigger,
+    targetSessionId?: SessionId,
+    limit?: number,
+    offset?: number,
   ): string;
   runSchedulerTickJson(): string;
   requestScheduledJobRunJson(jobId: string): string;
@@ -545,6 +561,12 @@ export interface NativeBridgeModule {
     intervalMs?: number;
     firstDueAt: string;
   }): Promise<ScheduledJobSummary>;
+  listScheduledJobs(
+    query?: ScheduledJobListQuery,
+  ): Promise<ScheduledJobSummary[]>;
+  listScheduledRuns(
+    query?: ScheduledRunListQuery,
+  ): Promise<ScheduledRunSummary[]>;
   runSchedulerTick(): Promise<SchedulerTickReport>;
   requestScheduledJobRun(
     jobId: string,
@@ -673,6 +695,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
     ensureConfiguredSession: unavailable("ensure_configured_session"),
     registerScheduledWakeJob: unavailable("register_scheduled_wake_job"),
+    listScheduledJobs: unavailable("list_scheduled_jobs"),
+    listScheduledRuns: unavailable("list_scheduled_runs"),
     runSchedulerTick: unavailable("run_scheduler_tick"),
     requestScheduledJobRun: unavailable("request_scheduled_job_run"),
     pauseScheduledJob: unavailable("pause_scheduled_job"),
@@ -908,6 +932,30 @@ function createNativeBridgeModule(
           ),
         ) as RawScheduledJobSummary,
       ),
+    listScheduledJobs: async (query = {}) =>
+      (
+        JSON.parse(
+          binding.listScheduledJobsJson(
+            query.status,
+            query.jobKind,
+            query.limit,
+            query.offset,
+          ),
+        ) as RawScheduledJobSummary[]
+      ).map(toScheduledJobSummary),
+    listScheduledRuns: async (query = {}) =>
+      (
+        JSON.parse(
+          binding.listScheduledRunsJson(
+            query.jobId,
+            query.status,
+            query.trigger,
+            query.targetSessionId,
+            query.limit,
+            query.offset,
+          ),
+        ) as RawScheduledRunSummary[]
+      ).map(toScheduledRunSummary),
     runSchedulerTick: async () =>
       toSchedulerTickReport(
         JSON.parse(binding.runSchedulerTickJson()) as RawSchedulerTickReport,

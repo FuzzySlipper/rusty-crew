@@ -15,7 +15,13 @@ export type CronCliCommand =
       baseUrl?: string;
       token?: string;
     }
-  | { kind: "runs"; jobId?: string; limit?: number; baseUrl?: string };
+  | {
+      kind: "runs";
+      jobId?: string;
+      limit?: number;
+      baseUrl?: string;
+      token?: string;
+    };
 
 export interface CronCliOptions {
   args: readonly string[];
@@ -53,6 +59,7 @@ export function parseCronArgs(args: readonly string[]): CronCliCommand {
           jobId: option(rest, "--job"),
           limit: numericOption(rest, "--limit"),
           baseUrl: option(rest, "--base-url"),
+          token: option(rest, "--token"),
         },
       );
     default:
@@ -110,20 +117,23 @@ export async function runRustyCrewCronCli(
   }
 
   if (command.kind === "runs") {
-    write(
-      JSON.stringify(
+    const baseUrl =
+      command.baseUrl ??
+      env.RUSTY_CREW_ADMIN_BASE_URL ??
+      "http://127.0.0.1:9347";
+    const token = command.token ?? env.RUSTY_CREW_ADMIN_TOKEN;
+    const runs = await getSchedulerRuns(
+      baseUrl,
+      token,
+      optionalFields(
+        {},
         {
-          ok: false,
-          reasonCode: "scheduler_run_history_api_missing",
           jobId: command.jobId,
-          limit: command.limit ?? 20,
-          message:
-            "Rusty Crew does not yet expose scheduled run history through the admin API.",
+          limit: command.limit,
         },
-        null,
-        2,
       ),
     );
+    write(JSON.stringify(runs, null, 2));
     return;
   }
 
@@ -135,6 +145,31 @@ export async function runRustyCrewCronCli(
     ...(command.kind === "resume" ? { nextDueAt: command.nextDueAt } : {}),
   });
   write(JSON.stringify(result, null, 2));
+}
+
+async function getSchedulerRuns(
+  baseUrl: string,
+  token: string | undefined,
+  query: { jobId?: string; limit?: number },
+): Promise<unknown> {
+  const url = new URL("/v1/admin/scheduler/runs", baseUrl);
+  if (query.jobId !== undefined) url.searchParams.set("jobId", query.jobId);
+  if (query.limit !== undefined) {
+    url.searchParams.set("limit", String(query.limit));
+  }
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const parsed = JSON.parse(await response.text()) as unknown;
+  if (!response.ok) {
+    throw new Error(
+      `cron runs failed ${response.status}: ${JSON.stringify(parsed)}`,
+    );
+  }
+  return parsed;
 }
 
 function serviceConfigForCli(
@@ -229,7 +264,7 @@ function usage(): string {
     "  npm run cron -- run --job <id> [--base-url <url>] [--token <token>]",
     "  npm run cron -- pause --job <id> [--base-url <url>] [--token <token>]",
     "  npm run cron -- resume --job <id> --next-due-at <iso> [--base-url <url>] [--token <token>]",
-    "  npm run cron -- runs [--job <id>] [--limit <n>]",
+    "  npm run cron -- runs [--job <id>] [--limit <n>] [--base-url <url>] [--token <token>]",
   ].join("\n");
 }
 

@@ -6,12 +6,12 @@ use rusty_crew_core_body::{
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
     CoordinationStore, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
-    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
+    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, QueryPage,
     QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
     RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
     RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary,
-    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord,
-    ScheduledRunStatus, ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
+    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
@@ -486,6 +486,40 @@ impl CoreEngine {
         };
         self.store.upsert_scheduled_job(&record)?;
         Ok(record)
+    }
+
+    pub fn list_scheduled_jobs(
+        &self,
+        status: Option<ScheduledJobStatus>,
+        job_kind: Option<String>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> CoreResult<Vec<ScheduledJobRecord>> {
+        self.store.query_scheduled_jobs(&ScheduledJobQuery {
+            status,
+            job_kind,
+            page: Some(QueryPage { limit, offset }),
+            ..ScheduledJobQuery::default()
+        })
+    }
+
+    pub fn list_scheduled_runs(
+        &self,
+        job_id: Option<String>,
+        status: Option<ScheduledRunStatus>,
+        trigger: Option<ScheduledRunTrigger>,
+        target_session_id: Option<SessionId>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        self.store.query_scheduled_runs(&ScheduledRunQuery {
+            job_id,
+            status,
+            trigger,
+            target_session_id,
+            page: Some(QueryPage { limit, offset }),
+            ..ScheduledRunQuery::default()
+        })
     }
 
     pub fn pause_scheduled_job(&self, job_id: &str) -> CoreResult<()> {

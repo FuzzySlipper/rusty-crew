@@ -809,6 +809,22 @@ export interface ScheduledRunSummary {
   updatedAt: string;
 }
 
+export interface ScheduledJobListQuery {
+  status?: ScheduledJobStatus;
+  jobKind?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ScheduledRunListQuery {
+  jobId?: string;
+  status?: ScheduledRunStatus;
+  trigger?: ScheduledRunTrigger;
+  targetSessionId?: SessionId;
+  limit?: number;
+  offset?: number;
+}
+
 export interface SchedulerTickReport {
   staleRunsExpired: number;
   dueRunsClaimed: number;
@@ -831,6 +847,8 @@ export const manifestOperationNames = [
   "enqueue_body_follow_up_message",
   "ensure_configured_session",
   "register_scheduled_wake_job",
+  "list_scheduled_jobs",
+  "list_scheduled_runs",
   "run_scheduler_tick",
   "request_scheduled_job_run",
   "pause_scheduled_job",

@@ -8,6 +8,9 @@ import type {
   CoreEvent,
   EngineHandle,
   ProfileId,
+  ScheduledJobStatus,
+  ScheduledRunStatus,
+  ScheduledRunTrigger,
   SessionId,
   SessionState,
   SubscriptionHandle,
@@ -338,6 +341,10 @@ async function handleHttpRequest(
     return handleDirectDebugRequest(request, url, state);
   }
 
+  if (url.pathname.startsWith("/v1/admin/scheduler/")) {
+    return handleSchedulerReadRequest(request, url, state);
+  }
+
   if (url.pathname.startsWith("/v1/admin/")) {
     return handleAdminDiagnosticsRequest(
       {
@@ -353,6 +360,66 @@ async function handleHttpRequest(
     code: "not_found",
     reason_code: "unknown_service_route",
     message: `unknown service route ${url.pathname}`,
+    retryable: false,
+  });
+}
+
+async function handleSchedulerReadRequest(
+  request: IncomingMessage,
+  url: URL,
+  state: ServiceState,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  if ((request.method ?? "GET").toUpperCase() !== "GET") {
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "read_only_route",
+      message: "scheduler diagnostics routes only support GET",
+      retryable: false,
+    });
+  }
+
+  if (url.pathname === "/v1/admin/scheduler/jobs") {
+    const status = scheduledJobStatusParam(url.searchParams.get("status"));
+    if (status === "invalid") {
+      return invalidSchedulerFilter(requestIdValue, "status");
+    }
+    const jobKind = stringParam(url, "jobKind");
+    const jobs = await state.bridge.listScheduledJobs({
+      ...(status === undefined ? {} : { status }),
+      ...(jobKind === undefined ? {} : { jobKind }),
+      ...pageParams(url),
+    });
+    return successRoute(requestIdValue, { jobs });
+  }
+
+  if (url.pathname === "/v1/admin/scheduler/runs") {
+    const status = scheduledRunStatusParam(url.searchParams.get("status"));
+    if (status === "invalid") {
+      return invalidSchedulerFilter(requestIdValue, "status");
+    }
+    const trigger = scheduledRunTriggerParam(url.searchParams.get("trigger"));
+    if (trigger === "invalid") {
+      return invalidSchedulerFilter(requestIdValue, "trigger");
+    }
+    const jobId = stringParam(url, "jobId");
+    const targetSessionId = stringParam(url, "targetSessionId");
+    const runs = await state.bridge.listScheduledRuns({
+      ...(jobId === undefined ? {} : { jobId }),
+      ...(status === undefined ? {} : { status }),
+      ...(trigger === undefined ? {} : { trigger }),
+      ...(targetSessionId === undefined
+        ? {}
+        : { targetSessionId: targetSessionId as never }),
+      ...pageParams(url),
+    });
+    return successRoute(requestIdValue, { runs });
+  }
+
+  return failure(404, requestIdValue, {
+    code: "not_found",
+    reason_code: "unknown_scheduler_diagnostics_route",
+    message: `unknown scheduler diagnostics route ${url.pathname}`,
     retryable: false,
   });
 }
@@ -2644,6 +2711,74 @@ function failure(
       error,
       meta: { request_id: requestIdValue, schema_version: 1 },
     },
+  };
+}
+
+function successRoute<T>(requestIdValue: string, data: T): AdminRouteResult<T> {
+  return {
+    status: 200,
+    headers: { "content-type": "application/json" },
+    body: {
+      ok: true,
+      data,
+      meta: { request_id: requestIdValue, schema_version: 1 },
+    },
+  };
+}
+
+function invalidSchedulerFilter(
+  requestIdValue: string,
+  key: string,
+): AdminRouteResult {
+  return failure(400, requestIdValue, {
+    code: "invalid_input",
+    reason_code: "invalid_scheduler_filter",
+    message: `invalid scheduler ${key} filter`,
+    retryable: false,
+  });
+}
+
+function scheduledJobStatusParam(
+  value: string | null,
+): ScheduledJobStatus | "invalid" | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  return value === "active" || value === "paused" || value === "archived"
+    ? value
+    : "invalid";
+}
+
+function scheduledRunStatusParam(
+  value: string | null,
+): ScheduledRunStatus | "invalid" | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  return value === "claimed" ||
+    value === "completed" ||
+    value === "skipped" ||
+    value === "failed" ||
+    value === "expired" ||
+    value === "cancelled"
+    ? value
+    : "invalid";
+}
+
+function scheduledRunTriggerParam(
+  value: string | null,
+): ScheduledRunTrigger | "invalid" | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  return value === "due" || value === "manual" ? value : "invalid";
+}
+
+function stringParam(url: URL, key: string): string | undefined {
+  const value = url.searchParams.get(key);
+  return value === null || value.trim() === "" ? undefined : value;
+}
+
+function pageParams(url: URL): { limit?: number; offset?: number } {
+  const limit = optionalInteger(url.searchParams.get("limit"));
+  const offset = optionalInteger(url.searchParams.get("offset"));
+  return {
+    ...(limit === undefined ? {} : { limit }),
+    ...(offset === undefined ? {} : { offset }),
   };
 }
 

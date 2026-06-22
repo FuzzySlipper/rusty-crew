@@ -26,6 +26,8 @@ pub const OPERATION_NAMES: &[&str] = &[
     "enqueue_body_follow_up_message",
     "ensure_configured_session",
     "register_scheduled_wake_job",
+    "list_scheduled_jobs",
+    "list_scheduled_runs",
     "run_scheduler_tick",
     "request_scheduled_job_run",
     "pause_scheduled_job",
