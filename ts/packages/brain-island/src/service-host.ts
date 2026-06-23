@@ -4,10 +4,23 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { join } from "node:path";
+import { createReadStream, existsSync } from "node:fs";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  extname,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   BrainEvent,
+  BrainImplementationId,
+  BrainModelConfig,
+  AgentId,
   BrainImplementationHandle,
   ChannelBindingRecord,
   CoreEvent,
@@ -19,6 +32,7 @@ import type {
   ScheduledRunStatus,
   ScheduledRunTrigger,
   SessionId,
+  SessionKind,
   SessionState,
   SubscriptionHandle,
 } from "@rusty-crew/contracts";
@@ -398,7 +412,7 @@ async function handleHttpRequest(
   state: ServiceState,
 ): Promise<ServiceRouteResult> {
   const url = new URL(request.url ?? "/", "http://rusty-crew.local");
-  if (isAdminPanelRoute(url.pathname)) {
+  if (isAdminPanelRoute(url.pathname, staticServingEnabled(state))) {
     return htmlResponse(adminPanelHtml(configRequiresAuth(state.config)));
   }
 
@@ -418,6 +432,10 @@ async function handleHttpRequest(
     (request.method ?? "GET").toUpperCase() === "OPTIONS"
   ) {
     return chatCorsPreflightResponse(request);
+  }
+
+  if (!url.pathname.startsWith("/v1/") && staticServingEnabled(state)) {
+    return handleStaticSiteRequest(request, url, state);
   }
 
   if (!isAuthorized(request, state.config.admin.token, state)) {
@@ -1556,6 +1574,21 @@ function telegramChannelActivityDiagnostics(
 async function reloadServiceRuntimeConfig(
   state: ServiceState,
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
+  return applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "runtime_config_reloaded",
+    summaryPrefix: "Runtime config reloaded",
+  });
+}
+
+async function applyServiceRuntimeConfigFromDisk(
+  state: ServiceState,
+  options: {
+    createMissingSessions: boolean;
+    eventType: string;
+    summaryPrefix: string;
+  },
+): Promise<RustyCrewRuntimeConfigApplyResult> {
   const nextRuntimeConfig = await loadRustyCrewRuntimeConfig(state.config);
   const nextProfileChannelWakePolicies =
     await loadProfileChannelWakePolicies(nextRuntimeConfig);
@@ -1566,7 +1599,7 @@ async function reloadServiceRuntimeConfig(
     bridge: state.bridge,
     existingBrainHandlesByProfileId:
       state.runtimeConfigApplyResult.brainHandlesByProfileId,
-    createMissingSessions: false,
+    createMissingSessions: options.createMissingSessions,
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: nextMcpManager.diagnostics(),
   });
@@ -1583,13 +1616,213 @@ async function reloadServiceRuntimeConfig(
   await restartTelegramConnector(state);
   recordServiceEvent(state, {
     source: "service-host",
-    eventType: "runtime_config_reloaded",
-    summary: runtimeConfigApplySummary(
-      "Runtime config reloaded",
-      nextApplyResult,
-    ),
+    eventType: options.eventType,
+    summary: runtimeConfigApplySummary(options.summaryPrefix, nextApplyResult),
   });
   return nextApplyResult;
+}
+
+interface CreatedServiceProfile {
+  profileId: string;
+  displayName?: string;
+  agentId: string;
+  sessionId: string;
+  implementationId: string;
+  profilePath: string;
+  runtimeConfigPath: string;
+  applyResult: RustyCrewRuntimeConfigApplyResult;
+}
+
+async function createServiceProfile(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<CreatedServiceProfile> {
+  const profileId = validateProfileComponent(
+    requiredBodyString(command, "profileId"),
+    "profileId",
+  );
+  const displayName = optionalBodyString(command, "displayName");
+  const agentId = validateProfileComponent(
+    optionalBodyString(command, "agentId") ?? profileId,
+    "agentId",
+  );
+  const sessionId = validateProfileComponent(
+    optionalBodyString(command, "sessionId") ?? `${agentId}-session`,
+    "sessionId",
+  );
+  const implementationId = validateProfileComponent(
+    optionalBodyString(command, "implementationId") ?? `${profileId}-brain`,
+    "implementationId",
+  );
+  const kind = optionalBodyString(command, "kind") ?? "full";
+  if (kind !== "full" && kind !== "worker" && kind !== "delegated") {
+    throw new Error("profile session kind must be full, worker, or delegated");
+  }
+  const modelConfig = modelConfigFromBody(command.body.modelConfig);
+  const mcpToolProfile =
+    optionalBodyString(command, "mcpToolProfile") ?? profileId;
+  const profilePath = join(
+    state.runtimeConfig.profilesDir,
+    `${profileId}.json`,
+  );
+  if (existsSync(profilePath)) {
+    throw new Error(`profile ${profileId} already exists`);
+  }
+
+  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
+  const brains = runtimeConfigFile.array("brains");
+  const sessions = runtimeConfigFile.array("sessions");
+  if (
+    brains.some(
+      (item) =>
+        isRecord(item) &&
+        (item.profileId === profileId ||
+          item.implementationId === implementationId),
+    )
+  ) {
+    throw new Error(`runtime config already has a brain for ${profileId}`);
+  }
+  if (
+    sessions.some(
+      (item) =>
+        isRecord(item) &&
+        (item.profileId === profileId ||
+          item.sessionId === sessionId ||
+          item.agentId === agentId),
+    )
+  ) {
+    throw new Error(`runtime config already has a session for ${profileId}`);
+  }
+
+  await mkdir(state.runtimeConfig.profilesDir, { recursive: true });
+  await writeJsonFileAtomic(profilePath, {
+    profileId,
+    ...(displayName === undefined ? {} : { displayName }),
+    modelConfig,
+    mcpConfig: {
+      bindingId: `${agentId}-mcp`,
+      serverNames: [agentId],
+      endpointRef: `config://mcp/${agentId}`,
+      toolProfile: mcpToolProfile,
+    },
+    skills: "all",
+  });
+
+  brains.push({ profileId, implementationId });
+  sessions.push({
+    sessionId,
+    agentId,
+    profileId,
+    kind: kind as SessionKind,
+  });
+  await writeJsonFileAtomic(
+    state.config.paths.serviceConfigFile,
+    runtimeConfigFile.value,
+  );
+
+  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: true,
+    eventType: "profile_created",
+    summaryPrefix: `Profile ${profileId} created`,
+  });
+  return {
+    profileId,
+    ...(displayName === undefined ? {} : { displayName }),
+    agentId,
+    sessionId,
+    implementationId,
+    profilePath,
+    runtimeConfigPath: state.config.paths.serviceConfigFile,
+    applyResult,
+  };
+}
+
+function validateProfileComponent(value: string, field: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(value)) {
+    throw new Error(
+      `${field} must start with a letter or number and contain only letters, numbers, underscore, or hyphen`,
+    );
+  }
+  return value;
+}
+
+function modelConfigFromBody(input: unknown): BrainModelConfig {
+  if (input === undefined) {
+    return { provider: "local", modelName: "deterministic" };
+  }
+  if (!isRecord(input)) {
+    throw new Error("modelConfig must be an object when provided");
+  }
+  const provider = optionalString(input.provider) ?? "local";
+  const modelName = optionalString(input.modelName) ?? "deterministic";
+  return compactRecord({
+    provider,
+    modelName,
+    baseUrl: optionalString(input.baseUrl),
+    api: optionalString(input.api),
+    apiKeyEnv: optionalString(input.apiKeyEnv),
+    temperatureMilli: optionalNumber(input.temperatureMilli),
+    maxOutputTokens: optionalNumber(input.maxOutputTokens),
+  }) as unknown as BrainModelConfig;
+}
+
+interface RuntimeConfigFileForMutation {
+  value: Record<string, unknown>;
+  array(key: string): unknown[];
+}
+
+async function readRuntimeConfigFileForMutation(
+  state: ServiceState,
+): Promise<RuntimeConfigFileForMutation> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      await readFile(state.config.paths.serviceConfigFile, "utf8"),
+    );
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      parsed = {};
+    } else {
+      throw error;
+    }
+  }
+  if (!isRecord(parsed)) {
+    throw new Error("service runtime config root must be an object");
+  }
+  if (parsed.profilesDir === undefined) {
+    parsed.profilesDir = state.runtimeConfig.profilesDir;
+  }
+  if (
+    state.runtimeConfig.skillsDir !== undefined &&
+    parsed.skillsDir === undefined
+  ) {
+    parsed.skillsDir = state.runtimeConfig.skillsDir;
+  }
+  return {
+    value: parsed,
+    array(key) {
+      const existing = parsed[key];
+      if (existing === undefined) {
+        const created: unknown[] = [];
+        parsed[key] = created;
+        return created;
+      }
+      if (!Array.isArray(existing)) {
+        throw new Error(`runtime config ${key} must be an array`);
+      }
+      return existing;
+    },
+  };
+}
+
+async function writeJsonFileAtomic(
+  path: string,
+  value: unknown,
+): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`);
+  await rename(tmpPath, path);
 }
 
 async function buildDirectDebugContext(
@@ -1732,6 +1965,20 @@ function createServiceControlExecutor(
       status: () => curatorStatus(state),
       skillsDir: curatorSkillsDir(state.curator.runtimeConfig),
     }),
+    createProfile: async (command) => {
+      const result = await createServiceProfile(state, command);
+      return {
+        status: "completed",
+        summary: `profile ${result.profileId} created with session ${result.sessionId}`,
+        affectedIds: {
+          profileId: result.profileId,
+          agentId: result.agentId,
+          sessionId: result.sessionId,
+          implementationId: result.implementationId,
+        },
+        result,
+      };
+    },
     createSession: async (command) => {
       const sessionId = requiredBodyString(command, "sessionId");
       const agentId = requiredBodyString(command, "agentId");
@@ -2078,6 +2325,24 @@ function optionalBodyBoolean(
 ): boolean | undefined {
   const value = command.body[key];
   return typeof value === "boolean" ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 interface ServiceWakeDispatchReport {
@@ -3890,8 +4155,12 @@ function isRawServiceRouteResult(
   return "kind" in result && result.kind === "raw";
 }
 
-function isAdminPanelRoute(pathname: string): boolean {
-  return pathname === "/" || pathname === "/admin" || pathname === "/admin/";
+function isAdminPanelRoute(pathname: string, staticEnabled: boolean): boolean {
+  return (
+    pathname === "/admin" ||
+    pathname === "/admin/" ||
+    (!staticEnabled && pathname === "/")
+  );
 }
 
 function htmlResponse(body: string): ServiceRouteResult {
@@ -3903,6 +4172,179 @@ function htmlResponse(body: string): ServiceRouteResult {
     },
     body,
   };
+}
+
+function staticServingEnabled(state: ServiceState): boolean {
+  const root = effectiveStaticSiteRoot(state);
+  return root !== undefined && existsSync(root);
+}
+
+async function handleStaticSiteRequest(
+  request: IncomingMessage,
+  url: URL,
+  state: ServiceState,
+): Promise<ServiceRouteResult> {
+  if ((request.method ?? "GET").toUpperCase() !== "GET") {
+    return failure(405, requestId(request), {
+      code: "method_not_allowed",
+      reason_code: "static_method_not_allowed",
+      message: "static files only support GET",
+      retryable: false,
+    });
+  }
+  const root = effectiveStaticSiteRoot(state);
+  if (root === undefined) {
+    return failure(404, requestId(request), {
+      code: "not_found",
+      reason_code: "static_site_disabled",
+      message: "static site serving is not configured",
+      retryable: false,
+    });
+  }
+  const candidate = resolveStaticSitePath(root, url.pathname);
+  if (!candidate.ok) {
+    return failure(403, requestId(request), {
+      code: "forbidden",
+      reason_code: candidate.reasonCode,
+      message: candidate.message,
+      retryable: false,
+    });
+  }
+
+  const filePath = await existingStaticFile(candidate.path);
+  if (filePath !== undefined) return staticFileResponse(root, filePath);
+
+  const indexPath = resolve(root, "index.html");
+  if (await isReadableFile(indexPath))
+    return staticFileResponse(root, indexPath);
+
+  return failure(404, requestId(request), {
+    code: "not_found",
+    reason_code: "static_index_missing",
+    message: `static site index.html was not found in ${root}`,
+    retryable: false,
+  });
+}
+
+function effectiveStaticSiteRoot(state: ServiceState): string | undefined {
+  return (
+    state.config.paths.staticDir ?? join(state.config.paths.dataDir, "site")
+  );
+}
+
+function resolveStaticSitePath(
+  root: string,
+  pathname: string,
+):
+  | { ok: true; path: string }
+  | { ok: false; reasonCode: string; message: string } {
+  let decodedSegments: string[];
+  try {
+    decodedSegments = pathname
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => decodeURIComponent(segment));
+  } catch {
+    return {
+      ok: false,
+      reasonCode: "static_path_invalid",
+      message: "static path contains invalid percent encoding",
+    };
+  }
+
+  if (
+    decodedSegments.some(
+      (segment) =>
+        segment === "." || segment === ".." || segment.startsWith("."),
+    )
+  ) {
+    return {
+      ok: false,
+      reasonCode: "static_path_forbidden",
+      message: "static path contains a forbidden segment",
+    };
+  }
+
+  const resolvedRoot = resolve(root);
+  const resolvedPath =
+    decodedSegments.length === 0
+      ? resolve(resolvedRoot, "index.html")
+      : resolve(resolvedRoot, ...decodedSegments);
+  const relativePath = relative(resolvedRoot, resolvedPath);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${sep}`) ||
+    resolve(resolvedPath) === resolvedRoot
+  ) {
+    return {
+      ok: false,
+      reasonCode: "static_path_traversal",
+      message: "static path escapes the configured static directory",
+    };
+  }
+  return { ok: true, path: resolvedPath };
+}
+
+async function existingStaticFile(path: string): Promise<string | undefined> {
+  if (await isReadableFile(path)) return path;
+  const indexPath = resolve(path, "index.html");
+  return (await isReadableFile(indexPath)) ? indexPath : undefined;
+}
+
+async function isReadableFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function staticFileResponse(
+  root: string,
+  filePath: string,
+): RawServiceRouteResult {
+  return {
+    kind: "raw",
+    write(response) {
+      response.statusCode = 200;
+      response.setHeader("content-type", staticContentType(filePath));
+      response.setHeader("cache-control", staticCacheControl(root, filePath));
+      createReadStream(filePath).pipe(response);
+    },
+  };
+}
+
+function staticContentType(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+      return "application/javascript; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".ico":
+      return "image/x-icon";
+    case ".png":
+      return "image/png";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function staticCacheControl(root: string, filePath: string): string {
+  const relativePath = relative(root, filePath);
+  if (relativePath === "index.html" || basename(filePath) === "index.html") {
+    return "no-cache";
+  }
+  return /-[a-z0-9]{16,}\./i.test(basename(filePath))
+    ? "public, max-age=31536000, immutable"
+    : "no-cache";
 }
 
 function adminPanelHtml(authRequired: boolean): string {

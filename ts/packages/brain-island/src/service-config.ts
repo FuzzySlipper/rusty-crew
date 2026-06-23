@@ -1,4 +1,11 @@
-import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   loadDenSuccessorGatewayConfig,
@@ -16,6 +23,7 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_RUN_DIR?: string;
   RUSTY_CREW_ARTIFACT_DIR?: string;
   RUSTY_CREW_BACKUP_DIR?: string;
+  RUSTY_CREW_STATIC_DIR?: string;
   RUSTY_CREW_ADMIN_HOST?: string;
   RUSTY_CREW_ADMIN_PORT?: string;
   RUSTY_CREW_ADMIN_ALLOW_LAN?: string;
@@ -57,6 +65,7 @@ export interface RustyCrewServicePaths {
   runDir: string;
   artifactDir: string;
   backupDir: string;
+  staticDir?: string;
   lockFile: string;
 }
 
@@ -141,6 +150,7 @@ export function loadRustyCrewServiceConfig(
       join(dataDir, "artifacts"),
     ),
     backupDir: resolvePath(env.RUSTY_CREW_BACKUP_DIR, join(dataDir, "backups")),
+    staticDir: resolveStaticDir(env.RUSTY_CREW_STATIC_DIR, dataDir),
     lockFile: "",
   };
   paths.serviceConfigFile = join(paths.configDir, "service.json");
@@ -220,6 +230,7 @@ export function validateRustyCrewServiceConfig(
   config: RustyCrewServiceConfig,
 ): void {
   for (const [name, path] of Object.entries(config.paths)) {
+    if (path === undefined) continue;
     if (!path.trim()) {
       throw new Error(`service path ${name} must not be empty`);
     }
@@ -259,6 +270,16 @@ export function ensureRustyCrewServiceDirectories(
   ]) {
     mkdirSync(path, { recursive: true, mode: 0o750 });
   }
+}
+
+function resolveStaticDir(
+  input: string | undefined,
+  dataDir: string,
+): string | undefined {
+  const configured = normalizeOptional(input);
+  if (configured !== undefined) return resolve(configured);
+  const defaultStaticDir = join(dataDir, "site");
+  return existsSync(defaultStaticDir) ? defaultStaticDir : undefined;
 }
 
 export function acquireRustyCrewServiceLock(

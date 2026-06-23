@@ -11,6 +11,7 @@ import type {
 } from "./admin-diagnostics-api.js";
 
 export type AdminControlCommandName =
+  | "create_profile"
   | "create_session"
   | "archive_session"
   | "new_session"
@@ -90,6 +91,9 @@ export interface AdminControlAuditSink {
 }
 
 export interface AdminControlExecutor {
+  createProfile?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
   createSession?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
@@ -393,6 +397,17 @@ function parseControlCommand(
       command: {
         ...commandBase,
         name: "create_session",
+        target: {},
+      },
+    };
+  }
+
+  if (url.pathname === "/v1/admin/control/profiles") {
+    return {
+      ok: true,
+      command: {
+        ...commandBase,
+        name: "create_profile",
         target: {},
       },
     };
@@ -754,6 +769,8 @@ function executorForCommand(
     ) => Promise<AdminControlOutcome> | AdminControlOutcome)
   | undefined {
   switch (command) {
+    case "create_profile":
+      return executor.createProfile;
     case "create_session":
       return executor.createSession;
     case "archive_session":

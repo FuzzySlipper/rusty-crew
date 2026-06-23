@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtempSync } from "node:fs";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -17,11 +23,42 @@ const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-host-"));
 const port = await openPort();
 const token = "local-field-test-token";
 writeRuntimeConfig(root);
+writeStaticSite(root);
 let host = await startHost(root, port, token);
 
 try {
   assert.equal(existsSync(join(root, "data", "engine")), true);
   assert.equal(existsSync(join(root, "run", "service.lock")), true);
+
+  const staticRoot = await getText("/");
+  assert.equal(staticRoot.status, 200);
+  assert.match(staticRoot.contentType ?? "", /text\/html/);
+  assert.equal(staticRoot.cacheControl, "no-cache");
+  assert.match(staticRoot.body, /Rusty View Smoke/);
+
+  const staticAsset = await getText("/main-1234567890abcdef.js");
+  assert.equal(staticAsset.status, 200);
+  assert.match(staticAsset.contentType ?? "", /application\/javascript/);
+  assert.equal(staticAsset.cacheControl, "public, max-age=31536000, immutable");
+  assert.match(staticAsset.body, /rusty-view-smoke/);
+
+  const staticStyle = await getText("/styles.css");
+  assert.equal(staticStyle.status, 200);
+  assert.match(staticStyle.contentType ?? "", /text\/css/);
+  assert.equal(staticStyle.cacheControl, "no-cache");
+
+  const spaFallback = await getText("/sessions/field-session");
+  assert.equal(spaFallback.status, 200);
+  assert.match(spaFallback.body, /Rusty View Smoke/);
+
+  const traversal = await rawHttpGet("/%2e%2e/%2e%2e/etc/passwd");
+  assert.match(traversal, /^HTTP\/1\.1 200/);
+  assert.match(traversal, /Rusty View Smoke/);
+  assert.doesNotMatch(traversal, /root:/);
+
+  const dotfile = await getText("/.env");
+  assert.equal(dotfile.status, 403);
+  assert.match(dotfile.body, /forbidden segment/);
 
   const adminPanel = await getText("/admin");
   assert.equal(adminPanel.status, 200);
@@ -39,6 +76,11 @@ try {
   const ready = await get("/v1/admin/readyz", token);
   assert.equal(ready.status, 200);
   assert.equal(ready.body.ok, true);
+
+  const chatSessions = await get("/v1/chat/sessions", token);
+  assert.equal(chatSessions.status, 200);
+  assert.equal(chatSessions.body.ok, true);
+  assert.equal(chatSessions.body.data.items.length, 1);
 
   const diagnostics = await get("/v1/admin/diagnostics", token);
   assert.equal(diagnostics.status, 200);
@@ -390,6 +432,10 @@ try {
   writeRuntimeConfig(noAuthRoot);
   const noAuthHost = await startNoAuthHost(noAuthRoot, noAuthPort);
   try {
+    const noStaticRoot = await getText("/", noAuthPort);
+    assert.equal(noStaticRoot.status, 200);
+    assert.match(noStaticRoot.body, /Rusty Crew Admin/);
+
     const noAuthPanel = await getText("/admin", noAuthPort);
     assert.equal(noAuthPanel.status, 200);
     assert.match(noAuthPanel.body, /tokenForm" class="token-row" hidden/);
@@ -397,6 +443,76 @@ try {
     const noAuthReady = await get("/v1/admin/readyz", undefined, noAuthPort);
     assert.equal(noAuthReady.status, 200);
     assert.equal(noAuthReady.body.ok, true);
+
+    const invalidProfile = await post(
+      "/v1/admin/control/profiles",
+      undefined,
+      { profileId: "../bad" },
+      noAuthPort,
+    );
+    assert.equal(invalidProfile.status, 500);
+    assert.equal(invalidProfile.body.data.outcome.status, "failed");
+    assert.match(
+      invalidProfile.body.data.outcome.summary,
+      /profileId must start/,
+    );
+
+    const createdProfile = await post(
+      "/v1/admin/control/profiles",
+      undefined,
+      {
+        profileId: "field-created-profile",
+        displayName: "Field Created Profile",
+      },
+      noAuthPort,
+    );
+    assert.equal(createdProfile.status, 200);
+    assert.equal(createdProfile.body.ok, true);
+    assert.equal(
+      createdProfile.body.data.outcome.result.profileId,
+      "field-created-profile",
+    );
+    assert.equal(
+      createdProfile.body.data.outcome.result.sessionId,
+      "field-created-profile-session",
+    );
+    assert.equal(
+      existsSync(
+        join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
+      ),
+      true,
+    );
+    const createdProfileConfig = JSON.parse(
+      readFileSync(
+        join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
+        "utf8",
+      ),
+    ) as { mcpConfig?: { toolProfile?: string }; displayName?: string };
+    assert.equal(createdProfileConfig.displayName, "Field Created Profile");
+    assert.equal(
+      createdProfileConfig.mcpConfig?.toolProfile,
+      "field-created-profile",
+    );
+    const noAuthAfterProfile = await get(
+      "/v1/admin/diagnostics",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(noAuthAfterProfile.body.data.overview.summary.sessions, 2);
+    assert.equal(
+      noAuthAfterProfile.body.data.overview.adapters.mcp.totalSurfaces,
+      2,
+    );
+
+    const duplicateProfile = await post(
+      "/v1/admin/control/profiles",
+      undefined,
+      { profileId: "field-created-profile" },
+      noAuthPort,
+    );
+    assert.equal(duplicateProfile.status, 500);
+    assert.equal(duplicateProfile.body.data.outcome.status, "failed");
+    assert.match(duplicateProfile.body.data.outcome.summary, /already exists/);
 
     const noAuthControl = await post(
       "/v1/admin/control/scheduler/tick",
@@ -433,6 +549,7 @@ async function getText(path: string, requestPort = port) {
   return {
     status: response.status,
     contentType: response.headers.get("content-type"),
+    cacheControl: response.headers.get("cache-control"),
     body: await response.text(),
   };
 }
@@ -473,6 +590,22 @@ function openPort(): Promise<number> {
         if (error) rejectOpenPort(error);
         else resolveOpenPort(port);
       });
+    });
+  });
+}
+
+async function rawHttpGet(path: string, requestPort = port): Promise<string> {
+  return new Promise((resolveRaw, rejectRaw) => {
+    const socket = connect(requestPort, "127.0.0.1");
+    let data = "";
+    socket.setEncoding("utf8");
+    socket.once("error", rejectRaw);
+    socket.on("data", (chunk) => {
+      data += chunk;
+    });
+    socket.on("end", () => resolveRaw(data));
+    socket.once("connect", () => {
+      socket.write(`GET ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n`);
     });
   });
 }
@@ -640,4 +773,28 @@ tags:
 TODO: move temporary project progress out of skills.
 `,
   );
+}
+
+function writeStaticSite(root: string): void {
+  const siteDir = join(root, "site");
+  mkdirSync(siteDir, { recursive: true });
+  writeFileSync(
+    join(siteDir, "index.html"),
+    `<!doctype html>
+<html>
+  <head>
+    <title>Rusty View Smoke</title>
+    <script type="module" src="/main-1234567890abcdef.js"></script>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>Rusty View Smoke</body>
+</html>
+`,
+  );
+  writeFileSync(
+    join(siteDir, "main-1234567890abcdef.js"),
+    `globalThis.__rustyViewSmoke = "rusty-view-smoke";\n`,
+  );
+  writeFileSync(join(siteDir, "styles.css"), `body { color: black; }\n`);
+  writeFileSync(join(siteDir, ".env"), "hidden=true\n");
 }

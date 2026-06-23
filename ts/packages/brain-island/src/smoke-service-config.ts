@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,12 @@ const defaultConfig = loadRustyCrewServiceConfig({
   RUSTY_CREW_ADMIN_TOKEN: "default-token",
 });
 assert.equal(defaultConfig.paths.dataDir, RUSTY_CREW_DEFAULT_DATA_DIR);
+assert.equal(
+  defaultConfig.paths.staticDir,
+  existsSync(join(RUSTY_CREW_DEFAULT_DATA_DIR, "site"))
+    ? join(RUSTY_CREW_DEFAULT_DATA_DIR, "site")
+    : undefined,
+);
 assert.equal(defaultConfig.admin.host, RUSTY_CREW_DEFAULT_ADMIN_HOST);
 assert.equal(defaultConfig.admin.port, RUSTY_CREW_DEFAULT_ADMIN_PORT);
 assert.equal(defaultConfig.admin.allowLan, true);
@@ -71,6 +77,7 @@ try {
   assert.equal(config.paths.runDir, join(root, "run"));
   assert.equal(config.paths.artifactDir, join(root, "artifacts"));
   assert.equal(config.paths.backupDir, join(root, "backups"));
+  assert.equal(config.paths.staticDir, undefined);
   assert.equal(config.admin.authMode, "bearer");
   assert.equal(config.admin.token, "local-token");
   assert.equal(config.background.schedulerTickIntervalMs, 2_000);
@@ -97,6 +104,22 @@ try {
   });
   assert.equal(noAuth.admin.authMode, "none");
   assert.equal(noAuth.admin.token, undefined);
+
+  const defaultSiteDir = join(root, "site");
+  mkdirSync(defaultSiteDir);
+  const defaultSite = loadRustyCrewServiceConfig({
+    RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+  });
+  assert.equal(defaultSite.paths.staticDir, defaultSiteDir);
+
+  const customSiteDir = join(root, "custom-site");
+  const customSite = loadRustyCrewServiceConfig({
+    RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+    RUSTY_CREW_STATIC_DIR: customSiteDir,
+  });
+  assert.equal(customSite.paths.staticDir, customSiteDir);
 
   ensureRustyCrewServiceDirectories(config);
   for (const path of [

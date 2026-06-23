@@ -12,6 +12,7 @@ while keeping mutable service state under `/home/agents/rusty-crew`.
 - Service env file: `/home/agents/rusty-crew/config/service.env`
 - Runtime config: `/home/agents/rusty-crew/config/service.json`
 - Engine data: `/home/agents/rusty-crew/data/engine`
+- Static frontend site: `/home/agents/rusty-crew/site`
 - Local lock: `/home/agents/rusty-crew/run/service.lock`
 - Systemd user unit source: `ops/systemd/rusty-crew.service`
 
@@ -81,6 +82,25 @@ Enter the local admin token from
 `/home/agents/rusty-crew/config/service.env` when the page prompts for it. In
 `RUSTY_CREW_ADMIN_AUTH_MODE=none`, the token box is hidden and the page reads
 diagnostics directly.
+
+## Static Frontend
+
+Rusty Crew can serve a static frontend from the same origin as the service API.
+When `/home/agents/rusty-crew/site` exists, it is used as the default site
+directory. `RUSTY_CREW_STATIC_DIR` can point at a different directory while
+developing or testing a frontend build.
+
+Deployment is intentionally file-copy simple:
+
+```bash
+mkdir -p /home/agents/rusty-crew/site
+cp -a /home/dev/rusty-view/dist/apps/debug-chat/browser/. /home/agents/rusty-crew/site/
+```
+
+With a site directory present, `/` serves the frontend app and `/v1/*` remains
+API-only. Unknown non-API paths fall back to `index.html` for client-side
+routing. The built-in Rusty Crew diagnostics panel remains available at
+`/admin`.
 
 ## Direct LLM Field Test
 
@@ -185,6 +205,41 @@ Minimal shape:
 ```
 
 Profile files live at `${profilesDir}/${profileId}.json`.
+
+### Create Profile API
+
+Frontends and operators should create new profile identities through the
+official control path instead of hand-editing `service.json` plumbing:
+
+```bash
+curl -X POST \
+  -H "authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"profileId":"field-prime","displayName":"Field Prime"}' \
+  http://127.0.0.1:9347/v1/admin/control/profiles
+```
+
+Only identity-bearing fields are required. The service defaults `agentId` to the
+profile id, `sessionId` to `${agentId}-session`, `implementationId` to
+`${profileId}-brain`, and creates a minimal profile JSON with a local
+deterministic model and default MCP profile binding. The endpoint then updates
+`service.json`, applies runtime config, registers the brain, and creates the
+configured session without a service restart.
+
+Optional request fields:
+
+- `displayName`
+- `agentId`
+- `sessionId`
+- `implementationId`
+- `kind` (`full`, `worker`, or `delegated`; default `full`)
+- `mcpToolProfile`
+- `modelConfig`
+
+Profile-authored content such as `soul.md`, memory files, profile-local skills,
+and later editable profile settings should be managed by profile editor flows.
+Channel joins are deliberately not implicit; use explicit channel
+join/create/archive controls for that.
 
 ### Durable Sessions
 
