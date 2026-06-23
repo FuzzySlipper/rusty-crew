@@ -1,5 +1,6 @@
 /target/
 /node_modules/
+/temp
 
 *.tsbuildinfo
 ts/packages/native-bridge/native/*.d.ts
