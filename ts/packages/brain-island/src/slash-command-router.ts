@@ -1,11 +1,11 @@
 import type { AdminControlCommandName } from "./admin-control-api.js";
+import {
+  findSlashCommandDescriptor,
+  slashCommandNames,
+  type SlashCommandName,
+} from "./api-command-registry.js";
 
-export type SlashCommandName =
-  | "help"
-  | "status"
-  | "session"
-  | "new"
-  | "reload-mcp";
+export type { SlashCommandName } from "./api-command-registry.js";
 
 export type SlashCommandStatus = "ok" | "denied" | "invalid";
 
@@ -68,8 +68,6 @@ export type SlashCommandRouteResult =
       response: SlashCommandResponse;
       controlRequest?: SlashCommandControlRequest;
     };
-
-const COMMANDS = ["help", "status", "session", "new", "reload-mcp"] as const;
 
 export function routeSlashCommand(
   input: SlashCommandInput,
@@ -176,11 +174,7 @@ function parseSlashCommand(
 }
 
 function normalizeCommandName(name: string): SlashCommandName | undefined {
-  const normalized = name.toLowerCase();
-  if (COMMANDS.includes(normalized as SlashCommandName)) {
-    return normalized as SlashCommandName;
-  }
-  return undefined;
+  return findSlashCommandDescriptor(name)?.name;
 }
 
 function commandAllowed(
@@ -198,7 +192,7 @@ function authorizeSlashCommand(
   session: SlashCommandSession,
   options: SlashCommandRouterOptions | undefined,
 ): { allowed: true } | { allowed: false; reason: string } {
-  const isControl = commandName === "new" || commandName === "reload-mcp";
+  const isControl = findSlashCommandDescriptor(commandName)?.mutating ?? false;
   const isPrime = (options?.primeProfiles ?? ["prime"]).includes(
     session.profileId,
   );
@@ -236,7 +230,7 @@ function intercepted(
 function helpResponse(
   options: SlashCommandRouterOptions | undefined,
 ): SlashCommandResponse {
-  const commands = COMMANDS.filter((command) =>
+  const commands = slashCommandNames().filter((command) =>
     commandAllowed(command, options),
   );
   return {
@@ -250,7 +244,7 @@ function unknownCommandResponse(name: string): SlashCommandResponse {
   return {
     title: "Unknown Command",
     summary: `Unknown slash command /${name}.`,
-    items: COMMANDS.map((command) => `/${command}`),
+    items: slashCommandNames().map((command) => `/${command}`),
   };
 }
 

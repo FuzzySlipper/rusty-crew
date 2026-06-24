@@ -68,7 +68,13 @@ Rusty has slash command routing and chat command discovery for `/help`,
 
 The chat registry contains command metadata: name, aliases, description,
 argument schema, session-kind constraints, read-only versus mutating behavior,
-and auth/control requirements.
+auth/control requirements, and the backing admin control command when a slash
+command executes through the guarded control plane.
+
+The registry is derived from the canonical API/command registry in
+`api-command-registry.ts`. Public chat OpenAPI paths are smoke-checked against
+that same registry, and the read-only admin surface exposes the broader route
+inventory at `GET /v1/admin/capabilities`.
 
 `/new` keeps archive-and-create semantics. It never clears context in place and
 never creates a new session implicitly from a normal message.

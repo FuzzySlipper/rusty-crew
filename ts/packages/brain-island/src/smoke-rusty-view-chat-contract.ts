@@ -59,6 +59,7 @@ const commandDescriptor = schema("ChatCommandDescriptor");
 assert.ok(commandDescriptor.required?.includes("read_only"));
 assert.ok(commandDescriptor.required?.includes("mutating"));
 assert.ok(commandDescriptor.required?.includes("scope"));
+assert.ok(commandDescriptor.properties?.backing_control_command);
 
 console.log(
   JSON.stringify(

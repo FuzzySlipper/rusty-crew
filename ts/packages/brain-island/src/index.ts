@@ -724,6 +724,27 @@ export type {
   AdminControlStatus,
   MemoryAdminControlAuditSink,
 } from "./admin-control-api.js";
+export {
+  API_CAPABILITIES,
+  ADMIN_CONTROL_CAPABILITIES,
+  SLASH_COMMAND_REGISTRY,
+  apiCapabilityRegistry,
+  chatApiCapabilityPaths,
+  chatCommandRegistry,
+  findSlashCommandDescriptor,
+  slashCommandNames,
+} from "./api-command-registry.js";
+export type {
+  ApiCapabilityAuth,
+  ApiCapabilityDescriptor,
+  ApiCapabilityMutation,
+  ApiCapabilityRegistry,
+  ApiCapabilityScope,
+  ApiCapabilityStability,
+  ChatCommandDescriptor,
+  ChatCommandRegistry,
+  SlashCommandDescriptor,
+} from "./api-command-registry.js";
 export { routeSlashCommand } from "./slash-command-router.js";
 export type {
   SlashCommandActor,

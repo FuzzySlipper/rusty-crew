@@ -71,6 +71,7 @@
     "smoke:scheduler-cleanup-e2e": "tsx src/smoke-scheduler-cleanup-e2e.ts",
     "smoke:slash-command-router": "tsx src/smoke-slash-command-router.ts",
     "smoke:slash-command-e2e": "tsx src/smoke-slash-command-e2e.ts",
+    "smoke:api-command-registry": "tsx src/smoke-api-command-registry.ts",
     "smoke:new-session-lifecycle": "tsx src/smoke-new-session-lifecycle.ts",
     "smoke:reload-mcp-control": "tsx src/smoke-reload-mcp-control.ts",
     "smoke:slash-command-responses": "tsx src/smoke-slash-command-responses.ts",

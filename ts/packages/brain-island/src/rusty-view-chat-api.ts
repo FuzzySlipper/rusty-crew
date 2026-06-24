@@ -8,7 +8,13 @@ import type {
   AdminErrorCode,
   AdminRouteResult,
 } from "./admin-diagnostics-api.js";
+import { chatCommandRegistry } from "./api-command-registry.js";
 import type { SlashCommandResponse } from "./slash-command-router.js";
+
+export type {
+  ChatCommandDescriptor,
+  ChatCommandRegistry,
+} from "./api-command-registry.js";
 
 export interface RustyViewChatRouteRequest {
   method: string;
@@ -144,22 +150,6 @@ export interface SendChatMessageResult {
 
 interface RawBodyStateJson {
   pending_messages?: AgentMessage[];
-}
-
-export interface ChatCommandRegistry {
-  commands: ChatCommandDescriptor[];
-}
-
-export interface ChatCommandDescriptor {
-  name: string;
-  aliases: string[];
-  description: string;
-  args_schema: Record<string, unknown>;
-  read_only: boolean;
-  mutating: boolean;
-  scope: "session" | "profile" | "service";
-  allowed_session_kinds: Array<"full" | "worker" | "delegated">;
-  requires_control_auth: boolean;
 }
 
 export async function handleRustyViewChatRequest(
@@ -761,59 +751,6 @@ function parseOptionalActor(
       kind,
       display_name: stringValue(record.display_name),
     },
-  };
-}
-
-function chatCommandRegistry(): ChatCommandRegistry {
-  return {
-    commands: [
-      descriptor("help", "Show available slash commands.", true, false),
-      descriptor(
-        "status",
-        "Show runtime status for this service.",
-        true,
-        false,
-      ),
-      descriptor(
-        "session",
-        "Show details for the current session.",
-        true,
-        false,
-      ),
-      descriptor(
-        "new",
-        "Archive the current session and create a fresh replacement session.",
-        false,
-        true,
-      ),
-      descriptor(
-        "reload-mcp",
-        "Reload MCP tools for the current session profile surface.",
-        false,
-        true,
-      ),
-    ],
-  };
-}
-
-function descriptor(
-  name: ChatCommandDescriptor["name"],
-  description: string,
-  readOnly: boolean,
-  mutating: boolean,
-): ChatCommandDescriptor {
-  return {
-    name,
-    aliases: [`/${name}`],
-    description,
-    args_schema: { type: "string", description: "Optional command arguments." },
-    read_only: readOnly,
-    mutating,
-    scope: "session",
-    allowed_session_kinds: mutating
-      ? ["full"]
-      : ["full", "worker", "delegated"],
-    requires_control_auth: mutating,
   };
 }
 

@@ -7,6 +7,7 @@ import type {
   RuntimeSessionDiagnostics,
 } from "./runtime-diagnostics.js";
 import type { BackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
+import { apiCapabilityRegistry } from "./api-command-registry.js";
 import type { RuntimeConfigValidationPreflightReport } from "./service-runtime-config.js";
 
 export type AdminErrorCode =
@@ -109,6 +110,8 @@ export function handleAdminDiagnosticsRequest(
     context.health ?? buildRuntimeHealthProjection(context.diagnostics);
 
   switch (url.pathname) {
+    case "/v1/admin/capabilities":
+      return success(requestId, apiCapabilityRegistry());
     case "/v1/admin/healthz":
       return success(requestId, health.liveness);
     case "/v1/admin/readyz":

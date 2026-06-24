@@ -62,6 +62,7 @@
     "smoke:scheduler-cleanup-e2e": "npm run smoke:scheduler-cleanup-e2e -w @rusty-crew/brain-island",
     "smoke:slash-command-router": "npm run smoke:slash-command-router -w @rusty-crew/brain-island",
     "smoke:slash-command-e2e": "npm run smoke:slash-command-e2e -w @rusty-crew/brain-island",
+    "smoke:api-command-registry": "npm run smoke:api-command-registry -w @rusty-crew/brain-island",
     "smoke:new-session-lifecycle": "npm run smoke:new-session-lifecycle -w @rusty-crew/brain-island",
     "smoke:reload-mcp-control": "npm run smoke:reload-mcp-control -w @rusty-crew/brain-island",
     "smoke:slash-command-responses": "npm run smoke:slash-command-responses -w @rusty-crew/brain-island",

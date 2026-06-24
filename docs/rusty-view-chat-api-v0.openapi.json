@@ -569,7 +569,8 @@
             "type": "array",
             "items": { "type": "string", "enum": ["full", "worker", "delegated"] }
           },
-          "requires_control_auth": { "type": "boolean", "default": false }
+          "requires_control_auth": { "type": "boolean", "default": false },
+          "backing_control_command": { "type": "string" }
         },
         "additionalProperties": false
       },
