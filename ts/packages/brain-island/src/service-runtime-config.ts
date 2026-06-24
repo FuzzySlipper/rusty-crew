@@ -24,8 +24,10 @@ import {
 import type {
   BrainWakeExecutor,
   NativeBridgeModule,
+  NativeRuntimeConfigDraft,
   NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   createBrowserToolResolver,
   MemoryBrowserScreenshotStore,
@@ -72,6 +74,7 @@ import {
 } from "./service-mcp-tools.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import { RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND } from "./scheduled-host-executors.js";
+import { planRuntimeConfigWithRust } from "./runtime-config-validation.js";
 import {
   createSkillsToolResolver,
   type SkillManageMode,
@@ -173,63 +176,46 @@ export async function loadRustyCrewRuntimeConfig(
 async function expandRuntimeConfigFromProfiles(
   runtimeConfig: RustyCrewRuntimeConfig,
 ): Promise<RustyCrewRuntimeConfig> {
-  const mcpBindings = [...runtimeConfig.mcpBindings];
-  const scheduledJobs = [...runtimeConfig.scheduledJobs];
-  const scheduledJobIds = new Set(scheduledJobs.map((job) => job.id));
-  const profilesWithReviewJobs = new Set<ProfileId>();
-  for (const session of runtimeConfig.sessions) {
-    const profile = await loadProfileConfig(
-      runtimeConfig.profilesDir,
-      session.profileId,
-    );
-    const reviewConfig = profile.backgroundReview;
-    if (
-      reviewConfig?.enabled &&
-      !profilesWithReviewJobs.has(profile.profileId)
-    ) {
-      profilesWithReviewJobs.add(profile.profileId);
-      const job = backgroundReviewScheduledJob(profile);
-      if (!scheduledJobIds.has(job.id)) {
-        scheduledJobs.push(job);
-        scheduledJobIds.add(job.id);
-      }
-    }
+  const profiles = await loadRuntimeProfiles(runtimeConfig);
+  const bridge = await loadNativeBridge();
+  const plan = await planRuntimeConfigWithRust({
+    bridge,
+    runtimeConfig,
+    profiles,
+  });
+  assertRuntimeConfigPlan(plan.diagnostics);
+  return runtimeConfigFromNativeDraft(plan.runtimeConfig, runtimeConfig, profiles);
+}
 
-    const mcpConfig = profile.mcpConfig;
-    if (mcpConfig?.toolProfile === undefined) continue;
-    const bindingId = mcpConfig.bindingId ?? `${session.agentId}-mcp`;
-    if (
-      hasProfileMcpBinding(
-        mcpBindings,
-        session,
-        bindingId,
-        mcpConfig.toolProfile,
-      )
-    ) {
-      continue;
-    }
-    mcpBindings.push({
-      bindingId,
-      adapterId: "mcp-ts-main" as never,
-      agentId: session.agentId,
-      sessionId: session.sessionId,
-      profileId: session.profileId,
-      serverNames:
-        mcpConfig.serverNames && mcpConfig.serverNames.length > 0
-          ? mcpConfig.serverNames
-          : [session.agentId],
-      endpointRef: mcpConfig.endpointRef ?? `config://mcp/${session.agentId}`,
-      transport: mcpConfig.transport ?? "stdio",
-      toolProfileKey: mcpConfig.toolProfile,
-      status: "active",
-      diagnostics: {},
-    });
+async function loadRuntimeProfiles(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Promise<ProfileConfig[]> {
+  const profileIds = new Set<ProfileId>();
+  for (const session of runtimeConfig.sessions) {
+    profileIds.add(session.profileId);
   }
-  return {
-    ...runtimeConfig,
-    scheduledJobs,
-    mcpBindings,
-  };
+  const profiles: ProfileConfig[] = [];
+  for (const profileId of profileIds) {
+    profiles.push(await loadProfileConfig(runtimeConfig.profilesDir, profileId));
+  }
+  return profiles;
+}
+
+function assertRuntimeConfigPlan(
+  diagnostics: readonly { severity: string; path?: string; message: string }[],
+): void {
+  const errors = diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (errors.length === 0) {
+    return;
+  }
+  const first = errors[0]!;
+  const suffix =
+    errors.length === 1
+      ? ""
+      : ` (${errors.length - 1} additional diagnostic${errors.length === 2 ? "" : "s"})`;
+  throw new Error(`${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`);
 }
 
 function backgroundReviewScheduledJob(
@@ -261,20 +247,104 @@ function backgroundReviewScheduledJob(
   };
 }
 
-function hasProfileMcpBinding(
-  bindings: readonly McpBindingRecord[],
-  session: RustyCrewConfiguredSession,
-  bindingId: string,
-  toolProfileKey: string,
-): boolean {
-  return bindings.some(
-    (binding) =>
-      binding.bindingId === bindingId ||
-      (binding.profileId === session.profileId &&
-        (binding.sessionId === undefined ||
-          binding.sessionId === session.sessionId) &&
-        binding.toolProfileKey === toolProfileKey),
+function runtimeConfigFromNativeDraft(
+  draft: NativeRuntimeConfigDraft,
+  original: RustyCrewRuntimeConfig,
+  profiles: readonly ProfileConfig[],
+): RustyCrewRuntimeConfig {
+  const originalSessions = new Map(
+    original.sessions.map((session) => [session.sessionId, session]),
   );
+  const originalScheduledJobs = new Map(
+    original.scheduledJobs.map((job) => [job.id, job]),
+  );
+  const originalChannelBindings = new Map(
+    original.channelBindings.map((binding) => [binding.bindingId, binding]),
+  );
+  const originalMcpBindings = new Map(
+    original.mcpBindings.map((binding) => [binding.bindingId, binding]),
+  );
+  const profilesById = new Map(profiles.map((profile) => [profile.profileId, profile]));
+  return {
+    profilesDir: draft.profilesDir,
+    skillsDir: draft.skillsDir,
+    brains: draft.brains.map((brain) => ({
+      implementationId: brain.implementationId as BrainImplementationId,
+      profileId: brain.profileId as ProfileId,
+    })),
+    sessions: draft.sessions.map((session) => ({
+      ...originalSessions.get(session.sessionId as SessionId),
+      sessionId: session.sessionId as SessionId,
+      agentId: session.agentId as AgentId,
+      profileId: session.profileId as ProfileId,
+      kind: session.kind,
+      resourceLimits: session.resourceLimits,
+      ownerId: session.ownerId,
+      maxHistoryMessages:
+        session.maxHistoryMessages ?? session.historyWindow?.maxMessages,
+      turnTimeoutMs: session.turnTimeoutMs,
+    })),
+    scheduledJobs: draft.scheduledJobs.map((job) => {
+      const originalJob = originalScheduledJobs.get(job.id);
+      return {
+        ...originalJob,
+        id: job.id,
+        schedule: job.schedule,
+        shape: job.shape,
+        jobKind: job.jobKind,
+        targetSessionId: job.targetSessionId as SessionId | undefined,
+        script: job.script,
+        deliveryChannelId: job.deliveryChannelId,
+        payload:
+          originalJob?.payload ??
+          backgroundReviewPayloadForJob(job.id, profilesById),
+      };
+    }),
+    channelBindings: draft.channelBindings.map((binding) => ({
+      ...originalChannelBindings.get(binding.bindingId),
+      bindingId: binding.bindingId,
+      adapterId: binding.adapterId as never,
+      provider: binding.provider,
+      agentId: binding.agentId as AgentId,
+      instanceId: binding.instanceId as never,
+      sessionId: binding.sessionId as SessionId | undefined,
+      profileId: binding.profileId as ProfileId,
+      externalChannelId: binding.externalChannelId,
+      externalThreadId: binding.externalThreadId,
+      externalUserId: binding.externalUserId,
+      conversationProjectId: binding.conversationProjectId,
+      conversationChannelId: binding.conversationChannelId,
+      providerSubscriptionId: binding.providerSubscriptionId,
+      status: binding.status,
+    })),
+    mcpBindings: draft.mcpBindings.map((binding) => ({
+      ...originalMcpBindings.get(binding.bindingId),
+      bindingId: binding.bindingId,
+      adapterId: binding.adapterId as never,
+      agentId: binding.agentId as AgentId,
+      instanceId: binding.instanceId as never,
+      sessionId: binding.sessionId as SessionId | undefined,
+      profileId: binding.profileId as ProfileId,
+      serverNames: binding.serverNames,
+      endpointRef: binding.endpointRef,
+      transport: binding.transport,
+      toolProfileKey: binding.toolProfileKey,
+      status: binding.status,
+      diagnostics: originalMcpBindings.get(binding.bindingId)?.diagnostics ?? {},
+    })),
+  };
+}
+
+function backgroundReviewPayloadForJob(
+  jobId: string,
+  profilesById: ReadonlyMap<ProfileId, ProfileConfig>,
+): unknown {
+  const prefix = "background-review-";
+  if (!jobId.startsWith(prefix)) {
+    return undefined;
+  }
+  const profile = profilesById.get(jobId.slice(prefix.length) as ProfileId);
+  return profile ? backgroundReviewScheduledJob(profile).payload : undefined;
 }
 
 export async function applyRustyCrewRuntimeConfig(input: {
@@ -291,9 +361,10 @@ export async function applyRustyCrewRuntimeConfig(input: {
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
+  const runtimeConfig = await expandRuntimeConfigFromProfiles(input.runtimeConfig);
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
-    runtimeConfig: input.runtimeConfig,
+    runtimeConfig,
     mcpConfig: input.serviceConfig.mcp,
     discoveryClientFactory: input.mcpToolDiscoveryClientFactory,
     surfaceDiagnostics: input.mcpSurfaceDiagnostics,
@@ -306,8 +377,8 @@ export async function applyRustyCrewRuntimeConfig(input: {
     const existing = profileContexts.get(profileId);
     if (existing !== undefined) return existing;
     const profile = await loadProfileContext({
-      profilesDir: input.runtimeConfig.profilesDir,
-      skillsDir: input.runtimeConfig.skillsDir,
+      profilesDir: runtimeConfig.profilesDir,
+      skillsDir: runtimeConfig.skillsDir,
       profileId,
       registry: mcpToolCatalog.registryForProfile(profileId),
       extraRequestedToolsets: mcpToolCatalog.toolsetsForProfile(profileId),
@@ -333,7 +404,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   };
 
   const brainModuleRegistry = createBrainModuleRegistry();
-  for (const brain of input.runtimeConfig.brains) {
+  for (const brain of runtimeConfig.brains) {
     const profile = await loadProfile(brain.profileId);
     const selection = resolveBrainModuleSelection(profile.profile);
     const module = brainModuleRegistry.require(selection.moduleId);
@@ -357,7 +428,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           await createConfiguredBrain(module, profile, {
             createDenRouterAgentFactory: input.createDenRouterAgentFactory,
             bridge: input.bridge,
-            runtimeConfig: input.runtimeConfig,
+            runtimeConfig,
             serviceConfig: input.serviceConfig,
             curatorExecutor: input.curatorExecutor,
             mcpToolCatalog,
@@ -384,7 +455,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
       session,
     ]),
   );
-  for (const session of input.runtimeConfig.sessions) {
+  for (const session of runtimeConfig.sessions) {
     const profile = await loadProfile(session.profileId);
     const configuredSession = sessionWithProfileDefaults(session, profile);
     const existing = existingSessionsById.get(session.sessionId);
@@ -409,7 +480,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
 
   const scheduledJobs = await registerConfiguredScheduledJobs({
     bridge: input.bridge,
-    runtimeConfig: input.runtimeConfig,
+    runtimeConfig,
   });
   result.scheduledJobsRegistered = scheduledJobs.registered;
 

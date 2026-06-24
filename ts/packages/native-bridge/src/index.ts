@@ -101,6 +101,7 @@ interface NativeBridgeBinding {
     displayName: string;
   }): number;
   validateRuntimeConfigDraftJson(inputJson: string): string;
+  planRuntimeConfigJson(inputJson: string): string;
   planCreateProfileJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
@@ -530,6 +531,13 @@ export interface NativeRuntimeConfigValidationResult {
   diagnostics: NativeRuntimeConfigDiagnostic[];
 }
 
+export interface NativeRuntimeConfigPlan {
+  runtimeConfig: NativeRuntimeConfigDraft;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  derivedScheduledJobs: NativeScheduledJobConfigDraft[];
+  derivedMcpBindings: NativeMcpBindingConfigDraft[];
+}
+
 export interface NativeRuntimeConfigValidationInput {
   runtimeConfig: NativeRuntimeConfigDraft;
   profiles: NativeProfileRuntimeMetadata[];
@@ -725,6 +733,9 @@ export interface NativeBridgeModule {
   validateRuntimeConfigDraft(
     input: NativeRuntimeConfigValidationInput,
   ): Promise<NativeRuntimeConfigValidationResult>;
+  planRuntimeConfig(
+    input: NativeRuntimeConfigValidationInput,
+  ): Promise<NativeRuntimeConfigPlan>;
   planCreateProfile(
     input: NativeCreateProfilePlanInput,
   ): Promise<NativeCreateProfilePlan>;
@@ -883,6 +894,7 @@ export const nativeManifestOperationNames = [
   "submit_brain_actions",
   "register_platform_adapter",
   "validate_runtime_config_draft",
+  "plan_runtime_config",
   "plan_create_profile",
   "inject_external_event",
   "inject_den_data_update",
@@ -930,6 +942,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     submitBrainActions: unavailable("submit_brain_actions"),
     registerPlatformAdapter: unavailable("register_platform_adapter"),
     validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
+    planRuntimeConfig: unavailable("plan_runtime_config"),
     planCreateProfile: unavailable("plan_create_profile"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
@@ -1116,6 +1129,14 @@ function createNativeBridgeModule(
           JSON.stringify(toNativeRuntimeConfigValidationInput(input)),
         ),
       ) as NativeRuntimeConfigValidationResult,
+    planRuntimeConfig: async (input) =>
+      toNativeRuntimeConfigPlan(
+        JSON.parse(
+          binding.planRuntimeConfigJson(
+            JSON.stringify(toNativeRuntimeConfigValidationInput(input)),
+          ),
+        ) as RawRuntimeConfigPlan,
+      ),
     planCreateProfile: async (input) =>
       toNativeCreateProfilePlan(
         JSON.parse(
@@ -1666,13 +1687,13 @@ function toNativeCreateProfilePlan(
     profileSeed: plan.profile_seed
       ? {
           profileId: plan.profile_seed.profile_id,
-          displayName: plan.profile_seed.display_name,
+          displayName: plan.profile_seed.display_name ?? undefined,
           modelConfig: toProfileModelConfigSeed(
             plan.profile_seed.model_config,
           ),
           brain: {
-            module: plan.profile_seed.brain.module,
-            strategy: plan.profile_seed.brain.strategy,
+            module: plan.profile_seed.brain.module ?? undefined,
+            strategy: plan.profile_seed.brain.strategy ?? undefined,
           },
           skillsMode: plan.profile_seed.skills_mode,
         }
@@ -1690,25 +1711,116 @@ function toNativeCreateProfilePlan(
           profileId: plan.runtime_session.profile_id,
           kind: plan.runtime_session.kind,
           resourceLimits: toResourceLimits(plan.runtime_session.resource_limits),
-          ownerId: plan.runtime_session.owner_id,
+          ownerId: plan.runtime_session.owner_id ?? undefined,
           historyWindow: plan.runtime_session.history_window
             ? {
-                maxMessages: plan.runtime_session.history_window.max_messages,
+                maxMessages:
+                  plan.runtime_session.history_window.max_messages ?? undefined,
               }
             : undefined,
-          maxHistoryMessages: plan.runtime_session.max_history_messages,
-          turnTimeoutMs: plan.runtime_session.turn_timeout_ms,
+          maxHistoryMessages:
+            plan.runtime_session.max_history_messages ?? undefined,
+          turnTimeoutMs: plan.runtime_session.turn_timeout_ms ?? undefined,
         }
       : undefined,
     profileMcpConfig: plan.profile_mcp_config
       ? {
-          bindingId: plan.profile_mcp_config.binding_id,
-          endpointRef: plan.profile_mcp_config.endpoint_ref,
+          bindingId: plan.profile_mcp_config.binding_id ?? undefined,
+          endpointRef: plan.profile_mcp_config.endpoint_ref ?? undefined,
           serverNames: plan.profile_mcp_config.server_names,
-          transport: plan.profile_mcp_config.transport,
-          toolProfile: plan.profile_mcp_config.tool_profile,
+          transport: plan.profile_mcp_config.transport ?? undefined,
+          toolProfile: plan.profile_mcp_config.tool_profile ?? undefined,
         }
       : undefined,
+  };
+}
+
+function toNativeRuntimeConfigPlan(
+  plan: RawRuntimeConfigPlan,
+): NativeRuntimeConfigPlan {
+  return {
+    runtimeConfig: toRuntimeConfigDraft(plan.runtime_config),
+    diagnostics: plan.diagnostics,
+    derivedScheduledJobs: plan.derived_scheduled_jobs.map(toScheduledJobDraft),
+    derivedMcpBindings: plan.derived_mcp_bindings.map(toMcpBindingDraft),
+  };
+}
+
+function toRuntimeConfigDraft(
+  draft: RawRuntimeConfigDraft,
+): NativeRuntimeConfigDraft {
+  return {
+    profilesDir: draft.profiles_dir,
+    skillsDir: draft.skills_dir ?? undefined,
+    brains: draft.brains.map((brain) => ({
+      implementationId: brain.implementation_id,
+      profileId: brain.profile_id,
+    })),
+    sessions: draft.sessions.map((session) => ({
+      sessionId: session.session_id,
+      agentId: session.agent_id,
+      profileId: session.profile_id,
+      kind: session.kind,
+      resourceLimits: toResourceLimits(session.resource_limits),
+      ownerId: session.owner_id ?? undefined,
+      historyWindow: session.history_window
+        ? {
+            maxMessages: session.history_window.max_messages ?? undefined,
+          }
+        : undefined,
+      maxHistoryMessages: session.max_history_messages ?? undefined,
+      turnTimeoutMs: session.turn_timeout_ms ?? undefined,
+    })),
+    scheduledJobs: draft.scheduled_jobs.map(toScheduledJobDraft),
+    channelBindings: draft.channel_bindings.map((binding) => ({
+      bindingId: binding.binding_id,
+      adapterId: binding.adapter_id,
+      provider: binding.provider,
+      agentId: binding.agent_id,
+      instanceId: binding.instance_id,
+      sessionId: binding.session_id,
+      profileId: binding.profile_id,
+      externalChannelId: binding.external_channel_id,
+      externalThreadId: binding.external_thread_id ?? undefined,
+      externalUserId: binding.external_user_id ?? undefined,
+      conversationProjectId: binding.conversation_project_id ?? undefined,
+      conversationChannelId: binding.conversation_channel_id ?? undefined,
+      providerSubscriptionId: binding.provider_subscription_id ?? undefined,
+      status: binding.status,
+    })),
+    mcpBindings: draft.mcp_bindings.map(toMcpBindingDraft),
+  };
+}
+
+function toScheduledJobDraft(
+  job: RawScheduledJobConfigDraft,
+): NativeScheduledJobConfigDraft {
+  return {
+    id: job.id,
+    schedule: job.schedule,
+    shape: job.shape,
+    jobKind: job.job_kind,
+    targetSessionId: job.target_session_id ?? undefined,
+    script: job.script ?? undefined,
+    deliveryChannelId: job.delivery_channel_id ?? undefined,
+  };
+}
+
+function toMcpBindingDraft(
+  binding: RawMcpBindingConfigDraft,
+): NativeMcpBindingConfigDraft {
+  return {
+    bindingId: binding.binding_id,
+    adapterId: binding.adapter_id,
+    agentId: binding.agent_id,
+    instanceId: binding.instance_id ?? undefined,
+    sessionId: binding.session_id ?? undefined,
+    profileId: binding.profile_id,
+    serverNames: binding.server_names,
+    endpointRef: binding.endpoint_ref,
+    transport: binding.transport,
+    toolProfileKey: binding.tool_profile_key,
+    status: binding.status,
   };
 }
 
@@ -1733,9 +1845,9 @@ function toResourceLimits(
     return undefined;
   }
   return {
-    workdir: limits.workdir,
-    maxDurationMs: limits.max_duration_ms,
-    maxDelegationDepth: limits.max_delegation_depth,
+    workdir: limits.workdir ?? undefined,
+    maxDurationMs: limits.max_duration_ms ?? undefined,
+    maxDelegationDepth: limits.max_delegation_depth ?? undefined,
   };
 }
 
@@ -2149,6 +2261,81 @@ interface RawCreateProfilePlan {
     transport?: string;
     tool_profile?: string;
   };
+}
+
+interface RawRuntimeConfigPlan {
+  runtime_config: RawRuntimeConfigDraft;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  derived_scheduled_jobs: RawScheduledJobConfigDraft[];
+  derived_mcp_bindings: RawMcpBindingConfigDraft[];
+}
+
+interface RawRuntimeConfigDraft {
+  profiles_dir: string;
+  skills_dir?: string;
+  brains: Array<{
+    implementation_id: string;
+    profile_id: string;
+  }>;
+  sessions: RawSessionConfigDraft[];
+  scheduled_jobs: RawScheduledJobConfigDraft[];
+  channel_bindings: RawChannelBindingConfigDraft[];
+  mcp_bindings: RawMcpBindingConfigDraft[];
+}
+
+interface RawSessionConfigDraft {
+  session_id: string;
+  agent_id: string;
+  profile_id: string;
+  kind: "full" | "worker" | "delegated";
+  resource_limits?: RawResourceLimits;
+  owner_id?: string;
+  history_window?: {
+    max_messages?: number;
+  };
+  max_history_messages?: number;
+  turn_timeout_ms?: number;
+}
+
+interface RawScheduledJobConfigDraft {
+  id: string;
+  schedule: string;
+  shape: "host_job" | "session_wake" | "script_only" | "data_collection";
+  job_kind?: string;
+  target_session_id?: string;
+  script?: string;
+  delivery_channel_id?: string;
+}
+
+interface RawChannelBindingConfigDraft {
+  binding_id: string;
+  adapter_id: string;
+  provider: string;
+  agent_id: string;
+  instance_id?: string;
+  session_id?: string;
+  profile_id: string;
+  external_channel_id: string;
+  external_thread_id?: string;
+  external_user_id?: string;
+  conversation_project_id?: string;
+  conversation_channel_id?: number;
+  provider_subscription_id?: string;
+  status: NativeExternalBindingStatus;
+}
+
+interface RawMcpBindingConfigDraft {
+  binding_id: string;
+  adapter_id: string;
+  agent_id: string;
+  instance_id?: string;
+  session_id?: string;
+  profile_id: string;
+  server_names: string[];
+  endpoint_ref: string;
+  transport: string;
+  tool_profile_key: string;
+  status: NativeExternalBindingStatus;
 }
 
 interface RawProfileModelConfigSeed {

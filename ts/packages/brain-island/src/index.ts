@@ -804,6 +804,7 @@ export type {
 } from "./profile-loading.js";
 export {
   planCreateProfileWithRust,
+  planRuntimeConfigWithRust,
   runtimeConfigValidationInput,
   validateRuntimeConfigWithRust,
 } from "./runtime-config-validation.js";

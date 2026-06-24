@@ -3,12 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScheduledJobSummary, SessionId } from "@rusty-crew/contracts";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import {
   loadRustyCrewServiceConfig,
   parseCronArgs,
   runRustyCrewCronCli,
 } from "./index.js";
 import {
+  applyRustyCrewRuntimeConfig,
   loadRustyCrewRuntimeConfig,
   registerConfiguredScheduledJobs,
 } from "./service-runtime-config.js";
@@ -27,6 +29,31 @@ try {
         profileId: "cron-profile",
         displayName: "Cron Profile",
         modelConfig: { provider: "local", modelName: "deterministic" },
+        runtime: {
+          defaultResourceLimits: {
+            workdir: join(root, "work", "cron-profile"),
+            maxDurationMs: 60000,
+            maxDelegationDepth: 3,
+          },
+        },
+        sessionDefaults: {
+          ownerId: "cron-owner",
+          maxHistoryMessages: 42,
+          turnTimeoutMs: 30000,
+        },
+        mcpConfig: {
+          bindingId: "cron-agent-mcp",
+          serverNames: ["cron-agent"],
+          endpointRef: "config://mcp/cron-agent",
+          transport: "stdio",
+          toolProfile: "cron-profile",
+        },
+        backgroundReview: {
+          enabled: true,
+          reviewType: "combined",
+          schedule: "0 3 * * *",
+          dryRun: false,
+        },
         toolPolicy: { requestedTools: [] },
       },
       null,
@@ -102,11 +129,31 @@ try {
     RUSTY_CREW_ADMIN_AUTH_MODE: "none",
   });
   const runtimeConfig = await loadRustyCrewRuntimeConfig(serviceConfig);
-  assert.equal(runtimeConfig.scheduledJobs.length, 2);
+  assert.equal(runtimeConfig.scheduledJobs.length, 3);
   assert.equal(runtimeConfig.scheduledJobs[0]?.id, "cron-wake");
   assert.equal(
     runtimeConfig.scheduledJobs[1]?.jobKind,
     "runtime.diagnostics.snapshot",
+  );
+  assert.equal(runtimeConfig.scheduledJobs[2]?.id, "background-review-cron-profile");
+  assert.equal(
+    runtimeConfig.scheduledJobs[2]?.jobKind,
+    "runtime.review.memory_skills",
+  );
+  assert.equal(
+    (runtimeConfig.scheduledJobs[2]?.payload as { dryRun?: boolean } | undefined)
+      ?.dryRun,
+    false,
+  );
+  assert.equal(runtimeConfig.mcpBindings.length, 1);
+  assert.equal(runtimeConfig.mcpBindings[0]?.bindingId, "cron-agent-mcp");
+  assert.equal(runtimeConfig.mcpBindings[0]?.toolProfileKey, "cron-profile");
+  assert.equal(runtimeConfig.sessions[0]?.ownerId, "cron-owner");
+  assert.equal(runtimeConfig.sessions[0]?.maxHistoryMessages, 42);
+  assert.equal(runtimeConfig.sessions[0]?.turnTimeoutMs, 30000);
+  assert.equal(
+    runtimeConfig.sessions[0]?.resourceLimits?.workdir,
+    join(root, "work", "cron-profile"),
   );
 
   const registered: Array<{
@@ -148,9 +195,10 @@ try {
       },
     },
   });
-  assert.equal(result.registered, 2);
+  assert.equal(result.registered, 3);
   assert.equal(registered[0]?.firstDueAt, "2026-06-15T09:15:00.000Z");
   assert.equal(registeredHost[0]?.jobKind, "runtime.diagnostics.snapshot");
+  assert.equal(registeredHost[1]?.jobKind, "runtime.review.memory_skills");
 
   const outputs: string[] = [];
   await runRustyCrewCronCli({
@@ -213,6 +261,76 @@ try {
   await assert.rejects(
     () => loadRustyCrewRuntimeConfig(serviceConfig),
     /not executable in Rusty Crew v1/,
+  );
+
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        profilesDir,
+        brains: [],
+        sessions: [
+          {
+            sessionId: "cron-session",
+            agentId: "cron-agent",
+            profileId: "cron-profile",
+            kind: "full",
+          },
+        ],
+        channelBindings: [
+          {
+            bindingId: "bad-channel",
+            adapterId: "den-gateway",
+            provider: "den_channels",
+            agentId: "wrong-agent",
+            sessionId: "cron-session",
+            profileId: "cron-profile",
+            externalChannelId: "40",
+            status: "active",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  await assert.rejects(
+    () => loadRustyCrewRuntimeConfig(serviceConfig),
+    /binding target session cron-session has agent\/profile/,
+  );
+
+  const noMutationBridge = new Proxy(
+    {},
+    {
+      get(_target, property) {
+        return () => {
+          throw new Error(`bridge method ${String(property)} should not be called`);
+        };
+      },
+    },
+  ) as NativeBridgeModule;
+  await assert.rejects(
+    () =>
+      applyRustyCrewRuntimeConfig({
+        serviceConfig,
+        runtimeConfig: {
+          ...runtimeConfig,
+          channelBindings: [
+            {
+              bindingId: "bad-channel",
+              adapterId: "den-gateway" as never,
+              provider: "den_channels",
+              agentId: "wrong-agent" as never,
+              sessionId: "cron-session" as never,
+              profileId: "cron-profile" as never,
+              externalChannelId: "40",
+              status: "active",
+            },
+          ],
+        },
+        bridge: noMutationBridge,
+      }),
+    /binding target session cron-session has agent\/profile/,
   );
 
   console.log(

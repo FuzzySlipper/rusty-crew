@@ -14,8 +14,8 @@ use rusty_crew_core_bridge_api::{
     ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
-    plan_create_profile, validate_runtime_config_input, CreateProfilePlan, CreateProfilePlanInput,
-    RuntimeConfigValidationInput,
+    plan_create_profile, plan_runtime_config, validate_runtime_config_input, CreateProfilePlan,
+    CreateProfilePlanInput, RuntimeConfigPlan, RuntimeConfigValidationInput,
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
@@ -71,6 +71,10 @@ impl NativeBridge {
 
     pub fn plan_create_profile(&self, input: CreateProfilePlanInput) -> CreateProfilePlan {
         plan_create_profile(&input)
+    }
+
+    pub fn plan_runtime_config(&self, input: RuntimeConfigValidationInput) -> RuntimeConfigPlan {
+        plan_runtime_config(&input)
     }
 
     pub fn initialize_engine(&mut self, config: EngineConfig) -> CoreResult<EngineHandle> {
@@ -1170,6 +1174,21 @@ impl NativeBridgeBinding {
         })?;
         let bridge = self.bridge()?;
         let plan = bridge.plan_create_profile(input);
+        serde_json::to_string(&plan)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn plan_runtime_config_json(&self, input_json: String) -> napi::Result<String> {
+        let input: RuntimeConfigValidationInput =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid runtime config plan input JSON: {error}"),
+                )
+            })?;
+        let bridge = self.bridge()?;
+        let plan = bridge.plan_runtime_config(input);
         serde_json::to_string(&plan)
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }

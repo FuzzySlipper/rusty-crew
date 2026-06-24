@@ -17,6 +17,7 @@ const MAX_DELEGATION_DEPTH: u32 = 64;
 const MAX_TURN_TIMEOUT_MS: u32 = 24 * 60 * 60 * 1_000;
 const ID_PATTERN_DESCRIPTION: &str =
     "must start with a letter or digit and contain only letters, digits, '.', '_', ':' or '-'";
+const RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND: &str = "runtime.review.memory_skills";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeConfigDraft {
@@ -309,6 +310,23 @@ impl RuntimeConfigValidationResult {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeConfigPlan {
+    pub runtime_config: RuntimeConfigDraft,
+    pub diagnostics: Vec<RuntimeConfigDiagnostic>,
+    pub derived_scheduled_jobs: Vec<ScheduledJobConfigDraft>,
+    pub derived_mcp_bindings: Vec<McpBindingConfigDraft>,
+}
+
+impl RuntimeConfigPlan {
+    pub fn ok(&self) -> bool {
+        !self
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error)
+    }
+}
+
 pub fn validate_runtime_config_draft(
     draft: &RuntimeConfigDraft,
     profiles: &[ProfileRuntimeMetadata],
@@ -324,6 +342,149 @@ pub fn validate_runtime_config_input(
     input: &RuntimeConfigValidationInput,
 ) -> RuntimeConfigValidationResult {
     validate_runtime_config_draft(&input.runtime_config, &input.profiles)
+}
+
+pub fn plan_runtime_config(input: &RuntimeConfigValidationInput) -> RuntimeConfigPlan {
+    let mut runtime_config = input.runtime_config.clone();
+    let profiles_by_id: HashMap<ProfileId, &ProfileRuntimeMetadata> = input
+        .profiles
+        .iter()
+        .map(|profile| (profile.profile_id.clone(), profile))
+        .collect();
+    let mut derived_scheduled_jobs = Vec::new();
+    let mut derived_mcp_bindings = Vec::new();
+    let mut scheduled_job_ids: HashSet<String> = runtime_config
+        .scheduled_jobs
+        .iter()
+        .map(|job| job.id.clone())
+        .collect();
+    let mut profiles_with_review_jobs = HashSet::new();
+
+    for session in &mut runtime_config.sessions {
+        let Some(profile) = profiles_by_id.get(&session.profile_id) else {
+            continue;
+        };
+        apply_profile_session_defaults(session, profile);
+
+        if let Some(job) = derive_background_review_job(
+            profile,
+            &mut scheduled_job_ids,
+            &mut profiles_with_review_jobs,
+        ) {
+            runtime_config.scheduled_jobs.push(job.clone());
+            derived_scheduled_jobs.push(job);
+        }
+
+        if let Some(binding) =
+            derive_profile_mcp_binding(&runtime_config.mcp_bindings, session, profile)
+        {
+            runtime_config.mcp_bindings.push(binding.clone());
+            derived_mcp_bindings.push(binding);
+        }
+    }
+
+    let diagnostics = validate_runtime_config_draft(&runtime_config, &input.profiles).diagnostics;
+    RuntimeConfigPlan {
+        runtime_config,
+        diagnostics,
+        derived_scheduled_jobs,
+        derived_mcp_bindings,
+    }
+}
+
+fn apply_profile_session_defaults(
+    session: &mut SessionConfigDraft,
+    profile: &ProfileRuntimeMetadata,
+) {
+    if session.resource_limits.is_none() {
+        session.resource_limits = profile
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.default_resource_limits.clone());
+    }
+    let Some(defaults) = &profile.session_defaults else {
+        return;
+    };
+    if session.owner_id.is_none() {
+        session.owner_id = defaults.owner_id.clone();
+    }
+    if session.max_history_messages.is_none() {
+        session.max_history_messages = defaults.max_history_messages;
+    }
+    if session.turn_timeout_ms.is_none() {
+        session.turn_timeout_ms = defaults.turn_timeout_ms;
+    }
+}
+
+fn derive_background_review_job(
+    profile: &ProfileRuntimeMetadata,
+    scheduled_job_ids: &mut HashSet<String>,
+    profiles_with_review_jobs: &mut HashSet<ProfileId>,
+) -> Option<ScheduledJobConfigDraft> {
+    let review = profile.background_review.as_ref()?;
+    if !review.enabled || !profiles_with_review_jobs.insert(profile.profile_id.clone()) {
+        return None;
+    }
+    let id = format!("background-review-{}", profile.profile_id);
+    if !scheduled_job_ids.insert(id.clone()) {
+        return None;
+    }
+    Some(ScheduledJobConfigDraft {
+        id,
+        schedule: review
+            .schedule
+            .clone()
+            .unwrap_or_else(|| "0 3 * * *".to_string()),
+        shape: ScheduledJobShape::HostJob,
+        job_kind: Some(RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND.to_string()),
+        target_session_id: None,
+        script: None,
+        delivery_channel_id: None,
+    })
+}
+
+fn derive_profile_mcp_binding(
+    bindings: &[McpBindingConfigDraft],
+    session: &SessionConfigDraft,
+    profile: &ProfileRuntimeMetadata,
+) -> Option<McpBindingConfigDraft> {
+    let mcp = profile.mcp_config.as_ref()?;
+    let tool_profile = mcp.tool_profile.as_ref()?;
+    let binding_id = mcp
+        .binding_id
+        .clone()
+        .unwrap_or_else(|| format!("{}-mcp", session.agent_id));
+    if bindings.iter().any(|binding| {
+        binding.binding_id == binding_id
+            || (binding.profile_id == session.profile_id
+                && binding
+                    .session_id
+                    .as_ref()
+                    .is_none_or(|session_id| *session_id == session.session_id)
+                && binding.tool_profile_key == *tool_profile)
+    }) {
+        return None;
+    }
+    Some(McpBindingConfigDraft {
+        binding_id,
+        adapter_id: AdapterId::new("mcp-ts-main"),
+        agent_id: session.agent_id.clone(),
+        instance_id: None,
+        session_id: Some(session.session_id.clone()),
+        profile_id: session.profile_id.clone(),
+        server_names: if mcp.server_names.is_empty() {
+            vec![session.agent_id.to_string()]
+        } else {
+            mcp.server_names.clone()
+        },
+        endpoint_ref: mcp
+            .endpoint_ref
+            .clone()
+            .unwrap_or_else(|| format!("config://mcp/{}", session.agent_id)),
+        transport: mcp.transport.clone().unwrap_or_else(|| "stdio".to_string()),
+        tool_profile_key: tool_profile.clone(),
+        status: ExternalBindingStatusDraft::Active,
+    })
 }
 
 pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan {
@@ -1333,6 +1494,112 @@ mod tests {
         assert_eq!(
             json["diagnostics"][0]["path"],
             "scheduledJobs[0].targetSessionId"
+        );
+    }
+
+    #[test]
+    fn plans_runtime_config_with_profile_expansions_and_defaults() {
+        let mut draft = RuntimeConfigDraft {
+            profiles_dir: "/tmp/rusty-crew/profiles".to_string(),
+            skills_dir: None,
+            brains: vec![BrainConfigDraft {
+                implementation_id: BrainImplementationId::new("runner-brain"),
+                profile_id: ProfileId::new("runner"),
+            }],
+            sessions: vec![SessionConfigDraft {
+                session_id: SessionId::new("runner-session"),
+                agent_id: AgentId::new("runner-agent"),
+                profile_id: ProfileId::new("runner"),
+                kind: SessionKind::Full,
+                resource_limits: None,
+                owner_id: None,
+                history_window: None,
+                max_history_messages: None,
+                turn_timeout_ms: None,
+            }],
+            scheduled_jobs: Vec::new(),
+            channel_bindings: Vec::new(),
+            mcp_bindings: Vec::new(),
+        };
+        let runner = profile("runner");
+
+        let plan = plan_runtime_config(&RuntimeConfigValidationInput {
+            runtime_config: draft.clone(),
+            profiles: vec![runner.clone()],
+        });
+
+        assert!(plan.ok(), "{:?}", plan.diagnostics);
+        assert_eq!(plan.derived_scheduled_jobs.len(), 1);
+        assert_eq!(
+            plan.derived_scheduled_jobs[0],
+            ScheduledJobConfigDraft {
+                id: "background-review-runner".to_string(),
+                schedule: "0 3 * * *".to_string(),
+                shape: ScheduledJobShape::HostJob,
+                job_kind: Some("runtime.review.memory_skills".to_string()),
+                target_session_id: None,
+                script: None,
+                delivery_channel_id: None,
+            }
+        );
+        assert_eq!(plan.derived_mcp_bindings.len(), 1);
+        assert_eq!(
+            plan.derived_mcp_bindings[0],
+            McpBindingConfigDraft {
+                binding_id: "runner-mcp".to_string(),
+                adapter_id: AdapterId::new("mcp-ts-main"),
+                agent_id: AgentId::new("runner-agent"),
+                instance_id: None,
+                session_id: Some(SessionId::new("runner-session")),
+                profile_id: ProfileId::new("runner"),
+                server_names: vec!["den".to_string()],
+                endpoint_ref: "config://mcp/runner".to_string(),
+                transport: "streamable_http".to_string(),
+                tool_profile_key: "runner".to_string(),
+                status: ExternalBindingStatusDraft::Active,
+            }
+        );
+        let expanded_session = &plan.runtime_config.sessions[0];
+        assert_eq!(expanded_session.owner_id.as_deref(), Some("owner"));
+        assert_eq!(expanded_session.max_history_messages, Some(500));
+        assert_eq!(expanded_session.turn_timeout_ms, Some(30_000));
+
+        draft.scheduled_jobs = plan.derived_scheduled_jobs.clone();
+        draft.mcp_bindings = plan.derived_mcp_bindings.clone();
+        let idempotent = plan_runtime_config(&RuntimeConfigValidationInput {
+            runtime_config: draft,
+            profiles: vec![runner],
+        });
+        assert!(idempotent.ok(), "{:?}", idempotent.diagnostics);
+        assert!(idempotent.derived_scheduled_jobs.is_empty());
+        assert!(idempotent.derived_mcp_bindings.is_empty());
+    }
+
+    #[test]
+    fn plans_runtime_config_reports_invalid_expanded_graph() {
+        let mut draft = valid_draft();
+        draft.channel_bindings[0].agent_id = AgentId::new("wrong-agent");
+        draft.scheduled_jobs.push(ScheduledJobConfigDraft {
+            id: "script-job".to_string(),
+            schedule: "0 1 * * *".to_string(),
+            shape: ScheduledJobShape::ScriptOnly,
+            job_kind: None,
+            target_session_id: None,
+            script: Some("echo hi".to_string()),
+            delivery_channel_id: None,
+        });
+
+        let plan = plan_runtime_config(&RuntimeConfigValidationInput {
+            runtime_config: draft,
+            profiles: vec![profile("runner")],
+        });
+
+        assert!(!plan.ok());
+        assert_codes(
+            &RuntimeConfigValidationResult {
+                diagnostics: plan.diagnostics,
+            },
+            &["binding_session_mismatch", "scheduled_job_not_executable"],
         );
     }
 

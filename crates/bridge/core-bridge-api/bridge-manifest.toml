@@ -108,6 +108,15 @@ errors = "core_protocol::CoreError"
 summary = "Validate a service runtime config draft and TS-loaded profile runtime metadata without mutating files or engine state."
 
 [[operation]]
+name = "plan_runtime_config"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::RuntimeConfigValidationInput"
+output = "core_config::RuntimeConfigPlan"
+errors = "core_protocol::CoreError"
+summary = "Validate and expand a service runtime config draft with profile-derived session defaults, MCP bindings, and background review jobs without mutating files or engine state."
+
+[[operation]]
 name = "plan_create_profile"
 surface = "stable"
 direction = "ts_to_rust"
