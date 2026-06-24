@@ -1,0 +1,12 @@
+[package]
+name = "rusty-crew-core-config"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusty-crew-core-protocol = { path = "../core-protocol" }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -404,6 +404,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusty-crew-core-config"
+version = "0.1.0"
+dependencies = [
+ "rusty-crew-core-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rusty-crew-core-engine"
 version = "0.1.0"
 dependencies = [
