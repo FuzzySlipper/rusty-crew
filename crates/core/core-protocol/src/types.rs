@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt;
 use thiserror::Error;
 
@@ -602,7 +603,7 @@ pub enum DeltaQueueOwner {
     Body,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BrainWakeRequest {
     pub brain: BrainImplementationHandle,
     pub session_id: SessionId,
@@ -610,6 +611,10 @@ pub struct BrainWakeRequest {
     pub system_prompt: RuntimeBufferHandle,
     pub role_assembly: RuntimeBufferHandle,
     pub wake_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state: Option<BrainWakeProviderStateInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state_absence: Option<ProviderStateAbsenceReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -703,6 +708,100 @@ pub struct BrainActionBatch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStateMode {
+    Unused,
+    Optional,
+    Required,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainProviderStateStrategyMetadata {
+    pub mode: ProviderStateMode,
+}
+
+impl BrainProviderStateStrategyMetadata {
+    pub const fn unused() -> Self {
+        Self {
+            mode: ProviderStateMode::Unused,
+        }
+    }
+}
+
+impl Default for BrainProviderStateStrategyMetadata {
+    fn default() -> Self {
+        Self::unused()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainStrategyMetadata {
+    pub module_id: String,
+    pub strategy_id: String,
+    #[serde(default)]
+    pub provider_state: BrainProviderStateStrategyMetadata,
+}
+
+impl BrainStrategyMetadata {
+    pub fn unused(module_id: impl Into<String>, strategy_id: impl Into<String>) -> Self {
+        Self {
+            module_id: module_id.into(),
+            strategy_id: strategy_id.into(),
+            provider_state: BrainProviderStateStrategyMetadata::unused(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStateAbsenceReason {
+    NotConfigured,
+    Missing,
+    Expired,
+    Invalidated,
+    ModuleDoesNotUseState,
+    LoadFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BrainWakeProviderStateInput {
+    pub module_id: String,
+    pub strategy_id: String,
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
+    pub payload_version: String,
+    pub payload: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BrainWakeProviderStateUpdate {
+    pub module_id: String,
+    pub strategy_id: String,
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
+    pub payload_version: String,
+    pub payload: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BrainWakeProviderStateOutput {
+    Unchanged,
+    Replace { state: BrainWakeProviderStateUpdate },
+    Clear { reason: ProviderStateClearReason },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStateClearReason {
+    BrainRequestedClear,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrainWakeFailure {
     pub wake_id: String,
     pub session_id: SessionId,
@@ -712,6 +811,7 @@ pub struct BrainWakeFailure {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum BrainWakeStreamItem {
     Event { event: BrainEventEnvelope },
     Actions { batch: BrainActionBatch },
@@ -770,6 +870,8 @@ pub struct BrainImplementationRegistration {
     pub profile_id: ProfileId,
     pub tool_profile: ToolProfile,
     pub model_config: BrainModelConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<BrainStrategyMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,6 +6,9 @@ import type {
   BrainEventEnvelope,
   BrainImplementationHandle,
   BrainImplementationRegistration,
+  BrainWakeProviderStateInput,
+  BrainWakeProviderStateOutput,
+  ProviderStateAbsenceReason,
   CompletionPacket,
   SessionId,
 } from "@rusty-crew/contracts";
@@ -26,11 +29,14 @@ export interface BrainWakeInput {
   state: BodyState;
   systemPrompt: string;
   roleAssembly: BrainRoleAssembly;
+  providerState?: BrainWakeProviderStateInput;
+  providerStateAbsence?: ProviderStateAbsenceReason;
 }
 
 export interface BrainWakeResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
+  providerState?: BrainWakeProviderStateOutput;
 }
 
 export interface BrainImplementation {

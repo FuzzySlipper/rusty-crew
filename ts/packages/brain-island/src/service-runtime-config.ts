@@ -37,6 +37,7 @@ import {
 import { BrowserSessionManager } from "./browser-session-manager.js";
 import {
   createBrainModuleRegistry,
+  resolveBrainStrategyMetadata,
   resolveBrainModuleSelection,
   type BrainModule,
   type BrainModuleSelection,
@@ -694,12 +695,14 @@ export async function applyRustyCrewRuntimeConfig(input: {
     const profile = await loadProfile(brain.profileId);
     const selection = resolveBrainModuleSelection(profile.profile);
     const module = brainModuleRegistry.require(selection.moduleId);
+    const strategy = resolveBrainStrategyMetadata(module, selection);
     result.brainModulesByProfileId[brain.profileId] = selection;
     result.brainDiagnosticsByProfileId[brain.profileId] =
       brainModuleDiagnostics({
         profile,
         implementationId: brain.implementationId,
         selection,
+        strategy,
         module,
       });
     try {
@@ -709,6 +712,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           profileId: brain.profileId,
           toolProfile: profile.toolSelection.toolProfile,
           modelConfig: profile.profile.modelConfig,
+          strategy,
         },
         toBridgeWakeExecutor(
           await createConfiguredBrain(module, profile, {
@@ -951,6 +955,7 @@ function brainModuleDiagnostics(input: {
   profile: Awaited<ReturnType<typeof loadProfileContext>>;
   implementationId: BrainImplementationId;
   selection: BrainModuleSelection;
+  strategy: ReturnType<typeof resolveBrainStrategyMetadata>;
   module: BrainModule;
 }): RuntimeBrainModuleDiagnostics {
   return {
@@ -960,6 +965,8 @@ function brainModuleDiagnostics(input: {
     ...(input.selection.strategy === undefined
       ? {}
       : { strategy: input.selection.strategy }),
+    effectiveStrategy: input.strategy.strategyId,
+    providerStateMode: input.strategy.providerState.mode,
     selectedToolCount: input.profile.toolSelection.toolProfile.tools.length,
     selectedToolSource: input.profile.toolSelection.catalogId,
     toolAdapterStatus: input.module.diagnostics.toolAdapterStatus,

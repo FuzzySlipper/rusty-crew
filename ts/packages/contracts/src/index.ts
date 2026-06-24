@@ -664,6 +664,8 @@ export interface BrainWakeRequest {
   systemPrompt: RuntimeBufferHandle;
   roleAssembly: RuntimeBufferHandle;
   wakeId: string;
+  providerState?: BrainWakeProviderStateInput;
+  providerStateAbsence?: ProviderStateAbsenceReason;
 }
 
 export interface BrainWakeAccepted {
@@ -682,6 +684,51 @@ export interface BrainActionBatch {
   sessionId: SessionId;
   actions: BrainAction[];
 }
+
+export type ProviderStateMode = "unused" | "optional" | "required";
+
+export interface BrainProviderStateStrategyMetadata {
+  mode: ProviderStateMode;
+}
+
+export interface BrainStrategyMetadata {
+  moduleId: string;
+  strategyId: string;
+  providerState: BrainProviderStateStrategyMetadata;
+}
+
+export type ProviderStateAbsenceReason =
+  | "not_configured"
+  | "missing"
+  | "expired"
+  | "invalidated"
+  | "module_does_not_use_state"
+  | "load_failed";
+
+export interface BrainWakeProviderStateInput {
+  moduleId: string;
+  strategyId: string;
+  profileFingerprint: string;
+  providerFingerprint: string;
+  payloadVersion: string;
+  payload: unknown;
+  expiresAt?: string;
+}
+
+export interface BrainWakeProviderStateUpdate {
+  moduleId: string;
+  strategyId: string;
+  profileFingerprint: string;
+  providerFingerprint: string;
+  payloadVersion: string;
+  payload: unknown;
+  ttlMs?: number;
+}
+
+export type BrainWakeProviderStateOutput =
+  | { type: "unchanged" }
+  | { type: "replace"; state: BrainWakeProviderStateUpdate }
+  | { type: "clear"; reason: "brain_requested_clear" };
 
 export interface BrainWakeFailure {
   wakeId: string;
@@ -787,6 +834,7 @@ export interface BrainImplementationRegistration {
   profileId: ProfileId;
   toolProfile: ToolProfile;
   modelConfig: BrainModelConfig;
+  strategy?: BrainStrategyMetadata;
 }
 
 export type PlatformAdapterKind = "den" | "telegram" | "mcp" | "tui" | "cli";

@@ -9,10 +9,10 @@ use rusty_crew_core_protocol::{
     CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
     DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
     DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
-    FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId, ResourceLimits,
-    RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
-    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
-    ToolProfile,
+    FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId,
+    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
+    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
+    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 15;
+const CURRENT_SCHEMA_VERSION: i64 = 16;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -120,6 +120,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 15,
         description: "add session history window persistence",
         apply: migrate_v15_add_session_history_window,
+    },
+    SchemaMigration {
+        version: 16,
+        description: "add provider wire-state persistence",
+        apply: migrate_v16_add_provider_wire_state,
     },
 ];
 
@@ -470,10 +475,79 @@ pub struct ScheduledRunQuery {
     pub page: Option<QueryPage>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderWireStateInvalidationReason {
+    ProfileChanged,
+    ProviderChanged,
+    ModuleChanged,
+    StrategyChanged,
+    Expired,
+    BrainRequestedClear,
+    OperatorRequestedClear,
+    Superseded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderWireStateKey {
+    pub session_id: SessionId,
+    pub module_id: String,
+    pub strategy_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderWireStateRecord {
+    pub row_id: i64,
+    pub key: ProviderWireStateKey,
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
+    pub payload_version: String,
+    pub payload_json: JsonValue,
+    pub payload_encoding: String,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub expires_at: Option<IsoTimestamp>,
+    pub last_wake_id: Option<String>,
+    pub invalidated_at: Option<IsoTimestamp>,
+    pub invalidation_reason: Option<ProviderWireStateInvalidationReason>,
+}
+
+impl ProviderWireStateRecord {
+    pub fn is_current(&self) -> bool {
+        self.invalidated_at.is_none() && self.invalidation_reason.is_none()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderWireStateWrite {
+    pub key: ProviderWireStateKey,
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
+    pub payload_version: String,
+    pub payload_json: JsonValue,
+    pub now: IsoTimestamp,
+    pub expires_at: Option<IsoTimestamp>,
+    pub last_wake_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderWireStateWakeLookup {
+    pub key: ProviderWireStateKey,
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderWireStateWakeResult {
+    pub record: Option<ProviderWireStateRecord>,
+    pub absence_reason: Option<ProviderStateAbsenceReason>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeMaintenancePolicy {
     pub expire_queued_messages_at: Option<IsoTimestamp>,
     pub purge_terminal_queued_messages_before: Option<IsoTimestamp>,
+    pub expire_provider_wire_states_at: Option<IsoTimestamp>,
     pub run_wal_checkpoint: bool,
     pub run_optimize: bool,
 }
@@ -494,6 +568,7 @@ pub struct RuntimeMaintenanceReport {
     pub size_after: RuntimeDatabaseSize,
     pub expired_queue_messages: u64,
     pub purged_terminal_queue_messages: u64,
+    pub expired_provider_wire_states: u64,
     pub wal_checkpoint_ran: bool,
     pub optimize_ran: bool,
 }
@@ -740,6 +815,7 @@ pub enum DiagnosticTable {
     ProfileMemories,
     ScheduledJobs,
     ScheduledJobRuns,
+    ProviderWireStates,
     ChannelBindings,
     McpBindings,
     AgentMessages,
@@ -769,6 +845,7 @@ impl DiagnosticTable {
         Self::ProfileMemories,
         Self::ScheduledJobs,
         Self::ScheduledJobRuns,
+        Self::ProviderWireStates,
         Self::ChannelBindings,
         Self::McpBindings,
         Self::AgentMessages,
@@ -798,6 +875,7 @@ impl DiagnosticTable {
             "profile_memories" => Ok(Self::ProfileMemories),
             "scheduled_jobs" => Ok(Self::ScheduledJobs),
             "scheduled_job_runs" => Ok(Self::ScheduledJobRuns),
+            "provider_wire_states" => Ok(Self::ProviderWireStates),
             "channel_bindings" => Ok(Self::ChannelBindings),
             "mcp_bindings" => Ok(Self::McpBindings),
             "agent_messages" => Ok(Self::AgentMessages),
@@ -832,6 +910,7 @@ impl DiagnosticTable {
             Self::ProfileMemories => "profile_memories",
             Self::ScheduledJobs => "scheduled_jobs",
             Self::ScheduledJobRuns => "scheduled_job_runs",
+            Self::ProviderWireStates => "provider_wire_states",
             Self::ChannelBindings => "channel_bindings",
             Self::McpBindings => "mcp_bindings",
             Self::AgentMessages => "agent_messages",
@@ -1281,6 +1360,64 @@ impl CoordinationStore {
         query_scheduled_runs(&conn, query)
     }
 
+    pub fn save_provider_wire_state(
+        &self,
+        write: &ProviderWireStateWrite,
+    ) -> CoreResult<ProviderWireStateRecord> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start save provider wire state", error))?;
+        let record = save_provider_wire_state_in_tx(&tx, write)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save provider wire state", error))?;
+        Ok(record)
+    }
+
+    pub fn load_provider_wire_state_for_wake(
+        &self,
+        lookup: &ProviderWireStateWakeLookup,
+    ) -> CoreResult<ProviderWireStateWakeResult> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start load provider wire state", error))?;
+        let result = load_provider_wire_state_for_wake_in_tx(&tx, lookup)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit load provider wire state", error))?;
+        Ok(result)
+    }
+
+    pub fn clear_provider_wire_state(
+        &self,
+        key: &ProviderWireStateKey,
+        now: &IsoTimestamp,
+        reason: ProviderWireStateInvalidationReason,
+    ) -> CoreResult<Option<ProviderWireStateRecord>> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start clear provider wire state", error))?;
+        let cleared = clear_provider_wire_state_in_tx(&tx, key, now, reason)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit clear provider wire state", error))?;
+        Ok(cleared)
+    }
+
+    pub fn expire_provider_wire_states_at(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ProviderWireStateRecord>> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start expire provider wire states", error))?;
+        let expired = expire_provider_wire_states_in_tx(&tx, now)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit expire provider wire states", error))?;
+        Ok(expired)
+    }
+
     pub fn expire_stale_scheduled_runs(
         &self,
         stale_before: &IsoTimestamp,
@@ -1328,6 +1465,7 @@ impl CoordinationStore {
         let size_before = self.database_size()?;
         let mut expired_queue_messages = 0;
         let mut purged_terminal_queue_messages = 0;
+        let mut expired_provider_wire_states = 0;
         {
             let mut conn = self.conn()?;
             let tx = conn
@@ -1338,6 +1476,10 @@ impl CoordinationStore {
             }
             if let Some(cutoff) = &policy.purge_terminal_queued_messages_before {
                 purged_terminal_queue_messages = purge_terminal_queued_messages_in_tx(&tx, cutoff)?;
+            }
+            if let Some(now) = &policy.expire_provider_wire_states_at {
+                expired_provider_wire_states =
+                    expire_provider_wire_states_in_tx(&tx, now)?.len() as u64;
             }
             tx.commit()
                 .map_err(|error| persistence_error("commit runtime maintenance", error))?;
@@ -1358,6 +1500,7 @@ impl CoordinationStore {
             size_after,
             expired_queue_messages,
             purged_terminal_queue_messages,
+            expired_provider_wire_states,
             wal_checkpoint_ran: policy.run_wal_checkpoint,
             optimize_ran: policy.run_optimize,
         })
@@ -2525,6 +2668,7 @@ fn reject_unsupported_unversioned_schema(conn: &Connection) -> CoreResult<()> {
                 | "runtime_import_batches"
                 | "legacy_id_mappings"
                 | "profile_memories"
+                | "provider_wire_states"
                 | "channel_bindings"
                 | "mcp_bindings"
         )
@@ -3051,6 +3195,434 @@ fn migrate_v14_add_scheduler_persistence(tx: &rusqlite::Transaction<'_>) -> Core
 
 fn migrate_v15_add_session_history_window(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     add_missing_column(tx, "sessions", "history_window_json", "TEXT")
+}
+
+fn migrate_v16_add_provider_wire_state(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS provider_wire_states (
+                row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                module_id TEXT NOT NULL,
+                strategy_id TEXT NOT NULL,
+                profile_fingerprint TEXT NOT NULL,
+                provider_fingerprint TEXT NOT NULL,
+                payload_version TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                payload_encoding TEXT NOT NULL DEFAULT 'json',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT,
+                last_wake_id TEXT,
+                invalidated_at TEXT,
+                invalidation_reason TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_wire_states_current
+                ON provider_wire_states(session_id, module_id, strategy_id)
+                WHERE invalidated_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_provider_wire_states_session_current
+                ON provider_wire_states(session_id, invalidated_at);
+            CREATE INDEX IF NOT EXISTS idx_provider_wire_states_expiry
+                ON provider_wire_states(invalidated_at, expires_at);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 16", error))
+}
+
+fn save_provider_wire_state_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &ProviderWireStateWrite,
+) -> CoreResult<ProviderWireStateRecord> {
+    validate_provider_wire_state_key(&write.key)?;
+    let payload_json = to_json_text(&write.payload_json)?;
+    invalidate_current_provider_wire_state_for_key_in_tx(
+        tx,
+        &write.key,
+        &write.now,
+        ProviderWireStateInvalidationReason::Superseded,
+    )?;
+    tx.execute(
+        "INSERT INTO provider_wire_states (
+            session_id,
+            module_id,
+            strategy_id,
+            profile_fingerprint,
+            provider_fingerprint,
+            payload_version,
+            payload_json,
+            payload_encoding,
+            created_at,
+            updated_at,
+            expires_at,
+            last_wake_id,
+            invalidated_at,
+            invalidation_reason
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'json', ?8, ?8, ?9, ?10, NULL, NULL)",
+        params![
+            write.key.session_id.0.as_str(),
+            write.key.module_id.as_str(),
+            write.key.strategy_id.as_str(),
+            write.profile_fingerprint.as_str(),
+            write.provider_fingerprint.as_str(),
+            write.payload_version.as_str(),
+            payload_json,
+            write.now.as_str(),
+            write.expires_at.as_deref(),
+            write.last_wake_id.as_deref(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert provider wire state", error))?;
+    load_provider_wire_state_by_row_id(tx, tx.last_insert_rowid())
+}
+
+fn load_provider_wire_state_for_wake_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    lookup: &ProviderWireStateWakeLookup,
+) -> CoreResult<ProviderWireStateWakeResult> {
+    validate_provider_wire_state_key(&lookup.key)?;
+    invalidate_provider_wire_states_for_session_except_in_tx(tx, &lookup.key, &lookup.now)?;
+    let Some(record) = load_current_provider_wire_state_by_key(tx, &lookup.key)? else {
+        return Ok(ProviderWireStateWakeResult {
+            record: None,
+            absence_reason: Some(ProviderStateAbsenceReason::Missing),
+        });
+    };
+    if record
+        .expires_at
+        .as_ref()
+        .is_some_and(|expires| expires <= &lookup.now)
+    {
+        invalidate_provider_wire_state_by_row_in_tx(
+            tx,
+            record.row_id,
+            &lookup.now,
+            ProviderWireStateInvalidationReason::Expired,
+        )?;
+        return Ok(ProviderWireStateWakeResult {
+            record: None,
+            absence_reason: Some(ProviderStateAbsenceReason::Expired),
+        });
+    }
+    if record.profile_fingerprint != lookup.profile_fingerprint {
+        invalidate_provider_wire_state_by_row_in_tx(
+            tx,
+            record.row_id,
+            &lookup.now,
+            ProviderWireStateInvalidationReason::ProfileChanged,
+        )?;
+        return Ok(ProviderWireStateWakeResult {
+            record: None,
+            absence_reason: Some(ProviderStateAbsenceReason::Invalidated),
+        });
+    }
+    if record.provider_fingerprint != lookup.provider_fingerprint {
+        invalidate_provider_wire_state_by_row_in_tx(
+            tx,
+            record.row_id,
+            &lookup.now,
+            ProviderWireStateInvalidationReason::ProviderChanged,
+        )?;
+        return Ok(ProviderWireStateWakeResult {
+            record: None,
+            absence_reason: Some(ProviderStateAbsenceReason::Invalidated),
+        });
+    }
+    Ok(ProviderWireStateWakeResult {
+        record: Some(record),
+        absence_reason: None,
+    })
+}
+
+fn clear_provider_wire_state_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    key: &ProviderWireStateKey,
+    now: &IsoTimestamp,
+    reason: ProviderWireStateInvalidationReason,
+) -> CoreResult<Option<ProviderWireStateRecord>> {
+    validate_provider_wire_state_key(key)?;
+    let Some(record) = load_current_provider_wire_state_by_key(tx, key)? else {
+        return Ok(None);
+    };
+    invalidate_provider_wire_state_by_row_in_tx(tx, record.row_id, now, reason)?;
+    load_provider_wire_state_by_row_id(tx, record.row_id).map(Some)
+}
+
+fn expire_provider_wire_states_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    now: &IsoTimestamp,
+) -> CoreResult<Vec<ProviderWireStateRecord>> {
+    let expiring = load_expired_current_provider_wire_states(tx, now)?;
+    for record in &expiring {
+        invalidate_provider_wire_state_by_row_in_tx(
+            tx,
+            record.row_id,
+            now,
+            ProviderWireStateInvalidationReason::Expired,
+        )?;
+    }
+    expiring
+        .into_iter()
+        .map(|record| load_provider_wire_state_by_row_id(tx, record.row_id))
+        .collect()
+}
+
+fn invalidate_provider_wire_states_for_session_except_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    key: &ProviderWireStateKey,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE provider_wire_states
+         SET invalidated_at = ?4,
+             updated_at = ?4,
+             invalidation_reason = CASE
+                 WHEN module_id != ?2 THEN 'module_changed'
+                 ELSE 'strategy_changed'
+             END
+         WHERE session_id = ?1
+           AND invalidated_at IS NULL
+           AND (module_id != ?2 OR strategy_id != ?3)",
+        params![
+            key.session_id.0.as_str(),
+            key.module_id.as_str(),
+            key.strategy_id.as_str(),
+            now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("invalidate changed provider wire state", error))?;
+    Ok(())
+}
+
+fn invalidate_current_provider_wire_state_for_key_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    key: &ProviderWireStateKey,
+    now: &IsoTimestamp,
+    reason: ProviderWireStateInvalidationReason,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE provider_wire_states
+         SET invalidated_at = ?4,
+             updated_at = ?4,
+             invalidation_reason = ?5
+         WHERE session_id = ?1
+           AND module_id = ?2
+           AND strategy_id = ?3
+           AND invalidated_at IS NULL",
+        params![
+            key.session_id.0.as_str(),
+            key.module_id.as_str(),
+            key.strategy_id.as_str(),
+            now.as_str(),
+            provider_wire_state_invalidation_reason_as_str(reason),
+        ],
+    )
+    .map_err(|error| persistence_error("invalidate current provider wire state", error))?;
+    Ok(())
+}
+
+fn invalidate_provider_wire_state_by_row_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    row_id: i64,
+    now: &IsoTimestamp,
+    reason: ProviderWireStateInvalidationReason,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE provider_wire_states
+         SET invalidated_at = ?2,
+             updated_at = ?2,
+             invalidation_reason = ?3
+         WHERE row_id = ?1
+           AND invalidated_at IS NULL",
+        params![
+            row_id,
+            now.as_str(),
+            provider_wire_state_invalidation_reason_as_str(reason),
+        ],
+    )
+    .map_err(|error| persistence_error("invalidate provider wire state row", error))?;
+    Ok(())
+}
+
+fn load_current_provider_wire_state_by_key(
+    conn: &Connection,
+    key: &ProviderWireStateKey,
+) -> CoreResult<Option<ProviderWireStateRecord>> {
+    conn.query_row(
+        "SELECT
+            row_id,
+            session_id,
+            module_id,
+            strategy_id,
+            profile_fingerprint,
+            provider_fingerprint,
+            payload_version,
+            payload_json,
+            payload_encoding,
+            created_at,
+            updated_at,
+            expires_at,
+            last_wake_id,
+            invalidated_at,
+            invalidation_reason
+         FROM provider_wire_states
+         WHERE session_id = ?1
+           AND module_id = ?2
+           AND strategy_id = ?3
+           AND invalidated_at IS NULL
+         LIMIT 1",
+        params![
+            key.session_id.0.as_str(),
+            key.module_id.as_str(),
+            key.strategy_id.as_str(),
+        ],
+        row_to_provider_wire_state_record,
+    )
+    .optional()
+    .map_err(|error| persistence_error("load current provider wire state", error))
+}
+
+fn load_provider_wire_state_by_row_id(
+    conn: &Connection,
+    row_id: i64,
+) -> CoreResult<ProviderWireStateRecord> {
+    conn.query_row(
+        "SELECT
+            row_id,
+            session_id,
+            module_id,
+            strategy_id,
+            profile_fingerprint,
+            provider_fingerprint,
+            payload_version,
+            payload_json,
+            payload_encoding,
+            created_at,
+            updated_at,
+            expires_at,
+            last_wake_id,
+            invalidated_at,
+            invalidation_reason
+         FROM provider_wire_states
+         WHERE row_id = ?1",
+        params![row_id],
+        row_to_provider_wire_state_record,
+    )
+    .map_err(|error| persistence_error("load provider wire state by row id", error))
+}
+
+fn load_expired_current_provider_wire_states(
+    conn: &Connection,
+    now: &IsoTimestamp,
+) -> CoreResult<Vec<ProviderWireStateRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                row_id,
+                session_id,
+                module_id,
+                strategy_id,
+                profile_fingerprint,
+                provider_fingerprint,
+                payload_version,
+                payload_json,
+                payload_encoding,
+                created_at,
+                updated_at,
+                expires_at,
+                last_wake_id,
+                invalidated_at,
+                invalidation_reason
+             FROM provider_wire_states
+             WHERE invalidated_at IS NULL
+               AND expires_at IS NOT NULL
+               AND expires_at <= ?1
+             ORDER BY expires_at ASC, row_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare expired provider wire state query", error))?;
+    let rows = stmt
+        .query_map(params![now.as_str()], row_to_provider_wire_state_record)
+        .map_err(|error| persistence_error("query expired provider wire states", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load expired provider wire states", error))
+}
+
+fn row_to_provider_wire_state_record(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ProviderWireStateRecord> {
+    let payload_json: String = row.get(7)?;
+    let invalidation_reason = row
+        .get::<_, Option<String>>(14)?
+        .map(|raw| provider_wire_state_invalidation_reason_from_str(&raw))
+        .transpose()?;
+    Ok(ProviderWireStateRecord {
+        row_id: row.get(0)?,
+        key: ProviderWireStateKey {
+            session_id: SessionId(row.get(1)?),
+            module_id: row.get(2)?,
+            strategy_id: row.get(3)?,
+        },
+        profile_fingerprint: row.get(4)?,
+        provider_fingerprint: row.get(5)?,
+        payload_version: row.get(6)?,
+        payload_json: from_json_text(&payload_json).map_err(to_sql_error)?,
+        payload_encoding: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+        expires_at: row.get(11)?,
+        last_wake_id: row.get(12)?,
+        invalidated_at: row.get(13)?,
+        invalidation_reason,
+    })
+}
+
+fn validate_provider_wire_state_key(key: &ProviderWireStateKey) -> CoreResult<()> {
+    if key.session_id.0.trim().is_empty()
+        || key.module_id.trim().is_empty()
+        || key.strategy_id.trim().is_empty()
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "provider wire state key requires session_id, module_id, and strategy_id",
+        ));
+    }
+    Ok(())
+}
+
+fn provider_wire_state_invalidation_reason_as_str(
+    reason: ProviderWireStateInvalidationReason,
+) -> &'static str {
+    match reason {
+        ProviderWireStateInvalidationReason::ProfileChanged => "profile_changed",
+        ProviderWireStateInvalidationReason::ProviderChanged => "provider_changed",
+        ProviderWireStateInvalidationReason::ModuleChanged => "module_changed",
+        ProviderWireStateInvalidationReason::StrategyChanged => "strategy_changed",
+        ProviderWireStateInvalidationReason::Expired => "expired",
+        ProviderWireStateInvalidationReason::BrainRequestedClear => "brain_requested_clear",
+        ProviderWireStateInvalidationReason::OperatorRequestedClear => "operator_requested_clear",
+        ProviderWireStateInvalidationReason::Superseded => "superseded",
+    }
+}
+
+fn provider_wire_state_invalidation_reason_from_str(
+    raw: &str,
+) -> rusqlite::Result<ProviderWireStateInvalidationReason> {
+    match raw {
+        "profile_changed" => Ok(ProviderWireStateInvalidationReason::ProfileChanged),
+        "provider_changed" => Ok(ProviderWireStateInvalidationReason::ProviderChanged),
+        "module_changed" => Ok(ProviderWireStateInvalidationReason::ModuleChanged),
+        "strategy_changed" => Ok(ProviderWireStateInvalidationReason::StrategyChanged),
+        "expired" => Ok(ProviderWireStateInvalidationReason::Expired),
+        "brain_requested_clear" => Ok(ProviderWireStateInvalidationReason::BrainRequestedClear),
+        "operator_requested_clear" => {
+            Ok(ProviderWireStateInvalidationReason::OperatorRequestedClear)
+        }
+        "superseded" => Ok(ProviderWireStateInvalidationReason::Superseded),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            format!("unknown provider wire state invalidation reason {other}").into(),
+        )),
+    }
 }
 
 fn save_queued_message_in_tx(
@@ -6390,6 +6962,7 @@ mod tests {
         assert!(table_exists(&db_path, "profile_memories"));
         assert!(table_exists(&db_path, "scheduled_jobs"));
         assert!(table_exists(&db_path, "scheduled_job_runs"));
+        assert!(table_exists(&db_path, "provider_wire_states"));
         assert!(table_exists(&db_path, "channel_bindings"));
         assert!(table_exists(&db_path, "mcp_bindings"));
         assert!(index_exists(
@@ -6405,6 +6978,7 @@ mod tests {
             &db_path,
             "idx_scheduled_job_runs_status_deadline"
         ));
+        assert!(index_exists(&db_path, "idx_provider_wire_states_current"));
         assert!(index_exists(&db_path, "idx_channel_bindings_external"));
         assert!(index_exists(&db_path, "idx_mcp_bindings_agent_profile"));
 
@@ -6994,6 +7568,290 @@ mod tests {
                 .unwrap()
                 .next_due_at,
             Some("2026-06-20T06:04:00Z".to_string())
+        );
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn provider_wire_state_replaces_current_record_and_preserves_payload_version() {
+        let db_path = temp_db_path("provider-wire-replace");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let key = sample_provider_wire_state_key();
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp-1",
+                    provider_fingerprint: "provider-fp-1",
+                    payload_version: "provider-owned-v1",
+                    payload_json: serde_json::json!({"response_id": "resp-1"}),
+                    now: "2026-06-20T00:00:00Z",
+                    expires_at: Some("2026-06-20T06:00:00Z"),
+                    last_wake_id: Some("wake-1"),
+                },
+            ))
+            .unwrap();
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp-1",
+                    provider_fingerprint: "provider-fp-1",
+                    payload_version: "provider-owned-v9000",
+                    payload_json: serde_json::json!({"response_id": "resp-2"}),
+                    now: "2026-06-20T00:01:00Z",
+                    expires_at: Some("2026-06-20T06:01:00Z"),
+                    last_wake_id: Some("wake-2"),
+                },
+            ))
+            .unwrap();
+
+        assert_eq!(store.count_rows("provider_wire_states").unwrap(), 2);
+        let loaded = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key,
+                profile_fingerprint: "profile-fp-1".to_string(),
+                provider_fingerprint: "provider-fp-1".to_string(),
+                now: "2026-06-20T00:02:00Z".to_string(),
+            })
+            .unwrap();
+        let record = loaded.record.unwrap();
+        assert_eq!(loaded.absence_reason, None);
+        assert_eq!(record.payload_version, "provider-owned-v9000");
+        assert_eq!(
+            record.payload_json,
+            serde_json::json!({"response_id": "resp-2"})
+        );
+        assert_eq!(record.last_wake_id.as_deref(), Some("wake-2"));
+        assert!(record.is_current());
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn provider_wire_state_withholds_expired_and_fingerprint_stale_records() {
+        let db_path = temp_db_path("provider-wire-invalidation");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let key = sample_provider_wire_state_key();
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp-1",
+                    provider_fingerprint: "provider-fp-1",
+                    payload_version: "provider-owned-v1",
+                    payload_json: serde_json::json!({"response_id": "expired"}),
+                    now: "2026-06-20T00:00:00Z",
+                    expires_at: Some("2026-06-20T00:05:00Z"),
+                    last_wake_id: Some("wake-expired"),
+                },
+            ))
+            .unwrap();
+        let expired = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: key.clone(),
+                profile_fingerprint: "profile-fp-1".to_string(),
+                provider_fingerprint: "provider-fp-1".to_string(),
+                now: "2026-06-20T00:05:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(expired.record, None);
+        assert_eq!(
+            expired.absence_reason,
+            Some(ProviderStateAbsenceReason::Expired)
+        );
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp-1",
+                    provider_fingerprint: "provider-fp-1",
+                    payload_version: "provider-owned-v2",
+                    payload_json: serde_json::json!({"response_id": "profile-stale"}),
+                    now: "2026-06-20T00:06:00Z",
+                    expires_at: Some("2026-06-20T06:00:00Z"),
+                    last_wake_id: Some("wake-profile-stale"),
+                },
+            ))
+            .unwrap();
+        let profile_stale = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: key.clone(),
+                profile_fingerprint: "profile-fp-2".to_string(),
+                provider_fingerprint: "provider-fp-1".to_string(),
+                now: "2026-06-20T00:07:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(profile_stale.record, None);
+        assert_eq!(
+            profile_stale.absence_reason,
+            Some(ProviderStateAbsenceReason::Invalidated)
+        );
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp-2",
+                    provider_fingerprint: "provider-fp-1",
+                    payload_version: "provider-owned-v3",
+                    payload_json: serde_json::json!({"response_id": "provider-stale"}),
+                    now: "2026-06-20T00:08:00Z",
+                    expires_at: Some("2026-06-20T06:00:00Z"),
+                    last_wake_id: Some("wake-provider-stale"),
+                },
+            ))
+            .unwrap();
+        let provider_stale = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key,
+                profile_fingerprint: "profile-fp-2".to_string(),
+                provider_fingerprint: "provider-fp-2".to_string(),
+                now: "2026-06-20T00:09:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(provider_stale.record, None);
+        assert_eq!(
+            provider_stale.absence_reason,
+            Some(ProviderStateAbsenceReason::Invalidated)
+        );
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn provider_wire_state_clear_and_strategy_change_remove_current_state() {
+        let db_path = temp_db_path("provider-wire-clear");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let key = sample_provider_wire_state_key();
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp",
+                    provider_fingerprint: "provider-fp",
+                    payload_version: "provider-owned-v1",
+                    payload_json: serde_json::json!({"response_id": "clear-me"}),
+                    now: "2026-06-20T00:00:00Z",
+                    expires_at: Some("2026-06-20T06:00:00Z"),
+                    last_wake_id: Some("wake-clear"),
+                },
+            ))
+            .unwrap();
+        let cleared = store
+            .clear_provider_wire_state(
+                &key,
+                &"2026-06-20T00:01:00Z".to_string(),
+                ProviderWireStateInvalidationReason::BrainRequestedClear,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            cleared.invalidation_reason,
+            Some(ProviderWireStateInvalidationReason::BrainRequestedClear)
+        );
+        let after_clear = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: key.clone(),
+                profile_fingerprint: "profile-fp".to_string(),
+                provider_fingerprint: "provider-fp".to_string(),
+                now: "2026-06-20T00:02:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(after_clear.record, None);
+        assert_eq!(
+            after_clear.absence_reason,
+            Some(ProviderStateAbsenceReason::Missing)
+        );
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp",
+                    provider_fingerprint: "provider-fp",
+                    payload_version: "provider-owned-v2",
+                    payload_json: serde_json::json!({"response_id": "old-strategy"}),
+                    now: "2026-06-20T00:03:00Z",
+                    expires_at: Some("2026-06-20T06:00:00Z"),
+                    last_wake_id: Some("wake-old-strategy"),
+                },
+            ))
+            .unwrap();
+        let changed_key = ProviderWireStateKey {
+            strategy_id: "replay-v2".to_string(),
+            ..key.clone()
+        };
+        let changed = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: changed_key,
+                profile_fingerprint: "profile-fp".to_string(),
+                provider_fingerprint: "provider-fp".to_string(),
+                now: "2026-06-20T00:04:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(changed.record, None);
+        assert_eq!(
+            changed.absence_reason,
+            Some(ProviderStateAbsenceReason::Missing)
+        );
+        let old_key_after_strategy_change = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key,
+                profile_fingerprint: "profile-fp".to_string(),
+                provider_fingerprint: "provider-fp".to_string(),
+                now: "2026-06-20T00:05:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(old_key_after_strategy_change.record, None);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn provider_wire_state_maintenance_marks_expired_current_records() {
+        let db_path = temp_db_path("provider-wire-maintenance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let key = sample_provider_wire_state_key();
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: key.clone(),
+                    profile_fingerprint: "profile-fp",
+                    provider_fingerprint: "provider-fp",
+                    payload_version: "provider-owned-v1",
+                    payload_json: serde_json::json!({"response_id": "expire-me"}),
+                    now: "2026-06-20T00:00:00Z",
+                    expires_at: Some("2026-06-20T00:05:00Z"),
+                    last_wake_id: Some("wake-expire-me"),
+                },
+            ))
+            .unwrap();
+        let report = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                expire_provider_wire_states_at: Some("2026-06-20T00:05:01Z".to_string()),
+                ..RuntimeMaintenancePolicy::default()
+            })
+            .unwrap();
+        assert_eq!(report.expired_provider_wire_states, 1);
+        let after_expiry = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key,
+                profile_fingerprint: "profile-fp".to_string(),
+                provider_fingerprint: "provider-fp".to_string(),
+                now: "2026-06-20T00:05:02Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(after_expiry.record, None);
+        assert_eq!(
+            after_expiry.absence_reason,
+            Some(ProviderStateAbsenceReason::Missing)
         );
 
         remove_temp_db(&db_path);
@@ -7929,6 +8787,7 @@ mod tests {
             .run_maintenance(&RuntimeMaintenancePolicy {
                 expire_queued_messages_at: Some("2026-06-20T02:00:02Z".to_string()),
                 purge_terminal_queued_messages_before: Some("2026-06-20T02:00:03Z".to_string()),
+                expire_provider_wire_states_at: None,
                 run_wal_checkpoint: true,
                 run_optimize: true,
             })
@@ -8106,6 +8965,40 @@ mod tests {
         let _ = fs::remove_file(db_path);
         let _ = fs::remove_file(format!("{}-wal", db_path.display()));
         let _ = fs::remove_file(format!("{}-shm", db_path.display()));
+    }
+
+    fn sample_provider_wire_state_key() -> ProviderWireStateKey {
+        ProviderWireStateKey {
+            session_id: SessionId::new("session-alpha"),
+            module_id: "openai-responses".to_string(),
+            strategy_id: "replay".to_string(),
+        }
+    }
+
+    struct ProviderWireStateWriteFixture<'a> {
+        key: ProviderWireStateKey,
+        profile_fingerprint: &'a str,
+        provider_fingerprint: &'a str,
+        payload_version: &'a str,
+        payload_json: JsonValue,
+        now: &'a str,
+        expires_at: Option<&'a str>,
+        last_wake_id: Option<&'a str>,
+    }
+
+    fn sample_provider_wire_state_write(
+        input: ProviderWireStateWriteFixture<'_>,
+    ) -> ProviderWireStateWrite {
+        ProviderWireStateWrite {
+            key: input.key,
+            profile_fingerprint: input.profile_fingerprint.to_string(),
+            provider_fingerprint: input.provider_fingerprint.to_string(),
+            payload_version: input.payload_version.to_string(),
+            payload_json: input.payload_json,
+            now: input.now.to_string(),
+            expires_at: input.expires_at.map(ToString::to_string),
+            last_wake_id: input.last_wake_id.map(ToString::to_string),
+        }
     }
 
     fn sample_session_state() -> SessionState {

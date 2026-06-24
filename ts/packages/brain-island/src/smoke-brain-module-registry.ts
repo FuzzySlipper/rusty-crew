@@ -154,6 +154,8 @@ try {
         module.implementationId,
         module.moduleId,
         module.strategy,
+        module.effectiveStrategy,
+        module.providerStateMode,
         module.selectedToolSource,
         module.toolAdapterStatus,
       ]),
@@ -163,6 +165,8 @@ try {
           "pi-brain",
           "pi-agent-core",
           "default",
+          "default",
+          "unused",
           "default-local-tools",
           "neutral_tools_adapted_to_pi",
         ],
@@ -171,6 +175,8 @@ try {
           "local-brain",
           "local",
           undefined,
+          "default",
+          "unused",
           "default-local-tools",
           "tools_not_used",
         ],
@@ -263,6 +269,12 @@ function brainModuleDiagnostics(
       ...(selection?.strategy === undefined
         ? {}
         : { strategy: selection.strategy }),
+      effectiveStrategy:
+        applyResult.brainDiagnosticsByProfileId[brain.profileId]
+          ?.effectiveStrategy,
+      providerStateMode:
+        applyResult.brainDiagnosticsByProfileId[brain.profileId]
+          ?.providerStateMode,
       selectedToolCount:
         applyResult.brainDiagnosticsByProfileId[brain.profileId]
           ?.selectedToolCount ?? 0,

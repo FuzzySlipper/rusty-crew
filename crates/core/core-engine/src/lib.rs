@@ -3668,6 +3668,7 @@ mod tests {
             .run_maintenance(&RuntimeMaintenancePolicy {
                 expire_queued_messages_at: Some("2026-06-19T00:00:02Z".to_string()),
                 purge_terminal_queued_messages_before: None,
+                expire_provider_wire_states_at: None,
                 run_wal_checkpoint: true,
                 run_optimize: true,
             })

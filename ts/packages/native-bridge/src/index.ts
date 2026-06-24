@@ -12,6 +12,7 @@ import type {
   BrainEventEnvelope,
   BrainImplementationHandle,
   BrainImplementationRegistration,
+  BrainWakeProviderStateOutput,
   BrainWakeAccepted,
   BrainWakeFailure,
   BrainWakeRequest,
@@ -95,6 +96,13 @@ interface NativeBridgeBinding {
       modelName: string;
       temperatureMilli?: number;
       maxOutputTokens?: number;
+    };
+    strategy?: {
+      moduleId: string;
+      strategyId: string;
+      providerState: {
+        mode: string;
+      };
     };
   }): number;
   registerPlatformAdapter(registration: {
@@ -336,6 +344,7 @@ export interface BridgeBufferClient {
 export interface BrainWakeExecutionResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
+  providerState?: BrainWakeProviderStateOutput;
   stream?: BrainWakeStreamItem[];
 }
 
@@ -535,6 +544,7 @@ export interface NativeRuntimeDatabaseSize {
 export interface NativeRuntimeMaintenancePolicy {
   expireQueuedMessagesAt?: string;
   purgeTerminalQueuedMessagesBefore?: string;
+  expireProviderWireStatesAt?: string;
   runWalCheckpoint?: boolean;
   runOptimize?: boolean;
 }
@@ -544,6 +554,7 @@ export interface NativeRuntimeMaintenanceReport {
   sizeAfter: NativeRuntimeDatabaseSize;
   expiredQueueMessages: number;
   purgedTerminalQueueMessages: number;
+  expiredProviderWireStates: number;
   walCheckpointRan: boolean;
   optimizeRan: boolean;
 }
@@ -1103,6 +1114,15 @@ function createNativeBridgeModule(
           temperatureMilli: registration.modelConfig.temperatureMilli,
           maxOutputTokens: registration.modelConfig.maxOutputTokens,
         },
+        strategy: registration.strategy
+          ? {
+              moduleId: registration.strategy.moduleId,
+              strategyId: registration.strategy.strategyId,
+              providerState: {
+                mode: registration.strategy.providerState.mode,
+              },
+            }
+          : undefined,
       }) as BrainImplementationHandle,
     registerBrainRuntime: async (registration, executor) => {
       const handle = await module.registerBrainImplementation(registration);

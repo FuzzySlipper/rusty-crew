@@ -149,6 +149,8 @@ export interface RuntimeBrainModuleDiagnostics {
   implementationId: BrainImplementationId | string;
   moduleId: string;
   strategy?: string;
+  effectiveStrategy?: string;
+  providerStateMode?: string;
   selectedToolCount: number;
   selectedToolSource: string;
   toolAdapterStatus: string;

@@ -2,6 +2,8 @@ import type {
   BrainAction,
   BrainEventEnvelope,
   CompletionPacket,
+  BrainStrategyMetadata,
+  ProviderStateMode,
   SessionId,
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
@@ -18,6 +20,15 @@ export type BrainModuleId = "pi-agent-core" | "local" | (string & {});
 export interface BrainModuleSelection {
   moduleId: BrainModuleId;
   strategy?: string;
+}
+
+export interface BrainModuleStrategyProviderStateMetadata {
+  mode: ProviderStateMode;
+}
+
+export interface BrainModuleStrategyMetadata {
+  strategyId: string;
+  providerState: BrainModuleStrategyProviderStateMetadata;
 }
 
 export type BrainModuleToolAdapterStatus =
@@ -51,6 +62,8 @@ export interface BrainModuleContext {
 export interface BrainModule {
   readonly moduleId: BrainModuleId;
   readonly displayName: string;
+  readonly defaultStrategyId: string;
+  readonly strategies: readonly BrainModuleStrategyMetadata[];
   readonly diagnostics: BrainModuleDiagnosticsMetadata;
   createBrain(context: BrainModuleContext): Promise<BrainImplementation>;
 }
@@ -116,9 +129,36 @@ export function brainModuleSelectionFromRuntimeConfig(
   };
 }
 
+export function resolveBrainStrategyMetadata(
+  module: BrainModule,
+  selection: BrainModuleSelection,
+): BrainStrategyMetadata {
+  const strategyId = selection.strategy ?? module.defaultStrategyId;
+  const strategy = module.strategies.find(
+    (candidate) => candidate.strategyId === strategyId,
+  );
+  if (!strategy) {
+    throw new Error(
+      `unknown strategy ${strategyId} for brain module ${module.moduleId}`,
+    );
+  }
+  return {
+    moduleId: module.moduleId,
+    strategyId,
+    providerState: strategy.providerState,
+  };
+}
+
 export const piAgentCoreBrainModule: BrainModule = {
   moduleId: "pi-agent-core",
   displayName: "pi-agent-core",
+  defaultStrategyId: "default",
+  strategies: [
+    {
+      strategyId: "default",
+      providerState: { mode: "unused" },
+    },
+  ],
   diagnostics: {
     toolAdapterStatus: "neutral_tools_adapted_to_pi",
   },
@@ -149,6 +189,13 @@ export const piAgentCoreBrainModule: BrainModule = {
 export const localBrainModule: BrainModule = {
   moduleId: "local",
   displayName: "Local deterministic",
+  defaultStrategyId: "default",
+  strategies: [
+    {
+      strategyId: "default",
+      providerState: { mode: "unused" },
+    },
+  ],
   diagnostics: {
     toolAdapterStatus: "tools_not_used",
   },

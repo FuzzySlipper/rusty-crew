@@ -49,6 +49,8 @@ export async function wakeBrainFromBridgeRequest(
       state: parseBodyStateBuffer(bodyStateView),
       systemPrompt: decodeBuffer(systemPromptView),
       roleAssembly: parseJsonBuffer<BrainRoleAssembly>(roleAssemblyView),
+      providerState: request.providerState,
+      providerStateAbsence: request.providerStateAbsence,
     });
   } catch (error) {
     wakeFailed = true;

@@ -202,6 +202,10 @@ impl RuntimeBufferStore {
                 system_prompt,
                 role_assembly,
                 wake_id: input.wake_id,
+                provider_state: None,
+                provider_state_absence: Some(
+                    crate::ProviderStateAbsenceReason::ModuleDoesNotUseState,
+                ),
             },
             leases,
         })

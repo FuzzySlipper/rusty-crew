@@ -796,6 +796,20 @@ fn validate_brain_registration(registration: &BrainImplementationRegistration) -
             "brain implementation requires a model name",
         ));
     }
+    if let Some(strategy) = &registration.strategy {
+        if strategy.module_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "brain strategy metadata requires a module_id",
+            ));
+        }
+        if strategy.strategy_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "brain strategy metadata requires a strategy_id",
+            ));
+        }
+    }
     let mut tool_names = HashSet::new();
     for tool in &registration.tool_profile.tools {
         if tool.name.trim().is_empty() {
@@ -866,11 +880,24 @@ pub struct JsBrainModelConfig {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsBrainProviderStateStrategyMetadata {
+    pub mode: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsBrainStrategyMetadata {
+    pub module_id: String,
+    pub strategy_id: String,
+    pub provider_state: JsBrainProviderStateStrategyMetadata,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsBrainImplementationRegistration {
     pub implementation_id: String,
     pub profile_id: String,
     pub tool_profile: JsToolProfile,
     pub model_config: JsBrainModelConfig,
+    pub strategy: Option<JsBrainStrategyMetadata>,
 }
 
 #[napi_derive::napi(object)]
@@ -1079,6 +1106,7 @@ pub struct JsRuntimeDatabaseSize {
 pub struct JsRuntimeMaintenancePolicy {
     pub expire_queued_messages_at: Option<String>,
     pub purge_terminal_queued_messages_before: Option<String>,
+    pub expire_provider_wire_states_at: Option<String>,
     pub run_wal_checkpoint: Option<bool>,
     pub run_optimize: Option<bool>,
 }
@@ -1089,6 +1117,7 @@ pub struct JsRuntimeMaintenanceReport {
     pub size_after: JsRuntimeDatabaseSize,
     pub expired_queue_messages: f64,
     pub purged_terminal_queue_messages: f64,
+    pub expired_provider_wire_states: f64,
     pub wal_checkpoint_ran: bool,
     pub optimize_ran: bool,
 }
@@ -1236,7 +1265,7 @@ impl NativeBridgeBinding {
     ) -> napi::Result<f64> {
         let mut bridge = self.bridge()?;
         let handle = bridge
-            .register_brain_implementation(to_brain_registration(registration))
+            .register_brain_implementation(to_brain_registration(registration)?)
             .map_err(to_napi_error)?;
         Ok(handle.get() as f64)
     }
@@ -1812,6 +1841,7 @@ impl NativeBridgeBinding {
             .run_maintenance(&RuntimeMaintenancePolicy {
                 expire_queued_messages_at: policy.expire_queued_messages_at,
                 purge_terminal_queued_messages_before: policy.purge_terminal_queued_messages_before,
+                expire_provider_wire_states_at: policy.expire_provider_wire_states_at,
                 run_wal_checkpoint: policy.run_wal_checkpoint.unwrap_or(false),
                 run_optimize: policy.run_optimize.unwrap_or(false),
             })
@@ -2429,6 +2459,7 @@ fn to_js_runtime_maintenance_report(
         size_after: to_js_runtime_database_size(report.size_after),
         expired_queue_messages: report.expired_queue_messages as f64,
         purged_terminal_queue_messages: report.purged_terminal_queue_messages as f64,
+        expired_provider_wire_states: report.expired_provider_wire_states as f64,
         wal_checkpoint_ran: report.wal_checkpoint_ran,
         optimize_ran: report.optimize_ran,
     }
@@ -2525,8 +2556,8 @@ fn js_session_config(
 
 fn to_brain_registration(
     registration: JsBrainImplementationRegistration,
-) -> BrainImplementationRegistration {
-    BrainImplementationRegistration {
+) -> napi::Result<BrainImplementationRegistration> {
+    Ok(BrainImplementationRegistration {
         implementation_id: rusty_crew_core_bridge_api::BrainImplementationId::new(
             registration.implementation_id,
         ),
@@ -2551,6 +2582,36 @@ fn to_brain_registration(
             temperature_milli: registration.model_config.temperature_milli,
             max_output_tokens: registration.model_config.max_output_tokens,
         },
+        strategy: registration
+            .strategy
+            .map(to_brain_strategy_metadata)
+            .transpose()?,
+    })
+}
+
+fn to_brain_strategy_metadata(
+    strategy: JsBrainStrategyMetadata,
+) -> napi::Result<rusty_crew_core_bridge_api::BrainStrategyMetadata> {
+    Ok(rusty_crew_core_bridge_api::BrainStrategyMetadata {
+        module_id: strategy.module_id,
+        strategy_id: strategy.strategy_id,
+        provider_state: rusty_crew_core_bridge_api::BrainProviderStateStrategyMetadata {
+            mode: parse_provider_state_mode(&strategy.provider_state.mode)?,
+        },
+    })
+}
+
+fn parse_provider_state_mode(
+    mode: &str,
+) -> napi::Result<rusty_crew_core_bridge_api::ProviderStateMode> {
+    match mode {
+        "unused" => Ok(rusty_crew_core_bridge_api::ProviderStateMode::Unused),
+        "optional" => Ok(rusty_crew_core_bridge_api::ProviderStateMode::Optional),
+        "required" => Ok(rusty_crew_core_bridge_api::ProviderStateMode::Required),
+        _ => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unknown provider state mode {mode}"),
+        )),
     }
 }
 
@@ -2952,6 +3013,9 @@ mod tests {
                 temperature_milli: None,
                 max_output_tokens: None,
             },
+            strategy: Some(rusty_crew_core_bridge_api::BrainStrategyMetadata::unused(
+                "local", "default",
+            )),
         }
     }
 }

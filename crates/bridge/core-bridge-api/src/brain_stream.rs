@@ -183,6 +183,10 @@ mod tests {
                 system_prompt: RuntimeBufferHandle::new(2),
                 role_assembly: RuntimeBufferHandle::new(3),
                 wake_id: "wake-1".to_string(),
+                provider_state: None,
+                provider_state_absence: Some(
+                    rusty_crew_core_protocol::ProviderStateAbsenceReason::ModuleDoesNotUseState,
+                ),
             })
             .expect("wake stream");
 
