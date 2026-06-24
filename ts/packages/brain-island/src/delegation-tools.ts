@@ -13,7 +13,7 @@ import type {
 import { Type, type Static } from "typebox";
 import type {
   BrainActionCollector,
-  PiAgentToolResolver,
+  BrainToolResolver,
 } from "./tool-session-selection.js";
 
 const prioritySchema = Type.Union([
@@ -139,10 +139,7 @@ export interface DelegationToolDetails {
   maxConcurrency?: number;
 }
 
-export const resolveDelegationTools: PiAgentToolResolver = ({
-  wake,
-  actions,
-}) =>
+export const resolveDelegationTools: BrainToolResolver = ({ wake, actions }) =>
   delegationTools({
     actions,
     parentResourceLimits: wake.state.session.resourceLimits,

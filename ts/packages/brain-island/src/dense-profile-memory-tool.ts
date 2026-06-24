@@ -9,7 +9,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import type { SessionState } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
-import type { PiAgentToolResolver } from "./tool-session-selection.js";
+import type { BrainToolResolver } from "./tool-session-selection.js";
 
 export type DenseProfileMemoryMode = "off" | "read_only" | "read_write";
 export type DenseProfileMemoryAction =
@@ -80,7 +80,7 @@ type Params = Static<typeof parameters>;
 
 export function createDenseProfileMemoryToolResolver(
   context: DenseProfileMemoryToolContext,
-): PiAgentToolResolver {
+): BrainToolResolver {
   return () => [denseProfileMemoryTool(context)];
 }
 

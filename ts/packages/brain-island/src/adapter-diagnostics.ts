@@ -48,6 +48,7 @@ export interface ChannelAdapterBindingDiagnostics {
   provider: string;
   externalChannelId?: string;
   externalThreadId?: string;
+  conversationProjectId?: string;
   conversationChannelId?: number;
   sourceMessageId?: number;
   deliveryIntentId?: number;
@@ -216,6 +217,9 @@ function channelBindingDiagnostics(
     provider: binding.provider,
     externalChannelId: binding.externalChannelId,
     externalThreadId: binding.externalThreadId,
+    conversationProjectId:
+      activity?.conversationProjectId ?? binding.conversationProjectId,
+    conversationChannelId: activity?.conversationChannelId,
     wakePolicy,
     status,
     membershipStatus: activity?.membershipStatus ?? "missing",

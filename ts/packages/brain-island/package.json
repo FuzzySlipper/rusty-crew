@@ -86,6 +86,7 @@
     "smoke:profile-loading": "tsx src/smoke-profile-loading.ts",
     "smoke:profile-role-assembly": "tsx src/smoke-profile-role-assembly.ts",
     "smoke:tool-session-selection": "tsx src/smoke-tool-session-selection.ts",
+    "smoke:brain-tool-pi-adapter": "tsx src/smoke-brain-tool-pi-adapter.ts",
     "smoke:local-code-tools": "tsx src/smoke-local-code-tools.ts",
     "smoke:patch-tool": "tsx src/smoke-patch-tool.ts",
     "smoke:service-config": "tsx src/smoke-service-config.ts",

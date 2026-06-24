@@ -9,7 +9,7 @@ import {
   type BrowserRefEntry,
   type CdpConnection,
 } from "./browser-session-manager.js";
-import type { PiAgentToolResolver } from "./tool-session-selection.js";
+import type { BrainToolResolver } from "./tool-session-selection.js";
 import { assertSafePublicUrl, type ResolveHostAddresses } from "./web-tools.js";
 
 export interface BrowserToolContext {
@@ -147,7 +147,7 @@ export class MemoryBrowserScreenshotStore implements BrowserScreenshotStore {
 
 export function createBrowserToolResolver(
   context: BrowserToolResolverContext,
-): PiAgentToolResolver {
+): BrainToolResolver {
   return ({ wake }) =>
     resolveBrowserTools({
       manager: context.manager,

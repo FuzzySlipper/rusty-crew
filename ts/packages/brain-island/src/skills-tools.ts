@@ -18,7 +18,7 @@ import {
   ProfileLoadError,
   type LoadedSkill,
 } from "./profile-loading.js";
-import type { PiAgentToolResolver } from "./tool-session-selection.js";
+import type { BrainToolResolver } from "./tool-session-selection.js";
 
 const skillSlugPattern = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
 const writableSkillSubdirs = [
@@ -111,7 +111,7 @@ export interface SkillManagementResult {
 
 export function createSkillsToolResolver(
   context: SkillsToolContext,
-): PiAgentToolResolver {
+): BrainToolResolver {
   return () => resolveSkillsTools(context);
 }
 

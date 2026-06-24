@@ -73,7 +73,7 @@ import {
 } from "./skills-tools.js";
 import {
   combineResolvers,
-  type PiAgentToolResolver,
+  type BrainToolResolver,
 } from "./tool-session-selection.js";
 import { createWebToolResolver } from "./web-tools.js";
 
@@ -657,7 +657,7 @@ function createServiceToolResolver(
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   },
-): PiAgentToolResolver {
+): BrainToolResolver {
   const todoStore = new MemorySessionTodoStore();
   const browserManager = new BrowserSessionManager();
   const browserScreenshotStore = new MemoryBrowserScreenshotStore();
@@ -701,7 +701,7 @@ function createMemoryToolResolver(
     bridge?: NativeBridgeModule;
     serviceConfig?: RustyCrewServiceConfig;
   },
-): PiAgentToolResolver {
+): BrainToolResolver {
   const denMemoryClient = createServiceDenMemoryClient(options.serviceConfig);
   return ({ wake }) => [
     ...resolveDenMemoryTools({
@@ -752,7 +752,7 @@ function createPlanningToolResolver(input: {
   runtimeConfig?: RustyCrewRuntimeConfig;
   curatorExecutor?: CuratorExecuteContext["executor"];
   todoStore: MemorySessionTodoStore;
-}): PiAgentToolResolver {
+}): BrainToolResolver {
   return ({ wake }) => {
     const session = wake.state.session;
     const allowedBindingIds = channelBindingIdsForSession(
@@ -1064,6 +1064,11 @@ function configuredChannelBinding(
     ),
     externalThreadId: optionalString(parsed.externalThreadId),
     externalUserId: optionalString(parsed.externalUserId),
+    conversationProjectId: optionalString(parsed.conversationProjectId),
+    conversationChannelId: optionalPositiveInteger(
+      parsed.conversationChannelId,
+      `channelBindings[${index}].conversationChannelId`,
+    ),
     providerSubscriptionId: optionalString(parsed.providerSubscriptionId),
     cursor: optionalString(parsed.cursor),
     membershipState: optionalString(parsed.membershipState),
@@ -1169,6 +1174,17 @@ function optionalNumber(input: unknown): number | undefined {
   return typeof input === "number" && Number.isFinite(input)
     ? input
     : undefined;
+}
+
+function optionalPositiveInteger(
+  input: unknown,
+  name: string,
+): number | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (typeof input !== "number" || !Number.isSafeInteger(input) || input <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return input;
 }
 
 function isAlreadyPresentError(error: unknown): boolean {

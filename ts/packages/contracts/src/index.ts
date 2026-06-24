@@ -410,6 +410,8 @@ export interface ChannelBindingRecord {
   externalChannelId: string;
   externalThreadId?: string;
   externalUserId?: string;
+  conversationProjectId?: string;
+  conversationChannelId?: number;
   providerSubscriptionId?: string;
   cursor?: string;
   membershipState?: string;

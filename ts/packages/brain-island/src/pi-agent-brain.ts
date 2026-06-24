@@ -23,8 +23,9 @@ import type {
 import {
   type BrainActionCollector,
   resolveToolSession,
-  type PiAgentToolResolver,
+  type BrainToolResolver,
 } from "./tool-session-selection.js";
+import { toPiAgentTools } from "./pi-tool-adapter.js";
 
 export type PiAgentLike = Pick<
   PiAgent,
@@ -37,7 +38,7 @@ export type PiAgentFactory = (options: PiAgentOptions) => PiAgentLike;
 export interface PiAgentBrainOptions {
   createAgent: PiAgentFactory;
   planActions?: BrainActionPlanner;
-  resolveTools?: PiAgentToolResolver;
+  resolveTools?: BrainToolResolver;
   toolProfile?: ToolProfile;
 }
 
@@ -120,12 +121,15 @@ function buildAgentOptions(
 
 function resolveAllowedTools(
   input: BrainWakeInput,
-  resolveTools: PiAgentToolResolver | undefined,
+  resolveTools: BrainToolResolver | undefined,
   toolProfile: ToolProfile | undefined,
   actions: BrainActionCollector,
 ): PiAgentTool[] {
-  return resolveToolSession({ wake: input, resolveTools, toolProfile, actions })
-    .tools;
+  return toPiAgentTools(
+    resolveToolSession({ wake: input, resolveTools, toolProfile, actions })
+      .tools,
+    { wake: input },
+  );
 }
 
 function toPiMessages(

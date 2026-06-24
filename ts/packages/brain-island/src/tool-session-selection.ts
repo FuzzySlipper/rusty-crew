@@ -1,9 +1,9 @@
-import type { AgentTool as PiAgentTool } from "@earendil-works/pi-agent-core";
 import type {
   BrainAction,
   ToolDescriptor,
   ToolProfile,
 } from "@rusty-crew/contracts";
+import type { BrainTool } from "./brain-tool.js";
 import type { BrainWakeInput } from "./index.js";
 
 export interface BrainActionCollector {
@@ -12,11 +12,11 @@ export interface BrainActionCollector {
   readonly actions: readonly BrainAction[];
 }
 
-export type PiAgentToolResolver = (input: {
+export type BrainToolResolver = (input: {
   wake: BrainWakeInput;
   tools: ToolDescriptor[];
   actions?: BrainActionCollector;
-}) => PiAgentTool[];
+}) => BrainTool[];
 
 export type ToolSessionSelectionStatus =
   | "callable"
@@ -27,7 +27,7 @@ export type ToolSessionSelectionStatus =
 export interface ToolSessionSelectionItem {
   name: string;
   descriptor?: ToolDescriptor;
-  tool?: PiAgentTool;
+  tool?: BrainTool;
   status: ToolSessionSelectionStatus;
   reasons: string[];
 }
@@ -35,12 +35,12 @@ export interface ToolSessionSelectionItem {
 export interface ToolSessionSelectionInput {
   wake: BrainWakeInput;
   toolProfile?: ToolProfile;
-  resolveTools?: PiAgentToolResolver;
+  resolveTools?: BrainToolResolver;
   actions?: BrainActionCollector;
 }
 
 export interface ToolSessionSelection {
-  tools: PiAgentTool[];
+  tools: BrainTool[];
   items: ToolSessionSelectionItem[];
 }
 
@@ -49,8 +49,8 @@ export interface ToolSessionSelection {
  * detection remain centralized in resolveToolSession.
  */
 export function combineResolvers(
-  ...resolvers: readonly PiAgentToolResolver[]
-): PiAgentToolResolver {
+  ...resolvers: readonly BrainToolResolver[]
+): BrainToolResolver {
   return (input) => resolvers.flatMap((resolver) => resolver(input));
 }
 
@@ -80,7 +80,7 @@ export function resolveToolSession(
           descriptor,
           status: "implementation_missing",
           reasons: [
-            `${descriptor.name} has no resolved Pi tool implementation`,
+            `${descriptor.name} has no resolved brain tool implementation`,
           ],
         };
       }
@@ -90,7 +90,7 @@ export function resolveToolSession(
           descriptor,
           status: "duplicate_implementation",
           reasons: [
-            `${descriptor.name} resolved to ${tools.length} Pi tool implementations`,
+            `${descriptor.name} resolved to ${tools.length} brain tool implementations`,
           ],
         };
       }
@@ -126,9 +126,9 @@ export function resolveToolSession(
 }
 
 function groupToolsByName(
-  tools: readonly PiAgentTool[],
-): Map<string, PiAgentTool[]> {
-  const byName = new Map<string, PiAgentTool[]>();
+  tools: readonly BrainTool[],
+): Map<string, BrainTool[]> {
+  const byName = new Map<string, BrainTool[]>();
   for (const tool of tools) {
     const group = byName.get(tool.name);
     if (group) {

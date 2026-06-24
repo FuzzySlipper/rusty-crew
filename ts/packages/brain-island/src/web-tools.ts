@@ -5,7 +5,7 @@ import type {
   AgentToolResult,
 } from "@earendil-works/pi-agent-core";
 import { Type, type Static } from "typebox";
-import type { PiAgentToolResolver } from "./tool-session-selection.js";
+import type { BrainToolResolver } from "./tool-session-selection.js";
 
 export interface WebSearchResult {
   title: string;
@@ -115,7 +115,7 @@ type WebExtractParams = Static<typeof webExtractParameters>;
 
 export function createWebToolResolver(
   context: WebToolContext = {},
-): PiAgentToolResolver {
+): BrainToolResolver {
   return () => resolveWebTools(context);
 }
 

@@ -77,6 +77,21 @@ const gateway = createHttpServer((request, response) => {
           deliveryListCount === 1
             ? [
                 {
+                  id: 89,
+                  target_identity: {
+                    profile: "missing-profile",
+                    instance_id: "missing-agent@rusty-crew",
+                    session_key: "missing-session",
+                  },
+                  state: "pending",
+                  idempotency_key: "wake:ch42:missing-profile:unmatched",
+                  source_ref:
+                    "wake://missing-profile?body=unmatched&channel_id=42",
+                  channel_message_id: 5,
+                  created_at: "2026-06-21T12:00:00Z",
+                  expires_at: "2026-06-21T12:05:00Z",
+                },
+                {
                   id: 90,
                   target_identity: {
                     profile: "field-profile",
@@ -100,8 +115,7 @@ const gateway = createHttpServer((request, response) => {
                   },
                   state: "pending",
                   idempotency_key: "wake:ch42:field-profile:nonce",
-                  source_ref:
-                    "wake://field-profile?body=hello%20from%20den&channel_id=42",
+                  source_ref: "/api/v1/conversation/channels/42/messages/7",
                   channel_message_id: 7,
                   created_at: "2026-06-21T12:00:00Z",
                   expires_at: "2026-06-21T12:05:00Z",
@@ -133,9 +147,69 @@ const gateway = createHttpServer((request, response) => {
       response.end(JSON.stringify({ accepted: true }));
       return;
     }
+    if (
+      request.url === "/v1/conversation/channels/42/messages?limit=5&after_id=6"
+    ) {
+      response.end(
+        JSON.stringify([
+          {
+            id: 7,
+            channel_id: 42,
+            body: "hello from den",
+            sender_type: "user",
+            sender_identity: "Patch",
+            created_at: "2026-06-21T12:00:00Z",
+          },
+        ]),
+      );
+      return;
+    }
     if (request.url === "/v1/conversation/channels/42/messages") {
       response.statusCode = 201;
       response.end(JSON.stringify({ id: 92, channel_id: 42 }));
+      return;
+    }
+    if (
+      request.url ===
+      "/v1/conversation/memberships?project_id=field-project&include_left=true&limit=100"
+    ) {
+      response.end(
+        JSON.stringify([
+          {
+            id: 93,
+            channel_id: 42,
+            member_type: "agent",
+            member_identity: "field-agent",
+            profile_identity: "field-profile",
+            membership_status: "active",
+            wake_policy: "subscription",
+            can_send: true,
+            can_react: true,
+            can_invite: false,
+            membership_purpose: "normal",
+            settings: {},
+            created_at: "2026-06-21T12:00:00Z",
+            updated_at: "2026-06-21T12:00:00Z",
+          },
+          {
+            id: 94,
+            channel_id: 42,
+            member_type: "agent",
+            member_identity: "field-agent",
+            profile_identity: "field-profile",
+            membership_status: "left",
+            wake_policy: "never",
+            can_send: false,
+            can_react: false,
+            can_invite: false,
+            membership_purpose: "ordinary",
+            settings: {},
+            created_at: "2026-06-21T11:00:00Z",
+            updated_at: "2026-06-21T11:30:00Z",
+            left_at: "2026-06-21T11:30:00Z",
+          },
+        ]),
+      );
       return;
     }
     response.end(JSON.stringify({ accepted: true }));
@@ -164,6 +238,7 @@ const host = await startRustyCrewServiceHost({
     DEN_SUCCESSOR_OBSERVATION_WRITE_TOKEN: "observation-write-token",
     DEN_SUCCESSOR_DELIVERY_TOKEN: "delivery-token",
     DEN_SUCCESSOR_CONVERSATION_WRITE_TOKEN: "conversation-write-token",
+    DEN_SUCCESSOR_CONVERSATION_READ_TOKEN: "conversation-read-token",
     RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS: "0",
     RUSTY_CREW_DEN_DELIVERY_POLL_INTERVAL_MS: "50",
   },
@@ -184,8 +259,11 @@ try {
   assert.equal(gatewayRequests[2]?.migrated, "true");
   assert.equal(gatewayRequests[3]?.migrated, "true");
   assert.equal(
-    (gatewayRequests[3]?.body as { event_type?: string } | undefined)
-      ?.event_type,
+    (
+      gatewayRequests.find(
+        (request) => request.path === "/v1/observation/activity-events",
+      )?.body as { event_type?: string } | undefined
+    )?.event_type,
     "adapter_connected",
   );
 
@@ -197,6 +275,20 @@ try {
           request.path === "/v1/conversation/channels/42/messages",
       ),
     "delivery intent completion was projected to Conversation",
+  );
+  assert.equal(
+    gatewayRequests.some((request) =>
+      request.path.startsWith("/v1/conversation/channels?"),
+    ),
+    false,
+  );
+  assert.equal(
+    gatewayRequests.find(
+      (request) =>
+        request.path ===
+        "/v1/conversation/memberships?project_id=field-project&include_left=true&limit=100",
+    )?.auth,
+    "Bearer conversation-read-token",
   );
   assert.equal(
     gatewayRequests.some(
@@ -306,6 +398,12 @@ try {
     ),
     true,
   );
+  assert.equal(
+    body.data.items.some(
+      (event) => event.eventType === "den_delivery_intent_unmatched",
+    ),
+    true,
+  );
   const channelDiagnostics = await fetch(
     `http://127.0.0.1:${adminPort}/v1/admin/diagnostics/channels`,
   );
@@ -319,29 +417,52 @@ try {
       }[];
     };
   };
-  assert.deepEqual(channelBody.data.items, [
-    {
-      bindingId: "gateway-delivery:field-session:42",
-      bindingSource: "gateway_delivery",
-      adapterId: "den-successor-gateway",
-      agentId: "field-agent",
-      sessionId: "field-session",
-      profileId: "field-profile",
-      provider: "den_successor_gateway",
-      externalChannelId: "conversation:42",
-      conversationChannelId: 42,
-      sourceMessageId: 7,
-      deliveryIntentId: 91,
-      lastObservedAt: "2026-06-21T12:01:00.000Z",
-      wakePolicy: "subscription",
-      status: "active",
-      membershipStatus: "dynamic",
-      presenceStatus: "delivery_intent",
-      subscriptionStatus: "active",
-      stalePresence: false,
-      droppedProjections: 0,
-    },
-  ]);
+  const configuredChannel = channelBody.data.items.find(
+    (item) => item.bindingSource === "configured",
+  );
+  assert.deepEqual(configuredChannel, {
+    bindingId: "field-channel",
+    bindingSource: "configured",
+    adapterId: "den-channel-main",
+    agentId: "field-agent",
+    sessionId: "field-session",
+    profileId: "field-profile",
+    provider: "den_channels",
+    externalChannelId: "field-channel",
+    conversationProjectId: "field-project",
+    wakePolicy: "subscription",
+    status: "active",
+    membershipStatus: "joined",
+    presenceStatus: "online",
+    subscriptionStatus: "active",
+    stalePresence: false,
+    droppedProjections: 0,
+    conversationChannelId: 42,
+  });
+  const dynamicChannel = channelBody.data.items.find(
+    (item) => item.bindingSource === "gateway_delivery",
+  );
+  assert.deepEqual(dynamicChannel, {
+    bindingId: "gateway-delivery:field-session:42",
+    bindingSource: "gateway_delivery",
+    adapterId: "den-successor-gateway",
+    agentId: "field-agent",
+    sessionId: "field-session",
+    profileId: "field-profile",
+    provider: "den_successor_gateway",
+    externalChannelId: "conversation:42",
+    conversationChannelId: 42,
+    sourceMessageId: 7,
+    deliveryIntentId: 91,
+    lastObservedAt: "2026-06-21T12:01:00.000Z",
+    wakePolicy: "subscription",
+    status: "active",
+    membershipStatus: "dynamic",
+    presenceStatus: "delivery_intent",
+    subscriptionStatus: "active",
+    stalePresence: false,
+    droppedProjections: 0,
+  });
 
   console.log(
     JSON.stringify(
@@ -349,7 +470,7 @@ try {
         gatewayRequests: gatewayRequests.length,
         startupEvent: body.data.items[0]?.eventType,
         lifecycleEvents,
-        dynamicChannels: channelBody.data.items.length,
+        channelDiagnostics: channelBody.data.items.length,
       },
       null,
       2,
@@ -501,7 +622,20 @@ function writeRuntimeConfig(targetRoot: string): void {
             kind: "full",
           },
         ],
-        channelBindings: [],
+        channelBindings: [
+          {
+            bindingId: "field-channel",
+            adapterId: "den-channel-main",
+            provider: "den_channels",
+            agentId: "field-agent",
+            sessionId: "field-session",
+            profileId: "field-profile",
+            externalChannelId: "field-channel",
+            conversationProjectId: "field-project",
+            conversationChannelId: 42,
+            status: "active",
+          },
+        ],
         mcpBindings: [],
       },
       null,

@@ -176,6 +176,18 @@ assert.equal(
 );
 assert.equal(
   diagnostics.channels.bindings.find(
+    (item) => item.bindingId === "binding-alpha",
+  )?.conversationChannelId,
+  42,
+);
+assert.equal(
+  diagnostics.channels.bindings.find(
+    (item) => item.bindingId === "binding-alpha",
+  )?.conversationProjectId,
+  "alpha-project",
+);
+assert.equal(
+  diagnostics.channels.bindings.find(
     (item) => item.bindingId === "binding-beta",
   )?.lastError,
   "projection sink unavailable",
@@ -259,7 +271,9 @@ function channelBinding(
     agentId: agentId as AgentId,
     sessionId: sessionId as SessionId,
     profileId: profileId as ProfileId,
-    externalChannelId: "crew-room",
+    externalChannelId: bindingId === "binding-alpha" ? "42" : "crew-room",
+    conversationProjectId:
+      bindingId === "binding-alpha" ? "alpha-project" : undefined,
     externalThreadId: "thread-1",
     externalUserId: `${agentId}-external`,
     status: "active",

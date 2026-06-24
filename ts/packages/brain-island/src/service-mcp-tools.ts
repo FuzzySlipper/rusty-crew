@@ -24,7 +24,7 @@ import {
   integrateMcpToolsWithRegistry,
   type McpRegistryIntegrationReport,
 } from "./mcp-tool-registry-integration.js";
-import type { PiAgentToolResolver } from "./tool-session-selection.js";
+import type { BrainToolResolver } from "./tool-session-selection.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
 export type ServiceMcpToolDiscoveryClientFactory = (
@@ -188,7 +188,7 @@ export function createServiceMcpToolResolver(input: {
   bridge?: Pick<NativeBridgeModule, "submitBrainEvent">;
   mcpConfig?: ServiceMcpEndpointConfig;
   executorFactory?: ServiceMcpToolExecutorFactory;
-}): PiAgentToolResolver {
+}): BrainToolResolver {
   return ({ wake }) =>
     input.catalog
       .candidatesForSession(wake.state.session)

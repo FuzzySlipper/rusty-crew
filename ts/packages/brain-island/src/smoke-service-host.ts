@@ -110,7 +110,11 @@ try {
   assert.equal(channels.status, 200);
   assert.equal(channels.body.data.total, 1);
   assert.equal(channels.body.data.items[0]?.bindingId, "field-channel");
-  assert.equal(channels.body.data.items[0]?.status, "missing");
+  assert.equal(channels.body.data.items[0]?.status, "degraded");
+  assert.equal(
+    channels.body.data.items[0]?.lastError,
+    "Den Conversation channel is not resolved",
+  );
 
   const mcp = await get("/v1/admin/diagnostics/mcp", token);
   assert.equal(mcp.status, 200);

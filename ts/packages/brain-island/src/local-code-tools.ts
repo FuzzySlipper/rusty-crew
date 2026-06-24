@@ -5,7 +5,7 @@ import type { AgentTool as PiAgentTool } from "@earendil-works/pi-agent-core";
 import type { ResourceLimits } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import { patchTool } from "./patch-tool.js";
-import type { PiAgentToolResolver } from "./tool-session-selection.js";
+import type { BrainToolResolver } from "./tool-session-selection.js";
 
 const defaultMaxReadBytes = 256 * 1024;
 const defaultMaxSearchFileBytes = 256 * 1024;
@@ -59,7 +59,7 @@ export interface LocalToolProcessResult {
   timedOut: boolean;
 }
 
-export const resolveLocalCodeTools: PiAgentToolResolver = ({ wake }) => {
+export const resolveLocalCodeTools: BrainToolResolver = ({ wake }) => {
   const context = localToolContext(wake.state.session.resourceLimits);
   return [
     readFileTool(context),

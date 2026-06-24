@@ -106,6 +106,24 @@ export interface DenSuccessorConversationChannel {
   archived_at?: string;
 }
 
+export interface DenSuccessorConversationMembership {
+  id: number;
+  channel_id: number;
+  member_type: string;
+  member_identity: string;
+  profile_identity?: string;
+  membership_status: string;
+  wake_policy: string;
+  can_send: boolean;
+  can_react: boolean;
+  can_invite: boolean;
+  membership_purpose: string;
+  settings?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  left_at?: string;
+}
+
 export interface DenSuccessorCreateChannelRequest {
   slug: string;
   display_name: string;
@@ -213,6 +231,14 @@ export interface DenSuccessorGatewayClient {
   createConversationChannel(
     input: DenSuccessorCreateChannelRequest,
   ): Promise<DenSuccessorConversationChannel>;
+  listConversationMemberships(input?: {
+    channelId?: string | number;
+    memberIdentity?: string;
+    membershipPurpose?: string;
+    projectId?: string;
+    includeLeft?: boolean;
+    limit?: number;
+  }): Promise<DenSuccessorConversationMembership[]>;
   listConversationMessages(input: {
     channelId: string | number;
     limit?: number;
@@ -400,6 +426,31 @@ export function createDenSuccessorGatewayClient(
           "conversation write",
         ),
         body: input,
+        timeoutMs,
+      });
+    },
+    listConversationMemberships(input = {}) {
+      const params = new URLSearchParams();
+      if (input.channelId !== undefined)
+        params.set("channel_id", String(input.channelId));
+      if (input.memberIdentity !== undefined)
+        params.set("member_identity", input.memberIdentity);
+      if (input.membershipPurpose !== undefined)
+        params.set("membership_purpose", input.membershipPurpose);
+      if (input.projectId !== undefined)
+        params.set("project_id", input.projectId);
+      if (input.includeLeft !== undefined)
+        params.set("include_left", String(input.includeLeft));
+      if (input.limit !== undefined) params.set("limit", String(input.limit));
+      const query = params.size > 0 ? `?${params.toString()}` : "";
+      return requestJSON<DenSuccessorConversationMembership[]>({
+        baseUrl,
+        path: `/v1/conversation/memberships${query}`,
+        method: "GET",
+        token: requireToken(
+          config.tokens.conversationRead,
+          "conversation read",
+        ),
         timeoutMs,
       });
     },

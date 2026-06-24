@@ -66,6 +66,8 @@ export interface ChannelSubscriptionInput {
 export interface ChannelBindingDiagnostics {
   bindingId: string;
   adapterId?: AdapterId;
+  conversationProjectId?: string;
+  conversationChannelId?: number;
   membershipStatus: ChannelMembershipStatus | "missing";
   presenceStatus: ChannelPresenceStatus | "missing";
   subscriptionStatus: ChannelSubscriptionStatus | "missing";
@@ -227,6 +229,11 @@ export class ChannelBindingActivityTracker {
           subscription?.adapterId ??
           presence?.adapterId ??
           membership?.adapterId,
+        conversationChannelId: numericChannelId(
+          subscription?.providerRefs.externalChannelId ??
+            presence?.providerRefs.externalChannelId ??
+            membership?.providerRefs.externalChannelId,
+        ),
         membershipStatus: membership?.status ?? "missing",
         presenceStatus: presence?.status ?? "missing",
         subscriptionStatus: subscription?.status ?? "missing",
@@ -247,6 +254,12 @@ export class ChannelBindingActivityTracker {
   subscription(bindingId: string): ChannelSubscriptionRecord | undefined {
     return this.#subscriptions.get(bindingId);
   }
+}
+
+function numericChannelId(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export function providerRefsFromBinding(

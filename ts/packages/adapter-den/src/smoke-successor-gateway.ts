@@ -152,6 +152,32 @@ const server = createServer((request, response) => {
       );
       return;
     }
+    if (
+      request.url ===
+      "/v1/conversation/memberships?channel_id=42&member_identity=field-prime&membership_purpose=ordinary&include_left=true&limit=10"
+    ) {
+      response.end(
+        JSON.stringify([
+          {
+            id: 91,
+            channel_id: 42,
+            member_type: "agent",
+            member_identity: "field-prime",
+            profile_identity: "field-prime",
+            membership_status: "active",
+            wake_policy: "subscription",
+            can_send: true,
+            can_react: true,
+            can_invite: false,
+            membership_purpose: "ordinary",
+            settings: {},
+            created_at: "2026-06-21T12:00:00Z",
+            updated_at: "2026-06-21T12:00:00Z",
+          },
+        ]),
+      );
+      return;
+    }
     if (request.url === "/v1/conversation/channels/42/messages?limit=5") {
       response.end(
         JSON.stringify([
@@ -272,6 +298,14 @@ try {
     visibility: "normal",
   });
   assert.equal(createdChannel.id, 43);
+  const memberships = await client.listConversationMemberships({
+    channelId: 42,
+    memberIdentity: "field-prime",
+    membershipPurpose: "ordinary",
+    includeLeft: true,
+    limit: 10,
+  });
+  assert.equal(memberships[0]?.membership_status, "active");
   const messages = await client.listConversationMessages({
     channelId: 42,
     limit: 5,
@@ -291,6 +325,7 @@ try {
       "POST /v1/conversation/channels/42/messages",
       "GET /v1/conversation/channels?project_id=rusty-crew&kind=agent_channel&limit=25",
       "POST /v1/conversation/channels",
+      "GET /v1/conversation/memberships?channel_id=42&member_identity=field-prime&membership_purpose=ordinary&include_left=true&limit=10",
       "GET /v1/conversation/channels/42/messages?limit=5",
     ],
   );
@@ -313,6 +348,7 @@ try {
   assert.equal(requests[8]?.auth, "Bearer conversation-read-token");
   assert.equal(requests[9]?.auth, "Bearer conversation-write-token");
   assert.equal(requests[10]?.auth, "Bearer conversation-read-token");
+  assert.equal(requests[11]?.auth, "Bearer conversation-read-token");
   assert.equal(
     requests[7]?.idempotencyKey,
     "channel_outbound:field-prime:nonce",
@@ -331,7 +367,8 @@ try {
         runtimeState: heartbeated.state,
         conversationPath: requests[7]?.path,
         channelListPath: requests[8]?.path,
-        readbackPath: requests[10]?.path,
+        membershipPath: requests[10]?.path,
+        readbackPath: requests[11]?.path,
       },
       null,
       2,

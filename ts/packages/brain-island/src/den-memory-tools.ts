@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import type { SessionState } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
-import type { PiAgentToolResolver } from "./tool-session-selection.js";
+import type { BrainToolResolver } from "./tool-session-selection.js";
 
 export type DenMemoryPolicyMode =
   | "off"
@@ -97,7 +97,7 @@ type ProposeParams = Static<typeof proposeParameters>;
 
 export function createDenMemoryToolResolver(
   context: DenMemoryToolContext,
-): PiAgentToolResolver {
+): BrainToolResolver {
   return () => resolveDenMemoryTools(context);
 }
 

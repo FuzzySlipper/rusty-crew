@@ -149,12 +149,20 @@ export {
   resolveToolSession,
 } from "./tool-session-selection.js";
 export type {
-  PiAgentToolResolver,
+  BrainToolResolver,
   ToolSessionSelection,
   ToolSessionSelectionInput,
   ToolSessionSelectionItem,
   ToolSessionSelectionStatus,
 } from "./tool-session-selection.js";
+export type {
+  BrainTool,
+  BrainToolContent,
+  BrainToolContext,
+  BrainToolExecutionMode,
+  BrainToolResult,
+  BrainToolUpdateCallback,
+} from "./brain-tool.js";
 export type { BridgeBufferClient } from "./bridge-wake.js";
 export { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 export {

@@ -11,7 +11,11 @@ import {
   resolveWebTools,
   webSearchTool,
 } from "./index.js";
-import type { BrainWakeInput, WebSearchProvider } from "./index.js";
+import type {
+  BrainWakeInput,
+  WebSearchProvider,
+  WebSearchToolDetails,
+} from "./index.js";
 
 const providerCalls: Array<{ query: string; maxResults: number }> = [];
 const fakeProvider: WebSearchProvider = {
@@ -119,8 +123,11 @@ const selectedResult = await toolSession.tools[0]?.execute("search-selected", {
   query: "selected brain",
   max_results: 1,
 });
+const selectedDetails = selectedResult?.details as
+  | WebSearchToolDetails
+  | undefined;
 assert.equal(
-  selectedResult?.details.results[0]?.url,
+  selectedDetails?.results[0]?.url,
   "https://example.com/rusty-crew",
 );
 
