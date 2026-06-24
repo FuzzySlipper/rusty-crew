@@ -20,7 +20,10 @@ Rust-derived replacement. Rusty View should not hand-copy backend shapes.
 - `GET /v1/chat/sessions/{session_id}/events`: replay historical session
   events after an optional cursor.
 - `GET /v1/chat/sessions/{session_id}/stream`: SSE stream for live and replayed
-  events. Supports `Last-Event-ID` and an explicit `cursor` query.
+  events. Supports `Last-Event-ID` and an explicit `cursor` query. During an
+  in-flight wake, assistant text deltas and tool lifecycle events are appended
+  and flushed as the service observes them; clients do not need to wait for the
+  whole wake to finish before rendering progress.
 - `POST /v1/chat/sessions/{session_id}/messages`: append a user message and
   request an agent wake.
 - `GET /v1/chat/commands`: discover slash/debug commands.
@@ -96,6 +99,9 @@ CORS posture:
   request headers.
 - SSE responses from `/v1/chat/sessions/{session_id}/stream` include the same
   chat CORS headers and keep admin/control routes outside this browser surface.
+- Default tool lifecycle payloads are browser-safe: tool name, status/error
+  state, wake id, and metadata. Raw tool arguments and results require a
+  deliberate future debug mode and are not part of the default stream contract.
 
 ## Implementation Notes
 

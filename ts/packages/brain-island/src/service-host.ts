@@ -4214,13 +4214,39 @@ async function observeWakeEvents<T>(
     sessionId,
   });
   try {
-    const accepted = await callback();
-    const events = await drainSubscriptionEventsUntilIdle(
+    const events: CoreEvent[] = [];
+    let callbackSettled = false;
+    const callbackResult = callback()
+      .then((value) => ({ ok: true as const, value }))
+      .catch((error: unknown) => ({ ok: false as const, error }))
+      .finally(() => {
+        callbackSettled = true;
+      });
+
+    while (!callbackSettled) {
+      await delay(25);
+      const chunk = await drainSubscriptionEventsUntilIdle(
+        state.bridge,
+        subscription,
+      );
+      if (chunk.length > 0) {
+        events.push(...chunk);
+        onEvents?.(chunk);
+      }
+    }
+
+    const result = await callbackResult;
+    if (!result.ok) throw result.error;
+
+    const finalEvents = await drainSubscriptionEventsUntilIdle(
       state.bridge,
       subscription,
     );
-    if (events.length > 0) onEvents?.(events);
-    return { accepted, events };
+    if (finalEvents.length > 0) {
+      events.push(...finalEvents);
+      onEvents?.(finalEvents);
+    }
+    return { accepted: result.value, events };
   } finally {
     await state.bridge.unsubscribeEvents(subscription).catch(() => undefined);
   }
@@ -4239,6 +4265,10 @@ async function drainSubscriptionEventsUntilIdle(
     if (chunk.length < chunkSize) break;
   }
   return events;
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function publishWakeToolActivity(input: {

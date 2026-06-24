@@ -138,12 +138,12 @@
         ],
         "responses": {
           "200": {
-            "description": "SSE stream of ChatEvent objects. Each SSE event uses ChatEvent.event_id as the SSE id.",
+            "description": "SSE stream of ChatEvent objects. Each SSE event uses ChatEvent.event_id as the SSE id. Assistant text deltas and tool lifecycle events are flushed during an in-flight wake as the service observes them; default tool payloads remain browser-safe and do not include raw arguments or results.",
             "content": {
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Server-sent events whose data field is a JSON ChatEvent."
+                  "description": "Server-sent events whose data field is a JSON ChatEvent. Live subscribers can render assistant_text_delta, tool_call_started, tool_call_completed, and tool_call_failed before the wake terminal event."
                 }
               }
             }

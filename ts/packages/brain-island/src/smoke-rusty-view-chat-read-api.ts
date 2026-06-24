@@ -4,7 +4,12 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentId } from "@rusty-crew/contracts";
+import type { AgentId, BrainEventEnvelope } from "@rusty-crew/contracts";
+import {
+  loadNativeBridge,
+  type BrainWakeExecutor,
+  type NativeBridgeModule,
+} from "@rusty-crew/native-bridge";
 import { startRustyCrewServiceHost } from "./service-host.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-read-api-"));
@@ -103,13 +108,17 @@ try {
   assert.ok(
     streamResponse.headers.get("content-type")?.includes("text/event-stream"),
   );
-  const streamedEventsPromise = collectSseEvents(
+  const streamedEventsPromise = collectSseEventsUntil(
     streamResponse,
-    5,
+    (events) =>
+      events.some((event) => event.kind === "assistant_text_delta") &&
+      events.some((event) => event.kind === "tool_call_started") &&
+      events.some((event) => event.kind === "tool_call_completed"),
     streamAbort,
   );
 
-  const sent = await post(
+  let postSettled = false;
+  const sentPromise = post(
     "/v1/chat/sessions/chat-session/messages",
     token,
     {
@@ -118,21 +127,29 @@ try {
       client_message_id: "client-message-1",
     },
     { "Idempotency-Key": "chat-send-1" },
+  ).finally(() => {
+    postSettled = true;
+  });
+  const streamedEvents = await streamedEventsPromise;
+  assert.equal(
+    postSettled,
+    false,
+    "stream should receive assistant/tool progress before chat POST completes",
   );
+  const sent = await sentPromise;
   assert.equal(sent.status, 202);
   assert.equal(sent.body.ok, true);
   assert.equal(sent.body.data.status, "accepted");
   assert.equal(sent.body.data.message_id, "client-message-1");
   assert.equal(typeof sent.body.data.wake_id, "string");
 
-  const streamedEvents = await streamedEventsPromise;
   assert.ok(
     streamedEvents.some((event) => event.kind === "message_created"),
     "active stream should receive the submitted message event",
   );
   assert.ok(
-    streamedEvents.some((event) => event.kind === "assistant_turn_finished"),
-    "active stream should receive assistant turn completion lifecycle",
+    streamedEvents.some((event) => event.kind === "tool_call_completed"),
+    "active stream should receive tool completion while wake is live",
   );
 
   const postTurnPage = await get("/v1/chat/sessions", token);
@@ -321,6 +338,7 @@ try {
 }
 
 async function startHost(extraEnv: Record<string, string> = {}) {
+  const bridge = withLiveWakeEventsBridge(await loadNativeBridge());
   return startRustyCrewServiceHost({
     env: {
       RUSTY_CREW_DATA_DIR: root,
@@ -332,6 +350,7 @@ async function startHost(extraEnv: Record<string, string> = {}) {
       RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "0",
       ...extraEnv,
     },
+    bridge,
   });
 }
 
@@ -407,13 +426,25 @@ async function collectSseEvents(
   count: number,
   controller: AbortController,
 ): Promise<SseEvent[]> {
+  return collectSseEventsUntil(
+    response,
+    (events) => events.length >= count,
+    controller,
+  );
+}
+
+async function collectSseEventsUntil(
+  response: Response,
+  done: (events: SseEvent[]) => boolean,
+  controller: AbortController,
+): Promise<SseEvent[]> {
   assert.ok(response.body, "SSE response should have a body");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let text = "";
   const deadline = Date.now() + 5_000;
   try {
-    while (parseSseEvents(text).length < count && Date.now() < deadline) {
+    while (!done(parseSseEvents(text)) && Date.now() < deadline) {
       const remaining = Math.max(deadline - Date.now(), 1);
       const read = await Promise.race([
         reader.read(),
@@ -433,8 +464,10 @@ async function collectSseEvents(
   }
   const events = parseSseEvents(text);
   assert.ok(
-    events.length >= count,
-    `expected at least ${count} SSE event(s), received ${events.length}`,
+    done(events),
+    `SSE stream did not reach expected condition; received ${events
+      .map((event) => event.kind)
+      .join(", ")}`,
   );
   return events;
 }
@@ -458,6 +491,66 @@ interface SseEvent {
   event_id: string;
   sequence_id: number;
   kind: string;
+}
+
+function withLiveWakeEventsBridge(
+  bridge: NativeBridgeModule,
+): NativeBridgeModule {
+  return {
+    ...bridge,
+    registerBrainRuntime: async (registration, executor) => {
+      const wrappedExecutor: BrainWakeExecutor = {
+        wake: async (request, buffers) => {
+          const liveEvents = submitLiveWakeEvents(bridge, [
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: { type: "text_delta", text: "live streaming delta" },
+            },
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: {
+                type: "tool_call_started",
+                toolName: "rusty_view_live_tool",
+              },
+            },
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: {
+                type: "tool_call_finished",
+                toolName: "rusty_view_live_tool",
+                isError: false,
+              },
+            },
+          ]);
+          const [result] = await Promise.all([
+            executor.wake(request, buffers),
+            delay(200),
+            liveEvents,
+          ]);
+          return result;
+        },
+      };
+      return bridge.registerBrainRuntime(registration, wrappedExecutor);
+    },
+  };
+}
+
+async function submitLiveWakeEvents(
+  bridge: NativeBridgeModule,
+  events: BrainEventEnvelope[],
+): Promise<void> {
+  await delay(25);
+  for (const event of events) {
+    await bridge.submitBrainEvent(event);
+    await delay(10);
+  }
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
