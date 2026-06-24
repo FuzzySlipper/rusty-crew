@@ -99,6 +99,15 @@ errors = "core_protocol::CoreError"
 summary = "Register a TS platform adapter such as Den, Telegram, MCP, TUI, or CLI."
 
 [[operation]]
+name = "validate_runtime_config_draft"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::RuntimeConfigValidationInput"
+output = "core_config::RuntimeConfigValidationResult"
+errors = "core_protocol::CoreError"
+summary = "Validate a service runtime config draft and TS-loaded profile runtime metadata without mutating files or engine state."
+
+[[operation]]
 name = "inject_external_event"
 surface = "stable"
 direction = "ts_to_rust"

@@ -32,7 +32,10 @@ impl BodyProjector {
         let session = self.sessions.get_session(session_id)?;
         let pending_messages = apply_history_window(
             self.bus.pending_messages_for_agent(&session.agent_id)?,
-            session.history_window.as_ref().and_then(|window| window.max_messages),
+            session
+                .history_window
+                .as_ref()
+                .and_then(|window| window.max_messages),
         );
         let recent_events = self
             .bus

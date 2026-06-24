@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 napi.workspace = true
 napi-derive.workspace = true
 rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
+rusty-crew-core-config = { path = "../../core/core-config" }
 rusty-crew-core-engine = { path = "../../core/core-engine" }
 rusty-crew-core-persistence = { path = "../../core/core-persistence" }
 serde_json.workspace = true

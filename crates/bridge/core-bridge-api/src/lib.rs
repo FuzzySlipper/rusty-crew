@@ -21,6 +21,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "submit_brain_event",
     "submit_brain_actions",
     "register_platform_adapter",
+    "validate_runtime_config_draft",
     "inject_external_event",
     "inject_den_data_update",
     "enqueue_body_follow_up_message",

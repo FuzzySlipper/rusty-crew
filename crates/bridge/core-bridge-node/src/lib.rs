@@ -13,6 +13,7 @@ use rusty_crew_core_bridge_api::{
     RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest,
     ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
+use rusty_crew_core_config::{validate_runtime_config_input, RuntimeConfigValidationInput};
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
     ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
@@ -56,6 +57,13 @@ impl NativeBridge {
 
     pub fn manifest_summary(&self) -> BridgeManifestSummary {
         manifest_summary()
+    }
+
+    pub fn validate_runtime_config_draft(
+        &self,
+        input: RuntimeConfigValidationInput,
+    ) -> rusty_crew_core_config::RuntimeConfigValidationResult {
+        validate_runtime_config_input(&input)
     }
 
     pub fn initialize_engine(&mut self, config: EngineConfig) -> CoreResult<EngineHandle> {
@@ -1128,6 +1136,21 @@ impl NativeBridgeBinding {
             .iter()
             .map(|name| name.to_string())
             .collect()
+    }
+
+    #[napi]
+    pub fn validate_runtime_config_draft_json(&self, input_json: String) -> napi::Result<String> {
+        let input: RuntimeConfigValidationInput =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid runtime config validation input JSON: {error}"),
+                )
+            })?;
+        let bridge = self.bridge()?;
+        let result = bridge.validate_runtime_config_draft(input);
+        serde_json::to_string(&result)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 
     #[napi]
@@ -2433,8 +2456,10 @@ fn js_session_config(
             },
             None => rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
         },
-        history_window: history_window.map(|window| rusty_crew_core_bridge_api::SessionHistoryWindow {
-            max_messages: window.max_messages,
+        history_window: history_window.map(|window| {
+            rusty_crew_core_bridge_api::SessionHistoryWindow {
+                max_messages: window.max_messages,
+            }
         }),
     })
 }

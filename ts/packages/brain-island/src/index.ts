@@ -803,6 +803,10 @@ export type {
   ProfileRuntimeConfig,
 } from "./profile-loading.js";
 export {
+  runtimeConfigValidationInput,
+  validateRuntimeConfigWithRust,
+} from "./runtime-config-validation.js";
+export {
   buildProfileRoleAssembly,
   renderDenMemoryContext,
   renderDenseProfileMemoryContext,

@@ -1791,13 +1791,13 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_persistence::{
         AgentMessageQuery, CompletionPacketQuery, CoordinationStore, QueryPage,
         QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope,
         RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
         ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
     };
+    use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
@@ -2202,12 +2202,8 @@ mod tests {
     #[test]
     fn session_history_window_bounds_wake_messages_without_resurrecting_queue_overflow() {
         let engine = test_engine();
-        let mut config = session_config(
-            "prime-session",
-            "prime",
-            "prime-profile",
-            SessionKind::Full,
-        );
+        let mut config =
+            session_config("prime-session", "prime", "prime-profile", SessionKind::Full);
         config.history_window = Some(SessionHistoryWindow {
             max_messages: Some(2),
         });
@@ -2342,12 +2338,8 @@ mod tests {
     fn session_history_window_survives_engine_restart() {
         let data_dir = unique_data_dir("history-window-restart");
         let engine = test_engine_with_data_dir(data_dir.clone());
-        let mut config = session_config(
-            "prime-session",
-            "prime",
-            "prime-profile",
-            SessionKind::Full,
-        );
+        let mut config =
+            session_config("prime-session", "prime", "prime-profile", SessionKind::Full);
         config.history_window = Some(SessionHistoryWindow {
             max_messages: Some(1),
         });

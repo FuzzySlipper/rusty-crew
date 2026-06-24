@@ -35,6 +35,13 @@ pub struct RuntimeConfigDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeConfigValidationInput {
+    pub runtime_config: RuntimeConfigDraft,
+    #[serde(default)]
+    pub profiles: Vec<ProfileRuntimeMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrainConfigDraft {
     pub implementation_id: BrainImplementationId,
     pub profile_id: ProfileId,
@@ -78,6 +85,7 @@ pub struct ScheduledJobConfigDraft {
 pub enum ExternalBindingStatusDraft {
     Active,
     Degraded,
+    Disconnected,
     Archived,
 }
 
@@ -249,6 +257,12 @@ pub fn validate_runtime_config_draft(
     RuntimeConfigValidationResult {
         diagnostics: validator.diagnostics,
     }
+}
+
+pub fn validate_runtime_config_input(
+    input: &RuntimeConfigValidationInput,
+) -> RuntimeConfigValidationResult {
+    validate_runtime_config_draft(&input.runtime_config, &input.profiles)
 }
 
 struct RuntimeConfigValidator<'a> {

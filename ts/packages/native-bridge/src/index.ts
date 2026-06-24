@@ -100,6 +100,7 @@ interface NativeBridgeBinding {
     kind: string;
     displayName: string;
   }): number;
+  validateRuntimeConfigDraftJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
     drainTimeoutMs: number,
@@ -506,6 +507,134 @@ export interface NativeRuntimeMaintenanceReport {
   optimizeRan: boolean;
 }
 
+export type NativeRuntimeConfigDiagnosticSeverity =
+  | "error"
+  | "warning"
+  | "info";
+
+export type NativeExternalBindingStatus =
+  | "active"
+  | "degraded"
+  | "disconnected"
+  | "archived";
+
+export interface NativeRuntimeConfigDiagnostic {
+  severity: NativeRuntimeConfigDiagnosticSeverity;
+  code: string;
+  path?: string;
+  message: string;
+}
+
+export interface NativeRuntimeConfigValidationResult {
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+}
+
+export interface NativeRuntimeConfigValidationInput {
+  runtimeConfig: NativeRuntimeConfigDraft;
+  profiles: NativeProfileRuntimeMetadata[];
+}
+
+export interface NativeRuntimeConfigDraft {
+  profilesDir: string;
+  skillsDir?: string;
+  brains: NativeBrainConfigDraft[];
+  sessions: NativeSessionConfigDraft[];
+  scheduledJobs: NativeScheduledJobConfigDraft[];
+  channelBindings: NativeChannelBindingConfigDraft[];
+  mcpBindings: NativeMcpBindingConfigDraft[];
+}
+
+export interface NativeBrainConfigDraft {
+  implementationId: string;
+  profileId: string;
+}
+
+export interface NativeSessionConfigDraft {
+  sessionId: string;
+  agentId: string;
+  profileId: string;
+  kind: "full" | "worker" | "delegated";
+  resourceLimits?: ResourceLimits;
+  ownerId?: string;
+  historyWindow?: SessionState["historyWindow"];
+  maxHistoryMessages?: number;
+  turnTimeoutMs?: number;
+}
+
+export interface NativeScheduledJobConfigDraft {
+  id: string;
+  schedule: string;
+  shape: "host_job" | "session_wake" | "script_only" | "data_collection";
+  jobKind?: string;
+  targetSessionId?: string;
+  script?: string;
+  deliveryChannelId?: string;
+}
+
+export interface NativeChannelBindingConfigDraft {
+  bindingId: string;
+  adapterId: string;
+  provider: string;
+  agentId: string;
+  instanceId?: string;
+  sessionId?: string;
+  profileId: string;
+  externalChannelId: string;
+  externalThreadId?: string;
+  externalUserId?: string;
+  conversationProjectId?: string;
+  conversationChannelId?: number;
+  providerSubscriptionId?: string;
+  status: NativeExternalBindingStatus;
+}
+
+export interface NativeMcpBindingConfigDraft {
+  bindingId: string;
+  adapterId: string;
+  agentId: string;
+  instanceId?: string;
+  sessionId?: string;
+  profileId: string;
+  serverNames: string[];
+  endpointRef: string;
+  transport: string;
+  toolProfileKey: string;
+  status: NativeExternalBindingStatus;
+}
+
+export interface NativeProfileRuntimeMetadata {
+  profileId: string;
+  brain?: {
+    module?: string;
+    strategy?: string;
+  };
+  runtime?: {
+    defaultResourceLimits?: ResourceLimits;
+    maxTurnDurationMs?: number;
+    maxTokensPerTurn?: number;
+  };
+  sessionDefaults?: {
+    ownerId?: string;
+    maxHistoryMessages?: number;
+    turnTimeoutMs?: number;
+  };
+  mcpConfig?: {
+    bindingId?: string;
+    endpointRef?: string;
+    serverNames: string[];
+    transport?: string;
+    toolProfile?: string;
+  };
+  backgroundReview?: {
+    enabled: boolean;
+    reviewType?: "memory" | "skills" | "combined";
+    schedule?: string;
+  };
+  channelDefaults?: {
+    wakePolicy?: "subscription" | "manual" | "disabled";
+  };
+}
+
 export interface NativeQueuedMessageRecord {
   messageId: string;
   ownerSessionId?: string;
@@ -541,6 +670,9 @@ export interface NativeBridgeModule {
   registerPlatformAdapter(
     registration: PlatformAdapterRegistration,
   ): Promise<PlatformAdapterHandle>;
+  validateRuntimeConfigDraft(
+    input: NativeRuntimeConfigValidationInput,
+  ): Promise<NativeRuntimeConfigValidationResult>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   cancelDelegatedSession(
@@ -695,6 +827,7 @@ export const nativeManifestOperationNames = [
   "submit_brain_event",
   "submit_brain_actions",
   "register_platform_adapter",
+  "validate_runtime_config_draft",
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
@@ -740,6 +873,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     submitBrainEvent: unavailable("submit_brain_event"),
     submitBrainActions: unavailable("submit_brain_actions"),
     registerPlatformAdapter: unavailable("register_platform_adapter"),
+    validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
@@ -919,6 +1053,12 @@ function createNativeBridgeModule(
         kind: registration.kind,
         displayName: registration.displayName,
       }) as PlatformAdapterHandle,
+    validateRuntimeConfigDraft: async (input) =>
+      JSON.parse(
+        binding.validateRuntimeConfigDraftJson(
+          JSON.stringify(toNativeRuntimeConfigValidationInput(input)),
+        ),
+      ) as NativeRuntimeConfigValidationResult,
     injectExternalEvent: async (event) =>
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
     injectDenDataUpdate: async (update) =>
@@ -1287,6 +1427,131 @@ function toExternalEventPayload(payload: unknown): ExternalEvent["payload"] {
 
 function encodeJson(value: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(value));
+}
+
+function toNativeRuntimeConfigValidationInput(
+  input: NativeRuntimeConfigValidationInput,
+): unknown {
+  return {
+    runtime_config: {
+      profiles_dir: input.runtimeConfig.profilesDir,
+      skills_dir: input.runtimeConfig.skillsDir,
+      brains: input.runtimeConfig.brains.map((brain) => ({
+        implementation_id: brain.implementationId,
+        profile_id: brain.profileId,
+      })),
+      sessions: input.runtimeConfig.sessions.map((session) => ({
+        session_id: session.sessionId,
+        agent_id: session.agentId,
+        profile_id: session.profileId,
+        kind: session.kind,
+        resource_limits: toNativeResourceLimits(session.resourceLimits),
+        owner_id: session.ownerId,
+        history_window: session.historyWindow
+          ? {
+              max_messages: session.historyWindow.maxMessages,
+            }
+          : undefined,
+        max_history_messages: session.maxHistoryMessages,
+        turn_timeout_ms: session.turnTimeoutMs,
+      })),
+      scheduled_jobs: input.runtimeConfig.scheduledJobs.map((job) => ({
+        id: job.id,
+        schedule: job.schedule,
+        shape: job.shape,
+        job_kind: job.jobKind,
+        target_session_id: job.targetSessionId,
+        script: job.script,
+        delivery_channel_id: job.deliveryChannelId,
+      })),
+      channel_bindings: input.runtimeConfig.channelBindings.map((binding) => ({
+        binding_id: binding.bindingId,
+        adapter_id: binding.adapterId,
+        provider: binding.provider,
+        agent_id: binding.agentId,
+        instance_id: binding.instanceId,
+        session_id: binding.sessionId,
+        profile_id: binding.profileId,
+        external_channel_id: binding.externalChannelId,
+        external_thread_id: binding.externalThreadId,
+        external_user_id: binding.externalUserId,
+        conversation_project_id: binding.conversationProjectId,
+        conversation_channel_id: binding.conversationChannelId,
+        provider_subscription_id: binding.providerSubscriptionId,
+        status: binding.status,
+      })),
+      mcp_bindings: input.runtimeConfig.mcpBindings.map((binding) => ({
+        binding_id: binding.bindingId,
+        adapter_id: binding.adapterId,
+        agent_id: binding.agentId,
+        instance_id: binding.instanceId,
+        session_id: binding.sessionId,
+        profile_id: binding.profileId,
+        server_names: binding.serverNames,
+        endpoint_ref: binding.endpointRef,
+        transport: binding.transport,
+        tool_profile_key: binding.toolProfileKey,
+        status: binding.status,
+      })),
+    },
+    profiles: input.profiles.map((profile) => ({
+      profile_id: profile.profileId,
+      brain: profile.brain
+        ? {
+            module: profile.brain.module,
+            strategy: profile.brain.strategy,
+          }
+        : undefined,
+      runtime: profile.runtime
+        ? {
+            default_resource_limits: toNativeResourceLimits(
+              profile.runtime.defaultResourceLimits,
+            ),
+            max_turn_duration_ms: profile.runtime.maxTurnDurationMs,
+            max_tokens_per_turn: profile.runtime.maxTokensPerTurn,
+          }
+        : undefined,
+      session_defaults: profile.sessionDefaults
+        ? {
+            owner_id: profile.sessionDefaults.ownerId,
+            max_history_messages: profile.sessionDefaults.maxHistoryMessages,
+            turn_timeout_ms: profile.sessionDefaults.turnTimeoutMs,
+          }
+        : undefined,
+      mcp_config: profile.mcpConfig
+        ? {
+            binding_id: profile.mcpConfig.bindingId,
+            endpoint_ref: profile.mcpConfig.endpointRef,
+            server_names: profile.mcpConfig.serverNames,
+            transport: profile.mcpConfig.transport,
+            tool_profile: profile.mcpConfig.toolProfile,
+          }
+        : undefined,
+      background_review: profile.backgroundReview
+        ? {
+            enabled: profile.backgroundReview.enabled,
+            review_type: profile.backgroundReview.reviewType,
+            schedule: profile.backgroundReview.schedule,
+          }
+        : undefined,
+      channel_defaults: profile.channelDefaults
+        ? {
+            wake_policy: profile.channelDefaults.wakePolicy,
+          }
+        : undefined,
+    })),
+  };
+}
+
+function toNativeResourceLimits(limits: ResourceLimits | undefined): unknown {
+  if (!limits) {
+    return undefined;
+  }
+  return {
+    workdir: limits.workdir,
+    max_duration_ms: limits.maxDurationMs,
+    max_delegation_depth: limits.maxDelegationDepth,
+  };
 }
 
 function toCoreEvent(event: RawCoreEvent): CoreEvent {

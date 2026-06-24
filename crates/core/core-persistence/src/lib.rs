@@ -5187,7 +5187,11 @@ fn save_session_state_in_tx(
     let status_json = to_json_text(&state.status)?;
     let resource_limits_json = to_json_text(&state.resource_limits)?;
     let tool_profile_json = to_json_text(&state.tool_profile)?;
-    let history_window_json = state.history_window.as_ref().map(to_json_text).transpose()?;
+    let history_window_json = state
+        .history_window
+        .as_ref()
+        .map(to_json_text)
+        .transpose()?;
     let delegation_json = state.delegation.as_ref().map(to_json_text).transpose()?;
     tx.execute(
         "INSERT INTO sessions (

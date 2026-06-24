@@ -49,6 +49,7 @@
     "smoke:curator-execute-tool": "tsx src/smoke-curator-execute-tool.ts",
     "smoke:skills-tools": "tsx src/smoke-skills-tools.ts",
     "smoke:runtime-diagnostics": "tsx src/smoke-runtime-diagnostics.ts",
+    "smoke:runtime-config-validation": "tsx src/smoke-runtime-config-validation.ts",
     "smoke:runtime-health": "tsx src/smoke-runtime-health.ts",
     "smoke:background-memory-skill-review": "tsx src/smoke-background-memory-skill-review.ts",
     "smoke:curator-candidates": "tsx src/smoke-curator-candidates.ts",
