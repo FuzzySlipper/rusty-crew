@@ -173,6 +173,10 @@ function createStubPiAgent(): PiAgentLike {
       listener?.(
         {
           type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: `stub pi-agent saw ${messages.length} message(s)`,
+          },
           message: {
             role: "assistant",
             content: [

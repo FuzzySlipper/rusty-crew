@@ -1968,11 +1968,6 @@ impl NativeBridgeBinding {
         metadata_json: Option<String>,
     ) -> napi::Result<JsEventReceipt> {
         let bridge = self.bridge()?;
-        let metadata = metadata_json
-            .as_deref()
-            .map(serde_json::from_str::<rusty_crew_core_bridge_api::ToolCallMetadata>)
-            .transpose()
-            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
         let event = match event_type.as_str() {
             "started" => rusty_crew_core_bridge_api::BrainEvent::Started,
             "text_delta" => rusty_crew_core_bridge_api::BrainEvent::TextDelta {
@@ -1985,7 +1980,7 @@ impl NativeBridgeBinding {
                         "tool_call_started requires toolName".to_string(),
                     )
                 })?,
-                metadata: metadata.clone(),
+                metadata: parse_tool_call_metadata(metadata_json.as_deref())?,
             },
             "tool_call_finished" => rusty_crew_core_bridge_api::BrainEvent::ToolCallFinished {
                 tool_name: tool_name.ok_or_else(|| {
@@ -1995,7 +1990,22 @@ impl NativeBridgeBinding {
                     )
                 })?,
                 is_error: is_error.unwrap_or(false),
-                metadata,
+                metadata: parse_tool_call_metadata(metadata_json.as_deref())?,
+            },
+            "provider_status" => rusty_crew_core_bridge_api::BrainEvent::ProviderStatus {
+                level: match tool_name.as_deref().unwrap_or("info") {
+                    "info" => rusty_crew_core_bridge_api::BrainProviderStatusLevel::Info,
+                    "degraded" => rusty_crew_core_bridge_api::BrainProviderStatusLevel::Degraded,
+                    "error" => rusty_crew_core_bridge_api::BrainProviderStatusLevel::Error,
+                    other => {
+                        return Err(napi::Error::new(
+                            napi::Status::InvalidArg,
+                            format!("unsupported provider status level {other}"),
+                        ))
+                    }
+                },
+                message: text.unwrap_or_default(),
+                metadata_json,
             },
             "finished" => rusty_crew_core_bridge_api::BrainEvent::Finished,
             other => {
@@ -2030,6 +2040,15 @@ fn to_js_event_receipt(receipt: EventReceipt) -> JsEventReceipt {
         accepted: receipt.accepted,
         sequence: receipt.sequence as f64,
     }
+}
+
+fn parse_tool_call_metadata(
+    metadata_json: Option<&str>,
+) -> napi::Result<Option<rusty_crew_core_bridge_api::ToolCallMetadata>> {
+    metadata_json
+        .map(serde_json::from_str::<rusty_crew_core_bridge_api::ToolCallMetadata>)
+        .transpose()
+        .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))
 }
 
 fn to_js_session_state(state: rusty_crew_core_bridge_api::SessionState) -> JsSessionState {

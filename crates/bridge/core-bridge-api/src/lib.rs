@@ -3,8 +3,12 @@
 //! This crate intentionally has no native transport dependency. napi-rs, CLI,
 //! and test transports live in sibling crates.
 
+mod brain_stream;
 mod buffers;
 
+pub use brain_stream::{
+    brain_wake_stream_channel, BrainWakeStream, BrainWakeStreamProducer, BrainWakeStreamSender,
+};
 pub use buffers::{
     BrainWakeBufferInput, BufferedBrainWakeRequest, RuntimeBufferLease, RuntimeBufferStore,
     APPLICATION_JSON, TEXT_PLAIN,

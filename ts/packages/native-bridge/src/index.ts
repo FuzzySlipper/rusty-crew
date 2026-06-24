@@ -13,7 +13,9 @@ import type {
   BrainImplementationHandle,
   BrainImplementationRegistration,
   BrainWakeAccepted,
+  BrainWakeFailure,
   BrainWakeRequest,
+  BrainWakeStreamItem,
   CoreEvent,
   DelegatedResourceCleanupReport,
   DelegatedSessionRuntimeStatus,
@@ -334,6 +336,7 @@ export interface BridgeBufferClient {
 export interface BrainWakeExecutionResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
+  stream?: BrainWakeStreamItem[];
 }
 
 export interface BrainWakeExecutor {
@@ -341,6 +344,42 @@ export interface BrainWakeExecutor {
     request: BrainWakeRequest,
     buffers: BridgeBufferClient,
   ): Promise<BrainWakeExecutionResult> | BrainWakeExecutionResult;
+}
+
+export function brainWakeStreamItemsFromExecutionResult(
+  request: BrainWakeRequest,
+  result: BrainWakeExecutionResult,
+): BrainWakeStreamItem[] {
+  if (result.stream !== undefined) {
+    assertTerminalBrainWakeStream(request, result.stream);
+    return result.stream;
+  }
+
+  return [
+    ...result.events.map(
+      (event): BrainWakeStreamItem => ({ type: "event", event }),
+    ),
+    {
+      type: "actions",
+      batch: {
+        wakeId: request.wakeId,
+        sessionId: request.sessionId,
+        actions: result.actions,
+      },
+    },
+  ];
+}
+
+function assertTerminalBrainWakeStream(
+  request: BrainWakeRequest,
+  stream: readonly BrainWakeStreamItem[],
+): void {
+  const terminal = stream.at(-1);
+  if (terminal?.type !== "actions" && terminal?.type !== "wake_failed") {
+    throw new Error(
+      `brain wake ${request.wakeId} stream must end with actions or wake_failed`,
+    );
+  }
 }
 
 export interface BrainWakeBufferInput {
@@ -1079,14 +1118,23 @@ function createNativeBridgeModule(
       }
 
       const result = await executor.wake(request, module);
-      for (const event of result.events) {
-        await module.submitBrainEvent(event);
+      for (const item of brainWakeStreamItemsFromExecutionResult(
+        request,
+        result,
+      )) {
+        switch (item.type) {
+          case "event":
+            await module.submitBrainEvent(item.event);
+            break;
+          case "actions":
+            await module.submitBrainActions(item.batch);
+            break;
+          case "wake_failed":
+            throw new Error(
+              `brain wake ${item.failure.wakeId} failed: ${item.failure.message}`,
+            );
+        }
       }
-      await module.submitBrainActions({
-        wakeId: request.wakeId,
-        sessionId: request.sessionId,
-        actions: result.actions,
-      });
       return { wakeId: request.wakeId, accepted: true };
     },
     submitBrainEvent: async (event) => {
@@ -2066,6 +2114,13 @@ function toBrainEvent(event: RawBrainEvent): BrainEvent {
           ? toToolCallMetadata(event.metadata)
           : undefined,
       };
+    case "provider_status":
+      return {
+        type: event.type,
+        level: event.level,
+        message: event.message,
+        metadataJson: event.metadata_json,
+      };
   }
 }
 
@@ -2097,6 +2152,13 @@ function toNativeBrainEvent(event: BrainEvent): {
         metadataJson: event.metadata
           ? JSON.stringify(toRawToolCallMetadata(event.metadata))
           : undefined,
+      };
+    case "provider_status":
+      return {
+        eventType: event.type,
+        text: event.message,
+        toolName: event.level,
+        metadataJson: event.metadataJson,
       };
     case "finished":
       return { eventType: event.type };
@@ -2441,6 +2503,12 @@ type RawBrainEvent =
       tool_name: string;
       is_error: boolean;
       metadata?: RawToolCallMetadata;
+    }
+  | {
+      type: "provider_status";
+      level: "info" | "degraded" | "error";
+      message: string;
+      metadata_json?: string;
     }
   | { type: "finished" };
 

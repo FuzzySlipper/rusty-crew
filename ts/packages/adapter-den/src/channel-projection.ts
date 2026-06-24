@@ -251,7 +251,13 @@ function activitySummary(event: CoreEvent): {
         severity:
           event.event.type === "tool_call_finished" && event.event.isError
             ? "error"
-            : "info",
+            : event.event.type === "provider_status" &&
+                event.event.level === "error"
+              ? "error"
+              : event.event.type === "provider_status" &&
+                  event.event.level === "degraded"
+                ? "warning"
+                : "info",
       };
     case "brain_actions_accepted":
       return {
@@ -283,6 +289,8 @@ function brainEventSummary(
       return `Tool started: ${event.event.toolName}`;
     case "tool_call_finished":
       return `Tool finished: ${event.event.toolName}`;
+    case "provider_status":
+      return `Provider ${event.event.level}: ${event.event.message}`;
     case "finished":
       return `Brain finished for ${event.sessionId}`;
   }

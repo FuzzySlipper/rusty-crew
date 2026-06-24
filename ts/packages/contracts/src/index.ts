@@ -628,7 +628,15 @@ export type BrainEvent =
       isError: boolean;
       metadata?: ToolCallMetadata;
     }
+  | {
+      type: "provider_status";
+      level: BrainProviderStatusLevel;
+      message: string;
+      metadataJson?: string;
+    }
   | { type: "finished" };
+
+export type BrainProviderStatusLevel = "info" | "degraded" | "error";
 
 export type BrainAction =
   | { type: "send_message"; message: AgentMessage }
@@ -674,6 +682,18 @@ export interface BrainActionBatch {
   sessionId: SessionId;
   actions: BrainAction[];
 }
+
+export interface BrainWakeFailure {
+  wakeId: string;
+  sessionId: SessionId;
+  kind: CoreErrorKind;
+  message: string;
+}
+
+export type BrainWakeStreamItem =
+  | { type: "event"; event: BrainEventEnvelope }
+  | { type: "actions"; batch: BrainActionBatch }
+  | { type: "wake_failed"; failure: BrainWakeFailure };
 
 export interface ActionRejection {
   index: number;

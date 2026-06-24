@@ -13,6 +13,7 @@
     "smoke:wake": "tsx src/smoke-wake.ts",
     "smoke:bridge-wake": "tsx src/smoke-bridge-wake.ts",
     "smoke:registered-bridge-wake": "tsx src/smoke-registered-bridge-wake.ts",
+    "smoke:brain-wake-stream-protocol": "tsx src/smoke-brain-wake-stream-protocol.ts",
     "smoke:production-delegation-wake": "tsx src/smoke-production-delegation-wake.ts",
     "smoke:production-local-tools-wake": "tsx src/smoke-production-local-tools-wake.ts",
     "smoke:production-web-tools-wake": "tsx src/smoke-production-web-tools-wake.ts",

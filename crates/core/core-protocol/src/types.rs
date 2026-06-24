@@ -636,7 +636,21 @@ pub enum BrainEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<ToolCallMetadata>,
     },
+    ProviderStatus {
+        level: BrainProviderStatusLevel,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata_json: Option<String>,
+    },
     Finished,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainProviderStatusLevel {
+    Info,
+    Degraded,
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -686,6 +700,40 @@ pub struct BrainActionBatch {
     pub wake_id: String,
     pub session_id: SessionId,
     pub actions: Vec<BrainAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainWakeFailure {
+    pub wake_id: String,
+    pub session_id: SessionId,
+    pub kind: CoreErrorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BrainWakeStreamItem {
+    Event { event: BrainEventEnvelope },
+    Actions { batch: BrainActionBatch },
+    WakeFailed { failure: BrainWakeFailure },
+}
+
+impl BrainWakeStreamItem {
+    pub fn event(event: BrainEventEnvelope) -> Self {
+        Self::Event { event }
+    }
+
+    pub fn actions(batch: BrainActionBatch) -> Self {
+        Self::Actions { batch }
+    }
+
+    pub fn wake_failed(failure: BrainWakeFailure) -> Self {
+        Self::WakeFailed { failure }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Actions { .. } | Self::WakeFailed { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -778,5 +826,35 @@ mod tests {
         let round_trip: ExternalEventPayload =
             serde_json::from_value(json).expect("deserialize payload");
         assert_eq!(round_trip, payload);
+    }
+
+    #[test]
+    fn brain_wake_stream_items_keep_flat_tagged_json_shape() {
+        let item = BrainWakeStreamItem::event(BrainEventEnvelope {
+            wake_id: "wake-1".to_string(),
+            session_id: SessionId::new("session-1"),
+            event: BrainEvent::ProviderStatus {
+                level: BrainProviderStatusLevel::Degraded,
+                message: "provider retrying".to_string(),
+                metadata_json: Some("{\"attempt\":1}".to_string()),
+            },
+        });
+
+        let json = serde_json::to_value(&item).expect("serialize stream item");
+        assert_eq!(json["type"], "event");
+        assert_eq!(json["event"]["event"]["type"], "provider_status");
+        assert_eq!(json["event"]["event"]["level"], "degraded");
+        assert!(!item.is_terminal());
+
+        let round_trip: BrainWakeStreamItem =
+            serde_json::from_value(json).expect("deserialize stream item");
+        assert_eq!(round_trip, item);
+
+        let terminal = BrainWakeStreamItem::actions(BrainActionBatch {
+            wake_id: "wake-1".to_string(),
+            session_id: SessionId::new("session-1"),
+            actions: Vec::new(),
+        });
+        assert!(terminal.is_terminal());
     }
 }

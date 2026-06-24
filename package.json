@@ -13,6 +13,7 @@
     "smoke:brain": "npm run smoke:wake -w @rusty-crew/brain-island",
     "smoke:bridge-wake": "npm run smoke:bridge-wake -w @rusty-crew/brain-island",
     "smoke:registered-bridge-wake": "npm run smoke:registered-bridge-wake -w @rusty-crew/brain-island",
+    "smoke:brain-wake-stream-protocol": "npm run smoke:brain-wake-stream-protocol -w @rusty-crew/brain-island",
     "smoke:agent-activity-observation": "npm run smoke:agent-activity-observation -w @rusty-crew/brain-island",
     "smoke:production-delegation-wake": "npm run smoke:production-delegation-wake -w @rusty-crew/brain-island",
     "smoke:production-local-tools-wake": "npm run smoke:production-local-tools-wake -w @rusty-crew/brain-island",
