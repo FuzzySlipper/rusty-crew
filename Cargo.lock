@@ -453,6 +453,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusty-crew-core-tool-registry"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
