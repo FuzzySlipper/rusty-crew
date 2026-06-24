@@ -27,6 +27,7 @@
     "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts",
     "smoke:delegated-slice": "tsx src/smoke-delegated-slice.ts",
     "smoke:tool-registry": "tsx src/smoke-tool-registry.ts",
+    "smoke:tool-registry-parity": "tsx src/smoke-tool-registry-parity.ts",
     "smoke:tool-registry-diagnostics": "tsx src/smoke-tool-registry-diagnostics.ts",
     "smoke:web-search-tool": "tsx src/smoke-web-search-tool.ts",
     "smoke:web-extract-tool": "tsx src/smoke-web-extract-tool.ts",
@@ -98,7 +99,8 @@
     "smoke:pi-agent-brain-events": "tsx src/smoke-pi-agent-brain-events.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
     "cron": "tsx src/cron-cli.ts",
-    "service:start": "tsx src/service-host.ts"
+    "service:start": "tsx src/service-host.ts",
+    "generate:tool-registry-artifact": "tsx src/generate-tool-registry-artifact.ts"
   },
   "piPackageSource": {
     "repository": "https://github.com/earendil-works/pi",

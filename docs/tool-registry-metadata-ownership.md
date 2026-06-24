@@ -114,6 +114,17 @@ canonical rules.
 After that, the source of truth can move to a manifest or Rust-owned schema
 without changing executable tool wiring.
 
+Current guardrail artifact:
+
+- fixture:
+  `fixtures/tool-registry/default-tool-registry-metadata.json`;
+- regenerate after registry metadata changes:
+  `npm run generate:tool-registry-artifact`;
+- check TS metadata/binding/descriptor parity:
+  `npm run smoke:tool-registry-parity`;
+- check Rust canonical validator parity:
+  `cargo test -p rusty-crew-core-tool-registry`.
+
 ## Invariants Until Migration
 
 While TypeScript remains the practical source of truth, it must continue to
@@ -145,4 +156,3 @@ The implementation should be split into scoped tasks:
 4. Update diagnostics/admin APIs to expose public metadata without executor
    pointers.
 5. Add parity guardrails so Rust, TS, and generated artifacts cannot drift.
-

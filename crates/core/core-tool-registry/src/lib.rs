@@ -438,6 +438,30 @@ fn valid_tool_name(value: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ToolRegistryMetadataArtifact {
+        schema_version: u32,
+        catalog_id: String,
+        tools: Vec<ToolMetadata>,
+    }
+
+    #[test]
+    fn validates_shared_default_tool_registry_artifact() {
+        let artifact: ToolRegistryMetadataArtifact = serde_json::from_str(include_str!(
+            "../../../../fixtures/tool-registry/default-tool-registry-metadata.json"
+        ))
+        .expect("shared tool registry metadata artifact should deserialize");
+
+        assert_eq!(artifact.schema_version, 1);
+        assert_eq!(artifact.catalog_id, "default-local-tools");
+        assert_eq!(artifact.tools.len(), 37);
+
+        let result = validate_tool_metadata_list(&artifact.tools);
+
+        assert!(result.ok(), "{:?}", result.diagnostics);
+    }
+
     #[test]
     fn validates_portable_metadata_without_executor_binding() {
         let result = validate_tool_metadata_list(&[

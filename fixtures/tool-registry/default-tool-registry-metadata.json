@@ -1,0 +1,376 @@
+{
+  "schemaVersion": 1,
+  "catalogId": "default-local-tools",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read a UTF-8 text file from the session workdir.",
+      "category": "local",
+      "toolsets": ["local_code_read", "review_readonly"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "local.file_text.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "write_file",
+      "description": "Write a bounded UTF-8 text file inside the session workdir.",
+      "category": "local",
+      "toolsets": ["local_code_write"],
+      "surfaces": ["brain"],
+      "safety": ["writes_files"],
+      "output_shape": "local.file_write_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "search_files",
+      "description": "Search files beneath the session workdir and return path matches.",
+      "category": "local",
+      "toolsets": ["local_code_read", "review_readonly"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "local.file_search_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "terminal",
+      "description": "Run a bounded shell command in the session workdir.",
+      "category": "local",
+      "toolsets": ["local_code_write"],
+      "surfaces": ["brain"],
+      "safety": ["executes_process", "writes_files"],
+      "output_shape": "local.terminal_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "git_status",
+      "description": "Return concise git working tree status for the session workdir.",
+      "category": "git",
+      "toolsets": ["local_code_read", "review_readonly"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "git.status_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "git_diff",
+      "description": "Return a git diff from the session workdir.",
+      "category": "git",
+      "toolsets": ["local_code_read", "review_readonly"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "git.diff_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "patch",
+      "description": "Apply a bounded multi-file patch and report a unified diff.",
+      "category": "patch",
+      "toolsets": ["local_code_write"],
+      "surfaces": ["brain"],
+      "safety": ["writes_files"],
+      "output_shape": "patch.apply_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "spawn_subagent",
+      "description": "Queue one Rust-owned delegated subagent request through the brain action contract.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "delegation.spawn_subagent_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "fan_out_subagents",
+      "description": "Queue a bounded Rust-owned fan-out group of delegated subagent requests.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "delegation.fan_out_request_actions.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "scout_codebase",
+      "description": "Delegate a read-only codebase scouting task and request concise evidence back.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "delegation.scout_codebase_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "summarize_files",
+      "description": "Delegate read-only file summarization for bounded context gathering.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "delegation.summarize_files_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "find_relevant_paths",
+      "description": "Delegate read-only codebase search for paths relevant to a task or question.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "delegation.find_relevant_paths_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "web_search",
+      "description": "Search the public web through the configured provider and return bounded results.",
+      "category": "web",
+      "toolsets": ["web_research"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "network_access"],
+      "output_shape": "web.search_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "web_extract",
+      "description": "Fetch and extract bounded text from a public HTTP(S) URL with SSRF guardrails.",
+      "category": "web",
+      "toolsets": ["web_research"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "network_access"],
+      "output_shape": "web.extract_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_navigate",
+      "description": "Navigate the session-scoped browser to an allowed public HTTP(S) page.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["network_access"],
+      "output_shape": "browser.navigation_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_snapshot",
+      "description": "Return a bounded accessibility snapshot for the session-scoped browser page.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "browser.snapshot_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_click",
+      "description": "Click a ref from the current session-scoped browser snapshot.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["external_write"],
+      "output_shape": "browser.click_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_type",
+      "description": "Type bounded text into a ref from the current session-scoped browser snapshot.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["external_write"],
+      "output_shape": "browser.type_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_scroll",
+      "description": "Scroll the current session-scoped browser page or a snapshot ref.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "browser.scroll_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_back",
+      "description": "Navigate back within the current session-scoped browser history.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "browser.back_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_press",
+      "description": "Send a bounded keyboard press to the current session-scoped browser page.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["external_write"],
+      "output_shape": "browser.press_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_console",
+      "description": "Read the bounded console log ring for the current session-scoped browser page.",
+      "category": "browser",
+      "toolsets": ["browser"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "browser.console_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "browser_vision",
+      "description": "Capture a screenshot artifact reference for the current session-scoped browser page.",
+      "category": "browser",
+      "toolsets": ["browser_vision"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "browser.vision_capture_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "den_memory_recall",
+      "description": "Recall relevant Den-owned memory summaries for the current profile or work context.",
+      "category": "memory",
+      "toolsets": ["memory_den_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "network_access"],
+      "output_shape": "den.memory_recall_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "den_memory_read",
+      "description": "Read a specific Den-owned memory entry by stable reference.",
+      "category": "memory",
+      "toolsets": ["memory_den_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "network_access"],
+      "output_shape": "den.memory_read_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "den_memory_search",
+      "description": "Search Den-owned memories through the configured Den Memories service.",
+      "category": "memory",
+      "toolsets": ["memory_den_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "network_access"],
+      "output_shape": "den.memory_search_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "den_memory_store",
+      "description": "Store a new Den-owned memory through the configured Den Memories service.",
+      "category": "memory",
+      "toolsets": ["memory_den_write"],
+      "surfaces": ["brain"],
+      "safety": ["network_access", "external_write"],
+      "output_shape": "den.memory_store_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "den_memory_propose",
+      "description": "Propose a Den-owned memory change for later review or acceptance.",
+      "category": "memory",
+      "toolsets": ["memory_den_write"],
+      "surfaces": ["brain"],
+      "safety": ["network_access", "external_write"],
+      "output_shape": "den.memory_propose_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "dense_profile_memory",
+      "description": "Read or update Rusty Crew dense profile memory through runtime-owned APIs.",
+      "category": "memory",
+      "toolsets": ["memory_profile"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "runtime.dense_profile_memory_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "skills_list",
+      "description": "List configured skills visible to the current profile.",
+      "category": "skills",
+      "toolsets": ["skills_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "skills.list_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "skill_view",
+      "description": "View one configured skill by slug without exposing unrelated files.",
+      "category": "skills",
+      "toolsets": ["skills_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "skills.view_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "skill_manage",
+      "description": "Create, patch, replace, or retire configured skills with governance safeguards.",
+      "category": "skills",
+      "toolsets": ["skills_manage"],
+      "surfaces": ["brain"],
+      "safety": ["writes_files", "coordination_action"],
+      "output_shape": "skills.manage_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "todo",
+      "description": "Read or update bounded session-local planning todos without changing Den tasks.",
+      "category": "planning",
+      "toolsets": ["planning_session"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "planning.todo_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "session_search",
+      "description": "Search Rusty Crew runtime history through typed search APIs.",
+      "category": "planning",
+      "toolsets": ["planning_session", "runtime_search"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "runtime.session_search_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "channel_readback",
+      "description": "Inspect bounded channel context for the current runtime binding without replaying messages.",
+      "category": "planning",
+      "toolsets": ["channels"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "channel.readback_response.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "counter_reset",
+      "description": "Reset or rebuild derived runtime counters without deleting runtime facts.",
+      "category": "planning",
+      "toolsets": ["planning_privileged", "runtime_counters"],
+      "surfaces": ["brain", "admin"],
+      "safety": ["coordination_action"],
+      "output_shape": "runtime.counter_reset_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "curator_execute",
+      "description": "Request a narrow audited curator/governance action through control APIs.",
+      "category": "planning",
+      "toolsets": ["planning_privileged", "curator_governance"],
+      "surfaces": ["brain", "admin"],
+      "safety": ["coordination_action", "external_write"],
+      "output_shape": "governance.curator_execute_result.v1",
+      "version": "0.1.0"
+    }
+  ]
+}

@@ -115,6 +115,7 @@ Common focused checks:
 
 ```sh
 npm run smoke:tool-registry
+npm run smoke:tool-registry-parity
 npm run smoke:tool-profile-selection
 npm run smoke:tool-session-selection
 npm run smoke:local-code-tools

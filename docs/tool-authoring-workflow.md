@@ -57,10 +57,15 @@ ToolProfile selection, and session filtering path.
 6. Add a focused smoke proving the tool can be selected and invoked.
 7. Add or extend a production wake proof if the tool changes bridge behavior,
    resource enforcement, or durable telemetry.
-8. Run:
+8. Regenerate the shared portable metadata artifact when registry metadata
+   changes:
+   - `npm run generate:tool-registry-artifact`
+9. Run:
    - `npm run format`
    - `npm run typecheck`
+   - `npm run smoke:tool-registry-parity`
    - relevant `npm run smoke:*`
+   - `cargo test -p rusty-crew-core-tool-registry`
    - `cargo clippy --all-targets --all-features -- -D warnings` when Rust
      contracts, bridge shapes, persistence, or telemetry changed.
 
@@ -133,6 +138,7 @@ production bridge proof.
 Existing proof scripts:
 
 - `npm run smoke:tool-registry`
+- `npm run smoke:tool-registry-parity`
 - `npm run smoke:tool-registry-diagnostics`
 - `npm run smoke:tool-profile-selection`
 - `npm run smoke:tool-session-selection`
