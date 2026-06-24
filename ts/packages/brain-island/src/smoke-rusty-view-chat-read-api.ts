@@ -135,6 +135,42 @@ try {
     "active stream should receive assistant turn completion lifecycle",
   );
 
+  const postTurnPage = await get("/v1/chat/sessions", token);
+  assert.equal(postTurnPage.status, 200);
+  const postTurnSession = postTurnPage.body.data.items.find(
+    (item: { session_id: string }) => item.session_id === "chat-session",
+  );
+  assert.ok(postTurnSession, "chat-session should be listed after chat turn");
+  assert.notEqual(
+    postTurnSession.latest_cursor,
+    "chat-session:0",
+    "session latest_cursor should advance with chat events",
+  );
+  assert.ok(
+    postTurnSession.message_count >= 2,
+    "session message_count should include user and assistant chat messages",
+  );
+
+  const postTurnOpen = await get("/v1/chat/sessions/chat-session", token);
+  assert.equal(postTurnOpen.status, 200);
+  assert.equal(
+    postTurnOpen.body.data.session.latest_cursor,
+    postTurnSession.latest_cursor,
+  );
+  assert.ok(postTurnOpen.body.data.session.message_count >= 2);
+
+  const afterLatest = await getSseOnce(
+    `/v1/chat/sessions/chat-session/stream?once=true&cursor=${encodeURIComponent(
+      postTurnSession.latest_cursor,
+    )}`,
+    token,
+  );
+  assert.equal(
+    afterLatest.length,
+    0,
+    "stream replay from latest_cursor should not replay historical turn events",
+  );
+
   const eventsAfterSnapshot = await get(
     `/v1/chat/sessions/chat-session/events?cursor=${encodeURIComponent(
       "chat-session:0",

@@ -3314,6 +3314,58 @@ function appendBrainEventToChatLog(
   }
 }
 
+function ensureChatWakeTerminalEvents(
+  state: ServiceState,
+  session: SessionState,
+  wakeId: string,
+  events: readonly CoreEvent[],
+  fallback: { summary?: string },
+): void {
+  const wakeEvents = events.filter(
+    (event) =>
+      (event.type === "brain_event_observed" &&
+        event.sessionId === session.sessionId &&
+        (event.wakeId === undefined || event.wakeId === wakeId)) ||
+      (event.type === "completion_packet_delivered" &&
+        event.packet.sessionId === session.sessionId),
+  );
+  const hasAssistantTurn = wakeEvents.some(
+    (event) =>
+      event.type === "brain_event_observed" &&
+      (event.event.type === "started" ||
+        event.event.type === "text_delta" ||
+        event.event.type === "tool_call_started" ||
+        event.event.type === "tool_call_finished"),
+  );
+  if (!hasAssistantTurn) return;
+
+  const hasCompletion = wakeEvents.some(
+    (event) => event.type === "completion_packet_delivered",
+  );
+  const hasFinished = wakeEvents.some(
+    (event) =>
+      event.type === "brain_event_observed" && event.event.type === "finished",
+  );
+
+  if (!hasCompletion && fallback.summary?.trim()) {
+    appendChatEvent(state, session.sessionId, {
+      kind: "assistant_message_completed",
+      payload: {
+        status: "completed",
+        summary: fallback.summary.trim(),
+        wake_id: wakeId,
+        source: "terminal_fallback",
+      },
+    });
+  }
+  if (!hasFinished) {
+    appendChatEvent(state, session.sessionId, {
+      kind: "assistant_turn_finished",
+      payload: { wake_id: wakeId, source: "terminal_fallback" },
+    });
+  }
+}
+
 function appendChatEvent(
   state: ServiceState,
   sessionId: SessionId,
@@ -4089,6 +4141,11 @@ async function dispatchWake(
           : `wake ${wakeId} was rejected for ${session.agentId}`),
       reasonCode: accepted.accepted ? undefined : "wake_rejected",
     };
+    if (report.status === "completed") {
+      ensureChatWakeTerminalEvents(state, session, wakeId, observed.events, {
+        summary: completionSummary ?? report.summary,
+      });
+    }
     recordServiceEvent(state, {
       source: "service-host",
       eventType: "brain_wake_dispatched",

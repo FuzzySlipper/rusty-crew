@@ -33,6 +33,8 @@ export interface RustyViewChatContext {
   now?: () => string;
 }
 
+const CHAT_SUMMARY_EVENT_LIMIT = 1_000;
+
 export interface ChatSessionSummary {
   session_id: string;
   agent_id: string;
@@ -192,7 +194,7 @@ export async function handleRustyViewChatRequest(
   const parts = url.pathname.split("/").filter(Boolean);
   if (url.pathname === "/v1/chat/sessions") {
     const sessions = await context.listSessions();
-    return success(requestId, sessionPage(sessions, url));
+    return success(requestId, sessionPage(sessions, context, url));
   }
 
   if (url.pathname === "/v1/chat/commands") {
@@ -394,7 +396,11 @@ async function handleExecuteCommand(
   };
 }
 
-function sessionPage(sessions: SessionState[], url: URL): ChatSessionPage {
+function sessionPage(
+  sessions: SessionState[],
+  context: RustyViewChatContext,
+  url: URL,
+): ChatSessionPage {
   const limit = pageLimit(url, 100, 500);
   const offset = pageOffset(url);
   const profileId = trimmedParam(url, "profile_id");
@@ -405,9 +411,13 @@ function sessionPage(sessions: SessionState[], url: URL): ChatSessionPage {
     )
     .filter((session) => status === undefined || session.status === status)
     .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
-  const items = filtered
-    .slice(offset, offset + limit)
-    .map((session) => sessionSummary(session, 0));
+  const items = filtered.slice(offset, offset + limit).map((session) => {
+    const stats = chatEventStats(session, context);
+    return sessionSummary(session, {
+      messageCount: stats.messageCount,
+      latestCursor: stats.latestCursor,
+    });
+  });
   return {
     items,
     total: filtered.length,
@@ -427,6 +437,7 @@ async function openSessionResult(
 ): Promise<ChatSessionOpenResult> {
   const now = context.now?.() ?? new Date().toISOString();
   const pendingMessages = await pendingMessagesForSession(session, context);
+  const stats = chatEventStats(session, context);
   const loggedEvents = context.listChatEvents?.(session, cursor, limit) ?? [];
   const snapshot: ChatEvent = {
     event_id: eventId(session.sessionId, 0),
@@ -435,7 +446,12 @@ async function openSessionResult(
     created_at: session.lastActiveAt,
     kind: "session_snapshot",
     payload: {
-      session: sessionSummary(session, pendingMessages.length),
+      session: sessionSummary(session, {
+        messageCount: stats.hasLoggedEvents
+          ? stats.messageCount
+          : pendingMessages.length,
+        latestCursor: stats.latestCursor,
+      }),
     },
   };
   const events: ChatEvent[] = [
@@ -448,7 +464,12 @@ async function openSessionResult(
   ].slice(0, limit);
   const latestSequence = events.at(-1)?.sequence_id ?? 0;
   return {
-    session: sessionSummary(session, pendingMessages.length),
+    session: sessionSummary(session, {
+      messageCount: stats.hasLoggedEvents
+        ? stats.messageCount
+        : pendingMessages.length,
+      latestCursor: stats.latestCursor,
+    }),
     events,
     latest_cursor: cursorFor(session.sessionId, latestSequence),
     has_more_before: false,
@@ -498,7 +519,10 @@ async function pendingMessagesForSession(
 
 function sessionSummary(
   session: SessionState,
-  messageCount: number,
+  options: {
+    messageCount: number;
+    latestCursor?: string;
+  },
 ): ChatSessionSummary {
   return {
     session_id: session.sessionId,
@@ -506,16 +530,44 @@ function sessionSummary(
     profile_id: session.profileId,
     kind: session.kind,
     status: session.status,
-    latest_cursor: cursorFor(session.sessionId, session.brainTurnCount),
+    latest_cursor:
+      options.latestCursor ??
+      cursorFor(session.sessionId, session.brainTurnCount),
     created_at: session.createdAt,
     updated_at: session.lastActiveAt,
-    message_count: messageCount,
+    message_count: options.messageCount,
     tool_event_count: session.toolProfile.tools.length,
     effective_defaults: {
       historyWindow: session.historyWindow,
       resourceLimits: session.resourceLimits,
     },
   };
+}
+
+function chatEventStats(
+  session: SessionState,
+  context: RustyViewChatContext,
+): {
+  hasLoggedEvents: boolean;
+  latestCursor?: string;
+  messageCount: number;
+} {
+  const events =
+    context.listChatEvents?.(session, undefined, CHAT_SUMMARY_EVENT_LIMIT) ??
+    [];
+  return {
+    hasLoggedEvents: events.length > 0,
+    latestCursor: events.at(-1)?.event_id,
+    messageCount: countChatMessages(events),
+  };
+}
+
+function countChatMessages(events: readonly ChatEvent[]): number {
+  return events.filter(
+    (event) =>
+      event.kind === "message_created" ||
+      event.kind === "assistant_message_completed",
+  ).length;
 }
 
 function messageCreatedEvent(
