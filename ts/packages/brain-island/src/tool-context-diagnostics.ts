@@ -113,7 +113,6 @@ export interface ToolContextDiagnosticTool {
   category?: string;
   surfaces: readonly string[];
   toolsets: readonly string[];
-  implementationModule?: string;
   outputShape?: string;
   version?: string;
   source: "local" | "mcp" | "registry" | "missing";
@@ -437,9 +436,8 @@ function buildToolReports(
       canonicalName: item?.canonicalName,
       status,
       category: diagnostic.category,
-      surfaces: item?.entry?.surfaces ?? [],
+      surfaces: item?.entry?.surfaces ?? diagnostic.surfaces,
       toolsets: diagnostic.toolsets,
-      implementationModule: diagnostic.implementationModule,
       outputShape: diagnostic.outputShape,
       version: diagnostic.version,
       source: diagnostic.category === "mcp" ? "mcp" : "local",
@@ -465,7 +463,6 @@ function buildToolReports(
       category: item.entry?.category,
       surfaces: item.entry?.surfaces ?? [],
       toolsets: item.entry?.toolsets ?? [],
-      implementationModule: item.binding?.implementationModule,
       outputShape: item.entry?.outputShape,
       version: item.entry?.version,
       source: item.entry?.category === "mcp" ? "mcp" : "missing",

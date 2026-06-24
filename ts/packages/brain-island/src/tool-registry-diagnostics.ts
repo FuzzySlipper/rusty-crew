@@ -19,20 +19,41 @@ export interface ToolRegistryDiagnosticsInput {
   entries?: readonly ToolRegistryEntry[];
   bindings?: readonly ToolExecutableBinding[];
   inventoryRequest?: ToolInventoryRequest;
+  includeDebugBindings?: boolean;
 }
 
 export interface ToolRegistryDiagnosticTool {
   name: string;
+  description: string;
   aliases: readonly string[];
   category: string;
   toolsets: readonly string[];
-  implementationModule: string;
+  surfaces: readonly string[];
+  safety: readonly string[];
   outputShape: string;
   version: string;
   status: ToolInventoryStatus | "invalid_registry";
   reasons: readonly string[];
   deprecated: boolean;
+  deprecation?: {
+    reason: string;
+    since: string;
+    replacement?: string;
+    sunset?: string;
+  };
   replacement?: string;
+  sourceHint: string;
+}
+
+export interface ToolRegistryDebugBinding {
+  name: string;
+  implementationModule: string;
+  inventoryTest: string;
+  status: "bound" | "orphan";
+}
+
+export interface ToolRegistryDiagnosticsDebug {
+  bindings: ToolRegistryDebugBinding[];
 }
 
 export interface ToolRegistryDiagnosticsSummary {
@@ -52,6 +73,7 @@ export interface ToolRegistryDiagnosticsReport {
   inventory?: ToolInventory;
   summary: ToolRegistryDiagnosticsSummary;
   tools: ToolRegistryDiagnosticTool[];
+  debug?: ToolRegistryDiagnosticsDebug;
 }
 
 export function buildToolRegistryDiagnostics(
@@ -82,17 +104,15 @@ export function buildToolRegistryDiagnostics(
     const item = inventoryItems.find(
       (candidate) => candidate.name === entry.name,
     );
-    const binding =
-      item?.binding ??
-      bindings.find((candidate) => candidate.name === entry.name);
     const replacement = entry.replacement ?? entry.deprecated?.replacement;
     return {
       name: entry.name,
+      description: entry.description,
       aliases: entry.aliases ?? [],
       category: entry.category,
       toolsets: entry.toolsets,
-      implementationModule:
-        binding?.implementationModule ?? "(missing binding)",
+      surfaces: entry.surfaces,
+      safety: entry.safety,
       outputShape: entry.outputShape,
       version: entry.version,
       status:
@@ -101,7 +121,16 @@ export function buildToolRegistryDiagnostics(
         "registry validation failed before inventory build",
       ],
       deprecated: Boolean(entry.deprecated),
+      deprecation: entry.deprecated
+        ? {
+            reason: entry.deprecated.reason,
+            since: entry.deprecated.since,
+            replacement: entry.deprecated.replacement,
+            sunset: entry.deprecated.sunset,
+          }
+        : undefined,
       replacement,
+      sourceHint: sourceHint(entry),
     };
   });
 
@@ -111,6 +140,9 @@ export function buildToolRegistryDiagnostics(
     inventory,
     summary: summarizeDiagnostics(catalogId, validation, inventory, entries),
     tools,
+    debug: input.includeDebugBindings
+      ? { bindings: debugBindings(entries, bindings) }
+      : undefined,
   };
 }
 
@@ -128,13 +160,14 @@ export function formatToolRegistryDiagnosticsMarkdown(
     `- validation errors: ${report.summary.validationErrors}`,
     `- validation warnings: ${report.summary.validationWarnings}`,
     "",
-    "| tool | status | implementation | output shape | notes |",
-    "| --- | --- | --- | --- | --- |",
+    "| tool | status | category | source | output shape | notes |",
+    "| --- | --- | --- | --- | --- | --- |",
     ...report.tools.map((tool) =>
       [
         tool.name,
         tool.status,
-        tool.implementationModule,
+        tool.category,
+        tool.sourceHint,
         tool.outputShape,
         tool.reasons.join("; "),
       ]
@@ -151,6 +184,26 @@ export function formatToolRegistryDiagnosticsMarkdown(
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function debugBindings(
+  entries: readonly ToolRegistryEntry[],
+  bindings: readonly ToolExecutableBinding[],
+): ToolRegistryDebugBinding[] {
+  const entryNames = new Set(entries.map((entry) => entry.name));
+  return bindings.map((binding) => ({
+    name: binding.name,
+    implementationModule: binding.implementationModule,
+    inventoryTest: binding.inventoryTest,
+    status: entryNames.has(binding.name) ? "bound" : "orphan",
+  }));
+}
+
+function sourceHint(entry: ToolRegistryEntry): string {
+  if (entry.category === "mcp") return "mcp";
+  if (entry.surfaces.includes("admin")) return "admin";
+  if (entry.surfaces.includes("diagnostic")) return "diagnostic";
+  return "local";
 }
 
 function summarizeDiagnostics(

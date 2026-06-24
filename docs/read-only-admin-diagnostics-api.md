@@ -122,6 +122,11 @@ The route intentionally reports only runtime-plumbing facts, derived record
 summaries, and structured diagnostics. It must not include prompt, soul, memory,
 skill body, provider credential, or raw profile content.
 
+Tool diagnostics exposed through admin/runtime routes are public metadata:
+catalog ids, counts, inventory status, denials, deprecation, safety, surfaces,
+and source hints. Executor binding details such as `implementationModule` are
+internal debug data and must not be treated as default admin API contract fields.
+
 ## Redaction
 
 All success payloads pass through a conservative redactor:

@@ -238,6 +238,7 @@ assert.equal(
   report.tools.find((tool) => tool.name === "terminal")?.status,
   "denied",
 );
+assert.equal(Object.hasOwn(report.tools[0]!, "implementationModule"), false);
 assert.deepEqual(
   report.tools.find((tool) => tool.name === "missing_tool")?.reasonCodes,
   ["missing_requested_tool"],
@@ -335,6 +336,7 @@ assert.doesNotMatch(
   markdown,
   /Use diagnostics without dumping raw prompt content\./,
 );
+assert.doesNotMatch(markdown, /mcp-tools\.js|tools\.js/);
 
 console.log(
   JSON.stringify(

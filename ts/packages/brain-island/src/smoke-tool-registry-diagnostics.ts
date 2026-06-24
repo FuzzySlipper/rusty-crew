@@ -23,9 +23,27 @@ assert.equal(report.summary.selectedTools, 4);
 assert.equal(report.summary.deniedTools, 3);
 assert.equal(report.summary.missingTools, 1);
 assert.equal(report.validation.ok, true);
+assert.equal(report.debug, undefined);
+assert.equal(Object.hasOwn(report.tools[0]!, "implementationModule"), false);
 assert.equal(
   report.tools.find((tool) => tool.name === "git_diff")?.status,
   "session_denied",
+);
+assert.equal(
+  report.tools
+    .find((tool) => tool.name === "git_diff")
+    ?.safety.includes("read_only"),
+  true,
+);
+assert.equal(
+  report.tools
+    .find((tool) => tool.name === "git_diff")
+    ?.surfaces.includes("brain"),
+  true,
+);
+assert.equal(
+  report.tools.find((tool) => tool.name === "git_diff")?.sourceHint,
+  "local",
 );
 assert.equal(
   report.tools.find((tool) => tool.name === "web_extract")?.status,
@@ -38,6 +56,19 @@ assert.equal(
 assert.equal(
   report.tools.find((tool) => tool.name === "browser_vision")?.reasons[0],
   "browser binary is not configured",
+);
+
+const debugReport = buildToolRegistryDiagnostics({
+  includeDebugBindings: true,
+});
+assert.ok(debugReport.debug);
+assert.equal(
+  debugReport.debug.bindings.some(
+    (binding) =>
+      binding.name === "read_file" &&
+      binding.implementationModule === "./local-code-tools.js#readFileTool",
+  ),
+  true,
 );
 
 const invalidReport = buildToolRegistryDiagnostics({
@@ -70,11 +101,14 @@ assert.match(markdown, /git_diff/);
 assert.match(markdown, /session_denied/);
 assert.match(markdown, /web_search/);
 assert.match(markdown, /browser_vision/);
+assert.doesNotMatch(markdown, /implementation/i);
+assert.doesNotMatch(markdown, /local-code-tools/);
 
 console.log(
   JSON.stringify(
     {
       summary: report.summary,
+      debugBindings: debugReport.debug.bindings.length,
       invalidIssues: invalidReport.validation.issues.map((issue) => issue.code),
       markdownLines: markdown.split("\n").length,
     },

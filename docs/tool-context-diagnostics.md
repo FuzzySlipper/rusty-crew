@@ -39,6 +39,11 @@ The report filters channel and MCP diagnostics to the current session or profile
 - duration and delegation depth limits
 - read-only session effects on write/process tools
 
+Tool rows expose canonical metadata and inventory explanations. They do not
+include executor module pointers by default; those remain an intentional
+tool-registry debug binding view rather than part of the public diagnostics
+contract.
+
 ## Verification
 
 `npm run smoke:tool-context-diagnostics` covers selected, denied, missing, and collided tools, degraded MCP surfaces, resource/workdir explanations, and prompt privacy behavior.
