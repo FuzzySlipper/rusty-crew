@@ -24,7 +24,9 @@ import {
 import type {
   BrainWakeExecutor,
   NativeBridgeModule,
+  NativeRuntimeConfigDiagnostic,
   NativeRuntimeConfigDraft,
+  NativeRuntimeConfigPlan,
   NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
@@ -154,6 +156,50 @@ export interface ScheduledJobRegistrationResult {
   jobs: ScheduledJobSummary[];
 }
 
+export interface RuntimeConfigValidationPreflightReport {
+  ok: boolean;
+  configPath: string;
+  profilesDir?: string;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  summary: {
+    diagnostics: number;
+    errors: number;
+    warnings: number;
+    brains: number;
+    sessions: number;
+    scheduledJobs: number;
+    channelBindings: number;
+    mcpBindings: number;
+    derivedScheduledJobs: number;
+    derivedMcpBindings: number;
+    sessionDefaultsApplied: number;
+  };
+  derived: {
+    scheduledJobs: Array<{
+      id: string;
+      shape: RustyCrewScheduledJobShape;
+      jobKind?: string;
+      targetSessionId?: string;
+    }>;
+    mcpBindings: Array<{
+      bindingId: string;
+      agentId: string;
+      sessionId?: string;
+      profileId: string;
+      transport: string;
+      toolProfileKey: string;
+      serverNames: string[];
+    }>;
+    sessionDefaultsApplied: Array<{
+      sessionId: string;
+      ownerId: boolean;
+      resourceLimits: boolean;
+      maxHistoryMessages: boolean;
+      turnTimeoutMs: boolean;
+    }>;
+  };
+}
+
 export async function loadRustyCrewRuntimeConfig(
   serviceConfig: RustyCrewServiceConfig,
 ): Promise<RustyCrewRuntimeConfig> {
@@ -173,6 +219,49 @@ export async function loadRustyCrewRuntimeConfig(
   );
 }
 
+export async function preflightRustyCrewRuntimeConfig(input: {
+  serviceConfig: RustyCrewServiceConfig;
+  bridge?: Pick<NativeBridgeModule, "planRuntimeConfig">;
+}): Promise<RuntimeConfigValidationPreflightReport> {
+  const configPath = input.serviceConfig.paths.serviceConfigFile;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(configPath, "utf8")) as unknown;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      parsed = {};
+    } else {
+      return preflightFailure(configPath, "invalid_runtime_config_json", error);
+    }
+  }
+
+  let runtimeConfig: RustyCrewRuntimeConfig;
+  try {
+    runtimeConfig = validateRuntimeConfig(parsed, input.serviceConfig);
+  } catch (error) {
+    return preflightFailure(configPath, "invalid_runtime_config_shape", error);
+  }
+
+  const loadedProfiles = await loadRuntimeProfilesForValidation(runtimeConfig);
+  if (loadedProfiles.diagnostics.length > 0) {
+    const emptyPlan: NativeRuntimeConfigPlan = {
+      runtimeConfig: runtimeConfigValidationInputShape(runtimeConfig),
+      diagnostics: loadedProfiles.diagnostics,
+      derivedScheduledJobs: [],
+      derivedMcpBindings: [],
+    };
+    return preflightReport(configPath, runtimeConfig, emptyPlan);
+  }
+
+  const bridge = input.bridge ?? (await loadNativeBridge());
+  const plan = await planRuntimeConfigWithRust({
+    bridge,
+    runtimeConfig,
+    profiles: loadedProfiles.profiles,
+  });
+  return preflightReport(configPath, runtimeConfig, plan);
+}
+
 async function expandRuntimeConfigFromProfiles(
   runtimeConfig: RustyCrewRuntimeConfig,
 ): Promise<RustyCrewRuntimeConfig> {
@@ -184,7 +273,11 @@ async function expandRuntimeConfigFromProfiles(
     profiles,
   });
   assertRuntimeConfigPlan(plan.diagnostics);
-  return runtimeConfigFromNativeDraft(plan.runtimeConfig, runtimeConfig, profiles);
+  return runtimeConfigFromNativeDraft(
+    plan.runtimeConfig,
+    runtimeConfig,
+    profiles,
+  );
 }
 
 async function loadRuntimeProfiles(
@@ -196,9 +289,195 @@ async function loadRuntimeProfiles(
   }
   const profiles: ProfileConfig[] = [];
   for (const profileId of profileIds) {
-    profiles.push(await loadProfileConfig(runtimeConfig.profilesDir, profileId));
+    profiles.push(
+      await loadProfileConfig(runtimeConfig.profilesDir, profileId),
+    );
   }
   return profiles;
+}
+
+async function loadRuntimeProfilesForValidation(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Promise<{
+  profiles: ProfileConfig[];
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+}> {
+  const profileIds = new Set<ProfileId>();
+  for (const brain of runtimeConfig.brains) {
+    profileIds.add(brain.profileId);
+  }
+  for (const session of runtimeConfig.sessions) {
+    profileIds.add(session.profileId);
+  }
+  const profiles: ProfileConfig[] = [];
+  const diagnostics: NativeRuntimeConfigDiagnostic[] = [];
+  for (const profileId of profileIds) {
+    try {
+      profiles.push(
+        await loadProfileConfig(runtimeConfig.profilesDir, profileId),
+      );
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "profile_metadata_load_failed",
+        path: `profiles.${profileId}`,
+        message: errorMessage(
+          error,
+          `profile ${profileId} could not be loaded`,
+        ),
+      });
+    }
+  }
+  return { profiles, diagnostics };
+}
+
+function preflightFailure(
+  configPath: string,
+  code: string,
+  error: unknown,
+): RuntimeConfigValidationPreflightReport {
+  const diagnostic = {
+    severity: "error",
+    code,
+    path: "serviceConfig",
+    message: errorMessage(error, "runtime config preflight failed"),
+  } satisfies NativeRuntimeConfigDiagnostic;
+  return {
+    ok: false,
+    configPath,
+    diagnostics: [diagnostic],
+    summary: {
+      diagnostics: 1,
+      errors: 1,
+      warnings: 0,
+      brains: 0,
+      sessions: 0,
+      scheduledJobs: 0,
+      channelBindings: 0,
+      mcpBindings: 0,
+      derivedScheduledJobs: 0,
+      derivedMcpBindings: 0,
+      sessionDefaultsApplied: 0,
+    },
+    derived: {
+      scheduledJobs: [],
+      mcpBindings: [],
+      sessionDefaultsApplied: [],
+    },
+  };
+}
+
+function preflightReport(
+  configPath: string,
+  original: RustyCrewRuntimeConfig,
+  plan: NativeRuntimeConfigPlan,
+): RuntimeConfigValidationPreflightReport {
+  const diagnostics = plan.diagnostics;
+  const errors = diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "error",
+  ).length;
+  const warnings = diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "warning",
+  ).length;
+  const defaultsApplied = sessionDefaultsApplied(original, plan.runtimeConfig);
+  return {
+    ok: errors === 0,
+    configPath,
+    profilesDir: original.profilesDir,
+    diagnostics,
+    summary: {
+      diagnostics: diagnostics.length,
+      errors,
+      warnings,
+      brains: plan.runtimeConfig.brains.length,
+      sessions: plan.runtimeConfig.sessions.length,
+      scheduledJobs: plan.runtimeConfig.scheduledJobs.length,
+      channelBindings: plan.runtimeConfig.channelBindings.length,
+      mcpBindings: plan.runtimeConfig.mcpBindings.length,
+      derivedScheduledJobs: plan.derivedScheduledJobs.length,
+      derivedMcpBindings: plan.derivedMcpBindings.length,
+      sessionDefaultsApplied: defaultsApplied.length,
+    },
+    derived: {
+      scheduledJobs: plan.derivedScheduledJobs.map((job) => ({
+        id: job.id,
+        shape: job.shape,
+        jobKind: job.jobKind,
+        targetSessionId: job.targetSessionId,
+      })),
+      mcpBindings: plan.derivedMcpBindings.map((binding) => ({
+        bindingId: binding.bindingId,
+        agentId: binding.agentId,
+        sessionId: binding.sessionId,
+        profileId: binding.profileId,
+        transport: binding.transport,
+        toolProfileKey: binding.toolProfileKey,
+        serverNames: binding.serverNames,
+      })),
+      sessionDefaultsApplied: defaultsApplied,
+    },
+  };
+}
+
+function sessionDefaultsApplied(
+  original: RustyCrewRuntimeConfig,
+  planned: NativeRuntimeConfigDraft,
+): RuntimeConfigValidationPreflightReport["derived"]["sessionDefaultsApplied"] {
+  const originalSessions = new Map(
+    original.sessions.map((session) => [session.sessionId, session]),
+  );
+  return planned.sessions
+    .map((plannedSession) => {
+      const originalSession = originalSessions.get(
+        plannedSession.sessionId as SessionId,
+      );
+      if (!originalSession) return undefined;
+      const applied = {
+        sessionId: plannedSession.sessionId,
+        ownerId:
+          originalSession.ownerId === undefined &&
+          plannedSession.ownerId !== undefined,
+        resourceLimits:
+          originalSession.resourceLimits === undefined &&
+          plannedSession.resourceLimits !== undefined,
+        maxHistoryMessages:
+          originalSession.maxHistoryMessages === undefined &&
+          plannedSession.maxHistoryMessages !== undefined,
+        turnTimeoutMs:
+          originalSession.turnTimeoutMs === undefined &&
+          plannedSession.turnTimeoutMs !== undefined,
+      };
+      return applied.ownerId ||
+        applied.resourceLimits ||
+        applied.maxHistoryMessages ||
+        applied.turnTimeoutMs
+        ? applied
+        : undefined;
+    })
+    .filter(
+      (
+        value,
+      ): value is RuntimeConfigValidationPreflightReport["derived"]["sessionDefaultsApplied"][number] =>
+        value !== undefined,
+    );
+}
+
+function runtimeConfigValidationInputShape(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): NativeRuntimeConfigDraft {
+  return {
+    profilesDir: runtimeConfig.profilesDir,
+    skillsDir: runtimeConfig.skillsDir,
+    brains: runtimeConfig.brains,
+    sessions: runtimeConfig.sessions,
+    scheduledJobs: runtimeConfig.scheduledJobs,
+    channelBindings: runtimeConfig.channelBindings,
+    mcpBindings: runtimeConfig.mcpBindings,
+  };
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function assertRuntimeConfigPlan(
@@ -215,7 +494,9 @@ function assertRuntimeConfigPlan(
     errors.length === 1
       ? ""
       : ` (${errors.length - 1} additional diagnostic${errors.length === 2 ? "" : "s"})`;
-  throw new Error(`${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`);
+  throw new Error(
+    `${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`,
+  );
 }
 
 function backgroundReviewScheduledJob(
@@ -264,7 +545,9 @@ function runtimeConfigFromNativeDraft(
   const originalMcpBindings = new Map(
     original.mcpBindings.map((binding) => [binding.bindingId, binding]),
   );
-  const profilesById = new Map(profiles.map((profile) => [profile.profileId, profile]));
+  const profilesById = new Map(
+    profiles.map((profile) => [profile.profileId, profile]),
+  );
   return {
     profilesDir: draft.profilesDir,
     skillsDir: draft.skillsDir,
@@ -330,7 +613,8 @@ function runtimeConfigFromNativeDraft(
       transport: binding.transport,
       toolProfileKey: binding.toolProfileKey,
       status: binding.status,
-      diagnostics: originalMcpBindings.get(binding.bindingId)?.diagnostics ?? {},
+      diagnostics:
+        originalMcpBindings.get(binding.bindingId)?.diagnostics ?? {},
     })),
   };
 }
@@ -361,7 +645,9 @@ export async function applyRustyCrewRuntimeConfig(input: {
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
-  const runtimeConfig = await expandRuntimeConfigFromProfiles(input.runtimeConfig);
+  const runtimeConfig = await expandRuntimeConfigFromProfiles(
+    input.runtimeConfig,
+  );
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
     runtimeConfig,
@@ -1030,11 +1316,6 @@ function configuredScheduledJob(
   }
   if (job.shape === "host_job" && !job.jobKind) {
     throw new Error(`scheduledJobs[${index}].jobKind is required for host_job`);
-  }
-  if (job.shape !== "session_wake" && job.shape !== "host_job") {
-    throw new Error(
-      `scheduledJobs[${index}].shape ${job.shape} is parsed for compatibility but not executable in Rusty Crew v1`,
-    );
   }
   return job;
 }

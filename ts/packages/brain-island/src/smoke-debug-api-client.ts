@@ -254,6 +254,10 @@ assert.equal(mcp.items[0]?.bindingId, "mcp-debug");
 const channels = await client.channelBindings({ status: "active" });
 assert.equal(channels.items[0]?.bindingId, "channel-debug");
 
+const configValidation = await client.configValidation();
+assert.equal(configValidation?.ok, false);
+assert.equal(configValidation.diagnostics[0]?.code, "binding_session_mismatch");
+
 const observation = await client.observation();
 assert.equal(observation?.enabled, true);
 
@@ -297,6 +301,7 @@ console.log(
       sessions: sessions.total,
       mcp: mcp.items.length,
       channels: channels.items.length,
+      configValidationOk: configValidation?.ok,
       directDebugSource: context.source,
       directTurnWake: turn.wakeId,
       calls: calls.length,
@@ -316,6 +321,36 @@ function routeAdmin(url: URL, method: string): Response {
     {
       diagnostics,
       recentEvents,
+      configValidation: {
+        ok: false,
+        configPath: "/home/agents/rusty-crew/config/service.json",
+        diagnostics: [
+          {
+            severity: "error",
+            code: "binding_session_mismatch",
+            path: "channels[0].sessionId",
+            message: "channel binding references the wrong session",
+          },
+        ],
+        summary: {
+          diagnostics: 1,
+          errors: 1,
+          warnings: 0,
+          brains: 1,
+          sessions: 1,
+          scheduledJobs: 0,
+          channelBindings: 1,
+          mcpBindings: 0,
+          derivedScheduledJobs: 0,
+          derivedMcpBindings: 0,
+          sessionDefaultsApplied: 0,
+        },
+        derived: {
+          scheduledJobs: [],
+          mcpBindings: [],
+          sessionDefaultsApplied: [],
+        },
+      },
     },
   );
   return jsonResponse(routeResult.body, routeResult.status);

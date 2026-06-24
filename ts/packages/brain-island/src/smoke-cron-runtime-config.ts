@@ -135,14 +135,20 @@ try {
     runtimeConfig.scheduledJobs[1]?.jobKind,
     "runtime.diagnostics.snapshot",
   );
-  assert.equal(runtimeConfig.scheduledJobs[2]?.id, "background-review-cron-profile");
+  assert.equal(
+    runtimeConfig.scheduledJobs[2]?.id,
+    "background-review-cron-profile",
+  );
   assert.equal(
     runtimeConfig.scheduledJobs[2]?.jobKind,
     "runtime.review.memory_skills",
   );
   assert.equal(
-    (runtimeConfig.scheduledJobs[2]?.payload as { dryRun?: boolean } | undefined)
-      ?.dryRun,
+    (
+      runtimeConfig.scheduledJobs[2]?.payload as
+        | { dryRun?: boolean }
+        | undefined
+    )?.dryRun,
     false,
   );
   assert.equal(runtimeConfig.mcpBindings.length, 1);
@@ -260,7 +266,7 @@ try {
   );
   await assert.rejects(
     () => loadRustyCrewRuntimeConfig(serviceConfig),
-    /not executable in Rusty Crew v1/,
+    /not executable by Rusty Crew v1/,
   );
 
   writeFileSync(
@@ -304,7 +310,9 @@ try {
     {
       get(_target, property) {
         return () => {
-          throw new Error(`bridge method ${String(property)} should not be called`);
+          throw new Error(
+            `bridge method ${String(property)} should not be called`,
+          );
         };
       },
     },

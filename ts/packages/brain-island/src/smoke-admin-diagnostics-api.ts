@@ -229,6 +229,78 @@ assert.equal(
   ).summary.activeJobs,
   2,
 );
+
+const configRoute = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/config" },
+  {
+    diagnostics,
+    configValidation: {
+      ok: false,
+      configPath: "/tmp/rusty-crew/config/service.json",
+      profilesDir: "/tmp/rusty-crew/config/profiles",
+      diagnostics: [
+        {
+          severity: "error",
+          code: "binding_session_mismatch",
+          path: "channelBindings[0].sessionId",
+          message: "binding target session mismatch",
+        },
+      ],
+      summary: {
+        diagnostics: 1,
+        errors: 1,
+        warnings: 0,
+        brains: 1,
+        sessions: 1,
+        scheduledJobs: 2,
+        channelBindings: 1,
+        mcpBindings: 1,
+        derivedScheduledJobs: 1,
+        derivedMcpBindings: 1,
+        sessionDefaultsApplied: 1,
+      },
+      derived: {
+        scheduledJobs: [
+          {
+            id: "background-review-prime",
+            shape: "host_job",
+            jobKind: "runtime.review.memory_skills",
+          },
+        ],
+        mcpBindings: [
+          {
+            bindingId: "agent-alpha-mcp",
+            agentId: "agent-alpha",
+            sessionId: "session-alpha",
+            profileId: "prime",
+            transport: "stdio",
+            toolProfileKey: "prime",
+            serverNames: ["agent-alpha"],
+          },
+        ],
+        sessionDefaultsApplied: [
+          {
+            sessionId: "session-alpha",
+            ownerId: true,
+            resourceLimits: false,
+            maxHistoryMessages: true,
+            turnTimeoutMs: true,
+          },
+        ],
+      },
+    },
+  },
+);
+assert.equal(configRoute.status, 200);
+assert.equal(
+  okData<{ ok: boolean; summary: { errors: number } }>(configRoute).ok,
+  false,
+);
+assert.equal(
+  okData<{ diagnostics: Array<{ code: string }> }>(configRoute).diagnostics[0]
+    ?.code,
+  "binding_session_mismatch",
+);
 assert.equal(
   okData<{ summary: { activeJobs: number; cleanupArchived: number } }>(
     backgroundRoute,

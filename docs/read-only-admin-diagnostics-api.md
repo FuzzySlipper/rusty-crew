@@ -12,6 +12,7 @@ The route layer is not an HTTP listener. It accepts a method/path request shape 
 
 - `RuntimeDiagnosticsProjection`;
 - `RuntimeHealthProjection`;
+- optional runtime config validation preflight reports;
 - optional bounded recent event summaries.
 
 It does not read storage directly, mutate runtime state, run maintenance, reload adapters, redeliver queues, or inspect private adapter objects. Mutating routes belong to guarded control endpoints.
@@ -34,6 +35,7 @@ Implemented read-only route families:
 - `GET /v1/admin/diagnostics/persistence`
 - `GET /v1/admin/diagnostics/observation`
 - `GET /v1/admin/diagnostics/background`
+- `GET /v1/admin/diagnostics/config`
 - `GET /v1/admin/diagnostics/metrics`
 - `GET /v1/admin/events/recent`
 
@@ -62,6 +64,64 @@ Supported initial filters:
 
 `limit` and `offset` are bounded. Metrics allow a larger cap than ordinary list routes because metrics are compact numeric samples.
 
+## Runtime Config Validation
+
+`GET /v1/admin/diagnostics/config` returns a read-only preflight of the current
+`service.json` on disk. It uses the Rust `core-config` planning boundary and
+does not reload, apply, create sessions, register brains, or mutate adapter
+state.
+
+The payload includes:
+
+```ts
+interface RuntimeConfigValidationPreflightReport {
+  ok: boolean;
+  configPath: string;
+  profilesDir?: string;
+  diagnostics: Array<{
+    severity: "error" | "warning" | "info";
+    code: string;
+    path?: string;
+    message: string;
+  }>;
+  summary: {
+    errors: number;
+    warnings: number;
+    brains: number;
+    sessions: number;
+    scheduledJobs: number;
+    channelBindings: number;
+    mcpBindings: number;
+    derivedScheduledJobs: number;
+    derivedMcpBindings: number;
+    sessionDefaultsApplied: number;
+  };
+  derived: {
+    scheduledJobs: Array<{ id: string; shape: string; jobKind?: string }>;
+    mcpBindings: Array<{
+      bindingId: string;
+      agentId: string;
+      sessionId?: string;
+      profileId: string;
+      transport: string;
+      toolProfileKey: string;
+      serverNames: string[];
+    }>;
+    sessionDefaultsApplied: Array<{
+      sessionId: string;
+      ownerId: boolean;
+      resourceLimits: boolean;
+      maxHistoryMessages: boolean;
+      turnTimeoutMs: boolean;
+    }>;
+  };
+}
+```
+
+The route intentionally reports only runtime-plumbing facts, derived record
+summaries, and structured diagnostics. It must not include prompt, soul, memory,
+skill body, provider credential, or raw profile content.
+
 ## Redaction
 
 All success payloads pass through a conservative redactor:
@@ -79,6 +139,7 @@ The redactor is a guardrail, not a license to put raw prompts, full tool outputs
 - readiness and overview routes;
 - sessions, agents, channels, tools, metrics, and recent events routes;
 - background service diagnostics route;
+- runtime config validation diagnostics route;
 - pagination and filters;
 - method rejection and unknown route handling;
 - secret-like field redaction.

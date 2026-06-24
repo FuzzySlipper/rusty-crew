@@ -14,6 +14,7 @@ The client exposes typed methods for:
 - tools
 - MCP surfaces
 - channel bindings
+- runtime config validation preflight
 - observation status
 - metrics
 - recent events
@@ -47,4 +48,4 @@ The client has direct-debug methods, but it does not treat direct debug as chann
 
 ## Verification
 
-`npm run smoke:debug-api-client` uses a fake fetch/admin server to cover auth headers, diagnostics methods, direct-debug context, direct-turn POST behavior, retry on a transient GET failure, and clear error propagation.
+`npm run smoke:debug-api-client` uses a fake fetch/admin server to cover auth headers, diagnostics methods, runtime config validation, direct-debug context, direct-turn POST behavior, retry on a transient GET failure, and clear error propagation.

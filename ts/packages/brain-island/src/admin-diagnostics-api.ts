@@ -7,6 +7,7 @@ import type {
   RuntimeSessionDiagnostics,
 } from "./runtime-diagnostics.js";
 import type { BackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
+import type { RuntimeConfigValidationPreflightReport } from "./service-runtime-config.js";
 
 export type AdminErrorCode =
   | "unauthorized"
@@ -68,6 +69,7 @@ export interface AdminDiagnosticsContext {
   health?: RuntimeHealthProjection;
   recentEvents?: readonly AdminRecentEvent[];
   background?: BackgroundServiceDiagnosticsProjection;
+  configValidation?: RuntimeConfigValidationPreflightReport;
 }
 
 export interface AdminPage<T> {
@@ -171,6 +173,8 @@ export function handleAdminDiagnosticsRequest(
       return success(requestId, context.diagnostics.observation ?? null);
     case "/v1/admin/diagnostics/background":
       return success(requestId, context.background ?? null);
+    case "/v1/admin/diagnostics/config":
+      return success(requestId, context.configValidation ?? null);
     case "/v1/admin/diagnostics/metrics":
       return success(requestId, page(health.metrics, url, 100, 250));
     case "/v1/admin/events/recent":

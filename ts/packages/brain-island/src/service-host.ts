@@ -184,6 +184,7 @@ import {
   effectiveSessionDefaults,
   effectiveWakeTimeoutMs,
   loadRustyCrewRuntimeConfig,
+  preflightRustyCrewRuntimeConfig,
   registerConfiguredScheduledJobs,
   ensureConfiguredSessionForChannelBinding,
   type RustyCrewRuntimeConfig,
@@ -836,6 +837,10 @@ async function buildDiagnosticsContext(
   });
   return {
     diagnostics,
+    configValidation: await preflightRustyCrewRuntimeConfig({
+      serviceConfig: state.config,
+      bridge: state.bridge,
+    }),
     background: await buildServiceBackgroundDiagnostics(state, now),
     recentEvents: [
       {
@@ -1950,7 +1955,10 @@ async function createServiceProfile(
 ): Promise<CreatedServiceProfile> {
   const profileId = requiredBodyString(command, "profileId");
   const displayName = optionalBodyString(command, "displayName");
-  const profilePath = safeProfileConfigPath(state.runtimeConfig.profilesDir, profileId);
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
   const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
   const profiles = await loadRuntimeConfigProfiles(state);
   const plan = await planCreateProfileWithRust({
@@ -1965,9 +1973,12 @@ async function createServiceProfile(
       implementationId: optionalBodyString(command, "implementationId"),
       kind: createProfileKind(command),
       modelConfig: modelConfigFromBody(command.body.modelConfig),
-      brain: profileBrainFromBody(command.body.brain ?? command.body.brainSelection),
+      brain: profileBrainFromBody(
+        command.body.brain ?? command.body.brainSelection,
+      ),
       mcpToolProfile: optionalBodyString(command, "mcpToolProfile"),
-      profileFileExists: profilePath === undefined ? false : existsSync(profilePath),
+      profileFileExists:
+        profilePath === undefined ? false : existsSync(profilePath),
     },
   });
   assertCreateProfilePlan(plan);
@@ -1977,7 +1988,9 @@ async function createServiceProfile(
   const runtimeSession = plan.runtimeSession;
   const profileMcpConfig = plan.profileMcpConfig;
   if (!profileSeed || !runtimeBrain || !runtimeSession || !profileMcpConfig) {
-    throw new Error("create-profile plan did not include required profile/runtime entries");
+    throw new Error(
+      "create-profile plan did not include required profile/runtime entries",
+    );
   }
   const plannedProfilePath = join(
     state.runtimeConfig.profilesDir,
@@ -2031,7 +2044,9 @@ async function loadRuntimeConfigProfiles(
   }
   const profiles: ProfileConfig[] = [];
   for (const profileId of profileIds) {
-    profiles.push(await loadProfileConfig(state.runtimeConfig.profilesDir, profileId));
+    profiles.push(
+      await loadProfileConfig(state.runtimeConfig.profilesDir, profileId),
+    );
   }
   return profiles;
 }
@@ -2082,7 +2097,9 @@ function assertCreateProfilePlan(plan: NativeCreateProfilePlan): void {
       errors.length === 1
         ? ""
         : ` (${errors.length - 1} additional diagnostic${errors.length === 2 ? "" : "s"})`;
-    throw new Error(`${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`);
+    throw new Error(
+      `${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`,
+    );
   }
 }
 

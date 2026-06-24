@@ -99,6 +99,28 @@ try {
     typeof diagnostics.body.data.overview.persistence.databaseBytes,
     "number",
   );
+  const configValidation = await get("/v1/admin/diagnostics/config", token);
+  assert.equal(configValidation.status, 200);
+  assert.equal(configValidation.body.ok, true);
+  assert.equal(configValidation.body.data.ok, true);
+  assert.equal(configValidation.body.data.summary.errors, 0);
+  assert.equal(
+    configValidation.body.data.derived.scheduledJobs[0]?.id,
+    "background-review-field-profile",
+  );
+  assert.equal(
+    configValidation.body.data.derived.mcpBindings[0]?.bindingId,
+    "field-mcp",
+  );
+  assert.equal(
+    configValidation.body.data.derived.sessionDefaultsApplied[0]?.sessionId,
+    "field-session",
+  );
+  const configValidationJson = JSON.stringify(configValidation.body.data);
+  assert.equal(
+    /soulMarkdown|memoryMarkdown|apiKeyEnv/.test(configValidationJson),
+    false,
+  );
   const configuredSessions = await host.bridge.listSessions();
   assert.equal(
     configuredSessions.find((session) => session.sessionId === "field-session")
@@ -410,6 +432,25 @@ try {
       .completion_packets,
     beforeRestartDirectTurn.body.data.overview.persistence.tableCounts
       .completion_packets + 1,
+  );
+
+  const configPath = join(root, "config", "service.json");
+  const invalidConfig = JSON.parse(readFileSync(configPath, "utf8")) as {
+    channelBindings?: Array<{ agentId?: string }>;
+  };
+  if (invalidConfig.channelBindings?.[0]) {
+    invalidConfig.channelBindings[0].agentId = "wrong-field-agent";
+  }
+  writeFileSync(configPath, JSON.stringify(invalidConfig, null, 2));
+  const invalidConfigValidation = await get(
+    "/v1/admin/diagnostics/config",
+    token,
+  );
+  assert.equal(invalidConfigValidation.status, 200);
+  assert.equal(invalidConfigValidation.body.data.ok, false);
+  assert.equal(
+    invalidConfigValidation.body.data.diagnostics[0]?.code,
+    "binding_session_mismatch",
   );
 
   writeRuntimeConfig(root, { includeExtraMcpBinding: true });

@@ -23,6 +23,7 @@ import type {
   RuntimeMetricSample,
   RuntimeReadinessProbe,
 } from "./runtime-health.js";
+import type { RuntimeConfigValidationPreflightReport } from "./service-runtime-config.js";
 
 export type DebugApiFetch = typeof fetch;
 
@@ -90,6 +91,7 @@ export interface DebugApiClient {
   channelBindings(
     query?: DebugApiQuery,
   ): Promise<AdminPage<ChannelAdapterBindingDiagnostics>>;
+  configValidation(): Promise<RuntimeConfigValidationPreflightReport | null>;
   observation(): Promise<ObservationDiagnosticsProjection | null>;
   metrics(query?: DebugApiQuery): Promise<AdminPage<RuntimeMetricSample>>;
   recentEvents(query?: DebugApiQuery): Promise<AdminPage<AdminRecentEvent>>;
@@ -135,6 +137,10 @@ export function createDebugApiClient(
       transport.get<AdminPage<ChannelAdapterBindingDiagnostics>>(
         "/v1/admin/diagnostics/channels",
         query,
+      ),
+    configValidation: () =>
+      transport.get<RuntimeConfigValidationPreflightReport | null>(
+        "/v1/admin/diagnostics/config",
       ),
     observation: () =>
       transport.get<ObservationDiagnosticsProjection | null>(
