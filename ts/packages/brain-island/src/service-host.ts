@@ -77,6 +77,7 @@ import {
   type ChannelWakePolicy,
   type DeliveryIntentWakeDecision,
 } from "./channel-wake-policy.js";
+import { resolveBrainModuleSelection } from "./brain-module.js";
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
@@ -810,6 +811,7 @@ async function buildDiagnosticsContext(
     sessions,
     sessionDefaults,
     delegatedSessions: [],
+    brainModules: brainModuleDiagnostics(state),
     adapters: buildServiceAdapterDiagnostics(state, now),
     persistence: {
       tableCounts,
@@ -844,6 +846,25 @@ async function buildDiagnosticsContext(
       ...state.recentEvents,
     ],
   };
+}
+
+function brainModuleDiagnostics(
+  state: ServiceState,
+): NonNullable<
+  Parameters<typeof buildRuntimeDiagnosticsProjection>[0]["brainModules"]
+> {
+  return state.runtimeConfig.brains.map((brain) => {
+    const selection =
+      state.runtimeConfigApplyResult.brainModulesByProfileId[brain.profileId];
+    return {
+      profileId: brain.profileId,
+      implementationId: brain.implementationId,
+      moduleId: selection?.moduleId ?? "unknown",
+      ...(selection?.strategy === undefined
+        ? {}
+        : { strategy: selection.strategy }),
+    };
+  });
 }
 
 async function effectiveSessionDefaultsById(
@@ -1976,6 +1997,9 @@ async function createServiceProfile(
     profileId,
     ...(displayName === undefined ? {} : { displayName }),
     modelConfig,
+    brain: {
+      module: resolveBrainModuleSelection({ modelConfig }).moduleId,
+    },
     mcpConfig: {
       bindingId: `${agentId}-mcp`,
       serverNames: [agentId],

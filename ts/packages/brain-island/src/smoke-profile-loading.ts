@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProfileId } from "@rusty-crew/contracts";
-import { loadProfileContext, ProfileLoadError } from "./index.js";
+import {
+  loadProfileContext,
+  ProfileLoadError,
+  resolveBrainModuleSelection,
+} from "./index.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-profile-loading-"));
 const profilesDir = join(root, "profiles");
@@ -105,6 +109,10 @@ Use Codex for bounded coding delegation when context isolation helps.
   assert.equal(context.profile.displayName, "Prime Coder");
   assert.equal(context.profile.modelConfig.provider, "den-router");
   assert.equal(
+    resolveBrainModuleSelection(context.profile).moduleId,
+    "pi-agent-core",
+  );
+  assert.equal(
     context.profile.runtime?.defaultResourceLimits?.maxDelegationDepth,
     1,
   );
@@ -145,6 +153,9 @@ modelConfig:
   api: openai-completions
   temperature: 0.2
   maxTokens: 4096
+brain:
+  module: pi-agent-core
+  strategy: default
 mcpConfig:
   toolProfile: runner
 runtimeConfig:
@@ -188,6 +199,8 @@ backgroundReview:
   assert.equal(runner.profile.modelConfig.baseUrl, "http://127.0.0.1:18082/v1");
   assert.equal(runner.profile.modelConfig.apiKeyEnv, "DEN_ROUTER_API_KEY");
   assert.equal(runner.profile.modelConfig.api, "openai-completions");
+  assert.equal(runner.profile.brain?.module, "pi-agent-core");
+  assert.equal(runner.profile.brain?.strategy, "default");
   assert.equal(runner.profile.modelConfig.temperatureMilli, 200);
   assert.equal(runner.profile.modelConfig.maxOutputTokens, 4096);
   assert.equal(runner.profile.runtime?.maxTurns, 100);

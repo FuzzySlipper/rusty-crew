@@ -31,6 +31,12 @@ import {
   MemoryBrowserScreenshotStore,
 } from "./browser-tools.js";
 import { BrowserSessionManager } from "./browser-session-manager.js";
+import {
+  createBrainModuleRegistry,
+  resolveBrainModuleSelection,
+  type BrainModule,
+  type BrainModuleSelection,
+} from "./brain-module.js";
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 import { nextCronDueAt } from "./cron-expression.js";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
@@ -42,7 +48,6 @@ import { resolveDenMemoryTools } from "./den-memory-tools.js";
 import { resolveDelegationTools } from "./delegation-tools.js";
 import type { BrainImplementation } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
-import { createPiAgentBrain } from "./pi-agent-brain.js";
 import type { PiAgentFactory } from "./pi-agent-brain.js";
 import {
   channelReadbackTool,
@@ -136,6 +141,7 @@ export interface RustyCrewRuntimeConfigApplyResult {
   sessionsMissing: number;
   scheduledJobsRegistered: number;
   brainHandlesByProfileId: Record<string, BrainImplementationHandle>;
+  brainModulesByProfileId: Record<string, BrainModuleSelection>;
 }
 
 export interface ScheduledJobRegistrationResult {
@@ -320,10 +326,15 @@ export async function applyRustyCrewRuntimeConfig(input: {
     sessionsMissing: 0,
     scheduledJobsRegistered: 0,
     brainHandlesByProfileId: {},
+    brainModulesByProfileId: {},
   };
 
+  const brainModuleRegistry = createBrainModuleRegistry();
   for (const brain of input.runtimeConfig.brains) {
     const profile = await loadProfile(brain.profileId);
+    const selection = resolveBrainModuleSelection(profile.profile);
+    const module = brainModuleRegistry.require(selection.moduleId);
+    result.brainModulesByProfileId[brain.profileId] = selection;
     try {
       const handle = await input.bridge.registerBrainRuntime(
         {
@@ -333,7 +344,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           modelConfig: profile.profile.modelConfig,
         },
         toBridgeWakeExecutor(
-          await createConfiguredBrain(profile, {
+          await createConfiguredBrain(module, profile, {
             createDenRouterAgentFactory: input.createDenRouterAgentFactory,
             bridge: input.bridge,
             runtimeConfig: input.runtimeConfig,
@@ -570,6 +581,7 @@ export async function ensureConfiguredSessionForChannelBinding(input: {
 }
 
 async function createConfiguredBrain(
+  module: BrainModule,
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
   options: {
     createDenRouterAgentFactory?: (
@@ -583,59 +595,16 @@ async function createConfiguredBrain(
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   } = {},
 ): Promise<BrainImplementation> {
-  if (profile.profile.modelConfig.provider === "den-router") {
-    const createAgent = await (
-      options.createDenRouterAgentFactory ?? createDenRouterPiAgentFactory
-    )({
-      modelId: profile.profile.modelConfig.modelName,
-      maxTokens: effectiveModelMaxTokens(profile),
-      baseUrl: profile.profile.modelConfig.baseUrl,
-      api: profile.profile.modelConfig.api,
-      apiKeyEnv: profile.profile.modelConfig.apiKeyEnv,
-      temperature:
-        profile.profile.modelConfig.temperatureMilli === undefined
-          ? undefined
-          : profile.profile.modelConfig.temperatureMilli / 1_000,
-    });
-    return createPiAgentBrain({
-      createAgent,
-      planActions: completionActionFromEvents,
-      resolveTools: createServiceToolResolver(profile, options),
-      toolProfile: profile.toolSelection.toolProfile,
-    });
-  }
-
-  return {
-    async wake(wake): Promise<{
-      events: BrainEventEnvelope[];
-      actions: BrainAction[];
-    }> {
-      return {
-        events: [
-          {
-            wakeId: wake.wakeId,
-            sessionId: wake.sessionId,
-            event: { type: "started" },
-          },
-          {
-            wakeId: wake.wakeId,
-            sessionId: wake.sessionId,
-            event: { type: "finished" },
-          },
-        ],
-        actions: [
-          {
-            type: "deliver_completion",
-            packet: {
-              sessionId: wake.sessionId,
-              status: "completed",
-              summary: "local service brain wake completed",
-            },
-          },
-        ],
-      };
-    },
-  };
+  return module.createBrain({
+    profile,
+    bridge: options.bridge,
+    runtimeConfig: options.runtimeConfig,
+    serviceConfig: options.serviceConfig,
+    toolResolver: createServiceToolResolver(profile, options),
+    planActions: completionActionFromEvents,
+    maxTokens: effectiveModelMaxTokens(profile),
+    createDenRouterAgentFactory: options.createDenRouterAgentFactory,
+  });
 }
 
 function effectiveModelMaxTokens(

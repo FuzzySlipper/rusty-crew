@@ -1,5 +1,7 @@
 import type {
+  BrainImplementationId,
   DelegatedSessionRuntimeStatus,
+  ProfileId,
   SessionId,
   SessionState,
 } from "@rusty-crew/contracts";
@@ -85,6 +87,7 @@ export interface RuntimeDiagnosticsInput {
   adapters?: AdapterDiagnosticsProjection;
   tools?: readonly ToolRegistryDiagnosticsReport[];
   observation?: ObservationDiagnosticsInput;
+  brainModules?: readonly RuntimeBrainModuleDiagnostics[];
   recentErrors?: readonly RuntimeDiagnosticError[];
   staleSessionMs?: number;
 }
@@ -116,6 +119,7 @@ export interface RuntimeDiagnosticsProjection {
   };
   runtime: {
     counters?: RuntimeCounterSummary;
+    brainModules: RuntimeBrainModuleDiagnostics[];
     sessions: RuntimeSessionDiagnostics[];
     delegatedSessions: RuntimeDelegationDiagnostics[];
   };
@@ -138,6 +142,13 @@ export interface RuntimeSessionDiagnostics {
   lastActiveAt: string;
   stale: boolean;
   effectiveDefaults?: RuntimeSessionEffectiveDefaults;
+}
+
+export interface RuntimeBrainModuleDiagnostics {
+  profileId: ProfileId | string;
+  implementationId: BrainImplementationId | string;
+  moduleId: string;
+  strategy?: string;
 }
 
 export interface RuntimeSessionEffectiveDefaults {
@@ -240,6 +251,7 @@ export function buildRuntimeDiagnosticsProjection(
     },
     runtime: {
       counters: input.runtimeSummary,
+      brainModules: [...(input.brainModules ?? [])],
       sessions,
       delegatedSessions,
     },

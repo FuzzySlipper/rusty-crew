@@ -5,6 +5,7 @@ import type {
   ProfileId,
   ResourceLimits,
 } from "@rusty-crew/contracts";
+import type { BrainModuleId } from "./brain-module.js";
 import {
   selectToolProfile,
   type ProfileToolPolicy,
@@ -83,12 +84,18 @@ export interface ProfileChannelDefaultsConfig {
   wakePolicy?: "subscription" | "manual" | "disabled";
 }
 
+export interface ProfileBrainConfig {
+  module?: BrainModuleId;
+  strategy?: string;
+}
+
 export interface ProfileConfig {
   profileId: ProfileId;
   profileDir?: string;
   profileSkillsDir?: string;
   displayName?: string;
   modelConfig: BrainModelConfig;
+  brain?: ProfileBrainConfig;
   runtime?: ProfileRuntimeConfig;
   toolPolicy?: ProfileToolPolicy;
   prompt?: ProfilePromptFragments;
@@ -485,6 +492,12 @@ function validateProfileConfig(
         optionalNumber(modelConfig.maxOutputTokens) ??
         optionalNumber(modelConfig.maxTokens),
     },
+    brain: isRecord(parsed.brain)
+      ? {
+          module: brainModuleId(parsed.brain.module, profileId, profilePath),
+          strategy: optionalString(parsed.brain.strategy),
+        }
+      : undefined,
     runtime: isRecord(parsed.runtime)
       ? {
           maxTurns: optionalNumber(parsed.runtime.maxTurns),
@@ -566,6 +579,23 @@ function validateProfileConfig(
         }
       : undefined,
   };
+}
+
+function brainModuleId(
+  input: unknown,
+  profileId: ProfileId,
+  profilePath: string,
+): BrainModuleId | undefined {
+  const value = optionalString(input);
+  if (value === undefined) return undefined;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(value)) {
+    throw invalidProfile(
+      profileId,
+      profilePath,
+      "brain.module must start with a letter or number and contain only letters, numbers, underscore, dot, or hyphen",
+    );
+  }
+  return value;
 }
 
 async function readOptionalProfileMarkdown(

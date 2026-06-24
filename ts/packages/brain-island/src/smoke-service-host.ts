@@ -491,8 +491,13 @@ try {
         join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
         "utf8",
       ),
-    ) as { mcpConfig?: { toolProfile?: string }; displayName?: string };
+    ) as {
+      brain?: { module?: string };
+      mcpConfig?: { toolProfile?: string };
+      displayName?: string;
+    };
     assert.equal(createdProfileConfig.displayName, "Field Created Profile");
+    assert.equal(createdProfileConfig.brain?.module, "local");
     assert.equal(
       createdProfileConfig.mcpConfig?.toolProfile,
       "field-created-profile",
@@ -503,6 +508,18 @@ try {
       noAuthPort,
     );
     assert.equal(noAuthAfterProfile.body.data.overview.summary.sessions, 2);
+    assert.deepEqual(
+      noAuthAfterProfile.body.data.overview.runtime.brainModules.map(
+        (module: { profileId: string; moduleId: string }) => [
+          module.profileId,
+          module.moduleId,
+        ],
+      ),
+      [
+        ["field-profile", "local"],
+        ["field-created-profile", "local"],
+      ],
+    );
     assert.equal(
       noAuthAfterProfile.body.data.overview.adapters.mcp.totalSurfaces,
       2,

@@ -163,6 +163,20 @@ export type {
   BrainToolResult,
   BrainToolUpdateCallback,
 } from "./brain-tool.js";
+export {
+  createBrainModuleRegistry,
+  defaultBrainModules,
+  localBrainModule,
+  piAgentCoreBrainModule,
+  resolveBrainModuleSelection,
+} from "./brain-module.js";
+export type {
+  BrainModule,
+  BrainModuleContext,
+  BrainModuleId,
+  BrainModuleRegistry,
+  BrainModuleSelection,
+} from "./brain-module.js";
 export type { BridgeBufferClient } from "./bridge-wake.js";
 export { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 export {
