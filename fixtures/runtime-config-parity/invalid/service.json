@@ -1,0 +1,51 @@
+{
+  "profilesDir": "__FIXTURE_ROOT__/profiles",
+  "brains": [
+    {
+      "implementationId": "parity-runner-brain",
+      "profileId": "parity-runner"
+    }
+  ],
+  "sessions": [
+    {
+      "sessionId": "parity-runner-session",
+      "agentId": "parity-runner",
+      "profileId": "parity-runner",
+      "kind": "full"
+    }
+  ],
+  "scheduledJobs": [
+    {
+      "id": "parity-script-only",
+      "schedule": "*/5 * * * *",
+      "shape": "script_only",
+      "script": "echo should-not-apply"
+    }
+  ],
+  "channelBindings": [
+    {
+      "bindingId": "parity-runner-channel",
+      "adapterId": "den-gateway",
+      "provider": "den_conversation",
+      "agentId": "wrong-agent",
+      "sessionId": "parity-runner-session",
+      "profileId": "parity-runner",
+      "externalChannelId": "40",
+      "status": "active"
+    }
+  ],
+  "mcpBindings": [
+    {
+      "bindingId": "parity-empty-mcp",
+      "adapterId": "mcp-ts-main",
+      "agentId": "parity-runner",
+      "sessionId": "parity-runner-session",
+      "profileId": "parity-runner",
+      "serverNames": ["den"],
+      "endpointRef": "den-core",
+      "transport": "streamable_http",
+      "toolProfileKey": "planner",
+      "status": "active"
+    }
+  ]
+}

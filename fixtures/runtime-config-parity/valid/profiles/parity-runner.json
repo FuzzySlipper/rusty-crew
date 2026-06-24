@@ -1,0 +1,44 @@
+{
+  "profileId": "parity-runner",
+  "displayName": "Parity Runner",
+  "modelConfig": {
+    "provider": "den-router",
+    "modelName": "local-deterministic",
+    "temperatureMilli": 100,
+    "maxOutputTokens": 2048
+  },
+  "brain": {
+    "module": "pi",
+    "strategy": "default"
+  },
+  "runtime": {
+    "defaultResourceLimits": {
+      "workdir": "__FIXTURE_ROOT__/work",
+      "maxDurationMs": 60000,
+      "maxDelegationDepth": 4
+    },
+    "maxTurnDurationMs": 30000,
+    "maxTokensPerTurn": 4096
+  },
+  "sessionDefaults": {
+    "ownerId": "parity-owner",
+    "maxHistoryMessages": 128,
+    "turnTimeoutMs": 30000
+  },
+  "mcpConfig": {
+    "bindingId": "parity-runner-mcp",
+    "endpointRef": "config://mcp/parity-runner",
+    "serverNames": ["den", "memory"],
+    "transport": "streamable_http",
+    "toolProfile": "planner"
+  },
+  "backgroundReview": {
+    "enabled": true,
+    "reviewType": "combined",
+    "schedule": "0 3 * * *"
+  },
+  "channelDefaults": {
+    "wakePolicy": "subscription"
+  },
+  "skills": "all"
+}

@@ -1688,9 +1688,7 @@ function toNativeCreateProfilePlan(
       ? {
           profileId: plan.profile_seed.profile_id,
           displayName: plan.profile_seed.display_name ?? undefined,
-          modelConfig: toProfileModelConfigSeed(
-            plan.profile_seed.model_config,
-          ),
+          modelConfig: toProfileModelConfigSeed(plan.profile_seed.model_config),
           brain: {
             module: plan.profile_seed.brain.module ?? undefined,
             strategy: plan.profile_seed.brain.strategy ?? undefined,
@@ -1710,7 +1708,9 @@ function toNativeCreateProfilePlan(
           agentId: plan.runtime_session.agent_id,
           profileId: plan.runtime_session.profile_id,
           kind: plan.runtime_session.kind,
-          resourceLimits: toResourceLimits(plan.runtime_session.resource_limits),
+          resourceLimits: toResourceLimits(
+            plan.runtime_session.resource_limits,
+          ),
           ownerId: plan.runtime_session.owner_id ?? undefined,
           historyWindow: plan.runtime_session.history_window
             ? {
@@ -1777,7 +1777,7 @@ function toRuntimeConfigDraft(
       adapterId: binding.adapter_id,
       provider: binding.provider,
       agentId: binding.agent_id,
-      instanceId: binding.instance_id,
+      instanceId: binding.instance_id ?? undefined,
       sessionId: binding.session_id,
       profileId: binding.profile_id,
       externalChannelId: binding.external_channel_id,
@@ -1799,7 +1799,7 @@ function toScheduledJobDraft(
     id: job.id,
     schedule: job.schedule,
     shape: job.shape,
-    jobKind: job.job_kind,
+    jobKind: job.job_kind ?? undefined,
     targetSessionId: job.target_session_id ?? undefined,
     script: job.script ?? undefined,
     deliveryChannelId: job.delivery_channel_id ?? undefined,

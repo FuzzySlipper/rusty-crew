@@ -1493,11 +1493,16 @@ function stringList(input: unknown, name: string): string[] {
 
 function externalBindingStatus(
   input: unknown,
-): "active" | "degraded" | "archived" {
+): "active" | "degraded" | "disconnected" | "archived" {
   const status = optionalString(input) ?? "active";
-  if (status !== "active" && status !== "degraded" && status !== "archived") {
+  if (
+    status !== "active" &&
+    status !== "degraded" &&
+    status !== "disconnected" &&
+    status !== "archived"
+  ) {
     throw new Error(
-      "external binding status must be active, degraded, or archived",
+      "external binding status must be active, degraded, disconnected, or archived",
     );
   }
   return status;

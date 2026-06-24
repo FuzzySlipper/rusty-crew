@@ -1749,6 +1749,80 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shared_runtime_config_parity_fixture_validates_and_plans_create_profile() {
+        // Temporary parity guard: TS still hand-loads service/profile files and
+        // converts them into this Rust-owned validation shape. Keep this
+        // fixture aligned with `validation-input.camel.json` until bridge
+        // manifest/codegen generates the TS facade types.
+        let input: RuntimeConfigValidationInput = fixture_json(
+            include_str!(
+                "../../../../fixtures/runtime-config-parity/valid/validation-input.snake.json"
+            ),
+            "/tmp/rusty-crew-config-parity",
+        );
+
+        let validation = validate_runtime_config_input(&input);
+        assert!(validation.ok(), "{:?}", validation.diagnostics);
+
+        let plan = plan_runtime_config(&input);
+        assert!(plan.ok(), "{:?}", plan.diagnostics);
+        assert_eq!(plan.runtime_config, input.runtime_config);
+        assert!(plan.derived_scheduled_jobs.is_empty());
+        assert!(plan.derived_mcp_bindings.is_empty());
+
+        assert_eq!(input.runtime_config.brains.len(), 1);
+        assert_eq!(input.runtime_config.sessions.len(), 1);
+        assert_eq!(input.runtime_config.scheduled_jobs.len(), 3);
+        assert_eq!(input.runtime_config.channel_bindings.len(), 1);
+        assert_eq!(input.runtime_config.mcp_bindings.len(), 2);
+        assert_eq!(
+            input.runtime_config.channel_bindings[0].status,
+            ExternalBindingStatusDraft::Disconnected
+        );
+
+        let request: CreateProfileRequest = fixture_json(
+            include_str!(
+                "../../../../fixtures/runtime-config-parity/valid/create-profile-request.snake.json"
+            ),
+            "/tmp/rusty-crew-config-parity",
+        );
+        let create_plan = plan_create_profile(&CreateProfilePlanInput {
+            runtime_config: input.runtime_config,
+            profiles: input.profiles,
+            request,
+        });
+        assert!(create_plan.ok(), "{:?}", create_plan.diagnostics);
+        assert_eq!(
+            create_plan
+                .profile_seed
+                .as_ref()
+                .map(|seed| seed.profile_id.to_string()),
+            Some("parity-created".to_string())
+        );
+        assert_eq!(
+            create_plan
+                .runtime_brain
+                .as_ref()
+                .map(|brain| brain.implementation_id.to_string()),
+            Some("parity-created-brain".to_string())
+        );
+        assert_eq!(
+            create_plan
+                .runtime_session
+                .as_ref()
+                .map(|session| session.session_id.to_string()),
+            Some("parity-created-session".to_string())
+        );
+        assert_eq!(
+            create_plan
+                .profile_mcp_config
+                .as_ref()
+                .and_then(|mcp| mcp.tool_profile.as_deref()),
+            Some("planner")
+        );
+    }
+
     fn valid_draft() -> RuntimeConfigDraft {
         RuntimeConfigDraft {
             profiles_dir: "/tmp/rusty-crew/profiles".to_string(),
@@ -1873,5 +1947,13 @@ mod tests {
             };
             actual.remove(index);
         }
+    }
+
+    fn fixture_json<T>(raw: &str, root: &str) -> T
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        serde_json::from_str(&raw.replace("__FIXTURE_ROOT__", root))
+            .expect("shared runtime config parity fixture should deserialize")
     }
 }

@@ -1,0 +1,20 @@
+{
+  "profile_id": "parity-created",
+  "display_name": "Parity Created",
+  "agent_id": "parity-created-agent",
+  "session_id": "parity-created-session",
+  "implementation_id": "parity-created-brain",
+  "kind": "full",
+  "model_config": {
+    "provider": "den-router",
+    "model_name": "local-deterministic",
+    "temperature_milli": 200,
+    "max_output_tokens": 1024
+  },
+  "brain": {
+    "module": "pi",
+    "strategy": "default"
+  },
+  "mcp_tool_profile": "planner",
+  "profile_file_exists": false
+}
