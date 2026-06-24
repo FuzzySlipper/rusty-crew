@@ -1,5 +1,5 @@
 import {
-  createMcpPiAgentTool,
+  createMcpBrainTool,
   discoverMcpToolCandidates,
   type McpDiscoveryReport,
   type McpRegistryCandidate,
@@ -203,7 +203,7 @@ export function createServiceMcpToolResolver(input: {
           toolProfile: wake.state.session.toolProfile as ToolProfile,
         });
         if (!decision.allowed) return [];
-        const tool = createMcpPiAgentTool(binding, candidate, executor);
+        const tool = createMcpBrainTool(binding, candidate, executor);
         return [
           {
             ...tool,

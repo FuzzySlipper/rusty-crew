@@ -1,9 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import { Type, type Static } from "typebox";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 
@@ -119,13 +116,13 @@ export function createWebToolResolver(
   return () => resolveWebTools(context);
 }
 
-export function resolveWebTools(context: WebToolContext = {}): PiAgentTool[] {
+export function resolveWebTools(context: WebToolContext = {}): BrainTool[] {
   return [webSearchTool(context), webExtractTool(context)];
 }
 
 export function webSearchTool(
   context: WebSearchToolContext = {},
-): PiAgentTool<typeof webSearchParameters, WebSearchToolDetails> {
+): BrainTool<typeof webSearchParameters, WebSearchToolDetails> {
   const searchDefaultLimit = clampInt(
     context.searchDefaultLimit ?? defaultSearchLimit,
     1,
@@ -177,7 +174,7 @@ export function webSearchTool(
 
 export function webExtractTool(
   context: WebExtractToolContext = {},
-): PiAgentTool<typeof webExtractParameters, WebExtractToolDetails> {
+): BrainTool<typeof webExtractParameters, WebExtractToolDetails> {
   const fetchImpl = context.fetchImpl ?? fetch;
   const maxUrls = clampInt(
     context.maxExtractUrls ?? defaultMaxExtractUrls,
@@ -755,7 +752,7 @@ function clampInt(value: number, min: number, max: number): number {
 
 function resultDetails(
   details: WebSearchToolDetails,
-): AgentToolResult<WebSearchToolDetails> {
+): BrainToolResult<WebSearchToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,
@@ -764,7 +761,7 @@ function resultDetails(
 
 function extractResultDetails(
   details: WebExtractToolDetails,
-): AgentToolResult<WebExtractToolDetails> {
+): BrainToolResult<WebExtractToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,

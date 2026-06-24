@@ -1,7 +1,4 @@
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { SessionState } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import {
@@ -160,9 +157,7 @@ export function createBrowserToolResolver(
     });
 }
 
-export function resolveBrowserTools(
-  context: BrowserToolContext,
-): PiAgentTool[] {
+export function resolveBrowserTools(context: BrowserToolContext): BrainTool[] {
   return [
     browserNavigateTool(context),
     browserSnapshotTool(context),
@@ -178,7 +173,7 @@ export function resolveBrowserTools(
 
 export function browserNavigateTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserNavigateParameters, BrowserActionDetails> {
+): BrainTool<typeof browserNavigateParameters, BrowserActionDetails> {
   return {
     name: "browser_navigate",
     label: "Browser navigate",
@@ -208,7 +203,7 @@ export function browserNavigateTool(
 
 export function browserSnapshotTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserSnapshotParameters, BrowserSnapshotDetails> {
+): BrainTool<typeof browserSnapshotParameters, BrowserSnapshotDetails> {
   return {
     name: "browser_snapshot",
     label: "Browser snapshot",
@@ -245,7 +240,7 @@ export function browserSnapshotTool(
 
 export function browserClickTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserRefParameters, BrowserActionDetails> {
+): BrainTool<typeof browserRefParameters, BrowserActionDetails> {
   return {
     name: "browser_click",
     label: "Browser click",
@@ -272,7 +267,7 @@ export function browserClickTool(
 
 export function browserTypeTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserTypeParameters, BrowserActionDetails> {
+): BrainTool<typeof browserTypeParameters, BrowserActionDetails> {
   return {
     name: "browser_type",
     label: "Browser type",
@@ -301,7 +296,7 @@ export function browserTypeTool(
 
 export function browserScrollTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserScrollParameters, BrowserActionDetails> {
+): BrainTool<typeof browserScrollParameters, BrowserActionDetails> {
   return {
     name: "browser_scroll",
     label: "Browser scroll",
@@ -326,7 +321,7 @@ export function browserScrollTool(
 
 export function browserBackTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserBackParameters, BrowserActionDetails> {
+): BrainTool<typeof browserBackParameters, BrowserActionDetails> {
   return {
     name: "browser_back",
     label: "Browser back",
@@ -349,7 +344,7 @@ export function browserBackTool(
 
 export function browserPressTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserPressParameters, BrowserActionDetails> {
+): BrainTool<typeof browserPressParameters, BrowserActionDetails> {
   return {
     name: "browser_press",
     label: "Browser press",
@@ -378,7 +373,7 @@ export function browserPressTool(
 
 export function browserConsoleTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserConsoleParameters, BrowserConsoleDetails> {
+): BrainTool<typeof browserConsoleParameters, BrowserConsoleDetails> {
   return {
     name: "browser_console",
     label: "Browser console",
@@ -405,7 +400,7 @@ export function browserConsoleTool(
 
 export function browserVisionTool(
   context: BrowserToolContext,
-): PiAgentTool<typeof browserVisionParameters, BrowserVisionDetails> {
+): BrainTool<typeof browserVisionParameters, BrowserVisionDetails> {
   return {
     name: "browser_vision",
     label: "Browser vision capture",
@@ -526,7 +521,7 @@ function axTreeLines(value: unknown): string[] {
 function textResult<TDetails extends Record<string, unknown>>(
   text: string,
   details: TDetails,
-): AgentToolResult<TDetails> {
+): BrainToolResult<TDetails> {
   return {
     content: [{ type: "text", text }],
     details,

@@ -3,10 +3,7 @@ import type {
   NativeProfileMemoryCaps,
   NativeProfileMemoryRecord,
 } from "@rusty-crew/native-bridge";
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { SessionState } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import type { BrainToolResolver } from "./tool-session-selection.js";
@@ -86,7 +83,7 @@ export function createDenseProfileMemoryToolResolver(
 
 export function denseProfileMemoryTool(
   context: DenseProfileMemoryToolContext,
-): PiAgentTool<typeof parameters, DenseProfileMemoryToolDetails> {
+): BrainTool<typeof parameters, DenseProfileMemoryToolDetails> {
   return {
     name: "dense_profile_memory",
     label: "Dense profile memory",
@@ -277,7 +274,7 @@ function denseResult(
     reasonCode?: string;
     result?: unknown;
   },
-): AgentToolResult<DenseProfileMemoryToolDetails> {
+): BrainToolResult<DenseProfileMemoryToolDetails> {
   const result = {
     ok: details.ok,
     operation,

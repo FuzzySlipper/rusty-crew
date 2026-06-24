@@ -1,7 +1,4 @@
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type {
   BrainAction,
   FanOutFailurePolicy,
@@ -145,7 +142,7 @@ export const resolveDelegationTools: BrainToolResolver = ({ wake, actions }) =>
     parentResourceLimits: wake.state.session.resourceLimits,
   });
 
-export function delegationTools(context: DelegationToolContext): PiAgentTool[] {
+export function delegationTools(context: DelegationToolContext): BrainTool[] {
   return [
     spawnSubagentTool(context),
     fanOutSubagentsTool(context),
@@ -157,7 +154,7 @@ export function delegationTools(context: DelegationToolContext): PiAgentTool[] {
 
 export function spawnSubagentTool(
   context: DelegationToolContext,
-): PiAgentTool<typeof spawnSubagentParameters, DelegationToolDetails> {
+): BrainTool<typeof spawnSubagentParameters, DelegationToolDetails> {
   return {
     name: "spawn_subagent",
     label: "Spawn subagent",
@@ -183,7 +180,7 @@ export function spawnSubagentTool(
 
 export function fanOutSubagentsTool(
   context: DelegationToolContext,
-): PiAgentTool<typeof fanOutSubagentsParameters, DelegationToolDetails> {
+): BrainTool<typeof fanOutSubagentsParameters, DelegationToolDetails> {
   return {
     name: "fan_out_subagents",
     label: "Fan out subagents",
@@ -219,7 +216,7 @@ export function fanOutSubagentsTool(
 
 export function scoutCodebaseTool(
   context: DelegationToolContext,
-): PiAgentTool<typeof scoutCodebaseParameters, DelegationToolDetails> {
+): BrainTool<typeof scoutCodebaseParameters, DelegationToolDetails> {
   return {
     name: "scout_codebase",
     label: "Scout codebase",
@@ -255,7 +252,7 @@ export function scoutCodebaseTool(
 
 export function summarizeFilesTool(
   context: DelegationToolContext,
-): PiAgentTool<typeof summarizeFilesParameters, DelegationToolDetails> {
+): BrainTool<typeof summarizeFilesParameters, DelegationToolDetails> {
   return {
     name: "summarize_files",
     label: "Summarize files",
@@ -289,7 +286,7 @@ export function summarizeFilesTool(
 
 export function findRelevantPathsTool(
   context: DelegationToolContext,
-): PiAgentTool<typeof findRelevantPathsParameters, DelegationToolDetails> {
+): BrainTool<typeof findRelevantPathsParameters, DelegationToolDetails> {
   return {
     name: "find_relevant_paths",
     label: "Find relevant paths",
@@ -365,7 +362,7 @@ function queueDelegationActions(
     DelegationToolDetails,
     "groupId" | "failurePolicy" | "maxConcurrency"
   > = {},
-): AgentToolResult<DelegationToolDetails> {
+): BrainToolResult<DelegationToolDetails> {
   if (!context.actions) {
     return result({
       ok: false,
@@ -425,7 +422,7 @@ function bullets(values: readonly string[]): string {
 
 function result(
   details: DelegationToolDetails,
-): AgentToolResult<DelegationToolDetails> {
+): BrainToolResult<DelegationToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,

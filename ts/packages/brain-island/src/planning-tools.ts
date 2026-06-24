@@ -12,10 +12,7 @@ import type {
   NormalizedChannelReadbackRequest,
   NormalizedChannelReadbackResponse,
 } from "@rusty-crew/contracts";
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import { Type, type Static } from "typebox";
 
 export type TodoStatus =
@@ -417,7 +414,7 @@ type CuratorExecuteParams = Static<typeof curatorExecuteParameters>;
 
 export function todoTool(
   context: TodoToolContext,
-): PiAgentTool<typeof todoParameters, TodoToolDetails> {
+): BrainTool<typeof todoParameters, TodoToolDetails> {
   return {
     name: "todo",
     label: "Session todo",
@@ -496,7 +493,7 @@ export function renderSessionTodoContext(
 
 export function sessionSearchTool(
   context: SessionSearchToolContext,
-): PiAgentTool<typeof sessionSearchParameters, SessionSearchToolDetails> {
+): BrainTool<typeof sessionSearchParameters, SessionSearchToolDetails> {
   return {
     name: "session_search",
     label: "Search runtime sessions",
@@ -553,7 +550,7 @@ export function sessionSearchTool(
 
 export function channelReadbackTool(
   context: ChannelReadbackToolContext,
-): PiAgentTool<typeof channelReadbackParameters, ChannelReadbackToolDetails> {
+): BrainTool<typeof channelReadbackParameters, ChannelReadbackToolDetails> {
   return {
     name: "channel_readback",
     label: "Channel readback",
@@ -637,7 +634,7 @@ export function channelReadbackTool(
 
 export function counterResetTool(
   context: CounterResetToolContext,
-): PiAgentTool<typeof counterResetParameters, CounterResetToolDetails> {
+): BrainTool<typeof counterResetParameters, CounterResetToolDetails> {
   return {
     name: "counter_reset",
     label: "Runtime counters",
@@ -752,7 +749,7 @@ export function counterResetTool(
 
 export function curatorExecuteTool(
   context: CuratorExecuteContext,
-): PiAgentTool<typeof curatorExecuteParameters, CuratorExecuteToolDetails> {
+): BrainTool<typeof curatorExecuteParameters, CuratorExecuteToolDetails> {
   return {
     name: "curator_execute",
     label: "Curator execute",
@@ -816,7 +813,7 @@ export function curatorExecuteTool(
 
 function todoResult(
   details: TodoToolDetails,
-): AgentToolResult<TodoToolDetails> {
+): BrainToolResult<TodoToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,
@@ -825,7 +822,7 @@ function todoResult(
 
 function channelReadbackResult(
   details: ChannelReadbackToolDetails,
-): AgentToolResult<ChannelReadbackToolDetails> {
+): BrainToolResult<ChannelReadbackToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,
@@ -902,7 +899,7 @@ function validateCounterScope(
 
 function counterResult(
   details: CounterResetToolDetails,
-): AgentToolResult<CounterResetToolDetails> {
+): BrainToolResult<CounterResetToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,
@@ -911,7 +908,7 @@ function counterResult(
 
 function curatorResult(
   details: CuratorExecuteToolDetails,
-): AgentToolResult<CuratorExecuteToolDetails> {
+): BrainToolResult<CuratorExecuteToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,
@@ -920,7 +917,7 @@ function curatorResult(
 
 function result(
   details: SessionSearchToolDetails,
-): AgentToolResult<SessionSearchToolDetails> {
+): BrainToolResult<SessionSearchToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,

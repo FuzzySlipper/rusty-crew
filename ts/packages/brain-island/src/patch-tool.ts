@@ -2,10 +2,7 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import { Type, type Static } from "typebox";
 import type { LocalToolContext } from "./local-code-tools.js";
 
@@ -55,7 +52,7 @@ interface V4AHunk {
 
 export function patchTool(
   context: LocalToolContext,
-): PiAgentTool<typeof patchParameters, PatchToolDetails> {
+): BrainTool<typeof patchParameters, PatchToolDetails> {
   return {
     name: "patch",
     label: "Patch",
@@ -75,7 +72,7 @@ export function patchTool(
 async function executeReplaceMode(
   context: LocalToolContext,
   params: PatchParams,
-): Promise<AgentToolResult<PatchToolDetails>> {
+): Promise<BrainToolResult<PatchToolDetails>> {
   const path = params.path ?? "";
   const oldString = params.old_string ?? "";
   const newString = params.new_string ?? "";
@@ -151,7 +148,7 @@ async function executeReplaceMode(
 async function executePatchMode(
   context: LocalToolContext,
   params: PatchParams,
-): Promise<AgentToolResult<PatchToolDetails>> {
+): Promise<BrainToolResult<PatchToolDetails>> {
   const patchBlock = params.patch ?? "";
   if (patchBlock.length === 0) {
     return errorResult("patch field is required in patch mode");
@@ -490,11 +487,11 @@ function scopedPath(workdir: string, path: string): string {
 function textResult(
   text: string,
   details: PatchToolDetails,
-): AgentToolResult<PatchToolDetails> {
+): BrainToolResult<PatchToolDetails> {
   return { content: [{ type: "text", text }], details };
 }
 
-function errorResult(message: string): AgentToolResult<PatchToolDetails> {
+function errorResult(message: string): BrainToolResult<PatchToolDetails> {
   return {
     content: [{ type: "text", text: message }],
     details: { ok: false, error: message },

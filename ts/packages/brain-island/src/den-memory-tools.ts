@@ -5,10 +5,7 @@ import type {
   DenMemoryScope,
   DenMemorySourceRef,
 } from "@rusty-crew/adapter-den";
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { SessionState } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import type { BrainToolResolver } from "./tool-session-selection.js";
@@ -103,7 +100,7 @@ export function createDenMemoryToolResolver(
 
 export function resolveDenMemoryTools(
   context: DenMemoryToolContext,
-): PiAgentTool[] {
+): BrainTool[] {
   return [
     denMemoryRecallTool(context),
     denMemoryReadTool(context),
@@ -115,7 +112,7 @@ export function resolveDenMemoryTools(
 
 export function denMemoryRecallTool(
   context: DenMemoryToolContext,
-): PiAgentTool<typeof recallParameters, DenMemoryToolDetails> {
+): BrainTool<typeof recallParameters, DenMemoryToolDetails> {
   return {
     name: "den_memory_recall",
     label: "Recall Den memory",
@@ -137,7 +134,7 @@ export function denMemoryRecallTool(
 
 export function denMemoryReadTool(
   context: DenMemoryToolContext,
-): PiAgentTool<typeof readParameters, DenMemoryToolDetails> {
+): BrainTool<typeof readParameters, DenMemoryToolDetails> {
   return {
     name: "den_memory_read",
     label: "Read Den memory",
@@ -161,7 +158,7 @@ export function denMemoryReadTool(
 
 export function denMemorySearchTool(
   context: DenMemoryToolContext,
-): PiAgentTool<typeof searchParameters, DenMemoryToolDetails> {
+): BrainTool<typeof searchParameters, DenMemoryToolDetails> {
   return {
     name: "den_memory_search",
     label: "Search Den memory",
@@ -183,7 +180,7 @@ export function denMemorySearchTool(
 
 export function denMemoryStoreTool(
   context: DenMemoryToolContext,
-): PiAgentTool<typeof storeParameters, DenMemoryToolDetails> {
+): BrainTool<typeof storeParameters, DenMemoryToolDetails> {
   return {
     name: "den_memory_store",
     label: "Store Den memory",
@@ -235,7 +232,7 @@ export function denMemoryStoreTool(
 
 export function denMemoryProposeTool(
   context: DenMemoryToolContext,
-): PiAgentTool<typeof proposeParameters, DenMemoryToolDetails> {
+): BrainTool<typeof proposeParameters, DenMemoryToolDetails> {
   return {
     name: "den_memory_propose",
     label: "Propose Den memory",
@@ -272,8 +269,8 @@ async function withMemoryClient(
   operation: DenMemoryToolDetails["operation"],
   callback: (
     client: DenMemoryClient,
-  ) => Promise<AgentToolResult<DenMemoryToolDetails>>,
-): Promise<AgentToolResult<DenMemoryToolDetails>> {
+  ) => Promise<BrainToolResult<DenMemoryToolDetails>>,
+): Promise<BrainToolResult<DenMemoryToolDetails>> {
   if (context.policy.mode === "off") {
     return deniedResult(operation, context, "den_memory_policy_off", false);
   }
@@ -344,7 +341,7 @@ function resultDetails(
   context: DenMemoryToolContext,
   action: DenMemoryToolDetails["action"],
   result: unknown,
-): AgentToolResult<DenMemoryToolDetails> {
+): BrainToolResult<DenMemoryToolDetails> {
   const details = {
     ok: true,
     operation,
@@ -363,7 +360,7 @@ function deniedResult(
   context: DenMemoryToolContext,
   reasonCode: string,
   retryable: boolean,
-): AgentToolResult<DenMemoryToolDetails> {
+): BrainToolResult<DenMemoryToolDetails> {
   const details = {
     ok: false,
     operation,
@@ -382,7 +379,7 @@ function errorResult(
   operation: DenMemoryToolDetails["operation"],
   context: DenMemoryToolContext,
   error: unknown,
-): AgentToolResult<DenMemoryToolDetails> {
+): BrainToolResult<DenMemoryToolDetails> {
   const memoryError = error as Partial<DenMemoryClientError>;
   const details = {
     ok: false,

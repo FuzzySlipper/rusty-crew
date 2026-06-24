@@ -7,10 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
-import type {
-  AgentTool as PiAgentTool,
-  AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import { Type, type Static } from "typebox";
 import {
   loadSkill,
@@ -115,11 +112,8 @@ export function createSkillsToolResolver(
   return () => resolveSkillsTools(context);
 }
 
-export function resolveSkillsTools(context: SkillsToolContext): PiAgentTool[] {
-  const tools: PiAgentTool[] = [
-    skillsListTool(context),
-    skillViewTool(context),
-  ];
+export function resolveSkillsTools(context: SkillsToolContext): BrainTool[] {
+  const tools: BrainTool[] = [skillsListTool(context), skillViewTool(context)];
   if (context.manageMode && context.manageMode !== "off") {
     tools.push(skillManageTool(context));
   }
@@ -128,7 +122,7 @@ export function resolveSkillsTools(context: SkillsToolContext): PiAgentTool[] {
 
 export function skillsListTool(
   context: SkillsToolContext,
-): PiAgentTool<typeof listParameters, SkillsToolDetails> {
+): BrainTool<typeof listParameters, SkillsToolDetails> {
   return {
     name: "skills_list",
     label: "List skills",
@@ -155,7 +149,7 @@ export function skillsListTool(
 
 export function skillViewTool(
   context: SkillsToolContext,
-): PiAgentTool<typeof viewParameters, SkillsToolDetails> {
+): BrainTool<typeof viewParameters, SkillsToolDetails> {
   return {
     name: "skill_view",
     label: "View skill",
@@ -206,7 +200,7 @@ export function skillViewTool(
 
 export function skillManageTool(
   context: SkillsToolContext,
-): PiAgentTool<typeof manageParameters, SkillsToolDetails> {
+): BrainTool<typeof manageParameters, SkillsToolDetails> {
   return {
     name: "skill_manage",
     label: "Manage skill",
@@ -259,7 +253,7 @@ async function validateSkillsRoot(
   operation: SkillsToolDetails["operation"],
 ): Promise<
   | { ok: true; skillsDir: string }
-  | { ok: false; result: AgentToolResult<SkillsToolDetails> }
+  | { ok: false; result: BrainToolResult<SkillsToolDetails> }
 > {
   if (!context.skillsDir) {
     return {
@@ -351,7 +345,7 @@ function isSafeSkillSlug(slug: string): boolean {
 async function handleManageCreate(
   skillsDir: string,
   params: ManageParams,
-): Promise<AgentToolResult<SkillsToolDetails>> {
+): Promise<BrainToolResult<SkillsToolDetails>> {
   const content = requiredParam(params.content, "missing_content");
   validateSkillMarkdown(content, params.slug);
   const skillPath = skillMarkdownPath(skillsDir, params.slug);
@@ -379,7 +373,7 @@ async function handleManageCreate(
 async function handleManagePatch(
   skillsDir: string,
   params: ManageParams,
-): Promise<AgentToolResult<SkillsToolDetails>> {
+): Promise<BrainToolResult<SkillsToolDetails>> {
   const skillPath = skillMarkdownPath(skillsDir, params.slug);
   const existing = await readExistingSkill(skillPath);
   const fullContent = params.content;
@@ -428,7 +422,7 @@ async function handleManagePatch(
 async function handleManageWriteFile(
   skillsDir: string,
   params: ManageParams,
-): Promise<AgentToolResult<SkillsToolDetails>> {
+): Promise<BrainToolResult<SkillsToolDetails>> {
   const skillPath = skillMarkdownPath(skillsDir, params.slug);
   await readExistingSkill(skillPath);
   const filePath = requiredParam(params.file_path, "missing_file_path");
@@ -461,7 +455,7 @@ async function handleManageDelete(
   skillsDir: string,
   params: ManageParams,
   context: SkillsToolContext,
-): Promise<AgentToolResult<SkillsToolDetails>> {
+): Promise<BrainToolResult<SkillsToolDetails>> {
   if (params.absorbed_into === undefined) {
     return manageResult(params, {
       ok: false,
@@ -686,7 +680,7 @@ function manageResult(
     reasonCode?: string;
     management?: Partial<SkillManagementResult>;
   },
-): AgentToolResult<SkillsToolDetails> {
+): BrainToolResult<SkillsToolDetails> {
   return result({
     ok: details.ok,
     operation: "manage",
@@ -703,7 +697,7 @@ function manageResult(
 
 function result(
   details: SkillsToolDetails,
-): AgentToolResult<SkillsToolDetails> {
+): BrainToolResult<SkillsToolDetails> {
   return {
     content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
     details,

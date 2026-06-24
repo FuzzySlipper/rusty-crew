@@ -10,7 +10,7 @@ import type {
 import {
   convertMcpToolsToCandidates,
   createMcpAdapterRegistration,
-  createMcpPiAgentTool,
+  createMcpBrainTool,
   createSimulatedMcpTransportFactory,
   discoverMcpToolCandidates,
   McpSurfaceManager,
@@ -189,7 +189,7 @@ assert.equal(
 );
 
 const executorCalls: unknown[] = [];
-const piTool = createMcpPiAgentTool(alphaBinding, discovered.candidates[0]!, {
+const brainTool = createMcpBrainTool(alphaBinding, discovered.candidates[0]!, {
   callTool(input) {
     executorCalls.push(input);
     return {
@@ -202,13 +202,13 @@ const piTool = createMcpPiAgentTool(alphaBinding, discovered.candidates[0]!, {
   },
 });
 
-assert.equal(piTool.name, "mcp_read_resource");
-assert.equal(piTool.label, "Read resource");
-const piToolResult = await piTool.execute("tool-call-1", {
+assert.equal(brainTool.name, "mcp_read_resource");
+assert.equal(brainTool.label, "Read resource");
+const brainToolResult = await brainTool.execute("tool-call-1", {
   uri: "den://doc/example",
   includeMetadata: null,
 });
-assert.equal(piToolResult.content[0]?.type, "text");
+assert.equal(brainToolResult.content[0]?.type, "text");
 assert.equal(executorCalls.length, 1);
 
 console.log(

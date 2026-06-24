@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   convertMcpToolsToCandidates,
-  createMcpPiAgentTool,
+  createMcpBrainTool,
   createSimulatedMcpTransportFactory,
   McpSurfaceManager,
   type McpToolExecutor,
@@ -130,12 +130,12 @@ const executor: McpToolExecutor = {
     };
   },
 };
-const alphaTool = createMcpPiAgentTool(
+const alphaTool = createMcpBrainTool(
   alphaBinding,
   alphaDiscovery.candidates[0]!,
   executor,
 );
-const betaTool = createMcpPiAgentTool(
+const betaTool = createMcpBrainTool(
   betaBinding,
   betaDiscovery.candidates[0]!,
   executor,

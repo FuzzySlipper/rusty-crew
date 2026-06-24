@@ -1,13 +1,13 @@
 import type { McpBindingRecord } from "@rusty-crew/contracts";
 import { Type, type TSchema } from "typebox";
 
-export interface PiCompatibleToolResult<TDetails = unknown> {
+export interface BrainCompatibleToolResult<TDetails = unknown> {
   content: Array<{ type: "text"; text: string }>;
   details: TDetails;
   terminate?: boolean;
 }
 
-export interface PiCompatibleAgentTool<
+export interface BrainCompatibleTool<
   TParameters extends TSchema = TSchema,
   TDetails = unknown,
 > {
@@ -19,7 +19,7 @@ export interface PiCompatibleAgentTool<
     toolCallId: string,
     params: unknown,
     signal?: AbortSignal,
-  ): Promise<PiCompatibleToolResult<TDetails>>;
+  ): Promise<BrainCompatibleToolResult<TDetails>>;
   executionMode?: "sequential" | "parallel";
 }
 
@@ -200,11 +200,11 @@ export function convertMcpToolsToCandidates(
   };
 }
 
-export function createMcpPiAgentTool(
+export function createMcpBrainTool(
   binding: McpBindingRecord,
   candidate: McpRegistryCandidate,
   executor: McpToolExecutor,
-): PiCompatibleAgentTool<TSchema, McpToolExecutionResult["details"]> {
+): BrainCompatibleTool<TSchema, McpToolExecutionResult["details"]> {
   return {
     name: candidate.name,
     description: candidate.description,
@@ -221,7 +221,7 @@ export function createMcpPiAgentTool(
         toolCallId,
         signal,
       });
-      return toPiToolResult(result);
+      return toBrainToolResult(result);
     },
   };
 }
@@ -393,9 +393,9 @@ function outputShapeForTool(
   return `mcp.${server}.${tool.name.replace(/[^A-Za-z0-9]+/g, "_").toLowerCase()}.result.v1`;
 }
 
-function toPiToolResult(
+function toBrainToolResult(
   result: McpToolExecutionResult,
-): PiCompatibleToolResult<McpToolExecutionResult["details"]> {
+): BrainCompatibleToolResult<McpToolExecutionResult["details"]> {
   return {
     content:
       typeof result.content === "string"

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
-import type { AgentTool as PiAgentTool } from "@earendil-works/pi-agent-core";
+import type { BrainTool } from "./brain-tool.js";
 import type { ResourceLimits } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
 import { patchTool } from "./patch-tool.js";
@@ -74,7 +74,7 @@ export const resolveLocalCodeTools: BrainToolResolver = ({ wake }) => {
 
 export function readFileTool(
   context: LocalToolContext,
-): PiAgentTool<typeof readFileParameters> {
+): BrainTool<typeof readFileParameters> {
   return {
     name: "read_file",
     description: "Read a UTF-8 text file from the session workdir.",
@@ -103,7 +103,7 @@ export function readFileTool(
 
 export function writeFileTool(
   context: LocalToolContext,
-): PiAgentTool<typeof writeFileParameters> {
+): BrainTool<typeof writeFileParameters> {
   return {
     name: "write_file",
     description: "Write a bounded UTF-8 text file inside the session workdir.",
@@ -133,7 +133,7 @@ export function writeFileTool(
 
 export function searchFilesTool(
   context: LocalToolContext,
-): PiAgentTool<typeof searchFilesParameters> {
+): BrainTool<typeof searchFilesParameters> {
   return {
     name: "search_files",
     description:
@@ -166,7 +166,7 @@ export function searchFilesTool(
 
 export function terminalTool(
   context: LocalToolContext,
-): PiAgentTool<typeof terminalParameters> {
+): BrainTool<typeof terminalParameters> {
   return {
     name: "terminal",
     description: "Run a bounded shell command in the session workdir.",
@@ -193,7 +193,7 @@ export function terminalTool(
 
 export function gitStatusTool(
   context: LocalToolContext,
-): PiAgentTool<typeof gitStatusParameters> {
+): BrainTool<typeof gitStatusParameters> {
   return {
     name: "git_status",
     description:
@@ -221,7 +221,7 @@ export function gitStatusTool(
 
 export function gitDiffTool(
   context: LocalToolContext,
-): PiAgentTool<typeof gitDiffParameters> {
+): BrainTool<typeof gitDiffParameters> {
   return {
     name: "git_diff",
     description: "Return a git diff from the session workdir.",
