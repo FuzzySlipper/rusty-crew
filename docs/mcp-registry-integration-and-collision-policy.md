@@ -26,6 +26,7 @@ It exports:
 
 - `integrateMcpToolsWithRegistry`
 - `mcpCandidateToRegistryEntry`
+- `mcpCandidateToExecutableBinding`
 
 `brain-island` depends on `adapter-mcp` for the candidate type only; discovery
 still happens in the adapter.
@@ -35,9 +36,12 @@ still happens in the adapter.
 The integration function:
 
 1. starts with the base canonical registry entries;
-2. converts MCP candidates into registry entries;
-3. validates the combined registry with existing validation rules;
-4. builds inventory through the existing `buildToolInventory` path;
+2. converts MCP candidates into portable registry metadata and separate TS
+   executable bindings;
+3. validates the combined metadata and binding set with existing validation
+   rules;
+4. builds inventory through the existing `buildToolInventory` path only when
+   validation succeeds;
 5. returns a `tool_catalog_changed` payload for affected sessions/profiles.
 
 This keeps selected, denied, missing, unavailable, and collision states visible
@@ -65,9 +69,12 @@ The integration layer maps them to `resource_denied` so sessions can explain
 that a tool is expected by profile but unavailable due to surface/resource
 state.
 
-## Source Metadata
+## Source And Execution Metadata
 
-MCP registry entries retain source metadata:
+MCP registry entries are portable metadata. They intentionally do not retain TS
+execution modules, inventory-test details, or MCP source routing fields.
+
+MCP executable bindings retain the TS-only source and execution metadata:
 
 - binding ID;
 - adapter ID;
@@ -79,7 +86,7 @@ MCP registry entries retain source metadata:
 - output schema.
 
 This metadata is not part of the model-callable name, but it is available for
-diagnostics and future execution routing.
+diagnostics and execution routing.
 
 ## Covered Cases
 
@@ -91,4 +98,6 @@ diagnostics and future execution routing.
 - local-name collision failure by default;
 - explicit source-prefix collision policy;
 - duplicate MCP exposed-name collision failure;
+- selected descriptor parity for successful MCP tools;
+- source routing retained on executable bindings;
 - emitting a `tool_catalog_changed` payload.

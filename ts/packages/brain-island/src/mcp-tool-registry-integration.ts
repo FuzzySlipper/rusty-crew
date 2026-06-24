@@ -26,14 +26,12 @@ export interface McpRegistryIntegrationInput {
   unavailableTools?: readonly string[];
 }
 
-export interface McpToolRegistryEntry extends ToolRegistryEntry {
-  mcpSource: McpRegistryCandidate["source"];
-  mcpAnnotations: McpRegistryCandidate["annotations"];
-  mcpOutputSchema?: McpRegistryCandidate["outputSchema"];
-}
+export type McpToolRegistryEntry = ToolRegistryEntry;
 
 export interface McpToolExecutableBinding extends ToolExecutableBinding {
   mcpSource: McpRegistryCandidate["source"];
+  mcpAnnotations: McpRegistryCandidate["annotations"];
+  mcpOutputSchema?: McpRegistryCandidate["outputSchema"];
 }
 
 export interface McpRegistryIntegrationReport {
@@ -117,9 +115,6 @@ export function mcpCandidateToRegistryEntry(
     outputShape: candidate.outputShape,
     version: candidate.version,
     coexistenceNote: candidate.coexistenceNote,
-    mcpSource: candidate.source,
-    mcpAnnotations: candidate.annotations,
-    mcpOutputSchema: candidate.outputSchema,
   };
 }
 
@@ -132,6 +127,8 @@ export function mcpCandidateToExecutableBinding(
     implementationModule: `${candidate.implementationModule}:${candidate.source.bindingId}:${candidate.source.sourceToolName}`,
     inventoryTest: candidate.inventoryTest,
     mcpSource: candidate.source,
+    mcpAnnotations: candidate.annotations,
+    mcpOutputSchema: candidate.outputSchema,
   };
 }
 
