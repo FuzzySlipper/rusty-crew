@@ -20,6 +20,16 @@ export interface BrainModuleSelection {
   strategy?: string;
 }
 
+export type BrainModuleToolAdapterStatus =
+  | "neutral_tools_adapted_to_pi"
+  | "native_neutral_tools"
+  | "tools_not_used"
+  | "unknown";
+
+export interface BrainModuleDiagnosticsMetadata {
+  toolAdapterStatus: BrainModuleToolAdapterStatus;
+}
+
 export interface BrainModuleConfigSelection {
   module?: BrainModuleId;
   strategy?: string;
@@ -41,6 +51,7 @@ export interface BrainModuleContext {
 export interface BrainModule {
   readonly moduleId: BrainModuleId;
   readonly displayName: string;
+  readonly diagnostics: BrainModuleDiagnosticsMetadata;
   createBrain(context: BrainModuleContext): Promise<BrainImplementation>;
 }
 
@@ -108,6 +119,9 @@ export function brainModuleSelectionFromRuntimeConfig(
 export const piAgentCoreBrainModule: BrainModule = {
   moduleId: "pi-agent-core",
   displayName: "pi-agent-core",
+  diagnostics: {
+    toolAdapterStatus: "neutral_tools_adapted_to_pi",
+  },
   async createBrain(context) {
     const profile = context.profile.profile;
     const createAgent = await (
@@ -135,6 +149,9 @@ export const piAgentCoreBrainModule: BrainModule = {
 export const localBrainModule: BrainModule = {
   moduleId: "local",
   displayName: "Local deterministic",
+  diagnostics: {
+    toolAdapterStatus: "tools_not_used",
+  },
   async createBrain() {
     return {
       async wake(wake): Promise<{

@@ -123,6 +123,24 @@ try {
       applyResult.brainModulesByProfileId["local-profile"]?.moduleId,
       "local",
     );
+    assert.equal(
+      applyResult.brainDiagnosticsByProfileId["pi-profile"]?.toolAdapterStatus,
+      "neutral_tools_adapted_to_pi",
+    );
+    assert.equal(
+      applyResult.brainDiagnosticsByProfileId["pi-profile"]?.selectedToolSource,
+      "default-local-tools",
+    );
+    assert.ok(
+      (applyResult.brainDiagnosticsByProfileId["pi-profile"]
+        ?.selectedToolCount ?? 0) > 0,
+      "pi module diagnostics should report selected tools",
+    );
+    assert.equal(
+      applyResult.brainDiagnosticsByProfileId["local-profile"]
+        ?.toolAdapterStatus,
+      "tools_not_used",
+    );
     assert.equal(denRouterOptions.length, 1);
 
     const diagnostics = buildRuntimeDiagnosticsProjection({
@@ -136,10 +154,26 @@ try {
         module.implementationId,
         module.moduleId,
         module.strategy,
+        module.selectedToolSource,
+        module.toolAdapterStatus,
       ]),
       [
-        ["pi-profile", "pi-brain", "pi-agent-core", "default"],
-        ["local-profile", "local-brain", "local", undefined],
+        [
+          "pi-profile",
+          "pi-brain",
+          "pi-agent-core",
+          "default",
+          "default-local-tools",
+          "neutral_tools_adapted_to_pi",
+        ],
+        [
+          "local-profile",
+          "local-brain",
+          "local",
+          undefined,
+          "default-local-tools",
+          "tools_not_used",
+        ],
       ],
     );
 
@@ -229,6 +263,15 @@ function brainModuleDiagnostics(
       ...(selection?.strategy === undefined
         ? {}
         : { strategy: selection.strategy }),
+      selectedToolCount:
+        applyResult.brainDiagnosticsByProfileId[brain.profileId]
+          ?.selectedToolCount ?? 0,
+      selectedToolSource:
+        applyResult.brainDiagnosticsByProfileId[brain.profileId]
+          ?.selectedToolSource ?? "unknown",
+      toolAdapterStatus:
+        applyResult.brainDiagnosticsByProfileId[brain.profileId]
+          ?.toolAdapterStatus ?? "unknown",
     };
   });
 }
@@ -278,6 +321,9 @@ function writeRuntimeConfig(dataDir: string): void {
         brain: {
           module: "pi-agent-core",
           strategy: "default",
+        },
+        toolPolicy: {
+          requestedTools: ["git_status"],
         },
       },
       null,

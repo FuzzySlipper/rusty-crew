@@ -173,9 +173,11 @@ export {
 export type {
   BrainModule,
   BrainModuleContext,
+  BrainModuleDiagnosticsMetadata,
   BrainModuleId,
   BrainModuleRegistry,
   BrainModuleSelection,
+  BrainModuleToolAdapterStatus,
 } from "./brain-module.js";
 export type { BridgeBufferClient } from "./bridge-wake.js";
 export { wakeBrainFromBridgeRequest } from "./bridge-wake.js";

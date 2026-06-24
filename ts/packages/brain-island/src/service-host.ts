@@ -854,6 +854,11 @@ function brainModuleDiagnostics(
   Parameters<typeof buildRuntimeDiagnosticsProjection>[0]["brainModules"]
 > {
   return state.runtimeConfig.brains.map((brain) => {
+    const diagnostics =
+      state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[
+        brain.profileId
+      ];
+    if (diagnostics) return diagnostics;
     const selection =
       state.runtimeConfigApplyResult.brainModulesByProfileId[brain.profileId];
     return {
@@ -863,6 +868,9 @@ function brainModuleDiagnostics(
       ...(selection?.strategy === undefined
         ? {}
         : { strategy: selection.strategy }),
+      selectedToolCount: 0,
+      selectedToolSource: "unknown",
+      toolAdapterStatus: "unknown",
     };
   });
 }

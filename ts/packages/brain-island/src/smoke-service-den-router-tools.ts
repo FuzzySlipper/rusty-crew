@@ -276,6 +276,27 @@ try {
     });
     const brain = applyResult.brainHandlesByProfileId["field-profile"];
     assert.ok(brain, "field-profile brain should be registered");
+    assert.deepEqual(
+      {
+        moduleId:
+          applyResult.brainDiagnosticsByProfileId["field-profile"]?.moduleId,
+        selectedToolCount:
+          applyResult.brainDiagnosticsByProfileId["field-profile"]
+            ?.selectedToolCount,
+        selectedToolSource:
+          applyResult.brainDiagnosticsByProfileId["field-profile"]
+            ?.selectedToolSource,
+        toolAdapterStatus:
+          applyResult.brainDiagnosticsByProfileId["field-profile"]
+            ?.toolAdapterStatus,
+      },
+      {
+        moduleId: "pi-agent-core",
+        selectedToolCount: requestedToolNames.length,
+        selectedToolSource: "service:mcp:field-profile",
+        toolAdapterStatus: "neutral_tools_adapted_to_pi",
+      },
+    );
 
     const subscription = await native.subscribeEvents({
       eventKinds: ["brain_event_observed"],

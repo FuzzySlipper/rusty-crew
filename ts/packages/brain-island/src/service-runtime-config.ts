@@ -81,6 +81,7 @@ import {
   type BrainToolResolver,
 } from "./tool-session-selection.js";
 import { createWebToolResolver } from "./web-tools.js";
+import type { RuntimeBrainModuleDiagnostics } from "./runtime-diagnostics.js";
 
 export interface RustyCrewConfiguredBrain {
   implementationId: BrainImplementationId;
@@ -142,6 +143,7 @@ export interface RustyCrewRuntimeConfigApplyResult {
   scheduledJobsRegistered: number;
   brainHandlesByProfileId: Record<string, BrainImplementationHandle>;
   brainModulesByProfileId: Record<string, BrainModuleSelection>;
+  brainDiagnosticsByProfileId: Record<string, RuntimeBrainModuleDiagnostics>;
 }
 
 export interface ScheduledJobRegistrationResult {
@@ -327,6 +329,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
     scheduledJobsRegistered: 0,
     brainHandlesByProfileId: {},
     brainModulesByProfileId: {},
+    brainDiagnosticsByProfileId: {},
   };
 
   const brainModuleRegistry = createBrainModuleRegistry();
@@ -335,6 +338,13 @@ export async function applyRustyCrewRuntimeConfig(input: {
     const selection = resolveBrainModuleSelection(profile.profile);
     const module = brainModuleRegistry.require(selection.moduleId);
     result.brainModulesByProfileId[brain.profileId] = selection;
+    result.brainDiagnosticsByProfileId[brain.profileId] =
+      brainModuleDiagnostics({
+        profile,
+        implementationId: brain.implementationId,
+        selection,
+        module,
+      });
     try {
       const handle = await input.bridge.registerBrainRuntime(
         {
@@ -578,6 +588,25 @@ export async function ensureConfiguredSessionForChannelBinding(input: {
     );
   }
   return input.bridge.ensureConfiguredSession(nativeSessionConfig(session));
+}
+
+function brainModuleDiagnostics(input: {
+  profile: Awaited<ReturnType<typeof loadProfileContext>>;
+  implementationId: BrainImplementationId;
+  selection: BrainModuleSelection;
+  module: BrainModule;
+}): RuntimeBrainModuleDiagnostics {
+  return {
+    profileId: input.profile.profile.profileId,
+    implementationId: input.implementationId,
+    moduleId: input.selection.moduleId,
+    ...(input.selection.strategy === undefined
+      ? {}
+      : { strategy: input.selection.strategy }),
+    selectedToolCount: input.profile.toolSelection.toolProfile.tools.length,
+    selectedToolSource: input.profile.toolSelection.catalogId,
+    toolAdapterStatus: input.module.diagnostics.toolAdapterStatus,
+  };
 }
 
 async function createConfiguredBrain(
