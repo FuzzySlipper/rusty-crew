@@ -41,12 +41,11 @@ export interface ToolDeprecation {
   sunset?: string;
 }
 
-export interface ToolRegistryEntry {
+export interface ToolRegistryMetadata {
   name: string;
   description: string;
   category: ToolCategory;
   toolsets: readonly string[];
-  implementationModule: string;
   surfaces: readonly ToolSurface[];
   safety: readonly ToolSafetyFlag[];
   outputShape: string;
@@ -54,8 +53,20 @@ export interface ToolRegistryEntry {
   aliases?: readonly string[];
   deprecated?: ToolDeprecation;
   replacement?: string;
-  inventoryTest: string;
   coexistenceNote?: string;
+}
+
+export type ToolRegistryEntry = ToolRegistryMetadata;
+
+export interface ToolExecutableBinding {
+  name: string;
+  implementationModule: string;
+  inventoryTest: string;
+}
+
+interface ToolRegistryDefinition extends ToolRegistryMetadata {
+  implementationModule: string;
+  inventoryTest: string;
 }
 
 export interface ToolRegistryValidationIssue {
@@ -68,7 +79,10 @@ export interface ToolRegistryValidationIssue {
     | "implementation_shape_drift"
     | "deprecated_without_replacement"
     | "invalid_name"
-    | "missing_metadata";
+    | "missing_metadata"
+    | "missing_executable_binding"
+    | "orphan_executable_binding"
+    | "duplicate_executable_binding";
   toolName?: string;
   otherToolName?: string;
   message: string;
@@ -77,6 +91,10 @@ export interface ToolRegistryValidationIssue {
 export interface ToolRegistryValidation {
   ok: boolean;
   issues: ToolRegistryValidationIssue[];
+}
+
+export interface ToolRegistryValidationOptions {
+  requireExecutableBindings?: boolean;
 }
 
 export interface ToolInventoryRequest {
@@ -95,27 +113,36 @@ export interface ToolInventoryItem {
   name: string;
   canonicalName?: string;
   entry?: ToolRegistryEntry;
+  binding?: ToolExecutableBinding;
   status: ToolInventoryStatus;
   reasons: string[];
 }
 
 export interface ToolInventory {
   selectedTools: ToolRegistryEntry[];
+  selectedBindings: ToolExecutableBinding[];
   selectedDescriptors: ToolDescriptor[];
   items: ToolInventoryItem[];
 }
 
 export class ToolRegistry {
   readonly entries: readonly ToolRegistryEntry[];
+  readonly bindings: ReadonlyMap<string, ToolExecutableBinding>;
   private readonly byName: Map<string, ToolRegistryEntry>;
   private readonly aliasToName: Map<string, string>;
 
-  constructor(entries: readonly ToolRegistryEntry[]) {
-    const validation = validateToolRegistry(entries);
+  constructor(
+    entries: readonly ToolRegistryEntry[],
+    bindings: readonly ToolExecutableBinding[] = [],
+  ) {
+    const validation = validateToolRegistry(entries, bindings, {
+      requireExecutableBindings: true,
+    });
     if (!validation.ok) {
       throw new Error(formatValidationIssues(validation.issues));
     }
     this.entries = [...entries];
+    this.bindings = new Map(bindings.map((binding) => [binding.name, binding]));
     this.byName = new Map(entries.map((entry) => [entry.name, entry]));
     this.aliasToName = new Map(
       entries.flatMap((entry) =>
@@ -134,6 +161,11 @@ export class ToolRegistry {
     );
   }
 
+  bindingFor(name: string): ToolExecutableBinding | undefined {
+    const canonicalName = this.canonicalName(name);
+    return canonicalName ? this.bindings.get(canonicalName) : undefined;
+  }
+
   canonicalName(name: string): string | undefined {
     if (this.byName.has(name)) {
       return name;
@@ -148,11 +180,12 @@ export class ToolRegistry {
 
 export function createToolRegistry(
   entries: readonly ToolRegistryEntry[],
+  bindings: readonly ToolExecutableBinding[] = [],
 ): ToolRegistry {
-  return new ToolRegistry(entries);
+  return new ToolRegistry(entries, bindings);
 }
 
-export const defaultToolRegistry = createToolRegistry([
+const defaultToolRegistryDefinitions = [
   {
     name: "read_file",
     description: "Read a UTF-8 text file from the session workdir.",
@@ -627,16 +660,66 @@ export const defaultToolRegistry = createToolRegistry([
     version: "0.1.0",
     inventoryTest: "smoke:tool-registry",
   },
-] satisfies readonly ToolRegistryEntry[]);
+] satisfies readonly ToolRegistryDefinition[];
+
+export const defaultToolRegistryMetadata =
+  defaultToolRegistryDefinitions.map(portableToolMetadata);
+
+export const defaultToolExecutableBindings = defaultToolRegistryDefinitions.map(
+  executableToolBinding,
+);
+
+export const defaultToolRegistry = createToolRegistry(
+  defaultToolRegistryMetadata,
+  defaultToolExecutableBindings,
+);
+
+function portableToolMetadata(
+  definition: ToolRegistryDefinition,
+): ToolRegistryMetadata {
+  return {
+    name: definition.name,
+    description: definition.description,
+    category: definition.category,
+    toolsets: definition.toolsets,
+    surfaces: definition.surfaces,
+    safety: definition.safety,
+    outputShape: definition.outputShape,
+    version: definition.version,
+    aliases: definition.aliases,
+    deprecated: definition.deprecated,
+    replacement: definition.replacement,
+    coexistenceNote: definition.coexistenceNote,
+  };
+}
+
+function executableToolBinding(
+  definition: ToolRegistryDefinition,
+): ToolExecutableBinding {
+  return {
+    name: definition.name,
+    implementationModule: definition.implementationModule,
+    inventoryTest: definition.inventoryTest,
+  };
+}
 
 export function validateToolRegistry(
   entries: readonly ToolRegistryEntry[],
+  bindings: readonly ToolExecutableBinding[] = [],
+  options: ToolRegistryValidationOptions = {},
 ): ToolRegistryValidation {
   const issues: ToolRegistryValidationIssue[] = [];
   const byName = new Map<string, ToolRegistryEntry>();
   const aliasOwners = new Map<string, string>();
   const capabilityOwners = new Map<string, ToolRegistryEntry>();
-  const implementationShapes = new Map<string, ToolRegistryEntry>();
+  const bindingsByName = new Map<string, ToolExecutableBinding>();
+  const implementationShapes = new Map<
+    string,
+    {
+      binding: ToolExecutableBinding;
+      entry: ToolRegistryEntry;
+    }
+  >();
 
   for (const entry of entries) {
     validateEntryMetadata(entry, issues);
@@ -666,6 +749,42 @@ export function validateToolRegistry(
         });
       } else {
         aliasOwners.set(alias, entry.name);
+      }
+    }
+  }
+
+  for (const binding of bindings) {
+    const existing = bindingsByName.get(binding.name);
+    if (existing) {
+      issues.push({
+        severity: "error",
+        code: "duplicate_executable_binding",
+        toolName: binding.name,
+        otherToolName: existing.name,
+        message: `duplicate executable binding for ${binding.name}`,
+      });
+    } else {
+      bindingsByName.set(binding.name, binding);
+    }
+    if (!byName.has(binding.name)) {
+      issues.push({
+        severity: "error",
+        code: "orphan_executable_binding",
+        toolName: binding.name,
+        message: `executable binding ${binding.name} has no portable metadata`,
+      });
+    }
+  }
+
+  if (options.requireExecutableBindings ?? bindings.length > 0) {
+    for (const entry of entries) {
+      if (!bindingsByName.has(entry.name)) {
+        issues.push({
+          severity: "error",
+          code: "missing_executable_binding",
+          toolName: entry.name,
+          message: `tool metadata ${entry.name} has no executable binding`,
+        });
       }
     }
   }
@@ -716,23 +835,30 @@ export function validateToolRegistry(
       capabilityOwners.set(capabilityKey, entry);
     }
 
+    const binding = bindingsByName.get(entry.name);
+    if (!binding) {
+      continue;
+    }
     const implementationOwner = implementationShapes.get(
-      entry.implementationModule,
+      binding.implementationModule,
     );
     if (
       implementationOwner &&
-      implementationOwner.name !== entry.name &&
-      implementationOwner.outputShape !== entry.outputShape
+      implementationOwner.entry.name !== entry.name &&
+      implementationOwner.entry.outputShape !== entry.outputShape
     ) {
       issues.push({
         severity: "error",
         code: "implementation_shape_drift",
         toolName: entry.name,
-        otherToolName: implementationOwner.name,
-        message: `${entry.name} and ${implementationOwner.name} share implementation module with different output shapes`,
+        otherToolName: implementationOwner.entry.name,
+        message: `${entry.name} and ${implementationOwner.entry.name} share implementation module with different output shapes`,
       });
     } else {
-      implementationShapes.set(entry.implementationModule, entry);
+      implementationShapes.set(binding.implementationModule, {
+        binding,
+        entry,
+      });
     }
   }
 
@@ -744,8 +870,11 @@ export function validateToolRegistry(
 
 export function assertValidToolRegistry(
   entries: readonly ToolRegistryEntry[],
+  bindings: readonly ToolExecutableBinding[] = [],
 ): void {
-  const validation = validateToolRegistry(entries);
+  const validation = validateToolRegistry(entries, bindings, {
+    requireExecutableBindings: bindings.length > 0,
+  });
   if (!validation.ok) {
     throw new Error(formatValidationIssues(validation.issues));
   }
@@ -780,6 +909,7 @@ export function buildToolInventory(
         name: requestedName,
         canonicalName,
         entry: registry.get(canonicalName),
+        binding: registry.bindingFor(canonicalName),
         status: "shadowed",
         reasons: [
           `${requestedName} resolves to canonical tool ${canonicalName}`,
@@ -800,6 +930,7 @@ export function buildToolInventory(
         name: entry.name,
         canonicalName: entry.name,
         entry,
+        binding: registry.bindingFor(entry.name),
         status: "not_requested",
         reasons: ["not requested by profile toolsets or explicit tool names"],
       };
@@ -816,6 +947,7 @@ export function buildToolInventory(
         name: entry.name,
         canonicalName: entry.name,
         entry,
+        binding: registry.bindingFor(entry.name),
         status: denialStatus,
         reasons: [reason],
       };
@@ -826,6 +958,7 @@ export function buildToolInventory(
         name: entry.name,
         canonicalName: entry.name,
         entry,
+        binding: registry.bindingFor(entry.name),
         status: "deprecated",
         reasons: [
           (entry.replacement ?? entry.deprecated.replacement)
@@ -841,6 +974,7 @@ export function buildToolInventory(
       name: entry.name,
       canonicalName: entry.name,
       entry,
+      binding: registry.bindingFor(entry.name),
       status: "selected",
       reasons: [
         requestedByName
@@ -858,9 +992,13 @@ export function buildToolInventory(
   const selectedTools = items
     .filter((item) => item.status === "selected" && item.entry)
     .map((item) => item.entry!);
+  const selectedBindings = items
+    .filter((item) => item.status === "selected" && item.binding)
+    .map((item) => item.binding!);
 
   return {
     selectedTools,
+    selectedBindings,
     selectedDescriptors: selectedTools.map(toToolDescriptor),
     items: allItems,
   };
@@ -905,10 +1043,8 @@ function validateEntryMetadata(
   const missingFields = [
     ["description", entry.description],
     ["category", entry.category],
-    ["implementationModule", entry.implementationModule],
     ["outputShape", entry.outputShape],
     ["version", entry.version],
-    ["inventoryTest", entry.inventoryTest],
   ].filter(([, value]) => typeof value !== "string" || value.trim() === "");
   if (
     missingFields.length > 0 ||

@@ -5,6 +5,7 @@ import {
   createToolRegistry,
   defaultToolRegistry,
   validateToolRegistry,
+  type ToolExecutableBinding,
   type ToolInventory,
   type ToolInventoryRequest,
   type ToolRegistry,
@@ -19,6 +20,7 @@ export interface McpRegistryIntegrationInput {
   catalogId: string;
   candidates: readonly McpRegistryCandidate[];
   baseEntries?: readonly ToolRegistryEntry[];
+  baseBindings?: readonly ToolExecutableBinding[];
   inventoryRequest?: ToolInventoryRequest;
   nameCollisionPolicy?: McpNameCollisionPolicy;
   unavailableTools?: readonly string[];
@@ -30,10 +32,16 @@ export interface McpToolRegistryEntry extends ToolRegistryEntry {
   mcpOutputSchema?: McpRegistryCandidate["outputSchema"];
 }
 
+export interface McpToolExecutableBinding extends ToolExecutableBinding {
+  mcpSource: McpRegistryCandidate["source"];
+}
+
 export interface McpRegistryIntegrationReport {
   catalogId: string;
   entries: readonly ToolRegistryEntry[];
+  bindings: readonly ToolExecutableBinding[];
   mcpEntries: readonly McpToolRegistryEntry[];
+  mcpBindings: readonly McpToolExecutableBinding[];
   validation: ToolRegistryValidation;
   registry?: ToolRegistry;
   inventory?: ToolInventory;
@@ -45,6 +53,9 @@ export function integrateMcpToolsWithRegistry(
   input: McpRegistryIntegrationInput,
 ): McpRegistryIntegrationReport {
   const baseEntries = input.baseEntries ?? defaultToolRegistry.entries;
+  const baseBindings = input.baseBindings ?? [
+    ...defaultToolRegistry.bindings.values(),
+  ];
   const policy = input.nameCollisionPolicy ?? "fail";
   const baseNames = new Set(baseEntries.map((entry) => entry.name));
   const unavailable = new Set(input.unavailableTools ?? []);
@@ -63,9 +74,17 @@ export function integrateMcpToolsWithRegistry(
           : candidate.name,
     }),
   );
+  const mcpBindings = input.candidates.map((candidate, index) =>
+    mcpCandidateToExecutableBinding(candidate, mcpEntries[index]!.name),
+  );
   const entries = [...baseEntries, ...mcpEntries];
-  const validation = validateToolRegistry(entries);
-  const registry = validation.ok ? createToolRegistry(entries) : undefined;
+  const bindings = [...baseBindings, ...mcpBindings];
+  const validation = validateToolRegistry(entries, bindings, {
+    requireExecutableBindings: true,
+  });
+  const registry = validation.ok
+    ? createToolRegistry(entries, bindings)
+    : undefined;
   const inventory = registry
     ? buildToolInventory(registry, inventoryRequest)
     : undefined;
@@ -73,7 +92,9 @@ export function integrateMcpToolsWithRegistry(
   return {
     catalogId: input.catalogId,
     entries,
+    bindings,
     mcpEntries,
+    mcpBindings,
     validation,
     registry,
     inventory,
@@ -91,16 +112,26 @@ export function mcpCandidateToRegistryEntry(
     description: candidate.description,
     category: candidate.category,
     toolsets: candidate.toolsets,
-    implementationModule: `${candidate.implementationModule}:${candidate.source.bindingId}:${candidate.source.sourceToolName}`,
     surfaces: candidate.surfaces,
     safety: candidate.safety,
     outputShape: candidate.outputShape,
     version: candidate.version,
-    inventoryTest: candidate.inventoryTest,
     coexistenceNote: candidate.coexistenceNote,
     mcpSource: candidate.source,
     mcpAnnotations: candidate.annotations,
     mcpOutputSchema: candidate.outputSchema,
+  };
+}
+
+export function mcpCandidateToExecutableBinding(
+  candidate: McpRegistryCandidate,
+  name: string = candidate.name,
+): McpToolExecutableBinding {
+  return {
+    name,
+    implementationModule: `${candidate.implementationModule}:${candidate.source.bindingId}:${candidate.source.sourceToolName}`,
+    inventoryTest: candidate.inventoryTest,
+    mcpSource: candidate.source,
   };
 }
 

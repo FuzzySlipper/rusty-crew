@@ -42,6 +42,7 @@ const profileContext = {
     catalogId: "session-defaults-smoke",
     inventory: {
       selectedTools: [],
+      selectedBindings: [],
       selectedDescriptors: [{ name: "read_file", description: "Read a file." }],
       items: [],
     },

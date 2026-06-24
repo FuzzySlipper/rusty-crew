@@ -465,7 +465,7 @@ function buildToolReports(
       category: item.entry?.category,
       surfaces: item.entry?.surfaces ?? [],
       toolsets: item.entry?.toolsets ?? [],
-      implementationModule: item.entry?.implementationModule,
+      implementationModule: item.binding?.implementationModule,
       outputShape: item.entry?.outputShape,
       version: item.entry?.version,
       source: item.entry?.category === "mcp" ? "mcp" : "missing",

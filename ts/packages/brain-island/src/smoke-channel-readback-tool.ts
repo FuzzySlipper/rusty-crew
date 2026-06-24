@@ -166,7 +166,7 @@ assert.equal(
   "channel_readback_requester_missing",
 );
 
-const registryEntry = defaultToolRegistry.resolve("channel_readback");
+const registryEntry = defaultToolRegistry.bindingFor("channel_readback");
 assert.equal(
   registryEntry?.implementationModule,
   "./planning-tools.js#channelReadbackTool",
@@ -178,7 +178,7 @@ console.log(
       messages: result.details.response?.messages.length,
       newestCursor: result.details.response?.cursorBoundaries.newestCursor,
       denied: denied.details.reasonCode,
-      registry: registryEntry?.outputShape,
+      registry: registryEntry?.implementationModule,
     },
     null,
     2,

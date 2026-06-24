@@ -18,7 +18,7 @@ const report = buildToolRegistryDiagnostics({
   },
 });
 
-assert.equal(report.summary.registeredTools, 31);
+assert.equal(report.summary.registeredTools, 37);
 assert.equal(report.summary.selectedTools, 4);
 assert.equal(report.summary.deniedTools, 3);
 assert.equal(report.summary.missingTools, 1);
@@ -89,11 +89,9 @@ function entry(name: string, outputShape: string): ToolRegistryEntry {
     description: `${name} description`,
     category: "local",
     toolsets: ["local_code_read"],
-    implementationModule: `./tools.js#${name}`,
     surfaces: ["brain"],
     safety: ["read_only"],
     outputShape,
     version: "1.0.0",
-    inventoryTest: "smoke:tool-registry-diagnostics",
   };
 }

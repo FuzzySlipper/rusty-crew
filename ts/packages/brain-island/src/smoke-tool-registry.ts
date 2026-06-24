@@ -5,7 +5,10 @@ import {
   defaultToolRegistry,
   validateToolRegistry,
 } from "./tool-registry.js";
-import type { ToolRegistryEntry } from "./tool-registry.js";
+import type {
+  ToolExecutableBinding,
+  ToolRegistryEntry,
+} from "./tool-registry.js";
 
 const readInventory = buildToolInventory(defaultToolRegistry, {
   requestedToolsets: ["local_code_read"],
@@ -18,6 +21,18 @@ assert.deepEqual(
 assert.deepEqual(
   readInventory.selectedDescriptors.map((tool) => tool.name),
   readInventory.selectedTools.map((tool) => tool.name),
+);
+assert.deepEqual(
+  readInventory.selectedBindings.map((binding) => binding.name),
+  readInventory.selectedTools.map((tool) => tool.name),
+);
+assert.equal(
+  Object.hasOwn(defaultToolRegistry.entries[0]!, "implementationModule"),
+  false,
+);
+assert.equal(
+  defaultToolRegistry.bindingFor("read_file")?.implementationModule,
+  "./local-code-tools.js#readFileTool",
 );
 assert.equal(
   readInventory.items.find((item) => item.name === "terminal")?.status,
@@ -142,12 +157,8 @@ assert.equal(
   "browser screenshot artifact store is not configured",
 );
 
-const aliasRegistry = createToolRegistry([
-  {
-    ...entry("read_file"),
-    aliases: ["cat_file"],
-  },
-]);
+const aliasEntry = { ...entry("read_file"), aliases: ["cat_file"] };
+const aliasRegistry = createToolRegistry([aliasEntry], [binding(aliasEntry)]);
 const aliasInventory = aliasRegistry.buildInventory({
   requestedTools: ["cat_file", "missing_tool"],
 });
@@ -183,6 +194,16 @@ const invalid = validateToolRegistry([
     },
   },
 ]);
+const missingBinding = validateToolRegistry([entry("missing_binding")], [], {
+  requireExecutableBindings: true,
+});
+const orphanBinding = validateToolRegistry(
+  [],
+  [binding(entry("orphan_tool"))],
+  {
+    requireExecutableBindings: true,
+  },
+);
 
 assert.equal(invalid.ok, false);
 assert.deepEqual(
@@ -196,6 +217,18 @@ assert.deepEqual(
     "deprecated_without_replacement",
     "duplicate_name",
   ],
+);
+assert.equal(
+  missingBinding.issues.find(
+    (issue) => issue.code === "missing_executable_binding",
+  )?.toolName,
+  "missing_binding",
+);
+assert.equal(
+  orphanBinding.issues.find(
+    (issue) => issue.code === "orphan_executable_binding",
+  )?.toolName,
+  "orphan_tool",
 );
 
 console.log(
@@ -211,6 +244,7 @@ console.log(
         writeInventory.items.map((item) => [item.name, item.status]),
       ),
       validationErrors: invalid.issues.length,
+      selectedBindings: readInventory.selectedBindings.length,
     },
     null,
     2,
@@ -223,11 +257,17 @@ function entry(name: string): ToolRegistryEntry {
     description: `${name} description`,
     category: "local",
     toolsets: ["local_code_read"],
-    implementationModule: `./tools.js#${name}`,
     surfaces: ["brain"],
     safety: ["read_only"],
     outputShape: `shape.${name}.v1`,
     version: "1.0.0",
+  };
+}
+
+function binding(entry: ToolRegistryEntry): ToolExecutableBinding {
+  return {
+    name: entry.name,
+    implementationModule: `./tools.js#${entry.name}`,
     inventoryTest: "smoke:tool-registry",
   };
 }

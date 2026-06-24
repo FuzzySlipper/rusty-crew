@@ -125,6 +125,7 @@ function sampleProfileContext(): LoadedProfileContext {
       toolProfile: { tools: [] },
       inventory: {
         selectedTools: [],
+        selectedBindings: [],
         selectedDescriptors: [],
         items: [],
       },

@@ -10,6 +10,7 @@ import {
 } from "./index.js";
 import type {
   LoadedProfileContext,
+  ToolExecutableBinding,
   ToolRegistryEntry,
   ToolRegistryDiagnosticsReport,
 } from "./index.js";
@@ -25,7 +26,7 @@ const policy = {
   requestedTools: ["missing_tool"],
   deniedTools: ["terminal"],
 };
-const selectedRegistry = createToolRegistry([
+const selectedEntries = [
   entry("read_file", "local.file_text.v1"),
   entry("write_file", "local.file_write_result.v1", ["writes_files"]),
   entry("search_files", "local.file_search_result.v1"),
@@ -38,10 +39,17 @@ const selectedRegistry = createToolRegistry([
     ...entry("mcp_memory_search", "memory.search_result.v1"),
     category: "mcp",
     toolsets: ["memory"],
-    implementationModule:
-      "./mcp-tools.js#mcp-memory:binding-memory:memory_search",
   },
-] satisfies readonly ToolRegistryEntry[]);
+] satisfies readonly ToolRegistryEntry[];
+const selectedBindings = selectedEntries.map((tool) =>
+  binding(
+    tool,
+    tool.name === "mcp_memory_search"
+      ? "./mcp-tools.js#mcp-memory:binding-memory:memory_search"
+      : undefined,
+  ),
+);
+const selectedRegistry = createToolRegistry(selectedEntries, selectedBindings);
 const toolSelection = selectToolProfile({
   profileId,
   policy,
@@ -356,11 +364,20 @@ function entry(
       : safety.includes("read_only")
         ? ["local_code_read", "review_readonly"]
         : ["local_code_write"],
-    implementationModule: `./tools.js#${name}`,
     surfaces: ["brain"],
     safety,
     outputShape,
     version: "1.0.0",
+  };
+}
+
+function binding(
+  entry: ToolRegistryEntry,
+  implementationModule = `./tools.js#${entry.name}`,
+): ToolExecutableBinding {
+  return {
+    name: entry.name,
+    implementationModule,
     inventoryTest: "smoke:tool-context-diagnostics",
   };
 }

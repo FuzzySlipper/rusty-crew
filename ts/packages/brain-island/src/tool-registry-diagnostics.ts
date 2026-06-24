@@ -7,6 +7,7 @@ import {
   type ToolInventoryItem,
   type ToolInventoryRequest,
   type ToolInventoryStatus,
+  type ToolExecutableBinding,
   type ToolRegistry,
   type ToolRegistryEntry,
   type ToolRegistryValidation,
@@ -16,6 +17,7 @@ export interface ToolRegistryDiagnosticsInput {
   catalogId?: string;
   registry?: ToolRegistry;
   entries?: readonly ToolRegistryEntry[];
+  bindings?: readonly ToolExecutableBinding[];
   inventoryRequest?: ToolInventoryRequest;
 }
 
@@ -58,9 +60,20 @@ export function buildToolRegistryDiagnostics(
   const catalogId = input.catalogId ?? "default-local-tools";
   const entries =
     input.registry?.entries ?? input.entries ?? defaultToolRegistry.entries;
-  const validation = validateToolRegistry(entries);
+  const bindings = input.registry
+    ? [...input.registry.bindings.values()]
+    : (input.bindings ??
+      (input.entries === undefined
+        ? [...defaultToolRegistry.bindings.values()]
+        : []));
+  const validation = validateToolRegistry(entries, bindings, {
+    requireExecutableBindings: bindings.length > 0,
+  });
   const registry =
-    input.registry ?? (validation.ok ? createToolRegistry(entries) : undefined);
+    input.registry ??
+    (validation.ok && bindings.length > 0
+      ? createToolRegistry(entries, bindings)
+      : undefined);
   const inventory = registry
     ? buildToolInventory(registry, input.inventoryRequest)
     : undefined;
@@ -69,13 +82,17 @@ export function buildToolRegistryDiagnostics(
     const item = inventoryItems.find(
       (candidate) => candidate.name === entry.name,
     );
+    const binding =
+      item?.binding ??
+      bindings.find((candidate) => candidate.name === entry.name);
     const replacement = entry.replacement ?? entry.deprecated?.replacement;
     return {
       name: entry.name,
       aliases: entry.aliases ?? [],
       category: entry.category,
       toolsets: entry.toolsets,
-      implementationModule: entry.implementationModule,
+      implementationModule:
+        binding?.implementationModule ?? "(missing binding)",
       outputShape: entry.outputShape,
       version: entry.version,
       status:
