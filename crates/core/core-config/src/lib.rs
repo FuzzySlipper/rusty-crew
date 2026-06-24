@@ -42,6 +42,67 @@ pub struct RuntimeConfigValidationInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfilePlanInput {
+    pub runtime_config: RuntimeConfigDraft,
+    #[serde(default)]
+    pub profiles: Vec<ProfileRuntimeMetadata>,
+    pub request: CreateProfileRequest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfileRequest {
+    pub profile_id: String,
+    pub display_name: Option<String>,
+    pub agent_id: Option<String>,
+    pub session_id: Option<String>,
+    pub implementation_id: Option<String>,
+    pub kind: Option<SessionKind>,
+    pub model_config: Option<ProfileModelConfigSeed>,
+    pub brain: Option<ProfileBrainMetadata>,
+    pub mcp_tool_profile: Option<String>,
+    #[serde(default)]
+    pub profile_file_exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileModelConfigSeed {
+    pub provider: String,
+    pub model_name: String,
+    pub base_url: Option<String>,
+    pub api: Option<String>,
+    pub api_key_env: Option<String>,
+    pub temperature_milli: Option<u32>,
+    pub max_output_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfilePlan {
+    pub diagnostics: Vec<RuntimeConfigDiagnostic>,
+    pub profile_seed: Option<CreateProfileSeedMetadata>,
+    pub runtime_brain: Option<BrainConfigDraft>,
+    pub runtime_session: Option<SessionConfigDraft>,
+    pub profile_mcp_config: Option<ProfileMcpConfig>,
+}
+
+impl CreateProfilePlan {
+    pub fn ok(&self) -> bool {
+        !self
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfileSeedMetadata {
+    pub profile_id: ProfileId,
+    pub display_name: Option<String>,
+    pub model_config: ProfileModelConfigSeed,
+    pub brain: ProfileBrainMetadata,
+    pub skills_mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrainConfigDraft {
     pub implementation_id: BrainImplementationId,
     pub profile_id: ProfileId,
@@ -263,6 +324,241 @@ pub fn validate_runtime_config_input(
     input: &RuntimeConfigValidationInput,
 ) -> RuntimeConfigValidationResult {
     validate_runtime_config_draft(&input.runtime_config, &input.profiles)
+}
+
+pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan {
+    let profile_id = input.request.profile_id.trim();
+    let agent_id = input
+        .request
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(profile_id);
+    let session_id = input
+        .request
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("{agent_id}-session"));
+    let implementation_id = input
+        .request
+        .implementation_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("{profile_id}-brain"));
+    let kind = input.request.kind.clone().unwrap_or(SessionKind::Full);
+    let model_config = input
+        .request
+        .model_config
+        .clone()
+        .unwrap_or_else(default_profile_model_config);
+    let brain = input.request.brain.clone().unwrap_or(ProfileBrainMetadata {
+        module: Some("local".to_string()),
+        strategy: None,
+    });
+    let mcp_tool_profile = input
+        .request
+        .mcp_tool_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(profile_id)
+        .to_string();
+
+    let mut diagnostics = Vec::new();
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_profile_id",
+        "request.profileId",
+        profile_id,
+    );
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_agent_id",
+        "request.agentId",
+        agent_id,
+    );
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_session_id",
+        "request.sessionId",
+        &session_id,
+    );
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_brain_implementation_id",
+        "request.implementationId",
+        &implementation_id,
+    );
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_tool_profile_key",
+        "request.mcpToolProfile",
+        &mcp_tool_profile,
+    );
+    collect_non_empty_diagnostic(
+        &mut diagnostics,
+        "invalid_model_provider",
+        "request.modelConfig.provider",
+        &model_config.provider,
+    );
+    collect_non_empty_diagnostic(
+        &mut diagnostics,
+        "invalid_model_name",
+        "request.modelConfig.modelName",
+        &model_config.model_name,
+    );
+    if input.request.profile_file_exists {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "profile_file_exists",
+            "request.profileId",
+            format!("profile file for {profile_id} already exists"),
+        ));
+    }
+
+    let profile_id = ProfileId::new(profile_id.to_string());
+    let agent_id = AgentId::new(agent_id.to_string());
+    let session_id = SessionId::new(session_id);
+    let implementation_id = BrainImplementationId::new(implementation_id);
+
+    if input
+        .profiles
+        .iter()
+        .any(|profile| profile.profile_id == profile_id)
+    {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "duplicate_profile_id",
+            "request.profileId",
+            format!("profile metadata for {profile_id} already exists"),
+        ));
+    }
+    if input
+        .runtime_config
+        .brains
+        .iter()
+        .any(|brain| brain.profile_id == profile_id)
+    {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "duplicate_profile_brain",
+            "request.profileId",
+            format!("runtime config already has a brain for {profile_id}"),
+        ));
+    }
+    if input
+        .runtime_config
+        .brains
+        .iter()
+        .any(|brain| brain.implementation_id == implementation_id)
+    {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "duplicate_brain_implementation_id",
+            "request.implementationId",
+            format!("runtime config already has brain implementation {implementation_id}"),
+        ));
+    }
+    if input
+        .runtime_config
+        .sessions
+        .iter()
+        .any(|session| session.profile_id == profile_id)
+    {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "duplicate_profile_session",
+            "request.profileId",
+            format!("runtime config already has a session for {profile_id}"),
+        ));
+    }
+    if input
+        .runtime_config
+        .sessions
+        .iter()
+        .any(|session| session.session_id == session_id)
+    {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "duplicate_session_id",
+            "request.sessionId",
+            format!("runtime config already has session {session_id}"),
+        ));
+    }
+    if input
+        .runtime_config
+        .sessions
+        .iter()
+        .any(|session| session.agent_id == agent_id)
+    {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "duplicate_agent_id",
+            "request.agentId",
+            format!("runtime config already has agent {agent_id}"),
+        ));
+    }
+
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error)
+    {
+        return CreateProfilePlan {
+            diagnostics,
+            profile_seed: None,
+            runtime_brain: None,
+            runtime_session: None,
+            profile_mcp_config: None,
+        };
+    }
+
+    let runtime_brain = BrainConfigDraft {
+        implementation_id: implementation_id.clone(),
+        profile_id: profile_id.clone(),
+    };
+    let runtime_session = SessionConfigDraft {
+        session_id: session_id.clone(),
+        agent_id: agent_id.clone(),
+        profile_id: profile_id.clone(),
+        kind,
+        resource_limits: None,
+        owner_id: None,
+        history_window: None,
+        max_history_messages: None,
+        turn_timeout_ms: None,
+    };
+    let profile_mcp_config = ProfileMcpConfig {
+        binding_id: Some(format!("{agent_id}-mcp")),
+        endpoint_ref: Some(format!("config://mcp/{agent_id}")),
+        server_names: vec![agent_id.to_string()],
+        transport: None,
+        tool_profile: Some(mcp_tool_profile),
+    };
+
+    CreateProfilePlan {
+        diagnostics,
+        profile_seed: Some(CreateProfileSeedMetadata {
+            profile_id,
+            display_name: input.request.display_name.clone(),
+            model_config,
+            brain,
+            skills_mode: "all".to_string(),
+        }),
+        runtime_brain: Some(runtime_brain),
+        runtime_session: Some(runtime_session),
+        profile_mcp_config: Some(profile_mcp_config),
+    }
+}
+
+fn default_profile_model_config() -> ProfileModelConfigSeed {
+    ProfileModelConfigSeed {
+        provider: "local".to_string(),
+        model_name: "deterministic".to_string(),
+        base_url: None,
+        api: None,
+        api_key_env: None,
+        temperature_milli: None,
+        max_output_tokens: None,
+    }
 }
 
 struct RuntimeConfigValidator<'a> {
@@ -869,6 +1165,36 @@ fn validate_id_text(
     }
 }
 
+fn collect_id_diagnostic(
+    diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
+    code: &str,
+    path: &str,
+    value: &str,
+) {
+    if !is_valid_component_id(value) {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            code,
+            path,
+            format!("{path} {ID_PATTERN_DESCRIPTION}"),
+        ));
+    }
+}
+
+fn collect_non_empty_diagnostic(
+    diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
+    code: &str,
+    path: &str,
+    value: &str,
+) {
+    if value.trim().is_empty() {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            code,
+            path,
+            "value must not be empty",
+        ));
+    }
+}
+
 fn validate_schedule(validator: &mut RuntimeConfigValidator<'_>, path: &str, schedule: &str) {
     validate_non_empty(validator, "invalid_schedule", path, schedule);
     if !looks_like_cron(schedule) {
@@ -1007,6 +1333,152 @@ mod tests {
         assert_eq!(
             json["diagnostics"][0]["path"],
             "scheduledJobs[0].targetSessionId"
+        );
+    }
+
+    #[test]
+    fn plans_create_profile_with_defaults_without_mutating_runtime() {
+        let input = CreateProfilePlanInput {
+            runtime_config: valid_draft(),
+            profiles: vec![profile("runner")],
+            request: CreateProfileRequest {
+                profile_id: "field-created-profile".to_string(),
+                display_name: Some("Field Created Profile".to_string()),
+                agent_id: None,
+                session_id: None,
+                implementation_id: None,
+                kind: None,
+                model_config: None,
+                brain: None,
+                mcp_tool_profile: None,
+                profile_file_exists: false,
+            },
+        };
+
+        let plan = plan_create_profile(&input);
+        assert!(plan.ok(), "{:?}", plan.diagnostics);
+        assert!(plan.diagnostics.is_empty());
+        let seed = plan.profile_seed.expect("profile seed should be planned");
+        assert_eq!(seed.profile_id, ProfileId::new("field-created-profile"));
+        assert_eq!(seed.display_name.as_deref(), Some("Field Created Profile"));
+        assert_eq!(seed.model_config.provider, "local");
+        assert_eq!(seed.model_config.model_name, "deterministic");
+        assert_eq!(seed.brain.module.as_deref(), Some("local"));
+        assert_eq!(seed.skills_mode, "all");
+        assert_eq!(
+            plan.runtime_brain.expect("brain should be planned"),
+            BrainConfigDraft {
+                implementation_id: BrainImplementationId::new("field-created-profile-brain"),
+                profile_id: ProfileId::new("field-created-profile"),
+            }
+        );
+        assert_eq!(
+            plan.runtime_session.expect("session should be planned"),
+            SessionConfigDraft {
+                session_id: SessionId::new("field-created-profile-session"),
+                agent_id: AgentId::new("field-created-profile"),
+                profile_id: ProfileId::new("field-created-profile"),
+                kind: SessionKind::Full,
+                resource_limits: None,
+                owner_id: None,
+                history_window: None,
+                max_history_messages: None,
+                turn_timeout_ms: None,
+            }
+        );
+        let mcp = plan
+            .profile_mcp_config
+            .expect("profile MCP config should be planned");
+        assert_eq!(mcp.binding_id.as_deref(), Some("field-created-profile-mcp"));
+        assert_eq!(
+            mcp.endpoint_ref.as_deref(),
+            Some("config://mcp/field-created-profile")
+        );
+        assert_eq!(mcp.server_names, vec!["field-created-profile"]);
+        assert_eq!(mcp.tool_profile.as_deref(), Some("field-created-profile"));
+    }
+
+    #[test]
+    fn rejects_create_profile_duplicates_with_structured_diagnostics() {
+        let input = CreateProfilePlanInput {
+            runtime_config: valid_draft(),
+            profiles: vec![profile("runner")],
+            request: CreateProfileRequest {
+                profile_id: "runner".to_string(),
+                display_name: None,
+                agent_id: Some("runner-agent".to_string()),
+                session_id: Some("runner-session".to_string()),
+                implementation_id: Some("runner-brain".to_string()),
+                kind: Some(SessionKind::Full),
+                model_config: None,
+                brain: None,
+                mcp_tool_profile: None,
+                profile_file_exists: true,
+            },
+        };
+
+        let plan = plan_create_profile(&input);
+        assert!(!plan.ok());
+        assert_eq!(plan.profile_seed, None);
+        assert_codes(
+            &RuntimeConfigValidationResult {
+                diagnostics: plan.diagnostics,
+            },
+            &[
+                "profile_file_exists",
+                "duplicate_profile_id",
+                "duplicate_profile_brain",
+                "duplicate_brain_implementation_id",
+                "duplicate_profile_session",
+                "duplicate_session_id",
+                "duplicate_agent_id",
+            ],
+        );
+    }
+
+    #[test]
+    fn rejects_create_profile_invalid_ids_before_returning_plan_entries() {
+        let input = CreateProfilePlanInput {
+            runtime_config: valid_draft(),
+            profiles: vec![profile("runner")],
+            request: CreateProfileRequest {
+                profile_id: "../bad".to_string(),
+                display_name: None,
+                agent_id: None,
+                session_id: None,
+                implementation_id: None,
+                kind: None,
+                model_config: Some(ProfileModelConfigSeed {
+                    provider: "".to_string(),
+                    model_name: "".to_string(),
+                    base_url: None,
+                    api: None,
+                    api_key_env: None,
+                    temperature_milli: None,
+                    max_output_tokens: None,
+                }),
+                brain: None,
+                mcp_tool_profile: Some("bad tool".to_string()),
+                profile_file_exists: false,
+            },
+        };
+
+        let plan = plan_create_profile(&input);
+        assert!(!plan.ok());
+        assert_eq!(plan.runtime_brain, None);
+        assert_codes(
+            &RuntimeConfigValidationResult {
+                diagnostics: plan.diagnostics,
+            },
+            &[
+                "invalid_profile_id",
+                "invalid_agent_id",
+                "invalid_session_id",
+                "invalid_brain_implementation_id",
+                "invalid_tool_profile_key",
+                "invalid_model_provider",
+                "invalid_model_name",
+            ],
         );
     }
 

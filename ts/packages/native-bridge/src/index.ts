@@ -101,6 +101,7 @@ interface NativeBridgeBinding {
     displayName: string;
   }): number;
   validateRuntimeConfigDraftJson(inputJson: string): string;
+  planCreateProfileJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
     drainTimeoutMs: number,
@@ -635,6 +636,57 @@ export interface NativeProfileRuntimeMetadata {
   };
 }
 
+export interface NativeCreateProfilePlanInput {
+  runtimeConfig: NativeRuntimeConfigDraft;
+  profiles: NativeProfileRuntimeMetadata[];
+  request: NativeCreateProfileRequest;
+}
+
+export interface NativeCreateProfileRequest {
+  profileId: string;
+  displayName?: string;
+  agentId?: string;
+  sessionId?: string;
+  implementationId?: string;
+  kind?: "full" | "worker" | "delegated";
+  modelConfig?: NativeProfileModelConfigSeed;
+  brain?: {
+    module?: string;
+    strategy?: string;
+  };
+  mcpToolProfile?: string;
+  profileFileExists?: boolean;
+}
+
+export interface NativeProfileModelConfigSeed {
+  provider: string;
+  modelName: string;
+  baseUrl?: string;
+  api?: string;
+  apiKeyEnv?: string;
+  temperatureMilli?: number;
+  maxOutputTokens?: number;
+}
+
+export interface NativeCreateProfilePlan {
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  profileSeed?: NativeCreateProfileSeedMetadata;
+  runtimeBrain?: NativeBrainConfigDraft;
+  runtimeSession?: NativeSessionConfigDraft;
+  profileMcpConfig?: NativeProfileRuntimeMetadata["mcpConfig"];
+}
+
+export interface NativeCreateProfileSeedMetadata {
+  profileId: string;
+  displayName?: string;
+  modelConfig: NativeProfileModelConfigSeed;
+  brain: {
+    module?: string;
+    strategy?: string;
+  };
+  skillsMode: string;
+}
+
 export interface NativeQueuedMessageRecord {
   messageId: string;
   ownerSessionId?: string;
@@ -673,6 +725,9 @@ export interface NativeBridgeModule {
   validateRuntimeConfigDraft(
     input: NativeRuntimeConfigValidationInput,
   ): Promise<NativeRuntimeConfigValidationResult>;
+  planCreateProfile(
+    input: NativeCreateProfilePlanInput,
+  ): Promise<NativeCreateProfilePlan>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   cancelDelegatedSession(
@@ -828,6 +883,7 @@ export const nativeManifestOperationNames = [
   "submit_brain_actions",
   "register_platform_adapter",
   "validate_runtime_config_draft",
+  "plan_create_profile",
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
@@ -874,6 +930,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     submitBrainActions: unavailable("submit_brain_actions"),
     registerPlatformAdapter: unavailable("register_platform_adapter"),
     validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
+    planCreateProfile: unavailable("plan_create_profile"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
@@ -1059,6 +1116,14 @@ function createNativeBridgeModule(
           JSON.stringify(toNativeRuntimeConfigValidationInput(input)),
         ),
       ) as NativeRuntimeConfigValidationResult,
+    planCreateProfile: async (input) =>
+      toNativeCreateProfilePlan(
+        JSON.parse(
+          binding.planCreateProfileJson(
+            JSON.stringify(toNativeCreateProfilePlanInput(input)),
+          ),
+        ) as RawCreateProfilePlan,
+      ),
     injectExternalEvent: async (event) =>
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
     injectDenDataUpdate: async (update) =>
@@ -1543,6 +1608,45 @@ function toNativeRuntimeConfigValidationInput(
   };
 }
 
+function toNativeCreateProfilePlanInput(
+  input: NativeCreateProfilePlanInput,
+): unknown {
+  const base = toNativeRuntimeConfigValidationInput({
+    runtimeConfig: input.runtimeConfig,
+    profiles: input.profiles,
+  }) as Record<string, unknown>;
+  return {
+    ...base,
+    request: {
+      profile_id: input.request.profileId,
+      display_name: input.request.displayName,
+      agent_id: input.request.agentId,
+      session_id: input.request.sessionId,
+      implementation_id: input.request.implementationId,
+      kind: input.request.kind,
+      model_config: input.request.modelConfig
+        ? {
+            provider: input.request.modelConfig.provider,
+            model_name: input.request.modelConfig.modelName,
+            base_url: input.request.modelConfig.baseUrl,
+            api: input.request.modelConfig.api,
+            api_key_env: input.request.modelConfig.apiKeyEnv,
+            temperature_milli: input.request.modelConfig.temperatureMilli,
+            max_output_tokens: input.request.modelConfig.maxOutputTokens,
+          }
+        : undefined,
+      brain: input.request.brain
+        ? {
+            module: input.request.brain.module,
+            strategy: input.request.brain.strategy,
+          }
+        : undefined,
+      mcp_tool_profile: input.request.mcpToolProfile,
+      profile_file_exists: input.request.profileFileExists ?? false,
+    },
+  };
+}
+
 function toNativeResourceLimits(limits: ResourceLimits | undefined): unknown {
   if (!limits) {
     return undefined;
@@ -1551,6 +1655,87 @@ function toNativeResourceLimits(limits: ResourceLimits | undefined): unknown {
     workdir: limits.workdir,
     max_duration_ms: limits.maxDurationMs,
     max_delegation_depth: limits.maxDelegationDepth,
+  };
+}
+
+function toNativeCreateProfilePlan(
+  plan: RawCreateProfilePlan,
+): NativeCreateProfilePlan {
+  return {
+    diagnostics: plan.diagnostics,
+    profileSeed: plan.profile_seed
+      ? {
+          profileId: plan.profile_seed.profile_id,
+          displayName: plan.profile_seed.display_name,
+          modelConfig: toProfileModelConfigSeed(
+            plan.profile_seed.model_config,
+          ),
+          brain: {
+            module: plan.profile_seed.brain.module,
+            strategy: plan.profile_seed.brain.strategy,
+          },
+          skillsMode: plan.profile_seed.skills_mode,
+        }
+      : undefined,
+    runtimeBrain: plan.runtime_brain
+      ? {
+          implementationId: plan.runtime_brain.implementation_id,
+          profileId: plan.runtime_brain.profile_id,
+        }
+      : undefined,
+    runtimeSession: plan.runtime_session
+      ? {
+          sessionId: plan.runtime_session.session_id,
+          agentId: plan.runtime_session.agent_id,
+          profileId: plan.runtime_session.profile_id,
+          kind: plan.runtime_session.kind,
+          resourceLimits: toResourceLimits(plan.runtime_session.resource_limits),
+          ownerId: plan.runtime_session.owner_id,
+          historyWindow: plan.runtime_session.history_window
+            ? {
+                maxMessages: plan.runtime_session.history_window.max_messages,
+              }
+            : undefined,
+          maxHistoryMessages: plan.runtime_session.max_history_messages,
+          turnTimeoutMs: plan.runtime_session.turn_timeout_ms,
+        }
+      : undefined,
+    profileMcpConfig: plan.profile_mcp_config
+      ? {
+          bindingId: plan.profile_mcp_config.binding_id,
+          endpointRef: plan.profile_mcp_config.endpoint_ref,
+          serverNames: plan.profile_mcp_config.server_names,
+          transport: plan.profile_mcp_config.transport,
+          toolProfile: plan.profile_mcp_config.tool_profile,
+        }
+      : undefined,
+  };
+}
+
+function toProfileModelConfigSeed(
+  modelConfig: RawProfileModelConfigSeed,
+): NativeProfileModelConfigSeed {
+  return {
+    provider: modelConfig.provider,
+    modelName: modelConfig.model_name,
+    baseUrl: modelConfig.base_url,
+    api: modelConfig.api,
+    apiKeyEnv: modelConfig.api_key_env,
+    temperatureMilli: modelConfig.temperature_milli,
+    maxOutputTokens: modelConfig.max_output_tokens,
+  };
+}
+
+function toResourceLimits(
+  limits: RawResourceLimits | undefined,
+): ResourceLimits | undefined {
+  if (!limits) {
+    return undefined;
+  }
+  return {
+    workdir: limits.workdir,
+    maxDurationMs: limits.max_duration_ms,
+    maxDelegationDepth: limits.max_delegation_depth,
   };
 }
 
@@ -1926,6 +2111,60 @@ interface RawDelegatedResourceCleanupReport {
   orphaned_archived: SessionId[];
   expired_archived: SessionId[];
   resources_released: number;
+}
+
+interface RawCreateProfilePlan {
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  profile_seed?: {
+    profile_id: string;
+    display_name?: string;
+    model_config: RawProfileModelConfigSeed;
+    brain: {
+      module?: string;
+      strategy?: string;
+    };
+    skills_mode: string;
+  };
+  runtime_brain?: {
+    implementation_id: string;
+    profile_id: string;
+  };
+  runtime_session?: {
+    session_id: string;
+    agent_id: string;
+    profile_id: string;
+    kind: "full" | "worker" | "delegated";
+    resource_limits?: RawResourceLimits;
+    owner_id?: string;
+    history_window?: {
+      max_messages?: number;
+    };
+    max_history_messages?: number;
+    turn_timeout_ms?: number;
+  };
+  profile_mcp_config?: {
+    binding_id?: string;
+    endpoint_ref?: string;
+    server_names: string[];
+    transport?: string;
+    tool_profile?: string;
+  };
+}
+
+interface RawProfileModelConfigSeed {
+  provider: string;
+  model_name: string;
+  base_url?: string;
+  api?: string;
+  api_key_env?: string;
+  temperature_milli?: number;
+  max_output_tokens?: number;
+}
+
+interface RawResourceLimits {
+  workdir?: string;
+  max_duration_ms?: number;
+  max_delegation_depth?: number;
 }
 
 interface RawScheduledJobSummary {

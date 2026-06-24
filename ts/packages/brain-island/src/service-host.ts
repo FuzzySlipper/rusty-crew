@@ -42,6 +42,7 @@ import {
   loadNativeBridge,
   type NativeProfileMemoryRecord,
   type NativeBridgeModule,
+  type NativeCreateProfilePlan,
 } from "@rusty-crew/native-bridge";
 import {
   McpSurfaceManager,
@@ -77,7 +78,6 @@ import {
   type ChannelWakePolicy,
   type DeliveryIntentWakeDecision,
 } from "./channel-wake-policy.js";
-import { resolveBrainModuleSelection } from "./brain-module.js";
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
@@ -111,8 +111,13 @@ import {
   type DirectDebugResult,
   type DirectDebugServiceContext,
 } from "./direct-debug-service.js";
-import { loadProfileConfig, loadProfileContext } from "./profile-loading.js";
+import {
+  loadProfileConfig,
+  loadProfileContext,
+  type ProfileConfig,
+} from "./profile-loading.js";
 import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
+import { planCreateProfileWithRust } from "./runtime-config-validation.js";
 import {
   buildRuntimeDiagnosticsProjection,
   type RuntimeSessionEffectiveDefaults,
@@ -1943,87 +1948,56 @@ async function createServiceProfile(
   state: ServiceState,
   command: AdminControlCommand,
 ): Promise<CreatedServiceProfile> {
-  const profileId = validateProfileComponent(
-    requiredBodyString(command, "profileId"),
-    "profileId",
-  );
+  const profileId = requiredBodyString(command, "profileId");
   const displayName = optionalBodyString(command, "displayName");
-  const agentId = validateProfileComponent(
-    optionalBodyString(command, "agentId") ?? profileId,
-    "agentId",
-  );
-  const sessionId = validateProfileComponent(
-    optionalBodyString(command, "sessionId") ?? `${agentId}-session`,
-    "sessionId",
-  );
-  const implementationId = validateProfileComponent(
-    optionalBodyString(command, "implementationId") ?? `${profileId}-brain`,
-    "implementationId",
-  );
-  const kind = optionalBodyString(command, "kind") ?? "full";
-  if (kind !== "full" && kind !== "worker" && kind !== "delegated") {
-    throw new Error("profile session kind must be full, worker, or delegated");
-  }
-  const modelConfig = modelConfigFromBody(command.body.modelConfig);
-  const mcpToolProfile =
-    optionalBodyString(command, "mcpToolProfile") ?? profileId;
-  const profilePath = join(
-    state.runtimeConfig.profilesDir,
-    `${profileId}.json`,
-  );
-  if (existsSync(profilePath)) {
-    throw new Error(`profile ${profileId} already exists`);
-  }
-
+  const profilePath = safeProfileConfigPath(state.runtimeConfig.profilesDir, profileId);
   const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const brains = runtimeConfigFile.array("brains");
-  const sessions = runtimeConfigFile.array("sessions");
-  if (
-    brains.some(
-      (item) =>
-        isRecord(item) &&
-        (item.profileId === profileId ||
-          item.implementationId === implementationId),
-    )
-  ) {
-    throw new Error(`runtime config already has a brain for ${profileId}`);
+  const profiles = await loadRuntimeConfigProfiles(state);
+  const plan = await planCreateProfileWithRust({
+    bridge: state.bridge,
+    runtimeConfig: state.runtimeConfig,
+    profiles,
+    request: {
+      profileId,
+      ...(displayName === undefined ? {} : { displayName }),
+      agentId: optionalBodyString(command, "agentId"),
+      sessionId: optionalBodyString(command, "sessionId"),
+      implementationId: optionalBodyString(command, "implementationId"),
+      kind: createProfileKind(command),
+      modelConfig: modelConfigFromBody(command.body.modelConfig),
+      brain: profileBrainFromBody(command.body.brain ?? command.body.brainSelection),
+      mcpToolProfile: optionalBodyString(command, "mcpToolProfile"),
+      profileFileExists: profilePath === undefined ? false : existsSync(profilePath),
+    },
+  });
+  assertCreateProfilePlan(plan);
+
+  const profileSeed = plan.profileSeed;
+  const runtimeBrain = plan.runtimeBrain;
+  const runtimeSession = plan.runtimeSession;
+  const profileMcpConfig = plan.profileMcpConfig;
+  if (!profileSeed || !runtimeBrain || !runtimeSession || !profileMcpConfig) {
+    throw new Error("create-profile plan did not include required profile/runtime entries");
   }
-  if (
-    sessions.some(
-      (item) =>
-        isRecord(item) &&
-        (item.profileId === profileId ||
-          item.sessionId === sessionId ||
-          item.agentId === agentId),
-    )
-  ) {
-    throw new Error(`runtime config already has a session for ${profileId}`);
-  }
+  const plannedProfilePath = join(
+    state.runtimeConfig.profilesDir,
+    `${profileSeed.profileId}.json`,
+  );
 
   await mkdir(state.runtimeConfig.profilesDir, { recursive: true });
-  await writeJsonFileAtomic(profilePath, {
-    profileId,
-    ...(displayName === undefined ? {} : { displayName }),
-    modelConfig,
-    brain: {
-      module: resolveBrainModuleSelection({ modelConfig }).moduleId,
-    },
-    mcpConfig: {
-      bindingId: `${agentId}-mcp`,
-      serverNames: [agentId],
-      endpointRef: `config://mcp/${agentId}`,
-      toolProfile: mcpToolProfile,
-    },
-    skills: "all",
+  await writeJsonFileAtomic(plannedProfilePath, {
+    profileId: profileSeed.profileId,
+    ...(profileSeed.displayName === undefined
+      ? {}
+      : { displayName: profileSeed.displayName }),
+    modelConfig: profileSeed.modelConfig,
+    brain: profileSeed.brain,
+    mcpConfig: profileMcpConfig,
+    skills: profileSeed.skillsMode,
   });
 
-  brains.push({ profileId, implementationId });
-  sessions.push({
-    sessionId,
-    agentId,
-    profileId,
-    kind: kind as SessionKind,
-  });
+  runtimeConfigFile.array("brains").push(runtimeBrain);
+  runtimeConfigFile.array("sessions").push(runtimeSession);
   await writeJsonFileAtomic(
     state.config.paths.serviceConfigFile,
     runtimeConfigFile.value,
@@ -2035,29 +2009,86 @@ async function createServiceProfile(
     summaryPrefix: `Profile ${profileId} created`,
   });
   return {
-    profileId,
-    ...(displayName === undefined ? {} : { displayName }),
-    agentId,
-    sessionId,
-    implementationId,
-    profilePath,
+    profileId: profileSeed.profileId,
+    ...(profileSeed.displayName === undefined
+      ? {}
+      : { displayName: profileSeed.displayName }),
+    agentId: runtimeSession.agentId,
+    sessionId: runtimeSession.sessionId,
+    implementationId: runtimeBrain.implementationId,
+    profilePath: plannedProfilePath,
     runtimeConfigPath: state.config.paths.serviceConfigFile,
     applyResult,
   };
 }
 
-function validateProfileComponent(value: string, field: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(value)) {
-    throw new Error(
-      `${field} must start with a letter or number and contain only letters, numbers, underscore, or hyphen`,
-    );
+async function loadRuntimeConfigProfiles(
+  state: ServiceState,
+): Promise<ProfileConfig[]> {
+  const profileIds = new Set<ProfileId>();
+  for (const session of state.runtimeConfig.sessions) {
+    profileIds.add(session.profileId);
   }
-  return value;
+  const profiles: ProfileConfig[] = [];
+  for (const profileId of profileIds) {
+    profiles.push(await loadProfileConfig(state.runtimeConfig.profilesDir, profileId));
+  }
+  return profiles;
 }
 
-function modelConfigFromBody(input: unknown): BrainModelConfig {
+function safeProfileConfigPath(
+  profilesDir: string,
+  profileId: string,
+): string | undefined {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(profileId)) {
+    return undefined;
+  }
+  return join(profilesDir, `${profileId}.json`);
+}
+
+function createProfileKind(
+  command: AdminControlCommand,
+): "full" | "worker" | "delegated" | undefined {
+  const kind = optionalBodyString(command, "kind");
+  if (kind === undefined) {
+    return undefined;
+  }
+  if (kind === "full" || kind === "worker" || kind === "delegated") {
+    return kind;
+  }
+  throw new Error("profile session kind must be full, worker, or delegated");
+}
+
+function profileBrainFromBody(
+  input: unknown,
+): { module?: string; strategy?: string } | undefined {
+  const brain = optionalRecord(input);
+  if (!brain) {
+    return undefined;
+  }
+  return compactRecord({
+    module: optionalString(brain.module),
+    strategy: optionalString(brain.strategy),
+  }) as { module?: string; strategy?: string };
+}
+
+function assertCreateProfilePlan(plan: NativeCreateProfilePlan): void {
+  const errors = plan.diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (errors.length > 0) {
+    const first = errors[0]!;
+    const suffix =
+      errors.length === 1
+        ? ""
+        : ` (${errors.length - 1} additional diagnostic${errors.length === 2 ? "" : "s"})`;
+    throw new Error(`${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`);
+  }
+}
+
+function modelConfigFromBody(input: unknown): BrainModelConfig | undefined {
   if (input === undefined) {
-    return { provider: "local", modelName: "deterministic" };
+    return undefined;
   }
   if (!isRecord(input)) {
     throw new Error("modelConfig must be an object when provided");

@@ -1,5 +1,7 @@
 import type {
   NativeBridgeModule,
+  NativeCreateProfilePlan,
+  NativeCreateProfileRequest,
   NativeRuntimeConfigValidationInput,
   NativeRuntimeConfigValidationResult,
   NativeProfileRuntimeMetadata,
@@ -80,6 +82,22 @@ export async function validateRuntimeConfigWithRust(input: {
   return input.bridge.validateRuntimeConfigDraft(
     runtimeConfigValidationInput(input.runtimeConfig, input.profiles),
   );
+}
+
+export async function planCreateProfileWithRust(input: {
+  bridge: Pick<NativeBridgeModule, "planCreateProfile">;
+  runtimeConfig: RustyCrewRuntimeConfig;
+  profiles: readonly ProfileConfig[];
+  request: NativeCreateProfileRequest;
+}): Promise<NativeCreateProfilePlan> {
+  const validationInput = runtimeConfigValidationInput(
+    input.runtimeConfig,
+    input.profiles,
+  );
+  return input.bridge.planCreateProfile({
+    ...validationInput,
+    request: input.request,
+  });
 }
 
 function profileRuntimeMetadata(

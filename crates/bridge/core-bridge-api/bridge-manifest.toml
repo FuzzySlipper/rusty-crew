@@ -108,6 +108,15 @@ errors = "core_protocol::CoreError"
 summary = "Validate a service runtime config draft and TS-loaded profile runtime metadata without mutating files or engine state."
 
 [[operation]]
+name = "plan_create_profile"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::CreateProfilePlanInput"
+output = "core_config::CreateProfilePlan"
+errors = "core_protocol::CoreError"
+summary = "Plan runtime/profile seed defaults for an admin create-profile request without writing files or mutating engine state."
+
+[[operation]]
 name = "inject_external_event"
 surface = "stable"
 direction = "ts_to_rust"

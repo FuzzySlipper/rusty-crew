@@ -10,6 +10,7 @@ import type {
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import type { ProfileConfig } from "./profile-loading.js";
 import {
+  planCreateProfileWithRust,
   runtimeConfigValidationInput,
   validateRuntimeConfigWithRust,
 } from "./runtime-config-validation.js";
@@ -192,5 +193,72 @@ assert(
       diagnostic.path === "mcpBindings[0].serverNames",
   ),
 );
+
+const createPlan = await planCreateProfileWithRust({
+  bridge,
+  runtimeConfig,
+  profiles: [profile],
+  request: {
+    profileId: "field-created-profile",
+    displayName: "Field Created Profile",
+    profileFileExists: false,
+  },
+});
+assert.deepEqual(createPlan.diagnostics, []);
+assert.equal(createPlan.profileSeed?.profileId, "field-created-profile");
+assert.equal(createPlan.profileSeed?.displayName, "Field Created Profile");
+assert.equal(createPlan.profileSeed?.modelConfig.provider, "local");
+assert.equal(createPlan.profileSeed?.modelConfig.modelName, "deterministic");
+assert.equal(createPlan.profileSeed?.brain.module, "local");
+assert.equal(createPlan.profileSeed?.skillsMode, "all");
+assert.equal(
+  createPlan.runtimeBrain?.implementationId,
+  "field-created-profile-brain",
+);
+assert.equal(
+  createPlan.runtimeSession?.sessionId,
+  "field-created-profile-session",
+);
+assert.equal(createPlan.profileMcpConfig?.toolProfile, "field-created-profile");
+
+const duplicatePlan = await planCreateProfileWithRust({
+  bridge,
+  runtimeConfig,
+  profiles: [profile],
+  request: {
+    profileId: profileId,
+    agentId: agentId,
+    sessionId: sessionId,
+    implementationId: brainImplementationId,
+    profileFileExists: true,
+  },
+});
+assert(
+  duplicatePlan.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.code === "duplicate_session_id" &&
+      diagnostic.path === "request.sessionId",
+  ),
+);
+assert.equal(duplicatePlan.profileSeed, undefined);
+
+const invalidCreatePlan = await planCreateProfileWithRust({
+  bridge,
+  runtimeConfig,
+  profiles: [profile],
+  request: {
+    profileId: "../bad",
+    mcpToolProfile: "bad tool",
+    profileFileExists: false,
+  },
+});
+assert(
+  invalidCreatePlan.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.code === "invalid_profile_id" &&
+      diagnostic.path === "request.profileId",
+  ),
+);
+assert.equal(invalidCreatePlan.runtimeSession, undefined);
 
 console.log("runtime config validation native bridge smoke passed");

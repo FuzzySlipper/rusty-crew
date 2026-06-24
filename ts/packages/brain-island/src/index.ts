@@ -803,6 +803,7 @@ export type {
   ProfileRuntimeConfig,
 } from "./profile-loading.js";
 export {
+  planCreateProfileWithRust,
   runtimeConfigValidationInput,
   validateRuntimeConfigWithRust,
 } from "./runtime-config-validation.js";
