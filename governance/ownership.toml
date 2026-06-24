@@ -1,5 +1,8 @@
-# Dependency guardrail sketch. This will become machine-checked once the
-# scaffold has a manifest/codegen harness.
+# Dependency guardrails for Rust crate boundaries.
+#
+# Keep this file machine-checkable with `npm run smoke:rust-crate-boundaries`.
+# `[[crate]]` entries target an exact Cargo package name. `[[lane]]` entries
+# target future crate families by path prefix.
 
 [[crate]]
 name = "rusty-crew-core-protocol"
@@ -12,3 +15,23 @@ may_not_depend_on = ["rusty-crew-core-bridge-node"]
 [[crate]]
 name = "rusty-crew-core-bridge-api"
 may_not_depend_on = ["rusty-crew-core-bridge-node"]
+
+[[lane]]
+name = "rust-brain-module"
+path_prefixes = ["crates/brains/"]
+allowed_internal_dependencies = [
+  "rusty-crew-core-protocol",
+  "rusty-crew-core-bridge-api",
+]
+may_not_depend_on = [
+  "rusty-crew-core-engine",
+  "rusty-crew-core-session",
+  "rusty-crew-core-bus",
+  "rusty-crew-core-body",
+  "rusty-crew-core-persistence",
+  "rusty-crew-core-config",
+  "rusty-crew-core-tool-registry",
+  "rusty-crew-core-bridge-node",
+  "rusty-crew-core-bridge-mock",
+  "rusty-crew-core-bridge-codegen",
+]
