@@ -129,6 +129,9 @@ import {
 import {
   handleRustyViewChatRequest,
   cursorSequence,
+  type AttachmentMutationResult,
+  type AttachmentPage,
+  type AttachmentRecord,
   type ChatEvent,
   type ChatSendMessageInput,
   type ConversationBranchMutationResult,
@@ -140,13 +143,20 @@ import {
   type ConversationSnapshotRecord,
   type ConversationTreeInput,
   type ConversationTreeProjection,
+  type CreateAttachmentInput,
   type CreateConversationBranchInput,
   type CreateConversationSnapshotInput,
+  type CreateDataBankScopeInput,
+  type DataBankScopeMutationResult,
+  type DataBankScopePage,
+  type DataBankScopeRecord,
   type CreateMessageSlotInput,
   type CreateMessageVariantInput,
   type DeleteMessageVariantInput,
   type ExecuteChatCommandInput,
   type ExecuteChatCommandResult,
+  type ListAttachmentsInput,
+  type ListDataBankScopesInput,
   type ListMessageSlotsInput,
   type ListMessageVariantsInput,
   type MessageBlockDraft,
@@ -158,6 +168,8 @@ import {
   type MessageVariantRecord,
   type MessageVariantsReorderResult,
   type ReorderMessageVariantsInput,
+  type RemoveAttachmentInput,
+  type RemoveDataBankScopeInput,
   type SelectActiveMessageVariantInput,
   type SelectActiveMessageVariantResult,
   type SelectActiveConversationBranchInput,
@@ -297,6 +309,11 @@ interface ServiceState {
   readonly chatEventsBySession: Map<SessionId, ChatEvent[]>;
   readonly chatSequencesBySession: Map<SessionId, number>;
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
+  readonly attachmentsBySession: Map<SessionId, Map<string, AttachmentRecord>>;
+  readonly dataBankScopesBySession: Map<
+    SessionId,
+    Map<string, DataBankScopeRecord>
+  >;
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
   readonly now: () => string;
@@ -423,6 +440,8 @@ export async function startRustyCrewServiceHost(
       chatEventsBySession: new Map(),
       chatSequencesBySession: new Map(),
       chatSubscribersBySession: new Map(),
+      attachmentsBySession: new Map(),
+      dataBankScopesBySession: new Map(),
       suppressedWakeEvents: new Map(),
       recentEvents: [],
       now: options.now ?? (() => new Date().toISOString()),
@@ -591,6 +610,15 @@ async function handleHttpRequest(
           createRustyViewConversationSnapshot(state, input),
         resolveConversationJump: (input) =>
           resolveRustyViewConversationJump(state, input),
+        createAttachment: (input) => createRustyViewAttachment(state, input),
+        listAttachments: (input) => listRustyViewAttachments(state, input),
+        removeAttachment: (input) => removeRustyViewAttachment(state, input),
+        createDataBankScope: (input) =>
+          createRustyViewDataBankScope(state, input),
+        listDataBankScopes: (input) =>
+          listRustyViewDataBankScopes(state, input),
+        removeDataBankScope: (input) =>
+          removeRustyViewDataBankScope(state, input),
         now: state.now,
       },
     );
@@ -4834,6 +4862,212 @@ async function resolveRustyViewConversationJump(
   })) as ConversationJumpResult;
 }
 
+async function createRustyViewAttachment(
+  state: ServiceState,
+  input: CreateAttachmentInput,
+): Promise<AttachmentMutationResult> {
+  const now = state.now();
+  const attachmentId =
+    input.request.attachment_id ??
+    stableChatRecordId(
+      "attachment",
+      `${input.session.sessionId}:${input.requestId}`,
+    );
+  const attachments = attachmentMap(state, input.session.sessionId);
+  const existing = attachments.get(attachmentId);
+  const link = attachmentLinkRecord({
+    attachmentId,
+    sessionId: input.session.sessionId,
+    messageId: input.request.message_id ?? null,
+    blockId: input.request.block_id ?? null,
+    scopeId: input.request.scope_id ?? null,
+    metadataJson: input.request.link_metadata_json ?? {},
+    createdAt: now,
+  });
+  const base: AttachmentRecord = {
+    attachment_id: attachmentId,
+    session_id: input.session.sessionId,
+    status: "active",
+    filename: input.request.filename,
+    mime_type: input.request.mime_type,
+    byte_size: input.request.byte_size,
+    storage_url: input.request.storage_url ?? null,
+    download_url: input.request.download_url ?? null,
+    thumbnail_url: input.request.thumbnail_url ?? null,
+    extracted_text: input.request.extracted_text ?? null,
+    extracted_text_truncated: input.request.extracted_text_truncated ?? false,
+    metadata_json: input.request.metadata_json ?? {},
+    created_at: existing?.created_at ?? now,
+    updated_at: now,
+    expires_at: input.request.expires_at ?? null,
+    links: appendAttachmentLink(existing?.links ?? [], link),
+  };
+  attachments.set(attachmentId, base);
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: existing ? "attachment_updated" : "attachment_uploaded",
+    payload: { attachment: base },
+  });
+  if (link.message_id || link.block_id || link.scope_id) {
+    appendChatEvent(state, input.session.sessionId, {
+      kind: "attachment_linked",
+      payload: { attachment_id: attachmentId, link, attachment: base },
+    });
+  }
+  return {
+    status: existing
+      ? "updated"
+      : link.scope_id || link.message_id || link.block_id
+        ? "linked"
+        : "created",
+    attachment: base,
+    latest_cursor:
+      latestChatCursor(state, input.session.sessionId) ?? event.event_id,
+  };
+}
+
+async function listRustyViewAttachments(
+  state: ServiceState,
+  input: ListAttachmentsInput,
+): Promise<AttachmentPage> {
+  const all = [...attachmentMap(state, input.session.sessionId).values()]
+    .filter((record) => input.includeRemoved || record.status !== "removed")
+    .filter(
+      (record) =>
+        input.scopeId === undefined ||
+        record.links.some((link) => link.scope_id === input.scopeId),
+    )
+    .filter(
+      (record) =>
+        input.messageId === undefined ||
+        record.links.some((link) => link.message_id === input.messageId),
+    )
+    .sort((left, right) =>
+      left.created_at === right.created_at
+        ? left.attachment_id.localeCompare(right.attachment_id)
+        : left.created_at.localeCompare(right.created_at),
+    );
+  const items = all.slice(input.offset, input.offset + input.limit);
+  return {
+    items,
+    total: all.length,
+    limit: input.limit,
+    offset: input.offset,
+    ...(input.offset + items.length < all.length
+      ? { nextOffset: input.offset + items.length }
+      : {}),
+  };
+}
+
+async function removeRustyViewAttachment(
+  state: ServiceState,
+  input: RemoveAttachmentInput,
+): Promise<AttachmentMutationResult> {
+  const attachments = attachmentMap(state, input.session.sessionId);
+  const existing = attachments.get(input.attachmentId);
+  if (!existing) {
+    throw new Error(
+      `attachment ${input.attachmentId} was not found for ${input.session.sessionId}`,
+    );
+  }
+  const removed: AttachmentRecord = {
+    ...existing,
+    status: "removed",
+    updated_at: state.now(),
+  };
+  attachments.set(input.attachmentId, removed);
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "attachment_removed",
+    payload: { attachment_id: input.attachmentId, attachment: removed },
+  });
+  return {
+    status: "removed",
+    attachment: removed,
+    latest_cursor: event.event_id,
+  };
+}
+
+async function createRustyViewDataBankScope(
+  state: ServiceState,
+  input: CreateDataBankScopeInput,
+): Promise<DataBankScopeMutationResult> {
+  const now = state.now();
+  const scopeId =
+    input.request.scope_id ??
+    stableChatRecordId(
+      "scope",
+      `${input.session.sessionId}:${input.requestId}`,
+    );
+  const scopes = dataBankScopeMap(state, input.session.sessionId);
+  const existing = scopes.get(scopeId);
+  const scope: DataBankScopeRecord = {
+    scope_id: scopeId,
+    session_id: input.session.sessionId,
+    status: "active",
+    label: input.request.label ?? null,
+    description: input.request.description ?? null,
+    metadata_json: input.request.metadata_json ?? {},
+    created_at: existing?.created_at ?? now,
+    updated_at: now,
+  };
+  scopes.set(scopeId, scope);
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "data_bank_scope_created",
+    payload: { scope },
+  });
+  return {
+    status: existing ? "updated" : "created",
+    scope,
+    latest_cursor: event.event_id,
+  };
+}
+
+async function listRustyViewDataBankScopes(
+  state: ServiceState,
+  input: ListDataBankScopesInput,
+): Promise<DataBankScopePage> {
+  const all = [...dataBankScopeMap(state, input.session.sessionId).values()]
+    .filter((record) => input.includeRemoved || record.status !== "removed")
+    .sort((left, right) =>
+      left.created_at === right.created_at
+        ? left.scope_id.localeCompare(right.scope_id)
+        : left.created_at.localeCompare(right.created_at),
+    );
+  const items = all.slice(input.offset, input.offset + input.limit);
+  return {
+    items,
+    total: all.length,
+    limit: input.limit,
+    offset: input.offset,
+    ...(input.offset + items.length < all.length
+      ? { nextOffset: input.offset + items.length }
+      : {}),
+  };
+}
+
+async function removeRustyViewDataBankScope(
+  state: ServiceState,
+  input: RemoveDataBankScopeInput,
+): Promise<DataBankScopeMutationResult> {
+  const scopes = dataBankScopeMap(state, input.session.sessionId);
+  const existing = scopes.get(input.scopeId);
+  if (!existing) {
+    throw new Error(
+      `data-bank scope ${input.scopeId} was not found for ${input.session.sessionId}`,
+    );
+  }
+  const removed: DataBankScopeRecord = {
+    ...existing,
+    status: "removed",
+    updated_at: state.now(),
+  };
+  scopes.set(input.scopeId, removed);
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "data_bank_scope_removed",
+    payload: { scope_id: input.scopeId, scope: removed },
+  });
+  return { status: "removed", scope: removed, latest_cursor: event.event_id };
+}
+
 async function ensureDefaultConversationBranch(
   state: ServiceState,
   session: ChatSendMessageInput["session"],
@@ -5145,6 +5379,68 @@ function messageBlockWrites(
 
 function stableChatRecordId(prefix: string, raw: string): string {
   return `${prefix}:${raw.replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 160)}`;
+}
+
+function attachmentMap(
+  state: ServiceState,
+  sessionId: SessionId,
+): Map<string, AttachmentRecord> {
+  const existing = state.attachmentsBySession.get(sessionId);
+  if (existing) return existing;
+  const created = new Map<string, AttachmentRecord>();
+  state.attachmentsBySession.set(sessionId, created);
+  return created;
+}
+
+function dataBankScopeMap(
+  state: ServiceState,
+  sessionId: SessionId,
+): Map<string, DataBankScopeRecord> {
+  const existing = state.dataBankScopesBySession.get(sessionId);
+  if (existing) return existing;
+  const created = new Map<string, DataBankScopeRecord>();
+  state.dataBankScopesBySession.set(sessionId, created);
+  return created;
+}
+
+function attachmentLinkRecord(input: {
+  attachmentId: string;
+  sessionId: SessionId;
+  messageId?: string | null;
+  blockId?: string | null;
+  scopeId?: string | null;
+  metadataJson: unknown;
+  createdAt: string;
+}): AttachmentRecord["links"][number] {
+  const target = [
+    input.messageId ?? "no-message",
+    input.blockId ?? "no-block",
+    input.scopeId ?? "no-scope",
+  ].join(":");
+  return {
+    link_id: stableChatRecordId(
+      "attachment-link",
+      `${input.attachmentId}:${target}`,
+    ),
+    attachment_id: input.attachmentId,
+    session_id: input.sessionId,
+    message_id: input.messageId ?? null,
+    block_id: input.blockId ?? null,
+    scope_id: input.scopeId ?? null,
+    metadata_json: input.metadataJson,
+    created_at: input.createdAt,
+  };
+}
+
+function appendAttachmentLink(
+  links: AttachmentRecord["links"],
+  next: AttachmentRecord["links"][number],
+): AttachmentRecord["links"] {
+  if (!next.message_id && !next.block_id && !next.scope_id) {
+    return links;
+  }
+  const filtered = links.filter((link) => link.link_id !== next.link_id);
+  return [...filtered, next];
 }
 
 async function executeRustyViewChatCommand(

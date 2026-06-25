@@ -463,6 +463,100 @@ try {
     assert.ok(slotMutationKinds.includes(kind), `missing ${kind} event`);
   }
 
+  const scope = await post(
+    "/v1/chat/sessions/chat-session/data-bank/scopes",
+    token,
+    {
+      scope_id: "scope:reference-pack",
+      label: "Reference pack",
+      description: "Reusable files for the current chat",
+      metadata_json: { source: "smoke" },
+    },
+  );
+  assert.equal(scope.status, 201);
+  assert.equal(scope.body.data.scope.scope_id, "scope:reference-pack");
+
+  const attachment = await post(
+    "/v1/chat/sessions/chat-session/attachments",
+    token,
+    {
+      attachment_id: "attachment:guide",
+      filename: "guide.txt",
+      mime_type: "text/plain",
+      byte_size: 42,
+      download_url:
+        "/v1/chat/sessions/chat-session/attachments/attachment%3Aguide/download",
+      thumbnail_url: null,
+      extracted_text: "hello attachment",
+      extracted_text_truncated: false,
+      message_id: "client-message-1",
+      scope_id: "scope:reference-pack",
+      metadata_json: { kind: "reference" },
+      link_metadata_json: { linked_by: "smoke" },
+    },
+  );
+  assert.equal(attachment.status, 201);
+  assert.equal(attachment.body.data.attachment.links.length, 1);
+  assert.equal(
+    attachment.body.data.attachment.links[0].scope_id,
+    "scope:reference-pack",
+  );
+
+  const attachments = await get(
+    "/v1/chat/sessions/chat-session/attachments?message_id=client-message-1",
+    token,
+  );
+  assert.equal(attachments.status, 200);
+  assert.equal(
+    attachments.body.data.items[0]?.attachment_id,
+    "attachment:guide",
+  );
+
+  const scopeAttachments = await get(
+    "/v1/chat/sessions/chat-session/data-bank/scopes/scope%3Areference-pack/attachments",
+    token,
+  );
+  assert.equal(scopeAttachments.status, 200);
+  assert.equal(
+    scopeAttachments.body.data.items[0]?.attachment_id,
+    "attachment:guide",
+  );
+
+  const removedAttachment = await del(
+    "/v1/chat/sessions/chat-session/attachments/attachment%3Aguide",
+    token,
+  );
+  assert.equal(removedAttachment.status, 200);
+  assert.equal(removedAttachment.body.data.status, "removed");
+
+  const removedScope = await del(
+    "/v1/chat/sessions/chat-session/data-bank/scopes/scope%3Areference-pack",
+    token,
+  );
+  assert.equal(removedScope.status, 200);
+  assert.equal(removedScope.body.data.scope.status, "removed");
+
+  const attachmentMutationKinds = (
+    await get(
+      "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+      token,
+    )
+  ).body.data.items
+    .map((event: { kind: string }) => event.kind)
+    .filter(
+      (kind: string) =>
+        kind.startsWith("attachment_") || kind.startsWith("data_bank_"),
+    );
+  for (const kind of [
+    "data_bank_scope_created",
+    "attachment_uploaded",
+    "attachment_linked",
+    "attachment_removed",
+    "data_bank_scope_removed",
+  ]) {
+    assert.ok(attachmentMutationKinds.includes(kind), `missing ${kind} event`);
+  }
+
   const afterMutationPage = await get("/v1/chat/sessions", token);
   const afterMutationSession = afterMutationPage.body.data.items.find(
     (item: { session_id: string }) => item.session_id === "chat-session",

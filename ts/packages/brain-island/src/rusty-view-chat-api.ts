@@ -85,6 +85,22 @@ export interface RustyViewChatContext {
   resolveConversationJump?(
     input: ResolveConversationJumpInput,
   ): Promise<ConversationJumpResult>;
+  createAttachment?(
+    input: CreateAttachmentInput,
+  ): Promise<AttachmentMutationResult>;
+  listAttachments?(input: ListAttachmentsInput): Promise<AttachmentPage>;
+  removeAttachment?(
+    input: RemoveAttachmentInput,
+  ): Promise<AttachmentMutationResult>;
+  createDataBankScope?(
+    input: CreateDataBankScopeInput,
+  ): Promise<DataBankScopeMutationResult>;
+  listDataBankScopes?(
+    input: ListDataBankScopesInput,
+  ): Promise<DataBankScopePage>;
+  removeDataBankScope?(
+    input: RemoveDataBankScopeInput,
+  ): Promise<DataBankScopeMutationResult>;
   now?: () => string;
 }
 
@@ -147,6 +163,12 @@ export interface ChatEvent {
     | "conversation_active_branch_selected"
     | "conversation_branch_head_updated"
     | "conversation_snapshot_created"
+    | "attachment_uploaded"
+    | "attachment_linked"
+    | "attachment_removed"
+    | "attachment_updated"
+    | "data_bank_scope_created"
+    | "data_bank_scope_removed"
     | "stream_error"
     | "unknown";
   payload: Record<string, unknown>;
@@ -513,6 +535,100 @@ export interface ConversationJumpResult {
   snapshot_id?: string | null;
 }
 
+export interface AttachmentLinkRecord {
+  link_id: string;
+  attachment_id: string;
+  session_id: string;
+  message_id?: string | null;
+  block_id?: string | null;
+  scope_id?: string | null;
+  metadata_json: unknown;
+  created_at: string;
+}
+
+export interface AttachmentRecord {
+  attachment_id: string;
+  session_id: string;
+  status: "active" | "removed";
+  filename: string;
+  mime_type: string;
+  byte_size: number;
+  storage_url?: string | null;
+  download_url?: string | null;
+  thumbnail_url?: string | null;
+  extracted_text?: string | null;
+  extracted_text_truncated: boolean;
+  metadata_json: unknown;
+  created_at: string;
+  updated_at: string;
+  expires_at?: string | null;
+  links: AttachmentLinkRecord[];
+}
+
+export interface AttachmentPage {
+  items: AttachmentRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+}
+
+export interface CreateAttachmentRequest {
+  attachment_id?: string;
+  filename: string;
+  mime_type: string;
+  byte_size: number;
+  storage_url?: string | null;
+  download_url?: string | null;
+  thumbnail_url?: string | null;
+  extracted_text?: string | null;
+  extracted_text_truncated?: boolean;
+  message_id?: string | null;
+  block_id?: string | null;
+  scope_id?: string | null;
+  metadata_json?: unknown;
+  link_metadata_json?: unknown;
+  expires_at?: string | null;
+}
+
+export interface AttachmentMutationResult {
+  status: "created" | "linked" | "removed" | "updated";
+  attachment: AttachmentRecord;
+  latest_cursor: string;
+}
+
+export interface DataBankScopeRecord {
+  scope_id: string;
+  session_id: string;
+  status: "active" | "removed";
+  label?: string | null;
+  description?: string | null;
+  metadata_json: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DataBankScopePage {
+  items: DataBankScopeRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+}
+
+export interface CreateDataBankScopeRequest {
+  scope_id?: string;
+  label?: string | null;
+  description?: string | null;
+  metadata_json?: unknown;
+}
+
+export interface DataBankScopeMutationResult {
+  status: "created" | "removed" | "updated";
+  scope: DataBankScopeRecord;
+  latest_cursor: string;
+}
+
 export interface ConversationTreeInput {
   session: SessionState;
   includeSnapshots: boolean;
@@ -552,6 +668,46 @@ export interface CreateConversationSnapshotInput {
 export interface ResolveConversationJumpInput {
   session: SessionState;
   target: ConversationJumpTarget;
+  requestId: string;
+}
+
+export interface CreateAttachmentInput {
+  session: SessionState;
+  request: CreateAttachmentRequest;
+  requestId: string;
+}
+
+export interface ListAttachmentsInput {
+  session: SessionState;
+  scopeId?: string;
+  messageId?: string;
+  includeRemoved: boolean;
+  limit: number;
+  offset: number;
+}
+
+export interface RemoveAttachmentInput {
+  session: SessionState;
+  attachmentId: string;
+  requestId: string;
+}
+
+export interface CreateDataBankScopeInput {
+  session: SessionState;
+  request: CreateDataBankScopeRequest;
+  requestId: string;
+}
+
+export interface ListDataBankScopesInput {
+  session: SessionState;
+  includeRemoved: boolean;
+  limit: number;
+  offset: number;
+}
+
+export interface RemoveDataBankScopeInput {
+  session: SessionState;
+  scopeId: string;
   requestId: string;
 }
 
@@ -631,6 +787,25 @@ export async function handleRustyViewChatRequest(
     }
     if (
       method === "POST" &&
+      partsMatch(url.pathname, ["v1", "chat", "sessions", "*", "attachments"])
+    ) {
+      return handleCreateAttachment(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "data-bank",
+        "scopes",
+      ])
+    ) {
+      return handleCreateDataBankScope(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
       partsMatch(url.pathname, ["v1", "chat", "sessions", "*", "slots"])
     ) {
       return handleCreateMessageSlot(request, context, requestId, url);
@@ -692,6 +867,33 @@ export async function handleRustyViewChatRequest(
       ])
     ) {
       return handleDeleteMessageVariant(request, context, requestId, url);
+    }
+    if (
+      method === "DELETE" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "attachments",
+        "*",
+      ])
+    ) {
+      return handleRemoveAttachment(request, context, requestId, url);
+    }
+    if (
+      method === "DELETE" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "data-bank",
+        "scopes",
+        "*",
+      ])
+    ) {
+      return handleRemoveDataBankScope(request, context, requestId, url);
     }
     return failure(405, requestId, {
       code: "method_not_allowed",
@@ -825,6 +1027,39 @@ export async function handleRustyViewChatRequest(
     parts[4] === "jump"
   ) {
     return handleResolveConversationJump(context, requestId, url, parts);
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "attachments"
+  ) {
+    return handleListAttachments(context, requestId, url, parts);
+  }
+
+  if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "data-bank" &&
+    parts[5] === "scopes"
+  ) {
+    return handleListDataBankScopes(context, requestId, url, parts);
+  }
+
+  if (
+    parts.length === 8 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "data-bank" &&
+    parts[5] === "scopes" &&
+    parts[7] === "attachments"
+  ) {
+    return handleListAttachments(context, requestId, url, parts);
   }
 
   if (
@@ -1312,6 +1547,150 @@ async function handleResolveConversationJump(
   );
 }
 
+async function handleListAttachments(
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.listAttachments) {
+    return chatFeatureUnavailable(requestId, "attachment_api_not_configured");
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.listAttachments({
+      session: session.session,
+      scopeId: parts[6]
+        ? decodeURIComponent(parts[6])
+        : trimmedParam(url, "scope_id"),
+      messageId: trimmedParam(url, "message_id"),
+      includeRemoved: boolParam(url, "include_removed"),
+      limit: pageLimit(url, 100, 500),
+      offset: pageOffset(url),
+    }),
+  );
+}
+
+async function handleCreateAttachment(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.createAttachment) {
+    return chatFeatureUnavailable(requestId, "attachment_api_not_configured");
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseCreateAttachmentRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.createAttachment({
+      session: session.session,
+      request: parsed.value,
+      requestId,
+    }),
+    201,
+  );
+}
+
+async function handleRemoveAttachment(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  void request;
+  if (!context.removeAttachment) {
+    return chatFeatureUnavailable(requestId, "attachment_api_not_configured");
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.removeAttachment({
+      session: session.session,
+      attachmentId: decodeURIComponent(parts[5] ?? ""),
+      requestId,
+    }),
+  );
+}
+
+async function handleListDataBankScopes(
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.listDataBankScopes) {
+    return chatFeatureUnavailable(requestId, "data_bank_api_not_configured");
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.listDataBankScopes({
+      session: session.session,
+      includeRemoved: boolParam(url, "include_removed"),
+      limit: pageLimit(url, 100, 500),
+      offset: pageOffset(url),
+    }),
+  );
+}
+
+async function handleCreateDataBankScope(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.createDataBankScope) {
+    return chatFeatureUnavailable(requestId, "data_bank_api_not_configured");
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseCreateDataBankScopeRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.createDataBankScope({
+      session: session.session,
+      request: parsed.value,
+      requestId,
+    }),
+    201,
+  );
+}
+
+async function handleRemoveDataBankScope(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  void request;
+  if (!context.removeDataBankScope) {
+    return chatFeatureUnavailable(requestId, "data_bank_api_not_configured");
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.removeDataBankScope({
+      session: session.session,
+      scopeId: decodeURIComponent(parts[6] ?? ""),
+      requestId,
+    }),
+  );
+}
+
 function sessionPage(
   sessions: SessionState[],
   context: RustyViewChatContext,
@@ -1722,7 +2101,7 @@ function chatFeatureUnavailable(
   return failure(412, requestId, {
     code: "failed_precondition",
     reason_code: reasonCode,
-    message: "chat message slot/variant persistence is not configured",
+    message: "the requested Rusty View chat feature is not configured",
     retryable: true,
   });
 }
@@ -2041,6 +2420,81 @@ function parseCreateConversationSnapshotRequest(
   };
 }
 
+function parseCreateAttachmentRequest(
+  value: unknown,
+):
+  | { ok: true; value: CreateAttachmentRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_attachment_body",
+      message: "attachment body must be a JSON object",
+    };
+  }
+  const filename = stringValue(value.filename);
+  const mimeType = stringValue(value.mime_type);
+  const byteSize = numberValue(value.byte_size);
+  if (!filename || !mimeType || byteSize === undefined) {
+    return {
+      ok: false,
+      reasonCode: "invalid_attachment_metadata",
+      message: "attachment requires filename, mime_type, and byte_size",
+    };
+  }
+  if (!mimeType.includes("/") || byteSize < 0) {
+    return {
+      ok: false,
+      reasonCode: "invalid_attachment_type_or_size",
+      message:
+        "attachment mime_type must be a MIME string and byte_size cannot be negative",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      attachment_id: stringValue(value.attachment_id),
+      filename,
+      mime_type: mimeType,
+      byte_size: byteSize,
+      storage_url: nullableStringValue(value.storage_url),
+      download_url: nullableStringValue(value.download_url),
+      thumbnail_url: nullableStringValue(value.thumbnail_url),
+      extracted_text: nullableStringValue(value.extracted_text),
+      extracted_text_truncated: booleanValue(value.extracted_text_truncated),
+      message_id: nullableStringValue(value.message_id),
+      block_id: nullableStringValue(value.block_id),
+      scope_id: nullableStringValue(value.scope_id),
+      metadata_json: value.metadata_json,
+      link_metadata_json: value.link_metadata_json,
+      expires_at: nullableStringValue(value.expires_at),
+    },
+  };
+}
+
+function parseCreateDataBankScopeRequest(
+  value: unknown,
+):
+  | { ok: true; value: CreateDataBankScopeRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_data_bank_scope_body",
+      message: "data-bank scope body must be a JSON object",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      scope_id: stringValue(value.scope_id),
+      label: nullableStringValue(value.label),
+      description: nullableStringValue(value.description),
+      metadata_json: value.metadata_json,
+    },
+  };
+}
+
 function parseConversationJumpTarget(
   url: URL,
 ):
@@ -2134,6 +2588,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function nullableStringValue(value: unknown): string | null | undefined {

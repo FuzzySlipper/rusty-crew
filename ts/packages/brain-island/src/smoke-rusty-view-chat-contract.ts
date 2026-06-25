@@ -25,6 +25,11 @@ const requiredPaths = [
   "/v1/chat/sessions/{session_id}/branches/active",
   "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
   "/v1/chat/sessions/{session_id}/snapshots",
+  "/v1/chat/sessions/{session_id}/attachments",
+  "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
+  "/v1/chat/sessions/{session_id}/data-bank/scopes",
+  "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}",
+  "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments",
   "/v1/chat/commands",
   "/v1/chat/commands/{command_name}/autocomplete",
   "/v1/chat/sessions/{session_id}/commands",
@@ -73,6 +78,12 @@ for (const kind of [
   "conversation_active_branch_selected",
   "conversation_branch_head_updated",
   "conversation_snapshot_created",
+  "attachment_uploaded",
+  "attachment_linked",
+  "attachment_removed",
+  "attachment_updated",
+  "data_bank_scope_created",
+  "data_bank_scope_removed",
   "unknown",
 ]) {
   assert.ok(eventKinds.includes(kind), `missing event kind ${kind}`);
@@ -100,6 +111,10 @@ assert.ok(schema("ConversationTreeProjection").properties?.branches);
 assert.ok(schema("ConversationBranchRecord").properties?.head_message_id);
 assert.ok(schema("ConversationSnapshotRecord").properties?.cursor);
 assert.ok(schema("ConversationJumpResult").properties?.target);
+assert.ok(schema("AttachmentRecord").properties?.links);
+assert.ok(schema("AttachmentMutationResult").properties?.attachment);
+assert.ok(schema("DataBankScopeRecord").properties?.scope_id);
+assert.ok(schema("DataBankScopeMutationResult").properties?.scope);
 assert.ok(schema("ActiveBranchExpectation").oneOf?.length);
 assert.ok(schema("BranchHeadExpectation").oneOf?.length);
 

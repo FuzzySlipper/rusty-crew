@@ -24,6 +24,7 @@ export type ChatCommandSource =
   | "frontend-local"
   | "plugin";
 export type ApiCapabilityScope =
+  | "attachment"
   | "chat"
   | "conversation"
   | "diagnostics"
@@ -648,6 +649,75 @@ export const API_CAPABILITIES = [
     tags: ["chat", "session", "conversation"],
     public: true,
   },
+  readCapability(
+    "chat.sessions.attachments.list",
+    "GET",
+    "/v1/chat/sessions/{session_id}/attachments",
+    "List generic attachments for a chat session.",
+    "chat",
+    ["chat", "session", "attachment"],
+  ),
+  {
+    id: "chat.sessions.attachments.create",
+    method: "POST",
+    path_template: "/v1/chat/sessions/{session_id}/attachments",
+    description:
+      "Register uploaded attachment metadata and optional message, block, or scope links.",
+    auth: "chat",
+    mutation: "write",
+    stability: "stable",
+    tags: ["chat", "session", "attachment"],
+    public: true,
+  },
+  {
+    id: "chat.sessions.attachments.remove",
+    method: "DELETE",
+    path_template: "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
+    description: "Mark a chat attachment removed.",
+    auth: "chat",
+    mutation: "write",
+    stability: "stable",
+    tags: ["chat", "session", "attachment"],
+    public: true,
+  },
+  readCapability(
+    "chat.sessions.data_bank.scopes.list",
+    "GET",
+    "/v1/chat/sessions/{session_id}/data-bank/scopes",
+    "List reusable file scopes for a chat session.",
+    "chat",
+    ["chat", "session", "attachment"],
+  ),
+  {
+    id: "chat.sessions.data_bank.scopes.create",
+    method: "POST",
+    path_template: "/v1/chat/sessions/{session_id}/data-bank/scopes",
+    description: "Create or update a reusable file scope.",
+    auth: "chat",
+    mutation: "write",
+    stability: "stable",
+    tags: ["chat", "session", "attachment"],
+    public: true,
+  },
+  {
+    id: "chat.sessions.data_bank.scopes.remove",
+    method: "DELETE",
+    path_template: "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}",
+    description: "Mark a reusable file scope removed.",
+    auth: "chat",
+    mutation: "write",
+    stability: "stable",
+    tags: ["chat", "session", "attachment"],
+    public: true,
+  },
+  readCapability(
+    "chat.sessions.data_bank.scopes.attachments.list",
+    "GET",
+    "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments",
+    "List attachments linked to one reusable file scope.",
+    "chat",
+    ["chat", "session", "attachment"],
+  ),
   readCapability(
     "chat.commands.list",
     "GET",

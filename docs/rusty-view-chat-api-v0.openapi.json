@@ -690,6 +690,260 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/attachments": {
+      "get": {
+        "operationId": "listAttachments",
+        "summary": "List generic attachments for a chat session",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "name": "scope_id", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "message_id",
+            "in": "query",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "include_removed",
+            "in": "query",
+            "schema": { "type": "boolean", "default": false }
+          },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/AttachmentPage" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAttachment",
+        "summary": "Register uploaded attachment metadata and optional links",
+        "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateAttachmentRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Attachment created or updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AttachmentMutationResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/attachments/{attachment_id}": {
+      "delete": {
+        "operationId": "removeAttachment",
+        "summary": "Mark a generic attachment removed",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AttachmentMutationResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/data-bank/scopes": {
+      "get": {
+        "operationId": "listDataBankScopes",
+        "summary": "List reusable file scopes for a chat session",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "include_removed",
+            "in": "query",
+            "schema": { "type": "boolean", "default": false }
+          },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reusable file scopes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/DataBankScopePage" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDataBankScope",
+        "summary": "Create or update a reusable file scope",
+        "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDataBankScopeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reusable file scope created or updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/DataBankScopeMutationResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}": {
+      "delete": {
+        "operationId": "removeDataBankScope",
+        "summary": "Mark a reusable file scope removed",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reusable file scope removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/DataBankScopeMutationResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments": {
+      "get": {
+        "operationId": "listDataBankScopeAttachments",
+        "summary": "List attachments linked to one reusable file scope",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scope attachment page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/AttachmentPage" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/commands": {
       "get": {
         "operationId": "listChatCommands",
@@ -984,6 +1238,12 @@
           "conversation_active_branch_selected",
           "conversation_branch_head_updated",
           "conversation_snapshot_created",
+          "attachment_uploaded",
+          "attachment_linked",
+          "attachment_removed",
+          "attachment_updated",
+          "data_bank_scope_created",
+          "data_bank_scope_removed",
           "stream_error",
           "unknown"
         ]
@@ -999,6 +1259,8 @@
           { "$ref": "#/components/schemas/MessageSlotPayload" },
           { "$ref": "#/components/schemas/MessageVariantPayload" },
           { "$ref": "#/components/schemas/ConversationTreePayload" },
+          { "$ref": "#/components/schemas/AttachmentPayload" },
+          { "$ref": "#/components/schemas/DataBankScopePayload" },
           { "$ref": "#/components/schemas/StreamErrorPayload" },
           { "$ref": "#/components/schemas/UnknownEventPayload" }
         ]
@@ -1226,6 +1488,159 @@
           "total": { "type": "integer", "minimum": 0 },
           "limit": { "type": "integer", "minimum": 1 },
           "offset": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentLinkRecord": {
+        "type": "object",
+        "required": ["link_id", "attachment_id", "session_id", "metadata_json", "created_at"],
+        "properties": {
+          "link_id": { "type": "string" },
+          "attachment_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "message_id": { "type": ["string", "null"] },
+          "block_id": { "type": ["string", "null"] },
+          "scope_id": { "type": ["string", "null"] },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentRecord": {
+        "type": "object",
+        "required": [
+          "attachment_id",
+          "session_id",
+          "status",
+          "filename",
+          "mime_type",
+          "byte_size",
+          "extracted_text_truncated",
+          "metadata_json",
+          "created_at",
+          "updated_at",
+          "links"
+        ],
+        "properties": {
+          "attachment_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "removed"] },
+          "filename": { "type": "string" },
+          "mime_type": { "type": "string" },
+          "byte_size": { "type": "integer", "minimum": 0 },
+          "storage_url": { "type": ["string", "null"] },
+          "download_url": { "type": ["string", "null"] },
+          "thumbnail_url": { "type": ["string", "null"] },
+          "extracted_text": { "type": ["string", "null"] },
+          "extracted_text_truncated": { "type": "boolean" },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": ["string", "null"], "format": "date-time" },
+          "links": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AttachmentLinkRecord" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentPage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AttachmentRecord" }
+          },
+          "total": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 },
+          "nextOffset": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "CreateAttachmentRequest": {
+        "type": "object",
+        "required": ["filename", "mime_type", "byte_size"],
+        "properties": {
+          "attachment_id": { "type": "string" },
+          "filename": { "type": "string", "minLength": 1 },
+          "mime_type": { "type": "string", "minLength": 3 },
+          "byte_size": { "type": "integer", "minimum": 0 },
+          "storage_url": { "type": ["string", "null"] },
+          "download_url": { "type": ["string", "null"] },
+          "thumbnail_url": { "type": ["string", "null"] },
+          "extracted_text": { "type": ["string", "null"] },
+          "extracted_text_truncated": { "type": "boolean", "default": false },
+          "message_id": { "type": ["string", "null"] },
+          "block_id": { "type": ["string", "null"] },
+          "scope_id": { "type": ["string", "null"] },
+          "metadata_json": {},
+          "link_metadata_json": {},
+          "expires_at": { "type": ["string", "null"], "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentMutationResult": {
+        "type": "object",
+        "required": ["status", "attachment", "latest_cursor"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["created", "linked", "removed", "updated"]
+          },
+          "attachment": { "$ref": "#/components/schemas/AttachmentRecord" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "DataBankScopeRecord": {
+        "type": "object",
+        "required": ["scope_id", "session_id", "status", "metadata_json", "created_at", "updated_at"],
+        "properties": {
+          "scope_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "removed"] },
+          "label": { "type": ["string", "null"] },
+          "description": { "type": ["string", "null"] },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "DataBankScopePage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DataBankScopeRecord" }
+          },
+          "total": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 },
+          "nextOffset": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "CreateDataBankScopeRequest": {
+        "type": "object",
+        "properties": {
+          "scope_id": { "type": "string" },
+          "label": { "type": ["string", "null"] },
+          "description": { "type": ["string", "null"] },
+          "metadata_json": {}
+        },
+        "additionalProperties": false
+      },
+      "DataBankScopeMutationResult": {
+        "type": "object",
+        "required": ["status", "scope", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["created", "removed", "updated"] },
+          "scope": { "$ref": "#/components/schemas/DataBankScopeRecord" },
+          "latest_cursor": { "type": "string" }
         },
         "additionalProperties": false
       },
@@ -1680,6 +2095,23 @@
           "snapshot": { "$ref": "#/components/schemas/ConversationSnapshotRecord" },
           "state": { "$ref": "#/components/schemas/ConversationBranchStateRecord" },
           "conflict": { "$ref": "#/components/schemas/ActiveVariantConflict" }
+        },
+        "additionalProperties": true
+      },
+      "AttachmentPayload": {
+        "type": "object",
+        "properties": {
+          "attachment_id": { "type": "string" },
+          "link": { "$ref": "#/components/schemas/AttachmentLinkRecord" },
+          "attachment": { "$ref": "#/components/schemas/AttachmentRecord" }
+        },
+        "additionalProperties": true
+      },
+      "DataBankScopePayload": {
+        "type": "object",
+        "properties": {
+          "scope_id": { "type": "string" },
+          "scope": { "$ref": "#/components/schemas/DataBankScopeRecord" }
         },
         "additionalProperties": true
       },
