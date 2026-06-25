@@ -189,6 +189,7 @@ import {
   effectiveWakeTimeoutMs,
   loadRustyCrewRuntimeConfig,
   preflightRustyCrewRuntimeConfig,
+  rebuildConfiguredBrainRuntime,
   registerConfiguredScheduledJobs,
   ensureConfiguredSessionForChannelBinding,
   type RustyCrewRuntimeConfig,
@@ -3137,21 +3138,19 @@ function createServiceControlExecutor(
       };
     },
     applyRuntimeRebuild: async (command) => {
-      const result = await planServiceRuntimeRebuild(state, command);
+      const result = await applyServiceRuntimeRebuild(state, command);
       return {
-        status: "failed",
+        status: result.apply.status === "completed" ? "completed" : "failed",
         summary:
-          "runtime rebuild apply is not available until brain hot-swap support is implemented",
+          result.apply.status === "completed"
+            ? `runtime rebuild applied for profile ${result.profileId}`
+            : `runtime rebuild blocked for profile ${result.profileId}`,
         affectedIds: runtimeRebuildAffectedIds(result),
-        result: {
-          ...result,
-          apply: {
-            status: "blocked",
-            reasonCode: "brain_hot_swap_not_implemented",
-            safeAlternative: "restart_service_after_config_reload",
-          },
-        },
-        reasonCode: "brain_hot_swap_not_implemented",
+        result,
+        reasonCode:
+          result.apply.status === "completed"
+            ? undefined
+            : result.apply.reasonCode,
       };
     },
     schedulerTick: async () => {
@@ -3310,7 +3309,7 @@ interface ServiceRuntimeRebuildPlan {
   scope: "session" | "profile";
   profileId: string;
   sessionIds: string[];
-  applySupported: false;
+  applySupported: true;
   requiredAction: "brain_hot_swap_required";
   preservesSessionId: true;
   preservesHistory: true;
@@ -3340,6 +3339,21 @@ interface ServiceRuntimeRebuildPlan {
     sessionsConfigured: number;
     sessionsActive: number;
   };
+}
+
+interface ServiceRuntimeRebuildApplyResult extends ServiceRuntimeRebuildPlan {
+  apply:
+    | {
+        status: "completed";
+        handle: BrainImplementationHandle;
+        implementationId: BrainImplementationId;
+        audited: true;
+      }
+    | {
+        status: "blocked";
+        reasonCode: "runtime_rebuild_in_flight";
+        blockedSessionIds: string[];
+      };
 }
 
 async function planServiceRuntimeRebuild(
@@ -3407,13 +3421,13 @@ async function planServiceRuntimeRebuild(
     scope,
     profileId,
     sessionIds,
-    applySupported: false,
+    applySupported: true,
     requiredAction: "brain_hot_swap_required",
     preservesSessionId: true,
     preservesHistory: true,
     configReload: {
       implicit: false,
-      requiredBeforeApply: true,
+      requiredBeforeApply: false,
     },
     providerState: {
       action: "discard",
@@ -3441,6 +3455,65 @@ async function planServiceRuntimeRebuild(
       sessionsActive: activeSessions.filter(
         (session) => session.profileId === profileId,
       ).length,
+    },
+  };
+}
+
+async function applyServiceRuntimeRebuild(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<ServiceRuntimeRebuildApplyResult> {
+  const plan = await planServiceRuntimeRebuild(state, command);
+  const activeProfileSessionIds = (await state.bridge.listSessions())
+    .filter((session) => session.profileId === plan.profileId)
+    .map((session) => session.sessionId);
+  const blockedSessionIds = activeProfileSessionIds.filter((sessionId) =>
+    state.inFlightWakes.has(sessionId),
+  );
+  if (blockedSessionIds.length > 0) {
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "runtime_rebuild_blocked",
+      severity: "warning",
+      summary: `Runtime rebuild for profile ${plan.profileId} blocked by in-flight wake(s): ${blockedSessionIds.join(", ")}.`,
+    });
+    return {
+      ...plan,
+      apply: {
+        status: "blocked",
+        reasonCode: "runtime_rebuild_in_flight",
+        blockedSessionIds,
+      },
+    };
+  }
+
+  const rebuild = await rebuildConfiguredBrainRuntime({
+    serviceConfig: state.config,
+    runtimeConfig: state.runtimeConfig,
+    profileId: plan.profileId as ProfileId,
+    bridge: state.bridge,
+    curatorExecutor: state.curator.executor,
+    mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
+  });
+  state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId] =
+    rebuild.handle;
+  state.runtimeConfigApplyResult.brainModulesByProfileId[plan.profileId] =
+    rebuild.module;
+  state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[plan.profileId] =
+    rebuild.diagnostics;
+  recordServiceEvent(state, {
+    source: "service-host",
+    eventType: "runtime_rebuild_applied",
+    summary: `Runtime rebuild applied for profile ${plan.profileId} with brain handle ${rebuild.handle}.`,
+  });
+
+  return {
+    ...plan,
+    apply: {
+      status: "completed",
+      handle: rebuild.handle,
+      implementationId: rebuild.implementationId,
+      audited: true,
     },
   };
 }

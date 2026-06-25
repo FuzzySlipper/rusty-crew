@@ -132,6 +132,22 @@ impl NativeBridge {
         Ok(handle)
     }
 
+    pub fn replace_brain_implementation(
+        &mut self,
+        registration: BrainImplementationRegistration,
+    ) -> CoreResult<rusty_crew_core_bridge_api::BrainImplementationHandle> {
+        let handle = self
+            .brain_registrations
+            .replace_for_profile(registration.clone())?;
+        if let Some(engine) = &self.engine {
+            engine.register_profile_tool_profile(
+                registration.profile_id,
+                registration.tool_profile,
+            )?;
+        }
+        Ok(handle)
+    }
+
     pub fn wake_brain(&self, request: BrainWakeRequest) -> CoreResult<BrainWakeAccepted> {
         self.brain_registrations.get(request.brain)?;
         self.get_buffer(request.body_state)?;
@@ -694,6 +710,45 @@ impl BrainImplementationRegistry {
         self.by_profile_id
             .insert(registration.profile_id.clone(), handle);
         self.by_handle.insert(handle, registration);
+
+        Ok(handle)
+    }
+
+    fn replace_for_profile(
+        &mut self,
+        registration: BrainImplementationRegistration,
+    ) -> CoreResult<BrainImplementationHandle> {
+        validate_brain_registration(&registration)?;
+
+        let Some(handle) = self.by_profile_id.get(&registration.profile_id).copied() else {
+            return self.register(registration);
+        };
+
+        if let Some(existing_handle) = self
+            .by_implementation_id
+            .get(&registration.implementation_id)
+            .copied()
+        {
+            if existing_handle != handle {
+                return Err(CoreError::new(
+                    CoreErrorKind::AlreadyExists,
+                    format!(
+                        "brain implementation {} is already registered",
+                        registration.implementation_id
+                    ),
+                ));
+            }
+        }
+
+        let previous = self.by_handle.insert(handle, registration.clone());
+        if let Some(previous) = previous {
+            self.by_implementation_id
+                .remove(&previous.implementation_id);
+        }
+        self.by_implementation_id
+            .insert(registration.implementation_id.clone(), handle);
+        self.by_profile_id
+            .insert(registration.profile_id.clone(), handle);
 
         Ok(handle)
     }
@@ -1415,6 +1470,18 @@ impl NativeBridgeBinding {
         let mut bridge = self.bridge()?;
         let handle = bridge
             .register_brain_implementation(to_brain_registration(registration)?)
+            .map_err(to_napi_error)?;
+        Ok(handle.get() as f64)
+    }
+
+    #[napi]
+    pub fn replace_brain_implementation(
+        &self,
+        registration: JsBrainImplementationRegistration,
+    ) -> napi::Result<f64> {
+        let mut bridge = self.bridge()?;
+        let handle = bridge
+            .replace_brain_implementation(to_brain_registration(registration)?)
             .map_err(to_napi_error)?;
         Ok(handle.get() as f64)
     }
@@ -3248,6 +3315,58 @@ mod tests {
         let error = bridge
             .register_brain_implementation(brain_registration("other", "planner-profile"))
             .expect_err("duplicate profile bindings must fail");
+
+        assert_eq!(error.kind, CoreErrorKind::AlreadyExists);
+    }
+
+    #[test]
+    fn native_bridge_replaces_profile_brain_registration_in_place() {
+        let mut bridge = NativeBridge::new();
+        let handle = bridge
+            .register_brain_implementation(brain_registration("planner", "planner-profile"))
+            .unwrap();
+        let replaced = bridge
+            .replace_brain_implementation(brain_registration_with_tools(
+                "planner-rebuilt",
+                "planner-profile",
+                vec!["read_file", "patch"],
+            ))
+            .unwrap();
+
+        assert_eq!(replaced, handle);
+        let registration = bridge.brain_registrations.get(handle).unwrap();
+        assert_eq!(
+            registration.implementation_id.to_string(),
+            "planner-rebuilt"
+        );
+        assert_eq!(registration.tool_profile.tools.len(), 2);
+    }
+
+    #[test]
+    fn native_bridge_replace_registers_missing_profile_brain() {
+        let mut bridge = NativeBridge::new();
+        let handle = bridge
+            .replace_brain_implementation(brain_registration("planner", "planner-profile"))
+            .unwrap();
+
+        assert_eq!(handle, BrainImplementationHandle::new(1));
+        let registration = bridge.brain_registrations.get(handle).unwrap();
+        assert_eq!(registration.profile_id.to_string(), "planner-profile");
+    }
+
+    #[test]
+    fn native_bridge_rejects_replacement_using_another_profile_implementation_id() {
+        let mut bridge = NativeBridge::new();
+        bridge
+            .register_brain_implementation(brain_registration("planner", "planner-profile"))
+            .unwrap();
+        bridge
+            .register_brain_implementation(brain_registration("coder", "coder-profile"))
+            .unwrap();
+
+        let error = bridge
+            .replace_brain_implementation(brain_registration("coder", "planner-profile"))
+            .expect_err("replacement cannot steal another profile implementation id");
 
         assert_eq!(error.kind, CoreErrorKind::AlreadyExists);
     }

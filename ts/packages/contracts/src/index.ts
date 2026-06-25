@@ -950,6 +950,7 @@ export const manifestOperationNames = [
   "initialize_engine",
   "shutdown_engine",
   "register_brain_implementation",
+  "replace_brain_implementation",
   "wake_brain",
   "submit_brain_event",
   "submit_brain_actions",

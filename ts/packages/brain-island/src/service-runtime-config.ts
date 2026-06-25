@@ -156,6 +156,14 @@ export interface RustyCrewRuntimeConfigApplyResult {
   brainDiagnosticsByProfileId: Record<string, RuntimeBrainModuleDiagnostics>;
 }
 
+export interface RustyCrewBrainRuntimeRebuildResult {
+  profileId: ProfileId;
+  implementationId: BrainImplementationId;
+  handle: BrainImplementationHandle;
+  module: BrainModuleSelection;
+  diagnostics: RuntimeBrainModuleDiagnostics;
+}
+
 export interface ScheduledJobRegistrationResult {
   registered: number;
   jobs: ScheduledJobSummary[];
@@ -791,6 +799,98 @@ export async function applyRustyCrewRuntimeConfig(input: {
   result.scheduledJobsRegistered = scheduledJobs.registered;
 
   return result;
+}
+
+export async function rebuildConfiguredBrainRuntime(input: {
+  serviceConfig: RustyCrewServiceConfig;
+  runtimeConfig: RustyCrewRuntimeConfig;
+  profileId: ProfileId;
+  bridge: NativeBridgeModule;
+  createDenRouterAgentFactory?: (
+    options: Parameters<typeof createDenRouterPiAgentFactory>[0],
+  ) => Promise<PiAgentFactory>;
+  curatorExecutor?: CuratorExecuteContext["executor"];
+  mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
+  mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
+  mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+}): Promise<RustyCrewBrainRuntimeRebuildResult> {
+  const runtimeConfig = await expandRuntimeConfigFromProfiles(
+    input.runtimeConfig,
+  );
+  const brain = runtimeConfig.brains.find(
+    (candidate) => candidate.profileId === input.profileId,
+  );
+  if (brain === undefined) {
+    throw new Error(`profile ${input.profileId} is not configured for a brain`);
+  }
+
+  const mcpToolCatalog = await buildServiceMcpToolCatalog({
+    runtimeConfig,
+    mcpConfig: input.serviceConfig.mcp,
+    discoveryClientFactory: input.mcpToolDiscoveryClientFactory,
+    surfaceDiagnostics: input.mcpSurfaceDiagnostics,
+  });
+  const profile = await loadProfileContext({
+    profilesDir: runtimeConfig.profilesDir,
+    skillsDir: runtimeConfig.skillsDir,
+    profileId: input.profileId,
+    registry: mcpToolCatalog.registryForProfile(input.profileId),
+    extraRequestedToolsets: mcpToolCatalog.toolsetsForProfile(input.profileId),
+    catalogId:
+      mcpToolCatalog.toolsetsForProfile(input.profileId).length > 0
+        ? `service:mcp:${input.profileId}`
+        : undefined,
+  });
+  const brainModuleRegistry = createBrainModuleRegistry();
+  const selection = resolveBrainModuleSelection(profile.profile);
+  const module = brainModuleRegistry.require(selection.moduleId);
+  const moduleStrategy = resolveBrainModuleStrategy(module, selection);
+  const strategy = brainStrategyMetadataForModuleStrategy(
+    module,
+    moduleStrategy,
+  );
+  const providerStateScope = providerStateScopeForProfile({
+    profile,
+    strategy,
+    moduleStrategy,
+  });
+  const handle = await input.bridge.replaceBrainRuntime(
+    {
+      implementationId: brain.implementationId,
+      profileId: brain.profileId,
+      toolProfile: profile.toolSelection.toolProfile,
+      modelConfig: profile.profile.modelConfig,
+      strategy,
+      providerStateScope,
+    },
+    toBridgeWakeExecutor(
+      await createConfiguredBrain(module, profile, {
+        createDenRouterAgentFactory: input.createDenRouterAgentFactory,
+        bridge: input.bridge,
+        providerStateScope,
+        runtimeConfig,
+        serviceConfig: input.serviceConfig,
+        curatorExecutor: input.curatorExecutor,
+        mcpToolCatalog,
+        mcpToolExecutorFactory: input.mcpToolExecutorFactory,
+      }),
+    ),
+  );
+
+  return {
+    profileId: brain.profileId,
+    implementationId: brain.implementationId,
+    handle,
+    module: selection,
+    diagnostics: brainModuleDiagnostics({
+      profile,
+      implementationId: brain.implementationId,
+      selection,
+      strategy,
+      moduleStrategy,
+      module,
+    }),
+  };
 }
 
 export async function registerConfiguredScheduledJobs(input: {

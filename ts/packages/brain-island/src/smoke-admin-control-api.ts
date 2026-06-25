@@ -197,7 +197,8 @@ const executor: AdminControlExecutor = {
         scope: command.target.scope,
         profileId: command.target.profileId ?? "prime",
         sessionIds: [command.target.sessionId ?? "session-alpha"],
-        applySupported: false,
+        applySupported: true,
+        requiredAction: "brain_hot_swap_required",
         preservesSessionId: true,
         preservesHistory: true,
         queuedMessages: {
@@ -208,17 +209,24 @@ const executor: AdminControlExecutor = {
   },
   applyRuntimeRebuild(command) {
     return {
-      status: "failed",
-      summary: "runtime rebuild apply is not supported",
+      status: "completed",
+      summary: "runtime rebuild applied",
       affectedIds: {
         profileId: command.target.profileId ?? "prime",
         sessionId: command.target.sessionId ?? "session-alpha",
       },
       result: {
         scope: command.target.scope,
-        applySupported: false,
+        profileId: command.target.profileId ?? "prime",
+        sessionIds: [command.target.sessionId ?? "session-alpha"],
+        applySupported: true,
+        apply: {
+          status: "completed",
+          handle: 1,
+          implementationId: "prime-brain",
+          audited: true,
+        },
       },
-      reasonCode: "brain_hot_swap_not_implemented",
     };
   },
 };
@@ -465,16 +473,20 @@ const rebuildProfileApply = await handleAdminControlRequest(
   },
   context,
 );
-assert.equal(rebuildProfileApply.status, 500);
+assert.equal(rebuildProfileApply.status, 200);
 const rebuildProfileApplyData =
   okData<AdminControlResponse>(rebuildProfileApply);
 assert.equal(rebuildProfileApplyData.command.name, "apply_runtime_rebuild");
 assert.equal(rebuildProfileApplyData.command.target.scope, "profile");
 assert.equal(rebuildProfileApplyData.command.target.profileId, "prime");
-assert.equal(rebuildProfileApplyData.outcome.status, "failed");
+assert.equal(rebuildProfileApplyData.outcome.status, "completed");
 assert.equal(
-  rebuildProfileApplyData.outcome.reasonCode,
-  "brain_hot_swap_not_implemented",
+  (
+    rebuildProfileApplyData.outcome.result as {
+      apply?: { status?: string; audited?: boolean };
+    }
+  ).apply?.audited,
+  true,
 );
 
 const curatorStatus = await handleAdminControlRequest(

@@ -57,6 +57,15 @@ errors = "core_protocol::CoreError"
 summary = "Register a TS brain implementation/profile/tool catalog for Rust-driven activation."
 
 [[operation]]
+name = "replace_brain_implementation"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BrainImplementationRegistration"
+output = "core_protocol::BrainImplementationHandle"
+errors = "core_protocol::CoreError"
+summary = "Replace a registered profile brain implementation in place for safe runtime rebuilds."
+
+[[operation]]
 name = "wake_brain"
 surface = "stable"
 direction = "rust_to_ts"

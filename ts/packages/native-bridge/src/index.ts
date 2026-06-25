@@ -115,6 +115,34 @@ interface NativeBridgeBinding {
       providerFingerprint: string;
     };
   }): number;
+  replaceBrainImplementation(registration: {
+    implementationId: string;
+    profileId: string;
+    toolProfile: {
+      tools: Array<{
+        name: string;
+        description: string;
+        inputSchema?: number;
+      }>;
+    };
+    modelConfig: {
+      provider: string;
+      modelName: string;
+      temperatureMilli?: number;
+      maxOutputTokens?: number;
+    };
+    strategy?: {
+      moduleId: string;
+      strategyId: string;
+      providerState: {
+        mode: string;
+      };
+    };
+    providerStateScope?: {
+      profileFingerprint: string;
+      providerFingerprint: string;
+    };
+  }): number;
   applyBrainProviderStateOutputJson(
     brain: number,
     sessionId: string,
@@ -842,7 +870,14 @@ export interface NativeBridgeModule {
   registerBrainImplementation(
     registration: BrainImplementationRegistration,
   ): Promise<BrainImplementationHandle>;
+  replaceBrainImplementation(
+    registration: BrainImplementationRegistration,
+  ): Promise<BrainImplementationHandle>;
   registerBrainRuntime(
+    registration: BrainImplementationRegistration,
+    executor: BrainWakeExecutor,
+  ): Promise<BrainImplementationHandle>;
+  replaceBrainRuntime(
     registration: BrainImplementationRegistration,
     executor: BrainWakeExecutor,
   ): Promise<BrainImplementationHandle>;
@@ -1017,6 +1052,7 @@ export const nativeManifestOperationNames = [
   "initialize_engine",
   "shutdown_engine",
   "register_brain_implementation",
+  "replace_brain_implementation",
   "wake_brain",
   "submit_brain_event",
   "submit_brain_actions",
@@ -1065,7 +1101,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     initializeEngine: unavailable("initialize_engine"),
     shutdownEngine: unavailable("shutdown_engine"),
     registerBrainImplementation: unavailable("register_brain_implementation"),
+    replaceBrainImplementation: unavailable("replace_brain_implementation"),
     registerBrainRuntime: unavailable("register_brain_implementation"),
+    replaceBrainRuntime: unavailable("replace_brain_implementation"),
     wakeBrain: unavailable("wake_brain"),
     submitBrainEvent: unavailable("submit_brain_event"),
     submitBrainActions: unavailable("submit_brain_actions"),
@@ -1344,6 +1382,42 @@ function createNativeBridgeModule(
     string,
     NativeProviderStateDiagnostic
   >();
+  const nativeBrainRegistration = (
+    registration: BrainImplementationRegistration,
+  ) => ({
+    implementationId: registration.implementationId,
+    profileId: registration.profileId,
+    toolProfile: {
+      tools: registration.toolProfile.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    },
+    modelConfig: {
+      provider: registration.modelConfig.provider,
+      modelName: registration.modelConfig.modelName,
+      temperatureMilli: registration.modelConfig.temperatureMilli,
+      maxOutputTokens: registration.modelConfig.maxOutputTokens,
+    },
+    strategy: registration.strategy
+      ? {
+          moduleId: registration.strategy.moduleId,
+          strategyId: registration.strategy.strategyId,
+          providerState: {
+            mode: registration.strategy.providerState.mode,
+          },
+        }
+      : undefined,
+    providerStateScope: registration.providerStateScope
+      ? {
+          profileFingerprint:
+            registration.providerStateScope.profileFingerprint,
+          providerFingerprint:
+            registration.providerStateScope.providerFingerprint,
+        }
+      : undefined,
+  });
   const module: NativeBridgeModule = {
     manifestVersion: binding.manifestVersion,
     operationNames:
@@ -1360,45 +1434,26 @@ function createNativeBridgeModule(
     shutdownEngine: async (request) =>
       binding.shutdownEngine(request.engine, request.drainTimeoutMs),
     registerBrainImplementation: async (registration) => {
-      const handle = binding.registerBrainImplementation({
-        implementationId: registration.implementationId,
-        profileId: registration.profileId,
-        toolProfile: {
-          tools: registration.toolProfile.tools.map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-          })),
-        },
-        modelConfig: {
-          provider: registration.modelConfig.provider,
-          modelName: registration.modelConfig.modelName,
-          temperatureMilli: registration.modelConfig.temperatureMilli,
-          maxOutputTokens: registration.modelConfig.maxOutputTokens,
-        },
-        strategy: registration.strategy
-          ? {
-              moduleId: registration.strategy.moduleId,
-              strategyId: registration.strategy.strategyId,
-              providerState: {
-                mode: registration.strategy.providerState.mode,
-              },
-            }
-          : undefined,
-        providerStateScope: registration.providerStateScope
-          ? {
-              profileFingerprint:
-                registration.providerStateScope.profileFingerprint,
-              providerFingerprint:
-                registration.providerStateScope.providerFingerprint,
-            }
-          : undefined,
-      }) as BrainImplementationHandle;
+      const handle = binding.registerBrainImplementation(
+        nativeBrainRegistration(registration),
+      ) as BrainImplementationHandle;
+      brainRegistrations.set(handle, registration);
+      return handle;
+    },
+    replaceBrainImplementation: async (registration) => {
+      const handle = binding.replaceBrainImplementation(
+        nativeBrainRegistration(registration),
+      ) as BrainImplementationHandle;
       brainRegistrations.set(handle, registration);
       return handle;
     },
     registerBrainRuntime: async (registration, executor) => {
       const handle = await module.registerBrainImplementation(registration);
+      wakeExecutors.set(handle, executor);
+      return handle;
+    },
+    replaceBrainRuntime: async (registration, executor) => {
+      const handle = await module.replaceBrainImplementation(registration);
       wakeExecutors.set(handle, executor);
       return handle;
     },
