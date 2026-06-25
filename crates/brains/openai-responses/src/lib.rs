@@ -6,11 +6,12 @@
 
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
-    BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel,
-    BrainWakeFailure, BrainWakeProviderStateInput, BrainWakeProviderStateOutput,
-    BrainWakeProviderStateUpdate, BrainWakeRequest, BrainWakeStreamItem, CompletionPacket,
-    CompletionStatus, CoreError, CoreErrorKind, CoreResult, ProviderStateAbsenceReason,
-    ProviderStateMode, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
+    AgentMessage, BodyState, BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope,
+    BrainProviderStatusLevel, BrainWakeFailure, BrainWakeProviderStateInput,
+    BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, BrainWakeRequest,
+    BrainWakeStreamItem, CompletionPacket, CompletionStatus, CoreError, CoreErrorKind, CoreEvent,
+    CoreResult, ExternalEventPayload, ProviderStateAbsenceReason, ProviderStateMode,
+    ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -99,6 +100,20 @@ pub enum ResponsesInputItem {
     UserMessage {
         content: String,
     },
+    AssistantMessage {
+        content: String,
+    },
+    Reasoning {
+        id: Option<String>,
+        summary: Option<String>,
+        encrypted_content: Option<String>,
+    },
+    FunctionCall {
+        id: Option<String>,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
     FunctionCallOutput {
         call_id: String,
         output: String,
@@ -138,19 +153,20 @@ impl ResponsesRequestBuilder {
 
     pub fn build(
         &self,
-        _wake: &BrainWakeRequest,
+        wake: &BrainWakeRequest,
         provider_state: Option<&BrainWakeProviderStateInput>,
+        history: ResponsesReplayProjection,
         continuation_items: Vec<ResponsesInputItem>,
     ) -> ResponsesRequest {
-        let mut input = vec![ResponsesInputItem::UserMessage {
-            content: "frozen Rusty wake snapshot".to_string(),
-        }];
-        if let Some(state) = provider_state {
-            input.push(ResponsesInputItem::ReplayHint {
-                raw_json: state.payload.clone(),
+        let mut input = history.input_items;
+        input.extend(provider_replay_items(provider_state));
+        input.extend(history.replay_hints);
+        input.extend(continuation_items);
+        if input.is_empty() {
+            input.push(ResponsesInputItem::UserMessage {
+                content: format!("wake {} has no Rust-owned history yet", wake.wake_id),
             });
         }
-        input.extend(continuation_items);
         ResponsesRequest {
             model: self.config.model.clone(),
             instructions: self.config.instructions.clone(),
@@ -181,6 +197,247 @@ impl ResponsesRequestBuilder {
                 .as_ref()
                 .map(|text| json!({"verbosity": text.verbosity})),
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResponsesReplayProjection {
+    pub input_items: Vec<ResponsesInputItem>,
+    pub replay_hints: Vec<ResponsesInputItem>,
+}
+
+impl ResponsesReplayProjection {
+    pub fn from_body_state(body: &BodyState) -> Self {
+        let mut input_items = Vec::new();
+        let mut seen_messages = Vec::new();
+
+        for event in &body.recent_events {
+            match event {
+                CoreEvent::AgentMessageRouted { message } => {
+                    push_message_item(&mut input_items, &mut seen_messages, &body.session, message);
+                }
+                CoreEvent::ExternalEventInjected { event } => match &event.payload {
+                    ExternalEventPayload::HumanMessage { from, text } => {
+                        input_items.push(ResponsesInputItem::UserMessage {
+                            content: format!("{from}: {text}"),
+                        });
+                    }
+                    ExternalEventPayload::ChannelMessage(payload) => {
+                        input_items.push(ResponsesInputItem::UserMessage {
+                            content: format!("{}: {}", payload.from, payload.text),
+                        });
+                    }
+                    _ => {}
+                },
+                CoreEvent::CompletionPacketDelivered { packet } => {
+                    input_items.push(ResponsesInputItem::UserMessage {
+                        content: format!(
+                            "delegated session {} reported {:?}: {}",
+                            packet.session_id.0.as_str(),
+                            packet.status,
+                            packet.summary
+                        ),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        for message in &body.pending_messages {
+            push_message_item(&mut input_items, &mut seen_messages, &body.session, message);
+        }
+
+        for completion in &body.child_completions {
+            input_items.push(ResponsesInputItem::UserMessage {
+                content: format!(
+                    "delegated run {} from {} reported {:?}: {}",
+                    completion.run_id.0.as_str(),
+                    completion.child_session_id.0.as_str(),
+                    completion.packet.status,
+                    completion.packet.summary
+                ),
+            });
+        }
+
+        Self {
+            input_items,
+            replay_hints: Vec::new(),
+        }
+    }
+}
+
+fn push_message_item(
+    input_items: &mut Vec<ResponsesInputItem>,
+    seen_messages: &mut Vec<(String, String, String, Option<String>)>,
+    session: &rusty_crew_core_protocol::SessionState,
+    message: &AgentMessage,
+) {
+    let key = (
+        message.from.0.clone(),
+        message.to.0.clone(),
+        message.body.clone(),
+        message.correlation_id.clone(),
+    );
+    if seen_messages.contains(&key) {
+        return;
+    }
+    seen_messages.push(key);
+    if message.from == session.agent_id {
+        input_items.push(ResponsesInputItem::AssistantMessage {
+            content: message.body.clone(),
+        });
+    } else {
+        input_items.push(ResponsesInputItem::UserMessage {
+            content: format!("{}: {}", message.from.0, message.body),
+        });
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiResponsesProviderStateV1 {
+    pub kind: String,
+    pub strategy_id: String,
+    pub payload_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_completed_response: Option<OpenAiResponsesCompletedResponseRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_hints: Option<OpenAiResponsesReplayHints>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiResponsesCompletedResponseRecord {
+    pub response_id: String,
+    pub output_items: Vec<OpenAiResponseOutputItemRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<ResponsesTokenUsage>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiResponsesReplayHints {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_items: Vec<OpenAiResponseOutputItemRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_item_watermark: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiResponseOutputItemRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+    pub item_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    pub raw_json: Value,
+}
+
+fn provider_replay_items(
+    provider_state: Option<&BrainWakeProviderStateInput>,
+) -> Vec<ResponsesInputItem> {
+    let Some(state) = provider_state else {
+        return Vec::new();
+    };
+    let Ok(payload) =
+        serde_json::from_value::<OpenAiResponsesProviderStateV1>(state.payload.clone())
+    else {
+        return vec![ResponsesInputItem::ReplayHint {
+            raw_json: state.payload.clone(),
+        }];
+    };
+
+    let mut items = Vec::new();
+    if let Some(completed) = payload.last_completed_response {
+        for record in completed.output_items {
+            if let Some(item) = replay_item_from_record(record) {
+                items.push(item);
+            }
+        }
+    }
+    if let Some(hints) = payload.replay_hints {
+        for record in hints.reasoning_items {
+            if let Some(item) = replay_item_from_record(record) {
+                items.push(item);
+            }
+        }
+        if hints.prompt_cache_key.is_some() || hints.provider_item_watermark.is_some() {
+            items.push(ResponsesInputItem::ReplayHint {
+                raw_json: json!({
+                    "promptCacheKey": hints.prompt_cache_key,
+                    "providerItemWatermark": hints.provider_item_watermark,
+                }),
+            });
+        }
+    }
+    items
+}
+
+fn replay_item_from_record(record: OpenAiResponseOutputItemRecord) -> Option<ResponsesInputItem> {
+    let output = serde_json::from_value::<ResponsesOutputItem>(record.raw_json).ok()?;
+    match output {
+        ResponsesOutputItem::Message { text, .. } => {
+            Some(ResponsesInputItem::AssistantMessage { content: text })
+        }
+        ResponsesOutputItem::Reasoning {
+            id,
+            summary,
+            encrypted_content,
+        } => Some(ResponsesInputItem::Reasoning {
+            id,
+            summary,
+            encrypted_content,
+        }),
+        ResponsesOutputItem::FunctionCall {
+            id,
+            call_id,
+            name,
+            arguments,
+        } => Some(ResponsesInputItem::FunctionCall {
+            id,
+            call_id,
+            name,
+            arguments,
+        }),
+        ResponsesOutputItem::FunctionCallOutput {
+            call_id,
+            output,
+            is_error,
+        } => Some(ResponsesInputItem::FunctionCallOutput {
+            call_id,
+            output,
+            is_error,
+        }),
+        ResponsesOutputItem::Other { raw_json, .. } => {
+            Some(ResponsesInputItem::ReplayHint { raw_json })
+        }
+    }
+}
+
+fn output_record_from_item(item: &ResponsesOutputItem) -> OpenAiResponseOutputItemRecord {
+    let (item_id, item_type, call_id) = match item {
+        ResponsesOutputItem::Message { id, .. } => (id.clone(), "message".to_string(), None),
+        ResponsesOutputItem::Reasoning { id, .. } => (id.clone(), "reasoning".to_string(), None),
+        ResponsesOutputItem::FunctionCall { id, call_id, .. } => (
+            id.clone(),
+            "function_call".to_string(),
+            Some(call_id.clone()),
+        ),
+        ResponsesOutputItem::FunctionCallOutput { call_id, .. } => (
+            None,
+            "function_call_output".to_string(),
+            Some(call_id.clone()),
+        ),
+        ResponsesOutputItem::Other { item_type, .. } => (None, item_type.clone(), None),
+    };
+    OpenAiResponseOutputItemRecord {
+        item_id,
+        item_type,
+        call_id,
+        raw_json: serde_json::to_value(item).unwrap_or_else(|_| json!({})),
     }
 }
 
@@ -379,6 +636,14 @@ where
     }
 
     pub fn wake(&mut self, request: BrainWakeRequest) -> CoreResult<ResponsesBrainWakeResult> {
+        self.wake_with_history(request, ResponsesReplayProjection::default())
+    }
+
+    pub fn wake_with_history(
+        &mut self,
+        request: BrainWakeRequest,
+        history: ResponsesReplayProjection,
+    ) -> CoreResult<ResponsesBrainWakeResult> {
         let mut items = vec![event(&request, BrainEvent::Started)];
         if let Some(absence) = &request.provider_state_absence {
             if matches!(
@@ -405,11 +670,13 @@ where
         let mut committed_output_items = Vec::new();
         let mut last_response_id = None;
         let mut last_usage = None;
+        let base_history = history;
 
         for _ in 0..=self.max_continuations {
             let provider_request = self.request_builder.build(
                 &request,
                 request.provider_state.as_ref(),
+                base_history.clone(),
                 continuation_items.clone(),
             );
             let events = match self.client.stream(provider_request) {
@@ -442,12 +709,20 @@ where
                             call_id,
                             name,
                             arguments,
-                        } => pending_calls.push(PendingResponsesFunctionCall {
-                            provider_item_id: id,
-                            call_id,
-                            name,
-                            arguments_json: arguments,
-                        }),
+                        } => {
+                            committed_output_items.push(ResponsesOutputItem::FunctionCall {
+                                id: id.clone(),
+                                call_id: call_id.clone(),
+                                name: name.clone(),
+                                arguments: arguments.clone(),
+                            });
+                            pending_calls.push(PendingResponsesFunctionCall {
+                                provider_item_id: id,
+                                call_id,
+                                name,
+                                arguments_json: arguments,
+                            });
+                        }
                         other => committed_output_items.push(other),
                     },
                     ResponsesEvent::Completed { response_id, usage } => {
@@ -521,6 +796,11 @@ where
                     },
                 ));
                 continuation_items.push(ResponsesInputItem::FunctionCallOutput {
+                    call_id: call.call_id.clone(),
+                    output: output.output.clone(),
+                    is_error: output.is_error,
+                });
+                committed_output_items.push(ResponsesOutputItem::FunctionCallOutput {
                     call_id: call.call_id,
                     output: output.output,
                     is_error: output.is_error,
@@ -560,6 +840,18 @@ fn provider_state_output(
     output_items: Vec<ResponsesOutputItem>,
     usage: Option<ResponsesTokenUsage>,
 ) -> BrainWakeProviderStateOutput {
+    let output_records: Vec<_> = output_items.iter().map(output_record_from_item).collect();
+    let payload = OpenAiResponsesProviderStateV1 {
+        kind: MODULE_ID.to_string(),
+        strategy_id: REPLAY_STRATEGY_ID.to_string(),
+        payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+        last_completed_response: Some(OpenAiResponsesCompletedResponseRecord {
+            response_id,
+            output_items: output_records,
+            token_usage: usage,
+        }),
+        replay_hints: None,
+    };
     BrainWakeProviderStateOutput::Replace {
         state: BrainWakeProviderStateUpdate {
             module_id: MODULE_ID.to_string(),
@@ -575,16 +867,7 @@ fn provider_state_output(
                 .map(|state| state.provider_fingerprint.clone())
                 .unwrap_or_else(|| "provider-fingerprint".to_string()),
             payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
-            payload: json!({
-                "kind": MODULE_ID,
-                "strategyId": REPLAY_STRATEGY_ID,
-                "payloadVersion": PROVIDER_STATE_PAYLOAD_VERSION,
-                "lastCompletedResponse": {
-                    "responseId": response_id,
-                    "outputItems": output_items,
-                    "tokenUsage": usage
-                }
-            }),
+            payload: serde_json::to_value(payload).unwrap_or_else(|_| json!({})),
             ttl_ms: Some(24 * 60 * 60 * 1000),
         },
     }
@@ -719,8 +1002,12 @@ impl NeutralToolExecutor for MapToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_crew_core_protocol::SessionId;
-    use rusty_crew_core_protocol::{BrainImplementationHandle, RuntimeBufferHandle};
+    use rusty_crew_core_protocol::{
+        AgentId, BodyDeltaPolicy, BrainImplementationHandle, DeltaQueueOwner, MidTurnDeltaMode,
+        ProfileId, ResourceLimits, SessionHandle, SessionId, SessionKind, SessionState,
+        SessionStatus, ToolProfile,
+    };
+    use rusty_crew_core_protocol::{CoreEvent, RuntimeBufferHandle};
 
     #[test]
     fn request_builder_adapts_neutral_tools_and_provider_state() {
@@ -748,6 +1035,12 @@ mod tests {
         let request = builder.build(
             &wake_request(Some(state.clone()), None),
             Some(&state),
+            ResponsesReplayProjection {
+                input_items: vec![ResponsesInputItem::UserMessage {
+                    content: "from history".to_string(),
+                }],
+                replay_hints: Vec::new(),
+            },
             Vec::new(),
         );
 
@@ -757,6 +1050,146 @@ mod tests {
         assert_eq!(request.reasoning.as_ref().unwrap()["effort"], "medium");
         assert_eq!(request.text.as_ref().unwrap()["verbosity"], "low");
         assert!(request.stream);
+    }
+
+    #[test]
+    fn body_history_projects_messages_without_requiring_provider_state() {
+        let body = body_state(
+            vec![agent_message(
+                "human",
+                "responses-agent",
+                "hello",
+                Some("c1"),
+            )],
+            vec![
+                CoreEvent::AgentMessageRouted {
+                    message: agent_message("human", "responses-agent", "hello", Some("c1")),
+                },
+                CoreEvent::AgentMessageRouted {
+                    message: agent_message("responses-agent", "human", "reply", None),
+                },
+            ],
+        );
+
+        let projection = ResponsesReplayProjection::from_body_state(&body);
+
+        assert_eq!(
+            projection.input_items,
+            vec![
+                ResponsesInputItem::UserMessage {
+                    content: "human: hello".to_string(),
+                },
+                ResponsesInputItem::AssistantMessage {
+                    content: "reply".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_state_replays_typed_reasoning_function_call_and_output_items() {
+        let builder = ResponsesRequestBuilder::new(ResponsesBrainConfig::replay("gpt-5"));
+        let state = provider_state(provider_state_payload(
+            "resp-typed",
+            vec![
+                ResponsesOutputItem::Reasoning {
+                    id: Some("reasoning-1".to_string()),
+                    summary: Some("kept as reasoning".to_string()),
+                    encrypted_content: Some("opaque".to_string()),
+                },
+                ResponsesOutputItem::FunctionCall {
+                    id: Some("call-item-1".to_string()),
+                    call_id: "call-1".to_string(),
+                    name: "lookup".to_string(),
+                    arguments: "{\"q\":\"rust\"}".to_string(),
+                },
+                ResponsesOutputItem::FunctionCallOutput {
+                    call_id: "call-1".to_string(),
+                    output: "found rust".to_string(),
+                    is_error: false,
+                },
+                ResponsesOutputItem::Message {
+                    id: Some("msg-1".to_string()),
+                    text: "answer".to_string(),
+                },
+            ],
+        ));
+        let request = builder.build(
+            &wake_request(Some(state.clone()), None),
+            Some(&state),
+            ResponsesReplayProjection {
+                input_items: vec![ResponsesInputItem::UserMessage {
+                    content: "human: continue".to_string(),
+                }],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+
+        assert!(request.input.iter().any(|item| matches!(
+            item,
+            ResponsesInputItem::Reasoning {
+                encrypted_content: Some(value),
+                ..
+            } if value == "opaque"
+        )));
+        assert!(request.input.iter().any(|item| matches!(
+            item,
+            ResponsesInputItem::FunctionCall {
+                call_id,
+                name,
+                ..
+            } if call_id == "call-1" && name == "lookup"
+        )));
+        assert!(request.input.iter().any(|item| matches!(
+            item,
+            ResponsesInputItem::FunctionCallOutput {
+                call_id,
+                output,
+                is_error,
+            } if call_id == "call-1" && output == "found rust" && !is_error
+        )));
+        assert!(request.input.iter().any(|item| matches!(
+            item,
+            ResponsesInputItem::AssistantMessage { content } if content == "answer"
+        )));
+    }
+
+    #[test]
+    fn expired_provider_state_recovers_from_rust_owned_history() {
+        let mut brain = brain_with(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-recovered".to_string(),
+                usage: None,
+            }])]),
+            MapToolExecutor::default(),
+        );
+        let history = ResponsesReplayProjection::from_body_state(&body_state(
+            vec![agent_message(
+                "human",
+                "responses-agent",
+                "recover from history",
+                None,
+            )],
+            Vec::new(),
+        ));
+        let result = brain
+            .wake_with_history(
+                wake_request(None, Some(ProviderStateAbsenceReason::Expired)),
+                history.clone(),
+            )
+            .unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+
+        assert!(items.iter().any(|item| matches!(
+            item,
+            BrainWakeStreamItem::Event { event } if matches!(&event.event, BrainEvent::ProviderStatus { message, .. } if message.contains("without provider state"))
+        )));
+        assert_eq!(brain.client.requests()[0].input, history.input_items);
+        assert!(matches!(
+            result.provider_state,
+            Some(BrainWakeProviderStateOutput::Replace { .. })
+        ));
     }
 
     #[test]
@@ -800,6 +1233,15 @@ mod tests {
             result.provider_state,
             Some(BrainWakeProviderStateOutput::Replace { .. })
         ));
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = result.provider_state else {
+            panic!("expected provider-state replacement");
+        };
+        let payload: OpenAiResponsesProviderStateV1 =
+            serde_json::from_value(state.payload).unwrap();
+        assert_eq!(
+            payload.last_completed_response.unwrap().output_items[0].item_type,
+            "message"
+        );
     }
 
     #[test]
@@ -849,6 +1291,19 @@ mod tests {
             result.provider_state,
             Some(BrainWakeProviderStateOutput::Replace { .. })
         ));
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = result.provider_state else {
+            panic!("expected provider-state replacement");
+        };
+        let payload: OpenAiResponsesProviderStateV1 =
+            serde_json::from_value(state.payload).unwrap();
+        let records = payload.last_completed_response.unwrap().output_items;
+        assert!(records.iter().any(|record| {
+            record.item_type == "function_call" && record.call_id.as_deref() == Some("call-1")
+        }));
+        assert!(records.iter().any(|record| {
+            record.item_type == "function_call_output"
+                && record.call_id.as_deref() == Some("call-1")
+        }));
     }
 
     #[test]
@@ -1017,6 +1472,73 @@ mod tests {
             payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
             payload,
             expires_at: None,
+        }
+    }
+
+    fn provider_state_payload(response_id: &str, output_items: Vec<ResponsesOutputItem>) -> Value {
+        serde_json::to_value(OpenAiResponsesProviderStateV1 {
+            kind: MODULE_ID.to_string(),
+            strategy_id: REPLAY_STRATEGY_ID.to_string(),
+            payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+            last_completed_response: Some(OpenAiResponsesCompletedResponseRecord {
+                response_id: response_id.to_string(),
+                output_items: output_items.iter().map(output_record_from_item).collect(),
+                token_usage: None,
+            }),
+            replay_hints: None,
+        })
+        .unwrap()
+    }
+
+    fn body_state(pending_messages: Vec<AgentMessage>, recent_events: Vec<CoreEvent>) -> BodyState {
+        BodyState {
+            session: session_state(),
+            pending_messages,
+            recent_events,
+            child_completions: Vec::new(),
+            fan_out_groups: Vec::new(),
+            delta_policy: BodyDeltaPolicy {
+                mode: MidTurnDeltaMode::FrozenSnapshotNextWake,
+                queue_owner: DeltaQueueOwner::Body,
+                queued_message_ttl_ms: 5_000,
+                max_queued_messages: 32,
+            },
+        }
+    }
+
+    fn session_state() -> SessionState {
+        SessionState {
+            handle: SessionHandle::new(1),
+            session_id: SessionId::new("responses-session"),
+            agent_id: AgentId::new("responses-agent"),
+            profile_id: ProfileId::new("responses-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+            tool_profile: ToolProfile { tools: Vec::new() },
+            history_window: None,
+            status: SessionStatus::Idle,
+            brain_turn_count: 0,
+            created_at: "2026-06-24T00:00:00Z".to_string(),
+            last_active_at: "2026-06-24T00:00:00Z".to_string(),
+        }
+    }
+
+    fn agent_message(
+        from: &str,
+        to: &str,
+        body: &str,
+        correlation_id: Option<&str>,
+    ) -> AgentMessage {
+        AgentMessage {
+            from: AgentId::new(from),
+            to: AgentId::new(to),
+            body: body.to_string(),
+            correlation_id: correlation_id.map(str::to_string),
         }
     }
 
