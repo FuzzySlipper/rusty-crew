@@ -148,6 +148,25 @@ try {
   );
   assert.equal(typeof sent.body.data.wake_id, "string");
 
+  const initialTree = await get("/v1/chat/sessions/chat-session/tree", token);
+  assert.equal(initialTree.status, 200);
+  const defaultBranch = initialTree.body.data.branches.find(
+    (branch: { label?: string }) => branch.label === "Default",
+  );
+  assert.ok(defaultBranch, "chat send should create a default branch");
+  assert.equal(defaultBranch.head_message_id, "client-message-1");
+  assert.equal(
+    initialTree.body.data.branch_state.active_branch_id,
+    defaultBranch.branch_id,
+  );
+
+  const messageJump = await get(
+    "/v1/chat/sessions/chat-session/jump?target_type=message&message_id=client-message-1",
+    token,
+  );
+  assert.equal(messageJump.status, 200);
+  assert.equal(messageJump.body.data.branch_id, defaultBranch.branch_id);
+
   assert.ok(
     streamedEvents.some((event) => event.kind === "message_created"),
     "active stream should receive the submitted message event",
@@ -327,6 +346,104 @@ try {
   );
   assert.equal(eagerManualSlot.alternates.length, 1);
   assert.equal(eagerManualSlot.alternates[0].variant_id, "variant:manual:alt2");
+
+  const createdBranch = await post(
+    "/v1/chat/sessions/chat-session/branches",
+    token,
+    {
+      branch_id: "branch:manual",
+      parent_branch_id: defaultBranch.branch_id,
+      parent_message_id: "client-message-1",
+      origin_message_id: "client-message-1",
+      head_message_id: "client-message-1",
+      label: "Manual branch",
+    },
+  );
+  assert.equal(createdBranch.status, 201);
+  assert.equal(createdBranch.body.data.branch.branch_id, "branch:manual");
+
+  const selectedBranch = await post(
+    "/v1/chat/sessions/chat-session/branches/active",
+    token,
+    {
+      active_branch_id: "branch:manual",
+      expected: { type: "branch", branch_id: defaultBranch.branch_id },
+    },
+  );
+  assert.equal(selectedBranch.status, 200);
+  assert.equal(selectedBranch.body.data.status, "selected");
+  assert.equal(
+    selectedBranch.body.data.state.active_branch_id,
+    "branch:manual",
+  );
+
+  const branchConflict = await post(
+    "/v1/chat/sessions/chat-session/branches/active",
+    token,
+    {
+      active_branch_id: defaultBranch.branch_id,
+      expected: { type: "none" },
+    },
+  );
+  assert.equal(branchConflict.status, 409);
+  assert.equal(branchConflict.body.data.status, "conflict");
+  assert.equal(branchConflict.body.data.conflict.actual, "branch:manual");
+
+  const headUpdate = await post(
+    "/v1/chat/sessions/chat-session/branches/branch%3Amanual/head",
+    token,
+    {
+      head_message_id: "client-message-1",
+      expected: { type: "message", message_id: "client-message-1" },
+    },
+  );
+  assert.equal(headUpdate.status, 200);
+  assert.equal(headUpdate.body.data.status, "updated");
+
+  const createdSnapshot = await post(
+    "/v1/chat/sessions/chat-session/snapshots",
+    token,
+    {
+      snapshot_id: "snapshot:manual",
+      branch_id: "branch:manual",
+      message_id: "client-message-1",
+      cursor: "chat-session:1",
+      label: "Manual snapshot",
+      summary: "Snapshot summary",
+      source: "user",
+    },
+  );
+  assert.equal(createdSnapshot.status, 201);
+  assert.equal(
+    createdSnapshot.body.data.snapshot.snapshot_id,
+    "snapshot:manual",
+  );
+
+  const snapshotJump = await get(
+    "/v1/chat/sessions/chat-session/jump?target_type=snapshot&snapshot_id=snapshot%3Amanual",
+    token,
+  );
+  assert.equal(snapshotJump.status, 200);
+  assert.equal(snapshotJump.body.data.cursor, "chat-session:1");
+
+  const branchJump = await get(
+    "/v1/chat/sessions/chat-session/jump?target_type=branch&branch_id=branch%3Amanual",
+    token,
+  );
+  assert.equal(branchJump.status, 200);
+  assert.equal(branchJump.body.data.message_id, "client-message-1");
+
+  const treeAfterBranch = await get(
+    "/v1/chat/sessions/chat-session/tree",
+    token,
+  );
+  assert.equal(treeAfterBranch.status, 200);
+  assert.ok(
+    treeAfterBranch.body.data.snapshots.some(
+      (snapshot: { snapshot_id: string }) =>
+        snapshot.snapshot_id === "snapshot:manual",
+    ),
+  );
 
   const slotMutationKinds = (
     await get(

@@ -415,6 +415,78 @@ errors = "core_protocol::CoreError"
 summary = "Reorder alternate message variants for a slot."
 
 [[operation]]
+name = "save_conversation_branch"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ConversationBranchWrite"
+output = "core_persistence::ConversationBranchRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist a generic conversation branch record."
+
+[[operation]]
+name = "query_conversation_branches"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ConversationBranchQuery"
+output = "Vec<core_persistence::ConversationBranchRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query generic conversation branches for session projection and breadcrumbs."
+
+[[operation]]
+name = "get_conversation_branch_state"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ session_id, default_updated_at }"
+output = "core_persistence::ConversationBranchStateRecord"
+errors = "core_protocol::CoreError"
+summary = "Read a session's active conversation branch state without mutating it."
+
+[[operation]]
+name = "select_active_conversation_branch"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::SelectActiveBranchRequest"
+output = "core_persistence::SelectActiveBranchResult"
+errors = "core_protocol::CoreError"
+summary = "Select a session active branch with compare-and-swap conflict reporting."
+
+[[operation]]
+name = "update_conversation_branch_head"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::UpdateBranchHeadRequest"
+output = "core_persistence::UpdateBranchHeadResult"
+errors = "core_protocol::CoreError"
+summary = "Update a branch head message with compare-and-swap conflict reporting."
+
+[[operation]]
+name = "save_conversation_snapshot"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ConversationSnapshotWrite"
+output = "core_persistence::ConversationSnapshotRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist a generic conversation snapshot/navigation checkpoint."
+
+[[operation]]
+name = "query_conversation_snapshots"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ConversationSnapshotQuery"
+output = "Vec<core_persistence::ConversationSnapshotRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query generic conversation snapshots for session projection and navigation."
+
+[[operation]]
+name = "resolve_conversation_jump"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ConversationJumpRequest"
+output = "core_persistence::ConversationJumpResult"
+errors = "core_protocol::CoreError"
+summary = "Resolve a message, branch, snapshot, or cursor jump target without hydrating the full tree."
+
+[[operation]]
 name = "database_size"
 surface = "stable"
 direction = "ts_to_rust"

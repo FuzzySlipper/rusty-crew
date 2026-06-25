@@ -131,6 +131,17 @@ import {
   cursorSequence,
   type ChatEvent,
   type ChatSendMessageInput,
+  type ConversationBranchMutationResult,
+  type ConversationBranchRecord,
+  type ConversationBranchStateInput,
+  type ConversationBranchStateRecord,
+  type ConversationJumpResult,
+  type ConversationSnapshotMutationResult,
+  type ConversationSnapshotRecord,
+  type ConversationTreeInput,
+  type ConversationTreeProjection,
+  type CreateConversationBranchInput,
+  type CreateConversationSnapshotInput,
   type CreateMessageSlotInput,
   type CreateMessageVariantInput,
   type DeleteMessageVariantInput,
@@ -149,7 +160,12 @@ import {
   type ReorderMessageVariantsInput,
   type SelectActiveMessageVariantInput,
   type SelectActiveMessageVariantResult,
+  type SelectActiveConversationBranchInput,
+  type SelectActiveConversationBranchResult,
   type SendChatMessageResult,
+  type ResolveConversationJumpInput,
+  type UpdateConversationBranchHeadInput,
+  type UpdateConversationBranchHeadResult,
 } from "./rusty-view-chat-api.js";
 import { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
 import {
@@ -562,6 +578,19 @@ async function handleHttpRequest(
           reorderRustyViewMessageVariants(state, input),
         selectActiveMessageVariant: (input) =>
           selectRustyViewActiveMessageVariant(state, input),
+        conversationTree: (input) => rustyViewConversationTree(state, input),
+        createConversationBranch: (input) =>
+          createRustyViewConversationBranch(state, input),
+        getConversationBranchState: (input) =>
+          getRustyViewConversationBranchState(state, input),
+        selectActiveConversationBranch: (input) =>
+          selectRustyViewActiveConversationBranch(state, input),
+        updateConversationBranchHead: (input) =>
+          updateRustyViewConversationBranchHead(state, input),
+        createConversationSnapshot: (input) =>
+          createRustyViewConversationSnapshot(state, input),
+        resolveConversationJump: (input) =>
+          resolveRustyViewConversationJump(state, input),
         now: state.now,
       },
     );
@@ -4535,6 +4564,11 @@ async function submitRustyViewChatMessage(
   const slotId = stableChatRecordId("slot", messageId);
   const primaryVariantId = stableChatRecordId("variant", slotId);
   const now = state.now();
+  const branch = await ensureDefaultConversationBranch(
+    state,
+    input.session,
+    now,
+  );
   await state.bridge.saveMessageSlot({
     slot_id: slotId,
     session_id: input.session.sessionId,
@@ -4558,6 +4592,9 @@ async function submitRustyViewChatMessage(
       ordinal: 0,
       actor: input.actor,
       body: input.body,
+      branchId: branch.branch_id,
+      parentMessageId: branch.head_message_id ?? undefined,
+      previousMessageId: branch.head_message_id ?? undefined,
       metadataJson: {
         source: "rusty_view_chat",
         correlation_id: correlationId,
@@ -4572,6 +4609,9 @@ async function submitRustyViewChatMessage(
       message_id: messageId,
       slot_id: slotId,
       primary_variant_id: primaryVariantId,
+      branch_id: branch.branch_id,
+      parent_message_id: branch.head_message_id,
+      previous_message_id: branch.head_message_id,
       role: input.actor.kind === "agent" ? "assistant" : "user",
       actor: input.actor,
       body: input.body,
@@ -4585,6 +4625,12 @@ async function submitRustyViewChatMessage(
     body: input.body,
     correlationId,
     source: "chat",
+  });
+  await state.bridge.updateConversationBranchHead({
+    branch_id: branch.branch_id,
+    head_message_id: messageId,
+    expected: { type: "any" },
+    updated_at: state.now(),
   });
   const result: SendChatMessageResult = {
     status: wakeReport.status === "completed" ? "accepted" : "rejected",
@@ -4619,6 +4665,208 @@ async function listRustyViewMessageSlots(
       ? { nextOffset: input.offset + items.length }
       : {}),
   };
+}
+
+async function rustyViewConversationTree(
+  state: ServiceState,
+  input: ConversationTreeInput,
+): Promise<ConversationTreeProjection> {
+  const branches = (await state.bridge.queryConversationBranches({
+    session_id: input.session.sessionId,
+    page: { limit: input.limit, offset: input.offset },
+  })) as ConversationBranchRecord[];
+  const snapshots = input.includeSnapshots
+    ? ((await state.bridge.queryConversationSnapshots({
+        session_id: input.session.sessionId,
+        page: { limit: input.limit, offset: input.offset },
+      })) as ConversationSnapshotRecord[])
+    : [];
+  const branchState = await getRustyViewConversationBranchState(state, {
+    session: input.session,
+  });
+  return {
+    branches,
+    snapshots,
+    branch_state: branchState,
+    active_branch_id: branchState.active_branch_id,
+  };
+}
+
+async function getRustyViewConversationBranchState(
+  state: ServiceState,
+  input: ConversationBranchStateInput,
+): Promise<ConversationBranchStateRecord> {
+  return (await state.bridge.getConversationBranchState({
+    session_id: input.session.sessionId,
+    default_updated_at: state.now(),
+  })) as ConversationBranchStateRecord;
+}
+
+async function createRustyViewConversationBranch(
+  state: ServiceState,
+  input: CreateConversationBranchInput,
+): Promise<ConversationBranchMutationResult> {
+  const now = state.now();
+  const branchId =
+    input.request.branch_id ??
+    stableChatRecordId(
+      "branch",
+      `${input.session.sessionId}:${input.requestId}`,
+    );
+  const branch = (await state.bridge.saveConversationBranch({
+    branch_id: branchId,
+    session_id: input.session.sessionId,
+    parent_branch_id: input.request.parent_branch_id ?? null,
+    parent_message_id: input.request.parent_message_id ?? null,
+    origin_message_id: input.request.origin_message_id ?? null,
+    head_message_id: input.request.head_message_id ?? null,
+    label: input.request.label ?? null,
+    metadata_json: input.request.metadata_json ?? {},
+    created_at: now,
+    updated_at: now,
+  })) as ConversationBranchRecord;
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "conversation_branch_created",
+    payload: { branch },
+  });
+  return { status: "created", branch, latest_cursor: event.event_id };
+}
+
+async function selectRustyViewActiveConversationBranch(
+  state: ServiceState,
+  input: SelectActiveConversationBranchInput,
+): Promise<SelectActiveConversationBranchResult> {
+  const result = (await state.bridge.selectActiveConversationBranch({
+    session_id: input.session.sessionId,
+    active_branch_id: input.request.active_branch_id ?? null,
+    expected: input.request.expected,
+    updated_at: state.now(),
+  })) as {
+    state: ConversationBranchStateRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  const status = result.conflict ? "conflict" : "selected";
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "conversation_active_branch_selected",
+    payload: {
+      active_branch_id: result.state.active_branch_id,
+      conflict: result.conflict,
+      state: result.state,
+    },
+  });
+  return {
+    status,
+    state: result.state,
+    ...(result.conflict ? { conflict: result.conflict } : {}),
+    latest_cursor: event.event_id,
+  };
+}
+
+async function updateRustyViewConversationBranchHead(
+  state: ServiceState,
+  input: UpdateConversationBranchHeadInput,
+): Promise<UpdateConversationBranchHeadResult> {
+  const result = (await state.bridge.updateConversationBranchHead({
+    branch_id: input.branchId,
+    head_message_id: input.request.head_message_id ?? null,
+    expected: input.request.expected,
+    updated_at: state.now(),
+  })) as {
+    branch: ConversationBranchRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  const status = result.conflict ? "conflict" : "updated";
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "conversation_branch_head_updated",
+    payload: {
+      branch_id: input.branchId,
+      head_message_id: result.branch.head_message_id,
+      conflict: result.conflict,
+      branch: result.branch,
+    },
+  });
+  return {
+    status,
+    branch: result.branch,
+    ...(result.conflict ? { conflict: result.conflict } : {}),
+    latest_cursor: event.event_id,
+  };
+}
+
+async function createRustyViewConversationSnapshot(
+  state: ServiceState,
+  input: CreateConversationSnapshotInput,
+): Promise<ConversationSnapshotMutationResult> {
+  const now = state.now();
+  const snapshotId =
+    input.request.snapshot_id ??
+    stableChatRecordId(
+      "snapshot",
+      `${input.session.sessionId}:${input.requestId}`,
+    );
+  const snapshot = (await state.bridge.saveConversationSnapshot({
+    snapshot_id: snapshotId,
+    session_id: input.session.sessionId,
+    branch_id: input.request.branch_id ?? null,
+    message_id: input.request.message_id ?? null,
+    cursor: input.request.cursor ?? null,
+    label: input.request.label ?? null,
+    summary: input.request.summary ?? null,
+    source: input.request.source ?? "user",
+    metadata_json: input.request.metadata_json ?? {},
+    created_at: now,
+    updated_at: now,
+  })) as ConversationSnapshotRecord;
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "conversation_snapshot_created",
+    payload: { snapshot },
+  });
+  return { status: "created", snapshot, latest_cursor: event.event_id };
+}
+
+async function resolveRustyViewConversationJump(
+  state: ServiceState,
+  input: ResolveConversationJumpInput,
+): Promise<ConversationJumpResult> {
+  return (await state.bridge.resolveConversationJump({
+    session_id: input.session.sessionId,
+    target: input.target,
+  })) as ConversationJumpResult;
+}
+
+async function ensureDefaultConversationBranch(
+  state: ServiceState,
+  session: ChatSendMessageInput["session"],
+  now: string,
+): Promise<ConversationBranchRecord> {
+  const branchId = stableChatRecordId("branch", `${session.sessionId}:default`);
+  const existing = (await state.bridge.queryConversationBranches({
+    session_id: session.sessionId,
+    page: { limit: 500, offset: 0 },
+  })) as ConversationBranchRecord[];
+  const found = existing.find((branch) => branch.branch_id === branchId);
+  if (found) return found;
+  const branch = (await state.bridge.saveConversationBranch({
+    branch_id: branchId,
+    session_id: session.sessionId,
+    parent_branch_id: null,
+    parent_message_id: null,
+    origin_message_id: null,
+    head_message_id: null,
+    label: "Default",
+    metadata_json: { source: "rusty_view_chat_default" },
+    created_at: now,
+    updated_at: now,
+  })) as ConversationBranchRecord;
+  await state.bridge
+    .selectActiveConversationBranch({
+      session_id: session.sessionId,
+      active_branch_id: branchId,
+      expected: { type: "none" },
+      updated_at: now,
+    })
+    .catch(() => undefined);
+  return branch;
 }
 
 async function listRustyViewMessageVariants(
@@ -4838,6 +5086,9 @@ function messageVariantWrite(input: {
   ordinal: number;
   actor: { id: string; kind: "human" | "agent" | "system" };
   body: string;
+  branchId?: string | null;
+  parentMessageId?: string | null;
+  previousMessageId?: string | null;
   metadataJson: unknown;
   blocks?: MessageBlockDraft[];
   now: string;
@@ -4851,6 +5102,9 @@ function messageVariantWrite(input: {
     message: {
       message_id: input.messageId,
       session_id: input.sessionId,
+      branch_id: input.branchId ?? null,
+      parent_message_id: input.parentMessageId ?? null,
+      previous_message_id: input.previousMessageId ?? null,
       author_id: input.actor.id,
       author_role:
         input.actor.kind === "agent"

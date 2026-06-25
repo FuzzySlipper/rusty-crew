@@ -55,6 +55,27 @@ export interface RustyViewChatContext {
   selectActiveMessageVariant?(
     input: SelectActiveMessageVariantInput,
   ): Promise<SelectActiveMessageVariantResult>;
+  conversationTree?(
+    input: ConversationTreeInput,
+  ): Promise<ConversationTreeProjection>;
+  createConversationBranch?(
+    input: CreateConversationBranchInput,
+  ): Promise<ConversationBranchMutationResult>;
+  getConversationBranchState?(
+    input: ConversationBranchStateInput,
+  ): Promise<ConversationBranchStateRecord>;
+  selectActiveConversationBranch?(
+    input: SelectActiveConversationBranchInput,
+  ): Promise<SelectActiveConversationBranchResult>;
+  updateConversationBranchHead?(
+    input: UpdateConversationBranchHeadInput,
+  ): Promise<UpdateConversationBranchHeadResult>;
+  createConversationSnapshot?(
+    input: CreateConversationSnapshotInput,
+  ): Promise<ConversationSnapshotMutationResult>;
+  resolveConversationJump?(
+    input: ResolveConversationJumpInput,
+  ): Promise<ConversationJumpResult>;
   now?: () => string;
 }
 
@@ -113,6 +134,10 @@ export interface ChatEvent {
     | "message_variant_deleted"
     | "message_variants_reordered"
     | "message_active_variant_selected"
+    | "conversation_branch_created"
+    | "conversation_active_branch_selected"
+    | "conversation_branch_head_updated"
+    | "conversation_snapshot_created"
     | "stream_error"
     | "unknown";
   payload: Record<string, unknown>;
@@ -353,6 +378,174 @@ export interface SelectActiveMessageVariantInput {
   requestId: string;
 }
 
+export interface ConversationBranchRecord {
+  branch_id: string;
+  session_id: string;
+  parent_branch_id?: string | null;
+  parent_message_id?: string | null;
+  origin_message_id?: string | null;
+  head_message_id?: string | null;
+  label?: string | null;
+  metadata_json: unknown;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+export interface ConversationBranchStateRecord {
+  session_id: string;
+  active_branch_id?: string | null;
+  updated_at: string;
+  version: number;
+}
+
+export interface ConversationSnapshotRecord {
+  snapshot_id: string;
+  session_id: string;
+  branch_id?: string | null;
+  message_id?: string | null;
+  cursor?: string | null;
+  label?: string | null;
+  summary?: string | null;
+  source: "user" | "system" | "import";
+  metadata_json: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationTreeProjection {
+  branches: ConversationBranchRecord[];
+  snapshots: ConversationSnapshotRecord[];
+  branch_state: ConversationBranchStateRecord;
+  active_branch_id?: string | null;
+}
+
+export interface CreateConversationBranchRequest {
+  branch_id?: string;
+  parent_branch_id?: string | null;
+  parent_message_id?: string | null;
+  origin_message_id?: string | null;
+  head_message_id?: string | null;
+  label?: string | null;
+  metadata_json?: unknown;
+}
+
+export interface ConversationBranchMutationResult {
+  status: "created";
+  branch: ConversationBranchRecord;
+  latest_cursor: string;
+}
+
+export interface SelectActiveConversationBranchRequest {
+  active_branch_id?: string | null;
+  expected:
+    | { type: "any" }
+    | { type: "none" }
+    | { type: "branch"; branch_id: string };
+}
+
+export interface SelectActiveConversationBranchResult {
+  status: "selected" | "conflict";
+  state: ConversationBranchStateRecord;
+  conflict?: {
+    expected?: string | null;
+    actual?: string | null;
+  };
+  latest_cursor: string;
+}
+
+export interface UpdateConversationBranchHeadRequest {
+  head_message_id?: string | null;
+  expected:
+    | { type: "any" }
+    | { type: "none" }
+    | { type: "message"; message_id: string };
+}
+
+export interface UpdateConversationBranchHeadResult {
+  status: "updated" | "conflict";
+  branch: ConversationBranchRecord;
+  conflict?: {
+    expected?: string | null;
+    actual?: string | null;
+  };
+  latest_cursor: string;
+}
+
+export interface CreateConversationSnapshotRequest {
+  snapshot_id?: string;
+  branch_id?: string | null;
+  message_id?: string | null;
+  cursor?: string | null;
+  label?: string | null;
+  summary?: string | null;
+  source?: "user" | "system" | "import";
+  metadata_json?: unknown;
+}
+
+export interface ConversationSnapshotMutationResult {
+  status: "created";
+  snapshot: ConversationSnapshotRecord;
+  latest_cursor: string;
+}
+
+export type ConversationJumpTarget =
+  | { type: "message"; message_id: string }
+  | { type: "branch"; branch_id: string }
+  | { type: "snapshot"; snapshot_id: string }
+  | { type: "cursor"; cursor: string };
+
+export interface ConversationJumpResult {
+  session_id: string;
+  target: ConversationJumpTarget;
+  branch_id?: string | null;
+  message_id?: string | null;
+  cursor?: string | null;
+  snapshot_id?: string | null;
+}
+
+export interface ConversationTreeInput {
+  session: SessionState;
+  includeSnapshots: boolean;
+  limit: number;
+  offset: number;
+}
+
+export interface ConversationBranchStateInput {
+  session: SessionState;
+}
+
+export interface CreateConversationBranchInput {
+  session: SessionState;
+  request: CreateConversationBranchRequest;
+  requestId: string;
+}
+
+export interface SelectActiveConversationBranchInput {
+  session: SessionState;
+  request: SelectActiveConversationBranchRequest;
+  requestId: string;
+}
+
+export interface UpdateConversationBranchHeadInput {
+  session: SessionState;
+  branchId: string;
+  request: UpdateConversationBranchHeadRequest;
+  requestId: string;
+}
+
+export interface CreateConversationSnapshotInput {
+  session: SessionState;
+  request: CreateConversationSnapshotRequest;
+  requestId: string;
+}
+
+export interface ResolveConversationJumpInput {
+  session: SessionState;
+  target: ConversationJumpTarget;
+  requestId: string;
+}
+
 interface RawBodyStateJson {
   pending_messages?: AgentMessage[];
 }
@@ -377,6 +570,55 @@ export async function handleRustyViewChatRequest(
       partsMatch(url.pathname, ["v1", "chat", "sessions", "*", "commands"])
     ) {
       return handleExecuteCommand(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, ["v1", "chat", "sessions", "*", "branches"])
+    ) {
+      return handleCreateConversationBranch(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "branches",
+        "active",
+      ])
+    ) {
+      return handleSelectActiveConversationBranch(
+        request,
+        context,
+        requestId,
+        url,
+      );
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "branches",
+        "*",
+        "head",
+      ])
+    ) {
+      return handleUpdateConversationBranchHead(
+        request,
+        context,
+        requestId,
+        url,
+      );
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, ["v1", "chat", "sessions", "*", "snapshots"])
+    ) {
+      return handleCreateConversationSnapshot(request, context, requestId, url);
     }
     if (
       method === "POST" &&
@@ -530,6 +772,26 @@ export async function handleRustyViewChatRequest(
     parts[4] === "slots"
   ) {
     return handleListMessageSlots(context, requestId, url, parts);
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "tree"
+  ) {
+    return handleConversationTree(context, requestId, url, parts);
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "jump"
+  ) {
+    return handleResolveConversationJump(context, requestId, url, parts);
   }
 
   if (
@@ -857,6 +1119,164 @@ async function handleSelectActiveMessageVariant(
     requestId,
   });
   return success(requestId, result, result.status === "conflict" ? 409 : 200);
+}
+
+async function handleConversationTree(
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.conversationTree) {
+    return chatFeatureUnavailable(
+      requestId,
+      "conversation_tree_api_not_configured",
+    );
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.conversationTree({
+      session: session.session,
+      includeSnapshots: !boolParam(url, "exclude_snapshots"),
+      limit: pageLimit(url, 100, 500),
+      offset: pageOffset(url),
+    }),
+  );
+}
+
+async function handleCreateConversationBranch(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.createConversationBranch) {
+    return chatFeatureUnavailable(
+      requestId,
+      "conversation_tree_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseCreateConversationBranchRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.createConversationBranch({
+      session: session.session,
+      request: parsed.value,
+      requestId,
+    }),
+    201,
+  );
+}
+
+async function handleSelectActiveConversationBranch(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.selectActiveConversationBranch) {
+    return chatFeatureUnavailable(
+      requestId,
+      "conversation_tree_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseSelectActiveConversationBranchRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  const result = await context.selectActiveConversationBranch({
+    session: session.session,
+    request: parsed.value,
+    requestId,
+  });
+  return success(requestId, result, result.status === "conflict" ? 409 : 200);
+}
+
+async function handleUpdateConversationBranchHead(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.updateConversationBranchHead) {
+    return chatFeatureUnavailable(
+      requestId,
+      "conversation_tree_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseUpdateConversationBranchHeadRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  const result = await context.updateConversationBranchHead({
+    session: session.session,
+    branchId: decodeURIComponent(parts[5] ?? ""),
+    request: parsed.value,
+    requestId,
+  });
+  return success(requestId, result, result.status === "conflict" ? 409 : 200);
+}
+
+async function handleCreateConversationSnapshot(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.createConversationSnapshot) {
+    return chatFeatureUnavailable(
+      requestId,
+      "conversation_tree_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseCreateConversationSnapshotRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.createConversationSnapshot({
+      session: session.session,
+      request: parsed.value,
+      requestId,
+    }),
+    201,
+  );
+}
+
+async function handleResolveConversationJump(
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.resolveConversationJump) {
+    return chatFeatureUnavailable(
+      requestId,
+      "conversation_tree_api_not_configured",
+    );
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseConversationJumpTarget(url);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.resolveConversationJump({
+      session: session.session,
+      target: parsed.value,
+      requestId,
+    }),
+  );
 }
 
 function sessionPage(
@@ -1440,6 +1860,193 @@ function parseSelectActiveMessageVariantRequest(
   };
 }
 
+function parseCreateConversationBranchRequest(
+  value: unknown,
+):
+  | { ok: true; value: CreateConversationBranchRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_conversation_branch_body",
+      message: "conversation branch body must be a JSON object",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      branch_id: stringValue(value.branch_id),
+      parent_branch_id: nullableStringValue(value.parent_branch_id),
+      parent_message_id: nullableStringValue(value.parent_message_id),
+      origin_message_id: nullableStringValue(value.origin_message_id),
+      head_message_id: nullableStringValue(value.head_message_id),
+      label: nullableStringValue(value.label),
+      metadata_json: value.metadata_json,
+    },
+  };
+}
+
+function parseSelectActiveConversationBranchRequest(
+  value: unknown,
+):
+  | { ok: true; value: SelectActiveConversationBranchRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value) || !isRecord(value.expected)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_active_branch_selection",
+      message: "active branch selection requires expected",
+    };
+  }
+  const expectedType = stringValue(value.expected.type);
+  const expected =
+    expectedType === "any"
+      ? ({ type: "any" } as const)
+      : expectedType === "none"
+        ? ({ type: "none" } as const)
+        : expectedType === "branch" &&
+            stringValue(value.expected.branch_id) !== undefined
+          ? ({
+              type: "branch",
+              branch_id: stringValue(value.expected.branch_id)!,
+            } as const)
+          : undefined;
+  if (expected === undefined) {
+    return {
+      ok: false,
+      reasonCode: "invalid_active_branch_expectation",
+      message: "expected must be any, none, or branch with branch_id",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      active_branch_id: nullableStringValue(value.active_branch_id),
+      expected,
+    },
+  };
+}
+
+function parseUpdateConversationBranchHeadRequest(
+  value: unknown,
+):
+  | { ok: true; value: UpdateConversationBranchHeadRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value) || !isRecord(value.expected)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_branch_head_update",
+      message: "branch head update requires expected",
+    };
+  }
+  const expectedType = stringValue(value.expected.type);
+  const expected =
+    expectedType === "any"
+      ? ({ type: "any" } as const)
+      : expectedType === "none"
+        ? ({ type: "none" } as const)
+        : expectedType === "message" &&
+            stringValue(value.expected.message_id) !== undefined
+          ? ({
+              type: "message",
+              message_id: stringValue(value.expected.message_id)!,
+            } as const)
+          : undefined;
+  if (expected === undefined) {
+    return {
+      ok: false,
+      reasonCode: "invalid_branch_head_expectation",
+      message: "expected must be any, none, or message with message_id",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      head_message_id: nullableStringValue(value.head_message_id),
+      expected,
+    },
+  };
+}
+
+function parseCreateConversationSnapshotRequest(
+  value: unknown,
+):
+  | { ok: true; value: CreateConversationSnapshotRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_conversation_snapshot_body",
+      message: "conversation snapshot body must be a JSON object",
+    };
+  }
+  const source = stringValue(value.source);
+  if (
+    source !== undefined &&
+    source !== "user" &&
+    source !== "system" &&
+    source !== "import"
+  ) {
+    return {
+      ok: false,
+      reasonCode: "invalid_conversation_snapshot_source",
+      message: "snapshot source must be user, system, or import",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      snapshot_id: stringValue(value.snapshot_id),
+      branch_id: nullableStringValue(value.branch_id),
+      message_id: nullableStringValue(value.message_id),
+      cursor: nullableStringValue(value.cursor),
+      label: nullableStringValue(value.label),
+      summary: nullableStringValue(value.summary),
+      source,
+      metadata_json: value.metadata_json,
+    },
+  };
+}
+
+function parseConversationJumpTarget(
+  url: URL,
+):
+  | { ok: true; value: ConversationJumpTarget }
+  | { ok: false; reasonCode: string; message: string } {
+  const targetType = trimmedParam(url, "target_type");
+  if (targetType === "message") {
+    const messageId = trimmedParam(url, "message_id");
+    if (messageId) {
+      return { ok: true, value: { type: "message", message_id: messageId } };
+    }
+  }
+  if (targetType === "branch") {
+    const branchId = trimmedParam(url, "branch_id");
+    if (branchId) {
+      return { ok: true, value: { type: "branch", branch_id: branchId } };
+    }
+  }
+  if (targetType === "snapshot") {
+    const snapshotId = trimmedParam(url, "snapshot_id");
+    if (snapshotId) {
+      return {
+        ok: true,
+        value: { type: "snapshot", snapshot_id: snapshotId },
+      };
+    }
+  }
+  if (targetType === "cursor") {
+    const cursor = trimmedParam(url, "cursor");
+    if (cursor) return { ok: true, value: { type: "cursor", cursor } };
+  }
+  return {
+    ok: false,
+    reasonCode: "invalid_conversation_jump_target",
+    message:
+      "jump target requires target_type with message_id, branch_id, snapshot_id, or cursor",
+  };
+}
+
 function parseRequiredActor(
   value: unknown,
 ):
@@ -1494,6 +2101,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function nullableStringValue(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return stringValue(value);
 }
 
 function boolParam(url: URL, key: string): boolean {

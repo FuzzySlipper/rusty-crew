@@ -62,6 +62,8 @@ string_id!(MessageSlotId);
 string_id!(MessageVariantId);
 string_id!(MessageId);
 string_id!(MessageBlockId);
+string_id!(ConversationBranchId);
+string_id!(ConversationSnapshotId);
 
 pub type IsoTimestamp = String;
 

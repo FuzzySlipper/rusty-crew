@@ -6,14 +6,14 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
     AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, BrainEvent,
-    CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
-    DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
-    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
-    FanOutGroupStatus, IsoTimestamp, MessageBlockId, MessageId, MessageSlotId, MessageVariantId,
-    ParentConsumptionPolicy, ProfileId, ProjectId, ProviderStateAbsenceReason, ResourceLimits,
-    RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
-    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
-    ToolProfile,
+    CompletionPacket, ConversationBranchId, ConversationSnapshotId, CoreError, CoreErrorKind,
+    CoreEvent, CoreEventKind, CoreResult, DelegatedCompletion, DelegatedFanOutGroup,
+    DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
+    DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp, MessageBlockId,
+    MessageId, MessageSlotId, MessageVariantId, ParentConsumptionPolicy, ProfileId, ProjectId,
+    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
+    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
+    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 17;
+const CURRENT_SCHEMA_VERSION: i64 = 18;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -131,6 +131,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 17,
         description: "add message slot and variant persistence",
         apply: migrate_v17_add_message_slot_variants,
+    },
+    SchemaMigration {
+        version: 18,
+        description: "add conversation tree branches and snapshots",
+        apply: migrate_v18_add_conversation_tree,
     },
 ];
 
@@ -313,6 +318,9 @@ pub struct MessageBlockRecord {
 pub struct DurableMessageRecord {
     pub message_id: MessageId,
     pub session_id: SessionId,
+    pub branch_id: Option<ConversationBranchId>,
+    pub parent_message_id: Option<MessageId>,
+    pub previous_message_id: Option<MessageId>,
     pub author_id: String,
     pub author_role: String,
     pub status: DurableMessageStatus,
@@ -363,6 +371,9 @@ pub struct MessageBlockWrite {
 pub struct DurableMessageWrite {
     pub message_id: MessageId,
     pub session_id: SessionId,
+    pub branch_id: Option<ConversationBranchId>,
+    pub parent_message_id: Option<MessageId>,
+    pub previous_message_id: Option<MessageId>,
     pub author_id: String,
     pub author_role: String,
     pub status: DurableMessageStatus,
@@ -436,6 +447,199 @@ pub struct SelectActiveVariantResult {
 pub struct ActiveVariantConflict {
     pub expected: Option<MessageVariantId>,
     pub actual: Option<MessageVariantId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationBranchRecord {
+    pub branch_id: ConversationBranchId,
+    pub session_id: SessionId,
+    pub parent_branch_id: Option<ConversationBranchId>,
+    pub parent_message_id: Option<MessageId>,
+    pub origin_message_id: Option<MessageId>,
+    pub head_message_id: Option<MessageId>,
+    pub label: Option<String>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationBranchWrite {
+    pub branch_id: ConversationBranchId,
+    pub session_id: SessionId,
+    pub parent_branch_id: Option<ConversationBranchId>,
+    pub parent_message_id: Option<MessageId>,
+    pub origin_message_id: Option<MessageId>,
+    pub head_message_id: Option<MessageId>,
+    pub label: Option<String>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ConversationBranchQuery {
+    pub session_id: Option<SessionId>,
+    pub parent_branch_id: Option<ConversationBranchId>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationBranchStateRecord {
+    pub session_id: SessionId,
+    pub active_branch_id: Option<ConversationBranchId>,
+    pub updated_at: IsoTimestamp,
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "branch_id", rename_all = "snake_case")]
+pub enum ActiveBranchExpectation {
+    Any,
+    None,
+    Branch(ConversationBranchId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectActiveBranchRequest {
+    pub session_id: SessionId,
+    pub active_branch_id: Option<ConversationBranchId>,
+    pub expected: ActiveBranchExpectation,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectActiveBranchResult {
+    pub state: ConversationBranchStateRecord,
+    pub conflict: Option<ActiveBranchConflict>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveBranchConflict {
+    pub expected: Option<ConversationBranchId>,
+    pub actual: Option<ConversationBranchId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "message_id", rename_all = "snake_case")]
+pub enum BranchHeadExpectation {
+    Any,
+    None,
+    Message(MessageId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateBranchHeadRequest {
+    pub branch_id: ConversationBranchId,
+    pub head_message_id: Option<MessageId>,
+    pub expected: BranchHeadExpectation,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateBranchHeadResult {
+    pub branch: ConversationBranchRecord,
+    pub conflict: Option<BranchHeadConflict>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchHeadConflict {
+    pub expected: Option<MessageId>,
+    pub actual: Option<MessageId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationSnapshotSource {
+    User,
+    System,
+    Import,
+}
+
+impl ConversationSnapshotSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::System => "system",
+            Self::Import => "import",
+        }
+    }
+
+    fn parse(raw: &str) -> CoreResult<Self> {
+        match raw {
+            "user" => Ok(Self::User),
+            "system" => Ok(Self::System),
+            "import" => Ok(Self::Import),
+            _ => Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("unsupported conversation snapshot source {raw}"),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationSnapshotRecord {
+    pub snapshot_id: ConversationSnapshotId,
+    pub session_id: SessionId,
+    pub branch_id: Option<ConversationBranchId>,
+    pub message_id: Option<MessageId>,
+    pub cursor: Option<String>,
+    pub label: Option<String>,
+    pub summary: Option<String>,
+    pub source: ConversationSnapshotSource,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationSnapshotWrite {
+    pub snapshot_id: ConversationSnapshotId,
+    pub session_id: SessionId,
+    pub branch_id: Option<ConversationBranchId>,
+    pub message_id: Option<MessageId>,
+    pub cursor: Option<String>,
+    pub label: Option<String>,
+    pub summary: Option<String>,
+    pub source: ConversationSnapshotSource,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ConversationSnapshotQuery {
+    pub session_id: Option<SessionId>,
+    pub branch_id: Option<ConversationBranchId>,
+    pub message_id: Option<MessageId>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ConversationJumpTarget {
+    Message { message_id: MessageId },
+    Branch { branch_id: ConversationBranchId },
+    Snapshot { snapshot_id: ConversationSnapshotId },
+    Cursor { cursor: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationJumpRequest {
+    pub session_id: SessionId,
+    pub target: ConversationJumpTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationJumpResult {
+    pub session_id: SessionId,
+    pub target: ConversationJumpTarget,
+    pub branch_id: Option<ConversationBranchId>,
+    pub message_id: Option<MessageId>,
+    pub cursor: Option<String>,
+    pub snapshot_id: Option<ConversationSnapshotId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1069,6 +1273,9 @@ pub enum DiagnosticTable {
     MessageVariants,
     Messages,
     MessageBlocks,
+    ConversationBranches,
+    ConversationBranchState,
+    ConversationSnapshots,
     ChannelBindings,
     McpBindings,
     AgentMessages,
@@ -1103,6 +1310,9 @@ impl DiagnosticTable {
         Self::MessageVariants,
         Self::Messages,
         Self::MessageBlocks,
+        Self::ConversationBranches,
+        Self::ConversationBranchState,
+        Self::ConversationSnapshots,
         Self::ChannelBindings,
         Self::McpBindings,
         Self::AgentMessages,
@@ -1137,6 +1347,9 @@ impl DiagnosticTable {
             "message_variants" => Ok(Self::MessageVariants),
             "messages" => Ok(Self::Messages),
             "message_blocks" => Ok(Self::MessageBlocks),
+            "conversation_branches" => Ok(Self::ConversationBranches),
+            "conversation_branch_state" => Ok(Self::ConversationBranchState),
+            "conversation_snapshots" => Ok(Self::ConversationSnapshots),
             "channel_bindings" => Ok(Self::ChannelBindings),
             "mcp_bindings" => Ok(Self::McpBindings),
             "agent_messages" => Ok(Self::AgentMessages),
@@ -1176,6 +1389,9 @@ impl DiagnosticTable {
             Self::MessageVariants => "message_variants",
             Self::Messages => "messages",
             Self::MessageBlocks => "message_blocks",
+            Self::ConversationBranches => "conversation_branches",
+            Self::ConversationBranchState => "conversation_branch_state",
+            Self::ConversationSnapshots => "conversation_snapshots",
             Self::ChannelBindings => "channel_bindings",
             Self::McpBindings => "mcp_bindings",
             Self::AgentMessages => "agent_messages",
@@ -1913,6 +2129,184 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         let conn = self.conn()?;
         query_message_variants(&conn, query)
+    }
+
+    pub fn save_conversation_branch(
+        &self,
+        branch: &ConversationBranchWrite,
+    ) -> CoreResult<ConversationBranchRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin save conversation branch", error))?;
+        save_conversation_branch_in_tx(&tx, branch)?;
+        let record = load_conversation_branch_in_tx(&tx, &branch.branch_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save conversation branch", error))?;
+        Ok(record)
+    }
+
+    pub fn query_conversation_branches(
+        &self,
+        query: &ConversationBranchQuery,
+    ) -> CoreResult<Vec<ConversationBranchRecord>> {
+        let conn = self.conn()?;
+        query_conversation_branches(&conn, query)
+    }
+
+    pub fn get_conversation_branch_state(
+        &self,
+        session_id: &SessionId,
+        default_updated_at: &IsoTimestamp,
+    ) -> CoreResult<ConversationBranchStateRecord> {
+        let conn = self.conn()?;
+        load_conversation_branch_state(&conn, session_id, default_updated_at)
+    }
+
+    pub fn select_active_conversation_branch(
+        &self,
+        request: &SelectActiveBranchRequest,
+    ) -> CoreResult<SelectActiveBranchResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin select active branch", error))?;
+        let current = current_active_branch_in_tx(&tx, &request.session_id)?;
+        let expected = match &request.expected {
+            ActiveBranchExpectation::Any => current.clone(),
+            ActiveBranchExpectation::None => None,
+            ActiveBranchExpectation::Branch(branch_id) => Some(branch_id.clone()),
+        };
+        if request.expected != ActiveBranchExpectation::Any && current != expected {
+            let state = load_conversation_branch_state_in_tx(
+                &tx,
+                &request.session_id,
+                &request.updated_at,
+            )?;
+            tx.commit()
+                .map_err(|error| persistence_error("commit active branch conflict", error))?;
+            return Ok(SelectActiveBranchResult {
+                state,
+                conflict: Some(ActiveBranchConflict {
+                    expected,
+                    actual: current,
+                }),
+            });
+        }
+        if let Some(branch_id) = &request.active_branch_id {
+            ensure_branch_belongs_to_session_in_tx(&tx, &request.session_id, branch_id)?;
+        }
+        tx.execute(
+            "INSERT INTO conversation_branch_state (
+                session_id, active_branch_id, updated_at, version
+             ) VALUES (?1, ?2, ?3, 0)
+             ON CONFLICT(session_id) DO UPDATE SET
+                active_branch_id = excluded.active_branch_id,
+                updated_at = excluded.updated_at,
+                version = conversation_branch_state.version + 1",
+            params![
+                request.session_id.0,
+                request
+                    .active_branch_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                request.updated_at,
+            ],
+        )
+        .map_err(|error| persistence_error("select active conversation branch", error))?;
+        let state =
+            load_conversation_branch_state_in_tx(&tx, &request.session_id, &request.updated_at)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit select active branch", error))?;
+        Ok(SelectActiveBranchResult {
+            state,
+            conflict: None,
+        })
+    }
+
+    pub fn update_conversation_branch_head(
+        &self,
+        request: &UpdateBranchHeadRequest,
+    ) -> CoreResult<UpdateBranchHeadResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin update branch head", error))?;
+        let current = current_branch_head_in_tx(&tx, &request.branch_id)?;
+        let expected = match &request.expected {
+            BranchHeadExpectation::Any => current.clone(),
+            BranchHeadExpectation::None => None,
+            BranchHeadExpectation::Message(message_id) => Some(message_id.clone()),
+        };
+        if request.expected != BranchHeadExpectation::Any && current != expected {
+            let branch = load_conversation_branch_in_tx(&tx, &request.branch_id)?;
+            tx.commit()
+                .map_err(|error| persistence_error("commit branch head conflict", error))?;
+            return Ok(UpdateBranchHeadResult {
+                branch,
+                conflict: Some(BranchHeadConflict {
+                    expected,
+                    actual: current,
+                }),
+            });
+        }
+        if let Some(message_id) = &request.head_message_id {
+            ensure_message_exists_in_tx(&tx, message_id)?;
+        }
+        tx.execute(
+            "UPDATE conversation_branches
+             SET head_message_id = ?2,
+                 updated_at = ?3,
+                 version = version + 1
+             WHERE branch_id = ?1",
+            params![
+                request.branch_id.0,
+                request
+                    .head_message_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                request.updated_at,
+            ],
+        )
+        .map_err(|error| persistence_error("update conversation branch head", error))?;
+        let branch = load_conversation_branch_in_tx(&tx, &request.branch_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit update branch head", error))?;
+        Ok(UpdateBranchHeadResult {
+            branch,
+            conflict: None,
+        })
+    }
+
+    pub fn save_conversation_snapshot(
+        &self,
+        snapshot: &ConversationSnapshotWrite,
+    ) -> CoreResult<ConversationSnapshotRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin save conversation snapshot", error))?;
+        save_conversation_snapshot_in_tx(&tx, snapshot)?;
+        let record = load_conversation_snapshot_in_tx(&tx, &snapshot.snapshot_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save conversation snapshot", error))?;
+        Ok(record)
+    }
+
+    pub fn query_conversation_snapshots(
+        &self,
+        query: &ConversationSnapshotQuery,
+    ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
+        let conn = self.conn()?;
+        query_conversation_snapshots(&conn, query)
+    }
+
+    pub fn resolve_conversation_jump(
+        &self,
+        request: &ConversationJumpRequest,
+    ) -> CoreResult<ConversationJumpResult> {
+        let conn = self.conn()?;
+        resolve_conversation_jump(&conn, request)
     }
 
     pub fn select_active_message_variant(
@@ -3748,6 +4142,72 @@ fn migrate_v17_add_message_slot_variants(tx: &rusqlite::Transaction<'_>) -> Core
     .map_err(|error| persistence_error("apply schema migration 17", error))
 }
 
+fn migrate_v18_add_conversation_tree(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    add_missing_column_tx(tx, "messages", "branch_id", "TEXT")?;
+    add_missing_column_tx(tx, "messages", "parent_message_id", "TEXT")?;
+    add_missing_column_tx(tx, "messages", "previous_message_id", "TEXT")?;
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS conversation_branches (
+                branch_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                parent_branch_id TEXT,
+                parent_message_id TEXT,
+                origin_message_id TEXT,
+                head_message_id TEXT,
+                label TEXT,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversation_branches_session_branch
+                ON conversation_branches(session_id, branch_id);
+            CREATE INDEX IF NOT EXISTS idx_conversation_branches_parent_branch
+                ON conversation_branches(parent_branch_id);
+            CREATE INDEX IF NOT EXISTS idx_conversation_branches_parent_message
+                ON conversation_branches(parent_message_id);
+            CREATE INDEX IF NOT EXISTS idx_conversation_branches_session_created
+                ON conversation_branches(session_id, created_at, branch_id);
+
+            CREATE TABLE IF NOT EXISTS conversation_branch_state (
+                session_id TEXT PRIMARY KEY,
+                active_branch_id TEXT,
+                updated_at TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS conversation_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                branch_id TEXT,
+                message_id TEXT,
+                cursor TEXT,
+                label TEXT,
+                summary TEXT,
+                source TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversation_snapshots_session_message
+                ON conversation_snapshots(session_id, message_id);
+            CREATE INDEX IF NOT EXISTS idx_conversation_snapshots_session_branch
+                ON conversation_snapshots(session_id, branch_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_conversation_snapshots_session_created
+                ON conversation_snapshots(session_id, created_at, snapshot_id);
+
+            CREATE INDEX IF NOT EXISTS idx_messages_session_branch
+                ON messages(session_id, branch_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_parent_message
+                ON messages(parent_message_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_branch_created
+                ON messages(branch_id, created_at, message_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 18", error))
+}
+
 fn save_provider_wire_state_in_tx(
     tx: &rusqlite::Transaction<'_>,
     write: &ProviderWireStateWrite,
@@ -5076,15 +5536,21 @@ fn save_durable_message_in_tx(
         "INSERT INTO messages (
             message_id,
             session_id,
+            branch_id,
+            parent_message_id,
+            previous_message_id,
             author_id,
             author_role,
             status,
             body,
             metadata_json,
             created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(message_id) DO UPDATE SET
             session_id = excluded.session_id,
+            branch_id = excluded.branch_id,
+            parent_message_id = excluded.parent_message_id,
+            previous_message_id = excluded.previous_message_id,
             author_id = excluded.author_id,
             author_role = excluded.author_role,
             status = excluded.status,
@@ -5093,6 +5559,15 @@ fn save_durable_message_in_tx(
         params![
             message.message_id.0,
             message.session_id.0,
+            message.branch_id.as_ref().map(|value| value.0.as_str()),
+            message
+                .parent_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            message
+                .previous_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
             message.author_id,
             message.author_role,
             message.status.as_str(),
@@ -5241,6 +5716,683 @@ fn query_message_variants_in_tx(
         .iter()
         .map(|variant_id| load_message_variant_in_tx(tx, variant_id))
         .collect()
+}
+
+fn save_conversation_branch_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    branch: &ConversationBranchWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO conversation_branches (
+            branch_id,
+            session_id,
+            parent_branch_id,
+            parent_message_id,
+            origin_message_id,
+            head_message_id,
+            label,
+            metadata_json,
+            created_at,
+            updated_at,
+            version
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)
+         ON CONFLICT(branch_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            parent_branch_id = excluded.parent_branch_id,
+            parent_message_id = excluded.parent_message_id,
+            origin_message_id = excluded.origin_message_id,
+            head_message_id = excluded.head_message_id,
+            label = excluded.label,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at,
+            version = conversation_branches.version + 1",
+        params![
+            branch.branch_id.0,
+            branch.session_id.0,
+            branch
+                .parent_branch_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            branch
+                .parent_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            branch
+                .origin_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            branch
+                .head_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            branch.label,
+            to_json_text(&branch.metadata_json)?,
+            branch.created_at,
+            branch.updated_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save conversation branch", error))?;
+    Ok(())
+}
+
+fn query_conversation_branches(
+    conn: &Connection,
+    query: &ConversationBranchQuery,
+) -> CoreResult<Vec<ConversationBranchRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let parent_branch_id = query
+        .parent_branch_id
+        .as_ref()
+        .map(|value| value.0.as_str());
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT branch_id
+             FROM conversation_branches
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR parent_branch_id = ?2)
+             ORDER BY created_at ASC, branch_id ASC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|error| persistence_error("prepare query conversation branches", error))?;
+    let branch_ids = stmt
+        .query_map(
+            params![session_id, parent_branch_id, limit, offset],
+            |row| Ok(ConversationBranchId::new(row.get::<_, String>(0)?)),
+        )
+        .map_err(|error| persistence_error("query conversation branches", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load conversation branch ids", error))?;
+    branch_ids
+        .iter()
+        .map(|branch_id| load_conversation_branch(conn, branch_id))
+        .collect()
+}
+
+fn load_conversation_branch(
+    conn: &Connection,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<ConversationBranchRecord> {
+    conn.query_row(
+        "SELECT session_id, parent_branch_id, parent_message_id, origin_message_id,
+                head_message_id, label, metadata_json, created_at, updated_at, version
+         FROM conversation_branches
+         WHERE branch_id = ?1",
+        params![branch_id.0],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, Option<String>>(1)?
+                    .map(ConversationBranchId::new),
+                row.get::<_, Option<String>>(2)?.map(MessageId::new),
+                row.get::<_, Option<String>>(3)?.map(MessageId::new),
+                row.get::<_, Option<String>>(4)?.map(MessageId::new),
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, i64>(9)? as u64,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load conversation branch", error))?
+    .map(
+        |(
+            session_id,
+            parent_branch_id,
+            parent_message_id,
+            origin_message_id,
+            head_message_id,
+            label,
+            metadata_json,
+            created_at,
+            updated_at,
+            version,
+        )| {
+            Ok(ConversationBranchRecord {
+                branch_id: branch_id.clone(),
+                session_id,
+                parent_branch_id,
+                parent_message_id,
+                origin_message_id,
+                head_message_id,
+                label,
+                metadata_json: parse_json_record(&metadata_json)?,
+                created_at,
+                updated_at,
+                version,
+            })
+        },
+    )
+    .transpose()?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("conversation branch {branch_id} not found"),
+        )
+    })
+}
+
+fn load_conversation_branch_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<ConversationBranchRecord> {
+    tx.query_row(
+        "SELECT session_id, parent_branch_id, parent_message_id, origin_message_id,
+                head_message_id, label, metadata_json, created_at, updated_at, version
+         FROM conversation_branches
+         WHERE branch_id = ?1",
+        params![branch_id.0],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, Option<String>>(1)?
+                    .map(ConversationBranchId::new),
+                row.get::<_, Option<String>>(2)?.map(MessageId::new),
+                row.get::<_, Option<String>>(3)?.map(MessageId::new),
+                row.get::<_, Option<String>>(4)?.map(MessageId::new),
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, i64>(9)? as u64,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load conversation branch in tx", error))?
+    .map(
+        |(
+            session_id,
+            parent_branch_id,
+            parent_message_id,
+            origin_message_id,
+            head_message_id,
+            label,
+            metadata_json,
+            created_at,
+            updated_at,
+            version,
+        )| {
+            Ok(ConversationBranchRecord {
+                branch_id: branch_id.clone(),
+                session_id,
+                parent_branch_id,
+                parent_message_id,
+                origin_message_id,
+                head_message_id,
+                label,
+                metadata_json: parse_json_record(&metadata_json)?,
+                created_at,
+                updated_at,
+                version,
+            })
+        },
+    )
+    .transpose()?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("conversation branch {branch_id} not found"),
+        )
+    })
+}
+
+fn current_active_branch_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+) -> CoreResult<Option<ConversationBranchId>> {
+    tx.query_row(
+        "SELECT active_branch_id FROM conversation_branch_state WHERE session_id = ?1",
+        params![session_id.0],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map_err(|error| persistence_error("load current active branch", error))
+    .map(|value| value.flatten().map(ConversationBranchId::new))
+}
+
+fn load_conversation_branch_state(
+    conn: &Connection,
+    session_id: &SessionId,
+    default_updated_at: &IsoTimestamp,
+) -> CoreResult<ConversationBranchStateRecord> {
+    Ok(conn
+        .query_row(
+            "SELECT active_branch_id, updated_at, version
+             FROM conversation_branch_state
+             WHERE session_id = ?1",
+            params![session_id.0],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?
+                        .map(ConversationBranchId::new),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u64,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load conversation branch state", error))?
+        .map(
+            |(active_branch_id, updated_at, version)| ConversationBranchStateRecord {
+                session_id: session_id.clone(),
+                active_branch_id,
+                updated_at,
+                version,
+            },
+        )
+        .unwrap_or_else(|| ConversationBranchStateRecord {
+            session_id: session_id.clone(),
+            active_branch_id: None,
+            updated_at: default_updated_at.clone(),
+            version: 0,
+        }))
+}
+
+fn load_conversation_branch_state_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    default_updated_at: &IsoTimestamp,
+) -> CoreResult<ConversationBranchStateRecord> {
+    Ok(tx
+        .query_row(
+            "SELECT active_branch_id, updated_at, version
+             FROM conversation_branch_state
+             WHERE session_id = ?1",
+            params![session_id.0],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?
+                        .map(ConversationBranchId::new),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u64,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load conversation branch state", error))?
+        .map(
+            |(active_branch_id, updated_at, version)| ConversationBranchStateRecord {
+                session_id: session_id.clone(),
+                active_branch_id,
+                updated_at,
+                version,
+            },
+        )
+        .unwrap_or_else(|| ConversationBranchStateRecord {
+            session_id: session_id.clone(),
+            active_branch_id: None,
+            updated_at: default_updated_at.clone(),
+            version: 0,
+        }))
+}
+
+fn current_branch_head_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<Option<MessageId>> {
+    tx.query_row(
+        "SELECT head_message_id FROM conversation_branches WHERE branch_id = ?1",
+        params![branch_id.0],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map_err(|error| persistence_error("load current branch head", error))?
+    .map(|value| value.map(MessageId::new))
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("conversation branch {branch_id} not found"),
+        )
+    })
+}
+
+fn ensure_branch_belongs_to_session_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<()> {
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM conversation_branches
+                WHERE session_id = ?1 AND branch_id = ?2
+             )",
+            params![session_id.0, branch_id.0],
+            |row| row.get(0),
+        )
+        .map_err(|error| persistence_error("check branch session ownership", error))?;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("conversation branch {branch_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn ensure_message_exists_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    message_id: &MessageId,
+) -> CoreResult<()> {
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?1)",
+            params![message_id.0],
+            |row| row.get(0),
+        )
+        .map_err(|error| persistence_error("check durable message existence", error))?;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message {message_id} not found"),
+        ))
+    }
+}
+
+fn save_conversation_snapshot_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot: &ConversationSnapshotWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO conversation_snapshots (
+            snapshot_id,
+            session_id,
+            branch_id,
+            message_id,
+            cursor,
+            label,
+            summary,
+            source,
+            metadata_json,
+            created_at,
+            updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(snapshot_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            branch_id = excluded.branch_id,
+            message_id = excluded.message_id,
+            cursor = excluded.cursor,
+            label = excluded.label,
+            summary = excluded.summary,
+            source = excluded.source,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at",
+        params![
+            snapshot.snapshot_id.0,
+            snapshot.session_id.0,
+            snapshot.branch_id.as_ref().map(|value| value.0.as_str()),
+            snapshot.message_id.as_ref().map(|value| value.0.as_str()),
+            snapshot.cursor,
+            snapshot.label,
+            snapshot.summary,
+            snapshot.source.as_str(),
+            to_json_text(&snapshot.metadata_json)?,
+            snapshot.created_at,
+            snapshot.updated_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save conversation snapshot", error))?;
+    Ok(())
+}
+
+fn query_conversation_snapshots(
+    conn: &Connection,
+    query: &ConversationSnapshotQuery,
+) -> CoreResult<Vec<ConversationSnapshotRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let branch_id = query.branch_id.as_ref().map(|value| value.0.as_str());
+    let message_id = query.message_id.as_ref().map(|value| value.0.as_str());
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT snapshot_id
+             FROM conversation_snapshots
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR branch_id = ?2)
+               AND (?3 IS NULL OR message_id = ?3)
+             ORDER BY created_at ASC, snapshot_id ASC
+             LIMIT ?4 OFFSET ?5",
+        )
+        .map_err(|error| persistence_error("prepare query conversation snapshots", error))?;
+    let snapshot_ids = stmt
+        .query_map(
+            params![session_id, branch_id, message_id, limit, offset],
+            |row| Ok(ConversationSnapshotId::new(row.get::<_, String>(0)?)),
+        )
+        .map_err(|error| persistence_error("query conversation snapshots", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load conversation snapshot ids", error))?;
+    snapshot_ids
+        .iter()
+        .map(|snapshot_id| load_conversation_snapshot(conn, snapshot_id))
+        .collect()
+}
+
+fn load_conversation_snapshot(
+    conn: &Connection,
+    snapshot_id: &ConversationSnapshotId,
+) -> CoreResult<ConversationSnapshotRecord> {
+    conn.query_row(
+        "SELECT session_id, branch_id, message_id, cursor, label, summary,
+                source, metadata_json, created_at, updated_at
+         FROM conversation_snapshots
+         WHERE snapshot_id = ?1",
+        params![snapshot_id.0],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, Option<String>>(1)?
+                    .map(ConversationBranchId::new),
+                row.get::<_, Option<String>>(2)?.map(MessageId::new),
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load conversation snapshot", error))?
+    .map(
+        |(
+            session_id,
+            branch_id,
+            message_id,
+            cursor,
+            label,
+            summary,
+            source,
+            metadata_json,
+            created_at,
+            updated_at,
+        )| {
+            Ok(ConversationSnapshotRecord {
+                snapshot_id: snapshot_id.clone(),
+                session_id,
+                branch_id,
+                message_id,
+                cursor,
+                label,
+                summary,
+                source: ConversationSnapshotSource::parse(&source)?,
+                metadata_json: parse_json_record(&metadata_json)?,
+                created_at,
+                updated_at,
+            })
+        },
+    )
+    .transpose()?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("conversation snapshot {snapshot_id} not found"),
+        )
+    })
+}
+
+fn load_conversation_snapshot_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot_id: &ConversationSnapshotId,
+) -> CoreResult<ConversationSnapshotRecord> {
+    tx.query_row(
+        "SELECT session_id, branch_id, message_id, cursor, label, summary,
+                source, metadata_json, created_at, updated_at
+         FROM conversation_snapshots
+         WHERE snapshot_id = ?1",
+        params![snapshot_id.0],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, Option<String>>(1)?
+                    .map(ConversationBranchId::new),
+                row.get::<_, Option<String>>(2)?.map(MessageId::new),
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load conversation snapshot in tx", error))?
+    .map(
+        |(
+            session_id,
+            branch_id,
+            message_id,
+            cursor,
+            label,
+            summary,
+            source,
+            metadata_json,
+            created_at,
+            updated_at,
+        )| {
+            Ok(ConversationSnapshotRecord {
+                snapshot_id: snapshot_id.clone(),
+                session_id,
+                branch_id,
+                message_id,
+                cursor,
+                label,
+                summary,
+                source: ConversationSnapshotSource::parse(&source)?,
+                metadata_json: parse_json_record(&metadata_json)?,
+                created_at,
+                updated_at,
+            })
+        },
+    )
+    .transpose()?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("conversation snapshot {snapshot_id} not found"),
+        )
+    })
+}
+
+fn resolve_conversation_jump(
+    conn: &Connection,
+    request: &ConversationJumpRequest,
+) -> CoreResult<ConversationJumpResult> {
+    match &request.target {
+        ConversationJumpTarget::Message { message_id } => {
+            let message = load_durable_message(conn, message_id)?;
+            if message.session_id != request.session_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "message {message_id} not found for session {}",
+                        request.session_id
+                    ),
+                ));
+            }
+            Ok(ConversationJumpResult {
+                session_id: request.session_id.clone(),
+                target: request.target.clone(),
+                branch_id: message.branch_id,
+                message_id: Some(message_id.clone()),
+                cursor: None,
+                snapshot_id: None,
+            })
+        }
+        ConversationJumpTarget::Branch { branch_id } => {
+            let branch = load_conversation_branch(conn, branch_id)?;
+            if branch.session_id != request.session_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "branch {branch_id} not found for session {}",
+                        request.session_id
+                    ),
+                ));
+            }
+            Ok(ConversationJumpResult {
+                session_id: request.session_id.clone(),
+                target: request.target.clone(),
+                branch_id: Some(branch.branch_id),
+                message_id: branch
+                    .head_message_id
+                    .or(branch.origin_message_id)
+                    .or(branch.parent_message_id),
+                cursor: None,
+                snapshot_id: None,
+            })
+        }
+        ConversationJumpTarget::Snapshot { snapshot_id } => {
+            let snapshot = load_conversation_snapshot(conn, snapshot_id)?;
+            if snapshot.session_id != request.session_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "snapshot {snapshot_id} not found for session {}",
+                        request.session_id
+                    ),
+                ));
+            }
+            Ok(ConversationJumpResult {
+                session_id: request.session_id.clone(),
+                target: request.target.clone(),
+                branch_id: snapshot.branch_id,
+                message_id: snapshot.message_id,
+                cursor: snapshot.cursor,
+                snapshot_id: Some(snapshot.snapshot_id),
+            })
+        }
+        ConversationJumpTarget::Cursor { cursor } => Ok(ConversationJumpResult {
+            session_id: request.session_id.clone(),
+            target: request.target.clone(),
+            branch_id: None,
+            message_id: None,
+            cursor: Some(cursor.clone()),
+            snapshot_id: None,
+        }),
+    }
 }
 
 fn load_message_slot(
@@ -5483,21 +6635,37 @@ fn load_durable_message(
     conn: &Connection,
     message_id: &MessageId,
 ) -> CoreResult<DurableMessageRecord> {
-    let (session_id, author_id, author_role, status, body, metadata_json, created_at) = conn
+    let (
+        session_id,
+        branch_id,
+        parent_message_id,
+        previous_message_id,
+        author_id,
+        author_role,
+        status,
+        body,
+        metadata_json,
+        created_at,
+    ) = conn
         .query_row(
-            "SELECT session_id, author_id, author_role, status, body, metadata_json, created_at
+            "SELECT session_id, branch_id, parent_message_id, previous_message_id,
+                    author_id, author_role, status, body, metadata_json, created_at
              FROM messages
              WHERE message_id = ?1",
             params![message_id.0],
             |row| {
                 Ok((
                     SessionId::new(row.get::<_, String>(0)?),
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(1)?
+                        .map(ConversationBranchId::new),
+                    row.get::<_, Option<String>>(2)?.map(MessageId::new),
+                    row.get::<_, Option<String>>(3)?.map(MessageId::new),
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             },
         )
@@ -5512,6 +6680,9 @@ fn load_durable_message(
     Ok(DurableMessageRecord {
         message_id: message_id.clone(),
         session_id,
+        branch_id,
+        parent_message_id,
+        previous_message_id,
         author_id,
         author_role,
         status: DurableMessageStatus::parse(&status)?,
@@ -5526,21 +6697,37 @@ fn load_durable_message_in_tx(
     tx: &rusqlite::Transaction<'_>,
     message_id: &MessageId,
 ) -> CoreResult<DurableMessageRecord> {
-    let (session_id, author_id, author_role, status, body, metadata_json, created_at) = tx
+    let (
+        session_id,
+        branch_id,
+        parent_message_id,
+        previous_message_id,
+        author_id,
+        author_role,
+        status,
+        body,
+        metadata_json,
+        created_at,
+    ) = tx
         .query_row(
-            "SELECT session_id, author_id, author_role, status, body, metadata_json, created_at
+            "SELECT session_id, branch_id, parent_message_id, previous_message_id,
+                    author_id, author_role, status, body, metadata_json, created_at
              FROM messages
              WHERE message_id = ?1",
             params![message_id.0],
             |row| {
                 Ok((
                     SessionId::new(row.get::<_, String>(0)?),
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(1)?
+                        .map(ConversationBranchId::new),
+                    row.get::<_, Option<String>>(2)?.map(MessageId::new),
+                    row.get::<_, Option<String>>(3)?.map(MessageId::new),
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             },
         )
@@ -5555,6 +6742,9 @@ fn load_durable_message_in_tx(
     Ok(DurableMessageRecord {
         message_id: message_id.clone(),
         session_id,
+        branch_id,
+        parent_message_id,
+        previous_message_id,
         author_id,
         author_role,
         status: DurableMessageStatus::parse(&status)?,
@@ -8137,6 +9327,33 @@ fn add_missing_column(
     Ok(())
 }
 
+fn add_missing_column_tx(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> CoreResult<()> {
+    let mut stmt = tx
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| persistence_error("prepare table info in tx", error))?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| persistence_error("query table info in tx", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("read table info in tx", error))?;
+
+    if columns.iter().any(|existing| existing == column) {
+        return Ok(());
+    }
+
+    tx.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )
+    .map_err(|error| persistence_error("add missing sqlite column in tx", error))?;
+    Ok(())
+}
+
 fn to_json_text<T: Serialize>(value: &T) -> CoreResult<String> {
     serde_json::to_string(value)
         .map_err(|error| persistence_error("serialize coordination record", error))
@@ -10077,6 +11294,177 @@ mod tests {
     }
 
     #[test]
+    fn conversation_tree_branches_snapshots_and_jump_targets_persist() {
+        let db_path = temp_db_path("conversation-tree");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let now = "2026-06-25T04:00:00Z".to_string();
+        let session_id = SessionId::new("session-1");
+        let root_branch = ConversationBranchId::new("branch-root");
+        let child_branch = ConversationBranchId::new("branch-child");
+        let slot_id = MessageSlotId::new("slot-tree");
+        let primary_variant_id = MessageVariantId::new("variant-tree-primary");
+        let root_message_id = MessageId::new("message-root");
+        let child_message_id = MessageId::new("message-child");
+
+        store
+            .save_conversation_branch(&ConversationBranchWrite {
+                branch_id: root_branch.clone(),
+                session_id: session_id.clone(),
+                parent_branch_id: None,
+                parent_message_id: None,
+                origin_message_id: None,
+                head_message_id: Some(root_message_id.clone()),
+                label: Some("Root".to_string()),
+                metadata_json: json!({"kind": "default"}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        store
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: session_id.clone(),
+                primary_variant_id: primary_variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        let mut variant = variant_write(
+            &slot_id,
+            &primary_variant_id,
+            MessageVariantSource::Primary,
+            0,
+            &root_message_id.0,
+            "root body",
+        );
+        variant.message.branch_id = Some(root_branch.clone());
+        store.save_message_variant(&variant).unwrap();
+
+        store
+            .save_conversation_branch(&ConversationBranchWrite {
+                branch_id: child_branch.clone(),
+                session_id: session_id.clone(),
+                parent_branch_id: Some(root_branch.clone()),
+                parent_message_id: Some(root_message_id.clone()),
+                origin_message_id: Some(root_message_id.clone()),
+                head_message_id: Some(child_message_id.clone()),
+                label: Some("Alternative".to_string()),
+                metadata_json: json!({"reason": "alternate"}),
+                created_at: "2026-06-25T04:01:00Z".to_string(),
+                updated_at: "2026-06-25T04:01:00Z".to_string(),
+            })
+            .unwrap();
+
+        let branches = store
+            .query_conversation_branches(&ConversationBranchQuery {
+                session_id: Some(session_id.clone()),
+                parent_branch_id: None,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(branches.len(), 2);
+        assert_eq!(branches[1].parent_branch_id, Some(root_branch.clone()));
+
+        let selected = store
+            .select_active_conversation_branch(&SelectActiveBranchRequest {
+                session_id: session_id.clone(),
+                active_branch_id: Some(child_branch.clone()),
+                expected: ActiveBranchExpectation::None,
+                updated_at: "2026-06-25T04:02:00Z".to_string(),
+            })
+            .unwrap();
+        assert!(selected.conflict.is_none());
+        assert_eq!(selected.state.active_branch_id, Some(child_branch.clone()));
+
+        let conflict = store
+            .select_active_conversation_branch(&SelectActiveBranchRequest {
+                session_id: session_id.clone(),
+                active_branch_id: Some(root_branch.clone()),
+                expected: ActiveBranchExpectation::None,
+                updated_at: "2026-06-25T04:03:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            conflict.conflict.unwrap().actual,
+            Some(child_branch.clone())
+        );
+
+        let head_conflict = store
+            .update_conversation_branch_head(&UpdateBranchHeadRequest {
+                branch_id: child_branch.clone(),
+                head_message_id: Some(root_message_id.clone()),
+                expected: BranchHeadExpectation::None,
+                updated_at: "2026-06-25T04:04:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            head_conflict.conflict.unwrap().actual,
+            Some(child_message_id.clone())
+        );
+
+        let snapshot = store
+            .save_conversation_snapshot(&ConversationSnapshotWrite {
+                snapshot_id: ConversationSnapshotId::new("snapshot-1"),
+                session_id: session_id.clone(),
+                branch_id: Some(child_branch.clone()),
+                message_id: Some(root_message_id.clone()),
+                cursor: Some("session-1:42".to_string()),
+                label: Some("Before alternate".to_string()),
+                summary: Some("Checkpoint summary".to_string()),
+                source: ConversationSnapshotSource::User,
+                metadata_json: json!({"from": "test"}),
+                created_at: "2026-06-25T04:05:00Z".to_string(),
+                updated_at: "2026-06-25T04:05:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(snapshot.branch_id, Some(child_branch.clone()));
+
+        let snapshots = store
+            .query_conversation_snapshots(&ConversationSnapshotQuery {
+                session_id: Some(session_id.clone()),
+                branch_id: None,
+                message_id: Some(root_message_id.clone()),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(snapshots.len(), 1);
+
+        let branch_jump = store
+            .resolve_conversation_jump(&ConversationJumpRequest {
+                session_id: session_id.clone(),
+                target: ConversationJumpTarget::Branch {
+                    branch_id: child_branch.clone(),
+                },
+            })
+            .unwrap();
+        assert_eq!(branch_jump.message_id, Some(child_message_id.clone()));
+
+        let snapshot_jump = store
+            .resolve_conversation_jump(&ConversationJumpRequest {
+                session_id: session_id.clone(),
+                target: ConversationJumpTarget::Snapshot {
+                    snapshot_id: ConversationSnapshotId::new("snapshot-1"),
+                },
+            })
+            .unwrap();
+        assert_eq!(snapshot_jump.cursor, Some("session-1:42".to_string()));
+
+        let message_jump = store
+            .resolve_conversation_jump(&ConversationJumpRequest {
+                session_id,
+                target: ConversationJumpTarget::Message {
+                    message_id: root_message_id,
+                },
+            })
+            .unwrap();
+        assert_eq!(message_jump.branch_id, Some(root_branch));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
     fn maintenance_guardrails_cover_queue_retention_size_and_hot_indexes() {
         let db_path = temp_db_path("maintenance-guardrails");
         let store = CoordinationStore::open_file(&db_path).unwrap();
@@ -10434,6 +11822,9 @@ mod tests {
             message: DurableMessageWrite {
                 message_id: MessageId::new(message_id),
                 session_id: SessionId::new("session-1"),
+                branch_id: None,
+                parent_message_id: None,
+                previous_message_id: None,
                 author_id: "agent-alpha".to_string(),
                 author_role: "assistant".to_string(),
                 status: DurableMessageStatus::Completed,

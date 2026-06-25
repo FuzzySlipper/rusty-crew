@@ -159,6 +159,14 @@ interface NativeBridgeBinding {
   selectActiveMessageVariantJson(inputJson: string): string;
   deleteMessageVariantJson(inputJson: string): string;
   reorderMessageVariantsJson(inputJson: string): string;
+  saveConversationBranchJson(inputJson: string): string;
+  queryConversationBranchesJson(inputJson: string): string;
+  getConversationBranchStateJson(inputJson: string): string;
+  selectActiveConversationBranchJson(inputJson: string): string;
+  updateConversationBranchHeadJson(inputJson: string): string;
+  saveConversationSnapshotJson(inputJson: string): string;
+  queryConversationSnapshotsJson(inputJson: string): string;
+  resolveConversationJumpJson(inputJson: string): string;
   registerPlatformAdapter(registration: {
     adapterId: string;
     kind: string;
@@ -1022,6 +1030,14 @@ export interface NativeBridgeModule {
   selectActiveMessageVariant(input: unknown): Promise<unknown>;
   deleteMessageVariant(input: unknown): Promise<unknown>;
   reorderMessageVariants(input: unknown): Promise<unknown[]>;
+  saveConversationBranch(input: unknown): Promise<unknown>;
+  queryConversationBranches(query: unknown): Promise<unknown[]>;
+  getConversationBranchState(input: unknown): Promise<unknown>;
+  selectActiveConversationBranch(input: unknown): Promise<unknown>;
+  updateConversationBranchHead(input: unknown): Promise<unknown>;
+  saveConversationSnapshot(input: unknown): Promise<unknown>;
+  queryConversationSnapshots(query: unknown): Promise<unknown[]>;
+  resolveConversationJump(input: unknown): Promise<unknown>;
   providerStateDiagnostics(
     limit?: number,
   ): Promise<NativeProviderStateDiagnostic[]>;
@@ -1188,6 +1204,18 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     selectActiveMessageVariant: unavailable("select_active_message_variant"),
     deleteMessageVariant: unavailable("delete_message_variant"),
     reorderMessageVariants: unavailable("reorder_message_variants"),
+    saveConversationBranch: unavailable("save_conversation_branch"),
+    queryConversationBranches: unavailable("query_conversation_branches"),
+    getConversationBranchState: unavailable("get_conversation_branch_state"),
+    selectActiveConversationBranch: unavailable(
+      "select_active_conversation_branch",
+    ),
+    updateConversationBranchHead: unavailable(
+      "update_conversation_branch_head",
+    ),
+    saveConversationSnapshot: unavailable("save_conversation_snapshot"),
+    queryConversationSnapshots: unavailable("query_conversation_snapshots"),
+    resolveConversationJump: unavailable("resolve_conversation_jump"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     runOpenAiResponsesBrain: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
@@ -1875,6 +1903,38 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.reorderMessageVariantsJson(JSON.stringify(input)),
       ) as unknown[],
+    saveConversationBranch: async (input) =>
+      JSON.parse(
+        binding.saveConversationBranchJson(JSON.stringify(input)),
+      ) as unknown,
+    queryConversationBranches: async (query) =>
+      JSON.parse(
+        binding.queryConversationBranchesJson(JSON.stringify(query)),
+      ) as unknown[],
+    getConversationBranchState: async (input) =>
+      JSON.parse(
+        binding.getConversationBranchStateJson(JSON.stringify(input)),
+      ) as unknown,
+    selectActiveConversationBranch: async (input) =>
+      JSON.parse(
+        binding.selectActiveConversationBranchJson(JSON.stringify(input)),
+      ) as unknown,
+    updateConversationBranchHead: async (input) =>
+      JSON.parse(
+        binding.updateConversationBranchHeadJson(JSON.stringify(input)),
+      ) as unknown,
+    saveConversationSnapshot: async (input) =>
+      JSON.parse(
+        binding.saveConversationSnapshotJson(JSON.stringify(input)),
+      ) as unknown,
+    queryConversationSnapshots: async (query) =>
+      JSON.parse(
+        binding.queryConversationSnapshotsJson(JSON.stringify(query)),
+      ) as unknown[],
+    resolveConversationJump: async (input) =>
+      JSON.parse(
+        binding.resolveConversationJumpJson(JSON.stringify(input)),
+      ) as unknown,
     providerStateDiagnostics: async (limit = 100) => {
       const stored = binding
         .providerStateDiagnostics(limit)

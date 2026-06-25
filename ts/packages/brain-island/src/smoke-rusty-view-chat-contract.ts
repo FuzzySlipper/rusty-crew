@@ -19,6 +19,12 @@ const requiredPaths = [
   "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/{variant_id}",
   "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/reorder",
   "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant",
+  "/v1/chat/sessions/{session_id}/tree",
+  "/v1/chat/sessions/{session_id}/jump",
+  "/v1/chat/sessions/{session_id}/branches",
+  "/v1/chat/sessions/{session_id}/branches/active",
+  "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
+  "/v1/chat/sessions/{session_id}/snapshots",
   "/v1/chat/commands",
   "/v1/chat/sessions/{session_id}/commands",
 ];
@@ -62,6 +68,10 @@ for (const kind of [
   "message_variant_deleted",
   "message_variants_reordered",
   "message_active_variant_selected",
+  "conversation_branch_created",
+  "conversation_active_branch_selected",
+  "conversation_branch_head_updated",
+  "conversation_snapshot_created",
   "unknown",
 ]) {
   assert.ok(eventKinds.includes(kind), `missing event kind ${kind}`);
@@ -83,6 +93,14 @@ assert.deepEqual(schema("MessageSlotRecord").required, [
 ]);
 assert.ok(schema("MessageVariantRecord").properties?.message);
 assert.ok(schema("ActiveVariantExpectation").oneOf?.length);
+assert.ok(schema("DurableMessageRecord").properties?.branch_id);
+assert.ok(schema("DurableMessageRecord").properties?.parent_message_id);
+assert.ok(schema("ConversationTreeProjection").properties?.branches);
+assert.ok(schema("ConversationBranchRecord").properties?.head_message_id);
+assert.ok(schema("ConversationSnapshotRecord").properties?.cursor);
+assert.ok(schema("ConversationJumpResult").properties?.target);
+assert.ok(schema("ActiveBranchExpectation").oneOf?.length);
+assert.ok(schema("BranchHeadExpectation").oneOf?.length);
 
 const commandDescriptor = schema("ChatCommandDescriptor");
 assert.ok(commandDescriptor.required?.includes("read_only"));

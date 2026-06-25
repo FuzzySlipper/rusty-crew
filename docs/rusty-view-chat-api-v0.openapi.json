@@ -449,6 +449,247 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/tree": {
+      "get": {
+        "operationId": "getConversationTree",
+        "summary": "Read generic conversation branch/snapshot projection for a session",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" },
+          {
+            "name": "exclude_snapshots",
+            "in": "query",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation tree projection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ConversationTreeProjection"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/jump": {
+      "get": {
+        "operationId": "resolveConversationJump",
+        "summary": "Resolve a message, branch, snapshot, or cursor jump target",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "target_type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["message", "branch", "snapshot", "cursor"]
+            }
+          },
+          { "name": "message_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "branch_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "snapshot_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved jump target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ConversationJumpResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/branches": {
+      "post": {
+        "operationId": "createConversationBranch",
+        "summary": "Create or update a generic conversation branch",
+        "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationBranchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Branch created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ConversationBranchMutationResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/branches/active": {
+      "post": {
+        "operationId": "selectActiveConversationBranch",
+        "summary": "Select the active conversation branch with CAS conflict reporting",
+        "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectActiveConversationBranchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Active branch selected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/SelectActiveConversationBranchResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CAS expectation did not match current active branch"
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/branches/{branch_id}/head": {
+      "post": {
+        "operationId": "updateConversationBranchHead",
+        "summary": "Update a branch head message with CAS conflict reporting",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/BranchId" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConversationBranchHeadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Branch head updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/UpdateConversationBranchHeadResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CAS expectation did not match current branch head"
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/snapshots": {
+      "post": {
+        "operationId": "createConversationSnapshot",
+        "summary": "Create or update a generic conversation snapshot",
+        "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationSnapshotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Snapshot created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ConversationSnapshotMutationResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/commands": {
       "get": {
         "operationId": "listChatCommands",
@@ -528,6 +769,12 @@
       },
       "VariantId": {
         "name": "variant_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "minLength": 1 }
+      },
+      "BranchId": {
+        "name": "branch_id",
         "in": "path",
         "required": true,
         "schema": { "type": "string", "minLength": 1 }
@@ -690,6 +937,10 @@
           "message_variant_deleted",
           "message_variants_reordered",
           "message_active_variant_selected",
+          "conversation_branch_created",
+          "conversation_active_branch_selected",
+          "conversation_branch_head_updated",
+          "conversation_snapshot_created",
           "stream_error",
           "unknown"
         ]
@@ -704,6 +955,7 @@
           { "$ref": "#/components/schemas/CommandPayload" },
           { "$ref": "#/components/schemas/MessageSlotPayload" },
           { "$ref": "#/components/schemas/MessageVariantPayload" },
+          { "$ref": "#/components/schemas/ConversationTreePayload" },
           { "$ref": "#/components/schemas/StreamErrorPayload" },
           { "$ref": "#/components/schemas/UnknownEventPayload" }
         ]
@@ -853,6 +1105,9 @@
         "properties": {
           "message_id": { "type": "string" },
           "session_id": { "type": "string" },
+          "branch_id": { "type": ["string", "null"] },
+          "parent_message_id": { "type": ["string", "null"] },
+          "previous_message_id": { "type": ["string", "null"] },
           "author_id": { "type": "string" },
           "author_role": { "type": "string", "enum": ["user", "assistant", "system", "tool"] },
           "status": { "type": "string", "enum": ["created", "streaming", "completed", "failed", "deleted"] },
@@ -1099,6 +1354,289 @@
             "items": { "type": "string" }
           },
           "slot": { "$ref": "#/components/schemas/MessageSlotRecord" }
+        },
+        "additionalProperties": true
+      },
+      "ConversationBranchRecord": {
+        "type": "object",
+        "required": [
+          "branch_id",
+          "session_id",
+          "metadata_json",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "branch_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "parent_branch_id": { "type": ["string", "null"] },
+          "parent_message_id": { "type": ["string", "null"] },
+          "origin_message_id": { "type": ["string", "null"] },
+          "head_message_id": { "type": ["string", "null"] },
+          "label": { "type": ["string", "null"] },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "version": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ConversationBranchStateRecord": {
+        "type": "object",
+        "required": ["session_id", "updated_at", "version"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "active_branch_id": { "type": ["string", "null"] },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "version": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ConversationSnapshotRecord": {
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "session_id",
+          "source",
+          "metadata_json",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "snapshot_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "branch_id": { "type": ["string", "null"] },
+          "message_id": { "type": ["string", "null"] },
+          "cursor": { "type": ["string", "null"] },
+          "label": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "source": { "type": "string", "enum": ["user", "system", "import"] },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "ConversationTreeProjection": {
+        "type": "object",
+        "required": ["branches", "snapshots", "branch_state"],
+        "properties": {
+          "branches": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ConversationBranchRecord" }
+          },
+          "snapshots": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ConversationSnapshotRecord" }
+          },
+          "branch_state": {
+            "$ref": "#/components/schemas/ConversationBranchStateRecord"
+          },
+          "active_branch_id": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "CreateConversationBranchRequest": {
+        "type": "object",
+        "properties": {
+          "branch_id": { "type": "string" },
+          "parent_branch_id": { "type": ["string", "null"] },
+          "parent_message_id": { "type": ["string", "null"] },
+          "origin_message_id": { "type": ["string", "null"] },
+          "head_message_id": { "type": ["string", "null"] },
+          "label": { "type": ["string", "null"] },
+          "metadata_json": {}
+        },
+        "additionalProperties": false
+      },
+      "ConversationBranchMutationResult": {
+        "type": "object",
+        "required": ["status", "branch", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["created"] },
+          "branch": { "$ref": "#/components/schemas/ConversationBranchRecord" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ActiveBranchExpectation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": { "type": { "const": "any" } },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": { "type": { "const": "none" } },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type", "branch_id"],
+            "properties": {
+              "type": { "const": "branch" },
+              "branch_id": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SelectActiveConversationBranchRequest": {
+        "type": "object",
+        "required": ["expected"],
+        "properties": {
+          "active_branch_id": { "type": ["string", "null"] },
+          "expected": { "$ref": "#/components/schemas/ActiveBranchExpectation" }
+        },
+        "additionalProperties": false
+      },
+      "SelectActiveConversationBranchResult": {
+        "type": "object",
+        "required": ["status", "state", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["selected", "conflict"] },
+          "state": { "$ref": "#/components/schemas/ConversationBranchStateRecord" },
+          "conflict": { "$ref": "#/components/schemas/ActiveVariantConflict" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "BranchHeadExpectation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": { "type": { "const": "any" } },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": { "type": { "const": "none" } },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type", "message_id"],
+            "properties": {
+              "type": { "const": "message" },
+              "message_id": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "UpdateConversationBranchHeadRequest": {
+        "type": "object",
+        "required": ["expected"],
+        "properties": {
+          "head_message_id": { "type": ["string", "null"] },
+          "expected": { "$ref": "#/components/schemas/BranchHeadExpectation" }
+        },
+        "additionalProperties": false
+      },
+      "UpdateConversationBranchHeadResult": {
+        "type": "object",
+        "required": ["status", "branch", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["updated", "conflict"] },
+          "branch": { "$ref": "#/components/schemas/ConversationBranchRecord" },
+          "conflict": { "$ref": "#/components/schemas/ActiveVariantConflict" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "CreateConversationSnapshotRequest": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": { "type": "string" },
+          "branch_id": { "type": ["string", "null"] },
+          "message_id": { "type": ["string", "null"] },
+          "cursor": { "type": ["string", "null"] },
+          "label": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "source": { "type": "string", "enum": ["user", "system", "import"] },
+          "metadata_json": {}
+        },
+        "additionalProperties": false
+      },
+      "ConversationSnapshotMutationResult": {
+        "type": "object",
+        "required": ["status", "snapshot", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["created"] },
+          "snapshot": { "$ref": "#/components/schemas/ConversationSnapshotRecord" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ConversationJumpTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "message_id"],
+            "properties": {
+              "type": { "const": "message" },
+              "message_id": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type", "branch_id"],
+            "properties": {
+              "type": { "const": "branch" },
+              "branch_id": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type", "snapshot_id"],
+            "properties": {
+              "type": { "const": "snapshot" },
+              "snapshot_id": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type", "cursor"],
+            "properties": {
+              "type": { "const": "cursor" },
+              "cursor": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ConversationJumpResult": {
+        "type": "object",
+        "required": ["session_id", "target"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "target": { "$ref": "#/components/schemas/ConversationJumpTarget" },
+          "branch_id": { "type": ["string", "null"] },
+          "message_id": { "type": ["string", "null"] },
+          "cursor": { "type": ["string", "null"] },
+          "snapshot_id": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ConversationTreePayload": {
+        "type": "object",
+        "properties": {
+          "branch": { "$ref": "#/components/schemas/ConversationBranchRecord" },
+          "branch_id": { "type": "string" },
+          "head_message_id": { "type": ["string", "null"] },
+          "active_branch_id": { "type": ["string", "null"] },
+          "snapshot": { "$ref": "#/components/schemas/ConversationSnapshotRecord" },
+          "state": { "$ref": "#/components/schemas/ConversationBranchStateRecord" },
+          "conflict": { "$ref": "#/components/schemas/ActiveVariantConflict" }
         },
         "additionalProperties": true
       },

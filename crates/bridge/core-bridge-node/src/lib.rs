@@ -20,6 +20,9 @@ use rusty_crew_core_config::{
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
+    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
+    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
+    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
     MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
@@ -27,7 +30,9 @@ use rusty_crew_core_persistence::{
     RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
     RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
     ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, SelectActiveVariantRequest, SelectActiveVariantResult,
+    ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
+    SelectActiveVariantRequest, SelectActiveVariantResult, UpdateBranchHeadRequest,
+    UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     BodyState, BrainWakeProviderStateInput, MessageSlotId, MessageVariantId,
@@ -423,6 +428,64 @@ impl NativeBridge {
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         self.engine()?.query_message_variants(query)
+    }
+
+    pub fn save_conversation_branch(
+        &self,
+        branch: &ConversationBranchWrite,
+    ) -> CoreResult<ConversationBranchRecord> {
+        self.engine()?.save_conversation_branch(branch)
+    }
+
+    pub fn query_conversation_branches(
+        &self,
+        query: &ConversationBranchQuery,
+    ) -> CoreResult<Vec<ConversationBranchRecord>> {
+        self.engine()?.query_conversation_branches(query)
+    }
+
+    pub fn get_conversation_branch_state(
+        &self,
+        session_id: &SessionId,
+        default_updated_at: &rusty_crew_core_bridge_api::IsoTimestamp,
+    ) -> CoreResult<ConversationBranchStateRecord> {
+        self.engine()?
+            .get_conversation_branch_state(session_id, default_updated_at)
+    }
+
+    pub fn select_active_conversation_branch(
+        &self,
+        request: &SelectActiveBranchRequest,
+    ) -> CoreResult<SelectActiveBranchResult> {
+        self.engine()?.select_active_conversation_branch(request)
+    }
+
+    pub fn update_conversation_branch_head(
+        &self,
+        request: &UpdateBranchHeadRequest,
+    ) -> CoreResult<UpdateBranchHeadResult> {
+        self.engine()?.update_conversation_branch_head(request)
+    }
+
+    pub fn save_conversation_snapshot(
+        &self,
+        snapshot: &ConversationSnapshotWrite,
+    ) -> CoreResult<ConversationSnapshotRecord> {
+        self.engine()?.save_conversation_snapshot(snapshot)
+    }
+
+    pub fn query_conversation_snapshots(
+        &self,
+        query: &ConversationSnapshotQuery,
+    ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
+        self.engine()?.query_conversation_snapshots(query)
+    }
+
+    pub fn resolve_conversation_jump(
+        &self,
+        request: &ConversationJumpRequest,
+    ) -> CoreResult<ConversationJumpResult> {
+        self.engine()?.resolve_conversation_jump(request)
     }
 
     pub fn select_active_message_variant(
@@ -1377,6 +1440,12 @@ struct WireReorderMessageVariantsRequest {
     slot_id: MessageSlotId,
     ordered_variant_ids: Vec<MessageVariantId>,
     updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireGetConversationBranchStateRequest {
+    session_id: SessionId,
+    default_updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
 }
 
 #[napi_derive::napi(object)]
@@ -2347,6 +2416,103 @@ impl NativeBridgeBinding {
             .query_message_variants(&query)
             .map_err(to_napi_error)?;
         serialize_json(&records, "message variant records")
+    }
+
+    #[napi]
+    pub fn save_conversation_branch_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let branch =
+            parse_json::<ConversationBranchWrite>(&input_json, "conversation branch write")?;
+        let record = bridge
+            .save_conversation_branch(&branch)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "conversation branch record")
+    }
+
+    #[napi]
+    pub fn query_conversation_branches_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query =
+            parse_json::<ConversationBranchQuery>(&input_json, "conversation branch query")?;
+        let records = bridge
+            .query_conversation_branches(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "conversation branch records")
+    }
+
+    #[napi]
+    pub fn get_conversation_branch_state_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<WireGetConversationBranchStateRequest>(
+            &input_json,
+            "get conversation branch state request",
+        )?;
+        let state = bridge
+            .get_conversation_branch_state(&request.session_id, &request.default_updated_at)
+            .map_err(to_napi_error)?;
+        serialize_json(&state, "conversation branch state")
+    }
+
+    #[napi]
+    pub fn select_active_conversation_branch_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<SelectActiveBranchRequest>(
+            &input_json,
+            "select active conversation branch request",
+        )?;
+        let result = bridge
+            .select_active_conversation_branch(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "select active conversation branch result")
+    }
+
+    #[napi]
+    pub fn update_conversation_branch_head_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<UpdateBranchHeadRequest>(
+            &input_json,
+            "update conversation branch head request",
+        )?;
+        let result = bridge
+            .update_conversation_branch_head(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "update conversation branch head result")
+    }
+
+    #[napi]
+    pub fn save_conversation_snapshot_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let snapshot =
+            parse_json::<ConversationSnapshotWrite>(&input_json, "conversation snapshot write")?;
+        let record = bridge
+            .save_conversation_snapshot(&snapshot)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "conversation snapshot record")
+    }
+
+    #[napi]
+    pub fn query_conversation_snapshots_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query =
+            parse_json::<ConversationSnapshotQuery>(&input_json, "conversation snapshot query")?;
+        let records = bridge
+            .query_conversation_snapshots(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "conversation snapshot records")
+    }
+
+    #[napi]
+    pub fn resolve_conversation_jump_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request =
+            parse_json::<ConversationJumpRequest>(&input_json, "conversation jump request")?;
+        let result = bridge
+            .resolve_conversation_jump(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "conversation jump result")
     }
 
     #[napi]

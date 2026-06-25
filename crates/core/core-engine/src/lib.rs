@@ -6,6 +6,9 @@ use rusty_crew_core_body::{
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
+    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
+    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
+    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
     CoordinationStore, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
@@ -15,8 +18,9 @@ use rusty_crew_core_persistence::{
     RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
     RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, ScheduledJobQuery,
     ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
-    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveVariantRequest, SelectActiveVariantResult,
-    WorkerRunRecord, WorkerRunStatus,
+    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
+    SelectActiveVariantRequest, SelectActiveVariantResult, UpdateBranchHeadRequest,
+    UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
@@ -618,6 +622,64 @@ impl CoreEngine {
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         self.store.query_message_variants(query)
+    }
+
+    pub fn save_conversation_branch(
+        &self,
+        branch: &ConversationBranchWrite,
+    ) -> CoreResult<ConversationBranchRecord> {
+        self.store.save_conversation_branch(branch)
+    }
+
+    pub fn query_conversation_branches(
+        &self,
+        query: &ConversationBranchQuery,
+    ) -> CoreResult<Vec<ConversationBranchRecord>> {
+        self.store.query_conversation_branches(query)
+    }
+
+    pub fn get_conversation_branch_state(
+        &self,
+        session_id: &SessionId,
+        default_updated_at: &IsoTimestamp,
+    ) -> CoreResult<ConversationBranchStateRecord> {
+        self.store
+            .get_conversation_branch_state(session_id, default_updated_at)
+    }
+
+    pub fn select_active_conversation_branch(
+        &self,
+        request: &SelectActiveBranchRequest,
+    ) -> CoreResult<SelectActiveBranchResult> {
+        self.store.select_active_conversation_branch(request)
+    }
+
+    pub fn update_conversation_branch_head(
+        &self,
+        request: &UpdateBranchHeadRequest,
+    ) -> CoreResult<UpdateBranchHeadResult> {
+        self.store.update_conversation_branch_head(request)
+    }
+
+    pub fn save_conversation_snapshot(
+        &self,
+        snapshot: &ConversationSnapshotWrite,
+    ) -> CoreResult<ConversationSnapshotRecord> {
+        self.store.save_conversation_snapshot(snapshot)
+    }
+
+    pub fn query_conversation_snapshots(
+        &self,
+        query: &ConversationSnapshotQuery,
+    ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
+        self.store.query_conversation_snapshots(query)
+    }
+
+    pub fn resolve_conversation_jump(
+        &self,
+        request: &ConversationJumpRequest,
+    ) -> CoreResult<ConversationJumpResult> {
+        self.store.resolve_conversation_jump(request)
     }
 
     pub fn select_active_message_variant(

@@ -112,6 +112,38 @@ export class CoreBridge {
     return this.native.reorderMessageVariants(input);
   }
 
+  async saveConversationBranch(input: unknown): Promise<unknown> {
+    return this.native.saveConversationBranch(input);
+  }
+
+  async queryConversationBranches(query: unknown): Promise<unknown[]> {
+    return this.native.queryConversationBranches(query);
+  }
+
+  async getConversationBranchState(input: unknown): Promise<unknown> {
+    return this.native.getConversationBranchState(input);
+  }
+
+  async selectActiveConversationBranch(input: unknown): Promise<unknown> {
+    return this.native.selectActiveConversationBranch(input);
+  }
+
+  async updateConversationBranchHead(input: unknown): Promise<unknown> {
+    return this.native.updateConversationBranchHead(input);
+  }
+
+  async saveConversationSnapshot(input: unknown): Promise<unknown> {
+    return this.native.saveConversationSnapshot(input);
+  }
+
+  async queryConversationSnapshots(query: unknown): Promise<unknown[]> {
+    return this.native.queryConversationSnapshots(query);
+  }
+
+  async resolveConversationJump(input: unknown): Promise<unknown> {
+    return this.native.resolveConversationJump(input);
+  }
+
   async wakeBrain(request: BrainWakeRequest): Promise<BrainWakeAccepted> {
     return this.native.wakeBrain(request);
   }
