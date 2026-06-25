@@ -462,6 +462,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusty-crew-openai-responses-brain"
+version = "0.1.0"
+dependencies = [
+ "rusty-crew-core-bridge-api",
+ "rusty-crew-core-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"

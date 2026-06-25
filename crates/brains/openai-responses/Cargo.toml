@@ -1,0 +1,12 @@
+[package]
+name = "rusty-crew-openai-responses-brain"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusty-crew-core-bridge-api = { path = "../../bridge/core-bridge-api" }
+rusty-crew-core-protocol = { path = "../../core/core-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

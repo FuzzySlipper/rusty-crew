@@ -124,6 +124,10 @@ try {
       "local",
     );
     assert.equal(
+      applyResult.brainModulesByProfileId["responses-profile"]?.moduleId,
+      "openai-responses",
+    );
+    assert.equal(
       applyResult.brainDiagnosticsByProfileId["pi-profile"]?.toolAdapterStatus,
       "neutral_tools_adapted_to_pi",
     );
@@ -140,6 +144,16 @@ try {
       applyResult.brainDiagnosticsByProfileId["local-profile"]
         ?.toolAdapterStatus,
       "tools_not_used",
+    );
+    assert.equal(
+      applyResult.brainDiagnosticsByProfileId["responses-profile"]
+        ?.providerStateMode,
+      "optional",
+    );
+    assert.equal(
+      applyResult.brainDiagnosticsByProfileId["responses-profile"]
+        ?.toolAdapterStatus,
+      "native_neutral_tools",
     );
     assert.equal(denRouterOptions.length, 1);
 
@@ -180,6 +194,16 @@ try {
           "default-local-tools",
           "tools_not_used",
         ],
+        [
+          "responses-profile",
+          "responses-brain",
+          "openai-responses",
+          "replay",
+          "replay",
+          "optional",
+          "default-local-tools",
+          "native_neutral_tools",
+        ],
       ],
     );
 
@@ -196,13 +220,22 @@ try {
       "local-session" as SessionId,
       "wake-local-module",
     );
+    const responsesResult = await wakeSession(
+      applyResult.brainHandlesByProfileId["responses-profile"],
+      "responses-session" as SessionId,
+      "wake-responses-module",
+    );
 
     assert.deepEqual(piResult, { wakeId: "wake-pi-module", accepted: true });
     assert.deepEqual(localResult, {
       wakeId: "wake-local-module",
       accepted: true,
     });
-    assert.equal(await native.countRows("completion_packets"), 2);
+    assert.deepEqual(responsesResult, {
+      wakeId: "wake-responses-module",
+      accepted: true,
+    });
+    assert.equal(await native.countRows("completion_packets"), 3);
 
     const observedEvents = await native.drainSubscriptionEvents(
       brainEvents,
@@ -300,6 +333,10 @@ function writeRuntimeConfig(dataDir: string): void {
         brains: [
           { profileId: "pi-profile", implementationId: "pi-brain" },
           { profileId: "local-profile", implementationId: "local-brain" },
+          {
+            profileId: "responses-profile",
+            implementationId: "responses-brain",
+          },
         ],
         sessions: [
           {
@@ -312,6 +349,12 @@ function writeRuntimeConfig(dataDir: string): void {
             sessionId: "local-session",
             agentId: "local-agent",
             profileId: "local-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "responses-session",
+            agentId: "responses-agent",
+            profileId: "responses-profile",
             kind: "full",
           },
         ],
@@ -353,6 +396,25 @@ function writeRuntimeConfig(dataDir: string): void {
         },
         brain: {
           module: "local",
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(profilesDir, "responses-profile.json"),
+    JSON.stringify(
+      {
+        profileId: "responses-profile",
+        modelConfig: {
+          provider: "openai",
+          modelName: "gpt-5",
+          api: "responses",
+        },
+        brain: {
+          module: "openai-responses",
+          strategy: "replay",
         },
       },
       null,

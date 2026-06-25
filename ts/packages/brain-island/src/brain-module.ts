@@ -104,7 +104,7 @@ export function createBrainModuleRegistry(
 }
 
 export function defaultBrainModules(): BrainModule[] {
-  return [localBrainModule, piAgentCoreBrainModule];
+  return [localBrainModule, openAiResponsesBrainModule, piAgentCoreBrainModule];
 }
 
 export function resolveBrainModuleSelection(
@@ -246,6 +246,76 @@ export const localBrainModule: BrainModule = {
                 sessionId: wake.sessionId as SessionId,
                 status: "completed",
                 summary: "local service brain wake completed",
+              } satisfies CompletionPacket,
+            },
+          ],
+        };
+      },
+    };
+  },
+};
+
+export const openAiResponsesBrainModule: BrainModule = {
+  moduleId: "openai-responses",
+  displayName: "OpenAI Responses",
+  defaultStrategyId: "replay",
+  strategies: [
+    {
+      strategyId: "replay",
+      providerState: { mode: "optional" },
+      fingerprints: {
+        providerOptions: {
+          strategy: "replay",
+        },
+      },
+    },
+  ],
+  diagnostics: {
+    toolAdapterStatus: "native_neutral_tools",
+  },
+  async createBrain() {
+    return {
+      async wake(wake): Promise<{
+        events: BrainEventEnvelope[];
+        actions: BrainAction[];
+      }> {
+        return {
+          events: [
+            {
+              wakeId: wake.wakeId,
+              sessionId: wake.sessionId,
+              event: { type: "started" },
+            },
+            {
+              wakeId: wake.wakeId,
+              sessionId: wake.sessionId,
+              event: {
+                type: "provider_status",
+                level: "info",
+                message: "openai-responses Rust scaffold selected",
+              },
+            },
+            {
+              wakeId: wake.wakeId,
+              sessionId: wake.sessionId,
+              event: {
+                type: "text_delta",
+                text: "responses module scaffold wake completed",
+              },
+            },
+            {
+              wakeId: wake.wakeId,
+              sessionId: wake.sessionId,
+              event: { type: "finished" },
+            },
+          ],
+          actions: [
+            {
+              type: "deliver_completion",
+              packet: {
+                sessionId: wake.sessionId as SessionId,
+                status: "completed",
+                summary: "responses module scaffold wake completed",
               } satisfies CompletionPacket,
             },
           ],

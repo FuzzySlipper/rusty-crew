@@ -13,6 +13,7 @@ members = [
     "crates/bridge/core-bridge-mock",
     "crates/bridge/core-bridge-node",
     "crates/bridge/core-bridge-codegen",
+    "crates/brains/openai-responses",
 ]
 
 [workspace.package]
