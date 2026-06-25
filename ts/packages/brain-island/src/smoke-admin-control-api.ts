@@ -488,6 +488,14 @@ assert.equal(
   ).apply?.audited,
   true,
 );
+assert.equal(
+  observationSink.events.find(
+    (event) =>
+      event.event_type === "admin_command_completed" &&
+      event.payload.work_ref?.run_id === "command:apply_runtime_rebuild",
+  )?.payload.result_ref?.artifact_path,
+  "runtime://admin-control/apply_runtime_rebuild/admin-control",
+);
 
 const curatorStatus = await handleAdminControlRequest(
   {

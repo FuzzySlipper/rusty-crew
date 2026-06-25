@@ -3043,31 +3043,7 @@ function createServiceControlExecutor(
       },
       now: state.now,
     }),
-    reloadMcp: createReloadMcpControlExecutor({
-      resolveBinding: (sessionId) => mcpBindingForSession(state, sessionId),
-      manager: state.mcpManager,
-      discoveryClient: {
-        listTools: () => [],
-      },
-      discoveryClientForBinding: (binding) =>
-        createDefaultMcpDiscoveryClient(binding, state.config.mcp),
-      catalogId: (binding) => `mcp:${binding.toolProfileKey}`,
-      previousToolNames: () => [],
-      inventoryRequest: (binding) => ({
-        requestedToolsets: [`mcp:${binding.toolProfileKey}`],
-      }),
-      auditSink: {
-        writeReloadMcpLifecycleAudit(event) {
-          recordServiceEvent(state, {
-            source: "service-host",
-            eventType: `reload_mcp_${event.phase}`,
-            severity: event.phase === "degraded" ? "warning" : undefined,
-            summary: `Reload MCP lifecycle ${event.phase} for ${event.sessionId}.`,
-          });
-        },
-      },
-      now: state.now,
-    }),
+    reloadMcp: createServiceReloadMcpExecutor(state),
     cancelDelegation: async (command) => {
       const session = await state.bridge.cancelDelegatedSession(
         command.target.sessionId as never,
@@ -3305,6 +3281,113 @@ function mcpBindingForSession(
   );
 }
 
+function createServiceReloadMcpExecutor(
+  state: ServiceState,
+): NonNullable<AdminControlExecutor["reloadMcp"]> {
+  return createReloadMcpControlExecutor({
+    resolveBinding: (sessionId) => mcpBindingForSession(state, sessionId),
+    manager: state.mcpManager,
+    discoveryClient: {
+      listTools: () => [],
+    },
+    discoveryClientForBinding: (binding) =>
+      createDefaultMcpDiscoveryClient(binding, state.config.mcp),
+    catalogId: (binding) => `mcp:${binding.toolProfileKey}`,
+    previousToolNames: () => [],
+    inventoryRequest: (binding) => ({
+      requestedToolsets: [`mcp:${binding.toolProfileKey}`],
+    }),
+    auditSink: {
+      writeReloadMcpLifecycleAudit(event) {
+        recordServiceEvent(state, {
+          source: "service-host",
+          eventType: `reload_mcp_${event.phase}`,
+          severity: event.phase === "degraded" ? "warning" : undefined,
+          summary: `Reload MCP lifecycle ${event.phase} for ${event.sessionId}.`,
+        });
+      },
+    },
+    now: state.now,
+  });
+}
+
+async function refreshMcpBindingsAfterRuntimeRebuild(
+  state: ServiceState,
+  bindingIds: readonly string[],
+  command: AdminControlCommand,
+): Promise<ServiceRuntimeRebuildMcpRefreshResult> {
+  const uniqueBindingIds = [...new Set(bindingIds)];
+  const reloadMcp = createServiceReloadMcpExecutor(state);
+  const results: ServiceRuntimeRebuildMcpRefreshResult["results"] = [];
+
+  for (const bindingId of uniqueBindingIds) {
+    const binding = state.runtimeConfig.mcpBindings.find(
+      (candidate) => candidate.bindingId === bindingId,
+    );
+    if (binding?.sessionId === undefined) {
+      results.push({
+        bindingId,
+        status: "missing",
+        reasonCode: "mcp_binding_missing_after_rebuild",
+        summary: `MCP binding ${bindingId} was not present after runtime rebuild.`,
+      });
+      continue;
+    }
+
+    const outcome = await reloadMcp({
+      ...command,
+      name: "reload_mcp",
+      target: { sessionId: binding.sessionId },
+      reason: command.reason ?? "runtime rebuild MCP refresh",
+    });
+    const status =
+      outcome.status === "completed"
+        ? ("refreshed" as const)
+        : ("degraded" as const);
+    results.push({
+      bindingId,
+      sessionId: binding.sessionId,
+      status,
+      reasonCode: outcome.reasonCode,
+      summary: outcome.summary,
+    });
+  }
+
+  const refreshedBindingIds = results
+    .filter((result) => result.status === "refreshed")
+    .map((result) => result.bindingId);
+  const degradedBindingIds = results
+    .filter((result) => result.status === "degraded")
+    .map((result) => result.bindingId);
+  const missingBindingIds = results
+    .filter((result) => result.status === "missing")
+    .map((result) => result.bindingId);
+
+  return {
+    action: "refresh_after_rebuild",
+    bindingIds: uniqueBindingIds,
+    refreshedBindingIds,
+    degradedBindingIds,
+    missingBindingIds,
+    results,
+  };
+}
+
+interface ServiceRuntimeRebuildMcpRefreshResult {
+  action: "refresh_after_rebuild";
+  bindingIds: string[];
+  refreshedBindingIds: string[];
+  degradedBindingIds: string[];
+  missingBindingIds: string[];
+  results: Array<{
+    bindingId: string;
+    sessionId?: string;
+    status: "refreshed" | "degraded" | "missing";
+    reasonCode?: string;
+    summary: string;
+  }>;
+}
+
 interface ServiceRuntimeRebuildPlan {
   scope: "session" | "profile";
   profileId: string;
@@ -3342,6 +3425,10 @@ interface ServiceRuntimeRebuildPlan {
   mcp: {
     action: "refresh_after_rebuild";
     bindingIds: string[];
+    refreshedBindingIds?: string[];
+    degradedBindingIds?: string[];
+    missingBindingIds?: string[];
+    results?: ServiceRuntimeRebuildMcpRefreshResult["results"];
   };
   diagnostics: {
     brainModule?: string;
@@ -3640,6 +3727,11 @@ async function applyServiceRuntimeRebuild(
     eventType: "runtime_rebuild_applied",
     summary: `Runtime rebuild applied for profile ${plan.profileId} with brain handle ${rebuild.handle}.`,
   });
+  const mcpRefresh = await refreshMcpBindingsAfterRuntimeRebuild(
+    state,
+    plan.mcp.bindingIds,
+    command,
+  );
 
   return {
     ...plan,
@@ -3647,6 +3739,7 @@ async function applyServiceRuntimeRebuild(
       ...plan.providerState,
       clearedSessions,
     },
+    mcp: mcpRefresh,
     apply: {
       status: "completed",
       handle: rebuild.handle,
@@ -3739,6 +3832,11 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     eventType: "runtime_rebuild_replacement_session_applied",
     summary: `Runtime rebuild archived ${oldSessionId} and created replacement session ${newSessionId}.`,
   });
+  const mcpRefresh = await refreshMcpBindingsAfterRuntimeRebuild(
+    state,
+    replacement.mcpBindings.bindingIds,
+    command,
+  );
 
   return {
     ...plan,
@@ -3752,6 +3850,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
       ttlPolicy: "unchanged",
     },
     channelBindings: replacement.channelBindings,
+    mcp: mcpRefresh,
     apply: {
       status: "completed",
       handle: rebuild.handle,
@@ -3784,7 +3883,8 @@ function runtimeRebuildReplacesSessionIdentity(
 function replacementChannelBindingAction(
   command: AdminControlCommand,
 ): "move" | "unchanged" {
-  const action = optionalBodyString(command, "channelBindingAction") ?? "move";
+  const action =
+    optionalBodyString(command, "channelBindingAction") ?? "unchanged";
   if (action === "move" || action === "unchanged") return action;
   throw new Error("channelBindingAction must be move or unchanged");
 }

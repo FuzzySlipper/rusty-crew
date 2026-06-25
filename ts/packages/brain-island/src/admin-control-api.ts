@@ -2,6 +2,7 @@ import {
   adminCommandActivity,
   type AgentActivityObservationProducer,
   type AgentActivityPublishResult,
+  type AgentActivityResultRef,
   type AgentObservationIdentity,
 } from "./agent-activity-observation.js";
 import type {
@@ -321,6 +322,7 @@ export async function handleAdminControlRequest(
       : "admin_command_failed",
     outcome.summary,
     outcome.reasonCode,
+    adminControlResultRef(parsed.command, outcome),
   );
 
   const status = outcome.status === "completed" ? 200 : 500;
@@ -1019,6 +1021,7 @@ async function publishControlObservation(
     | "admin_command_failed",
   summary: string,
   reasonCode?: string,
+  resultRef?: AgentActivityResultRef,
 ): Promise<AgentActivityPublishResult | undefined> {
   if (!context.observationProducer || !context.observationIdentity) {
     return undefined;
@@ -1030,8 +1033,25 @@ async function publishControlObservation(
       commandName: command.name,
       summary,
       reasonCode,
+      resultRef,
     }),
   );
+}
+
+function adminControlResultRef(
+  command: AdminControlCommand,
+  outcome: AdminControlOutcome,
+): AgentActivityResultRef | undefined {
+  if (
+    outcome.status !== "completed" ||
+    (command.name !== "plan_runtime_rebuild" &&
+      command.name !== "apply_runtime_rebuild")
+  ) {
+    return undefined;
+  }
+  return {
+    artifact_path: `runtime://admin-control/${command.name}/${command.requestId}`,
+  };
 }
 
 function success<T>(

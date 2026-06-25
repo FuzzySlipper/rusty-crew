@@ -29,6 +29,24 @@ try {
     from: "operator" as AgentId,
     body: "This pending message must remain on the archived old session.",
   });
+  const defaultPlan = await post(
+    "/v1/admin/control/sessions/old-session/rebuild-runtime/plan",
+    {
+      reason: "replacement smoke default channel behavior",
+      sessionIdentity: "replace",
+      newSessionId: "new-session",
+    },
+  );
+  assert.equal(defaultPlan.status, 200, JSON.stringify(defaultPlan.body));
+  assert.equal(
+    (
+      defaultPlan.body.data.outcome.result as {
+        channelBindings?: { action?: string };
+      }
+    ).channelBindings?.action,
+    "unchanged",
+  );
+
   const replacement = await post(
     "/v1/admin/control/sessions/old-session/rebuild-runtime/apply",
     {
@@ -45,6 +63,11 @@ try {
     preservesSessionId?: boolean;
     preservesHistory?: boolean;
     channelBindings?: { action?: string; bindingIds?: string[] };
+    mcp?: {
+      bindingIds?: string[];
+      refreshedBindingIds?: string[];
+      degradedBindingIds?: string[];
+    };
     queuedMessages?: { action?: string };
     apply?: {
       replacementSession?: {
@@ -58,6 +81,14 @@ try {
   assert.equal(result.preservesHistory, false);
   assert.equal(result.channelBindings?.action, "move_to_replacement_session");
   assert.deepEqual(result.channelBindings?.bindingIds, ["replace-channel"]);
+  assert.deepEqual(result.mcp?.bindingIds, ["replace-mcp"]);
+  assert.equal(
+    [
+      ...(result.mcp?.refreshedBindingIds ?? []),
+      ...(result.mcp?.degradedBindingIds ?? []),
+    ].includes("replace-mcp"),
+    true,
+  );
   assert.equal(
     result.queuedMessages?.action,
     "start_replacement_session_with_empty_queue",
