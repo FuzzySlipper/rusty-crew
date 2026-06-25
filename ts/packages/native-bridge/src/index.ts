@@ -19,6 +19,8 @@ import type {
   BrainWakeFailure,
   BrainWakeRequest,
   BrainWakeStreamItem,
+  BodyState,
+  CompletionPacket,
   CoreEvent,
   DelegatedResourceCleanupReport,
   DelegatedSessionRuntimeStatus,
@@ -33,6 +35,7 @@ import type {
   PlatformAdapterRegistration,
   ProfileId,
   ProviderStateMode,
+  ProviderStateAbsenceReason,
   ProjectId,
   ResourceLimits,
   RunId,
@@ -118,6 +121,7 @@ interface NativeBridgeBinding {
     wakeId: string,
     outputJson: string,
   ): void;
+  runOpenaiResponsesBrainJson(inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   registerPlatformAdapter(registration: {
     adapterId: string;
@@ -364,6 +368,20 @@ export interface BrainWakeExecutionResult {
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
   stream?: BrainWakeStreamItem[];
+}
+
+export interface OpenAiResponsesBrainRunInput {
+  wakeId: string;
+  sessionId: SessionId;
+  bodyState: BodyState;
+  providerState?: BrainWakeProviderStateInput;
+  providerStateAbsence?: ProviderStateAbsenceReason;
+  config: {
+    model: string;
+    instructions?: string;
+    streamIdleTimeoutMs?: number;
+  };
+  client?: { mode: "fake" } | { mode: "live"; baseUrl: string; apiKey: string };
 }
 
 interface NativeBrainWakeProviderStateInput {
@@ -947,6 +965,9 @@ export interface NativeBridgeModule {
   providerStateDiagnostics(
     limit?: number,
   ): Promise<NativeProviderStateDiagnostic[]>;
+  runOpenAiResponsesBrain(
+    input: OpenAiResponsesBrainRunInput,
+  ): Promise<BrainWakeExecutionResult>;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
@@ -1085,6 +1106,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     databaseSize: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
+    runOpenAiResponsesBrain: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
     getProfileMemory: unavailable("initialize_engine"),
     addProfileMemory: unavailable("initialize_engine"),
@@ -1715,6 +1737,21 @@ function createNativeBridgeModule(
         ...stored,
       ]).slice(0, limit);
     },
+    runOpenAiResponsesBrain: async (input) => {
+      const raw = JSON.parse(
+        binding.runOpenaiResponsesBrainJson(
+          JSON.stringify(toNativeOpenAiResponsesBrainRunInput(input)),
+        ),
+      ) as RawOpenAiResponsesBrainRunResult;
+      return {
+        stream: raw.stream.map(toBrainWakeStreamItem),
+        events: [],
+        actions: [],
+        providerState: raw.provider_state
+          ? toBrainWakeProviderStateOutput(raw.provider_state)
+          : undefined,
+      };
+    },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
     getProfileMemory: async (input) =>
       binding.getProfileMemory(
@@ -1797,6 +1834,202 @@ function toNativeBrainAction(action: BrainAction): unknown {
         },
       };
   }
+}
+
+function toNativeOpenAiResponsesBrainRunInput(
+  input: OpenAiResponsesBrainRunInput,
+): unknown {
+  return {
+    wakeId: input.wakeId,
+    sessionId: input.sessionId,
+    bodyState: toNativeBodyState(input.bodyState),
+    providerState: input.providerState
+      ? toNativeProviderStateInput(input.providerState)
+      : undefined,
+    providerStateAbsence: input.providerStateAbsence,
+    config: input.config,
+    client: input.client ?? { mode: "fake" },
+  };
+}
+
+function toNativeBodyState(state: BodyState): unknown {
+  return {
+    session: toNativeSessionState(state.session),
+    pending_messages: state.pendingMessages.map(toNativeAgentMessage),
+    recent_events: state.recentEvents.map(toNativeCoreEvent),
+    child_completions: state.childCompletions.map(toNativeDelegatedCompletion),
+    fan_out_groups: state.fanOutGroups.map(toNativeDelegatedFanOutGroup),
+    delta_policy: {
+      mode: state.deltaPolicy.mode,
+      queue_owner: state.deltaPolicy.queueOwner,
+      queued_message_ttl_ms: state.deltaPolicy.queuedMessageTtlMs,
+      max_queued_messages: state.deltaPolicy.maxQueuedMessages,
+    },
+  };
+}
+
+function toNativeSessionState(session: SessionState): unknown {
+  return {
+    handle: session.handle,
+    session_id: session.sessionId,
+    agent_id: session.agentId,
+    profile_id: session.profileId,
+    kind: session.kind,
+    delegation: session.delegation
+      ? {
+          parent_session_id: session.delegation.parentSessionId,
+          parent_agent_id: session.delegation.parentAgentId,
+          source_wake_id: session.delegation.sourceWakeId,
+          source_action_index: session.delegation.sourceActionIndex,
+          requested_task_id: session.delegation.requestedTaskId,
+          correlation_id: session.delegation.correlationId,
+        }
+      : undefined,
+    resource_limits: {
+      workdir: session.resourceLimits.workdir,
+      max_duration_ms: session.resourceLimits.maxDurationMs,
+      max_delegation_depth: session.resourceLimits.maxDelegationDepth,
+    },
+    tool_profile: {
+      tools: session.toolProfile.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.inputSchema,
+      })),
+    },
+    history_window: session.historyWindow
+      ? { max_messages: session.historyWindow.maxMessages }
+      : undefined,
+    status: session.status,
+    brain_turn_count: session.brainTurnCount,
+    created_at: session.createdAt,
+    last_active_at: session.lastActiveAt,
+  };
+}
+
+function toNativeAgentMessage(message: AgentMessage): RawAgentMessage {
+  return {
+    from: message.from,
+    to: message.to,
+    body: message.body,
+    correlation_id: message.correlationId,
+  };
+}
+
+function toNativeCoreEvent(event: CoreEvent): unknown {
+  switch (event.type) {
+    case "session_created":
+      return { type: event.type, state: toNativeSessionState(event.state) };
+    case "session_archived":
+      return { type: event.type, session_id: event.sessionId };
+    case "agent_message_routed":
+      return { type: event.type, message: toNativeAgentMessage(event.message) };
+    case "delegation_lifecycle_observed":
+      return {
+        type: event.type,
+        lifecycle: {
+          parent_session_id: event.lifecycle.parentSessionId,
+          delegated_session_id: event.lifecycle.delegatedSessionId,
+          run_id: event.lifecycle.runId,
+          phase: event.lifecycle.phase,
+          detail: event.lifecycle.detail,
+        },
+      };
+    case "external_event_injected":
+      return {
+        type: event.type,
+        event: toNativeExternalEvent(event.event),
+      };
+    case "den_data_updated":
+      return { type: event.type, update: toNativeDenDataUpdate(event.update) };
+    case "brain_wake_requested":
+      return { type: event.type, session_id: event.sessionId };
+    case "brain_event_observed":
+      return {
+        type: event.type,
+        session_id: event.sessionId,
+        wake_id: event.wakeId,
+        event: toNativeBrainEventForJson(event.event),
+      };
+    case "brain_actions_accepted":
+      return {
+        type: event.type,
+        session_id: event.sessionId,
+        count: event.count,
+      };
+    case "completion_packet_delivered":
+      return {
+        type: event.type,
+        packet: {
+          session_id: event.packet.sessionId,
+          status: event.packet.status,
+          summary: event.packet.summary,
+        },
+      };
+  }
+}
+
+function toNativeBrainEventForJson(event: BrainEvent): unknown {
+  const native = toNativeBrainEvent(event);
+  return {
+    type: native.eventType,
+    text: native.text,
+    tool_name: native.toolName,
+    is_error: native.isError,
+    metadata: native.metadataJson ? JSON.parse(native.metadataJson) : undefined,
+  };
+}
+
+function toNativeDelegatedCompletion(
+  completion: BodyState["childCompletions"][number],
+): unknown {
+  return {
+    run_id: completion.runId,
+    child_session_id: completion.childSessionId,
+    requested_task_id: completion.requestedTaskId,
+    source_wake_id: completion.sourceWakeId,
+    source_action_index: completion.sourceActionIndex,
+    correlation_id: completion.correlationId,
+    parent_consumption: completion.parentConsumption,
+    packet: {
+      session_id: completion.packet.sessionId,
+      status: completion.packet.status,
+      summary: completion.packet.summary,
+    },
+  };
+}
+
+function toNativeDelegatedFanOutGroup(
+  group: BodyState["fanOutGroups"][number],
+): unknown {
+  return {
+    group_id: group.groupId,
+    total: group.total,
+    pending: group.pending,
+    completed: group.completed,
+    failed: group.failed,
+    blocked: group.blocked,
+    exhausted: group.exhausted,
+    cancelled: group.cancelled,
+    expired: group.expired,
+    max_concurrency: group.maxConcurrency,
+    failure_policy: group.failurePolicy,
+    status: group.status,
+  };
+}
+
+function toNativeProviderStateInput(
+  state: BrainWakeProviderStateInput,
+): NativeBrainWakeProviderStateInput {
+  return {
+    module_id: state.moduleId,
+    strategy_id: state.strategyId,
+    profile_fingerprint: state.profileFingerprint,
+    provider_fingerprint: state.providerFingerprint,
+    payload_version: state.payloadVersion,
+    payload: state.payload,
+    expires_at: state.expiresAt,
+  };
 }
 
 function toNativeDenDataUpdate(update: DenDataUpdate): unknown {
@@ -2442,6 +2675,106 @@ function toBrainEvent(event: RawBrainEvent): BrainEvent {
   }
 }
 
+function toBrainWakeStreamItem(
+  item: RawBrainWakeStreamItem,
+): BrainWakeStreamItem {
+  switch (item.type) {
+    case "event":
+      return {
+        type: "event",
+        event: {
+          wakeId: item.event.wake_id,
+          sessionId: item.event.session_id,
+          event: toBrainEvent(item.event.event),
+        },
+      };
+    case "actions":
+      return {
+        type: "actions",
+        batch: {
+          wakeId: item.batch.wake_id,
+          sessionId: item.batch.session_id,
+          actions: item.batch.actions.map(toBrainAction),
+        },
+      };
+    case "wake_failed":
+      return {
+        type: "wake_failed",
+        failure: {
+          wakeId: item.failure.wake_id,
+          sessionId: item.failure.session_id,
+          kind: item.failure.kind as BrainWakeFailure["kind"],
+          message: item.failure.message,
+        },
+      };
+  }
+}
+
+function toBrainAction(action: RawBrainAction): BrainAction {
+  switch (action.type) {
+    case "send_message":
+      return {
+        type: action.type,
+        message: toAgentMessage(action.message),
+      };
+    case "request_delegation":
+      return {
+        type: action.type,
+        profileId: action.profile_id,
+        taskId: action.task_id,
+        prompt: action.prompt,
+        expectedOutput: action.expected_output,
+        resourceLimits: action.resource_limits
+          ? {
+              workdir: action.resource_limits.workdir,
+              maxDurationMs: action.resource_limits.max_duration_ms,
+              maxDelegationDepth: action.resource_limits.max_delegation_depth,
+            }
+          : undefined,
+        timeoutMs: action.timeout_ms,
+        priority: action.priority,
+        fanOutGroupId: action.fan_out_group_id,
+        fanOutMaxConcurrency: action.fan_out_max_concurrency,
+        fanOutFailurePolicy: action.fan_out_failure_policy,
+        correlationId: action.correlation_id,
+        parentConsumption: action.parent_consumption,
+      };
+    case "deliver_completion":
+      return {
+        type: action.type,
+        packet: {
+          sessionId: action.packet.session_id,
+          status: action.packet.status,
+          summary: action.packet.summary,
+        },
+      };
+  }
+}
+
+function toBrainWakeProviderStateOutput(
+  output: RawBrainWakeProviderStateOutput,
+): BrainWakeProviderStateOutput {
+  switch (output.type) {
+    case "unchanged":
+      return { type: "unchanged" };
+    case "replace":
+      return {
+        type: "replace",
+        state: {
+          moduleId: output.state.module_id,
+          strategyId: output.state.strategy_id,
+          profileFingerprint: output.state.profile_fingerprint,
+          providerFingerprint: output.state.provider_fingerprint,
+          payloadVersion: output.state.payload_version,
+          payload: output.state.payload,
+          ttlMs: output.state.ttl_ms,
+        },
+      };
+    case "clear":
+      return { type: "clear", reason: output.reason };
+  }
+}
+
 function toNativeBrainEvent(event: BrainEvent): {
   eventType: string;
   text?: string;
@@ -2807,6 +3140,84 @@ interface RawAgentMessage {
   body: string;
   correlation_id?: string;
 }
+
+interface RawOpenAiResponsesBrainRunResult {
+  stream: RawBrainWakeStreamItem[];
+  provider_state?: RawBrainWakeProviderStateOutput;
+}
+
+type RawBrainWakeStreamItem =
+  | {
+      type: "event";
+      event: {
+        wake_id: string;
+        session_id: SessionId;
+        event: RawBrainEvent;
+      };
+    }
+  | {
+      type: "actions";
+      batch: {
+        wake_id: string;
+        session_id: SessionId;
+        actions: RawBrainAction[];
+      };
+    }
+  | {
+      type: "wake_failed";
+      failure: {
+        wake_id: string;
+        session_id: SessionId;
+        kind: string;
+        message: string;
+      };
+    };
+
+type RawBrainAction =
+  | {
+      type: "send_message";
+      message: RawAgentMessage;
+    }
+  | {
+      type: "request_delegation";
+      profile_id: ProfileId;
+      task_id?: TaskId;
+      prompt: string;
+      expected_output?: string;
+      resource_limits?: RawResourceLimits;
+      timeout_ms?: number;
+      priority?: Extract<
+        BrainAction,
+        { type: "request_delegation" }
+      >["priority"];
+      fan_out_group_id?: string;
+      fan_out_max_concurrency?: number;
+      fan_out_failure_policy?: Extract<
+        BrainAction,
+        { type: "request_delegation" }
+      >["fanOutFailurePolicy"];
+      correlation_id?: string;
+      parent_consumption?: Extract<
+        BrainAction,
+        { type: "request_delegation" }
+      >["parentConsumption"];
+    }
+  | {
+      type: "deliver_completion";
+      packet: {
+        session_id: SessionId;
+        status: CompletionPacket["status"];
+        summary: string;
+      };
+    };
+
+type RawBrainWakeProviderStateOutput =
+  | { type: "unchanged" }
+  | {
+      type: "replace";
+      state: NativeBrainWakeProviderStateInput & { ttl_ms?: number };
+    }
+  | { type: "clear"; reason: "brain_requested_clear" };
 
 type RawBrainEvent =
   | { type: "started" }

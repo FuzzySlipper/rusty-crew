@@ -258,6 +258,59 @@ export const localBrainModule: BrainModule = {
   },
 };
 
+function openAiResponsesClientConfig(
+  context: BrainModuleContext,
+): { mode: "fake" } | { mode: "live"; baseUrl: string; apiKey: string } {
+  if (process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE !== "1") {
+    return { mode: "fake" };
+  }
+  const keyEnv =
+    context.profile.profile.modelConfig.apiKeyEnv ?? "OPENAI_API_KEY";
+  const apiKey = process.env[keyEnv];
+  if (!apiKey) {
+    throw new Error(
+      `openai-responses live client requested but ${keyEnv} is not set`,
+    );
+  }
+  return {
+    mode: "live",
+    baseUrl:
+      context.profile.profile.modelConfig.baseUrl ??
+      "https://api.openai.com/v1",
+    apiKey,
+  };
+}
+
+function withOpenAiResponsesProviderStateScope<
+  T extends { providerState?: BrainWakeProviderStateOutput },
+>(result: T, context: BrainModuleContext): T {
+  if (
+    result.providerState?.type !== "replace" ||
+    context.providerStateScope === undefined
+  ) {
+    return result;
+  }
+  return {
+    ...result,
+    providerState: {
+      type: "replace",
+      state: {
+        ...result.providerState.state,
+        profileFingerprint:
+          result.providerState.state.profileFingerprint ===
+          "profile-fingerprint"
+            ? context.providerStateScope.profileFingerprint
+            : result.providerState.state.profileFingerprint,
+        providerFingerprint:
+          result.providerState.state.providerFingerprint ===
+          "provider-fingerprint"
+            ? context.providerStateScope.providerFingerprint
+            : result.providerState.state.providerFingerprint,
+      },
+    },
+  };
+}
+
 export const openAiResponsesBrainModule: BrainModule = {
   moduleId: "openai-responses",
   displayName: "OpenAI Responses",
@@ -282,7 +335,33 @@ export const openAiResponsesBrainModule: BrainModule = {
         events: BrainEventEnvelope[];
         actions: BrainAction[];
         providerState?: BrainWakeProviderStateOutput;
+        stream?: import("@rusty-crew/contracts").BrainWakeStreamItem[];
       }> {
+        if (context.bridge?.runOpenAiResponsesBrain !== undefined) {
+          try {
+            return withOpenAiResponsesProviderStateScope(
+              await context.bridge.runOpenAiResponsesBrain({
+                wakeId: wake.wakeId,
+                sessionId: wake.sessionId,
+                bodyState: wake.state,
+                providerState: wake.providerState,
+                providerStateAbsence: wake.providerStateAbsence,
+                config: {
+                  model: context.profile.profile.modelConfig.modelName,
+                  instructions: wake.systemPrompt,
+                },
+                client: openAiResponsesClientConfig(context),
+              }),
+              context,
+            );
+          } catch (error) {
+            if (
+              process.env.RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE === "1"
+            ) {
+              throw error;
+            }
+          }
+        }
         const toolName = wake.state.session.toolProfile.tools[0]?.name;
         const hydrated = wake.providerState !== undefined;
         const outputItems = [

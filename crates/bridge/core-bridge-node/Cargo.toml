@@ -14,5 +14,7 @@ rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
 rusty-crew-core-config = { path = "../../core/core-config" }
 rusty-crew-core-engine = { path = "../../core/core-engine" }
 rusty-crew-core-persistence = { path = "../../core/core-persistence" }
+rusty-crew-core-protocol = { path = "../../core/core-protocol" }
+rusty-crew-openai-responses-brain = { path = "../../brains/openai-responses" }
 serde.workspace = true
 serde_json.workspace = true

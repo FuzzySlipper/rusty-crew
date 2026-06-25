@@ -4,6 +4,7 @@
 //! contract. It owns provider request/event shapes and fake-client tests, but
 //! it does not reach into Rusty Crew coordination internals.
 
+use reqwest::blocking::Client as HttpClient;
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
     AgentMessage, BodyState, BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope,
@@ -16,6 +17,7 @@ use rusty_crew_core_protocol::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
+use std::time::Duration;
 
 pub const MODULE_ID: &str = "openai-responses";
 pub const REPLAY_STRATEGY_ID: &str = "replay";
@@ -574,6 +576,8 @@ pub enum ResponsesStreamError {
     ResponseIncomplete(String),
     #[error("function call output call_id mismatch: expected {expected}, got {actual}")]
     FunctionCallOutputMismatch { expected: String, actual: String },
+    #[error("provider transport error: {0}")]
+    Transport(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -595,6 +599,260 @@ pub trait ResponsesClient {
         &mut self,
         request: ResponsesRequest,
     ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct LiveResponsesClient {
+    client: HttpClient,
+    endpoint: String,
+    api_key: String,
+}
+
+impl LiveResponsesClient {
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        idle_timeout_ms: u64,
+    ) -> Result<Self, ResponsesStreamError> {
+        let base_url = base_url.into();
+        let endpoint = format!("{}/responses", base_url.trim_end_matches('/'));
+        let client = HttpClient::builder()
+            .timeout(Duration::from_millis(idle_timeout_ms.max(1_000)))
+            .build()
+            .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
+        Ok(Self {
+            client,
+            endpoint,
+            api_key: api_key.into(),
+        })
+    }
+}
+
+impl ResponsesClient for LiveResponsesClient {
+    fn stream(
+        &mut self,
+        request: ResponsesRequest,
+    ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
+        let response = self
+            .client
+            .post(&self.endpoint)
+            .bearer_auth(&self.api_key)
+            .json(&request)
+            .send()
+            .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
+        if !status.is_success() {
+            return Err(ResponsesStreamError::Transport(format!(
+                "HTTP {status}: {body}"
+            )));
+        }
+        parse_sse_events(&body)
+    }
+}
+
+fn parse_sse_events(body: &str) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
+    let mut events = Vec::new();
+    let mut data_lines = Vec::new();
+    for line in body.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            flush_sse_data(&mut data_lines, &mut events)?;
+            continue;
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            data_lines.push(data.trim_start().to_string());
+        }
+    }
+    flush_sse_data(&mut data_lines, &mut events)?;
+    Ok(events)
+}
+
+fn flush_sse_data(
+    data_lines: &mut Vec<String>,
+    events: &mut Vec<ResponsesEvent>,
+) -> Result<(), ResponsesStreamError> {
+    if data_lines.is_empty() {
+        return Ok(());
+    }
+    let data = data_lines.join("\n");
+    data_lines.clear();
+    if data == "[DONE]" {
+        return Ok(());
+    }
+    let value: Value = serde_json::from_str(&data)
+        .map_err(|error| ResponsesStreamError::Transport(format!("invalid SSE JSON: {error}")))?;
+    if let Some(event) = event_from_provider_value(value)? {
+        events.push(event);
+    }
+    Ok(())
+}
+
+fn event_from_provider_value(value: Value) -> Result<Option<ResponsesEvent>, ResponsesStreamError> {
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or(ResponsesStreamError::MissingField("type"))?;
+    match event_type {
+        "response.output_text.delta" => Ok(Some(ResponsesEvent::TextDelta(
+            value
+                .get("delta")
+                .and_then(Value::as_str)
+                .ok_or(ResponsesStreamError::MissingField("delta"))?
+                .to_string(),
+        ))),
+        "response.reasoning.delta" | "response.reasoning_summary_text.delta" => {
+            Ok(Some(ResponsesEvent::ReasoningDelta(
+                value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            )))
+        }
+        "response.output_item.added" => {
+            let item = output_item_from_provider_value(
+                value
+                    .get("item")
+                    .ok_or(ResponsesStreamError::MissingField("item"))?,
+            )?;
+            Ok(Some(ResponsesEvent::OutputItemAdded(item)))
+        }
+        "response.output_item.done" => {
+            let item = output_item_from_provider_value(
+                value
+                    .get("item")
+                    .ok_or(ResponsesStreamError::MissingField("item"))?,
+            )?;
+            Ok(Some(ResponsesEvent::OutputItemDone(item)))
+        }
+        "response.completed" => {
+            let response = value
+                .get("response")
+                .ok_or(ResponsesStreamError::MissingField("response"))?;
+            let response_id = response
+                .get("id")
+                .or_else(|| value.get("response_id"))
+                .and_then(Value::as_str)
+                .ok_or(ResponsesStreamError::MissingField("response.id"))?
+                .to_string();
+            Ok(Some(ResponsesEvent::Completed {
+                response_id,
+                usage: response
+                    .get("usage")
+                    .and_then(token_usage_from_provider_value),
+            }))
+        }
+        "response.failed" => Ok(Some(ResponsesEvent::Failed(provider_message(
+            &value,
+            "provider response failed",
+        )))),
+        "response.incomplete" => Ok(Some(ResponsesEvent::Incomplete(provider_message(
+            &value,
+            "provider response incomplete",
+        )))),
+        _ => Ok(None),
+    }
+}
+
+fn output_item_from_provider_value(
+    value: &Value,
+) -> Result<ResponsesOutputItem, ResponsesStreamError> {
+    let item_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or(ResponsesStreamError::MissingField("item.type"))?;
+    match item_type {
+        "message" => Ok(ResponsesOutputItem::Message {
+            id: value.get("id").and_then(Value::as_str).map(str::to_string),
+            text: message_text_from_provider_item(value),
+        }),
+        "reasoning" => Ok(ResponsesOutputItem::Reasoning {
+            id: value.get("id").and_then(Value::as_str).map(str::to_string),
+            summary: value
+                .get("summary")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            encrypted_content: value
+                .get("encrypted_content")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        }),
+        "function_call" => Ok(ResponsesOutputItem::FunctionCall {
+            id: value.get("id").and_then(Value::as_str).map(str::to_string),
+            call_id: value
+                .get("call_id")
+                .and_then(Value::as_str)
+                .ok_or(ResponsesStreamError::MissingField("item.call_id"))?
+                .to_string(),
+            name: value
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or(ResponsesStreamError::MissingField("item.name"))?
+                .to_string(),
+            arguments: value
+                .get("arguments")
+                .and_then(Value::as_str)
+                .unwrap_or("{}")
+                .to_string(),
+        }),
+        _ => Ok(ResponsesOutputItem::Other {
+            item_type: item_type.to_string(),
+            raw_json: value.clone(),
+        }),
+    }
+}
+
+fn message_text_from_provider_item(value: &Value) -> String {
+    value
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|content| {
+            content
+                .iter()
+                .filter_map(|item| item.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .filter(|text| !text.is_empty())
+        .or_else(|| {
+            value
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default()
+}
+
+fn token_usage_from_provider_value(value: &Value) -> Option<ResponsesTokenUsage> {
+    Some(ResponsesTokenUsage {
+        input_tokens: value.get("input_tokens")?.as_u64()?,
+        cached_input_tokens: value
+            .get("input_tokens_details")
+            .and_then(|details| details.get("cached_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        output_tokens: value.get("output_tokens")?.as_u64()?,
+        reasoning_output_tokens: value
+            .get("output_tokens_details")
+            .and_then(|details| details.get("reasoning_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        total_tokens: value.get("total_tokens")?.as_u64()?,
+    })
+}
+
+fn provider_message(value: &Value, fallback: &str) -> String {
+    value
+        .get("response")
+        .and_then(|response| response.get("error"))
+        .and_then(|error| error.get("message"))
+        .or_else(|| value.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 pub trait NeutralToolExecutor {

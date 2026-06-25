@@ -27,6 +27,14 @@ use rusty_crew_core_persistence::{
     RuntimeSearchRowType, RuntimeStateSummary, ScheduledJobRecord, ScheduledJobStatus,
     ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
 };
+use rusty_crew_core_protocol::{BodyState, BrainWakeProviderStateInput};
+use rusty_crew_openai_responses_brain::{
+    FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
+    NeutralToolOutput, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
+    ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage,
+};
+use serde::Deserialize;
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
@@ -1233,6 +1241,57 @@ pub struct JsRuntimeBufferView {
     pub bytes: napi::bindgen_prelude::Buffer,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsOpenAiResponsesBrainRunInput {
+    wake_id: String,
+    session_id: String,
+    body_state: BodyState,
+    #[serde(default)]
+    provider_state: Option<BrainWakeProviderStateInput>,
+    #[serde(default)]
+    provider_state_absence: Option<String>,
+    config: JsOpenAiResponsesBrainConfig,
+    #[serde(default)]
+    client: JsOpenAiResponsesClientConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsOpenAiResponsesBrainConfig {
+    model: String,
+    #[serde(default)]
+    instructions: Option<String>,
+    #[serde(default = "default_responses_stream_idle_timeout_ms")]
+    stream_idle_timeout_ms: u64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+enum JsOpenAiResponsesClientConfig {
+    #[default]
+    Fake,
+    Live {
+        base_url: String,
+        api_key: String,
+    },
+}
+
+fn default_responses_stream_idle_timeout_ms() -> u64 {
+    30_000
+}
+
+struct EchoNeutralToolExecutor;
+
+impl NeutralToolExecutor for EchoNeutralToolExecutor {
+    fn execute(&self, call: &PendingResponsesFunctionCall) -> NeutralToolOutput {
+        NeutralToolOutput {
+            output: format!("{} completed by Rust Responses bridge", call.name),
+            is_error: false,
+        }
+    }
+}
+
 #[napi_derive::napi]
 pub struct NativeBridgeBinding {
     inner: Mutex<NativeBridge>,
@@ -1484,6 +1543,75 @@ impl NativeBridgeBinding {
         bridge
             .provider_state_diagnostics(limit.unwrap_or(100))
             .map_err(to_napi_error)
+    }
+
+    #[napi]
+    pub fn run_openai_responses_brain_json(&self, input_json: String) -> napi::Result<String> {
+        let input: JsOpenAiResponsesBrainRunInput =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid OpenAI Responses brain input JSON: {error}"),
+                )
+            })?;
+        let mut config = ResponsesBrainConfig::replay(input.config.model);
+        config.instructions = input.config.instructions;
+        config.stream_idle_timeout_ms = input.config.stream_idle_timeout_ms;
+        let descriptors = input
+            .body_state
+            .session
+            .tool_profile
+            .tools
+            .iter()
+            .map(|tool| NeutralBrainTool {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                input_schema: json!({"type": "object", "properties": {}}),
+            })
+            .collect::<Vec<_>>();
+        let history = rusty_crew_openai_responses_brain::ResponsesReplayProjection::from_body_state(
+            &input.body_state,
+        );
+        let request = BrainWakeRequest {
+            brain: BrainImplementationHandle::new(0),
+            session_id: SessionId::new(input.session_id),
+            body_state: RuntimeBufferHandle::new(0),
+            system_prompt: RuntimeBufferHandle::new(0),
+            role_assembly: RuntimeBufferHandle::new(0),
+            wake_id: input.wake_id,
+            provider_state: input.provider_state,
+            provider_state_absence: input
+                .provider_state_absence
+                .as_deref()
+                .map(parse_provider_state_absence_reason)
+                .transpose()
+                .map_err(to_napi_error)?,
+        };
+        let result = match input.client {
+            JsOpenAiResponsesClientConfig::Fake => {
+                let client = fake_responses_client_for_body(&input.body_state);
+                let mut brain =
+                    ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
+                brain.wake_with_history(request, history)
+            }
+            JsOpenAiResponsesClientConfig::Live { base_url, api_key } => {
+                let client =
+                    LiveResponsesClient::new(base_url, api_key, config.stream_idle_timeout_ms)
+                        .map_err(|error| {
+                            napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                        })?;
+                let mut brain =
+                    ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
+                brain.wake_with_history(request, history)
+            }
+        }
+        .map_err(to_napi_error)?;
+        let output = json!({
+            "stream": result.stream.drain_until_terminal().map_err(to_napi_error)?,
+            "provider_state": result.provider_state,
+        });
+        serde_json::to_string(&output)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 
     #[napi]
@@ -2839,6 +2967,71 @@ fn provider_state_absence_reason_as_str(
             "module_does_not_use_state"
         }
         rusty_crew_core_bridge_api::ProviderStateAbsenceReason::LoadFailed => "load_failed",
+    }
+}
+
+fn parse_provider_state_absence_reason(
+    raw: &str,
+) -> CoreResult<rusty_crew_core_bridge_api::ProviderStateAbsenceReason> {
+    Ok(match raw {
+        "not_configured" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::NotConfigured,
+        "missing" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Missing,
+        "expired" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Expired,
+        "invalidated" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Invalidated,
+        "module_does_not_use_state" => {
+            rusty_crew_core_bridge_api::ProviderStateAbsenceReason::ModuleDoesNotUseState
+        }
+        "load_failed" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::LoadFailed,
+        other => {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("invalid provider state absence reason {other}"),
+            ))
+        }
+    })
+}
+
+fn fake_responses_client_for_body(body: &BodyState) -> FakeResponsesClient {
+    let Some(tool) = body.session.tool_profile.tools.first() else {
+        return FakeResponsesClient::new(vec![Ok(vec![
+            ResponsesEvent::TextDelta("responses module scaffold wake completed".to_string()),
+            ResponsesEvent::Completed {
+                response_id: "fake-response".to_string(),
+                usage: Some(fake_responses_usage(false)),
+            },
+        ])]);
+    };
+    FakeResponsesClient::new(vec![
+        Ok(vec![
+            ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                id: Some("fake-call-item".to_string()),
+                call_id: "fake-call".to_string(),
+                name: tool.name.clone(),
+                arguments: "{}".to_string(),
+            }),
+            ResponsesEvent::Completed {
+                response_id: "fake-response-tool-call".to_string(),
+                usage: Some(fake_responses_usage(false)),
+            },
+        ]),
+        Ok(vec![
+            ResponsesEvent::TextDelta("responses module scaffold wake completed".to_string()),
+            ResponsesEvent::Completed {
+                response_id: "fake-response-final".to_string(),
+                usage: Some(fake_responses_usage(true)),
+            },
+        ]),
+    ])
+    .expect_function_output("fake-call")
+}
+
+fn fake_responses_usage(cached: bool) -> ResponsesTokenUsage {
+    ResponsesTokenUsage {
+        input_tokens: 1,
+        cached_input_tokens: u64::from(cached),
+        output_tokens: 1,
+        reasoning_output_tokens: 0,
+        total_tokens: 2,
     }
 }
 

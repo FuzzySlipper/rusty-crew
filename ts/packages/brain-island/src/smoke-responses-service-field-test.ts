@@ -31,7 +31,7 @@ try {
     reason: "responses service field smoke",
   });
   assert.equal(firstTurn.status, "accepted");
-  assert.match(firstTurn.summary, /responses replay service wake completed/);
+  assert.match(firstTurn.summary, /responses replay (service )?wake completed/);
   assert.match(firstTurn.wakeId ?? "", /^service-responses-session-/);
 
   const afterFirstTurn = await client.diagnostics();
@@ -78,7 +78,10 @@ try {
     reason: "responses service restart field smoke",
   });
   assert.equal(secondTurn.status, "accepted");
-  assert.match(secondTurn.summary, /responses replay service wake completed/);
+  assert.match(
+    secondTurn.summary,
+    /responses replay (service )?wake completed/,
+  );
 
   const afterSecondTurn = await client.diagnostics();
   assert.equal(

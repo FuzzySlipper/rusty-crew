@@ -94,6 +94,7 @@
     "smoke:brain-tool-pi-adapter": "tsx src/smoke-brain-tool-pi-adapter.ts",
     "smoke:brain-module-registry": "tsx src/smoke-brain-module-registry.ts",
     "smoke:responses-service-field-test": "tsx src/smoke-responses-service-field-test.ts",
+    "smoke:responses-service-live-field-test": "RUSTY_CREW_OPENAI_RESPONSES_LIVE=1 tsx src/smoke-responses-service-field-test.ts",
     "smoke:provider-state-fingerprints": "tsx src/smoke-provider-state-fingerprints.ts",
     "smoke:provider-state-diagnostics": "tsx src/smoke-provider-state-diagnostics.ts",
     "smoke:local-code-tools": "tsx src/smoke-local-code-tools.ts",
