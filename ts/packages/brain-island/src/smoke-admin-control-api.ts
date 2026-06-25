@@ -125,6 +125,42 @@ const executor: AdminControlExecutor = {
       affectedIds: { sessionsReactivated: 1 },
     };
   },
+  planRuntimeRebuild(command) {
+    return {
+      status: "completed",
+      summary: "runtime rebuild plan prepared",
+      affectedIds: {
+        profileId: command.target.profileId ?? "prime",
+        sessionId: command.target.sessionId ?? "session-alpha",
+      },
+      result: {
+        scope: command.target.scope,
+        profileId: command.target.profileId ?? "prime",
+        sessionIds: [command.target.sessionId ?? "session-alpha"],
+        applySupported: false,
+        preservesSessionId: true,
+        preservesHistory: true,
+        queuedMessages: {
+          action: "preserve_existing_queue_without_redelivery",
+        },
+      },
+    };
+  },
+  applyRuntimeRebuild(command) {
+    return {
+      status: "failed",
+      summary: "runtime rebuild apply is not supported",
+      affectedIds: {
+        profileId: command.target.profileId ?? "prime",
+        sessionId: command.target.sessionId ?? "session-alpha",
+      },
+      result: {
+        scope: command.target.scope,
+        applySupported: false,
+      },
+      reasonCode: "brain_hot_swap_not_implemented",
+    };
+  },
 };
 
 const context = {
@@ -241,6 +277,46 @@ assert.equal(reloadConfig.status, 200);
 const reloadConfigData = okData<AdminControlResponse>(reloadConfig);
 assert.equal(reloadConfigData.command.name, "reload_config");
 assert.equal(reloadConfigData.outcome.status, "completed");
+
+const rebuildSessionPlan = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/sessions/session-alpha/rebuild-runtime/plan",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(rebuildSessionPlan.status, 200);
+const rebuildSessionPlanData = okData<AdminControlResponse>(rebuildSessionPlan);
+assert.equal(rebuildSessionPlanData.command.name, "plan_runtime_rebuild");
+assert.equal(rebuildSessionPlanData.command.target.scope, "session");
+assert.equal(rebuildSessionPlanData.command.target.sessionId, "session-alpha");
+assert.equal(rebuildSessionPlanData.outcome.status, "completed");
+assert.equal(
+  (rebuildSessionPlanData.outcome.result as { preservesSessionId?: boolean })
+    .preservesSessionId,
+  true,
+);
+
+const rebuildProfileApply = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/profiles/prime/rebuild-brain/apply",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(rebuildProfileApply.status, 500);
+const rebuildProfileApplyData =
+  okData<AdminControlResponse>(rebuildProfileApply);
+assert.equal(rebuildProfileApplyData.command.name, "apply_runtime_rebuild");
+assert.equal(rebuildProfileApplyData.command.target.scope, "profile");
+assert.equal(rebuildProfileApplyData.command.target.profileId, "prime");
+assert.equal(rebuildProfileApplyData.outcome.status, "failed");
+assert.equal(
+  rebuildProfileApplyData.outcome.reasonCode,
+  "brain_hot_swap_not_implemented",
+);
 
 const curatorStatus = await handleAdminControlRequest(
   {

@@ -381,7 +381,9 @@ export interface OpenAiResponsesBrainRunInput {
     instructions?: string;
     streamIdleTimeoutMs?: number;
   };
-  client?: { mode: "fake" } | { mode: "live"; baseUrl: string; apiKey: string };
+  client?:
+    | { mode: "fake" }
+    | { mode: "live"; baseUrl: string; apiKey?: string };
 }
 
 interface NativeBrainWakeProviderStateInput {
@@ -1848,7 +1850,14 @@ function toNativeOpenAiResponsesBrainRunInput(
       : undefined,
     providerStateAbsence: input.providerStateAbsence,
     config: input.config,
-    client: input.client ?? { mode: "fake" },
+    client:
+      input.client?.mode === "live"
+        ? {
+            mode: "live",
+            base_url: input.client.baseUrl,
+            api_key: input.client.apiKey,
+          }
+        : { mode: "fake" },
   };
 }
 
@@ -1970,14 +1979,37 @@ function toNativeCoreEvent(event: CoreEvent): unknown {
 }
 
 function toNativeBrainEventForJson(event: BrainEvent): unknown {
-  const native = toNativeBrainEvent(event);
-  return {
-    type: native.eventType,
-    text: native.text,
-    tool_name: native.toolName,
-    is_error: native.isError,
-    metadata: native.metadataJson ? JSON.parse(native.metadataJson) : undefined,
-  };
+  switch (event.type) {
+    case "started":
+    case "finished":
+      return { type: event.type };
+    case "text_delta":
+      return { type: event.type, text: event.text };
+    case "tool_call_started":
+      return {
+        type: event.type,
+        tool_name: event.toolName,
+        metadata: event.metadata
+          ? toRawToolCallMetadata(event.metadata)
+          : undefined,
+      };
+    case "tool_call_finished":
+      return {
+        type: event.type,
+        tool_name: event.toolName,
+        is_error: event.isError,
+        metadata: event.metadata
+          ? toRawToolCallMetadata(event.metadata)
+          : undefined,
+      };
+    case "provider_status":
+      return {
+        type: event.type,
+        level: event.level,
+        message: event.message,
+        metadata_json: event.metadataJson,
+      };
+  }
 }
 
 function toNativeDelegatedCompletion(
@@ -2845,7 +2877,7 @@ function toRawToolCallMetadata(
     source: metadata.source,
     adapter_id: metadata.adapterId,
     binding_id: metadata.bindingId,
-    server_names: metadata.serverNames,
+    server_names: metadata.serverNames ?? [],
     profile_id: metadata.profileId,
     tool_profile_key: metadata.toolProfileKey,
     source_tool_name: metadata.sourceToolName,

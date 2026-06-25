@@ -2490,6 +2490,33 @@ function createServiceControlExecutor(
         result,
       };
     },
+    planRuntimeRebuild: async (command) => {
+      const result = await planServiceRuntimeRebuild(state, command);
+      return {
+        status: "completed",
+        summary: "runtime rebuild plan prepared",
+        affectedIds: runtimeRebuildAffectedIds(result),
+        result,
+      };
+    },
+    applyRuntimeRebuild: async (command) => {
+      const result = await planServiceRuntimeRebuild(state, command);
+      return {
+        status: "failed",
+        summary:
+          "runtime rebuild apply is not available until brain hot-swap support is implemented",
+        affectedIds: runtimeRebuildAffectedIds(result),
+        result: {
+          ...result,
+          apply: {
+            status: "blocked",
+            reasonCode: "brain_hot_swap_not_implemented",
+            safeAlternative: "restart_service_after_config_reload",
+          },
+        },
+        reasonCode: "brain_hot_swap_not_implemented",
+      };
+    },
     schedulerTick: async () => {
       const report = await state.bridge.runSchedulerTick();
       const curatorLifecycle =
@@ -2640,6 +2667,158 @@ function mcpBindingForSession(
   return state.runtimeConfig.mcpBindings.find(
     (binding) => binding.sessionId === sessionId,
   );
+}
+
+interface ServiceRuntimeRebuildPlan {
+  scope: "session" | "profile";
+  profileId: string;
+  sessionIds: string[];
+  applySupported: false;
+  requiredAction: "brain_hot_swap_required";
+  preservesSessionId: true;
+  preservesHistory: true;
+  configReload: {
+    implicit: false;
+    requiredBeforeApply: boolean;
+  };
+  providerState: {
+    action: "discard";
+    reason: string;
+  };
+  queuedMessages: {
+    action: "preserve_existing_queue_without_redelivery";
+    ttlPolicy: "unchanged";
+  };
+  channelBindings: {
+    action: "unchanged";
+    bindingIds: string[];
+  };
+  mcp: {
+    action: "refresh_after_rebuild";
+    bindingIds: string[];
+  };
+  diagnostics: {
+    brainModule?: string;
+    profileConfigured: boolean;
+    sessionsConfigured: number;
+    sessionsActive: number;
+  };
+}
+
+async function planServiceRuntimeRebuild(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<ServiceRuntimeRebuildPlan> {
+  const scope = command.target.scope;
+  if (scope !== "session" && scope !== "profile") {
+    throw new Error("runtime rebuild target scope must be session or profile");
+  }
+
+  const activeSessions = await state.bridge.listSessions();
+  const configuredSessions = state.runtimeConfig.sessions;
+  const configuredProfileIds = new Set(
+    state.runtimeConfig.brains.map((brain) => String(brain.profileId)),
+  );
+
+  let profileId: string;
+  let sessionIds: string[];
+  if (scope === "session") {
+    const sessionId = command.target.sessionId;
+    if (!sessionId) throw new Error("runtime rebuild session id is required");
+    const activeSession = activeSessions.find(
+      (session) => session.sessionId === sessionId,
+    );
+    const configuredSession = configuredSessions.find(
+      (session) => session.sessionId === sessionId,
+    );
+    profileId = activeSession?.profileId ?? configuredSession?.profileId ?? "";
+    if (!profileId) throw new Error(`session ${sessionId} was not found`);
+    sessionIds = [sessionId];
+  } else {
+    profileId = command.target.profileId ?? "";
+    if (!profileId) throw new Error("runtime rebuild profile id is required");
+    if (!configuredProfileIds.has(profileId)) {
+      throw new Error(`profile ${profileId} is not configured for a brain`);
+    }
+    sessionIds = [
+      ...new Set(
+        activeSessions
+          .filter((session) => session.profileId === profileId)
+          .map((session) => session.sessionId),
+      ),
+    ];
+  }
+
+  const channelBindingIds = state.runtimeConfig.channelBindings
+    .filter(
+      (binding) =>
+        binding.sessionId !== undefined &&
+        sessionIds.includes(binding.sessionId),
+    )
+    .map((binding) => binding.bindingId);
+  const mcpBindingIds = state.runtimeConfig.mcpBindings
+    .filter(
+      (binding) =>
+        binding.sessionId !== undefined &&
+        sessionIds.includes(binding.sessionId),
+    )
+    .map((binding) => binding.bindingId);
+  const brainModule =
+    state.runtimeConfigApplyResult.brainModulesByProfileId[profileId]?.moduleId;
+
+  return {
+    scope,
+    profileId,
+    sessionIds,
+    applySupported: false,
+    requiredAction: "brain_hot_swap_required",
+    preservesSessionId: true,
+    preservesHistory: true,
+    configReload: {
+      implicit: false,
+      requiredBeforeApply: true,
+    },
+    providerState: {
+      action: "discard",
+      reason:
+        "provider wire state is brain/provider/model scoped and must not be migrated opaquely",
+    },
+    queuedMessages: {
+      action: "preserve_existing_queue_without_redelivery",
+      ttlPolicy: "unchanged",
+    },
+    channelBindings: {
+      action: "unchanged",
+      bindingIds: channelBindingIds,
+    },
+    mcp: {
+      action: "refresh_after_rebuild",
+      bindingIds: mcpBindingIds,
+    },
+    diagnostics: {
+      brainModule,
+      profileConfigured: configuredProfileIds.has(profileId),
+      sessionsConfigured: configuredSessions.filter(
+        (session) => session.profileId === profileId,
+      ).length,
+      sessionsActive: activeSessions.filter(
+        (session) => session.profileId === profileId,
+      ).length,
+    },
+  };
+}
+
+function runtimeRebuildAffectedIds(
+  plan: ServiceRuntimeRebuildPlan,
+): Record<string, string | number> {
+  const affected: Record<string, string | number> = {
+    profileId: plan.profileId,
+    sessionCount: plan.sessionIds.length,
+  };
+  if (plan.sessionIds.length === 1) {
+    affected.sessionId = plan.sessionIds[0] ?? "";
+  }
+  return affected;
 }
 
 async function collectTableCounts(

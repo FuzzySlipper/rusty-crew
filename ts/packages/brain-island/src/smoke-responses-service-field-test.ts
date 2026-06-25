@@ -16,6 +16,9 @@ try {
   const client = createDebugApiClient({
     baseUrl: `http://127.0.0.1:${port}`,
     retries: 0,
+    timeoutMs:
+      Number(process.env.RUSTY_CREW_OPENAI_RESPONSES_SMOKE_TIMEOUT_MS) ||
+      (process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1" ? 60_000 : 2_000),
   });
 
   const initialProviderState = await providerStateDiagnostics();
@@ -51,14 +54,7 @@ try {
   );
 
   const firstEvents = await chatEvents();
-  assertChatKinds(firstEvents, [
-    "assistant_turn_started",
-    "tool_call_started",
-    "tool_call_completed",
-    "assistant_text_delta",
-    "assistant_message_completed",
-    "assistant_turn_finished",
-  ]);
+  assertChatKinds(firstEvents, expectedChatKinds());
 
   await host.stop();
   host = await startHost(root, port);
@@ -96,14 +92,7 @@ try {
   );
 
   const secondEvents = await chatEvents();
-  assertChatKinds(secondEvents, [
-    "assistant_turn_started",
-    "tool_call_started",
-    "tool_call_completed",
-    "assistant_text_delta",
-    "assistant_message_completed",
-    "assistant_turn_finished",
-  ]);
+  assertChatKinds(secondEvents, expectedChatKinds());
 
   console.log(
     JSON.stringify(
@@ -118,7 +107,7 @@ try {
         providerStateLastWakeId:
           secondState.providerState.sessions[0]?.lastWakeId,
         chatKinds: [...new Set(secondEvents.map((event) => event.kind))],
-        liveProvider: false,
+        liveProvider: process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1",
       },
       null,
       2,
@@ -127,6 +116,25 @@ try {
 } finally {
   await host.stop().catch(() => undefined);
   rmSync(root, { recursive: true, force: true });
+}
+
+function expectedChatKinds(): readonly ChatEvent["kind"][] {
+  if (process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1") {
+    return [
+      "assistant_turn_started",
+      "assistant_text_delta",
+      "assistant_message_completed",
+      "assistant_turn_finished",
+    ];
+  }
+  return [
+    "assistant_turn_started",
+    "tool_call_started",
+    "tool_call_completed",
+    "assistant_text_delta",
+    "assistant_message_completed",
+    "assistant_turn_finished",
+  ];
 }
 
 async function providerStateDiagnostics(): Promise<{
@@ -255,7 +263,9 @@ function writeRuntimeConfig(rootDir: string): void {
         displayName: "Responses Field Smoke",
         modelConfig: {
           provider: "openai",
-          modelName: "gpt-5",
+          modelName: process.env.RUSTY_CREW_OPENAI_RESPONSES_MODEL ?? "gpt-5",
+          baseUrl: process.env.RUSTY_CREW_OPENAI_RESPONSES_BASE_URL,
+          apiKeyEnv: process.env.RUSTY_CREW_OPENAI_RESPONSES_API_KEY_ENV,
           api: "responses",
         },
         brain: {

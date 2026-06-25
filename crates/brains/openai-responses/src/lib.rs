@@ -14,7 +14,8 @@ use rusty_crew_core_protocol::{
     CoreResult, ExternalEventPayload, ProviderStateAbsenceReason, ProviderStateMode,
     ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
 };
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
@@ -89,6 +90,7 @@ pub struct ResponsesRequest {
     pub tool_choice: Value,
     pub parallel_tool_calls: bool,
     pub reasoning: Option<Value>,
+    pub store: bool,
     pub stream: bool,
     pub include: Vec<String>,
     pub service_tier: Option<String>,
@@ -96,7 +98,7 @@ pub struct ResponsesRequest {
     pub text: Option<Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponsesInputItem {
     UserMessage {
@@ -124,6 +126,76 @@ pub enum ResponsesInputItem {
     ReplayHint {
         raw_json: Value,
     },
+}
+
+impl Serialize for ResponsesInputItem {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::UserMessage { content } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("type", "message")?;
+                map.serialize_entry("role", "user")?;
+                map.serialize_entry("content", content)?;
+                map.end()
+            }
+            Self::AssistantMessage { content } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("type", "message")?;
+                map.serialize_entry("role", "assistant")?;
+                map.serialize_entry("content", content)?;
+                map.end()
+            }
+            Self::Reasoning {
+                id,
+                summary,
+                encrypted_content,
+            } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "reasoning")?;
+                if let Some(id) = id {
+                    map.serialize_entry("id", id)?;
+                }
+                let summary_value = summary
+                    .as_ref()
+                    .map(|text| json!([{"type": "summary_text", "text": text}]))
+                    .unwrap_or_else(|| json!([]));
+                map.serialize_entry("summary", &summary_value)?;
+                if let Some(encrypted_content) = encrypted_content {
+                    map.serialize_entry("encrypted_content", encrypted_content)?;
+                }
+                map.end()
+            }
+            Self::FunctionCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "function_call")?;
+                if let Some(id) = id {
+                    map.serialize_entry("id", id)?;
+                }
+                map.serialize_entry("call_id", call_id)?;
+                map.serialize_entry("name", name)?;
+                map.serialize_entry("arguments", arguments)?;
+                map.end()
+            }
+            Self::FunctionCallOutput {
+                call_id, output, ..
+            } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("type", "function_call_output")?;
+                map.serialize_entry("call_id", call_id)?;
+                map.serialize_entry("output", output)?;
+                map.end()
+            }
+            Self::ReplayHint { raw_json } => raw_json.serialize(serializer),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,6 +261,7 @@ impl ResponsesRequestBuilder {
                     "include_encrypted_content": reasoning.include_encrypted_content
                 })
             }),
+            store: false,
             stream: true,
             include: self.config.include.clone(),
             service_tier: self.config.service_tier.clone(),
@@ -605,13 +678,13 @@ pub trait ResponsesClient {
 pub struct LiveResponsesClient {
     client: HttpClient,
     endpoint: String,
-    api_key: String,
+    api_key: Option<String>,
 }
 
 impl LiveResponsesClient {
     pub fn new(
         base_url: impl Into<String>,
-        api_key: impl Into<String>,
+        api_key: Option<String>,
         idle_timeout_ms: u64,
     ) -> Result<Self, ResponsesStreamError> {
         let base_url = base_url.into();
@@ -623,7 +696,7 @@ impl LiveResponsesClient {
         Ok(Self {
             client,
             endpoint,
-            api_key: api_key.into(),
+            api_key,
         })
     }
 }
@@ -633,11 +706,11 @@ impl ResponsesClient for LiveResponsesClient {
         &mut self,
         request: ResponsesRequest,
     ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
-        let response = self
-            .client
-            .post(&self.endpoint)
-            .bearer_auth(&self.api_key)
-            .json(&request)
+        let mut request = self.client.post(&self.endpoint).json(&request);
+        if let Some(api_key) = &self.api_key {
+            request = request.bearer_auth(api_key);
+        }
+        let response = request
             .send()
             .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
         let status = response.status();
@@ -1053,6 +1126,12 @@ where
                         metadata: Some(tool_metadata(&call)),
                     },
                 ));
+                continuation_items.push(ResponsesInputItem::FunctionCall {
+                    id: call.provider_item_id.clone(),
+                    call_id: call.call_id.clone(),
+                    name: call.name.clone(),
+                    arguments: call.arguments_json.clone(),
+                });
                 continuation_items.push(ResponsesInputItem::FunctionCallOutput {
                     call_id: call.call_id.clone(),
                     output: output.output.clone(),
@@ -1632,6 +1711,7 @@ mod tests {
             tool_choice: json!("auto"),
             parallel_tool_calls: true,
             reasoning: None,
+            store: false,
             stream: true,
             include: Vec::new(),
             service_tier: None,

@@ -15,6 +15,8 @@ export type AdminControlCommandName =
   | "create_session"
   | "archive_session"
   | "new_session"
+  | "plan_runtime_rebuild"
+  | "apply_runtime_rebuild"
   | "cancel_delegation"
   | "request_delegated_checkpoint"
   | "reload_config"
@@ -101,6 +103,12 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   newSession?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  planRuntimeRebuild?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  applyRuntimeRebuild?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   cancelDelegation?(
@@ -445,6 +453,56 @@ function parseControlCommand(
   }
 
   if (
+    parts.length === 7 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "sessions" &&
+    parts[5] === "rebuild-runtime"
+  ) {
+    const sessionId = parts[4] ?? "";
+    if (!sessionId) return invalidTarget(requestId, "missing_session_id");
+    if (parts[6] === "plan" || parts[6] === "apply") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name:
+            parts[6] === "plan"
+              ? "plan_runtime_rebuild"
+              : "apply_runtime_rebuild",
+          target: { scope: "session", sessionId },
+        },
+      };
+    }
+  }
+
+  if (
+    parts.length === 7 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "profiles" &&
+    parts[5] === "rebuild-brain"
+  ) {
+    const profileId = parts[4] ?? "";
+    if (!profileId) return invalidTarget(requestId, "missing_profile_id");
+    if (parts[6] === "plan" || parts[6] === "apply") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name:
+            parts[6] === "plan"
+              ? "plan_runtime_rebuild"
+              : "apply_runtime_rebuild",
+          target: { scope: "profile", profileId },
+        },
+      };
+    }
+  }
+
+  if (
     parts.length === 5 &&
     parts[0] === "v1" &&
     parts[1] === "admin" &&
@@ -777,6 +835,10 @@ function executorForCommand(
       return executor.archiveSession;
     case "new_session":
       return executor.newSession;
+    case "plan_runtime_rebuild":
+      return executor.planRuntimeRebuild;
+    case "apply_runtime_rebuild":
+      return executor.applyRuntimeRebuild;
     case "cancel_delegation":
       return executor.cancelDelegation;
     case "request_delegated_checkpoint":

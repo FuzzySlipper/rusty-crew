@@ -30,6 +30,18 @@ If a profile sets `modelConfig.apiKeyEnv`, that environment variable is used
 instead of `OPENAI_API_KEY`. `modelConfig.baseUrl` defaults to
 `https://api.openai.com/v1` when omitted.
 
+Local den-router can be used without an API key when its OAuth-backed `gpt`
+route is available:
+
+```bash
+RUSTY_CREW_OPENAI_RESPONSES_LIVE=1 \
+RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1 \
+RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY=1 \
+RUSTY_CREW_OPENAI_RESPONSES_BASE_URL=http://127.0.0.1:18082/v1 \
+RUSTY_CREW_OPENAI_RESPONSES_MODEL=gpt \
+npm run smoke:responses-service-field-test
+```
+
 Expected behavior:
 
 - the profile uses the same service/profile/provider-state path as the
@@ -38,4 +50,3 @@ Expected behavior:
   wake, survive restart, and update after the second wake;
 - live mode is never enabled unless `RUSTY_CREW_OPENAI_RESPONSES_LIVE=1` is set
   by the command/environment.
-

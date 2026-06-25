@@ -1273,7 +1273,8 @@ enum JsOpenAiResponsesClientConfig {
     Fake,
     Live {
         base_url: String,
-        api_key: String,
+        #[serde(default)]
+        api_key: Option<String>,
     },
 }
 

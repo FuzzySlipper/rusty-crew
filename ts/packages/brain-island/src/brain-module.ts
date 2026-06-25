@@ -260,14 +260,14 @@ export const localBrainModule: BrainModule = {
 
 function openAiResponsesClientConfig(
   context: BrainModuleContext,
-): { mode: "fake" } | { mode: "live"; baseUrl: string; apiKey: string } {
+): { mode: "fake" } | { mode: "live"; baseUrl: string; apiKey?: string } {
   if (process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE !== "1") {
     return { mode: "fake" };
   }
   const keyEnv =
     context.profile.profile.modelConfig.apiKeyEnv ?? "OPENAI_API_KEY";
   const apiKey = process.env[keyEnv];
-  if (!apiKey) {
+  if (!apiKey && process.env.RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY !== "1") {
     throw new Error(
       `openai-responses live client requested but ${keyEnv} is not set`,
     );
@@ -277,7 +277,7 @@ function openAiResponsesClientConfig(
     baseUrl:
       context.profile.profile.modelConfig.baseUrl ??
       "https://api.openai.com/v1",
-    apiKey,
+    ...(apiKey ? { apiKey } : {}),
   };
 }
 
