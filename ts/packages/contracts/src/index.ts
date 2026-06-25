@@ -697,6 +697,11 @@ export interface BrainStrategyMetadata {
   providerState: BrainProviderStateStrategyMetadata;
 }
 
+export interface BrainProviderStateScope {
+  profileFingerprint: string;
+  providerFingerprint: string;
+}
+
 export type ProviderStateAbsenceReason =
   | "not_configured"
   | "missing"
@@ -835,6 +840,7 @@ export interface BrainImplementationRegistration {
   toolProfile: ToolProfile;
   modelConfig: BrainModelConfig;
   strategy?: BrainStrategyMetadata;
+  providerStateScope?: BrainProviderStateScope;
 }
 
 export type PlatformAdapterKind = "den" | "telegram" | "mcp" | "tui" | "cli";

@@ -158,6 +158,18 @@ try {
               },
             },
           ],
+          providerState: {
+            type: "replace",
+            state: {
+              moduleId: "openai-responses",
+              strategyId: "replay",
+              profileFingerprint: "profile-fingerprint",
+              providerFingerprint: "provider-fingerprint",
+              payloadVersion: "provider-owned-v1",
+              payload: { responseId: "resp-unregistered" },
+              ttlMs: 60_000,
+            },
+          },
         };
       },
     },
@@ -178,7 +190,7 @@ try {
   assert.deepEqual(accepted, { wakeId, accepted: true });
 
   const observed = await native.drainSubscriptionEvents(eventSubscription, 8);
-  assert.equal(observed.length, 4);
+  assert.equal(observed.length, 5);
   assert.deepEqual(
     observed.map((event) => event.type),
     [
@@ -186,6 +198,7 @@ try {
       "brain_event_observed",
       "brain_event_observed",
       "brain_actions_accepted",
+      "brain_event_observed",
     ],
   );
   assert.deepEqual(observed[1], {
@@ -199,6 +212,28 @@ try {
       metadataJson: JSON.stringify({ recovered: true }),
     },
   });
+  assert.equal(observed[4]?.type, "brain_event_observed");
+  assert.equal(observed[4]?.sessionId, sessionId);
+  assert.equal(observed[4]?.wakeId, wakeId);
+  assert.deepEqual(
+    observed[4]?.type === "brain_event_observed"
+      ? {
+          type: observed[4].event.type,
+          level:
+            observed[4].event.type === "provider_status"
+              ? observed[4].event.level
+              : undefined,
+        }
+      : undefined,
+    { type: "provider_status", level: "degraded" },
+  );
+  assert.match(
+    observed[4]?.type === "brain_event_observed" &&
+      observed[4].event.type === "provider_status"
+      ? observed[4].event.message
+      : "",
+    /^provider state save failed:/,
+  );
   await native.unsubscribeEvents(eventSubscription);
 
   console.log(

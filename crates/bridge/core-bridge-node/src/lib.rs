@@ -7,11 +7,12 @@
 use rusty_crew_core_bridge_api::{
     manifest_summary, ActionBatchReceipt, BrainActionBatch, BrainEventEnvelope,
     BrainImplementationHandle, BrainImplementationRegistration, BrainWakeAccepted,
-    BrainWakeBufferInput, BrainWakeRequest, BridgeManifestSummary, CoreError, CoreErrorKind,
-    CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt,
-    EventSubscription, ExternalEvent, PlatformAdapterHandle, PlatformAdapterRegistration,
-    RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest,
-    ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
+    BrainWakeBufferInput, BrainWakeProviderStateOutput, BrainWakeRequest, BridgeManifestSummary,
+    CoreError, CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle,
+    EventReceipt, EventSubscription, ExternalEvent, PlatformAdapterHandle,
+    PlatformAdapterRegistration, RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView,
+    SessionId, ShutdownRequest, ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION,
+    OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
     plan_create_profile, plan_runtime_config, validate_runtime_config_input, CreateProfilePlan,
@@ -504,7 +505,9 @@ impl NativeBridge {
         &self,
         input: BrainWakeBufferInput,
     ) -> CoreResult<rusty_crew_core_bridge_api::BufferedBrainWakeRequest> {
-        self.buffers.build_brain_wake_request(input)
+        let mut buffered = self.buffers.build_brain_wake_request(input)?;
+        self.hydrate_provider_state(&mut buffered.request)?;
+        Ok(buffered)
     }
 
     pub fn build_brain_wake_request_for_session(
@@ -530,6 +533,31 @@ impl NativeBridge {
             role_assembly_json,
             wake_id,
         })
+    }
+
+    fn hydrate_provider_state(&self, request: &mut BrainWakeRequest) -> CoreResult<()> {
+        let Ok(registration) = self.brain_registrations.get(request.brain) else {
+            return Ok(());
+        };
+        let Some(engine) = &self.engine else {
+            return Ok(());
+        };
+        let hydration = engine.provider_state_for_wake(registration, &request.session_id)?;
+        request.provider_state = hydration.state;
+        request.provider_state_absence = hydration.absence_reason;
+        Ok(())
+    }
+
+    pub fn apply_provider_state_output(
+        &self,
+        brain: BrainImplementationHandle,
+        session_id: &SessionId,
+        wake_id: &str,
+        output: BrainWakeProviderStateOutput,
+    ) -> CoreResult<()> {
+        let registration = self.brain_registrations.get(brain)?;
+        self.engine()?
+            .apply_provider_state_output(registration, session_id, wake_id, output)
     }
 
     pub fn get_buffer(&self, handle: RuntimeBufferHandle) -> CoreResult<RuntimeBufferView> {
@@ -892,12 +920,19 @@ pub struct JsBrainStrategyMetadata {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsBrainProviderStateScope {
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsBrainImplementationRegistration {
     pub implementation_id: String,
     pub profile_id: String,
     pub tool_profile: JsToolProfile,
     pub model_config: JsBrainModelConfig,
     pub strategy: Option<JsBrainStrategyMetadata>,
+    pub provider_state_scope: Option<JsBrainProviderStateScope>,
 }
 
 #[napi_derive::napi(object)]
@@ -1134,6 +1169,8 @@ pub struct JsBufferedBrainWakeRequest {
     pub body_state: u32,
     pub system_prompt: u32,
     pub role_assembly: u32,
+    pub provider_state_json: Option<String>,
+    pub provider_state_absence: Option<String>,
 }
 
 #[napi_derive::napi(object)]
@@ -1307,6 +1344,21 @@ impl NativeBridgeBinding {
             body_state: handle_to_u32(buffered.request.body_state)?,
             system_prompt: handle_to_u32(buffered.request.system_prompt)?,
             role_assembly: handle_to_u32(buffered.request.role_assembly)?,
+            provider_state_json: buffered
+                .request
+                .provider_state
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                })?,
+            provider_state_absence: buffered
+                .request
+                .provider_state_absence
+                .as_ref()
+                .map(provider_state_absence_reason_as_str)
+                .map(str::to_string),
         })
     }
 
@@ -1333,7 +1385,42 @@ impl NativeBridgeBinding {
             body_state: handle_to_u32(buffered.request.body_state)?,
             system_prompt: handle_to_u32(buffered.request.system_prompt)?,
             role_assembly: handle_to_u32(buffered.request.role_assembly)?,
+            provider_state_json: buffered
+                .request
+                .provider_state
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                })?,
+            provider_state_absence: buffered
+                .request
+                .provider_state_absence
+                .as_ref()
+                .map(provider_state_absence_reason_as_str)
+                .map(str::to_string),
         })
+    }
+
+    #[napi]
+    pub fn apply_brain_provider_state_output_json(
+        &self,
+        brain: f64,
+        session_id: String,
+        wake_id: String,
+        output_json: String,
+    ) -> napi::Result<()> {
+        let bridge = self.bridge()?;
+        let output = parse_brain_provider_state_output_json(&output_json).map_err(to_napi_error)?;
+        bridge
+            .apply_provider_state_output(
+                BrainImplementationHandle::new(brain as u64),
+                &rusty_crew_core_bridge_api::SessionId::new(session_id),
+                &wake_id,
+                output,
+            )
+            .map_err(to_napi_error)
     }
 
     #[napi]
@@ -2586,6 +2673,12 @@ fn to_brain_registration(
             .strategy
             .map(to_brain_strategy_metadata)
             .transpose()?,
+        provider_state_scope: registration.provider_state_scope.map(|scope| {
+            rusty_crew_core_bridge_api::BrainProviderStateScope {
+                profile_fingerprint: scope.profile_fingerprint,
+                provider_fingerprint: scope.provider_fingerprint,
+            }
+        }),
     })
 }
 
@@ -2612,6 +2705,77 @@ fn parse_provider_state_mode(
             napi::Status::InvalidArg,
             format!("unknown provider state mode {mode}"),
         )),
+    }
+}
+
+fn parse_brain_provider_state_output_json(raw: &str) -> CoreResult<BrainWakeProviderStateOutput> {
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum WireOutput {
+        Unchanged,
+        Replace { state: WireUpdate },
+        Clear { reason: WireClearReason },
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct WireUpdate {
+        module_id: String,
+        strategy_id: String,
+        profile_fingerprint: String,
+        provider_fingerprint: String,
+        payload_version: String,
+        payload: serde_json::Value,
+        ttl_ms: Option<u64>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum WireClearReason {
+        BrainRequestedClear,
+    }
+
+    let parsed = serde_json::from_str::<WireOutput>(raw).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("invalid provider state output json: {error}"),
+        )
+    })?;
+    Ok(match parsed {
+        WireOutput::Unchanged => BrainWakeProviderStateOutput::Unchanged,
+        WireOutput::Replace { state } => BrainWakeProviderStateOutput::Replace {
+            state: rusty_crew_core_bridge_api::BrainWakeProviderStateUpdate {
+                module_id: state.module_id,
+                strategy_id: state.strategy_id,
+                profile_fingerprint: state.profile_fingerprint,
+                provider_fingerprint: state.provider_fingerprint,
+                payload_version: state.payload_version,
+                payload: state.payload,
+                ttl_ms: state.ttl_ms,
+            },
+        },
+        WireOutput::Clear { reason } => BrainWakeProviderStateOutput::Clear {
+            reason: match reason {
+                WireClearReason::BrainRequestedClear => {
+                    rusty_crew_core_bridge_api::ProviderStateClearReason::BrainRequestedClear
+                }
+            },
+        },
+    })
+}
+
+fn provider_state_absence_reason_as_str(
+    reason: &rusty_crew_core_bridge_api::ProviderStateAbsenceReason,
+) -> &'static str {
+    match reason {
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::NotConfigured => "not_configured",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Missing => "missing",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Expired => "expired",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Invalidated => "invalidated",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::ModuleDoesNotUseState => {
+            "module_does_not_use_state"
+        }
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::LoadFailed => "load_failed",
     }
 }
 
@@ -2708,7 +2872,9 @@ mod tests {
     use super::*;
     use rusty_crew_core_bridge_api::{
         AgentId, BrainAction, BrainActionBatch, BrainImplementationHandle, BrainImplementationId,
-        BrainModelConfig, CoreEventKind, EventSubscription, ProfileId, ResourceLimits,
+        BrainModelConfig, BrainProviderStateScope, BrainProviderStateStrategyMetadata,
+        BrainStrategyMetadata, BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate,
+        CoreEventKind, EventSubscription, ProfileId, ProviderStateMode, ResourceLimits,
         SessionConfig, SessionId, SessionKind, ShutdownRequest, ToolDescriptor, ToolProfile,
     };
 
@@ -2899,6 +3065,142 @@ mod tests {
     }
 
     #[test]
+    fn native_bridge_hydrates_and_updates_provider_state_around_wakes() {
+        let mut bridge = NativeBridge::new();
+        bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: std::env::temp_dir()
+                    .join(format!(
+                        "rusty-crew-native-provider-state-{}",
+                        std::process::id()
+                    ))
+                    .to_string_lossy()
+                    .to_string(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                    at: "2026-06-24T00:00:00Z".to_string(),
+                },
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1000,
+            })
+            .unwrap();
+        let optional_handle = bridge
+            .register_brain_implementation(provider_state_brain_registration(
+                "optional-provider-brain",
+                "optional-provider-profile",
+                ProviderStateMode::Optional,
+            ))
+            .unwrap();
+        let required_handle = bridge
+            .register_brain_implementation(provider_state_brain_registration(
+                "required-provider-brain",
+                "required-provider-profile",
+                ProviderStateMode::Required,
+            ))
+            .unwrap();
+        bridge
+            .create_session(provider_state_session_config(
+                "optional-provider-session",
+                "optional-provider-profile",
+            ))
+            .unwrap();
+        bridge
+            .create_session(provider_state_session_config(
+                "required-provider-session",
+                "required-provider-profile",
+            ))
+            .unwrap();
+
+        let first_optional = bridge
+            .build_brain_wake_request_for_session(
+                optional_handle,
+                SessionId::new("optional-provider-session"),
+                "system".to_string(),
+                b"{}".to_vec(),
+                "wake-1".to_string(),
+            )
+            .unwrap();
+        assert!(first_optional.request.provider_state.is_none());
+        assert_eq!(
+            first_optional.request.provider_state_absence,
+            Some(rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Missing)
+        );
+
+        bridge
+            .apply_provider_state_output(
+                optional_handle,
+                &SessionId::new("optional-provider-session"),
+                "wake-1",
+                BrainWakeProviderStateOutput::Replace {
+                    state: BrainWakeProviderStateUpdate {
+                        module_id: "openai-responses".to_string(),
+                        strategy_id: "replay".to_string(),
+                        profile_fingerprint: "profile-fingerprint".to_string(),
+                        provider_fingerprint: "provider-fingerprint".to_string(),
+                        payload_version: "provider-owned-v1".to_string(),
+                        payload: serde_json::json!({"response_id": "resp-1"}),
+                        ttl_ms: Some(60_000),
+                    },
+                },
+            )
+            .unwrap();
+        let hydrated = bridge
+            .build_brain_wake_request_for_session(
+                optional_handle,
+                SessionId::new("optional-provider-session"),
+                "system".to_string(),
+                b"{}".to_vec(),
+                "wake-2".to_string(),
+            )
+            .unwrap();
+        let state = hydrated
+            .request
+            .provider_state
+            .expect("provider state should hydrate after replace");
+        assert_eq!(state.module_id, "openai-responses");
+        assert_eq!(state.strategy_id, "replay");
+        assert_eq!(state.payload_version, "provider-owned-v1");
+        assert_eq!(state.payload, serde_json::json!({"response_id": "resp-1"}));
+        assert!(hydrated.request.provider_state_absence.is_none());
+
+        bridge
+            .apply_provider_state_output(
+                optional_handle,
+                &SessionId::new("optional-provider-session"),
+                "wake-2",
+                BrainWakeProviderStateOutput::Clear {
+                    reason:
+                        rusty_crew_core_bridge_api::ProviderStateClearReason::BrainRequestedClear,
+                },
+            )
+            .unwrap();
+        let after_clear = bridge
+            .build_brain_wake_request_for_session(
+                optional_handle,
+                SessionId::new("optional-provider-session"),
+                "system".to_string(),
+                b"{}".to_vec(),
+                "wake-3".to_string(),
+            )
+            .unwrap();
+        assert!(after_clear.request.provider_state.is_none());
+        assert_eq!(
+            after_clear.request.provider_state_absence,
+            Some(rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Missing)
+        );
+
+        let required_error = bridge
+            .build_brain_wake_request_for_session(
+                required_handle,
+                SessionId::new("required-provider-session"),
+                "system".to_string(),
+                b"{}".to_vec(),
+                "wake-required".to_string(),
+            )
+            .expect_err("required state should fail before provider invocation");
+        assert_eq!(required_error.kind, CoreErrorKind::BrainUnavailable);
+    }
+
+    #[test]
     fn native_bridge_submits_brain_events_to_the_engine() {
         let mut bridge = NativeBridge::new();
         bridge
@@ -3016,6 +3318,42 @@ mod tests {
             strategy: Some(rusty_crew_core_bridge_api::BrainStrategyMetadata::unused(
                 "local", "default",
             )),
+            provider_state_scope: None,
+        }
+    }
+
+    fn provider_state_brain_registration(
+        implementation_id: &str,
+        profile_id: &str,
+        mode: ProviderStateMode,
+    ) -> BrainImplementationRegistration {
+        let mut registration = brain_registration(implementation_id, profile_id);
+        registration.strategy = Some(BrainStrategyMetadata {
+            module_id: "openai-responses".to_string(),
+            strategy_id: "replay".to_string(),
+            provider_state: BrainProviderStateStrategyMetadata { mode },
+        });
+        registration.provider_state_scope = Some(BrainProviderStateScope {
+            profile_fingerprint: "profile-fingerprint".to_string(),
+            provider_fingerprint: "provider-fingerprint".to_string(),
+        });
+        registration
+    }
+
+    fn provider_state_session_config(session_id: &str, profile_id: &str) -> SessionConfig {
+        SessionConfig {
+            session_id: SessionId::new(session_id),
+            agent_id: AgentId::new(format!("agent:{session_id}")),
+            profile_id: ProfileId::new(profile_id),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+            tool_profile: ToolProfile { tools: Vec::new() },
+            history_window: None,
         }
     }
 }

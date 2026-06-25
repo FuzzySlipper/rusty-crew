@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
@@ -696,6 +697,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
     const selection = resolveBrainModuleSelection(profile.profile);
     const module = brainModuleRegistry.require(selection.moduleId);
     const strategy = resolveBrainStrategyMetadata(module, selection);
+    const providerStateScope = providerStateScopeForProfile(profile, strategy);
     result.brainModulesByProfileId[brain.profileId] = selection;
     result.brainDiagnosticsByProfileId[brain.profileId] =
       brainModuleDiagnostics({
@@ -713,6 +715,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           toolProfile: profile.toolSelection.toolProfile,
           modelConfig: profile.profile.modelConfig,
           strategy,
+          providerStateScope,
         },
         toBridgeWakeExecutor(
           await createConfiguredBrain(module, profile, {
@@ -971,6 +974,62 @@ function brainModuleDiagnostics(input: {
     selectedToolSource: input.profile.toolSelection.catalogId,
     toolAdapterStatus: input.module.diagnostics.toolAdapterStatus,
   };
+}
+
+function providerStateScopeForProfile(
+  profile: Awaited<ReturnType<typeof loadProfileContext>>,
+  strategy: ReturnType<typeof resolveBrainStrategyMetadata>,
+) {
+  return {
+    profileFingerprint: stableFingerprint({
+      profileId: profile.profile.profileId,
+      moduleId: strategy.moduleId,
+      strategyId: strategy.strategyId,
+      displayName: profile.profile.displayName,
+      prompt: profile.profile.prompt,
+      skills: profile.skills.map((skill) => ({
+        slug: skill.slug,
+        sourcePath: skill.sourcePath,
+        bodyMarkdown: skill.bodyMarkdown,
+      })),
+      toolProfile: profile.toolSelection.toolProfile,
+      toolCatalogId: profile.toolSelection.catalogId,
+      runtime: profile.profile.runtime,
+      memoryConfig: profile.profile.memoryConfig,
+      mcpConfig: profile.profile.mcpConfig,
+    }),
+    providerFingerprint: stableFingerprint({
+      moduleId: strategy.moduleId,
+      strategyId: strategy.strategyId,
+      modelConfig: profile.profile.modelConfig,
+      providerStateMode: strategy.providerState.mode,
+    }),
+  };
+}
+
+function stableFingerprint(value: unknown): string {
+  return createHash("sha256")
+    .update(stableJson(value))
+    .digest("hex");
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJsonValue(value));
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJsonValue);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, sortJsonValue(entry)]),
+    );
+  }
+  return value;
 }
 
 async function createConfiguredBrain(

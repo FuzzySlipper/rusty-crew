@@ -7,22 +7,27 @@ use rusty_crew_core_body::{
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
     CoordinationStore, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
-    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, QueryPage,
-    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
-    RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary,
-    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
+    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
+    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
+    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+    QueuedMessageState, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
+    RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeStateSummary, ScheduledJobQuery, ScheduledJobRecord,
+    ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus,
+    ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
-    BrainActionBatch, BrainEvent, BrainEventEnvelope, ClockConfig, CompletionStatus, CoreError,
-    CoreErrorKind, CoreEvent, CoreResult, DelegatedResourceCleanupReport, DelegatedRunStatus,
+    BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainImplementationRegistration,
+    BrainProviderStateScope, BrainWakeProviderStateInput, BrainWakeProviderStateOutput,
+    BrainWakeProviderStateUpdate, ClockConfig, CompletionStatus, CoreError, CoreErrorKind,
+    CoreEvent, CoreResult, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
     DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
     ExternalEvent, FanOutFailurePolicy, IsoTimestamp, ParentConsumptionPolicy, ProfileId,
-    ResourceLimits, RunId, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
-    ShutdownSummary, ToolProfile,
+    ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId,
+    SessionConfig, SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary,
+    ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -40,6 +45,14 @@ static NEXT_QUEUED_MESSAGE: AtomicU64 = AtomicU64::new(1);
 
 const SCHEDULED_WAKE_JOB_KIND: &str = "runtime.wake.session";
 const SCHEDULER_CLAIM_TTL_MS: u64 = 30_000;
+const DEFAULT_PROVIDER_WIRE_STATE_TTL_MS: u64 = 24 * 60 * 60 * 1_000;
+const MAX_PROVIDER_WIRE_STATE_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderStateHydration {
+    pub state: Option<BrainWakeProviderStateInput>,
+    pub absence_reason: Option<ProviderStateAbsenceReason>,
+}
 
 #[derive(Debug, Clone)]
 pub struct CoreEngine {
@@ -222,6 +235,168 @@ impl CoreEngine {
             .pending_messages
             .extend(queued.into_iter().map(|record| record.message));
         Ok(state)
+    }
+
+    pub fn provider_state_for_wake(
+        &self,
+        registration: &BrainImplementationRegistration,
+        session_id: &SessionId,
+    ) -> CoreResult<ProviderStateHydration> {
+        let Some(strategy) = &registration.strategy else {
+            return Ok(ProviderStateHydration {
+                state: None,
+                absence_reason: Some(ProviderStateAbsenceReason::NotConfigured),
+            });
+        };
+        match strategy.provider_state.mode {
+            ProviderStateMode::Unused => {
+                return Ok(ProviderStateHydration {
+                    state: None,
+                    absence_reason: Some(ProviderStateAbsenceReason::ModuleDoesNotUseState),
+                });
+            }
+            ProviderStateMode::Optional | ProviderStateMode::Required => {}
+        }
+        let Some(scope) = &registration.provider_state_scope else {
+            return self.provider_state_unavailable_for_mode(
+                strategy.provider_state.mode.clone(),
+                ProviderStateAbsenceReason::NotConfigured,
+            );
+        };
+        let key = provider_wire_state_key(session_id, &strategy.module_id, &strategy.strategy_id);
+        let lookup = ProviderWireStateWakeLookup {
+            key,
+            profile_fingerprint: scope.profile_fingerprint.clone(),
+            provider_fingerprint: scope.provider_fingerprint.clone(),
+            now: self.now(),
+        };
+        let loaded = match self.store.load_provider_wire_state_for_wake(&lookup) {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                if strategy.provider_state.mode == ProviderStateMode::Optional {
+                    return Ok(ProviderStateHydration {
+                        state: None,
+                        absence_reason: Some(ProviderStateAbsenceReason::LoadFailed),
+                    });
+                }
+                return Err(error);
+            }
+        };
+        let Some(record) = loaded.record else {
+            return self.provider_state_unavailable_for_mode(
+                strategy.provider_state.mode.clone(),
+                loaded
+                    .absence_reason
+                    .unwrap_or(ProviderStateAbsenceReason::Missing),
+            );
+        };
+        Ok(ProviderStateHydration {
+            state: Some(BrainWakeProviderStateInput {
+                module_id: record.key.module_id,
+                strategy_id: record.key.strategy_id,
+                profile_fingerprint: record.profile_fingerprint,
+                provider_fingerprint: record.provider_fingerprint,
+                payload_version: record.payload_version,
+                payload: record.payload_json,
+                expires_at: record.expires_at,
+            }),
+            absence_reason: None,
+        })
+    }
+
+    pub fn apply_provider_state_output(
+        &self,
+        registration: &BrainImplementationRegistration,
+        session_id: &SessionId,
+        wake_id: &str,
+        output: BrainWakeProviderStateOutput,
+    ) -> CoreResult<()> {
+        match output {
+            BrainWakeProviderStateOutput::Unchanged => Ok(()),
+            BrainWakeProviderStateOutput::Replace { state } => {
+                self.replace_provider_state(registration, session_id, wake_id, state)
+            }
+            BrainWakeProviderStateOutput::Clear { reason } => {
+                self.clear_provider_state(registration, session_id, reason)
+            }
+        }
+    }
+
+    fn provider_state_unavailable_for_mode(
+        &self,
+        mode: ProviderStateMode,
+        absence_reason: ProviderStateAbsenceReason,
+    ) -> CoreResult<ProviderStateHydration> {
+        if mode == ProviderStateMode::Required {
+            return Err(CoreError::new(
+                CoreErrorKind::BrainUnavailable,
+                format!("required provider state unavailable: {absence_reason:?}"),
+            ));
+        }
+        Ok(ProviderStateHydration {
+            state: None,
+            absence_reason: Some(absence_reason),
+        })
+    }
+
+    fn replace_provider_state(
+        &self,
+        registration: &BrainImplementationRegistration,
+        session_id: &SessionId,
+        wake_id: &str,
+        state: BrainWakeProviderStateUpdate,
+    ) -> CoreResult<()> {
+        let (module_id, strategy_id) = provider_state_registration_key(registration)?;
+        if state.module_id != module_id || state.strategy_id != strategy_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "provider state update targeted {}/{}, registered brain uses {}/{}",
+                    state.module_id, state.strategy_id, module_id, strategy_id
+                ),
+            ));
+        }
+        if let Some(scope) = &registration.provider_state_scope {
+            validate_provider_state_update_scope(&state, scope)?;
+        }
+        let ttl_ms = state
+            .ttl_ms
+            .unwrap_or(DEFAULT_PROVIDER_WIRE_STATE_TTL_MS)
+            .min(MAX_PROVIDER_WIRE_STATE_TTL_MS);
+        let now = self.now();
+        let expires_at = add_millis_to_iso(&now, ttl_ms)?;
+        self.store
+            .save_provider_wire_state(&ProviderWireStateWrite {
+                key: provider_wire_state_key(session_id, &module_id, &strategy_id),
+                profile_fingerprint: state.profile_fingerprint,
+                provider_fingerprint: state.provider_fingerprint,
+                payload_version: state.payload_version,
+                payload_json: state.payload,
+                now,
+                expires_at: Some(expires_at),
+                last_wake_id: Some(wake_id.to_string()),
+            })?;
+        Ok(())
+    }
+
+    fn clear_provider_state(
+        &self,
+        registration: &BrainImplementationRegistration,
+        session_id: &SessionId,
+        reason: ProviderStateClearReason,
+    ) -> CoreResult<()> {
+        let (module_id, strategy_id) = provider_state_registration_key(registration)?;
+        let invalidation_reason = match reason {
+            ProviderStateClearReason::BrainRequestedClear => {
+                ProviderWireStateInvalidationReason::BrainRequestedClear
+            }
+        };
+        self.store.clear_provider_wire_state(
+            &provider_wire_state_key(session_id, &module_id, &strategy_id),
+            &self.now(),
+            invalidation_reason,
+        )?;
+        Ok(())
     }
 
     pub fn enqueue_body_follow_up_message(
@@ -1711,6 +1886,55 @@ fn next_queued_message_id(session_id: &SessionId) -> String {
         .map_or(0, |duration| duration.as_nanos());
     let sequence = NEXT_QUEUED_MESSAGE.fetch_add(1, Ordering::Relaxed);
     format!("follow-up:{session_id}:{nanos}:{sequence}")
+}
+
+fn provider_wire_state_key(
+    session_id: &SessionId,
+    module_id: &str,
+    strategy_id: &str,
+) -> ProviderWireStateKey {
+    ProviderWireStateKey {
+        session_id: session_id.clone(),
+        module_id: module_id.to_string(),
+        strategy_id: strategy_id.to_string(),
+    }
+}
+
+fn provider_state_registration_key(
+    registration: &BrainImplementationRegistration,
+) -> CoreResult<(String, String)> {
+    let Some(strategy) = &registration.strategy else {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "brain registration has no provider-state strategy metadata",
+        ));
+    };
+    if strategy.provider_state.mode == ProviderStateMode::Unused {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "brain registration does not use provider state",
+        ));
+    }
+    Ok((strategy.module_id.clone(), strategy.strategy_id.clone()))
+}
+
+fn validate_provider_state_update_scope(
+    state: &BrainWakeProviderStateUpdate,
+    scope: &BrainProviderStateScope,
+) -> CoreResult<()> {
+    if state.profile_fingerprint != scope.profile_fingerprint {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "provider state update profile fingerprint does not match registered scope",
+        ));
+    }
+    if state.provider_fingerprint != scope.provider_fingerprint {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "provider state update provider fingerprint does not match registered scope",
+        ));
+    }
+    Ok(())
 }
 
 fn delegated_run_status(status: WorkerRunStatus) -> DelegatedRunStatus {

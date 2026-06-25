@@ -742,6 +742,12 @@ pub struct BrainStrategyMetadata {
     pub provider_state: BrainProviderStateStrategyMetadata,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrainProviderStateScope {
+    pub profile_fingerprint: String,
+    pub provider_fingerprint: String,
+}
+
 impl BrainStrategyMetadata {
     pub fn unused(module_id: impl Into<String>, strategy_id: impl Into<String>) -> Self {
         Self {
@@ -872,6 +878,8 @@ pub struct BrainImplementationRegistration {
     pub model_config: BrainModelConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy: Option<BrainStrategyMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state_scope: Option<BrainProviderStateScope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

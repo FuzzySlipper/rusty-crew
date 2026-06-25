@@ -394,6 +394,7 @@ dependencies = [
  "rusty-crew-core-config",
  "rusty-crew-core-engine",
  "rusty-crew-core-persistence",
+ "serde",
  "serde_json",
 ]
 

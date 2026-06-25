@@ -12,7 +12,9 @@ import type {
   BrainEventEnvelope,
   BrainImplementationHandle,
   BrainImplementationRegistration,
+  BrainProviderStateScope,
   BrainWakeProviderStateOutput,
+  BrainWakeProviderStateInput,
   BrainWakeAccepted,
   BrainWakeFailure,
   BrainWakeRequest,
@@ -104,7 +106,17 @@ interface NativeBridgeBinding {
         mode: string;
       };
     };
+    providerStateScope?: {
+      profileFingerprint: string;
+      providerFingerprint: string;
+    };
   }): number;
+  applyBrainProviderStateOutputJson(
+    brain: number,
+    sessionId: string,
+    wakeId: string,
+    outputJson: string,
+  ): void;
   registerPlatformAdapter(registration: {
     adapterId: string;
     kind: string;
@@ -267,6 +279,8 @@ interface NativeBridgeBinding {
     bodyState: number;
     systemPrompt: number;
     roleAssembly: number;
+    providerStateJson?: string;
+    providerStateAbsence?: string;
   };
   buildBrainWakeRequestForSession(
     brain: number,
@@ -278,6 +292,8 @@ interface NativeBridgeBinding {
     bodyState: number;
     systemPrompt: number;
     roleAssembly: number;
+    providerStateJson?: string;
+    providerStateAbsence?: string;
   };
   projectBodyStateJson(sessionId: string): Uint8Array;
   submitBrainActionsJson(
@@ -346,6 +362,16 @@ export interface BrainWakeExecutionResult {
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
   stream?: BrainWakeStreamItem[];
+}
+
+interface NativeBrainWakeProviderStateInput {
+  module_id: string;
+  strategy_id: string;
+  profile_fingerprint: string;
+  provider_fingerprint: string;
+  payload_version: string;
+  payload: unknown;
+  expires_at?: string;
 }
 
 export interface BrainWakeExecutor {
@@ -1053,6 +1079,44 @@ function unavailable<Args extends unknown[], Result>(
   };
 }
 
+function providerStateFromBufferedWake(buffered: {
+  providerStateJson?: string;
+  providerStateAbsence?: string;
+}): Pick<BrainWakeRequest, "providerState" | "providerStateAbsence"> {
+  const providerState =
+    buffered.providerStateJson === undefined
+      ? undefined
+      : providerStateInputFromNativeJson(buffered.providerStateJson);
+  return {
+    ...(providerState === undefined ? {} : { providerState }),
+    ...(buffered.providerStateAbsence === undefined
+      ? {}
+      : {
+          providerStateAbsence:
+            buffered.providerStateAbsence as BrainWakeRequest["providerStateAbsence"],
+        }),
+  };
+}
+
+function providerStateInputFromNativeJson(
+  raw: string,
+): BrainWakeProviderStateInput {
+  const parsed = JSON.parse(raw) as NativeBrainWakeProviderStateInput;
+  return {
+    moduleId: parsed.module_id,
+    strategyId: parsed.strategy_id,
+    profileFingerprint: parsed.profile_fingerprint,
+    providerFingerprint: parsed.provider_fingerprint,
+    payloadVersion: parsed.payload_version,
+    payload: parsed.payload,
+    ...(parsed.expires_at === undefined ? {} : { expiresAt: parsed.expires_at }),
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function loadNativeAddon(): NativeAddon | undefined {
   const artifactName = nativeArtifactName();
   if (!artifactName) {
@@ -1123,6 +1187,14 @@ function createNativeBridgeModule(
               },
             }
           : undefined,
+        providerStateScope: registration.providerStateScope
+          ? {
+              profileFingerprint:
+                registration.providerStateScope.profileFingerprint,
+              providerFingerprint:
+                registration.providerStateScope.providerFingerprint,
+            }
+          : undefined,
       }) as BrainImplementationHandle,
     registerBrainRuntime: async (registration, executor) => {
       const handle = await module.registerBrainImplementation(registration);
@@ -1153,6 +1225,26 @@ function createNativeBridgeModule(
             throw new Error(
               `brain wake ${item.failure.wakeId} failed: ${item.failure.message}`,
             );
+        }
+      }
+      if (result.providerState !== undefined) {
+        try {
+          binding.applyBrainProviderStateOutputJson(
+            request.brain,
+            request.sessionId,
+            request.wakeId,
+            JSON.stringify(result.providerState),
+          );
+        } catch (error) {
+          await module.submitBrainEvent({
+            wakeId: request.wakeId,
+            sessionId: request.sessionId,
+            event: {
+              type: "provider_status",
+              level: "degraded",
+              message: `provider state save failed: ${errorMessage(error)}`,
+            },
+          });
         }
       }
       return { wakeId: request.wakeId, accepted: true };
@@ -1379,6 +1471,7 @@ function createNativeBridgeModule(
         systemPrompt: buffered.systemPrompt as RuntimeBufferHandle,
         roleAssembly: buffered.roleAssembly as RuntimeBufferHandle,
         wakeId: input.wakeId,
+        ...providerStateFromBufferedWake(buffered),
       };
     },
     buildBrainWakeRequestForSession: async (input) => {
@@ -1396,6 +1489,7 @@ function createNativeBridgeModule(
         systemPrompt: buffered.systemPrompt as RuntimeBufferHandle,
         roleAssembly: buffered.roleAssembly as RuntimeBufferHandle,
         wakeId: input.wakeId,
+        ...providerStateFromBufferedWake(buffered),
       };
     },
     diagnosticProjectBodyStateJson: async (sessionId) =>
