@@ -8,6 +8,7 @@ import {
   apiCapabilityRegistry,
   buildRuntimeDiagnosticsProjection,
   chatApiCapabilityPaths,
+  chatCommandAutocomplete,
   chatCommandRegistry,
   handleAdminDiagnosticsRequest,
   routeSlashCommand,
@@ -34,6 +35,55 @@ assert.deepEqual(
 assert.deepEqual(
   registry.slash_commands.map((command) => command.name),
   commandNames,
+);
+const chatCommands = chatCommandRegistry().commands;
+for (const command of chatCommands) {
+  assert.ok(
+    command.args_schema,
+    `missing legacy args_schema for ${command.name}`,
+  );
+  assert.ok(
+    Array.isArray(command.positional_args),
+    `missing positional args for ${command.name}`,
+  );
+  assert.ok(
+    Array.isArray(command.named_args),
+    `missing named args for ${command.name}`,
+  );
+  assert.ok(
+    command.surfaces.includes("chat-input"),
+    `missing chat-input surface for ${command.name}`,
+  );
+  assert.ok(command.source, `missing source for ${command.name}`);
+}
+const newCommand = chatCommands.find((command) => command.name === "new");
+assert.ok(newCommand, "missing /new command");
+assert.equal(newCommand.source, "backend-control");
+assert.deepEqual(newCommand.positional_args[0], {
+  name: "reason",
+  description: "Optional operator-facing reason text.",
+  type: "string",
+  required: false,
+  placeholder: "reason",
+});
+const statusCommandDescriptor = chatCommands.find(
+  (command) => command.name === "status",
+);
+assert.ok(statusCommandDescriptor, "missing /status command");
+assert.equal(statusCommandDescriptor.source, "backend");
+assert.deepEqual(
+  chatCommandAutocomplete({ commandName: "new", argumentName: "reason" }),
+  {
+    command_name: "new",
+    argument_name: "reason",
+    provider: undefined,
+    items: [],
+    has_more: false,
+  },
+);
+assert.equal(
+  chatCommandAutocomplete({ commandName: "new", argumentName: "missing" }),
+  undefined,
 );
 
 assertUnique(commandNames, "slash command name");

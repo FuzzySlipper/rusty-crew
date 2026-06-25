@@ -26,6 +26,7 @@ const requiredPaths = [
   "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
   "/v1/chat/sessions/{session_id}/snapshots",
   "/v1/chat/commands",
+  "/v1/chat/commands/{command_name}/autocomplete",
   "/v1/chat/sessions/{session_id}/commands",
 ];
 
@@ -103,10 +104,22 @@ assert.ok(schema("ActiveBranchExpectation").oneOf?.length);
 assert.ok(schema("BranchHeadExpectation").oneOf?.length);
 
 const commandDescriptor = schema("ChatCommandDescriptor");
+assert.ok(commandDescriptor.required?.includes("positional_args"));
+assert.ok(commandDescriptor.required?.includes("named_args"));
+assert.ok(commandDescriptor.required?.includes("surfaces"));
+assert.ok(commandDescriptor.required?.includes("source"));
 assert.ok(commandDescriptor.required?.includes("read_only"));
 assert.ok(commandDescriptor.required?.includes("mutating"));
 assert.ok(commandDescriptor.required?.includes("scope"));
 assert.ok(commandDescriptor.properties?.backing_control_command);
+assert.deepEqual(schema("ChatCommandArgumentDescriptor").required, [
+  "name",
+  "type",
+  "required",
+]);
+assert.ok(schema("ChatCommandAutocompleteResult").properties?.items);
+assert.ok(schema("ChatCommandSurface").enum?.includes("chat-input"));
+assert.ok(schema("ChatCommandSource").enum?.includes("frontend-local"));
 
 console.log(
   JSON.stringify(

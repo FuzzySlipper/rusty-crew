@@ -8,12 +8,21 @@ import type {
   AdminErrorCode,
   AdminRouteResult,
 } from "./admin-diagnostics-api.js";
-import { chatCommandRegistry } from "./api-command-registry.js";
+import {
+  chatCommandAutocomplete,
+  chatCommandRegistry,
+} from "./api-command-registry.js";
 import type { SlashCommandResponse } from "./slash-command-router.js";
 
 export type {
+  ChatCommandArgumentDescriptor,
+  ChatCommandArgumentType,
+  ChatCommandAutocompleteResult,
   ChatCommandDescriptor,
+  ChatCommandEnumValue,
   ChatCommandRegistry,
+  ChatCommandSource,
+  ChatCommandSurface,
 } from "./api-command-registry.js";
 
 export interface RustyViewChatRouteRequest {
@@ -700,6 +709,30 @@ export async function handleRustyViewChatRequest(
 
   if (url.pathname === "/v1/chat/commands") {
     return success(requestId, chatCommandRegistry());
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "commands" &&
+    parts[4] === "autocomplete"
+  ) {
+    const result = chatCommandAutocomplete({
+      commandName: decodeURIComponent(parts[3] ?? ""),
+      argumentName: trimmedParam(url, "argument") ?? "",
+      query: trimmedParam(url, "query"),
+      limit: pageLimit(url, 20, 100),
+    });
+    if (!result) {
+      return failure(404, requestId, {
+        code: "not_found",
+        reason_code: "chat_command_autocomplete_not_found",
+        message: "chat command autocomplete provider was not found",
+        retryable: false,
+      });
+    }
+    return success(requestId, result);
   }
 
   if (

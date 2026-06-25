@@ -538,6 +538,41 @@ try {
     ),
     ["help", "status", "session", "new", "reload-mcp"],
   );
+  const newDescriptor = registry.body.data.commands.find(
+    (command: { name: string }) => command.name === "new",
+  );
+  assert.ok(newDescriptor);
+  assert.equal(newDescriptor.source, "backend-control");
+  assert.deepEqual(newDescriptor.positional_args[0], {
+    name: "reason",
+    description: "Optional operator-facing reason text.",
+    type: "string",
+    required: false,
+    placeholder: "reason",
+  });
+  assert.ok(newDescriptor.surfaces.includes("chat-input"));
+
+  const autocomplete = await get(
+    "/v1/chat/commands/new/autocomplete?argument=reason",
+    token,
+  );
+  assert.equal(autocomplete.status, 200);
+  assert.deepEqual(autocomplete.body.data, {
+    command_name: "new",
+    argument_name: "reason",
+    items: [],
+    has_more: false,
+  });
+
+  const missingAutocomplete = await get(
+    "/v1/chat/commands/status/autocomplete?argument=missing",
+    token,
+  );
+  assert.equal(missingAutocomplete.status, 404);
+  assert.equal(
+    missingAutocomplete.body.error.reason_code,
+    "chat_command_autocomplete_not_found",
+  );
 
   const statusCommand = await post(
     "/v1/chat/sessions/chat-session/commands",

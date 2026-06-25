@@ -736,6 +736,7 @@ export {
   SLASH_COMMAND_REGISTRY,
   apiCapabilityRegistry,
   chatApiCapabilityPaths,
+  chatCommandAutocomplete,
   chatCommandRegistry,
   findSlashCommandDescriptor,
   slashCommandNames,
@@ -747,8 +748,14 @@ export type {
   ApiCapabilityRegistry,
   ApiCapabilityScope,
   ApiCapabilityStability,
+  ChatCommandArgumentDescriptor,
+  ChatCommandArgumentType,
+  ChatCommandAutocompleteResult,
   ChatCommandDescriptor,
+  ChatCommandEnumValue,
   ChatCommandRegistry,
+  ChatCommandSource,
+  ChatCommandSurface,
   SlashCommandDescriptor,
 } from "./api-command-registry.js";
 export { routeSlashCommand } from "./slash-command-router.js";

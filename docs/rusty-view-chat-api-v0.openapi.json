@@ -715,6 +715,49 @@
         }
       }
     },
+    "/v1/chat/commands/{command_name}/autocomplete": {
+      "get": {
+        "operationId": "autocompleteChatCommandArgument",
+        "summary": "Resolve backend-provided autocomplete values for a slash command argument",
+        "parameters": [
+          {
+            "name": "command_name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "argument",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          { "name": "query", "in": "query", "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/Limit" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Autocomplete values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ChatCommandAutocompleteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/commands": {
       "post": {
         "operationId": "executeChatCommand",
@@ -1653,12 +1696,40 @@
       },
       "ChatCommandDescriptor": {
         "type": "object",
-        "required": ["name", "description", "read_only", "mutating", "scope"],
+        "required": [
+          "name",
+          "description",
+          "args_schema",
+          "positional_args",
+          "named_args",
+          "surfaces",
+          "source",
+          "read_only",
+          "mutating",
+          "scope"
+        ],
         "properties": {
           "name": { "type": "string" },
           "aliases": { "type": "array", "items": { "type": "string" } },
           "description": { "type": "string" },
           "args_schema": { "type": "object", "additionalProperties": true },
+          "positional_args": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatCommandArgumentDescriptor"
+            }
+          },
+          "named_args": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatCommandArgumentDescriptor"
+            }
+          },
+          "surfaces": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandSurface" }
+          },
+          "source": { "$ref": "#/components/schemas/ChatCommandSource" },
           "read_only": { "type": "boolean" },
           "mutating": { "type": "boolean" },
           "scope": { "type": "string", "enum": ["session", "profile", "service"] },
@@ -1668,6 +1739,62 @@
           },
           "requires_control_auth": { "type": "boolean", "default": false },
           "backing_control_command": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandArgumentDescriptor": {
+        "type": "object",
+        "required": ["name", "type", "required"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "type": { "$ref": "#/components/schemas/ChatCommandArgumentType" },
+          "required": { "type": "boolean" },
+          "default_value": {},
+          "enum_values": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandEnumValue" }
+          },
+          "enum_provider": { "type": "string" },
+          "repeated": { "type": "boolean" },
+          "placeholder": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandArgumentType": {
+        "type": "string",
+        "enum": ["string", "number", "boolean", "enum", "json", "file"]
+      },
+      "ChatCommandEnumValue": {
+        "type": "object",
+        "required": ["value"],
+        "properties": {
+          "value": { "type": "string" },
+          "label": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ChatCommandSurface": {
+        "type": "string",
+        "enum": ["chat-input", "global", "message-context"]
+      },
+      "ChatCommandSource": {
+        "type": "string",
+        "enum": ["backend", "backend-control", "frontend-local", "plugin"]
+      },
+      "ChatCommandAutocompleteResult": {
+        "type": "object",
+        "required": ["command_name", "argument_name", "items", "has_more"],
+        "properties": {
+          "command_name": { "type": "string" },
+          "argument_name": { "type": "string" },
+          "provider": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatCommandEnumValue" }
+          },
+          "has_more": { "type": "boolean" }
         },
         "additionalProperties": false
       },
