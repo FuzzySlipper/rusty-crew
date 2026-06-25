@@ -172,6 +172,18 @@ export function handleAdminDiagnosticsRequest(
       );
     case "/v1/admin/diagnostics/persistence":
       return success(requestId, context.diagnostics.persistence ?? null);
+    case "/v1/admin/diagnostics/provider-state":
+      return success(
+        requestId,
+        context.diagnostics.runtime.brainModules.map((module) => ({
+          profileId: module.profileId,
+          implementationId: module.implementationId,
+          moduleId: module.moduleId,
+          strategyId: module.effectiveStrategy ?? module.strategy,
+          providerStateMode: module.providerStateMode,
+          providerState: module.providerState,
+        })),
+      );
     case "/v1/admin/diagnostics/observation":
       return success(requestId, context.diagnostics.observation ?? null);
     case "/v1/admin/diagnostics/background":

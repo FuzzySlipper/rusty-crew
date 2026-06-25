@@ -801,7 +801,7 @@ async function buildDiagnosticsContext(
   state: ServiceState,
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
-  const [runtimeSummary, sessions, tableCounts, databaseSize] =
+  const [runtimeSummary, sessions, tableCounts, databaseSize, providerStates] =
     await Promise.all([
       state.bridge
         .runtimeSummary({ scopeType: "runtime" })
@@ -809,6 +809,7 @@ async function buildDiagnosticsContext(
       state.bridge.listSessions().catch(() => []),
       collectTableCounts(state.bridge),
       state.bridge.databaseSize().catch(() => undefined),
+      state.bridge.providerStateDiagnostics().catch(() => []),
     ]);
   const sessionDefaults = await effectiveSessionDefaultsById(state, sessions);
   const diagnostics = buildRuntimeDiagnosticsProjection({
@@ -818,6 +819,7 @@ async function buildDiagnosticsContext(
     sessionDefaults,
     delegatedSessions: [],
     brainModules: brainModuleDiagnostics(state),
+    providerStates,
     adapters: buildServiceAdapterDiagnostics(state, now),
     persistence: {
       tableCounts,

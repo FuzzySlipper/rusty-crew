@@ -32,6 +32,7 @@ import type {
   PlatformAdapterHandle,
   PlatformAdapterRegistration,
   ProfileId,
+  ProviderStateMode,
   ProjectId,
   ResourceLimits,
   RunId,
@@ -117,6 +118,7 @@ interface NativeBridgeBinding {
     wakeId: string,
     outputJson: string,
   ): void;
+  providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   registerPlatformAdapter(registration: {
     adapterId: string;
     kind: string;
@@ -788,6 +790,30 @@ export interface NativeQueuedMessageRecord {
   stateReason?: string;
 }
 
+export type NativeProviderStateStatus =
+  | "unused"
+  | "valid"
+  | "missing"
+  | "expired"
+  | "invalidated"
+  | "load_failed"
+  | "save_failed";
+
+export interface NativeProviderStateDiagnostic {
+  sessionId: SessionId | string;
+  moduleId: string;
+  strategyId: string;
+  status: NativeProviderStateStatus;
+  payloadVersion?: string;
+  payloadBytes?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  expiresAt?: string;
+  lastWakeId?: string;
+  invalidatedAt?: string;
+  invalidationReason?: string;
+}
+
 export interface NativeBridgeModule {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
@@ -918,6 +944,9 @@ export interface NativeBridgeModule {
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
+  providerStateDiagnostics(
+    limit?: number,
+  ): Promise<NativeProviderStateDiagnostic[]>;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
@@ -988,6 +1017,7 @@ export const nativeManifestOperationNames = [
   "cleanup_delegated_resources",
   "delegated_session_status",
   "list_sessions",
+  "provider_state_diagnostics",
   "database_size",
   "run_maintenance",
   "subscribe_events",
@@ -1054,6 +1084,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     diagnosticCountRows: unavailable("initialize_engine"),
     databaseSize: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
+    providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     listProfileMemory: unavailable("initialize_engine"),
     getProfileMemory: unavailable("initialize_engine"),
     addProfileMemory: unavailable("initialize_engine"),
@@ -1115,6 +1146,139 @@ function providerStateInputFromNativeJson(
   };
 }
 
+function observeProviderStateWake(
+  observations: Map<string, NativeProviderStateDiagnostic>,
+  request: Pick<
+    BrainWakeRequest,
+    "sessionId" | "wakeId" | "providerState" | "providerStateAbsence"
+  >,
+  registration: BrainImplementationRegistration | undefined,
+): void {
+  const strategy = registration?.strategy;
+  if (!strategy) return;
+  const state = request.providerState;
+  const status =
+    state === undefined
+      ? providerStateStatusFromAbsence(
+          request.providerStateAbsence,
+          strategy.providerState.mode,
+        )
+      : "valid";
+  const diagnostic: NativeProviderStateDiagnostic = {
+    sessionId: request.sessionId,
+    moduleId: strategy.moduleId,
+    strategyId: strategy.strategyId,
+    status,
+    lastWakeId: request.wakeId,
+    ...(state === undefined
+      ? {}
+      : {
+          payloadVersion: state.payloadVersion,
+          payloadBytes: Buffer.byteLength(JSON.stringify(state.payload)),
+          expiresAt: state.expiresAt,
+        }),
+  };
+  observations.set(providerStateDiagnosticKey(diagnostic), diagnostic);
+}
+
+function observeProviderStateFailure(
+  observations: Map<string, NativeProviderStateDiagnostic>,
+  request: Pick<BrainWakeRequest, "sessionId" | "wakeId">,
+  registration: BrainImplementationRegistration | undefined,
+  status: Extract<NativeProviderStateStatus, "save_failed" | "load_failed">,
+): void {
+  const strategy = registration?.strategy;
+  if (!strategy) return;
+  const diagnostic: NativeProviderStateDiagnostic = {
+    sessionId: request.sessionId,
+    moduleId: strategy.moduleId,
+    strategyId: strategy.strategyId,
+    status,
+    lastWakeId: request.wakeId,
+  };
+  observations.set(providerStateDiagnosticKey(diagnostic), diagnostic);
+}
+
+function providerStateStatusFromAbsence(
+  absence: BrainWakeRequest["providerStateAbsence"] | undefined,
+  mode: ProviderStateMode,
+): NativeProviderStateStatus {
+  if (mode === "unused" || absence === "module_does_not_use_state") {
+    return "unused";
+  }
+  if (absence === "expired") return "expired";
+  if (absence === "invalidated") return "invalidated";
+  if (absence === "load_failed") return "load_failed";
+  return "missing";
+}
+
+function toNativeProviderStateDiagnostic(
+  raw: NativeProviderStateDiagnostic,
+): NativeProviderStateDiagnostic {
+  return {
+    sessionId: raw.sessionId,
+    moduleId: raw.moduleId,
+    strategyId: raw.strategyId,
+    status: raw.status,
+    payloadVersion: raw.payloadVersion,
+    payloadBytes: raw.payloadBytes,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    expiresAt: raw.expiresAt,
+    lastWakeId: raw.lastWakeId,
+    invalidatedAt: raw.invalidatedAt,
+    invalidationReason: raw.invalidationReason,
+  };
+}
+
+function mergeProviderStateDiagnostics(
+  diagnostics: Iterable<NativeProviderStateDiagnostic>,
+): NativeProviderStateDiagnostic[] {
+  const byKey = new Map<string, NativeProviderStateDiagnostic>();
+  for (const diagnostic of diagnostics) {
+    const key = providerStateDiagnosticKey(diagnostic);
+    const existing = byKey.get(key);
+    if (
+      existing === undefined ||
+      providerStateStatusPriority(diagnostic.status) >
+        providerStateStatusPriority(existing.status)
+    ) {
+      byKey.set(key, diagnostic);
+    }
+  }
+  return [...byKey.values()];
+}
+
+function providerStateDiagnosticKey(
+  diagnostic: Pick<
+    NativeProviderStateDiagnostic,
+    "sessionId" | "moduleId" | "strategyId"
+  >,
+): string {
+  return `${diagnostic.sessionId}\u0000${diagnostic.moduleId}\u0000${diagnostic.strategyId}`;
+}
+
+function providerStateStatusPriority(
+  status: NativeProviderStateStatus,
+): number {
+  switch (status) {
+    case "save_failed":
+      return 7;
+    case "load_failed":
+      return 6;
+    case "invalidated":
+      return 5;
+    case "expired":
+      return 4;
+    case "valid":
+      return 3;
+    case "missing":
+      return 2;
+    case "unused":
+      return 1;
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1148,6 +1312,14 @@ function createNativeBridgeModule(
   binding: NativeBridgeBinding,
 ): NativeBridgeModule {
   const wakeExecutors = new Map<BrainImplementationHandle, BrainWakeExecutor>();
+  const brainRegistrations = new Map<
+    BrainImplementationHandle,
+    BrainImplementationRegistration
+  >();
+  const providerStateObservations = new Map<
+    string,
+    NativeProviderStateDiagnostic
+  >();
   const module: NativeBridgeModule = {
     manifestVersion: binding.manifestVersion,
     operationNames:
@@ -1163,8 +1335,8 @@ function createNativeBridgeModule(
       }) as EngineHandle,
     shutdownEngine: async (request) =>
       binding.shutdownEngine(request.engine, request.drainTimeoutMs),
-    registerBrainImplementation: async (registration) =>
-      binding.registerBrainImplementation({
+    registerBrainImplementation: async (registration) => {
+      const handle = binding.registerBrainImplementation({
         implementationId: registration.implementationId,
         profileId: registration.profileId,
         toolProfile: {
@@ -1197,7 +1369,10 @@ function createNativeBridgeModule(
                 registration.providerStateScope.providerFingerprint,
             }
           : undefined,
-      }) as BrainImplementationHandle,
+      }) as BrainImplementationHandle;
+      brainRegistrations.set(handle, registration);
+      return handle;
+    },
     registerBrainRuntime: async (registration, executor) => {
       const handle = await module.registerBrainImplementation(registration);
       wakeExecutors.set(handle, executor);
@@ -1238,6 +1413,12 @@ function createNativeBridgeModule(
             JSON.stringify(result.providerState),
           );
         } catch (error) {
+          observeProviderStateFailure(
+            providerStateObservations,
+            request,
+            brainRegistrations.get(request.brain),
+            "save_failed",
+          );
           await module.submitBrainEvent({
             wakeId: request.wakeId,
             sessionId: request.sessionId,
@@ -1466,7 +1647,7 @@ function createNativeBridgeModule(
         input.roleAssemblyJson,
         input.wakeId,
       );
-      return {
+      const request = {
         brain: input.brain,
         sessionId: input.sessionId as BrainWakeRequest["sessionId"],
         bodyState: buffered.bodyState as RuntimeBufferHandle,
@@ -1475,6 +1656,12 @@ function createNativeBridgeModule(
         wakeId: input.wakeId,
         ...providerStateFromBufferedWake(buffered),
       };
+      observeProviderStateWake(
+        providerStateObservations,
+        request,
+        brainRegistrations.get(input.brain),
+      );
+      return request;
     },
     buildBrainWakeRequestForSession: async (input) => {
       const buffered = binding.buildBrainWakeRequestForSession(
@@ -1484,7 +1671,7 @@ function createNativeBridgeModule(
         input.roleAssemblyJson,
         input.wakeId,
       );
-      return {
+      const request = {
         brain: input.brain,
         sessionId: input.sessionId,
         bodyState: buffered.bodyState as RuntimeBufferHandle,
@@ -1493,6 +1680,12 @@ function createNativeBridgeModule(
         wakeId: input.wakeId,
         ...providerStateFromBufferedWake(buffered),
       };
+      observeProviderStateWake(
+        providerStateObservations,
+        request,
+        brainRegistrations.get(input.brain),
+      );
+      return request;
     },
     diagnosticProjectBodyStateJson: async (sessionId) =>
       binding.projectBodyStateJson(sessionId),
@@ -1513,6 +1706,15 @@ function createNativeBridgeModule(
     diagnosticCountRows: async (table) => binding.countRows(table),
     databaseSize: async () => binding.databaseSize(),
     runMaintenance: async (policy) => binding.runMaintenance(policy),
+    providerStateDiagnostics: async (limit = 100) => {
+      const stored = binding
+        .providerStateDiagnostics(limit)
+        .map(toNativeProviderStateDiagnostic);
+      return mergeProviderStateDiagnostics([
+        ...providerStateObservations.values(),
+        ...stored,
+      ]).slice(0, limit);
+    },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
     getProfileMemory: async (input) =>
       binding.getProfileMemory(

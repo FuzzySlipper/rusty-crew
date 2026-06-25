@@ -322,6 +322,13 @@ impl CoreEngine {
         }
     }
 
+    pub fn provider_wire_state_diagnostics(
+        &self,
+        limit: u32,
+    ) -> CoreResult<Vec<rusty_crew_core_persistence::ProviderWireStateDiagnostic>> {
+        self.store.list_provider_wire_state_diagnostics(limit)
+    }
+
     fn provider_state_unavailable_for_mode(
         &self,
         mode: ProviderStateMode,
@@ -1102,6 +1109,10 @@ impl CoreEngine {
             archived_sessions,
             dropped_subscriptions,
         })
+    }
+
+    pub fn diagnostic_now(&self) -> IsoTimestamp {
+        self.now()
     }
 
     fn now(&self) -> IsoTimestamp {

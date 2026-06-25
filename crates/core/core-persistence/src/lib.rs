@@ -518,6 +518,19 @@ impl ProviderWireStateRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderWireStateDiagnostic {
+    pub key: ProviderWireStateKey,
+    pub payload_version: String,
+    pub payload_bytes: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub expires_at: Option<IsoTimestamp>,
+    pub last_wake_id: Option<String>,
+    pub invalidated_at: Option<IsoTimestamp>,
+    pub invalidation_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderWireStateWrite {
     pub key: ProviderWireStateKey,
     pub profile_fingerprint: String,
@@ -1416,6 +1429,14 @@ impl CoordinationStore {
         tx.commit()
             .map_err(|error| persistence_error("commit expire provider wire states", error))?;
         Ok(expired)
+    }
+
+    pub fn list_provider_wire_state_diagnostics(
+        &self,
+        limit: u32,
+    ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
+        let conn = self.conn()?;
+        list_provider_wire_state_diagnostics(&conn, limit)
     }
 
     pub fn expire_stale_scheduled_runs(
@@ -3546,6 +3567,36 @@ fn load_expired_current_provider_wire_states(
         .map_err(|error| persistence_error("load expired provider wire states", error))
 }
 
+fn list_provider_wire_state_diagnostics(
+    conn: &Connection,
+    limit: u32,
+) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                session_id,
+                module_id,
+                strategy_id,
+                payload_version,
+                length(payload_json),
+                created_at,
+                updated_at,
+                expires_at,
+                last_wake_id,
+                invalidated_at,
+                invalidation_reason
+             FROM provider_wire_states
+             ORDER BY updated_at DESC, row_id DESC
+             LIMIT ?1",
+        )
+        .map_err(|error| persistence_error("prepare provider wire state diagnostics", error))?;
+    let rows = stmt
+        .query_map(params![limit], row_to_provider_wire_state_diagnostic)
+        .map_err(|error| persistence_error("query provider wire state diagnostics", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load provider wire state diagnostics", error))
+}
+
 fn row_to_provider_wire_state_record(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<ProviderWireStateRecord> {
@@ -3572,6 +3623,26 @@ fn row_to_provider_wire_state_record(
         last_wake_id: row.get(12)?,
         invalidated_at: row.get(13)?,
         invalidation_reason,
+    })
+}
+
+fn row_to_provider_wire_state_diagnostic(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ProviderWireStateDiagnostic> {
+    Ok(ProviderWireStateDiagnostic {
+        key: ProviderWireStateKey {
+            session_id: SessionId(row.get(0)?),
+            module_id: row.get(1)?,
+            strategy_id: row.get(2)?,
+        },
+        payload_version: row.get(3)?,
+        payload_bytes: row.get::<_, u64>(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+        expires_at: row.get(7)?,
+        last_wake_id: row.get(8)?,
+        invalidated_at: row.get(9)?,
+        invalidation_reason: row.get(10)?,
     })
 }
 

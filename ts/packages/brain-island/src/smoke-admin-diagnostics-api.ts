@@ -97,6 +97,29 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
     }),
   ],
   observation: { enabled: true, writerAvailable: true },
+  brainModules: [
+    {
+      profileId: "prime" as ProfileId,
+      implementationId: "prime-brain" as never,
+      moduleId: "openai-responses",
+      effectiveStrategy: "replay",
+      providerStateMode: "optional",
+      selectedToolCount: 1,
+      selectedToolSource: "default-local-tools",
+      toolAdapterStatus: "native_neutral_tools",
+    },
+  ],
+  providerStates: [
+    {
+      sessionId: "session-alpha" as SessionId,
+      moduleId: "openai-responses",
+      strategyId: "replay",
+      status: "valid",
+      payloadVersion: "provider-owned-v1",
+      payloadBytes: 42,
+      lastWakeId: "wake-alpha",
+    },
+  ],
 });
 const background = buildBackgroundServiceDiagnosticsProjection({
   now,
@@ -217,6 +240,17 @@ const metrics = handleAdminDiagnosticsRequest(
 );
 const metricPage = okData<AdminPage<unknown>>(metrics);
 assert.equal(metricPage.limit, 250);
+
+const providerState = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/provider-state" },
+  { diagnostics },
+);
+assert.equal(providerState.status, 200);
+assert.equal(
+  okData<Array<{ providerState?: { status: string } }>>(providerState)[0]
+    ?.providerState?.status,
+  "valid",
+);
 
 const backgroundRoute = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics/background" },

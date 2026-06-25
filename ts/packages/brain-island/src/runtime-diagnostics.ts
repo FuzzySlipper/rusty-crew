@@ -68,6 +68,37 @@ export interface ObservationDiagnosticsInput {
   lastError?: string;
 }
 
+export type RuntimeProviderStateStatus =
+  | "unused"
+  | "valid"
+  | "missing"
+  | "expired"
+  | "invalidated"
+  | "load_failed"
+  | "save_failed";
+
+export interface RuntimeProviderStateSessionDiagnostics {
+  sessionId: SessionId | string;
+  moduleId: string;
+  strategyId: string;
+  status: RuntimeProviderStateStatus;
+  payloadVersion?: string;
+  payloadBytes?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  expiresAt?: string;
+  lastWakeId?: string;
+  invalidatedAt?: string;
+  invalidationReason?: string;
+}
+
+export interface RuntimeProviderStateDiagnostics {
+  moduleId: string;
+  strategyId: string;
+  status: RuntimeProviderStateStatus;
+  sessions: RuntimeProviderStateSessionDiagnostics[];
+}
+
 export interface RuntimeDiagnosticError {
   source: string;
   message: string;
@@ -88,6 +119,7 @@ export interface RuntimeDiagnosticsInput {
   tools?: readonly ToolRegistryDiagnosticsReport[];
   observation?: ObservationDiagnosticsInput;
   brainModules?: readonly RuntimeBrainModuleDiagnostics[];
+  providerStates?: readonly RuntimeProviderStateSessionDiagnostics[];
   recentErrors?: readonly RuntimeDiagnosticError[];
   staleSessionMs?: number;
 }
@@ -151,6 +183,7 @@ export interface RuntimeBrainModuleDiagnostics {
   strategy?: string;
   effectiveStrategy?: string;
   providerStateMode?: string;
+  providerState?: RuntimeProviderStateDiagnostics;
   selectedToolCount: number;
   selectedToolSource: string;
   toolAdapterStatus: string;
@@ -216,6 +249,11 @@ export function buildRuntimeDiagnosticsProjection(
   const observation = input.observation
     ? observationDiagnostics(input.observation)
     : undefined;
+  const brainModules = brainModuleDiagnostics(
+    input.brainModules ?? [],
+    sessions,
+    input.providerStates ?? [],
+  );
 
   const issues = [
     ...sessionIssues(sessions),
@@ -256,7 +294,7 @@ export function buildRuntimeDiagnosticsProjection(
     },
     runtime: {
       counters: input.runtimeSummary,
-      brainModules: [...(input.brainModules ?? [])],
+      brainModules,
       sessions,
       delegatedSessions,
     },
@@ -267,6 +305,114 @@ export function buildRuntimeDiagnosticsProjection(
     observation,
     issues,
   };
+}
+
+function brainModuleDiagnostics(
+  modules: readonly RuntimeBrainModuleDiagnostics[],
+  sessions: readonly RuntimeSessionDiagnostics[],
+  providerStates: readonly RuntimeProviderStateSessionDiagnostics[],
+): RuntimeBrainModuleDiagnostics[] {
+  return modules.map((module) => {
+    const providerState = providerStateDiagnosticsForModule(
+      module,
+      sessions.filter((session) => session.profileId === module.profileId),
+      providerStates,
+    );
+    return providerState === undefined ? module : { ...module, providerState };
+  });
+}
+
+function providerStateDiagnosticsForModule(
+  module: RuntimeBrainModuleDiagnostics,
+  sessions: readonly RuntimeSessionDiagnostics[],
+  providerStates: readonly RuntimeProviderStateSessionDiagnostics[],
+): RuntimeProviderStateDiagnostics | undefined {
+  const strategyId = module.effectiveStrategy ?? module.strategy;
+  const providerStateMode = module.providerStateMode;
+  if (providerStateMode === undefined || strategyId === undefined) {
+    return undefined;
+  }
+  const sessionDiagnostics =
+    sessions.length === 0
+      ? [
+          missingProviderStateSession(
+            "unbound",
+            module.moduleId,
+            strategyId,
+            providerStateMode,
+          ),
+        ]
+      : sessions.map((session) => {
+          const existing = providerStates.find(
+            (state) =>
+              state.sessionId === session.sessionId &&
+              state.moduleId === module.moduleId &&
+              state.strategyId === strategyId,
+          );
+          return (
+            existing ??
+            missingProviderStateSession(
+              session.sessionId,
+              module.moduleId,
+              strategyId,
+              providerStateMode,
+            )
+          );
+        });
+  return {
+    moduleId: module.moduleId,
+    strategyId,
+    status: summarizeProviderStateStatus(sessionDiagnostics),
+    sessions: sessionDiagnostics,
+  };
+}
+
+function missingProviderStateSession(
+  sessionId: SessionId | string,
+  moduleId: string,
+  strategyId: string,
+  mode: string,
+): RuntimeProviderStateSessionDiagnostics {
+  return {
+    sessionId,
+    moduleId,
+    strategyId,
+    status: mode === "unused" ? "unused" : "missing",
+  };
+}
+
+function summarizeProviderStateStatus(
+  sessions: readonly RuntimeProviderStateSessionDiagnostics[],
+): RuntimeProviderStateStatus {
+  return sessions.reduce<RuntimeProviderStateStatus>(
+    (current, session) =>
+      providerStateStatusPriority(session.status) >
+      providerStateStatusPriority(current)
+        ? session.status
+        : current,
+    "unused",
+  );
+}
+
+function providerStateStatusPriority(
+  status: RuntimeProviderStateStatus,
+): number {
+  switch (status) {
+    case "save_failed":
+      return 7;
+    case "load_failed":
+      return 6;
+    case "invalidated":
+      return 5;
+    case "expired":
+      return 4;
+    case "valid":
+      return 3;
+    case "missing":
+      return 2;
+    case "unused":
+      return 1;
+  }
 }
 
 function sessionDiagnostics(

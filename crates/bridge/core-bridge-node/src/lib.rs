@@ -560,6 +560,42 @@ impl NativeBridge {
             .apply_provider_state_output(registration, session_id, wake_id, output)
     }
 
+    pub fn provider_state_diagnostics(
+        &self,
+        limit: u32,
+    ) -> CoreResult<Vec<JsProviderStateDiagnostic>> {
+        let now = self.engine()?.diagnostic_now();
+        self.engine()?
+            .provider_wire_state_diagnostics(limit)
+            .map(|records| {
+                records
+                    .into_iter()
+                    .map(|record| {
+                        let status = provider_wire_state_status(
+                            record.invalidated_at.as_ref(),
+                            record.invalidation_reason.as_deref(),
+                            record.expires_at.as_ref(),
+                            &now,
+                        );
+                        JsProviderStateDiagnostic {
+                            session_id: record.key.session_id.0,
+                            module_id: record.key.module_id,
+                            strategy_id: record.key.strategy_id,
+                            status: status.to_string(),
+                            payload_version: Some(record.payload_version),
+                            payload_bytes: Some(record.payload_bytes as f64),
+                            created_at: Some(record.created_at),
+                            updated_at: Some(record.updated_at),
+                            expires_at: record.expires_at,
+                            last_wake_id: record.last_wake_id,
+                            invalidated_at: record.invalidated_at,
+                            invalidation_reason: record.invalidation_reason,
+                        }
+                    })
+                    .collect()
+            })
+    }
+
     pub fn get_buffer(&self, handle: RuntimeBufferHandle) -> CoreResult<RuntimeBufferView> {
         self.buffers.get_buffer(handle)
     }
@@ -923,6 +959,22 @@ pub struct JsBrainStrategyMetadata {
 pub struct JsBrainProviderStateScope {
     pub profile_fingerprint: String,
     pub provider_fingerprint: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsProviderStateDiagnostic {
+    pub session_id: String,
+    pub module_id: String,
+    pub strategy_id: String,
+    pub status: String,
+    pub payload_version: Option<String>,
+    pub payload_bytes: Option<f64>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub last_wake_id: Option<String>,
+    pub invalidated_at: Option<String>,
+    pub invalidation_reason: Option<String>,
 }
 
 #[napi_derive::napi(object)]
@@ -1420,6 +1472,17 @@ impl NativeBridgeBinding {
                 &wake_id,
                 output,
             )
+            .map_err(to_napi_error)
+    }
+
+    #[napi]
+    pub fn provider_state_diagnostics(
+        &self,
+        limit: Option<u32>,
+    ) -> napi::Result<Vec<JsProviderStateDiagnostic>> {
+        let bridge = self.bridge()?;
+        bridge
+            .provider_state_diagnostics(limit.unwrap_or(100))
             .map_err(to_napi_error)
     }
 
@@ -2777,6 +2840,24 @@ fn provider_state_absence_reason_as_str(
         }
         rusty_crew_core_bridge_api::ProviderStateAbsenceReason::LoadFailed => "load_failed",
     }
+}
+
+fn provider_wire_state_status(
+    invalidated_at: Option<&String>,
+    invalidation_reason: Option<&str>,
+    expires_at: Option<&String>,
+    now: &String,
+) -> &'static str {
+    if invalidation_reason == Some("expired") {
+        return "expired";
+    }
+    if invalidated_at.is_some() {
+        return "invalidated";
+    }
+    if expires_at.is_some_and(|expires| expires <= now) {
+        return "expired";
+    }
+    "valid"
 }
 
 fn to_event_subscription(subscription: JsEventSubscription) -> napi::Result<EventSubscription> {

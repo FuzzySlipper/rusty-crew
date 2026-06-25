@@ -979,6 +979,7 @@ export const manifestOperationNames = [
   "cleanup_delegated_resources",
   "delegated_session_status",
   "list_sessions",
+  "provider_state_diagnostics",
   "database_size",
   "run_maintenance",
   "subscribe_events",

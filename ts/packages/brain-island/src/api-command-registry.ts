@@ -499,6 +499,14 @@ export const API_CAPABILITIES = [
     ["diagnostics"],
   ),
   readCapability(
+    "admin.diagnostics.provider_state",
+    "GET",
+    "/v1/admin/diagnostics/provider-state",
+    "Read provider wire-state diagnostics.",
+    "admin",
+    ["diagnostics"],
+  ),
+  readCapability(
     "admin.diagnostics.observation",
     "GET",
     "/v1/admin/diagnostics/observation",
