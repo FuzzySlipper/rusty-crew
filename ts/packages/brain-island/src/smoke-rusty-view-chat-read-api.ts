@@ -167,6 +167,42 @@ try {
   assert.equal(messageJump.status, 200);
   assert.equal(messageJump.body.data.branch_id, defaultBranch.branch_id);
 
+  const currentSearch = await get(
+    "/v1/chat/sessions/chat-session/search?q=endpoint&role=user",
+    token,
+  );
+  assert.equal(currentSearch.status, 200);
+  assert.equal(currentSearch.body.data.scope, "current_session");
+  assert.equal(currentSearch.body.data.source, "rust_coordination");
+  assert.equal(
+    currentSearch.body.data.items[0]?.message_id,
+    "client-message-1",
+  );
+  assert.equal(currentSearch.body.data.items[0]?.jump.target.type, "message");
+  assert.equal(
+    currentSearch.body.data.items[0]?.jump.target.message_id,
+    "client-message-1",
+  );
+  assert.ok(
+    currentSearch.body.data.items[0]?.highlights[0]?.start >= 0,
+    "search result should include snippet-relative highlight offsets",
+  );
+
+  const crossSearch = await get(
+    "/v1/chat/search?q=endpoint&profile_id=chat-profile",
+    token,
+  );
+  assert.equal(crossSearch.status, 200);
+  assert.equal(crossSearch.body.data.scope, "cross_conversation");
+  assert.equal(crossSearch.body.data.items[0]?.session_id, "chat-session");
+
+  const filteredSearch = await get(
+    "/v1/chat/sessions/chat-session/search?q=endpoint&role=assistant",
+    token,
+  );
+  assert.equal(filteredSearch.status, 200);
+  assert.equal(filteredSearch.body.data.items.length, 0);
+
   assert.ok(
     streamedEvents.some((event) => event.kind === "message_created"),
     "active stream should receive the submitted message event",

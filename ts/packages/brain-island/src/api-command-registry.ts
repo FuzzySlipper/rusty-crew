@@ -35,6 +35,7 @@ export type ApiCapabilityScope =
   | "config"
   | "maintenance"
   | "scheduler"
+  | "search"
   | "curator"
   | "service";
 
@@ -603,6 +604,22 @@ export const API_CAPABILITIES = [
     "Resolve a message, branch, snapshot, or cursor jump target.",
     "chat",
     ["chat", "session", "conversation"],
+  ),
+  readCapability(
+    "chat.sessions.search",
+    "GET",
+    "/v1/chat/sessions/{session_id}/search",
+    "Search persisted transcript messages for one chat session.",
+    "chat",
+    ["chat", "session", "conversation", "search"],
+  ),
+  readCapability(
+    "chat.search",
+    "GET",
+    "/v1/chat/search",
+    "Search persisted transcript messages across chat sessions.",
+    "chat",
+    ["chat", "conversation", "search"],
   ),
   {
     id: "chat.sessions.branches.upsert",

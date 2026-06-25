@@ -21,6 +21,8 @@ const requiredPaths = [
   "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant",
   "/v1/chat/sessions/{session_id}/tree",
   "/v1/chat/sessions/{session_id}/jump",
+  "/v1/chat/sessions/{session_id}/search",
+  "/v1/chat/search",
   "/v1/chat/sessions/{session_id}/branches",
   "/v1/chat/sessions/{session_id}/branches/active",
   "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
@@ -111,6 +113,9 @@ assert.ok(schema("ConversationTreeProjection").properties?.branches);
 assert.ok(schema("ConversationBranchRecord").properties?.head_message_id);
 assert.ok(schema("ConversationSnapshotRecord").properties?.cursor);
 assert.ok(schema("ConversationJumpResult").properties?.target);
+assert.ok(schema("TranscriptSearchResult").properties?.highlights);
+assert.ok(schema("TranscriptSearchResult").properties?.jump);
+assert.ok(schema("TranscriptSearchResultPage").properties?.source);
 assert.ok(schema("AttachmentRecord").properties?.links);
 assert.ok(schema("AttachmentMutationResult").properties?.attachment);
 assert.ok(schema("DataBankScopeRecord").properties?.scope_id);

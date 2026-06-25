@@ -46,6 +46,9 @@ export interface RustyViewChatContext {
   ): Promise<ExecuteChatCommandResult>;
   sendMessage?(input: ChatSendMessageInput): Promise<SendChatMessageResult>;
   listMessageSlots?(input: ListMessageSlotsInput): Promise<MessageSlotPage>;
+  searchTranscript?(
+    input: SearchTranscriptInput,
+  ): Promise<TranscriptSearchResultPage>;
   listMessageVariants?(
     input: ListMessageVariantsInput,
   ): Promise<MessageVariantPage>;
@@ -244,6 +247,9 @@ export interface MessageBlockRecord {
 export interface DurableMessageRecord {
   message_id: string;
   session_id: string;
+  branch_id?: string | null;
+  parent_message_id?: string | null;
+  previous_message_id?: string | null;
   author_id: string;
   author_role: string;
   status: "created" | "streaming" | "completed" | "failed" | "deleted";
@@ -291,6 +297,40 @@ export interface MessageVariantPage {
   total: number;
   limit: number;
   offset: number;
+}
+
+export type TranscriptSearchScope = "current_session" | "cross_conversation";
+
+export interface TranscriptSearchHighlight {
+  start: number;
+  end: number;
+}
+
+export interface TranscriptSearchResult {
+  result_id: string;
+  scope: TranscriptSearchScope;
+  session_id: string;
+  slot_id: string;
+  variant_id: string;
+  message_id: string;
+  branch_id?: string | null;
+  author_role: string;
+  created_at: string;
+  snippet: string;
+  highlights: TranscriptSearchHighlight[];
+  jump: ConversationJumpResult;
+  source: "rust_coordination";
+}
+
+export interface TranscriptSearchResultPage {
+  items: TranscriptSearchResult[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+  query: string;
+  scope: TranscriptSearchScope;
+  source: "rust_coordination";
 }
 
 export interface CreateMessageSlotRequest {
@@ -364,6 +404,19 @@ export interface SelectActiveMessageVariantResult {
 export interface ListMessageSlotsInput {
   session: SessionState;
   includeAlternates: boolean;
+  limit: number;
+  offset: number;
+}
+
+export interface SearchTranscriptInput {
+  session?: SessionState;
+  query: string;
+  scope: TranscriptSearchScope;
+  sessionId?: string;
+  profileId?: string;
+  role?: string;
+  createdAfter?: string;
+  createdBefore?: string;
   limit: number;
   offset: number;
 }
@@ -913,6 +966,10 @@ export async function handleRustyViewChatRequest(
     return success(requestId, chatCommandRegistry());
   }
 
+  if (url.pathname === "/v1/chat/search") {
+    return handleSearchTranscript(context, requestId, url, []);
+  }
+
   if (
     parts.length === 5 &&
     parts[0] === "v1" &&
@@ -1007,6 +1064,16 @@ export async function handleRustyViewChatRequest(
     parts[4] === "slots"
   ) {
     return handleListMessageSlots(context, requestId, url, parts);
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "search"
+  ) {
+    return handleSearchTranscript(context, requestId, url, parts);
   }
 
   if (
@@ -1225,6 +1292,62 @@ async function handleListMessageSlots(
       includeAlternates: boolParam(url, "include_alternates"),
       limit: pageLimit(url, 100, 500),
       offset: pageOffset(url),
+    }),
+  );
+}
+
+async function handleSearchTranscript(
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.searchTranscript) {
+    return chatFeatureUnavailable(
+      requestId,
+      "transcript_search_not_configured",
+    );
+  }
+  const query = trimmedParam(url, "q") ?? trimmedParam(url, "query");
+  if (!query) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: "empty_transcript_search_query",
+      message: "transcript search requires q or query",
+      retryable: false,
+    });
+  }
+  const limit = pageLimit(url, 50, 100);
+  const offset = pageOffset(url);
+  if (parts.length > 0) {
+    const session = await chatSessionFromParts(context, requestId, parts);
+    if (!session.ok) return session.result;
+    return success(
+      requestId,
+      await context.searchTranscript({
+        session: session.session,
+        query,
+        scope: "current_session",
+        role: trimmedParam(url, "role"),
+        createdAfter: trimmedParam(url, "created_after"),
+        createdBefore: trimmedParam(url, "created_before"),
+        limit,
+        offset,
+      }),
+    );
+  }
+  return success(
+    requestId,
+    await context.searchTranscript({
+      query,
+      scope: "cross_conversation",
+      sessionId: trimmedParam(url, "session_id"),
+      profileId: trimmedParam(url, "profile_id"),
+      role: trimmedParam(url, "role"),
+      createdAfter: trimmedParam(url, "created_after"),
+      createdBefore: trimmedParam(url, "created_before"),
+      limit,
+      offset,
     }),
   );
 }

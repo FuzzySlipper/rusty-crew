@@ -176,6 +176,9 @@ import {
   type SelectActiveConversationBranchResult,
   type SendChatMessageResult,
   type ResolveConversationJumpInput,
+  type SearchTranscriptInput,
+  type TranscriptSearchResult,
+  type TranscriptSearchResultPage,
   type UpdateConversationBranchHeadInput,
   type UpdateConversationBranchHeadResult,
 } from "./rusty-view-chat-api.js";
@@ -586,6 +589,7 @@ async function handleHttpRequest(
         executeCommand: (input) => executeRustyViewChatCommand(state, input),
         sendMessage: (input) => submitRustyViewChatMessage(state, input),
         listMessageSlots: (input) => listRustyViewMessageSlots(state, input),
+        searchTranscript: (input) => searchRustyViewTranscript(state, input),
         listMessageVariants: (input) =>
           listRustyViewMessageVariants(state, input),
         createMessageSlot: (input) => createRustyViewMessageSlot(state, input),
@@ -4695,6 +4699,108 @@ async function listRustyViewMessageSlots(
   };
 }
 
+async function searchRustyViewTranscript(
+  state: ServiceState,
+  input: SearchTranscriptInput,
+): Promise<TranscriptSearchResultPage> {
+  const sessions =
+    input.scope === "current_session" && input.session
+      ? [input.session]
+      : (await state.bridge.listSessions()).filter(
+          (session) =>
+            (input.sessionId === undefined ||
+              session.sessionId === input.sessionId) &&
+            (input.profileId === undefined ||
+              session.profileId === input.profileId),
+        );
+  const query = input.query.trim();
+  const loweredQuery = query.toLowerCase();
+  const results: TranscriptSearchResult[] = [];
+  for (const session of sessions) {
+    const slots = (await state.bridge.queryMessageSlots({
+      session_id: session.sessionId,
+      include_alternates: true,
+      page: { limit: 500, offset: 0 },
+    })) as MessageSlotRecord[];
+    for (const slot of slots) {
+      for (const variant of [slot.primary, ...slot.alternates]) {
+        if (variant.status === "deleted") continue;
+        const message = variant.message;
+        if (input.role !== undefined && message.author_role !== input.role) {
+          continue;
+        }
+        if (
+          input.createdAfter !== undefined &&
+          message.created_at < input.createdAfter
+        ) {
+          continue;
+        }
+        if (
+          input.createdBefore !== undefined &&
+          message.created_at > input.createdBefore
+        ) {
+          continue;
+        }
+        const matchIndex = message.body.toLowerCase().indexOf(loweredQuery);
+        if (matchIndex < 0) continue;
+        const snippet = transcriptSnippet(
+          message.body,
+          matchIndex,
+          query.length,
+        );
+        results.push({
+          result_id: stableChatRecordId(
+            "search-result",
+            `${session.sessionId}:${message.message_id}:${variant.variant_id}:${matchIndex}`,
+          ),
+          scope: input.scope,
+          session_id: session.sessionId,
+          slot_id: slot.slot_id,
+          variant_id: variant.variant_id,
+          message_id: message.message_id,
+          branch_id: message.branch_id ?? null,
+          author_role: message.author_role,
+          created_at: message.created_at,
+          snippet: snippet.text,
+          highlights: [
+            {
+              start: snippet.highlightStart,
+              end: snippet.highlightEnd,
+            },
+          ],
+          jump: {
+            session_id: session.sessionId,
+            target: { type: "message", message_id: message.message_id },
+            branch_id: message.branch_id ?? null,
+            message_id: message.message_id,
+            cursor: null,
+            snapshot_id: null,
+          },
+          source: "rust_coordination",
+        });
+      }
+    }
+  }
+  results.sort((left, right) =>
+    left.created_at === right.created_at
+      ? left.result_id.localeCompare(right.result_id)
+      : left.created_at.localeCompare(right.created_at),
+  );
+  const items = results.slice(input.offset, input.offset + input.limit);
+  return {
+    items,
+    total: results.length,
+    limit: input.limit,
+    offset: input.offset,
+    ...(input.offset + items.length < results.length
+      ? { nextOffset: input.offset + items.length }
+      : {}),
+    query,
+    scope: input.scope,
+    source: "rust_coordination",
+  };
+}
+
 async function rustyViewConversationTree(
   state: ServiceState,
   input: ConversationTreeInput,
@@ -5379,6 +5485,25 @@ function messageBlockWrites(
 
 function stableChatRecordId(prefix: string, raw: string): string {
   return `${prefix}:${raw.replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 160)}`;
+}
+
+function transcriptSnippet(
+  body: string,
+  matchIndex: number,
+  queryLength: number,
+): { text: string; highlightStart: number; highlightEnd: number } {
+  const radius = 80;
+  const start = Math.max(0, matchIndex - radius);
+  const end = Math.min(body.length, matchIndex + queryLength + radius);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < body.length ? "..." : "";
+  const text = `${prefix}${body.slice(start, end)}${suffix}`;
+  const highlightStart = prefix.length + matchIndex - start;
+  return {
+    text,
+    highlightStart,
+    highlightEnd: highlightStart + queryLength,
+  };
 }
 
 function attachmentMap(

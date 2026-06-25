@@ -529,6 +529,113 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/search": {
+      "get": {
+        "operationId": "searchCurrentSessionTranscript",
+        "summary": "Search persisted transcript messages for one chat session",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          { "name": "role", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "created_after",
+            "in": "query",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transcript search result page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TranscriptSearchResultPage"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/search": {
+      "get": {
+        "operationId": "searchCrossConversationTranscript",
+        "summary": "Search persisted transcript messages across chat sessions",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "profile_id",
+            "in": "query",
+            "schema": { "type": "string" }
+          },
+          { "name": "role", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "created_after",
+            "in": "query",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cross-conversation transcript search result page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TranscriptSearchResultPage"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/branches": {
       "post": {
         "operationId": "createConversationBranch",
@@ -2082,6 +2189,73 @@
           "message_id": { "type": ["string", "null"] },
           "cursor": { "type": ["string", "null"] },
           "snapshot_id": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "TranscriptSearchScope": {
+        "type": "string",
+        "enum": ["current_session", "cross_conversation"]
+      },
+      "TranscriptSearchHighlight": {
+        "type": "object",
+        "required": ["start", "end"],
+        "properties": {
+          "start": { "type": "integer", "minimum": 0 },
+          "end": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "TranscriptSearchResult": {
+        "type": "object",
+        "required": [
+          "result_id",
+          "scope",
+          "session_id",
+          "slot_id",
+          "variant_id",
+          "message_id",
+          "author_role",
+          "created_at",
+          "snippet",
+          "highlights",
+          "jump",
+          "source"
+        ],
+        "properties": {
+          "result_id": { "type": "string" },
+          "scope": { "$ref": "#/components/schemas/TranscriptSearchScope" },
+          "session_id": { "type": "string" },
+          "slot_id": { "type": "string" },
+          "variant_id": { "type": "string" },
+          "message_id": { "type": "string" },
+          "branch_id": { "type": ["string", "null"] },
+          "author_role": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "snippet": { "type": "string" },
+          "highlights": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TranscriptSearchHighlight" }
+          },
+          "jump": { "$ref": "#/components/schemas/ConversationJumpResult" },
+          "source": { "type": "string", "enum": ["rust_coordination"] }
+        },
+        "additionalProperties": false
+      },
+      "TranscriptSearchResultPage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset", "query", "scope", "source"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TranscriptSearchResult" }
+          },
+          "total": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 },
+          "nextOffset": { "type": "integer", "minimum": 0 },
+          "query": { "type": "string" },
+          "scope": { "$ref": "#/components/schemas/TranscriptSearchScope" },
+          "source": { "type": "string", "enum": ["rust_coordination"] }
         },
         "additionalProperties": false
       },
