@@ -576,6 +576,73 @@ try {
     assert.equal(duplicateProfile.body.data.outcome.status, "failed");
     assert.match(duplicateProfile.body.data.outcome.summary, /already exists/);
 
+    const decommissionProfile = await post(
+      "/v1/admin/control/profiles/field-created-profile/decommission",
+      undefined,
+      { reason: "service host smoke profile cleanup" },
+      noAuthPort,
+    );
+    assert.equal(decommissionProfile.status, 200);
+    assert.equal(decommissionProfile.body.ok, true);
+    assert.equal(
+      decommissionProfile.body.data.outcome.result.profileDirectoryPreserved,
+      true,
+    );
+    assert.equal(
+      decommissionProfile.body.data.outcome.result.sessionsArchived[0],
+      "field-created-profile-session",
+    );
+    assert.equal(
+      existsSync(
+        join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
+      ),
+      true,
+    );
+    const noAuthAfterDecommission = await get(
+      "/v1/admin/diagnostics",
+      undefined,
+      noAuthPort,
+    );
+    assert.deepEqual(
+      noAuthAfterDecommission.body.data.overview.runtime.brainModules.map(
+        (module: { profileId: string; moduleId: string }) => [
+          module.profileId,
+          module.moduleId,
+        ],
+      ),
+      [["field-profile", "local"]],
+    );
+    assert.equal(
+      noAuthAfterDecommission.body.data.overview.adapters.mcp.totalSurfaces,
+      1,
+    );
+    const noAuthSessionsAfterDecommission =
+      await noAuthHost.bridge.listSessions();
+    assert.equal(
+      noAuthSessionsAfterDecommission.find(
+        (session) => session.sessionId === "field-created-profile-session",
+      )?.status,
+      "archived",
+    );
+    const noAuthRuntimeConfigAfterDecommission = JSON.parse(
+      readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
+    ) as {
+      brains?: Array<{ profileId?: string }>;
+      sessions?: Array<{ profileId?: string }>;
+    };
+    assert.equal(
+      noAuthRuntimeConfigAfterDecommission.brains?.some(
+        (brain) => brain.profileId === "field-created-profile",
+      ),
+      false,
+    );
+    assert.equal(
+      noAuthRuntimeConfigAfterDecommission.sessions?.some(
+        (session) => session.profileId === "field-created-profile",
+      ),
+      false,
+    );
+
     const noAuthControl = await post(
       "/v1/admin/control/scheduler/tick",
       undefined,

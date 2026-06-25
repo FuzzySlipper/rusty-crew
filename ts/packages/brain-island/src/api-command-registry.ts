@@ -130,6 +130,14 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     ["profile"],
   ),
   controlCapability(
+    "admin.control.profiles.decommission",
+    "POST",
+    "/v1/admin/control/profiles/{profile_id}/decommission",
+    "Decommission a profile by removing service plumbing and archiving active sessions while preserving profile files.",
+    "decommission_profile",
+    ["profile", "session", "config"],
+  ),
+  controlCapability(
     "admin.control.sessions.create",
     "POST",
     "/v1/admin/control/sessions",

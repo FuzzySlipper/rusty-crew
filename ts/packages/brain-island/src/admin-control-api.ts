@@ -12,6 +12,7 @@ import type {
 
 export type AdminControlCommandName =
   | "create_profile"
+  | "decommission_profile"
   | "create_session"
   | "archive_session"
   | "new_session"
@@ -94,6 +95,9 @@ export interface AdminControlAuditSink {
 
 export interface AdminControlExecutor {
   createProfile?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  decommissionProfile?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   createSession?(
@@ -417,6 +421,26 @@ function parseControlCommand(
         ...commandBase,
         name: "create_profile",
         target: {},
+      },
+    };
+  }
+
+  if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "profiles" &&
+    parts[5] === "decommission"
+  ) {
+    const profileId = parts[4] ?? "";
+    if (!profileId) return invalidTarget(requestId, "missing_profile_id");
+    return {
+      ok: true,
+      command: {
+        ...commandBase,
+        name: "decommission_profile",
+        target: { profileId },
       },
     };
   }
@@ -829,6 +853,8 @@ function executorForCommand(
   switch (command) {
     case "create_profile":
       return executor.createProfile;
+    case "decommission_profile":
+      return executor.decommissionProfile;
     case "create_session":
       return executor.createSession;
     case "archive_session":

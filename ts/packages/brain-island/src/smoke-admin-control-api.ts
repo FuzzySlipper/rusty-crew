@@ -107,6 +107,28 @@ const executor: AdminControlExecutor = {
       affectedIds: { sessionId: command.target.sessionId ?? "" },
     };
   },
+  decommissionProfile(command) {
+    return {
+      status: "completed",
+      summary: `Decommissioned ${command.target.profileId}.`,
+      affectedIds: {
+        profileId: command.target.profileId ?? "",
+        sessionsArchived: 1,
+      },
+      result: {
+        profileId: command.target.profileId,
+        profileDirectoryPreserved: true,
+        sessionsArchived: ["session-alpha"],
+        removed: {
+          brains: 1,
+          sessions: 1,
+          channelBindings: 1,
+          mcpBindings: 1,
+          scheduledJobs: 1,
+        },
+      },
+    };
+  },
   cancelDelegation(command) {
     return {
       status: "completed",
@@ -277,6 +299,30 @@ assert.equal(reloadConfig.status, 200);
 const reloadConfigData = okData<AdminControlResponse>(reloadConfig);
 assert.equal(reloadConfigData.command.name, "reload_config");
 assert.equal(reloadConfigData.outcome.status, "completed");
+
+const decommissionProfile = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/profiles/prime/decommission",
+    headers: authHeaders(),
+    body: { reason: "operator removed profile" },
+  },
+  context,
+);
+assert.equal(decommissionProfile.status, 200);
+const decommissionProfileData =
+  okData<AdminControlResponse>(decommissionProfile);
+assert.equal(decommissionProfileData.command.name, "decommission_profile");
+assert.equal(decommissionProfileData.command.target.profileId, "prime");
+assert.equal(decommissionProfileData.outcome.status, "completed");
+assert.equal(
+  (
+    decommissionProfileData.outcome.result as {
+      profileDirectoryPreserved?: boolean;
+    }
+  ).profileDirectoryPreserved,
+  true,
+);
 
 const rebuildSessionPlan = await handleAdminControlRequest(
   {

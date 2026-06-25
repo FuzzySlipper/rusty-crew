@@ -1951,6 +1951,141 @@ interface CreatedServiceProfile {
   applyResult: RustyCrewRuntimeConfigApplyResult;
 }
 
+interface DecommissionedServiceProfile {
+  profileId: string;
+  runtimeConfigPath: string;
+  profilePath?: string;
+  profileDirectoryPreserved: true;
+  sessionsArchived: string[];
+  removed: {
+    brains: number;
+    sessions: number;
+    channelBindings: number;
+    mcpBindings: number;
+    scheduledJobs: number;
+  };
+  skipped: {
+    profileDirectory: "preserved";
+    brainHandle: "retained_until_service_restart";
+  };
+  applyResult: RustyCrewRuntimeConfigApplyResult;
+}
+
+async function decommissionServiceProfile(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<DecommissionedServiceProfile> {
+  const profileId = command.target.profileId;
+  if (!profileId) throw new Error("profile id is required");
+  if (optionalBodyBoolean(command, "deleteProfileDirectory") === true) {
+    throw new Error(
+      "deleteProfileDirectory is not supported by profile decommission; profile files are preserved",
+    );
+  }
+
+  const configuredSessionIds = state.runtimeConfig.sessions
+    .filter((session) => String(session.profileId) === profileId)
+    .map((session) => String(session.sessionId));
+  const activeSessions = await state.bridge.listSessions();
+  const activeSessionIds = activeSessions
+    .filter((session) => String(session.profileId) === profileId)
+    .map((session) => String(session.sessionId));
+  const sessionIds = [
+    ...new Set([...configuredSessionIds, ...activeSessionIds]),
+  ];
+  const sessionsArchived: string[] = [];
+  for (const session of activeSessions) {
+    if (
+      String(session.profileId) !== profileId ||
+      session.status === "archived"
+    ) {
+      continue;
+    }
+    await state.bridge.archiveSession(session.sessionId);
+    sessionsArchived.push(String(session.sessionId));
+  }
+
+  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
+  const removed = {
+    brains: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("brains"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
+    ),
+    sessions: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("sessions"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
+    ),
+    channelBindings: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("channelBindings"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
+        sessionIds.includes(
+          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
+        ),
+    ),
+    mcpBindings: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("mcpBindings"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
+        sessionIds.includes(
+          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
+        ),
+    ),
+    scheduledJobs: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("scheduledJobs"),
+      (entry) =>
+        sessionIds.includes(
+          runtimeEntryString(entry, "targetSessionId", "target_session_id") ??
+            "",
+        ),
+    ),
+  };
+
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
+  const matchedRuntimeConfig =
+    removed.brains +
+      removed.sessions +
+      removed.channelBindings +
+      removed.mcpBindings +
+      removed.scheduledJobs >
+    0;
+  if (
+    !matchedRuntimeConfig &&
+    sessionsArchived.length === 0 &&
+    (profilePath === undefined || !existsSync(profilePath))
+  ) {
+    throw new Error(`profile ${profileId} was not found`);
+  }
+
+  await writeJsonFileAtomic(
+    state.config.paths.serviceConfigFile,
+    runtimeConfigFile.value,
+  );
+  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "profile_decommissioned",
+    summaryPrefix: `Profile ${profileId} decommissioned`,
+  });
+  return {
+    profileId,
+    runtimeConfigPath: state.config.paths.serviceConfigFile,
+    ...(profilePath === undefined ? {} : { profilePath }),
+    profileDirectoryPreserved: true,
+    sessionsArchived,
+    removed,
+    skipped: {
+      profileDirectory: "preserved",
+      brainHandle: "retained_until_service_restart",
+    },
+    applyResult,
+  };
+}
+
 async function createServiceProfile(
   state: ServiceState,
   command: AdminControlCommand,
@@ -2184,6 +2319,29 @@ async function writeJsonFileAtomic(
   await rename(tmpPath, path);
 }
 
+function removeRuntimeConfigEntries(
+  entries: unknown[],
+  shouldRemove: (entry: Record<string, unknown>) => boolean,
+): number {
+  let removed = 0;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (!isRecord(entry) || !shouldRemove(entry)) continue;
+    entries.splice(index, 1);
+    removed += 1;
+  }
+  return removed;
+}
+
+function runtimeEntryString(
+  entry: Record<string, unknown>,
+  camelKey: string,
+  snakeKey: string,
+): string | undefined {
+  const value = entry[camelKey] ?? entry[snakeKey];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 async function buildDirectDebugContext(
   state: ServiceState,
 ): Promise<DirectDebugServiceContext> {
@@ -2334,6 +2492,23 @@ function createServiceControlExecutor(
           agentId: result.agentId,
           sessionId: result.sessionId,
           implementationId: result.implementationId,
+        },
+        result,
+      };
+    },
+    decommissionProfile: async (command) => {
+      const result = await decommissionServiceProfile(state, command);
+      return {
+        status: "completed",
+        summary: `profile ${result.profileId} decommissioned`,
+        affectedIds: {
+          profileId: result.profileId,
+          sessionsArchived: result.sessionsArchived.length,
+          brainsRemoved: result.removed.brains,
+          sessionsRemoved: result.removed.sessions,
+          channelBindingsRemoved: result.removed.channelBindings,
+          mcpBindingsRemoved: result.removed.mcpBindings,
+          scheduledJobsRemoved: result.removed.scheduledJobs,
         },
         result,
       };

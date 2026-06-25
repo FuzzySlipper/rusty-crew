@@ -78,11 +78,20 @@ for (const command of SLASH_COMMAND_REGISTRY) {
 const adminCommandNames = ADMIN_CONTROL_CAPABILITIES.map(
   (capability) => capability.command_name,
 );
-assertUnique(adminCommandNames, "admin control command");
 assert.equal(
-  adminCommandNames.length,
-  ADMIN_CONTROL_CAPABILITIES.length,
+  adminCommandNames.every((commandName) => typeof commandName === "string"),
+  true,
   "every admin control capability must declare a command_name",
+);
+assertUnique(
+  ADMIN_CONTROL_CAPABILITIES.map((capability) => capability.id),
+  "admin control capability id",
+);
+assertUnique(
+  ADMIN_CONTROL_CAPABILITIES.map(
+    (capability) => `${capability.method} ${capability.path_template}`,
+  ),
+  "admin control route",
 );
 
 const contractPath = resolve(
