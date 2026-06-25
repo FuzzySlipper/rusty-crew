@@ -1240,8 +1240,8 @@ function mergeProviderStateDiagnostics(
     const existing = byKey.get(key);
     if (
       existing === undefined ||
-      providerStateStatusPriority(diagnostic.status) >
-        providerStateStatusPriority(existing.status)
+      providerStateDiagnosticPriority(diagnostic) >
+        providerStateDiagnosticPriority(existing)
     ) {
       byKey.set(key, diagnostic);
     }
@@ -1258,19 +1258,19 @@ function providerStateDiagnosticKey(
   return `${diagnostic.sessionId}\u0000${diagnostic.moduleId}\u0000${diagnostic.strategyId}`;
 }
 
-function providerStateStatusPriority(
-  status: NativeProviderStateStatus,
+function providerStateDiagnosticPriority(
+  diagnostic: NativeProviderStateDiagnostic,
 ): number {
-  switch (status) {
+  switch (diagnostic.status) {
     case "save_failed":
       return 7;
     case "load_failed":
       return 6;
     case "invalidated":
-      return 5;
-    case "expired":
-      return 4;
+      return diagnostic.invalidationReason === "superseded" ? 2 : 5;
     case "valid":
+      return 4;
+    case "expired":
       return 3;
     case "missing":
       return 2;

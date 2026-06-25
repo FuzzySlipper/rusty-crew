@@ -6,6 +6,7 @@ import type {
   BrainEventEnvelope,
   BrainImplementationHandle,
   BrainImplementationId,
+  BrainProviderStateScope,
   CompletionPacket,
   ChannelBindingRecord,
   McpBindingRecord,
@@ -731,6 +732,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
           await createConfiguredBrain(module, profile, {
             createDenRouterAgentFactory: input.createDenRouterAgentFactory,
             bridge: input.bridge,
+            providerStateScope,
             runtimeConfig,
             serviceConfig: input.serviceConfig,
             curatorExecutor: input.curatorExecutor,
@@ -996,6 +998,7 @@ async function createConfiguredBrain(
     bridge?: NativeBridgeModule;
     runtimeConfig?: RustyCrewRuntimeConfig;
     serviceConfig?: RustyCrewServiceConfig;
+    providerStateScope?: BrainProviderStateScope;
     curatorExecutor?: CuratorExecuteContext["executor"];
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
@@ -1004,6 +1007,7 @@ async function createConfiguredBrain(
   return module.createBrain({
     profile,
     bridge: options.bridge,
+    providerStateScope: options.providerStateScope,
     runtimeConfig: options.runtimeConfig,
     serviceConfig: options.serviceConfig,
     toolResolver: createServiceToolResolver(profile, options),

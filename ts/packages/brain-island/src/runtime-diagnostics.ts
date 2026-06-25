@@ -343,11 +343,13 @@ function providerStateDiagnosticsForModule(
           ),
         ]
       : sessions.map((session) => {
-          const existing = providerStates.find(
-            (state) =>
-              state.sessionId === session.sessionId &&
-              state.moduleId === module.moduleId &&
-              state.strategyId === strategyId,
+          const existing = selectProviderStateDiagnostic(
+            providerStates.filter(
+              (state) =>
+                state.sessionId === session.sessionId &&
+                state.moduleId === module.moduleId &&
+                state.strategyId === strategyId,
+            ),
           );
           return (
             existing ??
@@ -365,6 +367,17 @@ function providerStateDiagnosticsForModule(
     status: summarizeProviderStateStatus(sessionDiagnostics),
     sessions: sessionDiagnostics,
   };
+}
+
+function selectProviderStateDiagnostic(
+  states: readonly RuntimeProviderStateSessionDiagnostics[],
+): RuntimeProviderStateSessionDiagnostics | undefined {
+  return (
+    states.find((state) => state.status === "valid") ??
+    states.find((state) => state.status === "save_failed") ??
+    states.find((state) => state.status === "load_failed") ??
+    states[0]
+  );
 }
 
 function missingProviderStateSession(

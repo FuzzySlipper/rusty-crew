@@ -45,7 +45,16 @@ export function providerStateFingerprintMaterial(
       })),
       toolIdentity: {
         catalogId: input.profile.toolSelection.catalogId,
-        toolProfile: input.profile.toolSelection.toolProfile,
+        selectedTools: input.profile.toolSelection.inventory.selectedTools.map(
+          (tool) => ({
+            name: tool.name,
+            version: tool.version,
+            outputShape: tool.outputShape,
+            category: tool.category,
+            safety: tool.safety,
+            surfaces: tool.surfaces,
+          }),
+        ),
       },
       moduleOptions: moduleFingerprints?.profileOptions,
     },

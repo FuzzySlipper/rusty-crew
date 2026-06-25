@@ -190,7 +190,18 @@ function profileContext(
       profileId,
       catalogId: "service:mcp:rusty-crew-runner",
       inventory: {
-        selectedTools: [],
+        selectedTools: [
+          {
+            name: toolName,
+            description: `${toolName} tool`,
+            category: "local",
+            toolsets: ["default"],
+            surfaces: ["brain"],
+            safety: ["read_only"],
+            outputShape: "text",
+            version: "1",
+          },
+        ],
         selectedBindings: [],
         selectedDescriptors: [],
         items: [],

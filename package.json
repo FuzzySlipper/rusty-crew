@@ -85,6 +85,7 @@
     "smoke:tool-session-selection": "npm run smoke:tool-session-selection -w @rusty-crew/brain-island",
     "smoke:brain-tool-pi-adapter": "npm run smoke:brain-tool-pi-adapter -w @rusty-crew/brain-island",
     "smoke:brain-module-registry": "npm run smoke:brain-module-registry -w @rusty-crew/brain-island",
+    "smoke:responses-service-field-test": "npm run smoke:responses-service-field-test -w @rusty-crew/brain-island",
     "smoke:local-code-tools": "npm run smoke:local-code-tools -w @rusty-crew/brain-island",
     "smoke:patch-tool": "npm run smoke:patch-tool -w @rusty-crew/brain-island",
     "smoke:service-config": "npm run smoke:service-config -w @rusty-crew/brain-island",

@@ -228,10 +228,12 @@ const projection = buildRuntimeDiagnosticsProjection({
   sessions: [
     sessionState("load-failed-session", "load-failed-profile"),
     sessionState("unused-projection-session", "unused-projection-profile"),
+    sessionState("superseded-session", "superseded-profile"),
   ],
   brainModules: [
     brainModule("load-failed-profile", "optional"),
     brainModule("unused-projection-profile", "unused"),
+    brainModule("superseded-profile", "optional"),
   ],
   providerStates: [
     {
@@ -241,6 +243,21 @@ const projection = buildRuntimeDiagnosticsProjection({
       status: "load_failed",
       lastWakeId: "load-failed-wake",
     },
+    {
+      sessionId: "superseded-session" as SessionId,
+      moduleId: "openai-responses",
+      strategyId: "replay",
+      status: "invalidated",
+      lastWakeId: "old-wake",
+      invalidationReason: "superseded",
+    },
+    {
+      sessionId: "superseded-session" as SessionId,
+      moduleId: "openai-responses",
+      strategyId: "replay",
+      status: "valid",
+      lastWakeId: "new-wake",
+    },
   ],
 });
 const projectedLoadFailure = projection.runtime.brainModules.find(
@@ -249,8 +266,16 @@ const projectedLoadFailure = projection.runtime.brainModules.find(
 const projectedUnused = projection.runtime.brainModules.find(
   (module) => module.profileId === "unused-projection-profile",
 );
+const projectedSuperseded = projection.runtime.brainModules.find(
+  (module) => module.profileId === "superseded-profile",
+);
 assert.equal(projectedLoadFailure?.providerState?.status, "load_failed");
 assert.equal(projectedUnused?.providerState?.status, "unused");
+assert.equal(projectedSuperseded?.providerState?.status, "valid");
+assert.equal(
+  projectedSuperseded?.providerState?.sessions[0]?.lastWakeId,
+  "new-wake",
+);
 
 console.log("provider state diagnostics smoke passed");
 

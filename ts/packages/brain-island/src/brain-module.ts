@@ -2,6 +2,8 @@ import type {
   BrainAction,
   BrainEventEnvelope,
   CompletionPacket,
+  BrainProviderStateScope,
+  BrainWakeProviderStateOutput,
   BrainStrategyMetadata,
   ProviderStateMode,
   SessionId,
@@ -57,6 +59,7 @@ export interface BrainModuleContext {
   serviceConfig?: RustyCrewServiceConfig;
   runtimeConfig?: RustyCrewRuntimeConfig;
   bridge?: NativeBridgeModule;
+  providerStateScope?: BrainProviderStateScope;
   toolResolver?: BrainToolResolver;
   planActions?: BrainActionPlanner;
   maxTokens?: number;
@@ -273,12 +276,89 @@ export const openAiResponsesBrainModule: BrainModule = {
   diagnostics: {
     toolAdapterStatus: "native_neutral_tools",
   },
-  async createBrain() {
+  async createBrain(context) {
     return {
       async wake(wake): Promise<{
         events: BrainEventEnvelope[];
         actions: BrainAction[];
+        providerState?: BrainWakeProviderStateOutput;
       }> {
+        const toolName = wake.state.session.toolProfile.tools[0]?.name;
+        const hydrated = wake.providerState !== undefined;
+        const outputItems = [
+          {
+            itemId: `message-${wake.wakeId}`,
+            itemType: "message",
+            rawJson: {
+              type: "message",
+              id: `message-${wake.wakeId}`,
+              text: "responses replay service wake completed",
+            },
+          },
+          ...(toolName
+            ? [
+                {
+                  itemId: `call-${wake.wakeId}`,
+                  itemType: "function_call",
+                  callId: `call-${wake.wakeId}`,
+                  rawJson: {
+                    type: "function_call",
+                    id: `call-${wake.wakeId}`,
+                    call_id: `call-${wake.wakeId}`,
+                    name: toolName,
+                    arguments: "{}",
+                  },
+                },
+                {
+                  itemType: "function_call_output",
+                  callId: `call-${wake.wakeId}`,
+                  rawJson: {
+                    type: "function_call_output",
+                    call_id: `call-${wake.wakeId}`,
+                    output: `${toolName} completed in deterministic field scaffold`,
+                    is_error: false,
+                  },
+                },
+              ]
+            : []),
+        ];
+        const providerState: BrainWakeProviderStateOutput = {
+          type: "replace",
+          state: {
+            moduleId: "openai-responses",
+            strategyId: "replay",
+            profileFingerprint:
+              wake.providerState?.profileFingerprint ??
+              context.providerStateScope?.profileFingerprint ??
+              "profile-fingerprint",
+            providerFingerprint:
+              wake.providerState?.providerFingerprint ??
+              context.providerStateScope?.providerFingerprint ??
+              "provider-fingerprint",
+            payloadVersion: "openai-responses-state-v1",
+            payload: {
+              kind: "openai-responses",
+              strategyId: "replay",
+              payloadVersion: "openai-responses-state-v1",
+              lastCompletedResponse: {
+                responseId: `resp-${wake.wakeId}`,
+                outputItems,
+                tokenUsage: {
+                  inputTokens: 1,
+                  cachedInputTokens: hydrated ? 1 : 0,
+                  outputTokens: 1,
+                  reasoningOutputTokens: 0,
+                  totalTokens: 2,
+                },
+              },
+              replayHints: {
+                promptCacheKey: `profile:${wake.state.session.profileId}`,
+                providerItemWatermark: `message-${wake.wakeId}`,
+              },
+            },
+            ttlMs: 24 * 60 * 60 * 1000,
+          },
+        };
         return {
           events: [
             {
@@ -292,9 +372,34 @@ export const openAiResponsesBrainModule: BrainModule = {
               event: {
                 type: "provider_status",
                 level: "info",
-                message: "openai-responses Rust scaffold selected",
+                message: hydrated
+                  ? "openai-responses replay hydrated provider state"
+                  : `openai-responses replay starting without provider state: ${
+                      wake.providerStateAbsence ?? "missing"
+                    }`,
               },
             },
+            ...(toolName
+              ? [
+                  {
+                    wakeId: wake.wakeId,
+                    sessionId: wake.sessionId,
+                    event: {
+                      type: "tool_call_started" as const,
+                      toolName,
+                    },
+                  },
+                  {
+                    wakeId: wake.wakeId,
+                    sessionId: wake.sessionId,
+                    event: {
+                      type: "tool_call_finished" as const,
+                      toolName,
+                      isError: false,
+                    },
+                  },
+                ]
+              : []),
             {
               wakeId: wake.wakeId,
               sessionId: wake.sessionId,
@@ -315,10 +420,11 @@ export const openAiResponsesBrainModule: BrainModule = {
               packet: {
                 sessionId: wake.sessionId as SessionId,
                 status: "completed",
-                summary: "responses module scaffold wake completed",
+                summary: "responses replay service wake completed",
               } satisfies CompletionPacket,
             },
           ],
+          providerState,
         };
       },
     };
