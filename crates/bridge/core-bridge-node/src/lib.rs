@@ -20,10 +20,11 @@ use rusty_crew_core_config::{
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
-    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
-    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
-    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
+    AttachmentQuery, AttachmentRecord, AttachmentWrite, ConversationBranchQuery,
+    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
+    ConversationJumpRequest, ConversationJumpResult, ConversationSnapshotQuery,
+    ConversationSnapshotRecord, ConversationSnapshotWrite, DataBankScopeQuery, DataBankScopeRecord,
+    DataBankScopeWrite, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
     ProfileMemoryWrite, QueuedMessageRecord, RuntimeCounterQuery, RuntimeCounterRecord,
@@ -35,7 +36,8 @@ use rusty_crew_core_persistence::{
     UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
-    BodyState, BrainWakeProviderStateInput, MessageSlotId, MessageVariantId,
+    AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId, MessageSlotId,
+    MessageVariantId,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -486,6 +488,44 @@ impl NativeBridge {
         request: &ConversationJumpRequest,
     ) -> CoreResult<ConversationJumpResult> {
         self.engine()?.resolve_conversation_jump(request)
+    }
+
+    pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+        self.engine()?.save_attachment(attachment)
+    }
+
+    pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+        self.engine()?.query_attachments(query)
+    }
+
+    pub fn remove_attachment(
+        &self,
+        attachment_id: &AttachmentId,
+        updated_at: &rusty_crew_core_bridge_api::IsoTimestamp,
+    ) -> CoreResult<AttachmentRecord> {
+        self.engine()?.remove_attachment(attachment_id, updated_at)
+    }
+
+    pub fn save_data_bank_scope(
+        &self,
+        scope: &DataBankScopeWrite,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.engine()?.save_data_bank_scope(scope)
+    }
+
+    pub fn query_data_bank_scopes(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<Vec<DataBankScopeRecord>> {
+        self.engine()?.query_data_bank_scopes(query)
+    }
+
+    pub fn remove_data_bank_scope(
+        &self,
+        scope_id: &DataBankScopeId,
+        updated_at: &rusty_crew_core_bridge_api::IsoTimestamp,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.engine()?.remove_data_bank_scope(scope_id, updated_at)
     }
 
     pub fn select_active_message_variant(
@@ -1446,6 +1486,18 @@ struct WireReorderMessageVariantsRequest {
 struct WireGetConversationBranchStateRequest {
     session_id: SessionId,
     default_updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireRemoveAttachmentRequest {
+    attachment_id: AttachmentId,
+    updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireRemoveDataBankScopeRequest {
+    scope_id: DataBankScopeId,
+    updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
 }
 
 #[napi_derive::napi(object)]
@@ -2513,6 +2565,64 @@ impl NativeBridgeBinding {
             .resolve_conversation_jump(&request)
             .map_err(to_napi_error)?;
         serialize_json(&result, "conversation jump result")
+    }
+
+    #[napi]
+    pub fn save_attachment_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let attachment = parse_json::<AttachmentWrite>(&input_json, "attachment write")?;
+        let record = bridge.save_attachment(&attachment).map_err(to_napi_error)?;
+        serialize_json(&record, "attachment record")
+    }
+
+    #[napi]
+    pub fn query_attachments_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<AttachmentQuery>(&input_json, "attachment query")?;
+        let records = bridge.query_attachments(&query).map_err(to_napi_error)?;
+        serialize_json(&records, "attachment records")
+    }
+
+    #[napi]
+    pub fn remove_attachment_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request =
+            parse_json::<WireRemoveAttachmentRequest>(&input_json, "remove attachment request")?;
+        let record = bridge
+            .remove_attachment(&request.attachment_id, &request.updated_at)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "attachment record")
+    }
+
+    #[napi]
+    pub fn save_data_bank_scope_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let scope = parse_json::<DataBankScopeWrite>(&input_json, "data-bank scope write")?;
+        let record = bridge.save_data_bank_scope(&scope).map_err(to_napi_error)?;
+        serialize_json(&record, "data-bank scope record")
+    }
+
+    #[napi]
+    pub fn query_data_bank_scopes_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<DataBankScopeQuery>(&input_json, "data-bank scope query")?;
+        let records = bridge
+            .query_data_bank_scopes(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "data-bank scope records")
+    }
+
+    #[napi]
+    pub fn remove_data_bank_scope_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<WireRemoveDataBankScopeRequest>(
+            &input_json,
+            "remove data-bank scope request",
+        )?;
+        let record = bridge
+            .remove_data_bank_scope(&request.scope_id, &request.updated_at)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "data-bank scope record")
     }
 
     #[napi]

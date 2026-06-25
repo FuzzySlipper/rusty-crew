@@ -6,28 +6,29 @@ use rusty_crew_core_body::{
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
-    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
-    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
-    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
-    CoordinationStore, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProviderWireStateInvalidationReason, ProviderWireStateKey,
-    ProviderWireStateWakeLookup, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
-    QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, ScheduledJobQuery,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
-    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
-    SelectActiveVariantRequest, SelectActiveVariantResult, UpdateBranchHeadRequest,
-    UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
+    AttachmentQuery, AttachmentRecord, AttachmentWrite, ConversationBranchQuery,
+    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
+    ConversationJumpRequest, ConversationJumpResult, ConversationSnapshotQuery,
+    ConversationSnapshotRecord, ConversationSnapshotWrite, CoordinationStore, DataBankScopeQuery,
+    DataBankScopeRecord, DataBankScopeWrite, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueryPage,
+    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
+    RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary,
+    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
-    ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
-    BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainImplementationRegistration,
+    ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, AttachmentId, BodyState,
+    BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainImplementationRegistration,
     BrainProviderStateScope, BrainWakeProviderStateInput, BrainWakeProviderStateOutput,
     BrainWakeProviderStateUpdate, ClockConfig, CompletionStatus, CoreError, CoreErrorKind,
-    CoreEvent, CoreResult, DelegatedResourceCleanupReport, DelegatedRunStatus,
+    CoreEvent, CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
     DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
     ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MessageSlotId, MessageVariantId,
@@ -680,6 +681,44 @@ impl CoreEngine {
         request: &ConversationJumpRequest,
     ) -> CoreResult<ConversationJumpResult> {
         self.store.resolve_conversation_jump(request)
+    }
+
+    pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+        self.store.save_attachment(attachment)
+    }
+
+    pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+        self.store.query_attachments(query)
+    }
+
+    pub fn remove_attachment(
+        &self,
+        attachment_id: &AttachmentId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<AttachmentRecord> {
+        self.store.remove_attachment(attachment_id, updated_at)
+    }
+
+    pub fn save_data_bank_scope(
+        &self,
+        scope: &DataBankScopeWrite,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.store.save_data_bank_scope(scope)
+    }
+
+    pub fn query_data_bank_scopes(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<Vec<DataBankScopeRecord>> {
+        self.store.query_data_bank_scopes(query)
+    }
+
+    pub fn remove_data_bank_scope(
+        &self,
+        scope_id: &DataBankScopeId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.store.remove_data_bank_scope(scope_id, updated_at)
     }
 
     pub fn select_active_message_variant(

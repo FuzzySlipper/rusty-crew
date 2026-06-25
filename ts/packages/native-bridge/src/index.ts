@@ -167,6 +167,12 @@ interface NativeBridgeBinding {
   saveConversationSnapshotJson(inputJson: string): string;
   queryConversationSnapshotsJson(inputJson: string): string;
   resolveConversationJumpJson(inputJson: string): string;
+  saveAttachmentJson(inputJson: string): string;
+  queryAttachmentsJson(inputJson: string): string;
+  removeAttachmentJson(inputJson: string): string;
+  saveDataBankScopeJson(inputJson: string): string;
+  queryDataBankScopesJson(inputJson: string): string;
+  removeDataBankScopeJson(inputJson: string): string;
   registerPlatformAdapter(registration: {
     adapterId: string;
     kind: string;
@@ -1038,6 +1044,12 @@ export interface NativeBridgeModule {
   saveConversationSnapshot(input: unknown): Promise<unknown>;
   queryConversationSnapshots(query: unknown): Promise<unknown[]>;
   resolveConversationJump(input: unknown): Promise<unknown>;
+  saveAttachment(input: unknown): Promise<unknown>;
+  queryAttachments(query: unknown): Promise<unknown[]>;
+  removeAttachment(input: unknown): Promise<unknown>;
+  saveDataBankScope(input: unknown): Promise<unknown>;
+  queryDataBankScopes(query: unknown): Promise<unknown[]>;
+  removeDataBankScope(input: unknown): Promise<unknown>;
   providerStateDiagnostics(
     limit?: number,
   ): Promise<NativeProviderStateDiagnostic[]>;
@@ -1125,6 +1137,20 @@ export const nativeManifestOperationNames = [
   "select_active_message_variant",
   "delete_message_variant",
   "reorder_message_variants",
+  "save_conversation_branch",
+  "query_conversation_branches",
+  "get_conversation_branch_state",
+  "select_active_conversation_branch",
+  "update_conversation_branch_head",
+  "save_conversation_snapshot",
+  "query_conversation_snapshots",
+  "resolve_conversation_jump",
+  "save_attachment",
+  "query_attachments",
+  "remove_attachment",
+  "save_data_bank_scope",
+  "query_data_bank_scopes",
+  "remove_data_bank_scope",
   "database_size",
   "run_maintenance",
   "subscribe_events",
@@ -1216,6 +1242,12 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     saveConversationSnapshot: unavailable("save_conversation_snapshot"),
     queryConversationSnapshots: unavailable("query_conversation_snapshots"),
     resolveConversationJump: unavailable("resolve_conversation_jump"),
+    saveAttachment: unavailable("save_attachment"),
+    queryAttachments: unavailable("query_attachments"),
+    removeAttachment: unavailable("remove_attachment"),
+    saveDataBankScope: unavailable("save_data_bank_scope"),
+    queryDataBankScopes: unavailable("query_data_bank_scopes"),
+    removeDataBankScope: unavailable("remove_data_bank_scope"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     runOpenAiResponsesBrain: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
@@ -1934,6 +1966,28 @@ function createNativeBridgeModule(
     resolveConversationJump: async (input) =>
       JSON.parse(
         binding.resolveConversationJumpJson(JSON.stringify(input)),
+      ) as unknown,
+    saveAttachment: async (input) =>
+      JSON.parse(binding.saveAttachmentJson(JSON.stringify(input))) as unknown,
+    queryAttachments: async (query) =>
+      JSON.parse(
+        binding.queryAttachmentsJson(JSON.stringify(query)),
+      ) as unknown[],
+    removeAttachment: async (input) =>
+      JSON.parse(
+        binding.removeAttachmentJson(JSON.stringify(input)),
+      ) as unknown,
+    saveDataBankScope: async (input) =>
+      JSON.parse(
+        binding.saveDataBankScopeJson(JSON.stringify(input)),
+      ) as unknown,
+    queryDataBankScopes: async (query) =>
+      JSON.parse(
+        binding.queryDataBankScopesJson(JSON.stringify(query)),
+      ) as unknown[],
+    removeDataBankScope: async (input) =>
+      JSON.parse(
+        binding.removeDataBankScopeJson(JSON.stringify(input)),
       ) as unknown,
     providerStateDiagnostics: async (limit = 100) => {
       const stored = binding

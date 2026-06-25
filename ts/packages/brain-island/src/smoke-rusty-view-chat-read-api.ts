@@ -558,6 +558,62 @@ try {
     "attachment:guide",
   );
 
+  const creationMutationKinds = (
+    await get(
+      "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+      token,
+    )
+  ).body.data.items
+    .map((event: { kind: string }) => event.kind)
+    .filter(
+      (kind: string) =>
+        kind.startsWith("attachment_") || kind.startsWith("data_bank_"),
+    );
+  for (const kind of [
+    "data_bank_scope_created",
+    "attachment_uploaded",
+    "attachment_linked",
+  ]) {
+    assert.ok(creationMutationKinds.includes(kind), `missing ${kind} event`);
+  }
+
+  const duplicate = await post(
+    "/v1/chat/sessions/chat-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "this duplicate should not dispatch",
+      client_message_id: "client-message-1",
+    },
+    { "Idempotency-Key": "chat-send-1" },
+  );
+  assert.equal(duplicate.status, 202);
+  assert.equal(duplicate.body.data.status, "duplicate");
+  assert.equal(duplicate.body.data.wake_id, sent.body.data.wake_id);
+
+  await host.stop();
+  host = await startHost();
+
+  const persistedScopeAttachments = await get(
+    "/v1/chat/sessions/chat-session/data-bank/scopes/scope%3Areference-pack/attachments",
+    token,
+  );
+  assert.equal(persistedScopeAttachments.status, 200);
+  assert.equal(
+    persistedScopeAttachments.body.data.items[0]?.attachment_id,
+    "attachment:guide",
+  );
+
+  const persistedScopes = await get(
+    "/v1/chat/sessions/chat-session/data-bank/scopes",
+    token,
+  );
+  assert.equal(persistedScopes.status, 200);
+  assert.equal(
+    persistedScopes.body.data.items[0]?.scope_id,
+    "scope:reference-pack",
+  );
+
   const removedAttachment = await del(
     "/v1/chat/sessions/chat-session/attachments/attachment%3Aguide",
     token,
@@ -583,13 +639,7 @@ try {
       (kind: string) =>
         kind.startsWith("attachment_") || kind.startsWith("data_bank_"),
     );
-  for (const kind of [
-    "data_bank_scope_created",
-    "attachment_uploaded",
-    "attachment_linked",
-    "attachment_removed",
-    "data_bank_scope_removed",
-  ]) {
+  for (const kind of ["attachment_removed", "data_bank_scope_removed"]) {
     assert.ok(attachmentMutationKinds.includes(kind), `missing ${kind} event`);
   }
 
@@ -617,8 +667,12 @@ try {
     token,
   );
   assert.equal(eventsAfterSnapshot.status, 200);
-  assert.ok(eventsAfterSnapshot.body.data.items.length >= 4);
-  assert.equal(eventsAfterSnapshot.body.data.items[0]?.kind, "message_created");
+  assert.ok(eventsAfterSnapshot.body.data.items.length >= 2);
+  assert.ok(
+    eventsAfterSnapshot.body.data.items.some(
+      (event: { kind: string }) => event.kind === "attachment_removed",
+    ),
+  );
 
   const replayCursor = streamedEvents[1]?.event_id;
   assert.equal(typeof replayCursor, "string");
@@ -632,20 +686,6 @@ try {
     replay.every((event) => event.sequence_id > streamedEvents[1].sequence_id),
     "cursor replay should only return missed events",
   );
-
-  const duplicate = await post(
-    "/v1/chat/sessions/chat-session/messages",
-    token,
-    {
-      actor: { id: "human-operator", kind: "human" },
-      body: "this duplicate should not dispatch",
-      client_message_id: "client-message-1",
-    },
-    { "Idempotency-Key": "chat-send-1" },
-  );
-  assert.equal(duplicate.status, 202);
-  assert.equal(duplicate.body.data.status, "duplicate");
-  assert.equal(duplicate.body.data.wake_id, sent.body.data.wake_id);
 
   const empty = await post("/v1/chat/sessions/chat-session/messages", token, {
     actor: { id: "human-operator", kind: "human" },

@@ -5,15 +5,16 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, BrainEvent,
-    CompletionPacket, ConversationBranchId, ConversationSnapshotId, CoreError, CoreErrorKind,
-    CoreEvent, CoreEventKind, CoreResult, DelegatedCompletion, DelegatedFanOutGroup,
-    DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
-    DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp, MessageBlockId,
-    MessageId, MessageSlotId, MessageVariantId, ParentConsumptionPolicy, ProfileId, ProjectId,
-    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
-    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
-    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, AttachmentId,
+    AttachmentLinkId, BrainEvent, CompletionPacket, ConversationBranchId, ConversationSnapshotId,
+    CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DataBankScopeId,
+    DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
+    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
+    FanOutGroupStatus, IsoTimestamp, MessageBlockId, MessageId, MessageSlotId, MessageVariantId,
+    ParentConsumptionPolicy, ProfileId, ProjectId, ProviderStateAbsenceReason, ResourceLimits,
+    RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
+    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
+    ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -23,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 18;
+const CURRENT_SCHEMA_VERSION: i64 = 19;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -136,6 +137,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 18,
         description: "add conversation tree branches and snapshots",
         apply: migrate_v18_add_conversation_tree,
+    },
+    SchemaMigration {
+        version: 19,
+        description: "add generic chat attachments and data-bank scopes",
+        apply: migrate_v19_add_chat_attachments,
     },
 ];
 
@@ -640,6 +646,164 @@ pub struct ConversationJumpResult {
     pub message_id: Option<MessageId>,
     pub cursor: Option<String>,
     pub snapshot_id: Option<ConversationSnapshotId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentStatus {
+    Active,
+    Removed,
+}
+
+impl AttachmentStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Removed => "removed",
+        }
+    }
+
+    fn parse(raw: &str) -> CoreResult<Self> {
+        match raw {
+            "active" => Ok(Self::Active),
+            "removed" => Ok(Self::Removed),
+            _ => Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("unsupported attachment status {raw}"),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentLinkRecord {
+    pub link_id: AttachmentLinkId,
+    pub attachment_id: AttachmentId,
+    pub session_id: SessionId,
+    pub message_id: Option<MessageId>,
+    pub block_id: Option<MessageBlockId>,
+    pub scope_id: Option<DataBankScopeId>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentRecord {
+    pub attachment_id: AttachmentId,
+    pub session_id: SessionId,
+    pub status: AttachmentStatus,
+    pub filename: String,
+    pub mime_type: String,
+    pub byte_size: u64,
+    pub storage_url: Option<String>,
+    pub download_url: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub extracted_text: Option<String>,
+    pub extracted_text_truncated: bool,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub expires_at: Option<IsoTimestamp>,
+    pub links: Vec<AttachmentLinkRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentWrite {
+    pub attachment_id: AttachmentId,
+    pub session_id: SessionId,
+    pub status: AttachmentStatus,
+    pub filename: String,
+    pub mime_type: String,
+    pub byte_size: u64,
+    pub storage_url: Option<String>,
+    pub download_url: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub extracted_text: Option<String>,
+    pub extracted_text_truncated: bool,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub expires_at: Option<IsoTimestamp>,
+    pub link: Option<AttachmentLinkWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentLinkWrite {
+    pub link_id: AttachmentLinkId,
+    pub attachment_id: AttachmentId,
+    pub session_id: SessionId,
+    pub message_id: Option<MessageId>,
+    pub block_id: Option<MessageBlockId>,
+    pub scope_id: Option<DataBankScopeId>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AttachmentQuery {
+    pub session_id: Option<SessionId>,
+    pub message_id: Option<MessageId>,
+    pub scope_id: Option<DataBankScopeId>,
+    pub include_removed: bool,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataBankScopeStatus {
+    Active,
+    Removed,
+}
+
+impl DataBankScopeStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Removed => "removed",
+        }
+    }
+
+    fn parse(raw: &str) -> CoreResult<Self> {
+        match raw {
+            "active" => Ok(Self::Active),
+            "removed" => Ok(Self::Removed),
+            _ => Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("unsupported data-bank scope status {raw}"),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataBankScopeRecord {
+    pub scope_id: DataBankScopeId,
+    pub session_id: SessionId,
+    pub status: DataBankScopeStatus,
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataBankScopeWrite {
+    pub scope_id: DataBankScopeId,
+    pub session_id: SessionId,
+    pub status: DataBankScopeStatus,
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct DataBankScopeQuery {
+    pub session_id: Option<SessionId>,
+    pub include_removed: bool,
+    pub page: Option<QueryPage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1276,6 +1440,9 @@ pub enum DiagnosticTable {
     ConversationBranches,
     ConversationBranchState,
     ConversationSnapshots,
+    Attachments,
+    AttachmentLinks,
+    DataBankScopes,
     ChannelBindings,
     McpBindings,
     AgentMessages,
@@ -1313,6 +1480,9 @@ impl DiagnosticTable {
         Self::ConversationBranches,
         Self::ConversationBranchState,
         Self::ConversationSnapshots,
+        Self::Attachments,
+        Self::AttachmentLinks,
+        Self::DataBankScopes,
         Self::ChannelBindings,
         Self::McpBindings,
         Self::AgentMessages,
@@ -1350,6 +1520,9 @@ impl DiagnosticTable {
             "conversation_branches" => Ok(Self::ConversationBranches),
             "conversation_branch_state" => Ok(Self::ConversationBranchState),
             "conversation_snapshots" => Ok(Self::ConversationSnapshots),
+            "attachments" => Ok(Self::Attachments),
+            "attachment_links" => Ok(Self::AttachmentLinks),
+            "data_bank_scopes" => Ok(Self::DataBankScopes),
             "channel_bindings" => Ok(Self::ChannelBindings),
             "mcp_bindings" => Ok(Self::McpBindings),
             "agent_messages" => Ok(Self::AgentMessages),
@@ -1392,6 +1565,9 @@ impl DiagnosticTable {
             Self::ConversationBranches => "conversation_branches",
             Self::ConversationBranchState => "conversation_branch_state",
             Self::ConversationSnapshots => "conversation_snapshots",
+            Self::Attachments => "attachments",
+            Self::AttachmentLinks => "attachment_links",
+            Self::DataBankScopes => "data_bank_scopes",
             Self::ChannelBindings => "channel_bindings",
             Self::McpBindings => "mcp_bindings",
             Self::AgentMessages => "agent_messages",
@@ -2307,6 +2483,90 @@ impl CoordinationStore {
     ) -> CoreResult<ConversationJumpResult> {
         let conn = self.conn()?;
         resolve_conversation_jump(&conn, request)
+    }
+
+    pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin save attachment", error))?;
+        save_attachment_in_tx(&tx, attachment)?;
+        let record = load_attachment_in_tx(&tx, &attachment.attachment_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save attachment", error))?;
+        Ok(record)
+    }
+
+    pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+        let conn = self.conn()?;
+        query_attachments(&conn, query)
+    }
+
+    pub fn remove_attachment(
+        &self,
+        attachment_id: &AttachmentId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<AttachmentRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin remove attachment", error))?;
+        tx.execute(
+            "UPDATE attachments
+             SET status = 'removed', updated_at = ?2
+             WHERE attachment_id = ?1",
+            params![attachment_id.0.as_str(), updated_at],
+        )
+        .map_err(|error| persistence_error("remove attachment", error))?;
+        let record = load_attachment_in_tx(&tx, attachment_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit remove attachment", error))?;
+        Ok(record)
+    }
+
+    pub fn save_data_bank_scope(
+        &self,
+        scope: &DataBankScopeWrite,
+    ) -> CoreResult<DataBankScopeRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin save data-bank scope", error))?;
+        save_data_bank_scope_in_tx(&tx, scope)?;
+        let record = load_data_bank_scope_in_tx(&tx, &scope.scope_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save data-bank scope", error))?;
+        Ok(record)
+    }
+
+    pub fn query_data_bank_scopes(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<Vec<DataBankScopeRecord>> {
+        let conn = self.conn()?;
+        query_data_bank_scopes(&conn, query)
+    }
+
+    pub fn remove_data_bank_scope(
+        &self,
+        scope_id: &DataBankScopeId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<DataBankScopeRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin remove data-bank scope", error))?;
+        tx.execute(
+            "UPDATE data_bank_scopes
+             SET status = 'removed', updated_at = ?2
+             WHERE scope_id = ?1",
+            params![scope_id.0.as_str(), updated_at],
+        )
+        .map_err(|error| persistence_error("remove data-bank scope", error))?;
+        let record = load_data_bank_scope_in_tx(&tx, scope_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit remove data-bank scope", error))?;
+        Ok(record)
     }
 
     pub fn select_active_message_variant(
@@ -4206,6 +4466,66 @@ fn migrate_v18_add_conversation_tree(tx: &rusqlite::Transaction<'_>) -> CoreResu
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 18", error))
+}
+
+fn migrate_v19_add_chat_attachments(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS attachments (
+                attachment_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL,
+                storage_url TEXT,
+                download_url TEXT,
+                thumbnail_url TEXT,
+                extracted_text TEXT,
+                extracted_text_truncated INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachments_session_status
+                ON attachments(session_id, status, created_at, attachment_id);
+            CREATE INDEX IF NOT EXISTS idx_attachments_expiry
+                ON attachments(expires_at);
+
+            CREATE TABLE IF NOT EXISTS attachment_links (
+                link_id TEXT PRIMARY KEY,
+                attachment_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                message_id TEXT,
+                block_id TEXT,
+                scope_id TEXT,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (attachment_id) REFERENCES attachments(attachment_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachment_links_attachment
+                ON attachment_links(attachment_id, created_at, link_id);
+            CREATE INDEX IF NOT EXISTS idx_attachment_links_session_message
+                ON attachment_links(session_id, message_id);
+            CREATE INDEX IF NOT EXISTS idx_attachment_links_session_scope
+                ON attachment_links(session_id, scope_id);
+
+            CREATE TABLE IF NOT EXISTS data_bank_scopes (
+                scope_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                label TEXT,
+                description TEXT,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_data_bank_scopes_session_status
+                ON data_bank_scopes(session_id, status, created_at, scope_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 19", error))
 }
 
 fn save_provider_wire_state_in_tx(
@@ -6393,6 +6713,504 @@ fn resolve_conversation_jump(
             snapshot_id: None,
         }),
     }
+}
+
+type AttachmentRow = (
+    SessionId,
+    String,
+    String,
+    String,
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    String,
+    String,
+    String,
+    Option<String>,
+);
+
+fn save_attachment_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    attachment: &AttachmentWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO attachments (
+            attachment_id,
+            session_id,
+            status,
+            filename,
+            mime_type,
+            byte_size,
+            storage_url,
+            download_url,
+            thumbnail_url,
+            extracted_text,
+            extracted_text_truncated,
+            metadata_json,
+            created_at,
+            updated_at,
+            expires_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         ON CONFLICT(attachment_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            status = excluded.status,
+            filename = excluded.filename,
+            mime_type = excluded.mime_type,
+            byte_size = excluded.byte_size,
+            storage_url = excluded.storage_url,
+            download_url = excluded.download_url,
+            thumbnail_url = excluded.thumbnail_url,
+            extracted_text = excluded.extracted_text,
+            extracted_text_truncated = excluded.extracted_text_truncated,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at,
+            expires_at = excluded.expires_at",
+        params![
+            attachment.attachment_id.0,
+            attachment.session_id.0,
+            attachment.status.as_str(),
+            attachment.filename,
+            attachment.mime_type,
+            attachment.byte_size as i64,
+            attachment.storage_url,
+            attachment.download_url,
+            attachment.thumbnail_url,
+            attachment.extracted_text,
+            attachment.extracted_text_truncated,
+            to_json_text(&attachment.metadata_json)?,
+            attachment.created_at,
+            attachment.updated_at,
+            attachment.expires_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save attachment", error))?;
+    if let Some(link) = &attachment.link {
+        save_attachment_link_in_tx(tx, link)?;
+    }
+    Ok(())
+}
+
+fn save_attachment_link_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    link: &AttachmentLinkWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO attachment_links (
+            link_id,
+            attachment_id,
+            session_id,
+            message_id,
+            block_id,
+            scope_id,
+            metadata_json,
+            created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(link_id) DO UPDATE SET
+            attachment_id = excluded.attachment_id,
+            session_id = excluded.session_id,
+            message_id = excluded.message_id,
+            block_id = excluded.block_id,
+            scope_id = excluded.scope_id,
+            metadata_json = excluded.metadata_json",
+        params![
+            link.link_id.0,
+            link.attachment_id.0,
+            link.session_id.0,
+            link.message_id.as_ref().map(|value| value.0.as_str()),
+            link.block_id.as_ref().map(|value| value.0.as_str()),
+            link.scope_id.as_ref().map(|value| value.0.as_str()),
+            to_json_text(&link.metadata_json)?,
+            link.created_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save attachment link", error))?;
+    Ok(())
+}
+
+fn query_attachments(
+    conn: &Connection,
+    query: &AttachmentQuery,
+) -> CoreResult<Vec<AttachmentRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let message_id = query.message_id.as_ref().map(|value| value.0.as_str());
+    let scope_id = query.scope_id.as_ref().map(|value| value.0.as_str());
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT a.attachment_id
+             FROM attachments a
+             LEFT JOIN attachment_links l ON l.attachment_id = a.attachment_id
+             WHERE (?1 IS NULL OR a.session_id = ?1)
+               AND (?2 OR a.status <> 'removed')
+               AND (?3 IS NULL OR l.message_id = ?3)
+               AND (?4 IS NULL OR l.scope_id = ?4)
+             ORDER BY a.created_at ASC, a.attachment_id ASC
+             LIMIT ?5 OFFSET ?6",
+        )
+        .map_err(|error| persistence_error("prepare query attachments", error))?;
+    let attachment_ids = stmt
+        .query_map(
+            params![
+                session_id,
+                query.include_removed,
+                message_id,
+                scope_id,
+                limit,
+                offset,
+            ],
+            |row| Ok(AttachmentId::new(row.get::<_, String>(0)?)),
+        )
+        .map_err(|error| persistence_error("query attachments", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load attachment ids", error))?;
+    attachment_ids
+        .iter()
+        .map(|attachment_id| load_attachment(conn, attachment_id))
+        .collect()
+}
+
+fn load_attachment(
+    conn: &Connection,
+    attachment_id: &AttachmentId,
+) -> CoreResult<AttachmentRecord> {
+    let record = conn
+        .query_row(
+            "SELECT session_id, status, filename, mime_type, byte_size,
+                    storage_url, download_url, thumbnail_url, extracted_text,
+                    extracted_text_truncated, metadata_json, created_at, updated_at, expires_at
+             FROM attachments
+             WHERE attachment_id = ?1",
+            params![attachment_id.0],
+            |row| {
+                Ok((
+                    SessionId::new(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, bool>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load attachment", error))?;
+    attachment_record_from_row(conn, attachment_id, record)
+}
+
+fn load_attachment_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    attachment_id: &AttachmentId,
+) -> CoreResult<AttachmentRecord> {
+    let record = tx
+        .query_row(
+            "SELECT session_id, status, filename, mime_type, byte_size,
+                    storage_url, download_url, thumbnail_url, extracted_text,
+                    extracted_text_truncated, metadata_json, created_at, updated_at, expires_at
+             FROM attachments
+             WHERE attachment_id = ?1",
+            params![attachment_id.0],
+            |row| {
+                Ok((
+                    SessionId::new(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, bool>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load attachment in tx", error))?;
+    attachment_record_from_row(tx, attachment_id, record)
+}
+
+fn attachment_record_from_row(
+    conn: &Connection,
+    attachment_id: &AttachmentId,
+    record: Option<AttachmentRow>,
+) -> CoreResult<AttachmentRecord> {
+    record
+        .map(
+            |(
+                session_id,
+                status,
+                filename,
+                mime_type,
+                byte_size,
+                storage_url,
+                download_url,
+                thumbnail_url,
+                extracted_text,
+                extracted_text_truncated,
+                metadata_json,
+                created_at,
+                updated_at,
+                expires_at,
+            )| {
+                Ok(AttachmentRecord {
+                    attachment_id: attachment_id.clone(),
+                    session_id,
+                    status: AttachmentStatus::parse(&status)?,
+                    filename,
+                    mime_type,
+                    byte_size: byte_size.max(0) as u64,
+                    storage_url,
+                    download_url,
+                    thumbnail_url,
+                    extracted_text,
+                    extracted_text_truncated,
+                    metadata_json: parse_json_record(&metadata_json)?,
+                    created_at,
+                    updated_at,
+                    expires_at,
+                    links: load_attachment_links(conn, attachment_id)?,
+                })
+            },
+        )
+        .transpose()?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("attachment {attachment_id} not found"),
+            )
+        })
+}
+
+fn load_attachment_links(
+    conn: &Connection,
+    attachment_id: &AttachmentId,
+) -> CoreResult<Vec<AttachmentLinkRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT link_id, session_id, message_id, block_id, scope_id,
+                    metadata_json, created_at
+             FROM attachment_links
+             WHERE attachment_id = ?1
+             ORDER BY created_at ASC, link_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare load attachment links", error))?;
+    let links = stmt
+        .query_map(params![attachment_id.0], |row| {
+            Ok((
+                AttachmentLinkId::new(row.get::<_, String>(0)?),
+                SessionId::new(row.get::<_, String>(1)?),
+                row.get::<_, Option<String>>(2)?.map(MessageId::new),
+                row.get::<_, Option<String>>(3)?.map(MessageBlockId::new),
+                row.get::<_, Option<String>>(4)?.map(DataBankScopeId::new),
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })
+        .map_err(|error| persistence_error("query attachment links", error))?
+        .map(|row| {
+            let (link_id, session_id, message_id, block_id, scope_id, metadata_json, created_at) =
+                row.map_err(|error| persistence_error("load attachment link", error))?;
+            Ok(AttachmentLinkRecord {
+                link_id,
+                attachment_id: attachment_id.clone(),
+                session_id,
+                message_id,
+                block_id,
+                scope_id,
+                metadata_json: parse_json_record(&metadata_json)?,
+                created_at,
+            })
+        })
+        .collect::<CoreResult<Vec<_>>>()?;
+    Ok(links)
+}
+
+fn save_data_bank_scope_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    scope: &DataBankScopeWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO data_bank_scopes (
+            scope_id,
+            session_id,
+            status,
+            label,
+            description,
+            metadata_json,
+            created_at,
+            updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(scope_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            status = excluded.status,
+            label = excluded.label,
+            description = excluded.description,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at",
+        params![
+            scope.scope_id.0,
+            scope.session_id.0,
+            scope.status.as_str(),
+            scope.label,
+            scope.description,
+            to_json_text(&scope.metadata_json)?,
+            scope.created_at,
+            scope.updated_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save data-bank scope", error))?;
+    Ok(())
+}
+
+fn query_data_bank_scopes(
+    conn: &Connection,
+    query: &DataBankScopeQuery,
+) -> CoreResult<Vec<DataBankScopeRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT scope_id
+             FROM data_bank_scopes
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 OR status <> 'removed')
+             ORDER BY created_at ASC, scope_id ASC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|error| persistence_error("prepare query data-bank scopes", error))?;
+    let scope_ids = stmt
+        .query_map(
+            params![session_id, query.include_removed, limit, offset],
+            |row| Ok(DataBankScopeId::new(row.get::<_, String>(0)?)),
+        )
+        .map_err(|error| persistence_error("query data-bank scopes", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load data-bank scope ids", error))?;
+    scope_ids
+        .iter()
+        .map(|scope_id| load_data_bank_scope(conn, scope_id))
+        .collect()
+}
+
+fn load_data_bank_scope(
+    conn: &Connection,
+    scope_id: &DataBankScopeId,
+) -> CoreResult<DataBankScopeRecord> {
+    conn.query_row(
+        "SELECT session_id, status, label, description, metadata_json,
+                created_at, updated_at
+         FROM data_bank_scopes
+         WHERE scope_id = ?1",
+        params![scope_id.0],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load data-bank scope", error))?
+    .map(
+        |(session_id, status, label, description, metadata_json, created_at, updated_at)| {
+            Ok(DataBankScopeRecord {
+                scope_id: scope_id.clone(),
+                session_id,
+                status: DataBankScopeStatus::parse(&status)?,
+                label,
+                description,
+                metadata_json: parse_json_record(&metadata_json)?,
+                created_at,
+                updated_at,
+            })
+        },
+    )
+    .transpose()?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("data-bank scope {scope_id} not found"),
+        )
+    })
+}
+
+fn load_data_bank_scope_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    scope_id: &DataBankScopeId,
+) -> CoreResult<DataBankScopeRecord> {
+    tx.query_row(
+        "SELECT session_id, status, label, description, metadata_json,
+                created_at, updated_at
+         FROM data_bank_scopes
+         WHERE scope_id = ?1",
+        params![scope_id.0],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load data-bank scope in tx", error))?
+    .map(
+        |(session_id, status, label, description, metadata_json, created_at, updated_at)| {
+            Ok(DataBankScopeRecord {
+                scope_id: scope_id.clone(),
+                session_id,
+                status: DataBankScopeStatus::parse(&status)?,
+                label,
+                description,
+                metadata_json: parse_json_record(&metadata_json)?,
+                created_at,
+                updated_at,
+            })
+        },
+    )
+    .transpose()?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("data-bank scope {scope_id} not found"),
+        )
+    })
 }
 
 fn load_message_slot(
@@ -11460,6 +12278,135 @@ mod tests {
             })
             .unwrap();
         assert_eq!(message_jump.branch_id, Some(root_branch));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn attachments_and_data_bank_scopes_persist_across_reopen() {
+        let db_path = temp_db_path("attachments-data-bank");
+        let session_id = SessionId::new("session-attachment");
+        let scope_id = DataBankScopeId::new("scope-reference");
+        let attachment_id = AttachmentId::new("attachment-guide");
+        let message_id = MessageId::new("message-guide");
+
+        {
+            let store = CoordinationStore::open_file(&db_path).unwrap();
+            store
+                .save_data_bank_scope(&DataBankScopeWrite {
+                    scope_id: scope_id.clone(),
+                    session_id: session_id.clone(),
+                    status: DataBankScopeStatus::Active,
+                    label: Some("Reference".to_string()),
+                    description: Some("Reusable files".to_string()),
+                    metadata_json: json!({"source": "test"}),
+                    created_at: "2026-06-25T05:00:00Z".to_string(),
+                    updated_at: "2026-06-25T05:00:00Z".to_string(),
+                })
+                .unwrap();
+            let saved = store
+                .save_attachment(&AttachmentWrite {
+                    attachment_id: attachment_id.clone(),
+                    session_id: session_id.clone(),
+                    status: AttachmentStatus::Active,
+                    filename: "guide.txt".to_string(),
+                    mime_type: "text/plain".to_string(),
+                    byte_size: 42,
+                    storage_url: None,
+                    download_url: Some("/download/guide".to_string()),
+                    thumbnail_url: None,
+                    extracted_text: Some("hello attachment".to_string()),
+                    extracted_text_truncated: false,
+                    metadata_json: json!({"kind": "reference"}),
+                    created_at: "2026-06-25T05:01:00Z".to_string(),
+                    updated_at: "2026-06-25T05:01:00Z".to_string(),
+                    expires_at: None,
+                    link: Some(AttachmentLinkWrite {
+                        link_id: AttachmentLinkId::new("attachment-link-guide"),
+                        attachment_id: attachment_id.clone(),
+                        session_id: session_id.clone(),
+                        message_id: Some(message_id.clone()),
+                        block_id: None,
+                        scope_id: Some(scope_id.clone()),
+                        metadata_json: json!({"linked_by": "test"}),
+                        created_at: "2026-06-25T05:01:00Z".to_string(),
+                    }),
+                })
+                .unwrap();
+            assert_eq!(saved.links.len(), 1);
+        }
+
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let by_message = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session_id.clone()),
+                message_id: Some(message_id),
+                scope_id: None,
+                include_removed: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(by_message.len(), 1);
+        assert_eq!(&by_message[0].attachment_id, &attachment_id);
+        assert_eq!(by_message[0].links[0].scope_id, Some(scope_id.clone()));
+
+        let by_scope = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session_id.clone()),
+                message_id: None,
+                scope_id: Some(scope_id.clone()),
+                include_removed: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(by_scope.len(), 1);
+
+        let scopes = store
+            .query_data_bank_scopes(&DataBankScopeQuery {
+                session_id: Some(session_id.clone()),
+                include_removed: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(scopes.len(), 1);
+        assert_eq!(&scopes[0].scope_id, &scope_id);
+
+        let removed_attachment = store
+            .remove_attachment(
+                &AttachmentId::new("attachment-guide"),
+                &"2026-06-25T05:02:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(removed_attachment.status, AttachmentStatus::Removed);
+        let active_after_remove = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session_id.clone()),
+                include_removed: false,
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert!(active_after_remove.is_empty());
+        let removed_scope = store
+            .remove_data_bank_scope(&scope_id, &"2026-06-25T05:03:00Z".to_string())
+            .unwrap();
+        assert_eq!(removed_scope.status, DataBankScopeStatus::Removed);
+
+        let removed_records = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session_id.clone()),
+                include_removed: true,
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(removed_records.len(), 1);
+        let removed_scopes = store
+            .query_data_bank_scopes(&DataBankScopeQuery {
+                session_id: Some(session_id),
+                include_removed: true,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(removed_scopes.len(), 1);
 
         remove_temp_db(&db_path);
     }

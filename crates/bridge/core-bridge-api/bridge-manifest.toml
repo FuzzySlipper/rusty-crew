@@ -487,6 +487,60 @@ errors = "core_protocol::CoreError"
 summary = "Resolve a message, branch, snapshot, or cursor jump target without hydrating the full tree."
 
 [[operation]]
+name = "save_attachment"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::AttachmentWrite"
+output = "core_persistence::AttachmentRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist generic chat attachment metadata and optional links."
+
+[[operation]]
+name = "query_attachments"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::AttachmentQuery"
+output = "Vec<core_persistence::AttachmentRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query generic chat attachments by session, message, or reusable scope."
+
+[[operation]]
+name = "remove_attachment"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ attachment_id, updated_at }"
+output = "core_persistence::AttachmentRecord"
+errors = "core_protocol::CoreError"
+summary = "Mark a generic chat attachment removed."
+
+[[operation]]
+name = "save_data_bank_scope"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::DataBankScopeWrite"
+output = "core_persistence::DataBankScopeRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist a reusable file scope for chat attachments."
+
+[[operation]]
+name = "query_data_bank_scopes"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::DataBankScopeQuery"
+output = "Vec<core_persistence::DataBankScopeRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query reusable file scopes for chat attachments."
+
+[[operation]]
+name = "remove_data_bank_scope"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ scope_id, updated_at }"
+output = "core_persistence::DataBankScopeRecord"
+errors = "core_protocol::CoreError"
+summary = "Mark a reusable file scope removed."
+
+[[operation]]
 name = "database_size"
 surface = "stable"
 direction = "ts_to_rust"
