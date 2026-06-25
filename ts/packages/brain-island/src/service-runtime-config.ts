@@ -716,6 +716,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
         implementationId: brain.implementationId,
         selection,
         strategy,
+        moduleStrategy,
         module,
       });
     try {
@@ -971,6 +972,7 @@ function brainModuleDiagnostics(input: {
   implementationId: BrainImplementationId;
   selection: BrainModuleSelection;
   strategy: ReturnType<typeof resolveBrainStrategyMetadata>;
+  moduleStrategy: ReturnType<typeof resolveBrainModuleStrategy>;
   module: BrainModule;
 }): RuntimeBrainModuleDiagnostics {
   return {
@@ -982,6 +984,9 @@ function brainModuleDiagnostics(input: {
       : { strategy: input.selection.strategy }),
     effectiveStrategy: input.strategy.strategyId,
     providerStateMode: input.strategy.providerState.mode,
+    ...(input.moduleStrategy.diagnostics === undefined
+      ? {}
+      : { strategyDiagnostics: input.moduleStrategy.diagnostics }),
     selectedToolCount: input.profile.toolSelection.toolProfile.tools.length,
     selectedToolSource: input.profile.toolSelection.catalogId,
     toolAdapterStatus: input.module.diagnostics.toolAdapterStatus,

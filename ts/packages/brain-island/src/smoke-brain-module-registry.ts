@@ -155,6 +155,27 @@ try {
         ?.toolAdapterStatus,
       "native_neutral_tools",
     );
+    const chainDiagnostics =
+      applyResult.brainDiagnosticsByProfileId["responses-chain-profile"]
+        ?.strategyDiagnostics;
+    assert.equal(
+      chainDiagnostics?.selectedStrategyId,
+      "previous-response-chain",
+    );
+    assert.equal(chainDiagnostics?.effectiveStrategyId, "replay");
+    assert.equal(chainDiagnostics?.replayFallbackUsed, true);
+    assert.equal(chainDiagnostics?.fallbackReason, "normal_invalidation");
+    assert.deepEqual(chainDiagnostics?.fallbackReasonCatalog, [
+      "no_predecessor_state",
+      "request_fingerprint_mismatch",
+      "profile_fingerprint_mismatch",
+      "provider_fingerprint_mismatch",
+      "predecessor_rejected_by_provider",
+      "provider_state_expired",
+      "provider_state_load_failed",
+      "input_not_append_only",
+      "normal_invalidation",
+    ]);
     assert.equal(denRouterOptions.length, 1);
 
     const diagnostics = buildRuntimeDiagnosticsProjection({
@@ -204,7 +225,23 @@ try {
           "default-local-tools",
           "native_neutral_tools",
         ],
+        [
+          "responses-chain-profile",
+          "responses-chain-brain",
+          "openai-responses",
+          "previous-response-chain",
+          "previous-response-chain",
+          "optional",
+          "default-local-tools",
+          "native_neutral_tools",
+        ],
       ],
+    );
+    assert.equal(
+      diagnostics.runtime.brainModules.find(
+        (module) => module.profileId === "responses-chain-profile",
+      )?.strategyDiagnostics?.effectiveStrategyId,
+      "replay",
     );
 
     const brainEvents = await native.subscribeEvents({
@@ -308,6 +345,9 @@ function brainModuleDiagnostics(
       providerStateMode:
         applyResult.brainDiagnosticsByProfileId[brain.profileId]
           ?.providerStateMode,
+      strategyDiagnostics:
+        applyResult.brainDiagnosticsByProfileId[brain.profileId]
+          ?.strategyDiagnostics,
       selectedToolCount:
         applyResult.brainDiagnosticsByProfileId[brain.profileId]
           ?.selectedToolCount ?? 0,
@@ -337,6 +377,10 @@ function writeRuntimeConfig(dataDir: string): void {
             profileId: "responses-profile",
             implementationId: "responses-brain",
           },
+          {
+            profileId: "responses-chain-profile",
+            implementationId: "responses-chain-brain",
+          },
         ],
         sessions: [
           {
@@ -355,6 +399,12 @@ function writeRuntimeConfig(dataDir: string): void {
             sessionId: "responses-session",
             agentId: "responses-agent",
             profileId: "responses-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "responses-chain-session",
+            agentId: "responses-chain-agent",
+            profileId: "responses-chain-profile",
             kind: "full",
           },
         ],
@@ -415,6 +465,25 @@ function writeRuntimeConfig(dataDir: string): void {
         brain: {
           module: "openai-responses",
           strategy: "replay",
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(profilesDir, "responses-chain-profile.json"),
+    JSON.stringify(
+      {
+        profileId: "responses-chain-profile",
+        modelConfig: {
+          provider: "openai",
+          modelName: "gpt-5",
+          api: "responses",
+        },
+        brain: {
+          module: "openai-responses",
+          strategy: "previous-response-chain",
         },
       },
       null,

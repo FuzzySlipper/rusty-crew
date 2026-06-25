@@ -28,15 +28,35 @@ export interface BrainModuleStrategyProviderStateMetadata {
   mode: ProviderStateMode;
 }
 
+export type PreviousResponseChainFallbackReason =
+  | "no_predecessor_state"
+  | "request_fingerprint_mismatch"
+  | "profile_fingerprint_mismatch"
+  | "provider_fingerprint_mismatch"
+  | "predecessor_rejected_by_provider"
+  | "provider_state_expired"
+  | "provider_state_load_failed"
+  | "input_not_append_only"
+  | "normal_invalidation";
+
 export interface BrainModuleStrategyFingerprintMetadata {
   profileOptions?: unknown;
   providerOptions?: unknown;
+}
+
+export interface BrainModuleStrategyDiagnosticsMetadata {
+  selectedStrategyId: string;
+  effectiveStrategyId: string;
+  replayFallbackUsed: boolean;
+  fallbackReason?: PreviousResponseChainFallbackReason;
+  fallbackReasonCatalog?: readonly PreviousResponseChainFallbackReason[];
 }
 
 export interface BrainModuleStrategyMetadata {
   strategyId: string;
   providerState: BrainModuleStrategyProviderStateMetadata;
   fingerprints?: BrainModuleStrategyFingerprintMetadata;
+  diagnostics?: BrainModuleStrategyDiagnosticsMetadata;
 }
 
 export type BrainModuleToolAdapterStatus =
@@ -323,6 +343,37 @@ export const openAiResponsesBrainModule: BrainModule = {
         providerOptions: {
           strategy: "replay",
         },
+      },
+      diagnostics: {
+        selectedStrategyId: "replay",
+        effectiveStrategyId: "replay",
+        replayFallbackUsed: false,
+      },
+    },
+    {
+      strategyId: "previous-response-chain",
+      providerState: { mode: "optional" },
+      fingerprints: {
+        providerOptions: {
+          strategy: "previous-response-chain",
+        },
+      },
+      diagnostics: {
+        selectedStrategyId: "previous-response-chain",
+        effectiveStrategyId: "replay",
+        replayFallbackUsed: true,
+        fallbackReason: "normal_invalidation",
+        fallbackReasonCatalog: [
+          "no_predecessor_state",
+          "request_fingerprint_mismatch",
+          "profile_fingerprint_mismatch",
+          "provider_fingerprint_mismatch",
+          "predecessor_rejected_by_provider",
+          "provider_state_expired",
+          "provider_state_load_failed",
+          "input_not_append_only",
+          "normal_invalidation",
+        ],
       },
     },
   ],

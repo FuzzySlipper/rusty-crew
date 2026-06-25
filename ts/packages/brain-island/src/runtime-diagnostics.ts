@@ -7,6 +7,10 @@ import type {
 } from "@rusty-crew/contracts";
 import type { AdapterDiagnosticsProjection } from "./adapter-diagnostics.js";
 import type { ToolRegistryDiagnosticsReport } from "./tool-registry-diagnostics.js";
+import type {
+  BrainModuleStrategyDiagnosticsMetadata,
+  PreviousResponseChainFallbackReason,
+} from "./brain-module.js";
 
 export type DiagnosticsHealth = "ok" | "degraded" | "blocked";
 
@@ -184,10 +188,14 @@ export interface RuntimeBrainModuleDiagnostics {
   effectiveStrategy?: string;
   providerStateMode?: string;
   providerState?: RuntimeProviderStateDiagnostics;
+  strategyDiagnostics?: BrainModuleStrategyDiagnosticsMetadata;
   selectedToolCount: number;
   selectedToolSource: string;
   toolAdapterStatus: string;
 }
+
+export type RuntimePreviousResponseChainFallbackReason =
+  PreviousResponseChainFallbackReason;
 
 export interface RuntimeSessionEffectiveDefaults {
   ownerId?: string;

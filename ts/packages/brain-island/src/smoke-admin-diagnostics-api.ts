@@ -102,7 +102,25 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
       profileId: "prime" as ProfileId,
       implementationId: "prime-brain" as never,
       moduleId: "openai-responses",
+      strategy: "previous-response-chain",
       effectiveStrategy: "replay",
+      strategyDiagnostics: {
+        selectedStrategyId: "previous-response-chain",
+        effectiveStrategyId: "replay",
+        replayFallbackUsed: true,
+        fallbackReason: "provider_state_expired",
+        fallbackReasonCatalog: [
+          "no_predecessor_state",
+          "request_fingerprint_mismatch",
+          "profile_fingerprint_mismatch",
+          "provider_fingerprint_mismatch",
+          "predecessor_rejected_by_provider",
+          "provider_state_expired",
+          "provider_state_load_failed",
+          "input_not_append_only",
+          "normal_invalidation",
+        ],
+      },
       providerStateMode: "optional",
       selectedToolCount: 1,
       selectedToolSource: "default-local-tools",
@@ -251,6 +269,16 @@ assert.equal(
     ?.providerState?.status,
   "valid",
 );
+const rootDiagnostics = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics" },
+  { diagnostics },
+);
+const diagnosticsText = JSON.stringify(
+  okData<{ overview: unknown }>(rootDiagnostics),
+);
+assert.match(diagnosticsText, /previous-response-chain/);
+assert.match(diagnosticsText, /provider_state_expired/);
+assert.doesNotMatch(diagnosticsText, /responseId|rawJson|encrypted_content/);
 
 const backgroundRoute = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics/background" },
