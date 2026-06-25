@@ -1969,9 +1969,12 @@ interface DecommissionedServiceProfile {
     mcpBindings: number;
     scheduledJobs: number;
   };
+  brainHandle: {
+    action: "removed" | "already_absent";
+    handle?: BrainImplementationHandle;
+  };
   skipped: {
     profileDirectory: "preserved";
-    brainHandle: "retained_until_service_restart";
   };
   applyResult: RustyCrewRuntimeConfigApplyResult;
 }
@@ -2230,6 +2233,15 @@ async function decommissionServiceProfile(
   const sessionIds = [
     ...new Set([...configuredSessionIds, ...activeSessionIds]),
   ];
+  const inFlightSessionIds = sessionIds.filter((sessionId) =>
+    state.inFlightWakes.has(sessionId as SessionId),
+  );
+  if (inFlightSessionIds.length > 0) {
+    throw new Error(
+      `profile ${profileId} decommission blocked by in-flight wake(s): ${inFlightSessionIds.join(", ")}`,
+    );
+  }
+
   const sessionsArchived: string[] = [];
   for (const session of activeSessions) {
     if (
@@ -2308,6 +2320,7 @@ async function decommissionServiceProfile(
     eventType: "profile_decommissioned",
     summaryPrefix: `Profile ${profileId} decommissioned`,
   });
+  const brainHandle = await unregisterServiceProfileBrain(state, profileId);
   return {
     profileId,
     runtimeConfigPath: state.config.paths.serviceConfigFile,
@@ -2315,12 +2328,34 @@ async function decommissionServiceProfile(
     profileDirectoryPreserved: true,
     sessionsArchived,
     removed,
+    brainHandle,
     skipped: {
       profileDirectory: "preserved",
-      brainHandle: "retained_until_service_restart",
     },
     applyResult,
   };
+}
+
+async function unregisterServiceProfileBrain(
+  state: ServiceState,
+  profileId: string,
+): Promise<DecommissionedServiceProfile["brainHandle"]> {
+  try {
+    const handle = await state.bridge.unregisterBrainImplementationForProfile(
+      profileId as ProfileId,
+    );
+    return { action: "removed", handle };
+  } catch (error) {
+    if (isNativeNotFoundError(error)) {
+      return { action: "already_absent" };
+    }
+    throw error;
+  }
+}
+
+function isNativeNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return message.includes("notfound") || message.includes("not found");
 }
 
 async function createServiceProfile(
@@ -2946,6 +2981,7 @@ function createServiceControlExecutor(
           profileId: result.profileId,
           sessionsArchived: result.sessionsArchived.length,
           brainsRemoved: result.removed.brains,
+          brainHandleRemoved: result.brainHandle.action === "removed" ? 1 : 0,
           sessionsRemoved: result.removed.sessions,
           channelBindingsRemoved: result.removed.channelBindings,
           mcpBindingsRemoved: result.removed.mcpBindings,

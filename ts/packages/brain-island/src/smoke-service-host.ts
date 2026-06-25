@@ -683,6 +683,14 @@ try {
       "field-created-profile-session",
     );
     assert.equal(
+      decommissionProfile.body.data.outcome.result.brainHandle.action,
+      "removed",
+    );
+    assert.equal(
+      typeof decommissionProfile.body.data.outcome.result.brainHandle.handle,
+      "number",
+    );
+    assert.equal(
       existsSync(
         join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
       ),

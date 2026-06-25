@@ -66,6 +66,15 @@ errors = "core_protocol::CoreError"
 summary = "Replace a registered profile brain implementation in place for safe runtime rebuilds."
 
 [[operation]]
+name = "unregister_brain_implementation_for_profile"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ProfileId"
+output = "core_protocol::BrainImplementationHandle"
+errors = "core_protocol::CoreError"
+summary = "Remove a registered profile brain implementation after its sessions have been drained or archived."
+
+[[operation]]
 name = "wake_brain"
 surface = "stable"
 direction = "rust_to_ts"

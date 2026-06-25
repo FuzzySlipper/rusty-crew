@@ -10,9 +10,9 @@ use rusty_crew_core_bridge_api::{
     BrainWakeBufferInput, BrainWakeProviderStateOutput, BrainWakeRequest, BridgeManifestSummary,
     CoreError, CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle,
     EventReceipt, EventSubscription, ExternalEvent, PlatformAdapterHandle,
-    PlatformAdapterRegistration, RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView,
-    SessionId, ShutdownRequest, ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION,
-    OPERATION_NAMES,
+    PlatformAdapterRegistration, ProfileId, RuntimeBufferHandle, RuntimeBufferStore,
+    RuntimeBufferView, SessionId, ShutdownRequest, ShutdownSummary, SubscriptionHandle, Unit,
+    MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
     plan_create_profile, plan_runtime_config, validate_runtime_config_input, CreateProfilePlan,
@@ -144,6 +144,19 @@ impl NativeBridge {
                 registration.profile_id,
                 registration.tool_profile,
             )?;
+        }
+        Ok(handle)
+    }
+
+    pub fn unregister_brain_implementation_for_profile(
+        &mut self,
+        profile_id: ProfileId,
+    ) -> CoreResult<BrainImplementationHandle> {
+        let handle = self
+            .brain_registrations
+            .unregister_for_profile(&profile_id)?;
+        if let Some(engine) = &self.engine {
+            engine.unregister_profile_tool_profile(&profile_id)?;
         }
         Ok(handle)
     }
@@ -766,6 +779,30 @@ impl BrainImplementationRegistry {
                 ),
             )
         })
+    }
+
+    fn unregister_for_profile(
+        &mut self,
+        profile_id: &rusty_crew_core_bridge_api::ProfileId,
+    ) -> CoreResult<BrainImplementationHandle> {
+        let handle = self.by_profile_id.remove(profile_id).ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("brain implementation for profile {profile_id} is not registered"),
+            )
+        })?;
+        let registration = self.by_handle.remove(&handle).ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::BrainUnavailable,
+                format!(
+                    "brain implementation handle {} is not registered",
+                    handle.get()
+                ),
+            )
+        })?;
+        self.by_implementation_id
+            .remove(&registration.implementation_id);
+        Ok(handle)
     }
 
     fn registrations(&self) -> impl Iterator<Item = &BrainImplementationRegistration> {
@@ -1482,6 +1519,18 @@ impl NativeBridgeBinding {
         let mut bridge = self.bridge()?;
         let handle = bridge
             .replace_brain_implementation(to_brain_registration(registration)?)
+            .map_err(to_napi_error)?;
+        Ok(handle.get() as f64)
+    }
+
+    #[napi]
+    pub fn unregister_brain_implementation_for_profile(
+        &self,
+        profile_id: String,
+    ) -> napi::Result<f64> {
+        let mut bridge = self.bridge()?;
+        let handle = bridge
+            .unregister_brain_implementation_for_profile(ProfileId::new(profile_id))
             .map_err(to_napi_error)?;
         Ok(handle.get() as f64)
     }
@@ -3352,6 +3401,37 @@ mod tests {
         assert_eq!(handle, BrainImplementationHandle::new(1));
         let registration = bridge.brain_registrations.get(handle).unwrap();
         assert_eq!(registration.profile_id.to_string(), "planner-profile");
+    }
+
+    #[test]
+    fn native_bridge_unregisters_profile_brain_and_allows_reregister() {
+        let mut bridge = NativeBridge::new();
+        let handle = bridge
+            .register_brain_implementation(brain_registration("planner", "planner-profile"))
+            .unwrap();
+
+        let removed = bridge
+            .unregister_brain_implementation_for_profile(ProfileId::new("planner-profile"))
+            .unwrap();
+        assert_eq!(removed, handle);
+        assert!(bridge.brain_registrations.get(handle).is_err());
+
+        let next = bridge
+            .register_brain_implementation(brain_registration("planner-next", "planner-profile"))
+            .unwrap();
+        assert_ne!(next, handle);
+        let registration = bridge.brain_registrations.get(next).unwrap();
+        assert_eq!(registration.profile_id.to_string(), "planner-profile");
+    }
+
+    #[test]
+    fn native_bridge_unregister_missing_profile_brain_fails_closed() {
+        let mut bridge = NativeBridge::new();
+        let error = bridge
+            .unregister_brain_implementation_for_profile(ProfileId::new("missing-profile"))
+            .expect_err("missing profile brain unregister must fail");
+
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
     }
 
     #[test]

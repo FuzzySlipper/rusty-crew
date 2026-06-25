@@ -472,6 +472,19 @@ impl CoreEngine {
         Ok(())
     }
 
+    pub fn unregister_profile_tool_profile(&self, profile_id: &ProfileId) -> CoreResult<()> {
+        self.profile_tool_profiles
+            .lock()
+            .map_err(|_| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "profile registry lock poisoned",
+                )
+            })?
+            .remove(profile_id);
+        Ok(())
+    }
+
     pub fn route_agent_message(&self, message: AgentMessage) -> CoreResult<EventReceipt> {
         let event = CoreEvent::AgentMessageRouted { message };
         let sequence = self.bus.publish(event.clone())?;

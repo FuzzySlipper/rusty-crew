@@ -19,6 +19,7 @@ import type {
   ManifestOperationName,
   PlatformAdapterHandle,
   PlatformAdapterRegistration,
+  ProfileId,
   SessionId,
   RuntimeBufferHandle,
   RuntimeBufferView,
@@ -69,6 +70,18 @@ export class CoreBridge {
     registration: BrainImplementationRegistration,
   ): Promise<BrainImplementationHandle> {
     return this.native.registerBrainImplementation(registration);
+  }
+
+  async replaceBrainImplementation(
+    registration: BrainImplementationRegistration,
+  ): Promise<BrainImplementationHandle> {
+    return this.native.replaceBrainImplementation(registration);
+  }
+
+  async unregisterBrainImplementationForProfile(
+    profileId: ProfileId,
+  ): Promise<BrainImplementationHandle> {
+    return this.native.unregisterBrainImplementationForProfile(profileId);
   }
 
   async wakeBrain(request: BrainWakeRequest): Promise<BrainWakeAccepted> {

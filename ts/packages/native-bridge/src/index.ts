@@ -143,6 +143,7 @@ interface NativeBridgeBinding {
       providerFingerprint: string;
     };
   }): number;
+  unregisterBrainImplementationForProfile(profileId: string): number;
   applyBrainProviderStateOutputJson(
     brain: number,
     sessionId: string,
@@ -873,6 +874,9 @@ export interface NativeBridgeModule {
   replaceBrainImplementation(
     registration: BrainImplementationRegistration,
   ): Promise<BrainImplementationHandle>;
+  unregisterBrainImplementationForProfile(
+    profileId: ProfileId,
+  ): Promise<BrainImplementationHandle>;
   registerBrainRuntime(
     registration: BrainImplementationRegistration,
     executor: BrainWakeExecutor,
@@ -1058,6 +1062,7 @@ export const nativeManifestOperationNames = [
   "shutdown_engine",
   "register_brain_implementation",
   "replace_brain_implementation",
+  "unregister_brain_implementation_for_profile",
   "wake_brain",
   "submit_brain_event",
   "submit_brain_actions",
@@ -1108,6 +1113,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     shutdownEngine: unavailable("shutdown_engine"),
     registerBrainImplementation: unavailable("register_brain_implementation"),
     replaceBrainImplementation: unavailable("replace_brain_implementation"),
+    unregisterBrainImplementationForProfile: unavailable(
+      "unregister_brain_implementation_for_profile",
+    ),
     registerBrainRuntime: unavailable("register_brain_implementation"),
     replaceBrainRuntime: unavailable("replace_brain_implementation"),
     clearBrainProviderState: unavailable("apply_brain_provider_state_output"),
@@ -1452,6 +1460,14 @@ function createNativeBridgeModule(
         nativeBrainRegistration(registration),
       ) as BrainImplementationHandle;
       brainRegistrations.set(handle, registration);
+      return handle;
+    },
+    unregisterBrainImplementationForProfile: async (profileId) => {
+      const handle = binding.unregisterBrainImplementationForProfile(
+        profileId,
+      ) as BrainImplementationHandle;
+      brainRegistrations.delete(handle);
+      wakeExecutors.delete(handle);
       return handle;
     },
     registerBrainRuntime: async (registration, executor) => {
