@@ -75,6 +75,7 @@
     "smoke:api-command-registry": "tsx src/smoke-api-command-registry.ts",
     "smoke:new-session-lifecycle": "tsx src/smoke-new-session-lifecycle.ts",
     "smoke:reload-mcp-control": "tsx src/smoke-reload-mcp-control.ts",
+    "smoke:runtime-rebuild-replacement": "tsx src/smoke-runtime-rebuild-replacement.ts",
     "smoke:slash-command-responses": "tsx src/smoke-slash-command-responses.ts",
     "smoke:adapter-diagnostics": "tsx src/smoke-adapter-diagnostics.ts",
     "smoke:den-channels-e2e": "tsx src/smoke-den-channels-e2e.ts",
