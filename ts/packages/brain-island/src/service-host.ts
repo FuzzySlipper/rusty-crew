@@ -131,8 +131,24 @@ import {
   cursorSequence,
   type ChatEvent,
   type ChatSendMessageInput,
+  type CreateMessageSlotInput,
+  type CreateMessageVariantInput,
+  type DeleteMessageVariantInput,
   type ExecuteChatCommandInput,
   type ExecuteChatCommandResult,
+  type ListMessageSlotsInput,
+  type ListMessageVariantsInput,
+  type MessageBlockDraft,
+  type MessageSlotMutationResult,
+  type MessageSlotPage,
+  type MessageSlotRecord,
+  type MessageVariantMutationResult,
+  type MessageVariantPage,
+  type MessageVariantRecord,
+  type MessageVariantsReorderResult,
+  type ReorderMessageVariantsInput,
+  type SelectActiveMessageVariantInput,
+  type SelectActiveMessageVariantResult,
   type SendChatMessageResult,
 } from "./rusty-view-chat-api.js";
 import { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
@@ -534,6 +550,18 @@ async function handleHttpRequest(
           listChatEventsAfterCursor(state, session, cursor, limit),
         executeCommand: (input) => executeRustyViewChatCommand(state, input),
         sendMessage: (input) => submitRustyViewChatMessage(state, input),
+        listMessageSlots: (input) => listRustyViewMessageSlots(state, input),
+        listMessageVariants: (input) =>
+          listRustyViewMessageVariants(state, input),
+        createMessageSlot: (input) => createRustyViewMessageSlot(state, input),
+        createMessageVariant: (input) =>
+          createRustyViewMessageVariant(state, input),
+        deleteMessageVariant: (input) =>
+          deleteRustyViewMessageVariant(state, input),
+        reorderMessageVariants: (input) =>
+          reorderRustyViewMessageVariants(state, input),
+        selectActiveMessageVariant: (input) =>
+          selectRustyViewActiveMessageVariant(state, input),
         now: state.now,
       },
     );
@@ -4504,10 +4532,46 @@ async function submitRustyViewChatMessage(
   }
   const messageId = input.clientMessageId ?? `chat:${input.idempotencyKey}`;
   const correlationId = `chat:${input.idempotencyKey}`;
+  const slotId = stableChatRecordId("slot", messageId);
+  const primaryVariantId = stableChatRecordId("variant", slotId);
+  const now = state.now();
+  await state.bridge.saveMessageSlot({
+    slot_id: slotId,
+    session_id: input.session.sessionId,
+    primary_variant_id: primaryVariantId,
+    active_variant_id: null,
+    metadata_json: {
+      source: "rusty_view_chat",
+      correlation_id: correlationId,
+      reason: input.reason,
+    },
+    created_at: now,
+    updated_at: now,
+  });
+  await state.bridge.saveMessageVariant(
+    messageVariantWrite({
+      sessionId: input.session.sessionId,
+      slotId,
+      variantId: primaryVariantId,
+      messageId,
+      source: "primary",
+      ordinal: 0,
+      actor: input.actor,
+      body: input.body,
+      metadataJson: {
+        source: "rusty_view_chat",
+        correlation_id: correlationId,
+        reason: input.reason,
+      },
+      now,
+    }),
+  );
   const inbound = appendChatEvent(state, input.session.sessionId, {
     kind: "message_created",
     payload: {
       message_id: messageId,
+      slot_id: slotId,
+      primary_variant_id: primaryVariantId,
       role: input.actor.kind === "agent" ? "assistant" : "user",
       actor: input.actor,
       body: input.body,
@@ -4525,6 +4589,8 @@ async function submitRustyViewChatMessage(
   const result: SendChatMessageResult = {
     status: wakeReport.status === "completed" ? "accepted" : "rejected",
     message_id: messageId,
+    slot_id: slotId,
+    primary_variant_id: primaryVariantId,
     wake_id: wakeReport.wakeId,
     correlation_id: correlationId,
     latest_cursor:
@@ -4533,6 +4599,298 @@ async function submitRustyViewChatMessage(
   };
   rememberChatMessageReceipt(state, receiptKey, result);
   return result;
+}
+
+async function listRustyViewMessageSlots(
+  state: ServiceState,
+  input: ListMessageSlotsInput,
+): Promise<MessageSlotPage> {
+  const items = (await state.bridge.queryMessageSlots({
+    session_id: input.session.sessionId,
+    include_alternates: input.includeAlternates,
+    page: { limit: input.limit, offset: input.offset },
+  })) as MessageSlotRecord[];
+  return {
+    items,
+    total: input.offset + items.length,
+    limit: input.limit,
+    offset: input.offset,
+    ...(items.length >= input.limit
+      ? { nextOffset: input.offset + items.length }
+      : {}),
+  };
+}
+
+async function listRustyViewMessageVariants(
+  state: ServiceState,
+  input: ListMessageVariantsInput,
+): Promise<MessageVariantPage> {
+  await requireMessageSlotForSession(
+    state,
+    input.session.sessionId,
+    input.slotId,
+  );
+  const items = (await state.bridge.queryMessageVariants({
+    slot_id: input.slotId,
+    include_deleted: false,
+    page: { limit: input.limit, offset: input.offset },
+  })) as MessageVariantRecord[];
+  return {
+    items,
+    total: input.offset + items.length,
+    limit: input.limit,
+    offset: input.offset,
+  };
+}
+
+async function createRustyViewMessageSlot(
+  state: ServiceState,
+  input: CreateMessageSlotInput,
+): Promise<MessageSlotMutationResult> {
+  const now = state.now();
+  const slotId =
+    input.request.slot_id ??
+    stableChatRecordId("slot", `${input.session.sessionId}:${input.requestId}`);
+  const variantId =
+    input.request.primary_variant_id ?? stableChatRecordId("variant", slotId);
+  await state.bridge.saveMessageSlot({
+    slot_id: slotId,
+    session_id: input.session.sessionId,
+    primary_variant_id: variantId,
+    active_variant_id: null,
+    metadata_json: input.request.metadata_json ?? {},
+    created_at: now,
+    updated_at: now,
+  });
+  await state.bridge.saveMessageVariant(
+    messageVariantWrite({
+      sessionId: input.session.sessionId,
+      slotId,
+      variantId,
+      messageId:
+        input.request.message_id ?? stableChatRecordId("message", variantId),
+      source: "primary",
+      ordinal: 0,
+      actor: input.request.actor,
+      body: input.request.body,
+      metadataJson: input.request.variant_metadata_json ?? {},
+      blocks: input.request.blocks,
+      now,
+    }),
+  );
+  const slot = await requireMessageSlotForSession(
+    state,
+    input.session.sessionId,
+    slotId,
+    true,
+  );
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "message_slot_created",
+    payload: { slot },
+  });
+  return { status: "created", slot, latest_cursor: event.event_id };
+}
+
+async function createRustyViewMessageVariant(
+  state: ServiceState,
+  input: CreateMessageVariantInput,
+): Promise<MessageVariantMutationResult> {
+  const slot = await requireMessageSlotForSession(
+    state,
+    input.session.sessionId,
+    input.slotId,
+    true,
+  );
+  const now = state.now();
+  const variantId =
+    input.request.variant_id ??
+    stableChatRecordId("variant", `${input.slotId}:${input.requestId}`);
+  const ordinal = slot.alternates.length + 1;
+  const variant = (await state.bridge.saveMessageVariant(
+    messageVariantWrite({
+      sessionId: input.session.sessionId,
+      slotId: input.slotId,
+      variantId,
+      messageId:
+        input.request.message_id ?? stableChatRecordId("message", variantId),
+      source: "alternate",
+      ordinal,
+      actor: input.request.actor,
+      body: input.request.body,
+      metadataJson: input.request.metadata_json ?? {},
+      blocks: input.request.blocks,
+      now,
+    }),
+  )) as MessageVariantRecord;
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "message_variant_created",
+    payload: { slot_id: input.slotId, variant },
+  });
+  return { status: "created", variant, latest_cursor: event.event_id };
+}
+
+async function deleteRustyViewMessageVariant(
+  state: ServiceState,
+  input: DeleteMessageVariantInput,
+): Promise<MessageSlotMutationResult> {
+  await requireMessageSlotForSession(
+    state,
+    input.session.sessionId,
+    input.slotId,
+  );
+  const slot = (await state.bridge.deleteMessageVariant({
+    slot_id: input.slotId,
+    variant_id: input.variantId,
+    updated_at: state.now(),
+  })) as MessageSlotRecord;
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "message_variant_deleted",
+    payload: { slot_id: input.slotId, variant_id: input.variantId, slot },
+  });
+  return { status: "deleted", slot, latest_cursor: event.event_id };
+}
+
+async function reorderRustyViewMessageVariants(
+  state: ServiceState,
+  input: ReorderMessageVariantsInput,
+): Promise<MessageVariantsReorderResult> {
+  await requireMessageSlotForSession(
+    state,
+    input.session.sessionId,
+    input.slotId,
+  );
+  const variants = (await state.bridge.reorderMessageVariants({
+    slot_id: input.slotId,
+    ordered_variant_ids: input.orderedVariantIds,
+    updated_at: state.now(),
+  })) as MessageVariantRecord[];
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "message_variants_reordered",
+    payload: {
+      slot_id: input.slotId,
+      ordered_variant_ids: input.orderedVariantIds,
+      variants,
+    },
+  });
+  return { status: "reordered", variants, latest_cursor: event.event_id };
+}
+
+async function selectRustyViewActiveMessageVariant(
+  state: ServiceState,
+  input: SelectActiveMessageVariantInput,
+): Promise<SelectActiveMessageVariantResult> {
+  await requireMessageSlotForSession(
+    state,
+    input.session.sessionId,
+    input.slotId,
+  );
+  const result = (await state.bridge.selectActiveMessageVariant({
+    slot_id: input.slotId,
+    active_variant_id: input.request.active_variant_id ?? null,
+    expected: input.request.expected,
+    updated_at: state.now(),
+  })) as {
+    slot: MessageSlotRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  const status = result.conflict ? "conflict" : "selected";
+  const event = appendChatEvent(state, input.session.sessionId, {
+    kind: "message_active_variant_selected",
+    payload: {
+      slot_id: input.slotId,
+      active_variant_id: result.slot.active_variant_id,
+      conflict: result.conflict,
+      slot: result.slot,
+    },
+  });
+  return {
+    status,
+    slot: result.slot,
+    ...(result.conflict ? { conflict: result.conflict } : {}),
+    latest_cursor: event.event_id,
+  };
+}
+
+async function requireMessageSlotForSession(
+  state: ServiceState,
+  sessionId: SessionId,
+  slotId: string,
+  includeAlternates = false,
+): Promise<MessageSlotRecord> {
+  const slots = (await state.bridge.queryMessageSlots({
+    session_id: sessionId,
+    include_alternates: includeAlternates,
+    page: { limit: 500, offset: 0 },
+  })) as MessageSlotRecord[];
+  const slot = slots.find((candidate) => candidate.slot_id === slotId);
+  if (!slot) {
+    throw new Error(`message slot ${slotId} was not found for ${sessionId}`);
+  }
+  return slot;
+}
+
+function messageVariantWrite(input: {
+  sessionId: SessionId;
+  slotId: string;
+  variantId: string;
+  messageId: string;
+  source: "primary" | "alternate";
+  ordinal: number;
+  actor: { id: string; kind: "human" | "agent" | "system" };
+  body: string;
+  metadataJson: unknown;
+  blocks?: MessageBlockDraft[];
+  now: string;
+}): Record<string, unknown> {
+  return {
+    variant_id: input.variantId,
+    slot_id: input.slotId,
+    source: input.source,
+    ordinal: input.ordinal,
+    status: "active",
+    message: {
+      message_id: input.messageId,
+      session_id: input.sessionId,
+      author_id: input.actor.id,
+      author_role:
+        input.actor.kind === "agent"
+          ? "assistant"
+          : input.actor.kind === "system"
+            ? "system"
+            : "user",
+      status: "completed",
+      body: input.body,
+      metadata_json: input.metadataJson ?? {},
+      created_at: input.now,
+      blocks: messageBlockWrites(input.messageId, input.body, input.blocks),
+    },
+    metadata_json: input.metadataJson ?? {},
+    created_at: input.now,
+    updated_at: input.now,
+  };
+}
+
+function messageBlockWrites(
+  messageId: string,
+  body: string,
+  blocks: MessageBlockDraft[] | undefined,
+): Array<Record<string, unknown>> {
+  const source =
+    blocks && blocks.length > 0
+      ? blocks
+      : [{ kind: "text", content_json: { text: body }, metadata_json: {} }];
+  return source.map((block, index) => ({
+    block_id: block.block_id ?? `${messageId}:block:${index + 1}`,
+    ordinal: index,
+    kind: block.kind,
+    content_json: block.content_json,
+    render_policy_json: block.render_policy_json,
+    metadata_json: block.metadata_json ?? {},
+  }));
+}
+
+function stableChatRecordId(prefix: string, raw: string): string {
+  return `${prefix}:${raw.replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 160)}`;
 }
 
 async function executeRustyViewChatCommand(

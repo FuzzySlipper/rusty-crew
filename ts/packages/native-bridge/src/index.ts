@@ -152,6 +152,13 @@ interface NativeBridgeBinding {
   ): void;
   runOpenaiResponsesBrainJson(inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
+  saveMessageSlotJson(inputJson: string): void;
+  saveMessageVariantJson(inputJson: string): string;
+  queryMessageSlotsJson(inputJson: string): string;
+  queryMessageVariantsJson(inputJson: string): string;
+  selectActiveMessageVariantJson(inputJson: string): string;
+  deleteMessageVariantJson(inputJson: string): string;
+  reorderMessageVariantsJson(inputJson: string): string;
   registerPlatformAdapter(registration: {
     adapterId: string;
     kind: string;
@@ -1008,6 +1015,13 @@ export interface NativeBridgeModule {
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
+  saveMessageSlot(input: unknown): Promise<void>;
+  saveMessageVariant(input: unknown): Promise<unknown>;
+  queryMessageSlots(query: unknown): Promise<unknown[]>;
+  queryMessageVariants(query: unknown): Promise<unknown[]>;
+  selectActiveMessageVariant(input: unknown): Promise<unknown>;
+  deleteMessageVariant(input: unknown): Promise<unknown>;
+  reorderMessageVariants(input: unknown): Promise<unknown[]>;
   providerStateDiagnostics(
     limit?: number,
   ): Promise<NativeProviderStateDiagnostic[]>;
@@ -1088,6 +1102,13 @@ export const nativeManifestOperationNames = [
   "delegated_session_status",
   "list_sessions",
   "provider_state_diagnostics",
+  "save_message_slot",
+  "save_message_variant",
+  "query_message_slots",
+  "query_message_variants",
+  "select_active_message_variant",
+  "delete_message_variant",
+  "reorder_message_variants",
   "database_size",
   "run_maintenance",
   "subscribe_events",
@@ -1160,6 +1181,13 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     diagnosticCountRows: unavailable("initialize_engine"),
     databaseSize: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
+    saveMessageSlot: unavailable("save_message_slot"),
+    saveMessageVariant: unavailable("save_message_variant"),
+    queryMessageSlots: unavailable("query_message_slots"),
+    queryMessageVariants: unavailable("query_message_variants"),
+    selectActiveMessageVariant: unavailable("select_active_message_variant"),
+    deleteMessageVariant: unavailable("delete_message_variant"),
+    reorderMessageVariants: unavailable("reorder_message_variants"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     runOpenAiResponsesBrain: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
@@ -1821,6 +1849,32 @@ function createNativeBridgeModule(
     diagnosticCountRows: async (table) => binding.countRows(table),
     databaseSize: async () => binding.databaseSize(),
     runMaintenance: async (policy) => binding.runMaintenance(policy),
+    saveMessageSlot: async (input) =>
+      binding.saveMessageSlotJson(JSON.stringify(input)),
+    saveMessageVariant: async (input) =>
+      JSON.parse(
+        binding.saveMessageVariantJson(JSON.stringify(input)),
+      ) as unknown,
+    queryMessageSlots: async (query) =>
+      JSON.parse(
+        binding.queryMessageSlotsJson(JSON.stringify(query)),
+      ) as unknown[],
+    queryMessageVariants: async (query) =>
+      JSON.parse(
+        binding.queryMessageVariantsJson(JSON.stringify(query)),
+      ) as unknown[],
+    selectActiveMessageVariant: async (input) =>
+      JSON.parse(
+        binding.selectActiveMessageVariantJson(JSON.stringify(input)),
+      ) as unknown,
+    deleteMessageVariant: async (input) =>
+      JSON.parse(
+        binding.deleteMessageVariantJson(JSON.stringify(input)),
+      ) as unknown,
+    reorderMessageVariants: async (input) =>
+      JSON.parse(
+        binding.reorderMessageVariantsJson(JSON.stringify(input)),
+      ) as unknown[],
     providerStateDiagnostics: async (limit = 100) => {
       const stored = binding
         .providerStateDiagnostics(limit)

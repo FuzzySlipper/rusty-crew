@@ -20,20 +20,24 @@ use rusty_crew_core_config::{
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
-    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, QueuedMessageRecord,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
-    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeSearchRowType, RuntimeStateSummary, ScheduledJobRecord, ScheduledJobStatus,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
+    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, QueuedMessageRecord, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
+    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
+    ScheduledRunTrigger, SelectActiveVariantRequest, SelectActiveVariantResult,
 };
-use rusty_crew_core_protocol::{BodyState, BrainWakeProviderStateInput};
+use rusty_crew_core_protocol::{
+    BodyState, BrainWakeProviderStateInput, MessageSlotId, MessageVariantId,
+};
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
     NeutralToolOutput, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage,
 };
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
@@ -394,6 +398,58 @@ impl NativeBridge {
         policy: &RuntimeMaintenancePolicy,
     ) -> CoreResult<RuntimeMaintenanceReport> {
         self.engine()?.run_maintenance(policy)
+    }
+
+    pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
+        self.engine()?.save_message_slot(slot)
+    }
+
+    pub fn save_message_variant(
+        &self,
+        variant: &MessageVariantWrite,
+    ) -> CoreResult<MessageVariantRecord> {
+        self.engine()?.save_message_variant(variant)
+    }
+
+    pub fn query_message_slots(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<Vec<MessageSlotRecord>> {
+        self.engine()?.query_message_slots(query)
+    }
+
+    pub fn query_message_variants(
+        &self,
+        query: &MessageVariantQuery,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.engine()?.query_message_variants(query)
+    }
+
+    pub fn select_active_message_variant(
+        &self,
+        request: &SelectActiveVariantRequest,
+    ) -> CoreResult<SelectActiveVariantResult> {
+        self.engine()?.select_active_message_variant(request)
+    }
+
+    pub fn delete_message_variant(
+        &self,
+        slot_id: &MessageSlotId,
+        variant_id: &MessageVariantId,
+        updated_at: &rusty_crew_core_bridge_api::IsoTimestamp,
+    ) -> CoreResult<MessageSlotRecord> {
+        self.engine()?
+            .delete_message_variant(slot_id, variant_id, updated_at)
+    }
+
+    pub fn reorder_message_variants(
+        &self,
+        slot_id: &MessageSlotId,
+        ordered_variant_ids: &[MessageVariantId],
+        updated_at: &rusty_crew_core_bridge_api::IsoTimestamp,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.engine()?
+            .reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
     }
 
     pub fn list_profile_memory(
@@ -1307,6 +1363,20 @@ pub struct JsRuntimeMaintenanceReport {
     pub expired_provider_wire_states: f64,
     pub wal_checkpoint_ran: bool,
     pub optimize_ran: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireDeleteMessageVariantRequest {
+    slot_id: MessageSlotId,
+    variant_id: MessageVariantId,
+    updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireReorderMessageVariantsRequest {
+    slot_id: MessageSlotId,
+    ordered_variant_ids: Vec<MessageVariantId>,
+    updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
 }
 
 #[napi_derive::napi(object)]
@@ -2242,6 +2312,84 @@ impl NativeBridgeBinding {
             })
             .map_err(to_napi_error)?;
         Ok(to_js_runtime_maintenance_report(report))
+    }
+
+    #[napi]
+    pub fn save_message_slot_json(&self, input_json: String) -> napi::Result<()> {
+        let bridge = self.bridge()?;
+        let slot = parse_json::<MessageSlotWrite>(&input_json, "message slot write")?;
+        bridge.save_message_slot(&slot).map_err(to_napi_error)
+    }
+
+    #[napi]
+    pub fn save_message_variant_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let variant = parse_json::<MessageVariantWrite>(&input_json, "message variant write")?;
+        let record = bridge
+            .save_message_variant(&variant)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "message variant record")
+    }
+
+    #[napi]
+    pub fn query_message_slots_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<MessageSlotQuery>(&input_json, "message slot query")?;
+        let records = bridge.query_message_slots(&query).map_err(to_napi_error)?;
+        serialize_json(&records, "message slot records")
+    }
+
+    #[napi]
+    pub fn query_message_variants_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<MessageVariantQuery>(&input_json, "message variant query")?;
+        let records = bridge
+            .query_message_variants(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "message variant records")
+    }
+
+    #[napi]
+    pub fn select_active_message_variant_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<SelectActiveVariantRequest>(
+            &input_json,
+            "select active message variant request",
+        )?;
+        let result = bridge
+            .select_active_message_variant(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "select active message variant result")
+    }
+
+    #[napi]
+    pub fn delete_message_variant_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<WireDeleteMessageVariantRequest>(
+            &input_json,
+            "delete message variant request",
+        )?;
+        let slot = bridge
+            .delete_message_variant(&request.slot_id, &request.variant_id, &request.updated_at)
+            .map_err(to_napi_error)?;
+        serialize_json(&slot, "message slot record")
+    }
+
+    #[napi]
+    pub fn reorder_message_variants_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<WireReorderMessageVariantsRequest>(
+            &input_json,
+            "reorder message variants request",
+        )?;
+        let variants = bridge
+            .reorder_message_variants(
+                &request.slot_id,
+                &request.ordered_variant_ids,
+                &request.updated_at,
+            )
+            .map_err(to_napi_error)?;
+        serialize_json(&variants, "message variant records")
     }
 
     #[napi]
@@ -3256,6 +3404,24 @@ fn to_napi_error(error: CoreError) -> napi::Error {
         napi::Status::GenericFailure,
         format!("{:?}: {}", error.kind, error.message),
     )
+}
+
+fn parse_json<T: DeserializeOwned>(raw: &str, label: &str) -> napi::Result<T> {
+    serde_json::from_str(raw).map_err(|error| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("invalid {label} json: {error}"),
+        )
+    })
+}
+
+fn serialize_json<T: Serialize>(value: &T, label: &str) -> napi::Result<String> {
+    serde_json::to_string(value).map_err(|error| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("serialize {label}: {error}"),
+        )
+    })
 }
 
 #[cfg(test)]

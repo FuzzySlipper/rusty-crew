@@ -6,15 +6,17 @@ use rusty_crew_core_body::{
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
-    CoordinationStore, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
-    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
-    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
-    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-    QueuedMessageState, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
-    RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeStateSummary, ScheduledJobQuery, ScheduledJobRecord,
-    ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, WorkerRunRecord, WorkerRunStatus,
+    CoordinationStore, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, ProviderWireStateInvalidationReason, ProviderWireStateKey,
+    ProviderWireStateWakeLookup, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
+    QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, ScheduledJobQuery,
+    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
+    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveVariantRequest, SelectActiveVariantResult,
+    WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, BodyState, BrainAction,
@@ -24,10 +26,10 @@ use rusty_crew_core_protocol::{
     CoreEvent, CoreResult, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
     DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
-    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, ParentConsumptionPolicy, ProfileId,
-    ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId,
-    SessionConfig, SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary,
-    ToolProfile,
+    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MessageSlotId, MessageVariantId,
+    ParentConsumptionPolicy, ProfileId, ProviderStateAbsenceReason, ProviderStateClearReason,
+    ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId, SessionKind, SessionState,
+    SessionStatus, ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -591,6 +593,58 @@ impl CoreEngine {
         policy: &RuntimeMaintenancePolicy,
     ) -> CoreResult<RuntimeMaintenanceReport> {
         self.store.run_maintenance(policy)
+    }
+
+    pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
+        self.store.save_message_slot(slot)
+    }
+
+    pub fn save_message_variant(
+        &self,
+        variant: &MessageVariantWrite,
+    ) -> CoreResult<MessageVariantRecord> {
+        self.store.save_message_variant(variant)
+    }
+
+    pub fn query_message_slots(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<Vec<MessageSlotRecord>> {
+        self.store.query_message_slots(query)
+    }
+
+    pub fn query_message_variants(
+        &self,
+        query: &MessageVariantQuery,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.store.query_message_variants(query)
+    }
+
+    pub fn select_active_message_variant(
+        &self,
+        request: &SelectActiveVariantRequest,
+    ) -> CoreResult<SelectActiveVariantResult> {
+        self.store.select_active_message_variant(request)
+    }
+
+    pub fn delete_message_variant(
+        &self,
+        slot_id: &MessageSlotId,
+        variant_id: &MessageVariantId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<MessageSlotRecord> {
+        self.store
+            .delete_message_variant(slot_id, variant_id, updated_at)
+    }
+
+    pub fn reorder_message_variants(
+        &self,
+        slot_id: &MessageSlotId,
+        ordered_variant_ids: &[MessageVariantId],
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.store
+            .reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
     }
 
     pub fn list_profile_memory(

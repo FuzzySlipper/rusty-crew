@@ -141,6 +141,11 @@ try {
   assert.equal(sent.body.ok, true);
   assert.equal(sent.body.data.status, "accepted");
   assert.equal(sent.body.data.message_id, "client-message-1");
+  assert.equal(sent.body.data.slot_id, "slot:client-message-1");
+  assert.equal(
+    sent.body.data.primary_variant_id,
+    "variant:slot:client-message-1",
+  );
   assert.equal(typeof sent.body.data.wake_id, "string");
 
   assert.ok(
@@ -175,10 +180,180 @@ try {
     postTurnSession.latest_cursor,
   );
   assert.ok(postTurnOpen.body.data.session.message_count >= 2);
+  assert.ok(
+    postTurnOpen.body.data.message_slots.some(
+      (slot: { slot_id: string; alternates: unknown[] }) =>
+        slot.slot_id === sent.body.data.slot_id && slot.alternates.length === 0,
+    ),
+    "open session should include primary slots without lazy alternates",
+  );
 
+  const slots = await get(
+    "/v1/chat/sessions/chat-session/slots?include_alternates=true",
+    token,
+  );
+  assert.equal(slots.status, 200);
+  const sentSlot = slots.body.data.items.find(
+    (slot: { slot_id: string }) => slot.slot_id === sent.body.data.slot_id,
+  );
+  assert.ok(sentSlot, "sent message slot should be queryable");
+  assert.equal(sentSlot.primary.variant_id, sent.body.data.primary_variant_id);
+
+  const createdSlot = await post(
+    "/v1/chat/sessions/chat-session/slots",
+    token,
+    {
+      slot_id: "slot:manual",
+      primary_variant_id: "variant:manual:primary",
+      message_id: "message:manual:primary",
+      actor: { id: "human-operator", kind: "human" },
+      body: "manual primary",
+    },
+  );
+  assert.equal(createdSlot.status, 201);
+  assert.equal(createdSlot.body.data.status, "created");
+  assert.equal(createdSlot.body.data.slot.slot_id, "slot:manual");
+  assert.equal(
+    createdSlot.body.data.slot.primary.variant_id,
+    "variant:manual:primary",
+  );
+
+  const firstAlternate = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants",
+    token,
+    {
+      variant_id: "variant:manual:alt1",
+      message_id: "message:manual:alt1",
+      actor: { id: "chat-agent", kind: "agent" },
+      body: "alternate one",
+    },
+  );
+  assert.equal(firstAlternate.status, 201);
+  assert.equal(firstAlternate.body.data.variant.source, "alternate");
+  assert.equal(firstAlternate.body.data.variant.ordinal, 1);
+
+  const secondAlternate = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants",
+    token,
+    {
+      variant_id: "variant:manual:alt2",
+      message_id: "message:manual:alt2",
+      actor: { id: "chat-agent", kind: "agent" },
+      body: "alternate two",
+    },
+  );
+  assert.equal(secondAlternate.status, 201);
+  assert.equal(secondAlternate.body.data.variant.ordinal, 2);
+
+  const variants = await get(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants",
+    token,
+  );
+  assert.equal(variants.status, 200);
+  assert.deepEqual(
+    variants.body.data.items.map(
+      (variant: { variant_id: string }) => variant.variant_id,
+    ),
+    ["variant:manual:primary", "variant:manual:alt1", "variant:manual:alt2"],
+  );
+
+  const selected = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/active-variant",
+    token,
+    {
+      active_variant_id: "variant:manual:alt1",
+      expected: { type: "primary" },
+    },
+  );
+  assert.equal(selected.status, 200);
+  assert.equal(selected.body.data.status, "selected");
+  assert.equal(
+    selected.body.data.slot.active_variant_id,
+    "variant:manual:alt1",
+  );
+
+  const conflict = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/active-variant",
+    token,
+    {
+      active_variant_id: "variant:manual:alt2",
+      expected: { type: "primary" },
+    },
+  );
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.body.data.status, "conflict");
+  assert.equal(conflict.body.data.conflict.actual, "variant:manual:alt1");
+
+  const reordered = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants/reorder",
+    token,
+    { ordered_variant_ids: ["variant:manual:alt2", "variant:manual:alt1"] },
+  );
+  assert.equal(reordered.status, 200);
+  assert.deepEqual(
+    reordered.body.data.variants.map(
+      (variant: { variant_id: string }) => variant.variant_id,
+    ),
+    ["variant:manual:primary", "variant:manual:alt2", "variant:manual:alt1"],
+  );
+
+  const deleted = await del(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants/variant%3Amanual%3Aalt1",
+    token,
+  );
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.data.status, "deleted");
+  assert.equal(deleted.body.data.slot.active_variant_id, null);
+
+  const lazyOpen = await get("/v1/chat/sessions/chat-session", token);
+  assert.equal(lazyOpen.status, 200);
+  const lazyManualSlot = lazyOpen.body.data.message_slots.find(
+    (slot: { slot_id: string }) => slot.slot_id === "slot:manual",
+  );
+  assert.ok(lazyManualSlot, "manual slot should hydrate on open");
+  assert.deepEqual(
+    lazyManualSlot.alternates,
+    [],
+    "open session should lazy-load alternates by default",
+  );
+
+  const eagerOpen = await get(
+    "/v1/chat/sessions/chat-session?include_alternates=true",
+    token,
+  );
+  assert.equal(eagerOpen.status, 200);
+  const eagerManualSlot = eagerOpen.body.data.message_slots.find(
+    (slot: { slot_id: string }) => slot.slot_id === "slot:manual",
+  );
+  assert.equal(eagerManualSlot.alternates.length, 1);
+  assert.equal(eagerManualSlot.alternates[0].variant_id, "variant:manual:alt2");
+
+  const slotMutationKinds = (
+    await get(
+      "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+      token,
+    )
+  ).body.data.items
+    .map((event: { kind: string }) => event.kind)
+    .filter((kind: string) => kind.startsWith("message_"));
+  for (const kind of [
+    "message_slot_created",
+    "message_variant_created",
+    "message_active_variant_selected",
+    "message_variants_reordered",
+    "message_variant_deleted",
+  ]) {
+    assert.ok(slotMutationKinds.includes(kind), `missing ${kind} event`);
+  }
+
+  const afterMutationPage = await get("/v1/chat/sessions", token);
+  const afterMutationSession = afterMutationPage.body.data.items.find(
+    (item: { session_id: string }) => item.session_id === "chat-session",
+  );
+  assert.ok(afterMutationSession, "chat-session should still be listed");
   const afterLatest = await getSseOnce(
     `/v1/chat/sessions/chat-session/stream?once=true&cursor=${encodeURIComponent(
-      postTurnSession.latest_cursor,
+      afterMutationSession.latest_cursor,
     )}`,
     token,
   );
@@ -401,6 +576,20 @@ async function post(
       ...extraHeaders,
     },
     body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: (await response.json()) as any,
+  };
+}
+
+async function del(path: string, bearer: string | undefined) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "DELETE",
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+    },
   });
   return {
     status: response.status,

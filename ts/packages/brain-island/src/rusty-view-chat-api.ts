@@ -36,6 +36,25 @@ export interface RustyViewChatContext {
     input: ExecuteChatCommandInput,
   ): Promise<ExecuteChatCommandResult>;
   sendMessage?(input: ChatSendMessageInput): Promise<SendChatMessageResult>;
+  listMessageSlots?(input: ListMessageSlotsInput): Promise<MessageSlotPage>;
+  listMessageVariants?(
+    input: ListMessageVariantsInput,
+  ): Promise<MessageVariantPage>;
+  createMessageSlot?(
+    input: CreateMessageSlotInput,
+  ): Promise<MessageSlotMutationResult>;
+  createMessageVariant?(
+    input: CreateMessageVariantInput,
+  ): Promise<MessageVariantMutationResult>;
+  deleteMessageVariant?(
+    input: DeleteMessageVariantInput,
+  ): Promise<MessageSlotMutationResult>;
+  reorderMessageVariants?(
+    input: ReorderMessageVariantsInput,
+  ): Promise<MessageVariantsReorderResult>;
+  selectActiveMessageVariant?(
+    input: SelectActiveMessageVariantInput,
+  ): Promise<SelectActiveMessageVariantResult>;
   now?: () => string;
 }
 
@@ -66,6 +85,7 @@ export interface ChatSessionPage {
 export interface ChatSessionOpenResult {
   session: ChatSessionSummary;
   events: ChatEvent[];
+  message_slots?: MessageSlotRecord[];
   latest_cursor: string;
   has_more_before: boolean;
 }
@@ -88,6 +108,11 @@ export interface ChatEvent {
     | "command_started"
     | "command_completed"
     | "command_failed"
+    | "message_slot_created"
+    | "message_variant_created"
+    | "message_variant_deleted"
+    | "message_variants_reordered"
+    | "message_active_variant_selected"
     | "stream_error"
     | "unknown";
   payload: Record<string, unknown>;
@@ -142,10 +167,190 @@ export interface ExecuteChatCommandResult {
 export interface SendChatMessageResult {
   status: "accepted" | "duplicate" | "rejected";
   message_id: string;
+  slot_id?: string;
+  primary_variant_id?: string;
   wake_id?: string;
   correlation_id?: string;
   latest_cursor: string;
   reason_code?: string;
+}
+
+export interface MessageBlockRecord {
+  block_id: string;
+  message_id: string;
+  ordinal: number;
+  kind: string;
+  content_json: unknown;
+  render_policy_json?: unknown;
+  metadata_json: unknown;
+}
+
+export interface DurableMessageRecord {
+  message_id: string;
+  session_id: string;
+  author_id: string;
+  author_role: string;
+  status: "created" | "streaming" | "completed" | "failed" | "deleted";
+  body: string;
+  metadata_json: unknown;
+  created_at: string;
+  blocks: MessageBlockRecord[];
+}
+
+export interface MessageVariantRecord {
+  variant_id: string;
+  slot_id: string;
+  source: "primary" | "alternate";
+  ordinal: number;
+  status: "active" | "deleted";
+  message: DurableMessageRecord;
+  metadata_json: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MessageSlotRecord {
+  slot_id: string;
+  session_id: string;
+  primary_variant_id: string;
+  active_variant_id?: string | null;
+  metadata_json: unknown;
+  created_at: string;
+  updated_at: string;
+  version: number;
+  primary: MessageVariantRecord;
+  alternates: MessageVariantRecord[];
+}
+
+export interface MessageSlotPage {
+  items: MessageSlotRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+}
+
+export interface MessageVariantPage {
+  items: MessageVariantRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CreateMessageSlotRequest {
+  slot_id?: string;
+  primary_variant_id?: string;
+  message_id?: string;
+  actor: ChatActor;
+  body: string;
+  metadata_json?: unknown;
+  variant_metadata_json?: unknown;
+  blocks?: MessageBlockDraft[];
+}
+
+export interface CreateMessageVariantRequest {
+  variant_id?: string;
+  message_id?: string;
+  actor: ChatActor;
+  body: string;
+  metadata_json?: unknown;
+  blocks?: MessageBlockDraft[];
+}
+
+export interface MessageBlockDraft {
+  block_id?: string;
+  kind: string;
+  content_json: unknown;
+  render_policy_json?: unknown;
+  metadata_json?: unknown;
+}
+
+export interface MessageSlotMutationResult {
+  status: "created" | "deleted";
+  slot: MessageSlotRecord;
+  latest_cursor: string;
+}
+
+export interface MessageVariantMutationResult {
+  status: "created";
+  variant: MessageVariantRecord;
+  latest_cursor: string;
+}
+
+export interface ReorderMessageVariantsRequest {
+  ordered_variant_ids: string[];
+}
+
+export interface MessageVariantsReorderResult {
+  status: "reordered";
+  variants: MessageVariantRecord[];
+  latest_cursor: string;
+}
+
+export interface SelectActiveMessageVariantRequest {
+  active_variant_id?: string | null;
+  expected:
+    | { type: "any" }
+    | { type: "primary" }
+    | { type: "variant"; variant_id: string };
+}
+
+export interface SelectActiveMessageVariantResult {
+  status: "selected" | "conflict";
+  slot: MessageSlotRecord;
+  conflict?: {
+    expected?: string | null;
+    actual?: string | null;
+  };
+  latest_cursor: string;
+}
+
+export interface ListMessageSlotsInput {
+  session: SessionState;
+  includeAlternates: boolean;
+  limit: number;
+  offset: number;
+}
+
+export interface ListMessageVariantsInput {
+  session: SessionState;
+  slotId: string;
+  limit: number;
+  offset: number;
+}
+
+export interface CreateMessageSlotInput {
+  session: SessionState;
+  request: CreateMessageSlotRequest;
+  requestId: string;
+}
+
+export interface CreateMessageVariantInput {
+  session: SessionState;
+  slotId: string;
+  request: CreateMessageVariantRequest;
+  requestId: string;
+}
+
+export interface DeleteMessageVariantInput {
+  session: SessionState;
+  slotId: string;
+  variantId: string;
+  requestId: string;
+}
+
+export interface ReorderMessageVariantsInput {
+  session: SessionState;
+  slotId: string;
+  orderedVariantIds: string[];
+  requestId: string;
+}
+
+export interface SelectActiveMessageVariantInput {
+  session: SessionState;
+  slotId: string;
+  request: SelectActiveMessageVariantRequest;
+  requestId: string;
 }
 
 interface RawBodyStateJson {
@@ -159,6 +364,7 @@ export async function handleRustyViewChatRequest(
   const requestId = request.requestId ?? "rusty-view-chat";
   const url = new URL(request.url, "http://rusty-crew.local");
   const method = request.method.toUpperCase();
+  const parts = url.pathname.split("/").filter(Boolean);
   if (method !== "GET") {
     if (
       method === "POST" &&
@@ -172,6 +378,70 @@ export async function handleRustyViewChatRequest(
     ) {
       return handleExecuteCommand(request, context, requestId, url);
     }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, ["v1", "chat", "sessions", "*", "slots"])
+    ) {
+      return handleCreateMessageSlot(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "slots",
+        "*",
+        "variants",
+      ])
+    ) {
+      return handleCreateMessageVariant(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "slots",
+        "*",
+        "variants",
+        "reorder",
+      ])
+    ) {
+      return handleReorderMessageVariants(request, context, requestId, url);
+    }
+    if (
+      method === "POST" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "slots",
+        "*",
+        "active-variant",
+      ])
+    ) {
+      return handleSelectActiveMessageVariant(request, context, requestId, url);
+    }
+    if (
+      method === "DELETE" &&
+      partsMatch(url.pathname, [
+        "v1",
+        "chat",
+        "sessions",
+        "*",
+        "slots",
+        "*",
+        "variants",
+        "*",
+      ])
+    ) {
+      return handleDeleteMessageVariant(request, context, requestId, url);
+    }
     return failure(405, requestId, {
       code: "method_not_allowed",
       reason_code: "chat_read_requires_get",
@@ -181,7 +451,6 @@ export async function handleRustyViewChatRequest(
     });
   }
 
-  const parts = url.pathname.split("/").filter(Boolean);
   if (url.pathname === "/v1/chat/sessions") {
     const sessions = await context.listSessions();
     return success(requestId, sessionPage(sessions, context, url));
@@ -217,6 +486,7 @@ export async function handleRustyViewChatRequest(
         context,
         pageLimit(url, 100, 500),
         cursorParam(request, url),
+        boolParam(url, "include_alternates"),
       ),
     );
   }
@@ -250,6 +520,27 @@ export async function handleRustyViewChatRequest(
         cursorParam(request, url),
       ),
     );
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "slots"
+  ) {
+    return handleListMessageSlots(context, requestId, url, parts);
+  }
+
+  if (
+    parts.length === 7 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "slots" &&
+    parts[6] === "variants"
+  ) {
+    return handleListMessageVariants(context, requestId, url, parts);
   }
 
   return failure(404, requestId, {
@@ -386,6 +677,188 @@ async function handleExecuteCommand(
   };
 }
 
+async function handleListMessageSlots(
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.listMessageSlots) {
+    return chatFeatureUnavailable(requestId, "message_slot_api_not_configured");
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.listMessageSlots({
+      session: session.session,
+      includeAlternates: boolParam(url, "include_alternates"),
+      limit: pageLimit(url, 100, 500),
+      offset: pageOffset(url),
+    }),
+  );
+}
+
+async function handleListMessageVariants(
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.listMessageVariants) {
+    return chatFeatureUnavailable(
+      requestId,
+      "message_variant_api_not_configured",
+    );
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.listMessageVariants({
+      session: session.session,
+      slotId: decodeURIComponent(parts[5] ?? ""),
+      limit: pageLimit(url, 100, 500),
+      offset: pageOffset(url),
+    }),
+  );
+}
+
+async function handleCreateMessageSlot(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.createMessageSlot) {
+    return chatFeatureUnavailable(requestId, "message_slot_api_not_configured");
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseCreateMessageSlotRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.createMessageSlot({
+      session: session.session,
+      request: parsed.value,
+      requestId,
+    }),
+    201,
+  );
+}
+
+async function handleCreateMessageVariant(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.createMessageVariant) {
+    return chatFeatureUnavailable(
+      requestId,
+      "message_variant_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseCreateMessageVariantRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.createMessageVariant({
+      session: session.session,
+      slotId: decodeURIComponent(parts[5] ?? ""),
+      request: parsed.value,
+      requestId,
+    }),
+    201,
+  );
+}
+
+async function handleDeleteMessageVariant(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  void request;
+  if (!context.deleteMessageVariant) {
+    return chatFeatureUnavailable(
+      requestId,
+      "message_variant_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  return success(
+    requestId,
+    await context.deleteMessageVariant({
+      session: session.session,
+      slotId: decodeURIComponent(parts[5] ?? ""),
+      variantId: decodeURIComponent(parts[7] ?? ""),
+      requestId,
+    }),
+  );
+}
+
+async function handleReorderMessageVariants(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.reorderMessageVariants) {
+    return chatFeatureUnavailable(
+      requestId,
+      "message_variant_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseReorderMessageVariantsRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  return success(
+    requestId,
+    await context.reorderMessageVariants({
+      session: session.session,
+      slotId: decodeURIComponent(parts[5] ?? ""),
+      orderedVariantIds: parsed.value.ordered_variant_ids,
+      requestId,
+    }),
+  );
+}
+
+async function handleSelectActiveMessageVariant(
+  request: RustyViewChatRouteRequest,
+  context: RustyViewChatContext,
+  requestId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  if (!context.selectActiveMessageVariant) {
+    return chatFeatureUnavailable(
+      requestId,
+      "message_variant_api_not_configured",
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const parsed = parseSelectActiveMessageVariantRequest(request.body);
+  if (!parsed.ok) return invalidChatRequest(requestId, parsed);
+  const result = await context.selectActiveMessageVariant({
+    session: session.session,
+    slotId: decodeURIComponent(parts[5] ?? ""),
+    request: parsed.value,
+    requestId,
+  });
+  return success(requestId, result, result.status === "conflict" ? 409 : 200);
+}
+
 function sessionPage(
   sessions: SessionState[],
   context: RustyViewChatContext,
@@ -424,11 +897,21 @@ async function openSessionResult(
   context: RustyViewChatContext,
   limit: number,
   cursor: string | undefined,
+  includeAlternates: boolean,
 ): Promise<ChatSessionOpenResult> {
   const now = context.now?.() ?? new Date().toISOString();
   const pendingMessages = await pendingMessagesForSession(session, context);
   const stats = chatEventStats(session, context);
   const loggedEvents = context.listChatEvents?.(session, cursor, limit) ?? [];
+  const messageSlots = await context
+    .listMessageSlots?.({
+      session,
+      includeAlternates,
+      limit,
+      offset: 0,
+    })
+    .then((page) => page.items)
+    .catch(() => undefined);
   const snapshot: ChatEvent = {
     event_id: eventId(session.sessionId, 0),
     session_id: session.sessionId,
@@ -461,6 +944,7 @@ async function openSessionResult(
       latestCursor: stats.latestCursor,
     }),
     events,
+    ...(messageSlots === undefined ? {} : { message_slots: messageSlots }),
     latest_cursor: cursorFor(session.sessionId, latestSequence),
     has_more_before: false,
   };
@@ -754,8 +1238,267 @@ function parseOptionalActor(
   };
 }
 
+async function chatSessionFromParts(
+  context: RustyViewChatContext,
+  requestId: string,
+  parts: string[],
+): Promise<
+  { ok: true; session: SessionState } | { ok: false; result: AdminRouteResult }
+> {
+  const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
+  const sessions = await context.listSessions();
+  const session = sessions.find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  if (session) return { ok: true, session };
+  return {
+    ok: false,
+    result: failure(404, requestId, {
+      code: "not_found",
+      reason_code: "chat_session_not_found",
+      message: `chat session ${sessionId} was not found`,
+      retryable: false,
+    }),
+  };
+}
+
+function chatFeatureUnavailable(
+  requestId: string,
+  reasonCode: string,
+): AdminRouteResult {
+  return failure(412, requestId, {
+    code: "failed_precondition",
+    reason_code: reasonCode,
+    message: "chat message slot/variant persistence is not configured",
+    retryable: true,
+  });
+}
+
+function invalidChatRequest(
+  requestId: string,
+  parsed: { ok: false; reasonCode: string; message: string },
+): AdminRouteResult {
+  return failure(400, requestId, {
+    code: "invalid_input",
+    reason_code: parsed.reasonCode,
+    message: parsed.message,
+    retryable: false,
+  });
+}
+
+function parseCreateMessageSlotRequest(
+  value: unknown,
+):
+  | { ok: true; value: CreateMessageSlotRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_message_slot_body",
+      message: "message slot body must be a JSON object",
+    };
+  }
+  const actor = parseRequiredActor(value.actor);
+  if (!actor.ok) return actor;
+  const body = stringValue(value.body);
+  if (body === undefined) {
+    return {
+      ok: false,
+      reasonCode: "empty_message_slot_body",
+      message: "message slot body is empty",
+    };
+  }
+  const blocks = parseMessageBlockDrafts(value.blocks);
+  if (!blocks.ok) return blocks;
+  return {
+    ok: true,
+    value: {
+      slot_id: stringValue(value.slot_id),
+      primary_variant_id: stringValue(value.primary_variant_id),
+      message_id: stringValue(value.message_id),
+      actor: actor.value,
+      body,
+      metadata_json: value.metadata_json,
+      variant_metadata_json: value.variant_metadata_json,
+      blocks: blocks.value,
+    },
+  };
+}
+
+function parseCreateMessageVariantRequest(
+  value: unknown,
+):
+  | { ok: true; value: CreateMessageVariantRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_message_variant_body",
+      message: "message variant body must be a JSON object",
+    };
+  }
+  const actor = parseRequiredActor(value.actor);
+  if (!actor.ok) return actor;
+  const body = stringValue(value.body);
+  if (body === undefined) {
+    return {
+      ok: false,
+      reasonCode: "empty_message_variant_body",
+      message: "message variant body is empty",
+    };
+  }
+  const blocks = parseMessageBlockDrafts(value.blocks);
+  if (!blocks.ok) return blocks;
+  return {
+    ok: true,
+    value: {
+      variant_id: stringValue(value.variant_id),
+      message_id: stringValue(value.message_id),
+      actor: actor.value,
+      body,
+      metadata_json: value.metadata_json,
+      blocks: blocks.value,
+    },
+  };
+}
+
+function parseReorderMessageVariantsRequest(
+  value: unknown,
+):
+  | { ok: true; value: ReorderMessageVariantsRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value) || !Array.isArray(value.ordered_variant_ids)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_variant_order",
+      message: "ordered_variant_ids must be an array",
+    };
+  }
+  const ordered = value.ordered_variant_ids.filter(
+    (item): item is string => typeof item === "string" && item.trim() !== "",
+  );
+  if (ordered.length !== value.ordered_variant_ids.length) {
+    return {
+      ok: false,
+      reasonCode: "invalid_variant_order",
+      message: "ordered_variant_ids must contain only non-empty strings",
+    };
+  }
+  return { ok: true, value: { ordered_variant_ids: ordered } };
+}
+
+function parseSelectActiveMessageVariantRequest(
+  value: unknown,
+):
+  | { ok: true; value: SelectActiveMessageVariantRequest }
+  | { ok: false; reasonCode: string; message: string } {
+  if (!isRecord(value) || !isRecord(value.expected)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_active_variant_selection",
+      message: "active variant selection requires expected",
+    };
+  }
+  const expectedType = stringValue(value.expected.type);
+  const expected =
+    expectedType === "any"
+      ? ({ type: "any" } as const)
+      : expectedType === "primary"
+        ? ({ type: "primary" } as const)
+        : expectedType === "variant" &&
+            stringValue(value.expected.variant_id) !== undefined
+          ? ({
+              type: "variant",
+              variant_id: stringValue(value.expected.variant_id)!,
+            } as const)
+          : undefined;
+  if (expected === undefined) {
+    return {
+      ok: false,
+      reasonCode: "invalid_active_variant_expectation",
+      message: "expected must be any, primary, or variant with variant_id",
+    };
+  }
+  const active = value.active_variant_id;
+  if (
+    active !== undefined &&
+    active !== null &&
+    stringValue(active) === undefined
+  ) {
+    return {
+      ok: false,
+      reasonCode: "invalid_active_variant",
+      message: "active_variant_id must be a string or null",
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      active_variant_id: active === null ? null : stringValue(active),
+      expected,
+    },
+  };
+}
+
+function parseRequiredActor(
+  value: unknown,
+):
+  | { ok: true; value: ChatActor }
+  | { ok: false; reasonCode: string; message: string } {
+  const parsed = parseOptionalActor(value);
+  if (!parsed.ok) return parsed;
+  if (parsed.value !== undefined) return { ok: true, value: parsed.value };
+  return {
+    ok: false,
+    reasonCode: "invalid_chat_actor",
+    message: "chat actor is required",
+  };
+}
+
+function parseMessageBlockDrafts(
+  value: unknown,
+):
+  | { ok: true; value?: MessageBlockDraft[] }
+  | { ok: false; reasonCode: string; message: string } {
+  if (value === undefined) return { ok: true };
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      reasonCode: "invalid_message_blocks",
+      message: "blocks must be an array",
+    };
+  }
+  const blocks: MessageBlockDraft[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || stringValue(item.kind) === undefined) {
+      return {
+        ok: false,
+        reasonCode: "invalid_message_block",
+        message: "each block requires kind",
+      };
+    }
+    blocks.push({
+      block_id: stringValue(item.block_id),
+      kind: stringValue(item.kind)!,
+      content_json: item.content_json,
+      render_policy_json: item.render_policy_json,
+      metadata_json: item.metadata_json,
+    });
+  }
+  return { ok: true, value: blocks };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function boolParam(url: URL, key: string): boolean {
+  const value = url.searchParams.get(key);
+  return value === "1" || value === "true";
 }
 
 function partsMatch(pathname: string, pattern: readonly string[]): boolean {
@@ -766,9 +1509,13 @@ function partsMatch(pathname: string, pattern: readonly string[]): boolean {
   );
 }
 
-function success<T>(requestId: string, data: T): AdminRouteResult<T> {
+function success<T>(
+  requestId: string,
+  data: T,
+  status = 200,
+): AdminRouteResult<T> {
   return {
-    status: 200,
+    status,
     headers: { "content-type": "application/json" },
     body: {
       ok: true,

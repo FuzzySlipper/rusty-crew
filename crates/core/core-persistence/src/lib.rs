@@ -163,7 +163,7 @@ pub struct PersistedEvent {
     pub event: CoreEvent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueryPage {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
@@ -298,7 +298,7 @@ impl DurableMessageStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageBlockRecord {
     pub block_id: MessageBlockId,
     pub message_id: MessageId,
@@ -309,7 +309,7 @@ pub struct MessageBlockRecord {
     pub metadata_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DurableMessageRecord {
     pub message_id: MessageId,
     pub session_id: SessionId,
@@ -322,7 +322,7 @@ pub struct DurableMessageRecord {
     pub blocks: Vec<MessageBlockRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageVariantRecord {
     pub variant_id: MessageVariantId,
     pub slot_id: MessageSlotId,
@@ -335,7 +335,7 @@ pub struct MessageVariantRecord {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageSlotRecord {
     pub slot_id: MessageSlotId,
     pub session_id: SessionId,
@@ -349,7 +349,7 @@ pub struct MessageSlotRecord {
     pub alternates: Vec<MessageVariantRecord>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageBlockWrite {
     pub block_id: MessageBlockId,
     pub ordinal: u32,
@@ -359,7 +359,7 @@ pub struct MessageBlockWrite {
     pub metadata_json: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DurableMessageWrite {
     pub message_id: MessageId,
     pub session_id: SessionId,
@@ -372,7 +372,7 @@ pub struct DurableMessageWrite {
     pub blocks: Vec<MessageBlockWrite>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageVariantWrite {
     pub variant_id: MessageVariantId,
     pub slot_id: MessageSlotId,
@@ -385,7 +385,7 @@ pub struct MessageVariantWrite {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageSlotWrite {
     pub slot_id: MessageSlotId,
     pub session_id: SessionId,
@@ -396,28 +396,29 @@ pub struct MessageSlotWrite {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MessageSlotQuery {
     pub session_id: Option<SessionId>,
     pub include_alternates: bool,
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MessageVariantQuery {
     pub slot_id: Option<MessageSlotId>,
     pub include_deleted: bool,
     pub page: Option<QueryPage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "variant_id", rename_all = "snake_case")]
 pub enum ActiveVariantExpectation {
     Any,
     Primary,
     Variant(MessageVariantId),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectActiveVariantRequest {
     pub slot_id: MessageSlotId,
     pub active_variant_id: Option<MessageVariantId>,
@@ -425,13 +426,13 @@ pub struct SelectActiveVariantRequest {
     pub updated_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectActiveVariantResult {
     pub slot: MessageSlotRecord,
     pub conflict: Option<ActiveVariantConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveVariantConflict {
     pub expected: Option<MessageVariantId>,
     pub actual: Option<MessageVariantId>,

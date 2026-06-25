@@ -352,6 +352,69 @@ summary = "List Rust-owned runtime sessions for diagnostics and debug context."
 # Runtime maintenance and scale diagnostics.
 
 [[operation]]
+name = "save_message_slot"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::MessageSlotWrite"
+output = "unit"
+errors = "core_protocol::CoreError"
+summary = "Persist a durable chat message slot record."
+
+[[operation]]
+name = "save_message_variant"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::MessageVariantWrite"
+output = "core_persistence::MessageVariantRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist a durable message variant with its message and block records."
+
+[[operation]]
+name = "query_message_slots"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::MessageSlotQuery"
+output = "Vec<core_persistence::MessageSlotRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query durable message slots, optionally hydrating alternates."
+
+[[operation]]
+name = "query_message_variants"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::MessageVariantQuery"
+output = "Vec<core_persistence::MessageVariantRecord>"
+errors = "core_protocol::CoreError"
+summary = "Lazy-load durable message variants for a slot."
+
+[[operation]]
+name = "select_active_message_variant"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::SelectActiveVariantRequest"
+output = "core_persistence::SelectActiveVariantResult"
+errors = "core_protocol::CoreError"
+summary = "Select the active variant for a message slot with compare-and-swap conflict reporting."
+
+[[operation]]
+name = "delete_message_variant"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ slot_id, variant_id, updated_at }"
+output = "core_persistence::MessageSlotRecord"
+errors = "core_protocol::CoreError"
+summary = "Mark an alternate message variant deleted and clear active selection if needed."
+
+[[operation]]
+name = "reorder_message_variants"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ slot_id, ordered_variant_ids, updated_at }"
+output = "Vec<core_persistence::MessageVariantRecord>"
+errors = "core_protocol::CoreError"
+summary = "Reorder alternate message variants for a slot."
+
+[[operation]]
 name = "database_size"
 surface = "stable"
 direction = "ts_to_rust"

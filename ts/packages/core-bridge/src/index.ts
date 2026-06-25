@@ -84,6 +84,34 @@ export class CoreBridge {
     return this.native.unregisterBrainImplementationForProfile(profileId);
   }
 
+  async saveMessageSlot(input: unknown): Promise<void> {
+    return this.native.saveMessageSlot(input);
+  }
+
+  async saveMessageVariant(input: unknown): Promise<unknown> {
+    return this.native.saveMessageVariant(input);
+  }
+
+  async queryMessageSlots(query: unknown): Promise<unknown[]> {
+    return this.native.queryMessageSlots(query);
+  }
+
+  async queryMessageVariants(query: unknown): Promise<unknown[]> {
+    return this.native.queryMessageVariants(query);
+  }
+
+  async selectActiveMessageVariant(input: unknown): Promise<unknown> {
+    return this.native.selectActiveMessageVariant(input);
+  }
+
+  async deleteMessageVariant(input: unknown): Promise<unknown> {
+    return this.native.deleteMessageVariant(input);
+  }
+
+  async reorderMessageVariants(input: unknown): Promise<unknown[]> {
+    return this.native.reorderMessageVariants(input);
+  }
+
   async wakeBrain(request: BrainWakeRequest): Promise<BrainWakeAccepted> {
     return this.native.wakeBrain(request);
   }

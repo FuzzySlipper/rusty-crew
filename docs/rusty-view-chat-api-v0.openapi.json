@@ -69,6 +69,12 @@
             "in": "query",
             "description": "Debug-only hint. Implementations may ignore or deny this in chat-safe mode.",
             "schema": { "type": "boolean", "default": false }
+          },
+          {
+            "name": "include_alternates",
+            "in": "query",
+            "description": "Include alternate message variants in the message_slots projection. Defaults to false so chat clients can lazy-load alternates.",
+            "schema": { "type": "boolean", "default": false }
           }
         ],
         "responses": {
@@ -188,6 +194,261 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/slots": {
+      "get": {
+        "operationId": "listMessageSlots",
+        "summary": "List primary message slots for a chat session",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" },
+          {
+            "name": "include_alternates",
+            "in": "query",
+            "description": "When true, include non-deleted alternate variants for each slot.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message slot page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MessageSlotPage" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createMessageSlot",
+        "summary": "Create a primary message slot and primary variant",
+        "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateMessageSlotRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Message slot created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MessageSlotMutationResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants": {
+      "get": {
+        "operationId": "listMessageVariants",
+        "summary": "Lazy-load non-deleted variants for one message slot",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/SlotId" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message variant page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MessageVariantPage" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createMessageVariant",
+        "summary": "Create an alternate variant for one message slot",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/SlotId" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateMessageVariantRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Message variant created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MessageVariantMutationResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/{variant_id}": {
+      "delete": {
+        "operationId": "deleteMessageVariant",
+        "summary": "Delete an alternate message variant",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/SlotId" },
+          { "$ref": "#/components/parameters/VariantId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Variant deleted and containing slot returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MessageSlotMutationResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/reorder": {
+      "post": {
+        "operationId": "reorderMessageVariants",
+        "summary": "Reorder alternate variants for one message slot",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/SlotId" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReorderMessageVariantsRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Variants reordered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MessageVariantsReorderResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant": {
+      "post": {
+        "operationId": "selectActiveMessageVariant",
+        "summary": "Select the active variant for one message slot with CAS conflict reporting",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          { "$ref": "#/components/parameters/SlotId" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SelectActiveMessageVariantRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Active variant selected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/SelectActiveMessageVariantResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CAS expectation did not match the current active variant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/SelectActiveMessageVariantResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/commands": {
       "get": {
         "operationId": "listChatCommands",
@@ -255,6 +516,18 @@
     "parameters": {
       "SessionId": {
         "name": "session_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "minLength": 1 }
+      },
+      "SlotId": {
+        "name": "slot_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "minLength": 1 }
+      },
+      "VariantId": {
+        "name": "variant_id",
         "in": "path",
         "required": true,
         "schema": { "type": "string", "minLength": 1 }
@@ -362,6 +635,10 @@
             "type": "array",
             "items": { "$ref": "#/components/schemas/ChatEvent" }
           },
+          "message_slots": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageSlotRecord" }
+          },
           "latest_cursor": { "type": "string" },
           "has_more_before": { "type": "boolean" }
         },
@@ -408,6 +685,11 @@
           "command_started",
           "command_completed",
           "command_failed",
+          "message_slot_created",
+          "message_variant_created",
+          "message_variant_deleted",
+          "message_variants_reordered",
+          "message_active_variant_selected",
           "stream_error",
           "unknown"
         ]
@@ -420,6 +702,8 @@
           { "$ref": "#/components/schemas/AssistantMessageCompletedPayload" },
           { "$ref": "#/components/schemas/ToolCallPayload" },
           { "$ref": "#/components/schemas/CommandPayload" },
+          { "$ref": "#/components/schemas/MessageSlotPayload" },
+          { "$ref": "#/components/schemas/MessageVariantPayload" },
           { "$ref": "#/components/schemas/StreamErrorPayload" },
           { "$ref": "#/components/schemas/UnknownEventPayload" }
         ]
@@ -437,10 +721,14 @@
         "required": ["message_id", "role", "body"],
         "properties": {
           "message_id": { "type": "string" },
+          "slot_id": { "type": "string" },
+          "primary_variant_id": { "type": "string" },
           "client_message_id": { "type": "string" },
           "role": { "type": "string", "enum": ["user", "assistant", "system", "tool"] },
+          "actor": { "$ref": "#/components/schemas/ChatActor" },
           "body": { "type": "string" },
-          "correlation_id": { "type": "string" }
+          "correlation_id": { "type": "string" },
+          "reason": { "type": "string" }
         },
         "additionalProperties": false
       },
@@ -536,12 +824,283 @@
         "properties": {
           "status": { "type": "string", "enum": ["accepted", "duplicate", "rejected"] },
           "message_id": { "type": "string" },
+          "slot_id": { "type": "string" },
+          "primary_variant_id": { "type": "string" },
           "wake_id": { "type": "string" },
           "correlation_id": { "type": "string" },
           "latest_cursor": { "type": "string" },
           "reason_code": { "type": "string" }
         },
         "additionalProperties": false
+      },
+      "MessageBlockRecord": {
+        "type": "object",
+        "required": ["block_id", "message_id", "ordinal", "kind", "content_json", "metadata_json"],
+        "properties": {
+          "block_id": { "type": "string" },
+          "message_id": { "type": "string" },
+          "ordinal": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string" },
+          "content_json": {},
+          "render_policy_json": {},
+          "metadata_json": {}
+        },
+        "additionalProperties": false
+      },
+      "DurableMessageRecord": {
+        "type": "object",
+        "required": ["message_id", "session_id", "author_id", "author_role", "status", "body", "metadata_json", "created_at", "blocks"],
+        "properties": {
+          "message_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "author_id": { "type": "string" },
+          "author_role": { "type": "string", "enum": ["user", "assistant", "system", "tool"] },
+          "status": { "type": "string", "enum": ["created", "streaming", "completed", "failed", "deleted"] },
+          "body": { "type": "string" },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" },
+          "blocks": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageBlockRecord" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "MessageVariantRecord": {
+        "type": "object",
+        "required": ["variant_id", "slot_id", "source", "ordinal", "status", "message", "metadata_json", "created_at", "updated_at"],
+        "properties": {
+          "variant_id": { "type": "string" },
+          "slot_id": { "type": "string" },
+          "source": { "type": "string", "enum": ["primary", "alternate"] },
+          "ordinal": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string", "enum": ["active", "deleted"] },
+          "message": { "$ref": "#/components/schemas/DurableMessageRecord" },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "MessageSlotRecord": {
+        "type": "object",
+        "required": ["slot_id", "session_id", "primary_variant_id", "metadata_json", "created_at", "updated_at", "version", "primary", "alternates"],
+        "properties": {
+          "slot_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "primary_variant_id": { "type": "string" },
+          "active_variant_id": { "type": ["string", "null"] },
+          "metadata_json": {},
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "version": { "type": "integer", "minimum": 1 },
+          "primary": { "$ref": "#/components/schemas/MessageVariantRecord" },
+          "alternates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageVariantRecord" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "MessageSlotPage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageSlotRecord" }
+          },
+          "total": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 },
+          "nextOffset": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "MessageVariantPage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageVariantRecord" }
+          },
+          "total": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "MessageBlockDraft": {
+        "type": "object",
+        "required": ["kind", "content_json"],
+        "properties": {
+          "block_id": { "type": "string" },
+          "kind": { "type": "string" },
+          "content_json": {},
+          "render_policy_json": {},
+          "metadata_json": {}
+        },
+        "additionalProperties": false
+      },
+      "CreateMessageSlotRequest": {
+        "type": "object",
+        "required": ["actor", "body"],
+        "properties": {
+          "slot_id": { "type": "string" },
+          "primary_variant_id": { "type": "string" },
+          "message_id": { "type": "string" },
+          "actor": { "$ref": "#/components/schemas/ChatActor" },
+          "body": { "type": "string", "minLength": 1, "maxLength": 20000 },
+          "metadata_json": {},
+          "variant_metadata_json": {},
+          "blocks": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageBlockDraft" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateMessageVariantRequest": {
+        "type": "object",
+        "required": ["actor", "body"],
+        "properties": {
+          "variant_id": { "type": "string" },
+          "message_id": { "type": "string" },
+          "actor": { "$ref": "#/components/schemas/ChatActor" },
+          "body": { "type": "string", "minLength": 1, "maxLength": 20000 },
+          "metadata_json": {},
+          "blocks": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageBlockDraft" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "MessageSlotMutationResult": {
+        "type": "object",
+        "required": ["status", "slot", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["created", "deleted"] },
+          "slot": { "$ref": "#/components/schemas/MessageSlotRecord" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "MessageVariantMutationResult": {
+        "type": "object",
+        "required": ["status", "variant", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["created"] },
+          "variant": { "$ref": "#/components/schemas/MessageVariantRecord" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ReorderMessageVariantsRequest": {
+        "type": "object",
+        "required": ["ordered_variant_ids"],
+        "properties": {
+          "ordered_variant_ids": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "MessageVariantsReorderResult": {
+        "type": "object",
+        "required": ["status", "variants", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["reordered"] },
+          "variants": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageVariantRecord" }
+          },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ActiveVariantExpectation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": { "type": { "const": "any" } },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": { "type": { "const": "primary" } },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["type", "variant_id"],
+            "properties": {
+              "type": { "const": "variant" },
+              "variant_id": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SelectActiveMessageVariantRequest": {
+        "type": "object",
+        "required": ["expected"],
+        "properties": {
+          "active_variant_id": { "type": ["string", "null"] },
+          "expected": { "$ref": "#/components/schemas/ActiveVariantExpectation" }
+        },
+        "additionalProperties": false
+      },
+      "ActiveVariantConflict": {
+        "type": "object",
+        "properties": {
+          "expected": { "type": ["string", "null"] },
+          "actual": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "SelectActiveMessageVariantResult": {
+        "type": "object",
+        "required": ["status", "slot", "latest_cursor"],
+        "properties": {
+          "status": { "type": "string", "enum": ["selected", "conflict"] },
+          "slot": { "$ref": "#/components/schemas/MessageSlotRecord" },
+          "conflict": { "$ref": "#/components/schemas/ActiveVariantConflict" },
+          "latest_cursor": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "MessageSlotPayload": {
+        "type": "object",
+        "properties": {
+          "slot": { "$ref": "#/components/schemas/MessageSlotRecord" },
+          "slot_id": { "type": "string" },
+          "active_variant_id": { "type": ["string", "null"] },
+          "conflict": { "$ref": "#/components/schemas/ActiveVariantConflict" }
+        },
+        "additionalProperties": true
+      },
+      "MessageVariantPayload": {
+        "type": "object",
+        "properties": {
+          "slot_id": { "type": "string" },
+          "variant_id": { "type": "string" },
+          "variant": { "$ref": "#/components/schemas/MessageVariantRecord" },
+          "variants": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageVariantRecord" }
+          },
+          "ordered_variant_ids": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "slot": { "$ref": "#/components/schemas/MessageSlotRecord" }
+        },
+        "additionalProperties": true
       },
       "ChatCommandRegistry": {
         "type": "object",
