@@ -363,6 +363,7 @@ interface NativeBridgeBinding {
   };
   countRows(table: string): number;
   databaseSize(): NativeRuntimeDatabaseSize;
+  storageDiagnostics(): NativeRuntimeStorageDiagnostics;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
@@ -637,6 +638,43 @@ export interface NativeRuntimeDatabaseSize {
   freelistPages: number;
   freelistBytes: number;
   walBytes: number;
+}
+
+export interface NativeSchemaMigrationRecord {
+  version: number;
+  description: string;
+  appliedAt: string;
+}
+
+export interface NativeRuntimeStorageCapability {
+  name: string;
+  supported: boolean;
+  detail: string;
+}
+
+export interface NativeRuntimeStorageTableCount {
+  table: string;
+  rows: number;
+}
+
+export interface NativeRuntimeQueryPlanCheck {
+  name: string;
+  usesIndex: boolean;
+  detail: string;
+}
+
+export interface NativeRuntimeStorageDiagnostics {
+  backend: string;
+  backendLabel: string;
+  schemaVersion: number;
+  supportedSchemaVersion: number;
+  migrations: NativeSchemaMigrationRecord[];
+  size: NativeRuntimeDatabaseSize;
+  tableCounts: NativeRuntimeStorageTableCount[];
+  capabilities: NativeRuntimeStorageCapability[];
+  indexChecks: NativeRuntimeQueryPlanCheck[];
+  searchHealthy: boolean;
+  pressure: boolean;
 }
 
 export interface NativeRuntimeMaintenancePolicy {
@@ -1026,6 +1064,7 @@ export interface NativeBridgeModule {
   ): Promise<ActionBatchReceipt>;
   diagnosticCountRows(table: string): Promise<number>;
   databaseSize(): Promise<NativeRuntimeDatabaseSize>;
+  storageDiagnostics(): Promise<NativeRuntimeStorageDiagnostics>;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
@@ -1152,6 +1191,7 @@ export const nativeManifestOperationNames = [
   "query_data_bank_scopes",
   "remove_data_bank_scope",
   "database_size",
+  "storage_diagnostics",
   "run_maintenance",
   "subscribe_events",
   "unsubscribe_events",
@@ -1222,6 +1262,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     diagnosticSubmitBrainActionsJson: unavailable("submit_brain_actions"),
     diagnosticCountRows: unavailable("initialize_engine"),
     databaseSize: unavailable("initialize_engine"),
+    storageDiagnostics: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
@@ -1908,6 +1949,7 @@ function createNativeBridgeModule(
     },
     diagnosticCountRows: async (table) => binding.countRows(table),
     databaseSize: async () => binding.databaseSize(),
+    storageDiagnostics: async () => binding.storageDiagnostics(),
     runMaintenance: async (policy) => binding.runMaintenance(policy),
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),

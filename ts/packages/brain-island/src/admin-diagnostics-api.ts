@@ -5,6 +5,7 @@ import {
 import type {
   RuntimeDiagnosticsProjection,
   RuntimeSessionDiagnostics,
+  StorageDiagnosticsProjection,
 } from "./runtime-diagnostics.js";
 import type { BackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
 import { apiCapabilityRegistry } from "./api-command-registry.js";
@@ -71,6 +72,7 @@ export interface AdminDiagnosticsContext {
   recentEvents?: readonly AdminRecentEvent[];
   background?: BackgroundServiceDiagnosticsProjection;
   configValidation?: RuntimeConfigValidationPreflightReport;
+  storage?: StorageDiagnosticsProjection;
 }
 
 export interface AdminPage<T> {
@@ -172,6 +174,8 @@ export function handleAdminDiagnosticsRequest(
       );
     case "/v1/admin/diagnostics/persistence":
       return success(requestId, context.diagnostics.persistence ?? null);
+    case "/v1/admin/diagnostics/storage":
+      return success(requestId, context.storage ?? null);
     case "/v1/admin/diagnostics/provider-state":
       return success(
         requestId,

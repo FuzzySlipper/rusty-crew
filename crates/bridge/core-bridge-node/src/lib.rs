@@ -30,10 +30,11 @@ use rusty_crew_core_persistence::{
     ProfileMemoryWrite, QueuedMessageRecord, RuntimeCounterQuery, RuntimeCounterRecord,
     RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
     RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
+    RuntimeStorageCapability, RuntimeStorageDiagnostics, RuntimeStorageTableCount,
     ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
-    SelectActiveVariantRequest, SelectActiveVariantResult, UpdateBranchHeadRequest,
-    UpdateBranchHeadResult,
+    ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId, MessageSlotId,
@@ -398,6 +399,10 @@ impl NativeBridge {
 
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
         self.engine()?.database_size()
+    }
+
+    pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
+        self.engine()?.storage_diagnostics()
     }
 
     pub fn run_maintenance(
@@ -1449,6 +1454,48 @@ pub struct JsRuntimeDatabaseSize {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsSchemaMigrationRecord {
+    pub version: f64,
+    pub description: String,
+    pub applied_at: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeStorageCapability {
+    pub name: String,
+    pub supported: bool,
+    pub detail: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeStorageTableCount {
+    pub table: String,
+    pub rows: f64,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeQueryPlanCheck {
+    pub name: String,
+    pub uses_index: bool,
+    pub detail: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeStorageDiagnostics {
+    pub backend: String,
+    pub backend_label: String,
+    pub schema_version: f64,
+    pub supported_schema_version: f64,
+    pub migrations: Vec<JsSchemaMigrationRecord>,
+    pub size: JsRuntimeDatabaseSize,
+    pub table_counts: Vec<JsRuntimeStorageTableCount>,
+    pub capabilities: Vec<JsRuntimeStorageCapability>,
+    pub index_checks: Vec<JsRuntimeQueryPlanCheck>,
+    pub search_healthy: bool,
+    pub pressure: bool,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsRuntimeMaintenancePolicy {
     pub expire_queued_messages_at: Option<String>,
     pub purge_terminal_queued_messages_before: Option<String>,
@@ -2418,6 +2465,13 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn storage_diagnostics(&self) -> napi::Result<JsRuntimeStorageDiagnostics> {
+        let bridge = self.bridge()?;
+        let diagnostics = bridge.storage_diagnostics().map_err(to_napi_error)?;
+        Ok(to_js_runtime_storage_diagnostics(diagnostics))
+    }
+
+    #[napi]
     pub fn run_maintenance(
         &self,
         policy: JsRuntimeMaintenancePolicy,
@@ -3267,6 +3321,77 @@ fn to_js_runtime_database_size(size: RuntimeDatabaseSize) -> JsRuntimeDatabaseSi
         freelist_pages: size.freelist_pages as f64,
         freelist_bytes: size.freelist_bytes as f64,
         wal_bytes: size.wal_bytes as f64,
+    }
+}
+
+fn to_js_schema_migration_record(record: SchemaMigrationRecord) -> JsSchemaMigrationRecord {
+    JsSchemaMigrationRecord {
+        version: record.version as f64,
+        description: record.description,
+        applied_at: record.applied_at,
+    }
+}
+
+fn to_js_runtime_storage_capability(
+    capability: RuntimeStorageCapability,
+) -> JsRuntimeStorageCapability {
+    JsRuntimeStorageCapability {
+        name: capability.name,
+        supported: capability.supported,
+        detail: capability.detail,
+    }
+}
+
+fn to_js_runtime_storage_table_count(
+    count: RuntimeStorageTableCount,
+) -> JsRuntimeStorageTableCount {
+    JsRuntimeStorageTableCount {
+        table: count.table,
+        rows: count.rows as f64,
+    }
+}
+
+fn to_js_runtime_query_plan_check(
+    check: rusty_crew_core_persistence::RuntimeQueryPlanCheck,
+) -> JsRuntimeQueryPlanCheck {
+    JsRuntimeQueryPlanCheck {
+        name: check.name.to_string(),
+        uses_index: check.uses_index,
+        detail: check.detail,
+    }
+}
+
+fn to_js_runtime_storage_diagnostics(
+    diagnostics: RuntimeStorageDiagnostics,
+) -> JsRuntimeStorageDiagnostics {
+    JsRuntimeStorageDiagnostics {
+        backend: diagnostics.backend,
+        backend_label: diagnostics.backend_label,
+        schema_version: diagnostics.schema_version as f64,
+        supported_schema_version: diagnostics.supported_schema_version as f64,
+        migrations: diagnostics
+            .migrations
+            .into_iter()
+            .map(to_js_schema_migration_record)
+            .collect(),
+        size: to_js_runtime_database_size(diagnostics.size),
+        table_counts: diagnostics
+            .table_counts
+            .into_iter()
+            .map(to_js_runtime_storage_table_count)
+            .collect(),
+        capabilities: diagnostics
+            .capabilities
+            .into_iter()
+            .map(to_js_runtime_storage_capability)
+            .collect(),
+        index_checks: diagnostics
+            .index_checks
+            .into_iter()
+            .map(to_js_runtime_query_plan_check)
+            .collect(),
+        search_healthy: diagnostics.search_healthy,
+        pressure: diagnostics.pressure,
     }
 }
 

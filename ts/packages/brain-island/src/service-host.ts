@@ -125,6 +125,8 @@ import {
 import {
   buildRuntimeDiagnosticsProjection,
   type RuntimeSessionEffectiveDefaults,
+  type RuntimePauseDiagnostics,
+  type StorageDiagnosticsProjection,
 } from "./runtime-diagnostics.js";
 import {
   handleRustyViewChatRequest,
@@ -305,6 +307,7 @@ interface ServiceState {
   readonly wakeSubscription: SubscriptionHandle;
   readonly timers: Set<NodeJS.Timeout>;
   readonly inFlightWakes: Set<SessionId>;
+  readonly runtimePauses: Map<string, RuntimePauseRecord>;
   readonly claimedDeliveryIntentIds: Set<number>;
   readonly unmatchedDeliveryIntentIds: Set<number>;
   readonly directDispatchSessions: Set<SessionId>;
@@ -349,6 +352,20 @@ interface ServiceRecentEvent {
   eventType: string;
   summary: string;
   severity?: string;
+}
+
+type RuntimePauseScope = "session" | "profile" | "agent";
+
+interface RuntimePauseRecord {
+  pauseId: string;
+  scope: RuntimePauseScope;
+  targetId: string;
+  pausedBy: string;
+  pausedAt: string;
+  reason?: string;
+  reasonCode?: string;
+  affectedSessionIds: string[];
+  inFlightWakeCount: number;
 }
 
 interface RawServiceRouteResult {
@@ -431,6 +448,7 @@ export async function startRustyCrewServiceHost(
       wakeSubscription,
       timers: new Set(),
       inFlightWakes: new Set(),
+      runtimePauses: new Map(),
       claimedDeliveryIntentIds: new Set(),
       unmatchedDeliveryIntentIds: new Set(),
       directDispatchSessions: new Set(),
@@ -888,16 +906,16 @@ async function buildDiagnosticsContext(
   state: ServiceState,
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
-  const [runtimeSummary, sessions, tableCounts, databaseSize, providerStates] =
-    await Promise.all([
+  const [runtimeSummary, sessions, storage, providerStates] = await Promise.all(
+    [
       state.bridge
         .runtimeSummary({ scopeType: "runtime" })
         .catch(() => undefined),
       state.bridge.listSessions().catch(() => []),
-      collectTableCounts(state.bridge),
-      state.bridge.databaseSize().catch(() => undefined),
+      state.bridge.storageDiagnostics().catch(() => undefined),
       state.bridge.providerStateDiagnostics().catch(() => []),
-    ]);
+    ],
+  );
   const sessionDefaults = await effectiveSessionDefaultsById(state, sessions);
   const diagnostics = buildRuntimeDiagnosticsProjection({
     now,
@@ -909,9 +927,9 @@ async function buildDiagnosticsContext(
     providerStates,
     adapters: buildServiceAdapterDiagnostics(state, now),
     persistence: {
-      tableCounts,
-      searchHealthy: true,
-      databaseBytes: databaseSize?.databaseBytes,
+      tableCounts: tableCountMap(storage),
+      searchHealthy: storage?.searchHealthy ?? true,
+      databaseBytes: storage?.size.databaseBytes,
     },
     recentErrors: state.stopping
       ? [
@@ -923,9 +941,11 @@ async function buildDiagnosticsContext(
           },
         ]
       : [],
+    runtimePauses: runtimePauseDiagnostics(state, sessions),
   });
   return {
     diagnostics,
+    storage,
     configValidation: await preflightRustyCrewRuntimeConfig({
       serviceConfig: state.config,
       bridge: state.bridge,
@@ -945,6 +965,14 @@ async function buildDiagnosticsContext(
       ...state.recentEvents,
     ],
   };
+}
+
+function tableCountMap(
+  storage: StorageDiagnosticsProjection | undefined,
+): Record<string, number> {
+  return Object.fromEntries(
+    (storage?.tableCounts ?? []).map((count) => [count.table, count.rows]),
+  );
 }
 
 function brainModuleDiagnostics(
@@ -3161,6 +3189,8 @@ function createServiceControlExecutor(
       },
       now: state.now,
     }),
+    pauseRuntime: async (command) => pauseRuntimeTarget(state, command),
+    resumeRuntime: async (command) => resumeRuntimeTarget(state, command),
     reloadMcp: createServiceReloadMcpExecutor(state),
     cancelDelegation: async (command) => {
       const session = await state.bridge.cancelDelegatedSession(
@@ -3379,6 +3409,226 @@ async function serviceSessionById(
     throw new Error(`session ${sessionId} was not found`);
   }
   return session;
+}
+
+async function pauseRuntimeTarget(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<AdminControlResponse["outcome"]> {
+  const target = await runtimePauseTarget(state, command, true);
+  const key = runtimePauseKey(target.scope, target.targetId);
+  const existing = state.runtimePauses.get(key);
+  if (existing !== undefined) {
+    return {
+      status: "completed",
+      summary: `runtime ${target.scope} ${target.targetId} was already paused`,
+      affectedIds: runtimePauseAffectedIds(existing),
+      result: runtimePauseRecordView(existing),
+    };
+  }
+
+  const affectedSessionIds = await affectedRuntimePauseSessionIds(
+    state,
+    target,
+  );
+  if (affectedSessionIds.length === 0) {
+    return {
+      status: "failed",
+      summary: `runtime ${target.scope} ${target.targetId} did not match any configured sessions`,
+      reasonCode: "runtime_pause_target_not_found",
+      affectedIds: { [runtimePauseTargetKey(target.scope)]: target.targetId },
+    };
+  }
+
+  const record: RuntimePauseRecord = {
+    pauseId: [
+      "pause",
+      target.scope,
+      target.targetId.replace(/[^0-9A-Za-z_-]/g, "_"),
+      Date.now(),
+    ].join(":"),
+    scope: target.scope,
+    targetId: target.targetId,
+    pausedBy: command.actor.operatorId,
+    pausedAt: state.now(),
+    reason: command.reason,
+    reasonCode: command.reasonCode,
+    affectedSessionIds,
+    inFlightWakeCount: affectedSessionIds.filter((sessionId) =>
+      state.inFlightWakes.has(sessionId as SessionId),
+    ).length,
+  };
+  state.runtimePauses.set(key, record);
+  recordServiceEvent(state, {
+    source: "service-host",
+    eventType: "runtime_target_paused",
+    severity: "warning",
+    summary: `Paused runtime ${record.scope} ${record.targetId}; ${record.affectedSessionIds.length} session(s) affected, ${record.inFlightWakeCount} wake(s) already in flight.`,
+  });
+  return {
+    status: "completed",
+    summary:
+      record.inFlightWakeCount > 0
+        ? `runtime ${record.scope} ${record.targetId} paused; ${record.inFlightWakeCount} in-flight wake(s) will finish before suppression fully takes effect`
+        : `runtime ${record.scope} ${record.targetId} paused`,
+    affectedIds: runtimePauseAffectedIds(record),
+    result: runtimePauseRecordView(record),
+  };
+}
+
+async function resumeRuntimeTarget(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<AdminControlResponse["outcome"]> {
+  const target = await runtimePauseTarget(state, command, false);
+  const key = runtimePauseKey(target.scope, target.targetId);
+  const record = state.runtimePauses.get(key);
+  if (record === undefined) {
+    return {
+      status: "completed",
+      summary: `runtime ${target.scope} ${target.targetId} was not paused`,
+      affectedIds: { [runtimePauseTargetKey(target.scope)]: target.targetId },
+      result: { paused: false, scope: target.scope, targetId: target.targetId },
+    };
+  }
+  state.runtimePauses.delete(key);
+  recordServiceEvent(state, {
+    source: "service-host",
+    eventType: "runtime_target_resumed",
+    summary: `Resumed runtime ${record.scope} ${record.targetId}; ${record.affectedSessionIds.length} session(s) affected.`,
+  });
+  return {
+    status: "completed",
+    summary: `runtime ${record.scope} ${record.targetId} resumed`,
+    affectedIds: runtimePauseAffectedIds(record),
+    result: { ...runtimePauseRecordView(record), resumedAt: state.now() },
+  };
+}
+
+async function runtimePauseTarget(
+  state: ServiceState,
+  command: AdminControlCommand,
+  validateSession: boolean,
+): Promise<{ scope: RuntimePauseScope; targetId: string }> {
+  const scope = command.target.scope;
+  if (scope !== "session" && scope !== "profile" && scope !== "agent") {
+    throw new Error(
+      "runtime pause target scope must be session, profile, or agent",
+    );
+  }
+  const targetId =
+    scope === "session"
+      ? command.target.sessionId
+      : scope === "profile"
+        ? command.target.profileId
+        : command.target.agentId;
+  if (!targetId) {
+    throw new Error(`runtime pause target ${scope} id is required`);
+  }
+  if (validateSession && scope === "session") {
+    await serviceSessionById(state, targetId);
+  }
+  return { scope, targetId };
+}
+
+async function affectedRuntimePauseSessionIds(
+  state: ServiceState,
+  target: { scope: RuntimePauseScope; targetId: string },
+): Promise<string[]> {
+  const runtimeSessions = await state.bridge.listSessions().catch(() => []);
+  const configured = state.runtimeConfig.sessions;
+  const ids = new Set<string>();
+  for (const session of [...configured, ...runtimeSessions]) {
+    if (runtimePauseMatchesSession(target, session)) {
+      ids.add(session.sessionId);
+    }
+  }
+  return [...ids].sort();
+}
+
+function runtimePauseMatchesSession(
+  target: { scope: RuntimePauseScope; targetId: string },
+  session: Pick<SessionState, "sessionId" | "agentId" | "profileId">,
+): boolean {
+  if (target.scope === "session") return session.sessionId === target.targetId;
+  if (target.scope === "profile") return session.profileId === target.targetId;
+  return session.agentId === target.targetId;
+}
+
+function runtimePauseForSession(
+  state: ServiceState,
+  session: Pick<SessionState, "sessionId" | "agentId" | "profileId">,
+): RuntimePauseRecord | undefined {
+  return (
+    state.runtimePauses.get(runtimePauseKey("session", session.sessionId)) ??
+    state.runtimePauses.get(runtimePauseKey("profile", session.profileId)) ??
+    state.runtimePauses.get(runtimePauseKey("agent", session.agentId))
+  );
+}
+
+function runtimePauseKey(scope: RuntimePauseScope, targetId: string): string {
+  return `${scope}:${targetId}`;
+}
+
+function runtimePauseTargetKey(scope: RuntimePauseScope): string {
+  if (scope === "session") return "sessionId";
+  if (scope === "profile") return "profileId";
+  return "agentId";
+}
+
+function runtimePauseAffectedIds(
+  record: RuntimePauseRecord,
+): Record<string, string | number> {
+  return {
+    [runtimePauseTargetKey(record.scope)]: record.targetId,
+    affectedSessions: record.affectedSessionIds.length,
+    inFlightWakeCount: record.inFlightWakeCount,
+  };
+}
+
+function runtimePauseRecordView(
+  record: RuntimePauseRecord,
+): RuntimePauseDiagnostics {
+  return {
+    pauseId: record.pauseId,
+    scope: record.scope,
+    targetId: record.targetId,
+    pausedBy: record.pausedBy,
+    pausedAt: record.pausedAt,
+    reason: record.reason,
+    reasonCode: record.reasonCode,
+    affectedSessionIds: record.affectedSessionIds,
+    inFlightWakeCount: record.inFlightWakeCount,
+    cancellationSupported: false,
+    limitation:
+      "Current implementation suppresses new wakes and delivery claims; it does not interrupt an LLM/tool call already in flight.",
+  };
+}
+
+function runtimePauseDiagnostics(
+  state: ServiceState,
+  sessions: readonly SessionState[],
+): RuntimePauseDiagnostics[] {
+  return [...state.runtimePauses.values()]
+    .map((record) => ({
+      ...record,
+      affectedSessionIds: sessions
+        .filter((session) =>
+          runtimePauseMatchesSession(
+            { scope: record.scope, targetId: record.targetId },
+            session,
+          ),
+        )
+        .map((session) => session.sessionId),
+      inFlightWakeCount: sessions.filter(
+        (session) =>
+          runtimePauseMatchesSession(
+            { scope: record.scope, targetId: record.targetId },
+            session,
+          ) && state.inFlightWakes.has(session.sessionId),
+      ).length,
+    }))
+    .map(runtimePauseRecordView);
 }
 
 function channelBindingForSession(
@@ -4410,6 +4660,30 @@ async function pollDenDeliveryIntents(state: ServiceState): Promise<void> {
       );
       continue;
     }
+    const pause = runtimePauseForSession(state, session);
+    if (pause !== undefined) {
+      state.claimedDeliveryIntentIds.add(intent.id);
+      recordDynamicDenDeliveryChannel(state, intent, session, {
+        channelId: channelIdFromDeliveryIntent(intent),
+        sourceMessageId: intent.channel_message_id,
+        wakePolicy: decision.wakePolicy,
+        subscriptionStatus: "runtime_paused",
+        lastError: runtimePauseSummary(pause, session.sessionId),
+      });
+      void rejectPausedDenDeliveryIntent(state, intent, session, pause).catch(
+        (error) =>
+          recordServiceEvent(state, {
+            source: "den-successor-gateway",
+            eventType: "den_delivery_intent_runtime_pause_reject_failed",
+            severity: "error",
+            summary: errorMessage(
+              error,
+              `Den Delivery intent ${intent.id} runtime pause reject failed`,
+            ),
+          }),
+      );
+      continue;
+    }
     state.claimedDeliveryIntentIds.add(intent.id);
     void processDenDeliveryIntent(state, intent, session).catch((error) =>
       recordServiceEvent(state, {
@@ -4572,6 +4846,43 @@ async function rejectDenDeliveryIntent(
     source: "den-successor-gateway",
     eventType: "den_delivery_intent_rejected",
     summary: `Rejected Den Delivery intent ${intent.id} for ${session.agentId}: ${decision.summary}.`,
+  });
+}
+
+async function rejectPausedDenDeliveryIntent(
+  state: ServiceState,
+  intent: DenSuccessorDeliveryIntent,
+  session: RustyCrewRuntimeConfig["sessions"][number],
+  pause: RuntimePauseRecord,
+): Promise<void> {
+  if (state.denGatewayClient === undefined) return;
+  const claimToken = `rusty-crew:${intent.id}:${Date.now()}`;
+  const claimedBy = intent.target_identity;
+  const summary = runtimePauseSummary(pause, session.sessionId);
+  await state.denGatewayClient.claimDeliveryIntent({
+    id: intent.id,
+    claimToken,
+    claimedBy,
+  });
+  await state.denGatewayClient.reportDeliveryIntentEvent({
+    id: intent.id,
+    claimToken,
+    eventType: "failed",
+    payload: {
+      source: "rusty-crew",
+      session_id: session.sessionId,
+      reason: "runtime_paused",
+      summary,
+      pause_id: pause.pauseId,
+      pause_scope: pause.scope,
+      pause_target_id: pause.targetId,
+    },
+  });
+  recordServiceEvent(state, {
+    source: "den-successor-gateway",
+    eventType: "den_delivery_intent_runtime_paused",
+    severity: "warning",
+    summary: `Rejected Den Delivery intent ${intent.id} for ${session.agentId}: ${summary}.`,
   });
 }
 
@@ -5971,6 +6282,14 @@ async function submitServiceTurn(
     observationContext?: ServiceWakeObservationContext;
   },
 ): Promise<ServiceWakeDispatchReport> {
+  const session = (await state.bridge.listSessions().catch(() => [])).find(
+    (candidate) => candidate.sessionId === input.sessionId,
+  );
+  const pause =
+    session === undefined ? undefined : runtimePauseForSession(state, session);
+  if (pause !== undefined) {
+    return runtimePauseWakeReport(state, input.sessionId, pause);
+  }
   state.directDispatchSessions.add(input.sessionId);
   try {
     await state.bridge.enqueueBodyFollowUpMessage({
@@ -6563,6 +6882,10 @@ async function dispatchWake(
         `wake for ${sessionId} skipped because the session is archived`,
       );
     }
+    const pause = runtimePauseForSession(state, session);
+    if (pause !== undefined) {
+      return runtimePauseWakeReport(state, sessionId, pause);
+    }
 
     const brain = brainForProfile(state, session.profileId);
     if (brain === undefined) {
@@ -6962,6 +7285,27 @@ function wakeDispatchSkipped(
     summary,
   });
   return { sessionId, status: "skipped", summary, reasonCode };
+}
+
+function runtimePauseWakeReport(
+  state: ServiceState,
+  sessionId: SessionId,
+  pause: RuntimePauseRecord,
+): ServiceWakeDispatchReport {
+  return wakeDispatchSkipped(
+    state,
+    sessionId,
+    "runtime_paused",
+    runtimePauseSummary(pause, sessionId),
+  );
+}
+
+function runtimePauseSummary(
+  pause: RuntimePauseRecord,
+  sessionId: string,
+): string {
+  const reason = pause.reason ? `: ${pause.reason}` : "";
+  return `runtime wake for ${sessionId} is paused by ${pause.scope} ${pause.targetId}${reason}`;
 }
 
 function brainForProfile(

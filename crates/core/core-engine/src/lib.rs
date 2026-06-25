@@ -18,10 +18,11 @@ use rusty_crew_core_persistence::{
     QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
     RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
     RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary,
-    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
-    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
+    RuntimeStorageDiagnostics, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
+    ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord,
+    WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, AttachmentId, BodyState,
@@ -591,6 +592,10 @@ impl CoreEngine {
 
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
         self.store.database_size()
+    }
+
+    pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
+        self.store.storage_diagnostics()
     }
 
     pub fn run_maintenance(

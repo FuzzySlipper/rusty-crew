@@ -1180,6 +1180,34 @@ pub struct RuntimeDatabaseSize {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStorageCapability {
+    pub name: String,
+    pub supported: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStorageTableCount {
+    pub table: String,
+    pub rows: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStorageDiagnostics {
+    pub backend: String,
+    pub backend_label: String,
+    pub schema_version: i64,
+    pub supported_schema_version: i64,
+    pub migrations: Vec<SchemaMigrationRecord>,
+    pub size: RuntimeDatabaseSize,
+    pub table_counts: Vec<RuntimeStorageTableCount>,
+    pub capabilities: Vec<RuntimeStorageCapability>,
+    pub index_checks: Vec<RuntimeQueryPlanCheck>,
+    pub search_healthy: bool,
+    pub pressure: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeMaintenanceReport {
     pub size_before: RuntimeDatabaseSize,
     pub size_after: RuntimeDatabaseSize,
@@ -2121,6 +2149,42 @@ impl CoordinationStore {
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
         let conn = self.conn()?;
         database_size(&conn)
+    }
+
+    pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
+        let conn = self.conn()?;
+        let size = database_size(&conn)?;
+        let migrations = load_schema_migration_records(&conn)?;
+        let schema_version = current_schema_version(&conn)?;
+        let table_counts = DiagnosticTable::ALL
+            .iter()
+            .map(|table| {
+                let rows = count_diagnostic_table_rows(&conn, *table)?;
+                Ok(RuntimeStorageTableCount {
+                    table: table.as_str().to_string(),
+                    rows,
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        let index_checks = hot_query_plan_checks(&conn)?;
+        let search_healthy = sqlite_table_exists(&conn, "runtime_search_fts")?;
+        let pressure = size.wal_bytes > 64 * 1024 * 1024
+            || (size.database_bytes > 0 && size.freelist_bytes > size.database_bytes / 4)
+            || !index_checks.iter().all(|check| check.uses_index)
+            || !search_healthy;
+        Ok(RuntimeStorageDiagnostics {
+            backend: "sqlite".to_string(),
+            backend_label: "SQLite WAL".to_string(),
+            schema_version,
+            supported_schema_version: CURRENT_SCHEMA_VERSION,
+            migrations,
+            size,
+            table_counts,
+            capabilities: sqlite_storage_capabilities(),
+            index_checks,
+            search_healthy,
+            pressure,
+        })
     }
 
     pub fn run_maintenance(
@@ -3361,16 +3425,7 @@ impl CoordinationStore {
         let table = DiagnosticTable::parse(table)?;
 
         let conn = self.conn()?;
-        let count = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {}", table.as_str()),
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(|error| persistence_error("count rows", error))?
-            .unwrap_or(0);
-        Ok(count as u64)
+        count_diagnostic_table_rows(&conn, table)
     }
 
     pub fn runtime_counters(
@@ -3596,6 +3651,76 @@ fn database_path(conn: &Connection) -> CoreResult<Option<PathBuf>> {
     } else {
         Ok(Some(PathBuf::from(path)))
     }
+}
+
+fn sqlite_table_exists(conn: &Connection, table: &str) -> CoreResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type IN ('table', 'view') AND name = ?1)",
+        params![table],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|value| value != 0)
+    .map_err(|error| persistence_error("check sqlite table existence", error))
+}
+
+fn count_diagnostic_table_rows(conn: &Connection, table: DiagnosticTable) -> CoreResult<u64> {
+    let count = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM {}", table.as_str()),
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| persistence_error("count rows", error))?
+        .unwrap_or(0);
+    Ok(count as u64)
+}
+
+fn sqlite_storage_capabilities() -> Vec<RuntimeStorageCapability> {
+    [
+        (
+            "transactions",
+            true,
+            "single-node ACID transactions are supported",
+        ),
+        (
+            "full_text_search",
+            true,
+            "runtime search is backed by the service search capability",
+        ),
+        (
+            "json_metadata",
+            true,
+            "JSON metadata is stored as validated text blobs",
+        ),
+        (
+            "concurrent_writers",
+            false,
+            "SQLite serializes writers; WAL improves readers but not write concurrency",
+        ),
+        (
+            "online_migrations",
+            false,
+            "schema migrations run during service startup/open",
+        ),
+        (
+            "advisory_locks",
+            false,
+            "SQLite backend has no database-native advisory lock capability",
+        ),
+        (
+            "wal_checkpoint",
+            true,
+            "SQLite WAL checkpoint maintenance is available",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, supported, detail)| RuntimeStorageCapability {
+        name: name.to_string(),
+        supported,
+        detail: detail.to_string(),
+    })
+    .collect()
 }
 
 fn hot_query_plan_checks(conn: &Connection) -> CoreResult<Vec<RuntimeQueryPlanCheck>> {

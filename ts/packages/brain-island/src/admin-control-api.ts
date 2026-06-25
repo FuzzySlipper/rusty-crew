@@ -20,6 +20,8 @@ export type AdminControlCommandName =
   | "create_session"
   | "archive_session"
   | "new_session"
+  | "pause_runtime"
+  | "resume_runtime"
   | "plan_runtime_rebuild"
   | "apply_runtime_rebuild"
   | "cancel_delegation"
@@ -122,6 +124,12 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   newSession?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  pauseRuntime?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  resumeRuntime?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   planRuntimeRebuild?(
@@ -548,6 +556,50 @@ function parseControlCommand(
     parts[0] === "v1" &&
     parts[1] === "admin" &&
     parts[2] === "control" &&
+    (parts[3] === "sessions" ||
+      parts[3] === "profiles" ||
+      parts[3] === "agents") &&
+    parts[5] === "runtime"
+  ) {
+    const targetId = parts[4] ?? "";
+    if (!targetId) {
+      return invalidTarget(
+        requestId,
+        parts[3] === "sessions"
+          ? "missing_session_id"
+          : parts[3] === "profiles"
+            ? "missing_profile_id"
+            : "missing_agent_id",
+      );
+    }
+    if (parts[6] === "pause" || parts[6] === "resume") {
+      const scope =
+        parts[3] === "sessions"
+          ? "session"
+          : parts[3] === "profiles"
+            ? "profile"
+            : "agent";
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name: parts[6] === "pause" ? "pause_runtime" : "resume_runtime",
+          target:
+            scope === "session"
+              ? { scope, sessionId: targetId }
+              : scope === "profile"
+                ? { scope, profileId: targetId }
+                : { scope, agentId: targetId },
+        },
+      };
+    }
+  }
+
+  if (
+    parts.length === 7 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
     parts[3] === "sessions" &&
     parts[5] === "rebuild-runtime"
   ) {
@@ -957,6 +1009,10 @@ function executorForCommand(
       return executor.archiveSession;
     case "new_session":
       return executor.newSession;
+    case "pause_runtime":
+      return executor.pauseRuntime;
+    case "resume_runtime":
+      return executor.resumeRuntime;
     case "plan_runtime_rebuild":
       return executor.planRuntimeRebuild;
     case "apply_runtime_rebuild":

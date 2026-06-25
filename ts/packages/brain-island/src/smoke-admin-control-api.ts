@@ -131,6 +131,29 @@ const executor: AdminControlExecutor = {
       affectedIds: { sessionId: command.target.sessionId ?? "" },
     };
   },
+  pauseRuntime(command) {
+    return {
+      status: "completed",
+      summary: `Paused ${command.target.scope}.`,
+      affectedIds: {
+        sessionId: command.target.sessionId ?? "",
+        profileId: command.target.profileId ?? "",
+        agentId: command.target.agentId ?? "",
+      },
+      result: { cancellationSupported: false },
+    };
+  },
+  resumeRuntime(command) {
+    return {
+      status: "completed",
+      summary: `Resumed ${command.target.scope}.`,
+      affectedIds: {
+        sessionId: command.target.sessionId ?? "",
+        profileId: command.target.profileId ?? "",
+        agentId: command.target.agentId ?? "",
+      },
+    };
+  },
   decommissionProfile(command) {
     return {
       status: "completed",
@@ -291,6 +314,54 @@ assert.equal(auditSink.events[1]?.phase, "completed");
 assert.equal(observationSink.events.length, 2);
 assert.equal(observationSink.events[0]?.event_type, "admin_command_started");
 assert.equal(observationSink.events[1]?.event_type, "admin_command_completed");
+
+const pauseSession = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/sessions/session-alpha/runtime/pause",
+    headers: authHeaders(),
+    body: { reason: "operator emergency stop" },
+  },
+  context,
+);
+assert.equal(pauseSession.status, 200);
+const pauseSessionData = okData<AdminControlResponse>(pauseSession);
+assert.equal(pauseSessionData.command.name, "pause_runtime");
+assert.equal(pauseSessionData.command.target.scope, "session");
+assert.equal(pauseSessionData.command.target.sessionId, "session-alpha");
+assert.equal(
+  (pauseSessionData.outcome.result as { cancellationSupported?: boolean })
+    .cancellationSupported,
+  false,
+);
+
+const resumeProfile = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/profiles/prime/runtime/resume",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(resumeProfile.status, 200);
+const resumeProfileData = okData<AdminControlResponse>(resumeProfile);
+assert.equal(resumeProfileData.command.name, "resume_runtime");
+assert.equal(resumeProfileData.command.target.scope, "profile");
+assert.equal(resumeProfileData.command.target.profileId, "prime");
+
+const pauseAgent = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/agents/agent-alpha/runtime/pause",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(pauseAgent.status, 200);
+const pauseAgentData = okData<AdminControlResponse>(pauseAgent);
+assert.equal(pauseAgentData.command.name, "pause_runtime");
+assert.equal(pauseAgentData.command.target.scope, "agent");
+assert.equal(pauseAgentData.command.target.agentId, "agent-alpha");
 
 const cancel = await handleAdminControlRequest(
   {

@@ -125,6 +125,7 @@ export interface RuntimeDiagnosticsInput {
   observation?: ObservationDiagnosticsInput;
   brainModules?: readonly RuntimeBrainModuleDiagnostics[];
   providerStates?: readonly RuntimeProviderStateSessionDiagnostics[];
+  runtimePauses?: readonly RuntimePauseDiagnostics[];
   recentErrors?: readonly RuntimeDiagnosticError[];
   staleSessionMs?: number;
 }
@@ -159,6 +160,7 @@ export interface RuntimeDiagnosticsProjection {
     brainModules: RuntimeBrainModuleDiagnostics[];
     sessions: RuntimeSessionDiagnostics[];
     delegatedSessions: RuntimeDelegationDiagnostics[];
+    runtimePauses: RuntimePauseDiagnostics[];
   };
   queues?: QueueDiagnosticsProjection;
   persistence?: PersistenceDiagnosticsProjection;
@@ -215,11 +217,61 @@ export interface RuntimeDelegationDiagnostics {
   blocked: boolean;
 }
 
+export interface RuntimePauseDiagnostics {
+  pauseId: string;
+  scope: "session" | "profile" | "agent";
+  targetId: string;
+  pausedBy: string;
+  pausedAt: string;
+  reason?: string;
+  reasonCode?: string;
+  affectedSessionIds: string[];
+  inFlightWakeCount: number;
+  cancellationSupported: boolean;
+  limitation: string;
+}
+
 export interface QueueDiagnosticsProjection extends QueueDiagnosticsInput {
   backlog: boolean;
 }
 
 export interface PersistenceDiagnosticsProjection extends PersistenceDiagnosticsInput {
+  pressure: boolean;
+}
+
+export interface StorageDiagnosticsProjection {
+  backend: string;
+  backendLabel: string;
+  schemaVersion: number;
+  supportedSchemaVersion: number;
+  migrations: {
+    version: number;
+    description: string;
+    appliedAt: string;
+  }[];
+  size: {
+    databaseBytes: number;
+    pageCount: number;
+    pageSizeBytes: number;
+    freelistPages: number;
+    freelistBytes: number;
+    walBytes: number;
+  };
+  tableCounts: {
+    table: string;
+    rows: number;
+  }[];
+  capabilities: {
+    name: string;
+    supported: boolean;
+    detail: string;
+  }[];
+  indexChecks: {
+    name: string;
+    usesIndex: boolean;
+    detail: string;
+  }[];
+  searchHealthy: boolean;
   pressure: boolean;
 }
 
@@ -307,6 +359,7 @@ export function buildRuntimeDiagnosticsProjection(
       brainModules,
       sessions,
       delegatedSessions,
+      runtimePauses: [...(input.runtimePauses ?? [])],
     },
     queues,
     persistence,

@@ -166,6 +166,52 @@ const background = buildBackgroundServiceDiagnosticsProjection({
     adapterDegraded: 0,
   },
 });
+const storage = {
+  backend: "sqlite",
+  backendLabel: "SQLite WAL",
+  schemaVersion: 19,
+  supportedSchemaVersion: 19,
+  migrations: [
+    {
+      version: 19,
+      description: "storage diagnostics smoke",
+      appliedAt: now,
+    },
+  ],
+  size: {
+    databaseBytes: 4096,
+    pageCount: 1,
+    pageSizeBytes: 4096,
+    freelistPages: 0,
+    freelistBytes: 0,
+    walBytes: 0,
+  },
+  tableCounts: [
+    { table: "sessions", rows: 3 },
+    { table: "profile_memories", rows: 2 },
+  ],
+  capabilities: [
+    {
+      name: "transactions",
+      supported: true,
+      detail: "single-node ACID transactions are supported",
+    },
+    {
+      name: "concurrent_writers",
+      supported: false,
+      detail: "SQLite serializes writers",
+    },
+  ],
+  indexChecks: [
+    {
+      name: "pending_queue_by_agent",
+      usesIndex: true,
+      detail: "SEARCH queued_messages USING INDEX",
+    },
+  ],
+  searchHealthy: true,
+  pressure: false,
+};
 
 const overview = handleAdminDiagnosticsRequest(
   {
@@ -269,6 +315,29 @@ assert.equal(
     ?.providerState?.status,
   "valid",
 );
+
+const storageRoute = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/storage" },
+  { diagnostics, storage },
+);
+assert.equal(storageRoute.status, 200);
+const storageData = okData<{
+  backend: string;
+  capabilities: Array<{ name: string; supported: boolean }>;
+  tableCounts: Array<{ table: string; rows: number }>;
+}>(storageRoute);
+assert.equal(storageData.backend, "sqlite");
+assert.equal(
+  storageData.capabilities.find(
+    (capability) => capability.name === "transactions",
+  )?.supported,
+  true,
+);
+assert.equal(
+  storageData.tableCounts.find((count) => count.table === "sessions")?.rows,
+  3,
+);
+
 const rootDiagnostics = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics" },
   { diagnostics },
