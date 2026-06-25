@@ -96,6 +96,15 @@ output = "core_protocol::ActionBatchReceipt"
 errors = "core_protocol::CoreError"
 summary = "TS returns the structured brain action batch; Rust validates and executes it internally."
 
+[[operation]]
+name = "apply_brain_provider_state_output"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BrainWakeProviderStateOutput"
+output = "()"
+errors = "core_protocol::CoreError"
+summary = "Apply provider-owned wire-state replacement or clear output for a brain wake."
+
 # Platform adapters: external systems inject/project through the bus.
 
 [[operation]]

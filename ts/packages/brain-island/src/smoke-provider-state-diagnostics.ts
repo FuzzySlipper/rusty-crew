@@ -174,14 +174,11 @@ const clearWrite = await bridge.buildBrainWakeRequestForSession({
   wakeId: "clear-write",
 });
 await bridge.wakeBrain(clearWrite);
-const clearRequest = await bridge.buildBrainWakeRequestForSession({
+await bridge.clearBrainProviderState({
   brain: clearHandle,
   sessionId: "clear-session" as SessionId,
-  systemPrompt: "system",
-  roleAssemblyJson: new TextEncoder().encode("{}"),
   wakeId: "clear-state",
 });
-await bridge.wakeBrain(clearRequest);
 const cleared = (await bridge.providerStateDiagnostics()).find(
   (state) => state.sessionId === "clear-session",
 );

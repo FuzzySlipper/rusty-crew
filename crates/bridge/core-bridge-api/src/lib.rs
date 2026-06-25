@@ -25,6 +25,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "wake_brain",
     "submit_brain_event",
     "submit_brain_actions",
+    "apply_brain_provider_state_output",
     "register_platform_adapter",
     "validate_runtime_config_draft",
     "plan_runtime_config",

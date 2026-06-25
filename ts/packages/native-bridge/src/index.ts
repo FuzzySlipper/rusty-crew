@@ -881,6 +881,11 @@ export interface NativeBridgeModule {
     registration: BrainImplementationRegistration,
     executor: BrainWakeExecutor,
   ): Promise<BrainImplementationHandle>;
+  clearBrainProviderState(input: {
+    brain: BrainImplementationHandle;
+    sessionId: SessionId;
+    wakeId: string;
+  }): Promise<Unit>;
   wakeBrain(request: BrainWakeRequest): Promise<BrainWakeAccepted>;
   submitBrainEvent(event: BrainEventEnvelope): Promise<EventReceipt>;
   submitBrainActions(batch: BrainActionBatch): Promise<ActionBatchReceipt>;
@@ -1056,6 +1061,7 @@ export const nativeManifestOperationNames = [
   "wake_brain",
   "submit_brain_event",
   "submit_brain_actions",
+  "apply_brain_provider_state_output",
   "register_platform_adapter",
   "validate_runtime_config_draft",
   "plan_runtime_config",
@@ -1104,6 +1110,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     replaceBrainImplementation: unavailable("replace_brain_implementation"),
     registerBrainRuntime: unavailable("register_brain_implementation"),
     replaceBrainRuntime: unavailable("replace_brain_implementation"),
+    clearBrainProviderState: unavailable("apply_brain_provider_state_output"),
     wakeBrain: unavailable("wake_brain"),
     submitBrainEvent: unavailable("submit_brain_event"),
     submitBrainActions: unavailable("submit_brain_actions"),
@@ -1456,6 +1463,19 @@ function createNativeBridgeModule(
       const handle = await module.replaceBrainImplementation(registration);
       wakeExecutors.set(handle, executor);
       return handle;
+    },
+    clearBrainProviderState: async (input) => {
+      const output: BrainWakeProviderStateOutput = {
+        type: "clear",
+        reason: "brain_requested_clear",
+      };
+      binding.applyBrainProviderStateOutputJson(
+        input.brain,
+        input.sessionId,
+        input.wakeId,
+        JSON.stringify(output),
+      );
+      return {};
     },
     wakeBrain: async (request) => {
       const executor = wakeExecutors.get(request.brain);

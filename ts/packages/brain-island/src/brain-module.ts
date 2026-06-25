@@ -26,6 +26,18 @@ export interface BrainModuleSelection {
 
 export interface BrainModuleStrategyProviderStateMetadata {
   mode: ProviderStateMode;
+  rebuild: BrainModuleProviderStateRebuildPolicy;
+}
+
+export type BrainModuleProviderStateRebuildAction =
+  | "discard"
+  | "migrate"
+  | "unsupported";
+
+export interface BrainModuleProviderStateRebuildPolicy {
+  action: BrainModuleProviderStateRebuildAction;
+  reason: string;
+  migrationId?: string;
 }
 
 export type PreviousResponseChainFallbackReason =
@@ -193,6 +205,12 @@ export function brainStrategyMetadataForModuleStrategy(
   };
 }
 
+export function providerStateRebuildPolicyForModuleStrategy(
+  strategy: BrainModuleStrategyMetadata,
+): BrainModuleProviderStateRebuildPolicy {
+  return strategy.providerState.rebuild;
+}
+
 export const piAgentCoreBrainModule: BrainModule = {
   moduleId: "pi-agent-core",
   displayName: "pi-agent-core",
@@ -200,7 +218,13 @@ export const piAgentCoreBrainModule: BrainModule = {
   strategies: [
     {
       strategyId: "default",
-      providerState: { mode: "unused" },
+      providerState: {
+        mode: "unused",
+        rebuild: {
+          action: "discard",
+          reason: "pi-agent-core does not use persisted provider wire state",
+        },
+      },
     },
   ],
   diagnostics: {
@@ -237,7 +261,13 @@ export const localBrainModule: BrainModule = {
   strategies: [
     {
       strategyId: "default",
-      providerState: { mode: "unused" },
+      providerState: {
+        mode: "unused",
+        rebuild: {
+          action: "discard",
+          reason: "local deterministic brain does not use provider wire state",
+        },
+      },
     },
   ],
   diagnostics: {
@@ -338,7 +368,14 @@ export const openAiResponsesBrainModule: BrainModule = {
   strategies: [
     {
       strategyId: "replay",
-      providerState: { mode: "optional" },
+      providerState: {
+        mode: "optional",
+        rebuild: {
+          action: "discard",
+          reason:
+            "OpenAI Responses wire state is response-chain scoped and is discarded on runtime brain rebuild unless a safe migration is explicitly implemented",
+        },
+      },
       fingerprints: {
         providerOptions: {
           strategy: "replay",
@@ -352,7 +389,14 @@ export const openAiResponsesBrainModule: BrainModule = {
     },
     {
       strategyId: "previous-response-chain",
-      providerState: { mode: "optional" },
+      providerState: {
+        mode: "optional",
+        rebuild: {
+          action: "discard",
+          reason:
+            "OpenAI Responses previous_response_id state is provider-chain scoped and is discarded on runtime brain rebuild unless a safe migration is explicitly implemented",
+        },
+      },
       fingerprints: {
         providerOptions: {
           strategy: "previous-response-chain",

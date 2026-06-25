@@ -3318,8 +3318,10 @@ interface ServiceRuntimeRebuildPlan {
     requiredBeforeApply: boolean;
   };
   providerState: {
-    action: "discard";
+    action: "discard" | "migrate" | "unsupported";
     reason: string;
+    migrationId?: string;
+    clearedSessions?: number;
   };
   queuedMessages: {
     action: "preserve_existing_queue_without_redelivery";
@@ -3351,7 +3353,10 @@ interface ServiceRuntimeRebuildApplyResult extends ServiceRuntimeRebuildPlan {
       }
     | {
         status: "blocked";
-        reasonCode: "runtime_rebuild_in_flight";
+        reasonCode:
+          | "runtime_rebuild_in_flight"
+          | "provider_state_rebuild_unsupported"
+          | "provider_state_migration_not_implemented";
         blockedSessionIds: string[];
       };
 }
@@ -3393,9 +3398,14 @@ async function planServiceRuntimeRebuild(
     }
     sessionIds = [
       ...new Set(
-        activeSessions
-          .filter((session) => session.profileId === profileId)
-          .map((session) => session.sessionId),
+        [
+          ...activeSessions
+            .filter((session) => session.profileId === profileId)
+            .map((session) => session.sessionId),
+          ...configuredSessions
+            .filter((session) => session.profileId === profileId)
+            .map((session) => session.sessionId),
+        ].filter(Boolean),
       ),
     ];
   }
@@ -3416,6 +3426,13 @@ async function planServiceRuntimeRebuild(
     .map((binding) => binding.bindingId);
   const brainModule =
     state.runtimeConfigApplyResult.brainModulesByProfileId[profileId]?.moduleId;
+  const brainDiagnostics =
+    state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[profileId];
+  const providerStateRebuild = brainDiagnostics?.providerStateRebuild ?? {
+    action: "unsupported" as const,
+    reason:
+      "brain module did not declare provider-state rebuild handling; fail closed",
+  };
 
   return {
     scope,
@@ -3430,9 +3447,11 @@ async function planServiceRuntimeRebuild(
       requiredBeforeApply: false,
     },
     providerState: {
-      action: "discard",
-      reason:
-        "provider wire state is brain/provider/model scoped and must not be migrated opaquely",
+      action: providerStateRebuild.action,
+      reason: providerStateRebuild.reason,
+      ...(providerStateRebuild.migrationId === undefined
+        ? {}
+        : { migrationId: providerStateRebuild.migrationId }),
     },
     queuedMessages: {
       action: "preserve_existing_queue_without_redelivery",
@@ -3470,6 +3489,38 @@ async function applyServiceRuntimeRebuild(
   const blockedSessionIds = activeProfileSessionIds.filter((sessionId) =>
     state.inFlightWakes.has(sessionId),
   );
+  if (plan.providerState.action === "unsupported") {
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "runtime_rebuild_blocked",
+      severity: "warning",
+      summary: `Runtime rebuild for profile ${plan.profileId} blocked because provider-state handling is unsupported: ${plan.providerState.reason}.`,
+    });
+    return {
+      ...plan,
+      apply: {
+        status: "blocked",
+        reasonCode: "provider_state_rebuild_unsupported",
+        blockedSessionIds: [],
+      },
+    };
+  }
+  if (plan.providerState.action === "migrate") {
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: "runtime_rebuild_blocked",
+      severity: "warning",
+      summary: `Runtime rebuild for profile ${plan.profileId} blocked because provider-state migration is not implemented: ${plan.providerState.reason}.`,
+    });
+    return {
+      ...plan,
+      apply: {
+        status: "blocked",
+        reasonCode: "provider_state_migration_not_implemented",
+        blockedSessionIds: [],
+      },
+    };
+  }
   if (blockedSessionIds.length > 0) {
     recordServiceEvent(state, {
       source: "service-host",
@@ -3485,6 +3536,28 @@ async function applyServiceRuntimeRebuild(
         blockedSessionIds,
       },
     };
+  }
+
+  const previousBrain =
+    state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId];
+  let clearedSessions = 0;
+  const providerStateMode =
+    state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[plan.profileId]
+      ?.providerStateMode;
+  if (
+    previousBrain !== undefined &&
+    plan.providerState.action === "discard" &&
+    providerStateMode !== undefined &&
+    providerStateMode !== "unused"
+  ) {
+    for (const sessionId of plan.sessionIds) {
+      await state.bridge.clearBrainProviderState({
+        brain: previousBrain,
+        sessionId: sessionId as SessionId,
+        wakeId: `runtime-rebuild-${Date.now()}-${sessionId}`,
+      });
+      clearedSessions += 1;
+    }
   }
 
   const rebuild = await rebuildConfiguredBrainRuntime({
@@ -3509,6 +3582,10 @@ async function applyServiceRuntimeRebuild(
 
   return {
     ...plan,
+    providerState: {
+      ...plan.providerState,
+      clearedSessions,
+    },
     apply: {
       status: "completed",
       handle: rebuild.handle,

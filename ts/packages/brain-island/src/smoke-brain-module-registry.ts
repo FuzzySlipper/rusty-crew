@@ -152,6 +152,11 @@ try {
     );
     assert.equal(
       applyResult.brainDiagnosticsByProfileId["responses-profile"]
+        ?.providerStateRebuild?.action,
+      "discard",
+    );
+    assert.equal(
+      applyResult.brainDiagnosticsByProfileId["responses-profile"]
         ?.toolAdapterStatus,
       "native_neutral_tools",
     );
@@ -345,6 +350,9 @@ function brainModuleDiagnostics(
       providerStateMode:
         applyResult.brainDiagnosticsByProfileId[brain.profileId]
           ?.providerStateMode,
+      providerStateRebuild:
+        applyResult.brainDiagnosticsByProfileId[brain.profileId]
+          ?.providerStateRebuild,
       strategyDiagnostics:
         applyResult.brainDiagnosticsByProfileId[brain.profileId]
           ?.strategyDiagnostics,

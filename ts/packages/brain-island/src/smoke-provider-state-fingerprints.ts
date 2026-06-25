@@ -13,7 +13,13 @@ const profileId = "rusty-crew-runner" as ProfileId;
 
 const moduleStrategy: BrainModuleStrategyMetadata = {
   strategyId: "replay",
-  providerState: { mode: "optional" },
+  providerState: {
+    mode: "optional",
+    rebuild: {
+      action: "discard",
+      reason: "fingerprint smoke discards provider state on rebuild",
+    },
+  },
   fingerprints: {
     profileOptions: { instructionsVersion: 1 },
     providerOptions: { reasoningEffort: "medium" },

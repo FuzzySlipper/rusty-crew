@@ -8,6 +8,7 @@ import type {
 import type { AdapterDiagnosticsProjection } from "./adapter-diagnostics.js";
 import type { ToolRegistryDiagnosticsReport } from "./tool-registry-diagnostics.js";
 import type {
+  BrainModuleProviderStateRebuildPolicy,
   BrainModuleStrategyDiagnosticsMetadata,
   PreviousResponseChainFallbackReason,
 } from "./brain-module.js";
@@ -187,6 +188,7 @@ export interface RuntimeBrainModuleDiagnostics {
   strategy?: string;
   effectiveStrategy?: string;
   providerStateMode?: string;
+  providerStateRebuild?: BrainModuleProviderStateRebuildPolicy;
   providerState?: RuntimeProviderStateDiagnostics;
   strategyDiagnostics?: BrainModuleStrategyDiagnosticsMetadata;
   selectedToolCount: number;

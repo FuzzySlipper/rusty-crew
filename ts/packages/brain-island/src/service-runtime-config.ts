@@ -39,6 +39,7 @@ import { BrowserSessionManager } from "./browser-session-manager.js";
 import {
   createBrainModuleRegistry,
   brainStrategyMetadataForModuleStrategy,
+  providerStateRebuildPolicyForModuleStrategy,
   resolveBrainModuleStrategy,
   resolveBrainStrategyMetadata,
   resolveBrainModuleSelection,
@@ -1084,6 +1085,9 @@ function brainModuleDiagnostics(input: {
       : { strategy: input.selection.strategy }),
     effectiveStrategy: input.strategy.strategyId,
     providerStateMode: input.strategy.providerState.mode,
+    providerStateRebuild: providerStateRebuildPolicyForModuleStrategy(
+      input.moduleStrategy,
+    ),
     ...(input.moduleStrategy.diagnostics === undefined
       ? {}
       : { strategyDiagnostics: input.moduleStrategy.diagnostics }),
