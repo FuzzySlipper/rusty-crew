@@ -191,6 +191,25 @@ export async function loadProfileConfig(
   });
 }
 
+export function parseProfileConfigDraft(input: {
+  profilesDir: string;
+  profileId: ProfileId;
+  profileConfig: unknown;
+  soulMarkdown?: string;
+  memoryMarkdown?: string;
+}): ProfileConfig {
+  return validateProfileConfig(
+    input.profileConfig,
+    input.profileId,
+    join(input.profilesDir, `${input.profileId}.json`),
+    {
+      profileDir: input.profilesDir,
+      soulMarkdown: input.soulMarkdown,
+      memoryMarkdown: input.memoryMarkdown,
+    },
+  );
+}
+
 async function loadProfileDirectoryConfig(
   profilesDir: string,
   profileId: ProfileId,

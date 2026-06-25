@@ -543,6 +543,96 @@ try {
       createdProfileConfig.mcpConfig?.toolProfile,
       "field-created-profile",
     );
+    const readProfile = await post(
+      "/v1/admin/control/profiles/field-created-profile/read",
+      undefined,
+      {},
+      noAuthPort,
+    );
+    assert.equal(readProfile.status, 200);
+    assert.equal(
+      readProfile.body.data.outcome.result.profileId,
+      "field-created-profile",
+    );
+
+    const updatedProfileConfig = {
+      ...createdProfileConfig,
+      profileId: "field-created-profile",
+      displayName: "Field Created Profile Updated",
+    };
+    const profileUpdatePlan = await post(
+      "/v1/admin/control/profiles/field-created-profile/update/plan",
+      undefined,
+      {
+        profileConfig: updatedProfileConfig,
+        soulMarkdown: "A profile soul edited through Rusty View.",
+      },
+      noAuthPort,
+    );
+    assert.equal(profileUpdatePlan.status, 200);
+    assert.equal(profileUpdatePlan.body.data.outcome.result.ok, true);
+    assert.equal(
+      profileUpdatePlan.body.data.outcome.result.implications
+        .configReloadRequired,
+      true,
+    );
+    const profileUpdateApply = await post(
+      "/v1/admin/control/profiles/field-created-profile/update/apply",
+      undefined,
+      {
+        profileConfig: updatedProfileConfig,
+        soulMarkdown: "A profile soul edited through Rusty View.",
+      },
+      noAuthPort,
+    );
+    assert.equal(profileUpdateApply.status, 200);
+    assert.equal(profileUpdateApply.body.data.outcome.result.ok, true);
+    const profileAfterUpdate = JSON.parse(
+      readFileSync(
+        join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
+        "utf8",
+      ),
+    ) as {
+      displayName?: string;
+      prompt?: { soulMarkdown?: string };
+    };
+    assert.equal(
+      profileAfterUpdate.displayName,
+      "Field Created Profile Updated",
+    );
+    assert.equal(
+      profileAfterUpdate.prompt?.soulMarkdown,
+      "A profile soul edited through Rusty View.",
+    );
+
+    const runtimeDraft = JSON.parse(
+      readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
+    ) as Record<string, unknown>;
+    const runtimeDraftPlan = await post(
+      "/v1/admin/control/config/draft/plan",
+      undefined,
+      { runtimeConfig: runtimeDraft },
+      noAuthPort,
+    );
+    assert.equal(
+      runtimeDraftPlan.status,
+      200,
+      JSON.stringify(runtimeDraftPlan.body),
+    );
+    assert.equal(runtimeDraftPlan.body.data.outcome.result.ok, true);
+    const runtimeDraftApply = await post(
+      "/v1/admin/control/config/draft/apply",
+      undefined,
+      { runtimeConfig: runtimeDraft },
+      noAuthPort,
+    );
+    assert.equal(
+      runtimeDraftApply.status,
+      200,
+      JSON.stringify(runtimeDraftApply.body),
+    );
+    assert.equal(runtimeDraftApply.body.data.outcome.result.ok, true);
+
     const noAuthAfterProfile = await get(
       "/v1/admin/diagnostics",
       undefined,

@@ -114,10 +114,14 @@ import {
 import {
   loadProfileConfig,
   loadProfileContext,
+  parseProfileConfigDraft,
   type ProfileConfig,
 } from "./profile-loading.js";
 import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
-import { planCreateProfileWithRust } from "./runtime-config-validation.js";
+import {
+  planCreateProfileWithRust,
+  planRuntimeConfigWithRust,
+} from "./runtime-config-validation.js";
 import {
   buildRuntimeDiagnosticsProjection,
   type RuntimeSessionEffectiveDefaults,
@@ -1971,6 +1975,238 @@ interface DecommissionedServiceProfile {
   applyResult: RustyCrewRuntimeConfigApplyResult;
 }
 
+interface ProfileUpdatePlan {
+  profileId: string;
+  ok: boolean;
+  profilePath: string;
+  diagnostics: Array<{
+    severity: "error" | "warning" | "info";
+    code: string;
+    path: string;
+    message: string;
+  }>;
+  implications: {
+    configReloadRequired: true;
+    mcpRefreshRecommended: boolean;
+    runtimeRebuildRecommended: boolean;
+    profileDirectoryFiles: "json_profile_only";
+  };
+  runtimePlan?: unknown;
+}
+
+interface RuntimeConfigDraftPlan {
+  ok: boolean;
+  configPath: string;
+  diagnostics: Array<{
+    severity: "error" | "warning" | "info";
+    code: string;
+    path: string;
+    message: string;
+  }>;
+  implications: {
+    configReloadRequired: true;
+    createMissingSessions: false;
+    explicitChannelLifecycle: true;
+    explicitSessionLifecycle: true;
+  };
+  runtimePlan?: unknown;
+}
+
+async function readServiceProfileConfig(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<Record<string, unknown>> {
+  const profileId = command.target.profileId;
+  if (!profileId) throw new Error("profile id is required");
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
+  if (profilePath === undefined) {
+    throw new Error(`profile id ${profileId} is not a valid file profile id`);
+  }
+  const raw = JSON.parse(await readFile(profilePath, "utf8")) as unknown;
+  if (!isRecord(raw)) {
+    throw new Error(`profile ${profileId} config root must be an object`);
+  }
+  const loaded = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    profileId as ProfileId,
+  );
+  return {
+    profileId,
+    profilePath,
+    profileConfig: raw,
+    loaded,
+    editable: {
+      format: "json_profile",
+      supportsSoulMarkdown: true,
+      supportsMemoryMarkdown: true,
+    },
+  };
+}
+
+async function planServiceProfileUpdate(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<ProfileUpdatePlan> {
+  const profileId = command.target.profileId;
+  if (!profileId) throw new Error("profile id is required");
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
+  if (profilePath === undefined) {
+    throw new Error(`profile id ${profileId} is not a valid file profile id`);
+  }
+  const draft = profileConfigDraftFromCommand(command, profileId);
+  const diagnostics: ProfileUpdatePlan["diagnostics"] = [];
+  let parsedDraft: ProfileConfig | undefined;
+  try {
+    parsedDraft = parseProfileConfigDraft({
+      profilesDir: state.runtimeConfig.profilesDir,
+      profileId: profileId as ProfileId,
+      profileConfig: draft,
+      soulMarkdown: optionalBodyString(command, "soulMarkdown"),
+      memoryMarkdown: optionalBodyString(command, "memoryMarkdown"),
+    });
+  } catch (error) {
+    diagnostics.push({
+      severity: "error",
+      code: "invalid_profile_config",
+      path: `profiles.${profileId}`,
+      message: errorMessage(error, "profile draft is invalid"),
+    });
+  }
+
+  const currentProfile = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    profileId as ProfileId,
+  ).catch(() => undefined);
+  let runtimePlan: unknown;
+  if (parsedDraft !== undefined) {
+    const profiles = await loadRuntimeConfigProfilesReplacing(
+      state,
+      profileId,
+      parsedDraft,
+    );
+    const plan = await planRuntimeConfigWithRust({
+      bridge: state.bridge,
+      runtimeConfig: state.runtimeConfig,
+      profiles,
+    });
+    runtimePlan = plan;
+    for (const diagnostic of plan.diagnostics) {
+      diagnostics.push({
+        severity: diagnostic.severity,
+        code: diagnostic.code,
+        path: diagnostic.path ?? "runtimeConfig",
+        message: diagnostic.message,
+      });
+    }
+  }
+
+  return {
+    profileId,
+    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    profilePath,
+    diagnostics,
+    implications: {
+      configReloadRequired: true,
+      mcpRefreshRecommended: profileMcpChanged(currentProfile, parsedDraft),
+      runtimeRebuildRecommended: profileRuntimeBrainChanged(
+        currentProfile,
+        parsedDraft,
+      ),
+      profileDirectoryFiles: "json_profile_only",
+    },
+    runtimePlan,
+  };
+}
+
+async function applyServiceProfileUpdate(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<
+  ProfileUpdatePlan & { applyResult?: RustyCrewRuntimeConfigApplyResult }
+> {
+  const plan = await planServiceProfileUpdate(state, command);
+  if (!plan.ok) return plan;
+  const draft = profileConfigDraftFromCommand(command, plan.profileId);
+  await writeJsonFileAtomic(plan.profilePath, draft);
+  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "profile_config_updated",
+    summaryPrefix: `Profile ${plan.profileId} updated`,
+  });
+  return { ...plan, applyResult };
+}
+
+async function planServiceRuntimeConfigDraft(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<RuntimeConfigDraftPlan> {
+  const runtimeConfig = runtimeConfigDraftFromCommand(state, command);
+  const loaded = await loadRuntimeConfigProfilesForDraft(runtimeConfig);
+  const diagnostics: RuntimeConfigDraftPlan["diagnostics"] =
+    loaded.diagnostics.map((diagnostic) => ({
+      severity: diagnostic.severity,
+      code: diagnostic.code,
+      path: diagnostic.path,
+      message: diagnostic.message,
+    }));
+  let runtimePlan: unknown;
+  if (!diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    const plan = await planRuntimeConfigWithRust({
+      bridge: state.bridge,
+      runtimeConfig,
+      profiles: loaded.profiles,
+    });
+    runtimePlan = plan;
+    for (const diagnostic of plan.diagnostics) {
+      diagnostics.push({
+        severity: diagnostic.severity,
+        code: diagnostic.code,
+        path: diagnostic.path ?? "runtimeConfig",
+        message: diagnostic.message,
+      });
+    }
+  }
+  return {
+    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    configPath: state.config.paths.serviceConfigFile,
+    diagnostics,
+    implications: {
+      configReloadRequired: true,
+      createMissingSessions: false,
+      explicitChannelLifecycle: true,
+      explicitSessionLifecycle: true,
+    },
+    runtimePlan,
+  };
+}
+
+async function applyServiceRuntimeConfigDraft(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<
+  RuntimeConfigDraftPlan & { applyResult?: RustyCrewRuntimeConfigApplyResult }
+> {
+  const plan = await planServiceRuntimeConfigDraft(state, command);
+  if (!plan.ok) return plan;
+  const runtimeConfig = runtimeConfigDraftFromCommand(state, command);
+  await writeJsonFileAtomic(
+    state.config.paths.serviceConfigFile,
+    runtimeConfig,
+  );
+  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "runtime_config_draft_applied",
+    summaryPrefix: "Runtime config draft applied",
+  });
+  return { ...plan, applyResult };
+}
+
 async function decommissionServiceProfile(
   state: ServiceState,
   command: AdminControlCommand,
@@ -2342,6 +2578,177 @@ function runtimeEntryString(
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function profileConfigDraftFromCommand(
+  command: AdminControlCommand,
+  profileId: string,
+): Record<string, unknown> {
+  const draft = optionalRecord(command.body.profileConfig);
+  if (draft === undefined) {
+    throw new Error("profileConfig object is required");
+  }
+  const next = structuredCloneRecord(draft);
+  next.profileId = profileId;
+  const soulMarkdown = optionalBodyString(command, "soulMarkdown");
+  const memoryMarkdown = optionalBodyString(command, "memoryMarkdown");
+  if (soulMarkdown !== undefined || memoryMarkdown !== undefined) {
+    const prompt = optionalRecord(next.prompt);
+    next.prompt = {
+      ...(prompt ?? {}),
+      ...(soulMarkdown === undefined ? {} : { soulMarkdown }),
+      ...(memoryMarkdown === undefined ? {} : { memoryMarkdown }),
+    };
+  }
+  return next;
+}
+
+function runtimeConfigDraftFromCommand(
+  state: ServiceState,
+  command: AdminControlCommand,
+): RustyCrewRuntimeConfig {
+  const draft = optionalRecord(command.body.runtimeConfig);
+  if (draft === undefined) {
+    throw new Error("runtimeConfig object is required");
+  }
+  return {
+    profilesDir:
+      optionalString(draft.profilesDir) ?? state.runtimeConfig.profilesDir,
+    ...(optionalString(draft.skillsDir) === undefined
+      ? {}
+      : { skillsDir: optionalString(draft.skillsDir) }),
+    brains: arrayValue(draft.brains).map((brain, index) =>
+      runtimeConfigBrainDraft(brain, index),
+    ),
+    sessions: arrayValue(draft.sessions) as RustyCrewRuntimeConfig["sessions"],
+    scheduledJobs: arrayValue(
+      draft.scheduledJobs,
+    ) as RustyCrewRuntimeConfig["scheduledJobs"],
+    channelBindings: arrayValue(
+      draft.channelBindings,
+    ) as RustyCrewRuntimeConfig["channelBindings"],
+    mcpBindings: arrayValue(
+      draft.mcpBindings,
+    ) as RustyCrewRuntimeConfig["mcpBindings"],
+  };
+}
+
+function runtimeConfigBrainDraft(
+  value: unknown,
+  index: number,
+): RustyCrewRuntimeConfig["brains"][number] {
+  if (!isRecord(value)) {
+    throw new Error(`runtimeConfig.brains[${index}] must be an object`);
+  }
+  const profileId = optionalString(value.profileId);
+  if (profileId === undefined) {
+    throw new Error(`runtimeConfig.brains[${index}].profileId is required`);
+  }
+  return {
+    profileId: profileId as ProfileId,
+    implementationId: (optionalString(value.implementationId) ??
+      `${profileId}-brain`) as never,
+  };
+}
+
+async function loadRuntimeConfigProfilesReplacing(
+  state: ServiceState,
+  profileId: string,
+  replacement: ProfileConfig,
+): Promise<ProfileConfig[]> {
+  const profileIds = new Set<ProfileId>();
+  for (const brain of state.runtimeConfig.brains) {
+    profileIds.add(brain.profileId);
+  }
+  for (const session of state.runtimeConfig.sessions) {
+    profileIds.add(session.profileId);
+  }
+  profileIds.add(profileId as ProfileId);
+  const profiles: ProfileConfig[] = [];
+  for (const candidateId of profileIds) {
+    if (String(candidateId) === profileId) {
+      profiles.push(replacement);
+      continue;
+    }
+    profiles.push(
+      await loadProfileConfig(state.runtimeConfig.profilesDir, candidateId),
+    );
+  }
+  return profiles;
+}
+
+async function loadRuntimeConfigProfilesForDraft(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Promise<{
+  profiles: ProfileConfig[];
+  diagnostics: Array<{
+    severity: "error";
+    code: string;
+    path: string;
+    message: string;
+  }>;
+}> {
+  const profileIds = new Set<ProfileId>();
+  for (const brain of runtimeConfig.brains) profileIds.add(brain.profileId);
+  for (const session of runtimeConfig.sessions)
+    profileIds.add(session.profileId);
+  const profiles: ProfileConfig[] = [];
+  const diagnostics: Array<{
+    severity: "error";
+    code: string;
+    path: string;
+    message: string;
+  }> = [];
+  for (const profileId of profileIds) {
+    try {
+      profiles.push(
+        await loadProfileConfig(runtimeConfig.profilesDir, profileId),
+      );
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code: "profile_metadata_load_failed",
+        path: `profiles.${profileId}`,
+        message: errorMessage(
+          error,
+          `profile ${profileId} could not be loaded`,
+        ),
+      });
+    }
+  }
+  return { profiles, diagnostics };
+}
+
+function profileRuntimeBrainChanged(
+  before: ProfileConfig | undefined,
+  after: ProfileConfig | undefined,
+): boolean {
+  if (before === undefined || after === undefined) return false;
+  return (
+    JSON.stringify(before.modelConfig) !== JSON.stringify(after.modelConfig) ||
+    JSON.stringify(before.brain ?? {}) !== JSON.stringify(after.brain ?? {})
+  );
+}
+
+function profileMcpChanged(
+  before: ProfileConfig | undefined,
+  after: ProfileConfig | undefined,
+): boolean {
+  if (before === undefined || after === undefined) return false;
+  return (
+    JSON.stringify(before.mcpConfig ?? {}) !==
+    JSON.stringify(after.mcpConfig ?? {})
+  );
+}
+
+function structuredCloneRecord(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 async function buildDirectDebugContext(
   state: ServiceState,
 ): Promise<DirectDebugServiceContext> {
@@ -2494,6 +2901,39 @@ function createServiceControlExecutor(
           implementationId: result.implementationId,
         },
         result,
+      };
+    },
+    readProfileConfig: async (command) => {
+      const result = await readServiceProfileConfig(state, command);
+      return {
+        status: "completed",
+        summary: `profile ${result.profileId} read`,
+        affectedIds: { profileId: String(result.profileId) },
+        result,
+      };
+    },
+    planProfileUpdate: async (command) => {
+      const result = await planServiceProfileUpdate(state, command);
+      return {
+        status: result.ok ? "completed" : "failed",
+        summary: result.ok
+          ? `profile ${result.profileId} update plan is valid`
+          : `profile ${result.profileId} update plan is invalid`,
+        affectedIds: { profileId: result.profileId },
+        result,
+        reasonCode: result.ok ? undefined : "profile_update_plan_invalid",
+      };
+    },
+    applyProfileUpdate: async (command) => {
+      const result = await applyServiceProfileUpdate(state, command);
+      return {
+        status: result.ok ? "completed" : "failed",
+        summary: result.ok
+          ? `profile ${result.profileId} updated`
+          : `profile ${result.profileId} update rejected`,
+        affectedIds: { profileId: result.profileId },
+        result,
+        reasonCode: result.ok ? undefined : "profile_update_plan_invalid",
       };
     },
     decommissionProfile: async (command) => {
@@ -2663,6 +3103,28 @@ function createServiceControlExecutor(
           sessionsMissing: result.sessionsMissing,
         },
         result,
+      };
+    },
+    planRuntimeConfigUpdate: async (command) => {
+      const result = await planServiceRuntimeConfigDraft(state, command);
+      return {
+        status: result.ok ? "completed" : "failed",
+        summary: result.ok
+          ? "runtime config draft plan is valid"
+          : "runtime config draft plan is invalid",
+        result,
+        reasonCode: result.ok ? undefined : "runtime_config_draft_invalid",
+      };
+    },
+    applyRuntimeConfigUpdate: async (command) => {
+      const result = await applyServiceRuntimeConfigDraft(state, command);
+      return {
+        status: result.ok ? "completed" : "failed",
+        summary: result.ok
+          ? "runtime config draft applied"
+          : "runtime config draft rejected",
+        result,
+        reasonCode: result.ok ? undefined : "runtime_config_draft_invalid",
       };
     },
     planRuntimeRebuild: async (command) => {

@@ -12,6 +12,9 @@ import type {
 
 export type AdminControlCommandName =
   | "create_profile"
+  | "read_profile_config"
+  | "plan_profile_update"
+  | "apply_profile_update"
   | "decommission_profile"
   | "create_session"
   | "archive_session"
@@ -21,6 +24,8 @@ export type AdminControlCommandName =
   | "cancel_delegation"
   | "request_delegated_checkpoint"
   | "reload_config"
+  | "plan_runtime_config_update"
+  | "apply_runtime_config_update"
   | "reload_mcp"
   | "run_maintenance"
   | "scheduler_tick"
@@ -97,6 +102,15 @@ export interface AdminControlExecutor {
   createProfile?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  readProfileConfig?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  planProfileUpdate?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  applyProfileUpdate?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
   decommissionProfile?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
@@ -122,6 +136,12 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   reloadConfig?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  planRuntimeConfigUpdate?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  applyRuntimeConfigUpdate?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   reloadMcp?(
@@ -450,6 +470,51 @@ function parseControlCommand(
     parts[0] === "v1" &&
     parts[1] === "admin" &&
     parts[2] === "control" &&
+    parts[3] === "profiles" &&
+    parts[5] === "read"
+  ) {
+    const profileId = parts[4] ?? "";
+    if (!profileId) return invalidTarget(requestId, "missing_profile_id");
+    return {
+      ok: true,
+      command: {
+        ...commandBase,
+        name: "read_profile_config",
+        target: { profileId },
+      },
+    };
+  }
+
+  if (
+    parts.length === 7 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "profiles" &&
+    parts[5] === "update"
+  ) {
+    const profileId = parts[4] ?? "";
+    if (!profileId) return invalidTarget(requestId, "missing_profile_id");
+    if (parts[6] === "plan" || parts[6] === "apply") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name:
+            parts[6] === "plan"
+              ? "plan_profile_update"
+              : "apply_profile_update",
+          target: { profileId },
+        },
+      };
+    }
+  }
+
+  if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
     parts[3] === "sessions"
   ) {
     const sessionId = parts[4] ?? "";
@@ -542,6 +607,29 @@ function parseControlCommand(
         target: {},
       },
     };
+  }
+
+  if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "config" &&
+    parts[4] === "draft"
+  ) {
+    if (parts[5] === "plan" || parts[5] === "apply") {
+      return {
+        ok: true,
+        command: {
+          ...commandBase,
+          name:
+            parts[5] === "plan"
+              ? "plan_runtime_config_update"
+              : "apply_runtime_config_update",
+          target: {},
+        },
+      };
+    }
   }
 
   if (
@@ -853,6 +941,12 @@ function executorForCommand(
   switch (command) {
     case "create_profile":
       return executor.createProfile;
+    case "read_profile_config":
+      return executor.readProfileConfig;
+    case "plan_profile_update":
+      return executor.planProfileUpdate;
+    case "apply_profile_update":
+      return executor.applyProfileUpdate;
     case "decommission_profile":
       return executor.decommissionProfile;
     case "create_session":
@@ -871,6 +965,10 @@ function executorForCommand(
       return executor.requestDelegatedCheckpoint;
     case "reload_config":
       return executor.reloadConfig;
+    case "plan_runtime_config_update":
+      return executor.planRuntimeConfigUpdate;
+    case "apply_runtime_config_update":
+      return executor.applyRuntimeConfigUpdate;
     case "reload_mcp":
       return executor.reloadMcp;
     case "run_maintenance":

@@ -100,6 +100,30 @@ const executor: AdminControlExecutor = {
       changedPaths: ["/tmp/skill.md"],
     }),
   }),
+  readProfileConfig(command) {
+    return {
+      status: "completed",
+      summary: `Read ${command.target.profileId}.`,
+      affectedIds: { profileId: command.target.profileId ?? "" },
+      result: { profileId: command.target.profileId, profileConfig: {} },
+    };
+  },
+  planProfileUpdate(command) {
+    return {
+      status: "completed",
+      summary: `Planned ${command.target.profileId}.`,
+      affectedIds: { profileId: command.target.profileId ?? "" },
+      result: { ok: true, profileId: command.target.profileId },
+    };
+  },
+  applyProfileUpdate(command) {
+    return {
+      status: "completed",
+      summary: `Updated ${command.target.profileId}.`,
+      affectedIds: { profileId: command.target.profileId ?? "" },
+      result: { ok: true, profileId: command.target.profileId },
+    };
+  },
   archiveSession(command) {
     return {
       status: "completed",
@@ -145,6 +169,20 @@ const executor: AdminControlExecutor = {
       status: "completed",
       summary: "Runtime config reloaded.",
       affectedIds: { sessionsReactivated: 1 },
+    };
+  },
+  planRuntimeConfigUpdate() {
+    return {
+      status: "completed",
+      summary: "Runtime config draft valid.",
+      result: { ok: true },
+    };
+  },
+  applyRuntimeConfigUpdate() {
+    return {
+      status: "completed",
+      summary: "Runtime config draft applied.",
+      result: { ok: true },
     };
   },
   planRuntimeRebuild(command) {
@@ -299,6 +337,81 @@ assert.equal(reloadConfig.status, 200);
 const reloadConfigData = okData<AdminControlResponse>(reloadConfig);
 assert.equal(reloadConfigData.command.name, "reload_config");
 assert.equal(reloadConfigData.outcome.status, "completed");
+
+const readProfile = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/profiles/prime/read",
+    headers: authHeaders(),
+  },
+  context,
+);
+assert.equal(readProfile.status, 200);
+const readProfileData = okData<AdminControlResponse>(readProfile);
+assert.equal(readProfileData.command.name, "read_profile_config");
+assert.equal(readProfileData.command.target.profileId, "prime");
+
+const planProfileUpdate = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/profiles/prime/update/plan",
+    headers: authHeaders(),
+    body: { profileConfig: { profileId: "prime" } },
+  },
+  context,
+);
+assert.equal(planProfileUpdate.status, 200);
+const planProfileUpdateData = okData<AdminControlResponse>(planProfileUpdate);
+assert.equal(planProfileUpdateData.command.name, "plan_profile_update");
+
+const applyProfileUpdate = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/profiles/prime/update/apply",
+    headers: authHeaders(),
+    body: { profileConfig: { profileId: "prime" } },
+  },
+  context,
+);
+assert.equal(applyProfileUpdate.status, 200);
+const applyProfileUpdateData = okData<AdminControlResponse>(applyProfileUpdate);
+assert.equal(applyProfileUpdateData.command.name, "apply_profile_update");
+
+const planRuntimeConfigUpdate = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/config/draft/plan",
+    headers: authHeaders(),
+    body: { runtimeConfig: {} },
+  },
+  context,
+);
+assert.equal(planRuntimeConfigUpdate.status, 200);
+const planRuntimeConfigUpdateData = okData<AdminControlResponse>(
+  planRuntimeConfigUpdate,
+);
+assert.equal(
+  planRuntimeConfigUpdateData.command.name,
+  "plan_runtime_config_update",
+);
+
+const applyRuntimeConfigUpdate = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/config/draft/apply",
+    headers: authHeaders(),
+    body: { runtimeConfig: {} },
+  },
+  context,
+);
+assert.equal(applyRuntimeConfigUpdate.status, 200);
+const applyRuntimeConfigUpdateData = okData<AdminControlResponse>(
+  applyRuntimeConfigUpdate,
+);
+assert.equal(
+  applyRuntimeConfigUpdateData.command.name,
+  "apply_runtime_config_update",
+);
 
 const decommissionProfile = await handleAdminControlRequest(
   {
