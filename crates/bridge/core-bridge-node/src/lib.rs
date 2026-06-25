@@ -3162,6 +3162,49 @@ mod tests {
         assert_eq!(state.payload, serde_json::json!({"response_id": "resp-1"}));
         assert!(hydrated.request.provider_state_absence.is_none());
 
+        let changed_scope_handle = bridge
+            .register_brain_implementation(provider_state_brain_registration_with_scope(
+                "optional-provider-brain-changed-scope",
+                "optional-provider-profile-changed-scope",
+                ProviderStateMode::Optional,
+                "changed-profile-fingerprint",
+                "provider-fingerprint",
+            ))
+            .unwrap();
+        let invalidated = bridge
+            .build_brain_wake_request_for_session(
+                changed_scope_handle,
+                SessionId::new("optional-provider-session"),
+                "system".to_string(),
+                b"{}".to_vec(),
+                "wake-changed-scope".to_string(),
+            )
+            .unwrap();
+        assert!(invalidated.request.provider_state.is_none());
+        assert_eq!(
+            invalidated.request.provider_state_absence,
+            Some(rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Invalidated)
+        );
+
+        bridge
+            .apply_provider_state_output(
+                optional_handle,
+                &SessionId::new("optional-provider-session"),
+                "wake-2b",
+                BrainWakeProviderStateOutput::Replace {
+                    state: BrainWakeProviderStateUpdate {
+                        module_id: "openai-responses".to_string(),
+                        strategy_id: "replay".to_string(),
+                        profile_fingerprint: "profile-fingerprint".to_string(),
+                        provider_fingerprint: "provider-fingerprint".to_string(),
+                        payload_version: "provider-owned-v1".to_string(),
+                        payload: serde_json::json!({"response_id": "resp-2"}),
+                        ttl_ms: Some(60_000),
+                    },
+                },
+            )
+            .unwrap();
+
         bridge
             .apply_provider_state_output(
                 optional_handle,
@@ -3327,6 +3370,22 @@ mod tests {
         profile_id: &str,
         mode: ProviderStateMode,
     ) -> BrainImplementationRegistration {
+        provider_state_brain_registration_with_scope(
+            implementation_id,
+            profile_id,
+            mode,
+            "profile-fingerprint",
+            "provider-fingerprint",
+        )
+    }
+
+    fn provider_state_brain_registration_with_scope(
+        implementation_id: &str,
+        profile_id: &str,
+        mode: ProviderStateMode,
+        profile_fingerprint: &str,
+        provider_fingerprint: &str,
+    ) -> BrainImplementationRegistration {
         let mut registration = brain_registration(implementation_id, profile_id);
         registration.strategy = Some(BrainStrategyMetadata {
             module_id: "openai-responses".to_string(),
@@ -3334,8 +3393,8 @@ mod tests {
             provider_state: BrainProviderStateStrategyMetadata { mode },
         });
         registration.provider_state_scope = Some(BrainProviderStateScope {
-            profile_fingerprint: "profile-fingerprint".to_string(),
-            provider_fingerprint: "provider-fingerprint".to_string(),
+            profile_fingerprint: profile_fingerprint.to_string(),
+            provider_fingerprint: provider_fingerprint.to_string(),
         });
         registration
     }

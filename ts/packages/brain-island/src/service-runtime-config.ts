@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
@@ -38,6 +37,8 @@ import {
 import { BrowserSessionManager } from "./browser-session-manager.js";
 import {
   createBrainModuleRegistry,
+  brainStrategyMetadataForModuleStrategy,
+  resolveBrainModuleStrategy,
   resolveBrainStrategyMetadata,
   resolveBrainModuleSelection,
   type BrainModule,
@@ -55,6 +56,7 @@ import { resolveDelegationTools } from "./delegation-tools.js";
 import type { BrainImplementation } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
 import type { PiAgentFactory } from "./pi-agent-brain.js";
+import { providerStateScopeForProfile } from "./provider-state-fingerprints.js";
 import {
   channelReadbackTool,
   counterResetTool,
@@ -696,8 +698,16 @@ export async function applyRustyCrewRuntimeConfig(input: {
     const profile = await loadProfile(brain.profileId);
     const selection = resolveBrainModuleSelection(profile.profile);
     const module = brainModuleRegistry.require(selection.moduleId);
-    const strategy = resolveBrainStrategyMetadata(module, selection);
-    const providerStateScope = providerStateScopeForProfile(profile, strategy);
+    const moduleStrategy = resolveBrainModuleStrategy(module, selection);
+    const strategy = brainStrategyMetadataForModuleStrategy(
+      module,
+      moduleStrategy,
+    );
+    const providerStateScope = providerStateScopeForProfile({
+      profile,
+      strategy,
+      moduleStrategy,
+    });
     result.brainModulesByProfileId[brain.profileId] = selection;
     result.brainDiagnosticsByProfileId[brain.profileId] =
       brainModuleDiagnostics({
@@ -974,62 +984,6 @@ function brainModuleDiagnostics(input: {
     selectedToolSource: input.profile.toolSelection.catalogId,
     toolAdapterStatus: input.module.diagnostics.toolAdapterStatus,
   };
-}
-
-function providerStateScopeForProfile(
-  profile: Awaited<ReturnType<typeof loadProfileContext>>,
-  strategy: ReturnType<typeof resolveBrainStrategyMetadata>,
-) {
-  return {
-    profileFingerprint: stableFingerprint({
-      profileId: profile.profile.profileId,
-      moduleId: strategy.moduleId,
-      strategyId: strategy.strategyId,
-      displayName: profile.profile.displayName,
-      prompt: profile.profile.prompt,
-      skills: profile.skills.map((skill) => ({
-        slug: skill.slug,
-        sourcePath: skill.sourcePath,
-        bodyMarkdown: skill.bodyMarkdown,
-      })),
-      toolProfile: profile.toolSelection.toolProfile,
-      toolCatalogId: profile.toolSelection.catalogId,
-      runtime: profile.profile.runtime,
-      memoryConfig: profile.profile.memoryConfig,
-      mcpConfig: profile.profile.mcpConfig,
-    }),
-    providerFingerprint: stableFingerprint({
-      moduleId: strategy.moduleId,
-      strategyId: strategy.strategyId,
-      modelConfig: profile.profile.modelConfig,
-      providerStateMode: strategy.providerState.mode,
-    }),
-  };
-}
-
-function stableFingerprint(value: unknown): string {
-  return createHash("sha256")
-    .update(stableJson(value))
-    .digest("hex");
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(sortJsonValue(value));
-}
-
-function sortJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortJsonValue);
-  }
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, entry]) => entry !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entry]) => [key, sortJsonValue(entry)]),
-    );
-  }
-  return value;
 }
 
 async function createConfiguredBrain(

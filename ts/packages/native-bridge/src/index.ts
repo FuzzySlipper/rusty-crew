@@ -1109,7 +1109,9 @@ function providerStateInputFromNativeJson(
     providerFingerprint: parsed.provider_fingerprint,
     payloadVersion: parsed.payload_version,
     payload: parsed.payload,
-    ...(parsed.expires_at === undefined ? {} : { expiresAt: parsed.expires_at }),
+    ...(parsed.expires_at === undefined
+      ? {}
+      : { expiresAt: parsed.expires_at }),
   };
 }
 

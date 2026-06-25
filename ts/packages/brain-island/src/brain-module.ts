@@ -26,9 +26,15 @@ export interface BrainModuleStrategyProviderStateMetadata {
   mode: ProviderStateMode;
 }
 
+export interface BrainModuleStrategyFingerprintMetadata {
+  profileOptions?: unknown;
+  providerOptions?: unknown;
+}
+
 export interface BrainModuleStrategyMetadata {
   strategyId: string;
   providerState: BrainModuleStrategyProviderStateMetadata;
+  fingerprints?: BrainModuleStrategyFingerprintMetadata;
 }
 
 export type BrainModuleToolAdapterStatus =
@@ -133,6 +139,14 @@ export function resolveBrainStrategyMetadata(
   module: BrainModule,
   selection: BrainModuleSelection,
 ): BrainStrategyMetadata {
+  const strategy = resolveBrainModuleStrategy(module, selection);
+  return brainStrategyMetadataForModuleStrategy(module, strategy);
+}
+
+export function resolveBrainModuleStrategy(
+  module: BrainModule,
+  selection: BrainModuleSelection,
+): BrainModuleStrategyMetadata {
   const strategyId = selection.strategy ?? module.defaultStrategyId;
   const strategy = module.strategies.find(
     (candidate) => candidate.strategyId === strategyId,
@@ -142,9 +156,16 @@ export function resolveBrainStrategyMetadata(
       `unknown strategy ${strategyId} for brain module ${module.moduleId}`,
     );
   }
+  return strategy;
+}
+
+export function brainStrategyMetadataForModuleStrategy(
+  module: BrainModule,
+  strategy: BrainModuleStrategyMetadata,
+): BrainStrategyMetadata {
   return {
     moduleId: module.moduleId,
-    strategyId,
+    strategyId: strategy.strategyId,
     providerState: strategy.providerState,
   };
 }
