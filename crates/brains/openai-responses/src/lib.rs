@@ -22,10 +22,12 @@ use std::time::Duration;
 
 pub const MODULE_ID: &str = "openai-responses";
 pub const REPLAY_STRATEGY_ID: &str = "replay";
+pub const PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID: &str = "previous-response-chain";
 pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "openai-responses-state-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesBrainConfig {
+    pub strategy: ResponsesBrainStrategy,
     pub model: String,
     pub instructions: Option<String>,
     pub tool_choice: ResponsesToolChoice,
@@ -41,6 +43,7 @@ pub struct ResponsesBrainConfig {
 impl ResponsesBrainConfig {
     pub fn replay(model: impl Into<String>) -> Self {
         Self {
+            strategy: ResponsesBrainStrategy::Replay,
             model: model.into(),
             instructions: None,
             tool_choice: ResponsesToolChoice::Auto,
@@ -51,6 +54,28 @@ impl ResponsesBrainConfig {
             service_tier: None,
             prompt_cache_key: None,
             stream_idle_timeout_ms: 30_000,
+        }
+    }
+
+    pub fn previous_response_chain(model: impl Into<String>) -> Self {
+        Self {
+            strategy: ResponsesBrainStrategy::PreviousResponseChain,
+            ..Self::replay(model)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponsesBrainStrategy {
+    Replay,
+    PreviousResponseChain,
+}
+
+impl ResponsesBrainStrategy {
+    fn strategy_id(self) -> &'static str {
+        match self {
+            Self::Replay => REPLAY_STRATEGY_ID,
+            Self::PreviousResponseChain => PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID,
         }
     }
 }
@@ -85,6 +110,8 @@ pub struct NeutralBrainTool {
 pub struct ResponsesRequest {
     pub model: String,
     pub instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_response_id: Option<String>,
     pub input: Vec<ResponsesInputItem>,
     pub tools: Vec<ResponsesToolDescriptor>,
     pub tool_choice: Value,
@@ -232,6 +259,16 @@ impl ResponsesRequestBuilder {
         history: ResponsesReplayProjection,
         continuation_items: Vec<ResponsesInputItem>,
     ) -> ResponsesRequest {
+        self.build_replay(wake, provider_state, history, continuation_items)
+    }
+
+    fn build_replay(
+        &self,
+        wake: &BrainWakeRequest,
+        provider_state: Option<&BrainWakeProviderStateInput>,
+        history: ResponsesReplayProjection,
+        continuation_items: Vec<ResponsesInputItem>,
+    ) -> ResponsesRequest {
         let mut input = history.input_items;
         input.extend(provider_replay_items(provider_state));
         input.extend(history.replay_hints);
@@ -244,6 +281,7 @@ impl ResponsesRequestBuilder {
         ResponsesRequest {
             model: self.config.model.clone(),
             instructions: self.config.instructions.clone(),
+            previous_response_id: None,
             input,
             tools: self.tools.iter().map(adapt_neutral_tool).collect(),
             tool_choice: match &self.config.tool_choice {
@@ -261,7 +299,10 @@ impl ResponsesRequestBuilder {
                     "include_encrypted_content": reasoning.include_encrypted_content
                 })
             }),
-            store: false,
+            store: matches!(
+                self.config.strategy,
+                ResponsesBrainStrategy::PreviousResponseChain
+            ),
             stream: true,
             include: self.config.include.clone(),
             service_tier: self.config.service_tier.clone(),
@@ -273,6 +314,70 @@ impl ResponsesRequestBuilder {
                 .map(|text| json!({"verbosity": text.verbosity})),
         }
     }
+
+    fn build_for_strategy(
+        &self,
+        wake: &BrainWakeRequest,
+        provider_state: Option<&BrainWakeProviderStateInput>,
+        provider_state_absence: Option<&ProviderStateAbsenceReason>,
+        history: ResponsesReplayProjection,
+        continuation_items: Vec<ResponsesInputItem>,
+    ) -> ResponsesPlannedRequest {
+        let replay_request =
+            self.build_replay(wake, provider_state, history, continuation_items.clone());
+        if self.config.strategy != ResponsesBrainStrategy::PreviousResponseChain {
+            return ResponsesPlannedRequest {
+                request: replay_request,
+                fallback_reason: None,
+            };
+        }
+        if !continuation_items.is_empty() {
+            return ResponsesPlannedRequest {
+                request: replay_request,
+                fallback_reason: Some(PreviousResponseChainFallbackReason::NormalInvalidation),
+            };
+        }
+
+        let fallback_reason =
+            match previous_response_chain_state(provider_state, provider_state_absence) {
+                Ok(Some(chain_state)) => {
+                    let request_fingerprint = request_fingerprint(&replay_request);
+                    if chain_state.request_fingerprint != request_fingerprint {
+                        Some(PreviousResponseChainFallbackReason::RequestFingerprintMismatch)
+                    } else {
+                        match append_only_input_suffix(
+                            &replay_request.input,
+                            &chain_state.committed_context_items(),
+                        ) {
+                            Some(suffix) => {
+                                let mut chained_request = replay_request.clone();
+                                chained_request.previous_response_id =
+                                    Some(chain_state.previous_response_id.clone());
+                                chained_request.input = suffix;
+                                return ResponsesPlannedRequest {
+                                    request: chained_request,
+                                    fallback_reason: None,
+                                };
+                            }
+                            None => Some(PreviousResponseChainFallbackReason::InputNotAppendOnly),
+                        }
+                    }
+                }
+                Ok(None) => Some(absence_fallback_reason(provider_state_absence)),
+                Err(reason) => Some(reason),
+            };
+
+        ResponsesPlannedRequest {
+            request: replay_request,
+            fallback_reason,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResponsesPlannedRequest {
+    request: ResponsesRequest,
+    fallback_reason: Option<PreviousResponseChainFallbackReason>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -377,7 +482,36 @@ pub struct OpenAiResponsesProviderStateV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_completed_response: Option<OpenAiResponsesCompletedResponseRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_response_chain: Option<PreviousResponseChainStateV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_hints: Option<OpenAiResponsesReplayHints>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviousResponseChainStateV1 {
+    pub previous_response_id: String,
+    pub request_fingerprint: String,
+    pub completed_at: String,
+    pub expires_at: String,
+    pub committed_input_items: Vec<Value>,
+    pub committed_output_items: Vec<OpenAiResponseOutputItemRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_response_metadata: Option<Value>,
+}
+
+impl PreviousResponseChainStateV1 {
+    fn committed_context_items(&self) -> Vec<Value> {
+        let mut items = self.committed_input_items.clone();
+        items.extend(
+            self.committed_output_items
+                .iter()
+                .cloned()
+                .filter_map(replay_item_from_record)
+                .filter_map(|item| serde_json::to_value(item).ok()),
+        );
+        items
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -409,6 +543,107 @@ pub struct OpenAiResponseOutputItemRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
     pub raw_json: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviousResponseChainFallbackReason {
+    NoPredecessorState,
+    RequestFingerprintMismatch,
+    ProfileFingerprintMismatch,
+    ProviderFingerprintMismatch,
+    PredecessorRejectedByProvider,
+    ProviderStateExpired,
+    ProviderStateLoadFailed,
+    InputNotAppendOnly,
+    NormalInvalidation,
+}
+
+impl PreviousResponseChainFallbackReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NoPredecessorState => "no_predecessor_state",
+            Self::RequestFingerprintMismatch => "request_fingerprint_mismatch",
+            Self::ProfileFingerprintMismatch => "profile_fingerprint_mismatch",
+            Self::ProviderFingerprintMismatch => "provider_fingerprint_mismatch",
+            Self::PredecessorRejectedByProvider => "predecessor_rejected_by_provider",
+            Self::ProviderStateExpired => "provider_state_expired",
+            Self::ProviderStateLoadFailed => "provider_state_load_failed",
+            Self::InputNotAppendOnly => "input_not_append_only",
+            Self::NormalInvalidation => "normal_invalidation",
+        }
+    }
+}
+
+fn previous_response_chain_state(
+    provider_state: Option<&BrainWakeProviderStateInput>,
+    provider_state_absence: Option<&ProviderStateAbsenceReason>,
+) -> Result<Option<PreviousResponseChainStateV1>, PreviousResponseChainFallbackReason> {
+    let Some(state) = provider_state else {
+        return Ok(None);
+    };
+    if state.payload_version != PROVIDER_STATE_PAYLOAD_VERSION {
+        return Err(PreviousResponseChainFallbackReason::ProviderStateLoadFailed);
+    }
+    let payload = serde_json::from_value::<OpenAiResponsesProviderStateV1>(state.payload.clone())
+        .map_err(|_| PreviousResponseChainFallbackReason::ProviderStateLoadFailed)?;
+    if provider_state_absence.is_some() {
+        return Ok(None);
+    }
+    Ok(payload.previous_response_chain)
+}
+
+fn absence_fallback_reason(
+    provider_state_absence: Option<&ProviderStateAbsenceReason>,
+) -> PreviousResponseChainFallbackReason {
+    match provider_state_absence {
+        Some(ProviderStateAbsenceReason::Expired) => {
+            PreviousResponseChainFallbackReason::ProviderStateExpired
+        }
+        Some(ProviderStateAbsenceReason::LoadFailed) => {
+            PreviousResponseChainFallbackReason::ProviderStateLoadFailed
+        }
+        Some(ProviderStateAbsenceReason::Invalidated) => {
+            PreviousResponseChainFallbackReason::NormalInvalidation
+        }
+        _ => PreviousResponseChainFallbackReason::NoPredecessorState,
+    }
+}
+
+fn append_only_input_suffix(
+    current_input: &[ResponsesInputItem],
+    predecessor_context: &[Value],
+) -> Option<Vec<ResponsesInputItem>> {
+    let current_values = current_input
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if current_values.len() < predecessor_context.len() {
+        return None;
+    }
+    if &current_values[..predecessor_context.len()] != predecessor_context {
+        return None;
+    }
+    Some(current_input[predecessor_context.len()..].to_vec())
+}
+
+fn request_fingerprint(request: &ResponsesRequest) -> String {
+    serde_json::to_string(&json!({
+        "model": request.model,
+        "instructions": request.instructions,
+        "tools": request.tools,
+        "toolChoice": request.tool_choice,
+        "parallelToolCalls": request.parallel_tool_calls,
+        "reasoning": request.reasoning,
+        "store": request.store,
+        "stream": request.stream,
+        "include": request.include,
+        "serviceTier": request.service_tier,
+        "promptCacheKey": request.prompt_cache_key,
+        "text": request.text,
+    }))
+    .unwrap_or_else(|_| "fingerprint-unavailable".to_string())
 }
 
 fn provider_replay_items(
@@ -1004,144 +1239,96 @@ where
         let base_history = history;
 
         for _ in 0..=self.max_continuations {
-            let provider_request = self.request_builder.build(
+            let planned_request = self.request_builder.build_for_strategy(
                 &request,
                 request.provider_state.as_ref(),
+                request.provider_state_absence.as_ref(),
                 base_history.clone(),
                 continuation_items.clone(),
             );
-            let events = match self.client.stream(provider_request) {
+            if let Some(reason) = planned_request.fallback_reason {
+                items.push(previous_response_chain_fallback_event(&request, reason));
+            }
+            let planned_fingerprint = request_fingerprint(&planned_request.request);
+            let committed_input_items = planned_request.request.input.clone();
+            let events = match self.client.stream(planned_request.request.clone()) {
                 Ok(events) => events,
+                Err(error) => {
+                    if planned_request.request.previous_response_id.is_some() {
+                        items.push(previous_response_chain_fallback_event(
+                            &request,
+                            PreviousResponseChainFallbackReason::PredecessorRejectedByProvider,
+                        ));
+                        let replay_request = self.request_builder.build_replay(
+                            &request,
+                            request.provider_state.as_ref(),
+                            base_history.clone(),
+                            continuation_items.clone(),
+                        );
+                        let replay_fingerprint = request_fingerprint(&replay_request);
+                        let replay_input_items = replay_request.input.clone();
+                        let completed_without_pending = match self.client.stream(replay_request) {
+                            Ok(events) => self.process_provider_events(
+                                &request,
+                                &mut items,
+                                events,
+                                &mut continuation_items,
+                                &mut committed_output_items,
+                                &mut last_response_id,
+                                &mut last_usage,
+                            ),
+                            Err(error) => return Ok(failed_result(&request, items, error)),
+                        };
+                        let completed_without_pending = match completed_without_pending {
+                            Ok(done) => done,
+                            Err(error) => return Ok(failed_result(&request, items, error)),
+                        };
+                        if continuation_items.is_empty() {
+                            debug_assert!(completed_without_pending);
+                            return Ok(finish_responses_wake(
+                                &request,
+                                &self.request_builder.config,
+                                items,
+                                CompletedResponsesAttempt {
+                                    response_id: last_response_id,
+                                    output_items: committed_output_items,
+                                    usage: last_usage,
+                                    committed_input_items: replay_input_items,
+                                    request_fingerprint: replay_fingerprint,
+                                },
+                            ));
+                        }
+                        continue;
+                    }
+                    return Ok(failed_result(&request, items, error));
+                }
+            };
+            let completed_without_pending = self.process_provider_events(
+                &request,
+                &mut items,
+                events,
+                &mut continuation_items,
+                &mut committed_output_items,
+                &mut last_response_id,
+                &mut last_usage,
+            );
+            let completed_without_pending = match completed_without_pending {
+                Ok(done) => done,
                 Err(error) => return Ok(failed_result(&request, items, error)),
             };
-            let mut completed = false;
-            let mut pending_calls = Vec::new();
-            for provider_event in events {
-                match provider_event {
-                    ResponsesEvent::TextDelta(text) => {
-                        items.push(event(&request, BrainEvent::TextDelta { text }));
-                    }
-                    ResponsesEvent::ReasoningDelta(delta) => {
-                        items.push(event(
-                            &request,
-                            BrainEvent::ProviderStatus {
-                                level: BrainProviderStatusLevel::Info,
-                                message: "reasoning delta".to_string(),
-                                metadata_json: Some(json!({"delta": delta}).to_string()),
-                            },
-                        ));
-                    }
-                    ResponsesEvent::OutputItemAdded(output) => {
-                        committed_output_items.push(output);
-                    }
-                    ResponsesEvent::OutputItemDone(output) => match output {
-                        ResponsesOutputItem::FunctionCall {
-                            id,
-                            call_id,
-                            name,
-                            arguments,
-                        } => {
-                            committed_output_items.push(ResponsesOutputItem::FunctionCall {
-                                id: id.clone(),
-                                call_id: call_id.clone(),
-                                name: name.clone(),
-                                arguments: arguments.clone(),
-                            });
-                            pending_calls.push(PendingResponsesFunctionCall {
-                                provider_item_id: id,
-                                call_id,
-                                name,
-                                arguments_json: arguments,
-                            });
-                        }
-                        other => committed_output_items.push(other),
-                    },
-                    ResponsesEvent::Completed { response_id, usage } => {
-                        completed = true;
-                        last_response_id = Some(response_id);
-                        last_usage = usage;
-                    }
-                    ResponsesEvent::Failed(message) => {
-                        return Ok(failed_result(
-                            &request,
-                            items,
-                            ResponsesStreamError::ResponseFailed(message),
-                        ));
-                    }
-                    ResponsesEvent::Incomplete(message) => {
-                        return Ok(failed_result(
-                            &request,
-                            items,
-                            ResponsesStreamError::ResponseIncomplete(message),
-                        ));
-                    }
-                }
-            }
-            if !completed {
-                return Ok(failed_result(
+            if completed_without_pending {
+                return Ok(finish_responses_wake(
                     &request,
+                    &self.request_builder.config,
                     items,
-                    ResponsesStreamError::ClosedBeforeComplete,
-                ));
-            }
-            if pending_calls.is_empty() {
-                items.push(event(&request, BrainEvent::Finished));
-                let batch = BrainActionBatch {
-                    wake_id: request.wake_id.clone(),
-                    session_id: request.session_id.clone(),
-                    actions: vec![BrainAction::DeliverCompletion {
-                        packet: CompletionPacket {
-                            session_id: request.session_id.clone(),
-                            status: CompletionStatus::Completed,
-                            summary: "responses replay wake completed".to_string(),
-                        },
-                    }],
-                };
-                items.push(BrainWakeStreamItem::actions(batch));
-                let provider_state = provider_state_output(
-                    &request,
-                    last_response_id.unwrap_or_else(|| "unknown-response".to_string()),
-                    committed_output_items,
-                    last_usage,
-                );
-                return Ok(ResponsesBrainWakeResult {
-                    stream: BrainWakeStream::from_items(items),
-                    provider_state: Some(provider_state),
-                });
-            }
-            for call in pending_calls {
-                items.push(event(
-                    &request,
-                    BrainEvent::ToolCallStarted {
-                        tool_name: call.name.clone(),
-                        metadata: Some(tool_metadata(&call)),
+                    CompletedResponsesAttempt {
+                        response_id: last_response_id,
+                        output_items: committed_output_items,
+                        usage: last_usage,
+                        committed_input_items,
+                        request_fingerprint: planned_fingerprint,
                     },
                 ));
-                let output = self.tools.execute(&call);
-                items.push(event(
-                    &request,
-                    BrainEvent::ToolCallFinished {
-                        tool_name: call.name.clone(),
-                        is_error: output.is_error,
-                        metadata: Some(tool_metadata(&call)),
-                    },
-                ));
-                continuation_items.push(ResponsesInputItem::FunctionCall {
-                    id: call.provider_item_id.clone(),
-                    call_id: call.call_id.clone(),
-                    name: call.name.clone(),
-                    arguments: call.arguments_json.clone(),
-                });
-                continuation_items.push(ResponsesInputItem::FunctionCallOutput {
-                    call_id: call.call_id.clone(),
-                    output: output.output.clone(),
-                    is_error: output.is_error,
-                });
-                committed_output_items.push(ResponsesOutputItem::FunctionCallOutput {
-                    call_id: call.call_id,
-                    output: output.output,
-                    is_error: output.is_error,
-                });
             }
         }
 
@@ -1150,6 +1337,115 @@ where
             items,
             ResponsesStreamError::IdleTimeout,
         ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_provider_events(
+        &self,
+        request: &BrainWakeRequest,
+        items: &mut Vec<BrainWakeStreamItem>,
+        events: Vec<ResponsesEvent>,
+        continuation_items: &mut Vec<ResponsesInputItem>,
+        committed_output_items: &mut Vec<ResponsesOutputItem>,
+        last_response_id: &mut Option<String>,
+        last_usage: &mut Option<ResponsesTokenUsage>,
+    ) -> Result<bool, ResponsesStreamError> {
+        let mut completed = false;
+        let mut pending_calls = Vec::new();
+        for provider_event in events {
+            match provider_event {
+                ResponsesEvent::TextDelta(text) => {
+                    items.push(event(request, BrainEvent::TextDelta { text }));
+                }
+                ResponsesEvent::ReasoningDelta(delta) => {
+                    items.push(event(
+                        request,
+                        BrainEvent::ProviderStatus {
+                            level: BrainProviderStatusLevel::Info,
+                            message: "reasoning delta".to_string(),
+                            metadata_json: Some(json!({"delta": delta}).to_string()),
+                        },
+                    ));
+                }
+                ResponsesEvent::OutputItemAdded(output) => {
+                    committed_output_items.push(output);
+                }
+                ResponsesEvent::OutputItemDone(output) => match output {
+                    ResponsesOutputItem::FunctionCall {
+                        id,
+                        call_id,
+                        name,
+                        arguments,
+                    } => {
+                        committed_output_items.push(ResponsesOutputItem::FunctionCall {
+                            id: id.clone(),
+                            call_id: call_id.clone(),
+                            name: name.clone(),
+                            arguments: arguments.clone(),
+                        });
+                        pending_calls.push(PendingResponsesFunctionCall {
+                            provider_item_id: id,
+                            call_id,
+                            name,
+                            arguments_json: arguments,
+                        });
+                    }
+                    other => committed_output_items.push(other),
+                },
+                ResponsesEvent::Completed { response_id, usage } => {
+                    completed = true;
+                    *last_response_id = Some(response_id);
+                    *last_usage = usage;
+                }
+                ResponsesEvent::Failed(message) => {
+                    return Err(ResponsesStreamError::ResponseFailed(message));
+                }
+                ResponsesEvent::Incomplete(message) => {
+                    return Err(ResponsesStreamError::ResponseIncomplete(message));
+                }
+            }
+        }
+        if !completed {
+            return Err(ResponsesStreamError::ClosedBeforeComplete);
+        }
+        if pending_calls.is_empty() {
+            return Ok(true);
+        }
+        for call in pending_calls {
+            items.push(event(
+                request,
+                BrainEvent::ToolCallStarted {
+                    tool_name: call.name.clone(),
+                    metadata: Some(tool_metadata(&call)),
+                },
+            ));
+            let output = self.tools.execute(&call);
+            items.push(event(
+                request,
+                BrainEvent::ToolCallFinished {
+                    tool_name: call.name.clone(),
+                    is_error: output.is_error,
+                    metadata: Some(tool_metadata(&call)),
+                },
+            ));
+            continuation_items.push(ResponsesInputItem::FunctionCall {
+                id: call.provider_item_id.clone(),
+                call_id: call.call_id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments_json.clone(),
+            });
+            continuation_items.push(ResponsesInputItem::FunctionCallOutput {
+                call_id: call.call_id.clone(),
+                output: output.output.clone(),
+                is_error: output.is_error,
+            });
+            committed_output_items.push(ResponsesOutputItem::FunctionCallOutput {
+                call_id: call.call_id,
+                output: output.output,
+                is_error: output.is_error,
+            });
+        }
+        Ok(false)
     }
 }
 
@@ -1171,28 +1467,90 @@ pub struct ResponsesBrainWakeResult {
     pub provider_state: Option<BrainWakeProviderStateOutput>,
 }
 
+struct CompletedResponsesAttempt {
+    response_id: Option<String>,
+    output_items: Vec<ResponsesOutputItem>,
+    usage: Option<ResponsesTokenUsage>,
+    committed_input_items: Vec<ResponsesInputItem>,
+    request_fingerprint: String,
+}
+
+fn finish_responses_wake(
+    request: &BrainWakeRequest,
+    config: &ResponsesBrainConfig,
+    mut items: Vec<BrainWakeStreamItem>,
+    completed: CompletedResponsesAttempt,
+) -> ResponsesBrainWakeResult {
+    items.push(event(request, BrainEvent::Finished));
+    let batch = BrainActionBatch {
+        wake_id: request.wake_id.clone(),
+        session_id: request.session_id.clone(),
+        actions: vec![BrainAction::DeliverCompletion {
+            packet: CompletionPacket {
+                session_id: request.session_id.clone(),
+                status: CompletionStatus::Completed,
+                summary: "responses replay wake completed".to_string(),
+            },
+        }],
+    };
+    items.push(BrainWakeStreamItem::actions(batch));
+    let provider_state = provider_state_output(
+        request,
+        config,
+        completed
+            .response_id
+            .unwrap_or_else(|| "unknown-response".to_string()),
+        completed.output_items,
+        completed.usage,
+        completed.committed_input_items,
+        completed.request_fingerprint,
+    );
+    ResponsesBrainWakeResult {
+        stream: BrainWakeStream::from_items(items),
+        provider_state: Some(provider_state),
+    }
+}
+
 fn provider_state_output(
     request: &BrainWakeRequest,
+    config: &ResponsesBrainConfig,
     response_id: String,
     output_items: Vec<ResponsesOutputItem>,
     usage: Option<ResponsesTokenUsage>,
+    committed_input_items: Vec<ResponsesInputItem>,
+    request_fingerprint: String,
 ) -> BrainWakeProviderStateOutput {
     let output_records: Vec<_> = output_items.iter().map(output_record_from_item).collect();
+    let previous_response_chain = (config.strategy
+        == ResponsesBrainStrategy::PreviousResponseChain)
+        .then(|| PreviousResponseChainStateV1 {
+            previous_response_id: response_id.clone(),
+            request_fingerprint,
+            completed_at: format!("wake:{}", request.wake_id),
+            expires_at: "provider-wire-state-ttl".to_string(),
+            committed_input_items: committed_input_items
+                .into_iter()
+                .filter_map(|item| serde_json::to_value(item).ok())
+                .collect(),
+            committed_output_items: output_records.clone(),
+            provider_response_metadata: None,
+        });
     let payload = OpenAiResponsesProviderStateV1 {
         kind: MODULE_ID.to_string(),
-        strategy_id: REPLAY_STRATEGY_ID.to_string(),
+        strategy_id: config.strategy.strategy_id().to_string(),
         payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
         last_completed_response: Some(OpenAiResponsesCompletedResponseRecord {
             response_id,
             output_items: output_records,
             token_usage: usage,
         }),
+        previous_response_chain,
         replay_hints: None,
     };
     BrainWakeProviderStateOutput::Replace {
         state: BrainWakeProviderStateUpdate {
             module_id: MODULE_ID.to_string(),
-            strategy_id: REPLAY_STRATEGY_ID.to_string(),
+            strategy_id: config.strategy.strategy_id().to_string(),
             profile_fingerprint: request
                 .provider_state
                 .as_ref()
@@ -1208,6 +1566,31 @@ fn provider_state_output(
             ttl_ms: Some(24 * 60 * 60 * 1000),
         },
     }
+}
+
+fn previous_response_chain_fallback_event(
+    request: &BrainWakeRequest,
+    reason: PreviousResponseChainFallbackReason,
+) -> BrainWakeStreamItem {
+    event(
+        request,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Info,
+            message: format!(
+                "previous_response_id chain fell back to replay: {}",
+                reason.as_str()
+            ),
+            metadata_json: Some(
+                json!({
+                    "selectedStrategyId": PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID,
+                    "effectiveStrategyId": REPLAY_STRATEGY_ID,
+                    "replayFallbackUsed": true,
+                    "fallbackReason": reason.as_str(),
+                })
+                .to_string(),
+            ),
+        },
+    )
 }
 
 fn failed_result(
@@ -1530,6 +1913,219 @@ mod tests {
     }
 
     #[test]
+    fn previous_response_chain_commits_predecessor_only_after_completion() {
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::Message {
+                    id: Some("msg-1".to_string()),
+                    text: "reply one".to_string(),
+                }),
+                ResponsesEvent::Completed {
+                    response_id: "resp-1".to_string(),
+                    usage: Some(usage()),
+                },
+            ])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+        let history = ResponsesReplayProjection {
+            input_items: vec![ResponsesInputItem::UserMessage {
+                content: "human: first".to_string(),
+            }],
+            replay_hints: Vec::new(),
+        };
+        let result = brain
+            .wake_with_history(wake_request(None, None), history.clone())
+            .unwrap();
+
+        let payload = provider_state_payload_from_output(result.provider_state);
+        let chain = payload
+            .previous_response_chain
+            .expect("chain state should be present after completion");
+        assert_eq!(chain.previous_response_id, "resp-1");
+        assert_eq!(
+            chain.committed_input_items,
+            history
+                .input_items
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        );
+        assert_eq!(chain.committed_output_items[0].item_type, "message");
+
+        let mut failed = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::TextDelta(
+                "partial".to_string(),
+            )])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+        let failed_result = failed.wake(wake_request(None, None)).unwrap();
+        assert!(failed_result.provider_state.is_none());
+    }
+
+    #[test]
+    fn previous_response_chain_uses_compact_append_only_input_when_valid() {
+        let state = valid_chain_provider_state();
+        let history = append_only_history();
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-2".to_string(),
+                usage: None,
+            }])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+        let result = brain
+            .wake_with_history(wake_request(Some(state), None), history)
+            .unwrap();
+
+        assert!(matches!(
+            result.provider_state,
+            Some(BrainWakeProviderStateOutput::Replace { .. })
+        ));
+        assert_eq!(brain.client.requests().len(), 1);
+        assert_eq!(
+            brain.client.requests()[0].previous_response_id.as_deref(),
+            Some("resp-1")
+        );
+        assert_eq!(
+            brain.client.requests()[0].input,
+            vec![ResponsesInputItem::UserMessage {
+                content: "human: second".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn previous_response_chain_falls_back_on_request_fingerprint_mismatch() {
+        let mut state = valid_chain_provider_state();
+        let mut payload: OpenAiResponsesProviderStateV1 =
+            serde_json::from_value(state.payload.clone()).unwrap();
+        payload
+            .previous_response_chain
+            .as_mut()
+            .unwrap()
+            .request_fingerprint = "stale-fingerprint".to_string();
+        state.payload = serde_json::to_value(payload).unwrap();
+
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-replay".to_string(),
+                usage: None,
+            }])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+        let result = brain
+            .wake_with_history(wake_request(Some(state), None), append_only_history())
+            .unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+
+        assert!(fallback_reason_seen(
+            &items,
+            PreviousResponseChainFallbackReason::RequestFingerprintMismatch
+        ));
+        assert_eq!(brain.client.requests()[0].previous_response_id, None);
+        assert!(brain.client.requests()[0].input.len() > 1);
+    }
+
+    #[test]
+    fn previous_response_chain_falls_back_on_non_append_only_input() {
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-replay".to_string(),
+                usage: None,
+            }])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+        let result = brain
+            .wake_with_history(
+                wake_request(Some(valid_chain_provider_state()), None),
+                ResponsesReplayProjection {
+                    input_items: vec![ResponsesInputItem::UserMessage {
+                        content: "human: rewritten first".to_string(),
+                    }],
+                    replay_hints: vec![ResponsesInputItem::UserMessage {
+                        content: "human: second".to_string(),
+                    }],
+                },
+            )
+            .unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+
+        assert!(fallback_reason_seen(
+            &items,
+            PreviousResponseChainFallbackReason::InputNotAppendOnly
+        ));
+        assert_eq!(brain.client.requests()[0].previous_response_id, None);
+    }
+
+    #[test]
+    fn previous_response_chain_provider_rejection_replays_with_typed_diagnostic() {
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![
+                Err(ResponsesStreamError::Transport("HTTP 404".to_string())),
+                Ok(vec![ResponsesEvent::Completed {
+                    response_id: "resp-recovered".to_string(),
+                    usage: None,
+                }]),
+            ]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+        let result = brain
+            .wake_with_history(
+                wake_request(Some(valid_chain_provider_state()), None),
+                append_only_history(),
+            )
+            .unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+
+        assert!(fallback_reason_seen(
+            &items,
+            PreviousResponseChainFallbackReason::PredecessorRejectedByProvider
+        ));
+        assert_eq!(brain.client.requests().len(), 2);
+        assert_eq!(
+            brain.client.requests()[0].previous_response_id.as_deref(),
+            Some("resp-1")
+        );
+        assert_eq!(brain.client.requests()[1].previous_response_id, None);
+        assert!(matches!(
+            result.provider_state,
+            Some(BrainWakeProviderStateOutput::Replace { .. })
+        ));
+    }
+
+    #[test]
+    fn previous_response_chain_expired_state_replays_with_typed_diagnostic() {
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-replay".to_string(),
+                usage: None,
+            }])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+        let result = brain
+            .wake_with_history(
+                wake_request(None, Some(ProviderStateAbsenceReason::Expired)),
+                append_only_history(),
+            )
+            .unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+
+        assert!(fallback_reason_seen(
+            &items,
+            PreviousResponseChainFallbackReason::ProviderStateExpired
+        ));
+        assert_eq!(brain.client.requests()[0].previous_response_id, None);
+    }
+
+    #[test]
     fn fake_client_streams_text_reasoning_and_completion_action() {
         let mut brain = brain_with(
             FakeResponsesClient::new(vec![Ok(vec![
@@ -1702,6 +2298,7 @@ mod tests {
         let request = ResponsesRequest {
             model: "gpt-5".to_string(),
             instructions: None,
+            previous_response_id: None,
             input: vec![ResponsesInputItem::FunctionCallOutput {
                 call_id: "wrong-call".to_string(),
                 output: "oops".to_string(),
@@ -1773,16 +2370,119 @@ mod tests {
         client: FakeResponsesClient,
         tools: MapToolExecutor,
     ) -> ResponsesReplayBrain<FakeResponsesClient, MapToolExecutor> {
+        brain_with_config(client, tools, ResponsesBrainConfig::replay("gpt-5"))
+    }
+
+    fn brain_with_config(
+        client: FakeResponsesClient,
+        tools: MapToolExecutor,
+        config: ResponsesBrainConfig,
+    ) -> ResponsesReplayBrain<FakeResponsesClient, MapToolExecutor> {
         ResponsesReplayBrain::new(
             client,
             tools,
-            ResponsesBrainConfig::replay("gpt-5"),
+            config,
             vec![NeutralBrainTool {
                 name: "lookup".to_string(),
                 description: "Look up data".to_string(),
                 input_schema: json!({"type": "object"}),
             }],
         )
+    }
+
+    fn append_only_history() -> ResponsesReplayProjection {
+        ResponsesReplayProjection {
+            input_items: vec![ResponsesInputItem::UserMessage {
+                content: "human: first".to_string(),
+            }],
+            replay_hints: vec![ResponsesInputItem::UserMessage {
+                content: "human: second".to_string(),
+            }],
+        }
+    }
+
+    fn valid_chain_provider_state() -> BrainWakeProviderStateInput {
+        let config = ResponsesBrainConfig::previous_response_chain("gpt-5");
+        let builder = ResponsesRequestBuilder::new(config).tools(vec![NeutralBrainTool {
+            name: "lookup".to_string(),
+            description: "Look up data".to_string(),
+            input_schema: json!({"type": "object"}),
+        }]);
+        let output = ResponsesOutputItem::Message {
+            id: Some("msg-1".to_string()),
+            text: "reply one".to_string(),
+        };
+        let completed_record = output_record_from_item(&output);
+        let replay_state = provider_state(provider_state_payload("resp-1", vec![output]));
+        let replay_request = builder.build_replay(
+            &wake_request(Some(replay_state.clone()), None),
+            Some(&replay_state),
+            append_only_history(),
+            Vec::new(),
+        );
+        let payload = OpenAiResponsesProviderStateV1 {
+            kind: MODULE_ID.to_string(),
+            strategy_id: PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID.to_string(),
+            payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+            last_completed_response: Some(OpenAiResponsesCompletedResponseRecord {
+                response_id: "resp-1".to_string(),
+                output_items: vec![completed_record.clone()],
+                token_usage: None,
+            }),
+            previous_response_chain: Some(PreviousResponseChainStateV1 {
+                previous_response_id: "resp-1".to_string(),
+                request_fingerprint: request_fingerprint(&replay_request),
+                completed_at: "wake:wake-1".to_string(),
+                expires_at: "provider-wire-state-ttl".to_string(),
+                committed_input_items: vec![serde_json::to_value(
+                    ResponsesInputItem::UserMessage {
+                        content: "human: first".to_string(),
+                    },
+                )
+                .unwrap()],
+                committed_output_items: vec![completed_record],
+                provider_response_metadata: None,
+            }),
+            replay_hints: None,
+        };
+        provider_state(serde_json::to_value(payload).unwrap())
+    }
+
+    fn provider_state_payload_from_output(
+        output: Option<BrainWakeProviderStateOutput>,
+    ) -> OpenAiResponsesProviderStateV1 {
+        let Some(BrainWakeProviderStateOutput::Replace { state }) = output else {
+            panic!("expected provider-state replacement");
+        };
+        serde_json::from_value(state.payload).unwrap()
+    }
+
+    fn fallback_reason_seen(
+        items: &[BrainWakeStreamItem],
+        reason: PreviousResponseChainFallbackReason,
+    ) -> bool {
+        items.iter().any(|item| {
+            let BrainWakeStreamItem::Event { event } = item else {
+                return false;
+            };
+            let BrainEvent::ProviderStatus {
+                metadata_json: Some(metadata),
+                ..
+            } = &event.event
+            else {
+                return false;
+            };
+            serde_json::from_str::<Value>(metadata)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("fallbackReason")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .as_deref()
+                == Some(reason.as_str())
+        })
     }
 
     fn wake_request(
@@ -1823,6 +2523,7 @@ mod tests {
                 output_items: output_items.iter().map(output_record_from_item).collect(),
                 token_usage: None,
             }),
+            previous_response_chain: None,
             replay_hints: None,
         })
         .unwrap()
