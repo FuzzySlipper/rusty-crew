@@ -9,10 +9,11 @@ use rusty_crew_core_protocol::{
     CompletionPacket, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
     DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
     DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
-    FanOutGroupStatus, IsoTimestamp, ParentConsumptionPolicy, ProfileId, ProjectId,
-    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
-    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
-    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    FanOutGroupStatus, IsoTimestamp, MessageBlockId, MessageId, MessageSlotId, MessageVariantId,
+    ParentConsumptionPolicy, ProfileId, ProjectId, ProviderStateAbsenceReason, ResourceLimits,
+    RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
+    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
+    ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -22,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 16;
+const CURRENT_SCHEMA_VERSION: i64 = 17;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -126,6 +127,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add provider wire-state persistence",
         apply: migrate_v16_add_provider_wire_state,
     },
+    SchemaMigration {
+        version: 17,
+        description: "add message slot and variant persistence",
+        apply: migrate_v17_add_message_slot_variants,
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -200,6 +206,235 @@ pub struct AgentMessageQuery {
     pub agent_id: Option<AgentId>,
     pub correlation_id: Option<String>,
     pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageVariantSource {
+    Primary,
+    Alternate,
+}
+
+impl MessageVariantSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Alternate => "alternate",
+        }
+    }
+
+    fn parse(raw: &str) -> CoreResult<Self> {
+        match raw {
+            "primary" => Ok(Self::Primary),
+            "alternate" => Ok(Self::Alternate),
+            _ => Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("unsupported message variant source {raw}"),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageVariantStatus {
+    Active,
+    Deleted,
+}
+
+impl MessageVariantStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Deleted => "deleted",
+        }
+    }
+
+    fn parse(raw: &str) -> CoreResult<Self> {
+        match raw {
+            "active" => Ok(Self::Active),
+            "deleted" => Ok(Self::Deleted),
+            _ => Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("unsupported message variant status {raw}"),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DurableMessageStatus {
+    Created,
+    Streaming,
+    Completed,
+    Failed,
+    Deleted,
+}
+
+impl DurableMessageStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Streaming => "streaming",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Deleted => "deleted",
+        }
+    }
+
+    fn parse(raw: &str) -> CoreResult<Self> {
+        match raw {
+            "created" => Ok(Self::Created),
+            "streaming" => Ok(Self::Streaming),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "deleted" => Ok(Self::Deleted),
+            _ => Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("unsupported durable message status {raw}"),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageBlockRecord {
+    pub block_id: MessageBlockId,
+    pub message_id: MessageId,
+    pub ordinal: u32,
+    pub kind: String,
+    pub content_json: JsonValue,
+    pub render_policy_json: Option<JsonValue>,
+    pub metadata_json: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DurableMessageRecord {
+    pub message_id: MessageId,
+    pub session_id: SessionId,
+    pub author_id: String,
+    pub author_role: String,
+    pub status: DurableMessageStatus,
+    pub body: String,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub blocks: Vec<MessageBlockRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageVariantRecord {
+    pub variant_id: MessageVariantId,
+    pub slot_id: MessageSlotId,
+    pub source: MessageVariantSource,
+    pub ordinal: u32,
+    pub status: MessageVariantStatus,
+    pub message: DurableMessageRecord,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageSlotRecord {
+    pub slot_id: MessageSlotId,
+    pub session_id: SessionId,
+    pub primary_variant_id: MessageVariantId,
+    pub active_variant_id: Option<MessageVariantId>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub version: u64,
+    pub primary: MessageVariantRecord,
+    pub alternates: Vec<MessageVariantRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageBlockWrite {
+    pub block_id: MessageBlockId,
+    pub ordinal: u32,
+    pub kind: String,
+    pub content_json: JsonValue,
+    pub render_policy_json: Option<JsonValue>,
+    pub metadata_json: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DurableMessageWrite {
+    pub message_id: MessageId,
+    pub session_id: SessionId,
+    pub author_id: String,
+    pub author_role: String,
+    pub status: DurableMessageStatus,
+    pub body: String,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub blocks: Vec<MessageBlockWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageVariantWrite {
+    pub variant_id: MessageVariantId,
+    pub slot_id: MessageSlotId,
+    pub source: MessageVariantSource,
+    pub ordinal: u32,
+    pub status: MessageVariantStatus,
+    pub message: DurableMessageWrite,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageSlotWrite {
+    pub slot_id: MessageSlotId,
+    pub session_id: SessionId,
+    pub primary_variant_id: MessageVariantId,
+    pub active_variant_id: Option<MessageVariantId>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageSlotQuery {
+    pub session_id: Option<SessionId>,
+    pub include_alternates: bool,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageVariantQuery {
+    pub slot_id: Option<MessageSlotId>,
+    pub include_deleted: bool,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActiveVariantExpectation {
+    Any,
+    Primary,
+    Variant(MessageVariantId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectActiveVariantRequest {
+    pub slot_id: MessageSlotId,
+    pub active_variant_id: Option<MessageVariantId>,
+    pub expected: ActiveVariantExpectation,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectActiveVariantResult {
+    pub slot: MessageSlotRecord,
+    pub conflict: Option<ActiveVariantConflict>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveVariantConflict {
+    pub expected: Option<MessageVariantId>,
+    pub actual: Option<MessageVariantId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -829,6 +1064,10 @@ pub enum DiagnosticTable {
     ScheduledJobs,
     ScheduledJobRuns,
     ProviderWireStates,
+    MessageSlots,
+    MessageVariants,
+    Messages,
+    MessageBlocks,
     ChannelBindings,
     McpBindings,
     AgentMessages,
@@ -859,6 +1098,10 @@ impl DiagnosticTable {
         Self::ScheduledJobs,
         Self::ScheduledJobRuns,
         Self::ProviderWireStates,
+        Self::MessageSlots,
+        Self::MessageVariants,
+        Self::Messages,
+        Self::MessageBlocks,
         Self::ChannelBindings,
         Self::McpBindings,
         Self::AgentMessages,
@@ -889,6 +1132,10 @@ impl DiagnosticTable {
             "scheduled_jobs" => Ok(Self::ScheduledJobs),
             "scheduled_job_runs" => Ok(Self::ScheduledJobRuns),
             "provider_wire_states" => Ok(Self::ProviderWireStates),
+            "message_slots" => Ok(Self::MessageSlots),
+            "message_variants" => Ok(Self::MessageVariants),
+            "messages" => Ok(Self::Messages),
+            "message_blocks" => Ok(Self::MessageBlocks),
             "channel_bindings" => Ok(Self::ChannelBindings),
             "mcp_bindings" => Ok(Self::McpBindings),
             "agent_messages" => Ok(Self::AgentMessages),
@@ -924,6 +1171,10 @@ impl DiagnosticTable {
             Self::ScheduledJobs => "scheduled_jobs",
             Self::ScheduledJobRuns => "scheduled_job_runs",
             Self::ProviderWireStates => "provider_wire_states",
+            Self::MessageSlots => "message_slots",
+            Self::MessageVariants => "message_variants",
+            Self::Messages => "messages",
+            Self::MessageBlocks => "message_blocks",
             Self::ChannelBindings => "channel_bindings",
             Self::McpBindings => "mcp_bindings",
             Self::AgentMessages => "agent_messages",
@@ -1619,6 +1870,185 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<AgentMessageRecord>> {
         let conn = self.conn()?;
         query_agent_messages(&conn, query)
+    }
+
+    pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin save message slot", error))?;
+        save_message_slot_in_tx(&tx, slot)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save message slot", error))?;
+        Ok(())
+    }
+
+    pub fn save_message_variant(
+        &self,
+        variant: &MessageVariantWrite,
+    ) -> CoreResult<MessageVariantRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin save message variant", error))?;
+        save_message_variant_in_tx(&tx, variant)?;
+        let record = load_message_variant_in_tx(&tx, &variant.variant_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save message variant", error))?;
+        Ok(record)
+    }
+
+    pub fn query_message_slots(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<Vec<MessageSlotRecord>> {
+        let conn = self.conn()?;
+        query_message_slots(&conn, query)
+    }
+
+    pub fn query_message_variants(
+        &self,
+        query: &MessageVariantQuery,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        let conn = self.conn()?;
+        query_message_variants(&conn, query)
+    }
+
+    pub fn select_active_message_variant(
+        &self,
+        request: &SelectActiveVariantRequest,
+    ) -> CoreResult<SelectActiveVariantResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin select active message variant", error))?;
+        let current = current_active_variant_in_tx(&tx, &request.slot_id)?;
+        let expected = match &request.expected {
+            ActiveVariantExpectation::Any => current.clone(),
+            ActiveVariantExpectation::Primary => None,
+            ActiveVariantExpectation::Variant(variant_id) => Some(variant_id.clone()),
+        };
+        if request.expected != ActiveVariantExpectation::Any && current != expected {
+            let slot = load_message_slot_in_tx(&tx, &request.slot_id, true)?;
+            tx.commit()
+                .map_err(|error| persistence_error("commit active variant conflict", error))?;
+            return Ok(SelectActiveVariantResult {
+                slot,
+                conflict: Some(ActiveVariantConflict {
+                    expected,
+                    actual: current,
+                }),
+            });
+        }
+        if let Some(variant_id) = &request.active_variant_id {
+            ensure_variant_belongs_to_slot_in_tx(&tx, &request.slot_id, variant_id)?;
+        }
+        tx.execute(
+            "UPDATE message_slots
+             SET active_variant_id = ?2, updated_at = ?3, version = version + 1
+             WHERE slot_id = ?1",
+            params![
+                request.slot_id.0,
+                request
+                    .active_variant_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                request.updated_at,
+            ],
+        )
+        .map_err(|error| persistence_error("select active message variant", error))?;
+        let slot = load_message_slot_in_tx(&tx, &request.slot_id, true)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit select active message variant", error))?;
+        Ok(SelectActiveVariantResult {
+            slot,
+            conflict: None,
+        })
+    }
+
+    pub fn delete_message_variant(
+        &self,
+        slot_id: &MessageSlotId,
+        variant_id: &MessageVariantId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<MessageSlotRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin delete message variant", error))?;
+        ensure_variant_belongs_to_slot_in_tx(&tx, slot_id, variant_id)?;
+        tx.execute(
+            "UPDATE message_variants
+             SET status = 'deleted', updated_at = ?3
+             WHERE slot_id = ?1 AND variant_id = ?2 AND source <> 'primary'",
+            params![slot_id.0, variant_id.0, updated_at],
+        )
+        .map_err(|error| persistence_error("delete message variant", error))?;
+        tx.execute(
+            "UPDATE message_slots
+             SET active_variant_id = CASE
+                    WHEN active_variant_id = ?2 THEN NULL
+                    ELSE active_variant_id
+                 END,
+                 updated_at = ?3,
+                 version = version + 1
+             WHERE slot_id = ?1",
+            params![slot_id.0, variant_id.0, updated_at],
+        )
+        .map_err(|error| persistence_error("clear deleted active variant", error))?;
+        let slot = load_message_slot_in_tx(&tx, slot_id, true)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit delete message variant", error))?;
+        Ok(slot)
+    }
+
+    pub fn reorder_message_variants(
+        &self,
+        slot_id: &MessageSlotId,
+        ordered_variant_ids: &[MessageVariantId],
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin reorder message variants", error))?;
+        for (index, variant_id) in ordered_variant_ids.iter().enumerate() {
+            ensure_variant_belongs_to_slot_in_tx(&tx, slot_id, variant_id)?;
+            tx.execute(
+                "UPDATE message_variants
+                 SET ordinal = ?3, updated_at = ?4
+                 WHERE slot_id = ?1 AND variant_id = ?2 AND source <> 'primary'",
+                params![slot_id.0, variant_id.0, -((index + 1) as i64), updated_at],
+            )
+            .map_err(|error| persistence_error("stage reorder message variant", error))?;
+        }
+        for (index, variant_id) in ordered_variant_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE message_variants
+                 SET ordinal = ?3, updated_at = ?4
+                 WHERE slot_id = ?1 AND variant_id = ?2 AND source <> 'primary'",
+                params![slot_id.0, variant_id.0, (index + 1) as i64, updated_at],
+            )
+            .map_err(|error| persistence_error("reorder message variant", error))?;
+        }
+        tx.execute(
+            "UPDATE message_slots
+             SET updated_at = ?2, version = version + 1
+             WHERE slot_id = ?1",
+            params![slot_id.0, updated_at],
+        )
+        .map_err(|error| persistence_error("touch reordered message slot", error))?;
+        let variants = query_message_variants_in_tx(
+            &tx,
+            &MessageVariantQuery {
+                slot_id: Some(slot_id.clone()),
+                include_deleted: false,
+                page: None,
+            },
+        )?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit reorder message variants", error))?;
+        Ok(variants)
     }
 
     pub fn query_completion_packets(
@@ -3250,6 +3680,73 @@ fn migrate_v16_add_provider_wire_state(tx: &rusqlite::Transaction<'_>) -> CoreRe
     .map_err(|error| persistence_error("apply schema migration 16", error))
 }
 
+fn migrate_v17_add_message_slot_variants(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS message_slots (
+                slot_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                primary_variant_id TEXT NOT NULL,
+                active_variant_id TEXT,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_message_slots_session_slot
+                ON message_slots(session_id, slot_id);
+            CREATE INDEX IF NOT EXISTS idx_message_slots_active_variant
+                ON message_slots(active_variant_id);
+
+            CREATE TABLE IF NOT EXISTS messages (
+                message_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                author_id TEXT NOT NULL,
+                author_role TEXT NOT NULL,
+                status TEXT NOT NULL,
+                body TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_messages_session_created
+                ON messages(session_id, created_at, message_id);
+
+            CREATE TABLE IF NOT EXISTS message_blocks (
+                block_id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                content_json TEXT NOT NULL,
+                render_policy_json TEXT,
+                metadata_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_message_blocks_message_ordinal
+                ON message_blocks(message_id, ordinal);
+
+            CREATE TABLE IF NOT EXISTS message_variants (
+                variant_id TEXT PRIMARY KEY,
+                slot_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (slot_id) REFERENCES message_slots(slot_id),
+                FOREIGN KEY (message_id) REFERENCES messages(message_id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_message_variants_slot_ordinal
+                ON message_variants(slot_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_message_variants_slot_status
+                ON message_variants(slot_id, status, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_message_variants_message
+                ON message_variants(message_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 17", error))
+}
+
 fn save_provider_wire_state_in_tx(
     tx: &rusqlite::Transaction<'_>,
     write: &ProviderWireStateWrite,
@@ -4483,6 +4980,698 @@ fn query_agent_messages(
         .map_err(|error| persistence_error("query agent messages", error))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| persistence_error("load queried agent messages", error))
+}
+
+fn save_message_slot_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    slot: &MessageSlotWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO message_slots (
+            slot_id,
+            session_id,
+            primary_variant_id,
+            active_variant_id,
+            metadata_json,
+            created_at,
+            updated_at,
+            version
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
+         ON CONFLICT(slot_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            primary_variant_id = excluded.primary_variant_id,
+            active_variant_id = excluded.active_variant_id,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at,
+            version = message_slots.version + 1",
+        params![
+            slot.slot_id.0,
+            slot.session_id.0,
+            slot.primary_variant_id.0,
+            slot.active_variant_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            to_json_text(&slot.metadata_json)?,
+            slot.created_at,
+            slot.updated_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save message slot", error))?;
+    Ok(())
+}
+
+fn save_message_variant_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    variant: &MessageVariantWrite,
+) -> CoreResult<()> {
+    if variant.source == MessageVariantSource::Primary && variant.ordinal != 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "primary message variant ordinal must be 0",
+        ));
+    }
+    save_durable_message_in_tx(tx, &variant.message)?;
+    tx.execute(
+        "INSERT INTO message_variants (
+            variant_id,
+            slot_id,
+            source,
+            ordinal,
+            status,
+            message_id,
+            metadata_json,
+            created_at,
+            updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(variant_id) DO UPDATE SET
+            slot_id = excluded.slot_id,
+            source = excluded.source,
+            ordinal = excluded.ordinal,
+            status = excluded.status,
+            message_id = excluded.message_id,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at",
+        params![
+            variant.variant_id.0,
+            variant.slot_id.0,
+            variant.source.as_str(),
+            variant.ordinal as i64,
+            variant.status.as_str(),
+            variant.message.message_id.0,
+            to_json_text(&variant.metadata_json)?,
+            variant.created_at,
+            variant.updated_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save message variant", error))?;
+    Ok(())
+}
+
+fn save_durable_message_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    message: &DurableMessageWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO messages (
+            message_id,
+            session_id,
+            author_id,
+            author_role,
+            status,
+            body,
+            metadata_json,
+            created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(message_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            author_id = excluded.author_id,
+            author_role = excluded.author_role,
+            status = excluded.status,
+            body = excluded.body,
+            metadata_json = excluded.metadata_json",
+        params![
+            message.message_id.0,
+            message.session_id.0,
+            message.author_id,
+            message.author_role,
+            message.status.as_str(),
+            message.body,
+            to_json_text(&message.metadata_json)?,
+            message.created_at,
+        ],
+    )
+    .map_err(|error| persistence_error("save durable message", error))?;
+    tx.execute(
+        "DELETE FROM message_blocks WHERE message_id = ?1",
+        params![message.message_id.0],
+    )
+    .map_err(|error| persistence_error("replace message blocks", error))?;
+    for block in &message.blocks {
+        tx.execute(
+            "INSERT INTO message_blocks (
+                block_id,
+                message_id,
+                ordinal,
+                kind,
+                content_json,
+                render_policy_json,
+                metadata_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                block.block_id.0,
+                message.message_id.0,
+                block.ordinal as i64,
+                block.kind,
+                to_json_text(&block.content_json)?,
+                block
+                    .render_policy_json
+                    .as_ref()
+                    .map(to_json_text)
+                    .transpose()?,
+                to_json_text(&block.metadata_json)?,
+            ],
+        )
+        .map_err(|error| persistence_error("save message block", error))?;
+    }
+    Ok(())
+}
+
+fn query_message_slots(
+    conn: &Connection,
+    query: &MessageSlotQuery,
+) -> CoreResult<Vec<MessageSlotRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT slot_id
+             FROM message_slots
+             WHERE (?1 IS NULL OR session_id = ?1)
+             ORDER BY created_at ASC, slot_id ASC
+             LIMIT ?2 OFFSET ?3",
+        )
+        .map_err(|error| persistence_error("prepare query message slots", error))?;
+    let slot_ids = stmt
+        .query_map(params![session_id, limit, offset], |row| {
+            Ok(MessageSlotId::new(row.get::<_, String>(0)?))
+        })
+        .map_err(|error| persistence_error("query message slots", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load message slot ids", error))?;
+    slot_ids
+        .iter()
+        .map(|slot_id| load_message_slot(conn, slot_id, query.include_alternates))
+        .collect()
+}
+
+fn query_message_variants(
+    conn: &Connection,
+    query: &MessageVariantQuery,
+) -> CoreResult<Vec<MessageVariantRecord>> {
+    let slot_id = query.slot_id.as_ref().map(|value| value.0.as_str());
+    let include_deleted = query.include_deleted;
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT variant_id
+             FROM message_variants
+             WHERE (?1 IS NULL OR slot_id = ?1)
+               AND (?2 OR status <> 'deleted')
+             ORDER BY slot_id ASC, ordinal ASC, variant_id ASC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|error| persistence_error("prepare query message variants", error))?;
+    let variant_ids = stmt
+        .query_map(params![slot_id, include_deleted, limit, offset], |row| {
+            Ok(MessageVariantId::new(row.get::<_, String>(0)?))
+        })
+        .map_err(|error| persistence_error("query message variants", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load message variant ids", error))?;
+    variant_ids
+        .iter()
+        .map(|variant_id| load_message_variant(conn, variant_id))
+        .collect()
+}
+
+fn query_message_variants_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    query: &MessageVariantQuery,
+) -> CoreResult<Vec<MessageVariantRecord>> {
+    let slot_id = query.slot_id.as_ref().map(|value| value.0.as_str());
+    let include_deleted = query.include_deleted;
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = tx
+        .prepare(
+            "SELECT variant_id
+             FROM message_variants
+             WHERE (?1 IS NULL OR slot_id = ?1)
+               AND (?2 OR status <> 'deleted')
+             ORDER BY slot_id ASC, ordinal ASC, variant_id ASC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|error| persistence_error("prepare query message variants", error))?;
+    let variant_ids = stmt
+        .query_map(params![slot_id, include_deleted, limit, offset], |row| {
+            Ok(MessageVariantId::new(row.get::<_, String>(0)?))
+        })
+        .map_err(|error| persistence_error("query message variants", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load message variant ids", error))?;
+    variant_ids
+        .iter()
+        .map(|variant_id| load_message_variant_in_tx(tx, variant_id))
+        .collect()
+}
+
+fn load_message_slot(
+    conn: &Connection,
+    slot_id: &MessageSlotId,
+    include_alternates: bool,
+) -> CoreResult<MessageSlotRecord> {
+    let (session_id, primary_variant_id, active_variant_id, metadata_json, created_at, updated_at, version) =
+        conn.query_row(
+            "SELECT session_id, primary_variant_id, active_variant_id, metadata_json, created_at, updated_at, version
+             FROM message_slots
+             WHERE slot_id = ?1",
+            params![slot_id.0],
+            |row| {
+                Ok((
+                    SessionId::new(row.get::<_, String>(0)?),
+                    MessageVariantId::new(row.get::<_, String>(1)?),
+                    row.get::<_, Option<String>>(2)?.map(MessageVariantId::new),
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)? as u64,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load message slot", error))?
+        .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, format!("message slot {slot_id} not found")))?;
+    let primary = load_message_variant(conn, &primary_variant_id)?;
+    let alternates = if include_alternates {
+        query_message_variants(
+            conn,
+            &MessageVariantQuery {
+                slot_id: Some(slot_id.clone()),
+                include_deleted: false,
+                page: None,
+            },
+        )?
+        .into_iter()
+        .filter(|variant| variant.source == MessageVariantSource::Alternate)
+        .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(MessageSlotRecord {
+        slot_id: slot_id.clone(),
+        session_id,
+        primary_variant_id,
+        active_variant_id,
+        metadata_json: parse_json_record(&metadata_json)?,
+        created_at,
+        updated_at,
+        version,
+        primary,
+        alternates,
+    })
+}
+
+fn load_message_slot_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    slot_id: &MessageSlotId,
+    include_alternates: bool,
+) -> CoreResult<MessageSlotRecord> {
+    let (session_id, primary_variant_id, active_variant_id, metadata_json, created_at, updated_at, version) =
+        tx.query_row(
+            "SELECT session_id, primary_variant_id, active_variant_id, metadata_json, created_at, updated_at, version
+             FROM message_slots
+             WHERE slot_id = ?1",
+            params![slot_id.0],
+            |row| {
+                Ok((
+                    SessionId::new(row.get::<_, String>(0)?),
+                    MessageVariantId::new(row.get::<_, String>(1)?),
+                    row.get::<_, Option<String>>(2)?.map(MessageVariantId::new),
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)? as u64,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load message slot in tx", error))?
+        .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, format!("message slot {slot_id} not found")))?;
+    let primary = load_message_variant_in_tx(tx, &primary_variant_id)?;
+    let alternates = if include_alternates {
+        query_message_variants_in_tx(
+            tx,
+            &MessageVariantQuery {
+                slot_id: Some(slot_id.clone()),
+                include_deleted: false,
+                page: None,
+            },
+        )?
+        .into_iter()
+        .filter(|variant| variant.source == MessageVariantSource::Alternate)
+        .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(MessageSlotRecord {
+        slot_id: slot_id.clone(),
+        session_id,
+        primary_variant_id,
+        active_variant_id,
+        metadata_json: parse_json_record(&metadata_json)?,
+        created_at,
+        updated_at,
+        version,
+        primary,
+        alternates,
+    })
+}
+
+fn load_message_variant(
+    conn: &Connection,
+    variant_id: &MessageVariantId,
+) -> CoreResult<MessageVariantRecord> {
+    let row = conn
+        .query_row(
+            "SELECT slot_id, source, ordinal, status, message_id, metadata_json, created_at, updated_at
+             FROM message_variants
+             WHERE variant_id = ?1",
+            params![variant_id.0],
+            |row| {
+                Ok((
+                    MessageSlotId::new(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u32,
+                    row.get::<_, String>(3)?,
+                    MessageId::new(row.get::<_, String>(4)?),
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load message variant", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("message variant {variant_id} not found"),
+            )
+        })?;
+    hydrate_message_variant(conn, variant_id, row)
+}
+
+fn load_message_variant_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    variant_id: &MessageVariantId,
+) -> CoreResult<MessageVariantRecord> {
+    let row = tx
+        .query_row(
+            "SELECT slot_id, source, ordinal, status, message_id, metadata_json, created_at, updated_at
+             FROM message_variants
+             WHERE variant_id = ?1",
+            params![variant_id.0],
+            |row| {
+                Ok((
+                    MessageSlotId::new(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u32,
+                    row.get::<_, String>(3)?,
+                    MessageId::new(row.get::<_, String>(4)?),
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load message variant in tx", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("message variant {variant_id} not found"),
+            )
+        })?;
+    hydrate_message_variant_in_tx(tx, variant_id, row)
+}
+
+fn hydrate_message_variant(
+    conn: &Connection,
+    variant_id: &MessageVariantId,
+    row: (
+        MessageSlotId,
+        String,
+        u32,
+        String,
+        MessageId,
+        String,
+        IsoTimestamp,
+        IsoTimestamp,
+    ),
+) -> CoreResult<MessageVariantRecord> {
+    let (slot_id, source, ordinal, status, message_id, metadata_json, created_at, updated_at) = row;
+    Ok(MessageVariantRecord {
+        variant_id: variant_id.clone(),
+        slot_id,
+        source: MessageVariantSource::parse(&source)?,
+        ordinal,
+        status: MessageVariantStatus::parse(&status)?,
+        message: load_durable_message(conn, &message_id)?,
+        metadata_json: parse_json_record(&metadata_json)?,
+        created_at,
+        updated_at,
+    })
+}
+
+fn hydrate_message_variant_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    variant_id: &MessageVariantId,
+    row: (
+        MessageSlotId,
+        String,
+        u32,
+        String,
+        MessageId,
+        String,
+        IsoTimestamp,
+        IsoTimestamp,
+    ),
+) -> CoreResult<MessageVariantRecord> {
+    let (slot_id, source, ordinal, status, message_id, metadata_json, created_at, updated_at) = row;
+    Ok(MessageVariantRecord {
+        variant_id: variant_id.clone(),
+        slot_id,
+        source: MessageVariantSource::parse(&source)?,
+        ordinal,
+        status: MessageVariantStatus::parse(&status)?,
+        message: load_durable_message_in_tx(tx, &message_id)?,
+        metadata_json: parse_json_record(&metadata_json)?,
+        created_at,
+        updated_at,
+    })
+}
+
+fn load_durable_message(
+    conn: &Connection,
+    message_id: &MessageId,
+) -> CoreResult<DurableMessageRecord> {
+    let (session_id, author_id, author_role, status, body, metadata_json, created_at) = conn
+        .query_row(
+            "SELECT session_id, author_id, author_role, status, body, metadata_json, created_at
+             FROM messages
+             WHERE message_id = ?1",
+            params![message_id.0],
+            |row| {
+                Ok((
+                    SessionId::new(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load durable message", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("message {message_id} not found"),
+            )
+        })?;
+    Ok(DurableMessageRecord {
+        message_id: message_id.clone(),
+        session_id,
+        author_id,
+        author_role,
+        status: DurableMessageStatus::parse(&status)?,
+        body,
+        metadata_json: parse_json_record(&metadata_json)?,
+        created_at,
+        blocks: load_message_blocks(conn, message_id)?,
+    })
+}
+
+fn load_durable_message_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    message_id: &MessageId,
+) -> CoreResult<DurableMessageRecord> {
+    let (session_id, author_id, author_role, status, body, metadata_json, created_at) = tx
+        .query_row(
+            "SELECT session_id, author_id, author_role, status, body, metadata_json, created_at
+             FROM messages
+             WHERE message_id = ?1",
+            params![message_id.0],
+            |row| {
+                Ok((
+                    SessionId::new(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| persistence_error("load durable message in tx", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("message {message_id} not found"),
+            )
+        })?;
+    Ok(DurableMessageRecord {
+        message_id: message_id.clone(),
+        session_id,
+        author_id,
+        author_role,
+        status: DurableMessageStatus::parse(&status)?,
+        body,
+        metadata_json: parse_json_record(&metadata_json)?,
+        created_at,
+        blocks: load_message_blocks_in_tx(tx, message_id)?,
+    })
+}
+
+fn load_message_blocks(
+    conn: &Connection,
+    message_id: &MessageId,
+) -> CoreResult<Vec<MessageBlockRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT block_id, ordinal, kind, content_json, render_policy_json, metadata_json
+             FROM message_blocks
+             WHERE message_id = ?1
+             ORDER BY ordinal ASC, block_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare load message blocks", error))?;
+    let rows = stmt
+        .query_map(params![message_id.0], |row| {
+            row_to_message_block(row, message_id)
+        })
+        .map_err(|error| persistence_error("query message blocks", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load message blocks", error))
+}
+
+fn load_message_blocks_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    message_id: &MessageId,
+) -> CoreResult<Vec<MessageBlockRecord>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT block_id, ordinal, kind, content_json, render_policy_json, metadata_json
+             FROM message_blocks
+             WHERE message_id = ?1
+             ORDER BY ordinal ASC, block_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare load message blocks in tx", error))?;
+    let rows = stmt
+        .query_map(params![message_id.0], |row| {
+            row_to_message_block(row, message_id)
+        })
+        .map_err(|error| persistence_error("query message blocks in tx", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load message blocks in tx", error))
+}
+
+fn row_to_message_block(
+    row: &rusqlite::Row<'_>,
+    message_id: &MessageId,
+) -> rusqlite::Result<MessageBlockRecord> {
+    let content_json: String = row.get(3)?;
+    let render_policy_json: Option<String> = row.get(4)?;
+    let metadata_json: String = row.get(5)?;
+    Ok(MessageBlockRecord {
+        block_id: MessageBlockId::new(row.get::<_, String>(0)?),
+        message_id: message_id.clone(),
+        ordinal: row.get::<_, i64>(1)? as u32,
+        kind: row.get(2)?,
+        content_json: from_json_text(&content_json).map_err(to_sql_error)?,
+        render_policy_json: render_policy_json
+            .as_deref()
+            .map(from_json_text)
+            .transpose()
+            .map_err(to_sql_error)?,
+        metadata_json: from_json_text(&metadata_json).map_err(to_sql_error)?,
+    })
+}
+
+fn current_active_variant_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    slot_id: &MessageSlotId,
+) -> CoreResult<Option<MessageVariantId>> {
+    tx.query_row(
+        "SELECT active_variant_id FROM message_slots WHERE slot_id = ?1",
+        params![slot_id.0],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map_err(|error| persistence_error("load active message variant", error))?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message slot {slot_id} not found"),
+        )
+    })
+    .map(|value| value.map(MessageVariantId::new))
+}
+
+fn ensure_variant_belongs_to_slot_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    slot_id: &MessageSlotId,
+    variant_id: &MessageVariantId,
+) -> CoreResult<()> {
+    let exists = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM message_variants
+                WHERE slot_id = ?1 AND variant_id = ?2 AND status <> 'deleted'
+            )",
+            params![slot_id.0, variant_id.0],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| persistence_error("check message variant slot", error))?
+        != 0;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message variant {variant_id} not found in slot {slot_id}"),
+        ))
+    }
 }
 
 fn query_completion_packets(
@@ -6956,6 +8145,11 @@ fn from_json_text<T: DeserializeOwned>(value: &str) -> Result<T, serde_json::Err
     serde_json::from_str(value)
 }
 
+fn parse_json_record<T: DeserializeOwned>(value: &str) -> CoreResult<T> {
+    from_json_text(value)
+        .map_err(|error| persistence_error("deserialize coordination record", error))
+}
+
 fn to_sql_error(error: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }
@@ -6971,6 +8165,7 @@ fn persistence_error(context: &str, error: impl std::error::Error) -> CoreError 
 mod tests {
     use super::*;
     use rusty_crew_core_protocol::{AgentMessage, ToolDescriptor};
+    use serde_json::json;
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -7034,6 +8229,10 @@ mod tests {
         assert!(table_exists(&db_path, "scheduled_jobs"));
         assert!(table_exists(&db_path, "scheduled_job_runs"));
         assert!(table_exists(&db_path, "provider_wire_states"));
+        assert!(table_exists(&db_path, "message_slots"));
+        assert!(table_exists(&db_path, "message_variants"));
+        assert!(table_exists(&db_path, "messages"));
+        assert!(table_exists(&db_path, "message_blocks"));
         assert!(table_exists(&db_path, "channel_bindings"));
         assert!(table_exists(&db_path, "mcp_bindings"));
         assert!(index_exists(
@@ -8732,6 +9931,151 @@ mod tests {
     }
 
     #[test]
+    fn message_slots_persist_variants_and_active_selection_conflicts() {
+        let db_path = temp_db_path("message-slots");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let now = "2026-06-25T03:00:00Z".to_string();
+        let slot_id = MessageSlotId::new("slot-1");
+        let primary_variant_id = MessageVariantId::new("variant-primary");
+        store
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: SessionId::new("session-1"),
+                primary_variant_id: primary_variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({"origin": "test"}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        store
+            .save_message_variant(&variant_write(
+                &slot_id,
+                &primary_variant_id,
+                MessageVariantSource::Primary,
+                0,
+                "message-primary",
+                "primary body",
+            ))
+            .unwrap();
+        store
+            .save_message_variant(&variant_write(
+                &slot_id,
+                &MessageVariantId::new("variant-a"),
+                MessageVariantSource::Alternate,
+                1,
+                "message-a",
+                "alternate a",
+            ))
+            .unwrap();
+        store
+            .save_message_variant(&variant_write(
+                &slot_id,
+                &MessageVariantId::new("variant-b"),
+                MessageVariantSource::Alternate,
+                2,
+                "message-b",
+                "alternate b",
+            ))
+            .unwrap();
+
+        let lazy = store
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(SessionId::new("session-1")),
+                include_alternates: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(lazy.len(), 1);
+        assert_eq!(lazy[0].primary.message.body, "primary body");
+        assert!(lazy[0].alternates.is_empty());
+
+        let variants = store
+            .query_message_variants(&MessageVariantQuery {
+                slot_id: Some(slot_id.clone()),
+                include_deleted: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            variants
+                .iter()
+                .map(|variant| variant.variant_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["variant-primary", "variant-a", "variant-b"]
+        );
+        assert_eq!(variants[0].message.blocks[0].kind, "text");
+
+        let selected = store
+            .select_active_message_variant(&SelectActiveVariantRequest {
+                slot_id: slot_id.clone(),
+                active_variant_id: Some(MessageVariantId::new("variant-a")),
+                expected: ActiveVariantExpectation::Primary,
+                updated_at: "2026-06-25T03:01:00Z".to_string(),
+            })
+            .unwrap();
+        assert!(selected.conflict.is_none());
+        assert_eq!(
+            selected.slot.active_variant_id,
+            Some(MessageVariantId::new("variant-a"))
+        );
+
+        let conflict = store
+            .select_active_message_variant(&SelectActiveVariantRequest {
+                slot_id: slot_id.clone(),
+                active_variant_id: Some(MessageVariantId::new("variant-b")),
+                expected: ActiveVariantExpectation::Primary,
+                updated_at: "2026-06-25T03:02:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            conflict.conflict.unwrap().actual,
+            Some(MessageVariantId::new("variant-a"))
+        );
+
+        store
+            .reorder_message_variants(
+                &slot_id,
+                &[
+                    MessageVariantId::new("variant-b"),
+                    MessageVariantId::new("variant-a"),
+                ],
+                &"2026-06-25T03:03:00Z".to_string(),
+            )
+            .unwrap();
+        let reordered = store
+            .query_message_variants(&MessageVariantQuery {
+                slot_id: Some(slot_id.clone()),
+                include_deleted: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            reordered
+                .iter()
+                .map(|variant| variant.variant_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["variant-primary", "variant-b", "variant-a"]
+        );
+
+        let deleted = store
+            .delete_message_variant(
+                &slot_id,
+                &MessageVariantId::new("variant-a"),
+                &"2026-06-25T03:04:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(deleted.active_variant_id, None);
+        assert_eq!(deleted.alternates.len(), 1);
+        assert_eq!(
+            deleted.alternates[0].variant_id,
+            MessageVariantId::new("variant-b")
+        );
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
     fn maintenance_guardrails_cover_queue_retention_size_and_hot_indexes() {
         let db_path = temp_db_path("maintenance-guardrails");
         let store = CoordinationStore::open_file(&db_path).unwrap();
@@ -9069,6 +10413,44 @@ mod tests {
             now: input.now.to_string(),
             expires_at: input.expires_at.map(ToString::to_string),
             last_wake_id: input.last_wake_id.map(ToString::to_string),
+        }
+    }
+
+    fn variant_write(
+        slot_id: &MessageSlotId,
+        variant_id: &MessageVariantId,
+        source: MessageVariantSource,
+        ordinal: u32,
+        message_id: &str,
+        body: &str,
+    ) -> MessageVariantWrite {
+        MessageVariantWrite {
+            variant_id: variant_id.clone(),
+            slot_id: slot_id.clone(),
+            source,
+            ordinal,
+            status: MessageVariantStatus::Active,
+            message: DurableMessageWrite {
+                message_id: MessageId::new(message_id),
+                session_id: SessionId::new("session-1"),
+                author_id: "agent-alpha".to_string(),
+                author_role: "assistant".to_string(),
+                status: DurableMessageStatus::Completed,
+                body: body.to_string(),
+                metadata_json: json!({"provider": "fixture"}),
+                created_at: "2026-06-25T03:00:00Z".to_string(),
+                blocks: vec![MessageBlockWrite {
+                    block_id: MessageBlockId::new(format!("{message_id}:block-1")),
+                    ordinal: 0,
+                    kind: "text".to_string(),
+                    content_json: json!({"text": body}),
+                    render_policy_json: None,
+                    metadata_json: json!({}),
+                }],
+            },
+            metadata_json: json!({}),
+            created_at: "2026-06-25T03:00:00Z".to_string(),
+            updated_at: "2026-06-25T03:00:00Z".to_string(),
         }
     }
 

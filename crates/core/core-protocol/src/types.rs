@@ -58,6 +58,10 @@ string_id!(RunId);
 string_id!(AssignmentId);
 string_id!(AdapterId);
 string_id!(BrainImplementationId);
+string_id!(MessageSlotId);
+string_id!(MessageVariantId);
+string_id!(MessageId);
+string_id!(MessageBlockId);
 
 pub type IsoTimestamp = String;
 
