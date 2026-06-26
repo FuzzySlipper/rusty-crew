@@ -886,6 +886,17 @@ export type {
   ProfileRegistryWriteDraft,
 } from "./profile-registry-import.js";
 export {
+  buildAdminProfileRegistryDiagnostics,
+  filterAdminProfileRegistryRecords,
+} from "./profile-registry-admin.js";
+export type {
+  AdminProfileAssetStatus,
+  AdminProfileRegistryAssetStatus,
+  AdminProfileRegistryDiagnostics,
+  AdminProfileRegistryRecord,
+  AdminProfileRegistrySource,
+} from "./profile-registry-admin.js";
+export {
   planCreateProfileWithRust,
   planRuntimeConfigWithRust,
   runtimeConfigValidationInput,

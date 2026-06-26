@@ -1458,6 +1458,8 @@ export const manifestOperationNames = [
   "remove_data_bank_scope",
   "database_size",
   "storage_schema",
+  "list_profile_registry_records",
+  "get_profile_registry_record",
   "list_simple_kv",
   "storage_diagnostics",
   "run_maintenance",

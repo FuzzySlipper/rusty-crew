@@ -14,6 +14,7 @@ import {
   buildToolRegistryDiagnostics,
   handleAdminDiagnosticsRequest,
   type AdminPage,
+  type AdminProfileRegistryDiagnostics,
   type AdminRecentEvent,
   type AdminRouteResult,
   type RuntimeReadinessProbe,
@@ -338,6 +339,195 @@ assert.equal(
   storageData.tableCounts.find((count) => count.table === "sessions")?.rows,
   3,
 );
+
+const profileRegistry: AdminProfileRegistryDiagnostics = {
+  generatedAt: now,
+  registryCount: 2,
+  fileFallbackCount: 1,
+  driftCount: 1,
+  missingAssetCount: 1,
+  diagnostics: [
+    {
+      severity: "warning",
+      code: "profile_registry_asset_drift",
+      path: "profiles.prime.assets.soul_md",
+      message: "profile registry asset fingerprint changed",
+    },
+  ],
+  records: [
+    {
+      source: "registry",
+      profileId: "prime",
+      lifecycleStatus: "active",
+      displayName: "Prime",
+      revision: 3,
+      activeRuntimeRefs: [
+        {
+          refKind: "session",
+          refId: "session-alpha",
+          status: "active",
+          metadataJson: {},
+        },
+      ],
+      sourceAssetRefs: [
+        {
+          assetKind: "soul_md",
+          path: "/profiles/prime/soul.md",
+          contentHash: "sha256:old",
+          metadataJson: {},
+        },
+      ],
+      sourceAssetStatuses: [
+        {
+          assetKind: "soul_md",
+          path: "/profiles/prime/soul.md",
+          contentHash: "sha256:old",
+          currentContentHash: "sha256:new",
+          status: "changed",
+        },
+      ],
+      diagnostics: [
+        {
+          severity: "warning",
+          code: "profile_registry_asset_drift",
+          path: "profiles.prime.assets.soul_md",
+          message: "profile registry asset fingerprint changed",
+        },
+      ],
+      fallbackStatus: "registry_authoritative",
+    },
+    {
+      source: "registry",
+      profileId: "archived-profile",
+      lifecycleStatus: "archived",
+      displayName: "Archived Profile",
+      revision: 7,
+      activeRuntimeRefs: [],
+      sourceAssetRefs: [],
+      sourceAssetStatuses: [],
+      diagnostics: [],
+      fallbackStatus: "registry_authoritative",
+    },
+    {
+      source: "registry",
+      profileId: "decommissioned-profile",
+      lifecycleStatus: "decommissioned",
+      displayName: "Decommissioned Profile",
+      revision: 5,
+      activeRuntimeRefs: [],
+      sourceAssetRefs: [],
+      sourceAssetStatuses: [
+        {
+          assetKind: "profile_yaml",
+          path: "/profiles/decommissioned-profile/profile.yaml",
+          contentHash: "sha256:gone",
+          status: "missing",
+        },
+      ],
+      diagnostics: [
+        {
+          severity: "error",
+          code: "profile_registry_asset_missing",
+          path: "profiles.decommissioned-profile.assets.profile_yaml",
+          message: "profile registry asset is missing",
+        },
+      ],
+      fallbackStatus: "registry_authoritative",
+    },
+    {
+      source: "file_fallback",
+      profileId: "file-only",
+      lifecycleStatus: "paused",
+      displayName: "File Only",
+      activeRuntimeRefs: [],
+      sourceAssetRefs: [
+        {
+          assetKind: "profile_json",
+          path: "/profiles/file-only.json",
+          contentHash: "sha256:file",
+          metadataJson: {},
+        },
+      ],
+      sourceAssetStatuses: [
+        {
+          assetKind: "profile_json",
+          path: "/profiles/file-only.json",
+          contentHash: "sha256:file",
+          currentContentHash: "sha256:file",
+          status: "tracked",
+        },
+      ],
+      diagnostics: [
+        {
+          severity: "info",
+          code: "file_backed_profile_fallback",
+          path: "profiles.file-only",
+          message: "profile is currently file backed",
+        },
+      ],
+      fallbackStatus: "file_backed_fallback",
+    },
+  ],
+};
+
+const profileDiagnosticsRoute = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/profiles" },
+  { diagnostics, profileRegistry },
+);
+assert.equal(profileDiagnosticsRoute.status, 200);
+assert.equal(
+  okData<{ driftCount: number; fileFallbackCount: number }>(
+    profileDiagnosticsRoute,
+  ).driftCount,
+  1,
+);
+
+const profileRegistryList = handleAdminDiagnosticsRequest(
+  {
+    method: "GET",
+    url: "/v1/admin/profiles/registry?lifecycle_status=archived",
+  },
+  { diagnostics, profileRegistry },
+);
+const profileRegistryPage =
+  okData<AdminPage<{ profileId: string; lifecycleStatus: string }>>(
+    profileRegistryList,
+  );
+assert.equal(profileRegistryPage.total, 1);
+assert.equal(profileRegistryPage.items[0]?.profileId, "archived-profile");
+
+const fallbackProfiles = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/profiles/registry?source=file_fallback" },
+  { diagnostics, profileRegistry },
+);
+assert.equal(
+  okData<AdminPage<{ profileId: string }>>(fallbackProfiles).items[0]
+    ?.profileId,
+  "file-only",
+);
+
+const decommissionedProfile = handleAdminDiagnosticsRequest(
+  {
+    method: "GET",
+    url: "/v1/admin/profiles/registry/decommissioned-profile",
+  },
+  { diagnostics, profileRegistry },
+);
+assert.equal(decommissionedProfile.status, 200);
+assert.equal(
+  okData<{
+    lifecycleStatus: string;
+    sourceAssetStatuses: Array<{ status: string }>;
+  }>(decommissionedProfile).sourceAssetStatuses[0]?.status,
+  "missing",
+);
+
+const missingProfile = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/profiles/registry/missing-profile" },
+  { diagnostics, profileRegistry },
+);
+assert.equal(missingProfile.status, 404);
+assert.equal(missingProfile.body.ok, false);
 
 const memorySpaces = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics/memory-spaces" },

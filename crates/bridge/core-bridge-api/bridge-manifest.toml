@@ -559,6 +559,24 @@ errors = "core_protocol::CoreError"
 summary = "Read backend-neutral module schema registry diagnostics for admin and frontend surfaces."
 
 [[operation]]
+name = "list_profile_registry_records"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ProfileRegistryQuery"
+output = "Vec<core_protocol::ProfileRegistryRecord>"
+errors = "core_protocol::CoreError"
+summary = "List DB-backed profile registry records for admin read/diagnostic surfaces."
+
+[[operation]]
+name = "get_profile_registry_record"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ProfileId"
+output = "Option<core_protocol::ProfileRegistryRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read a single DB-backed profile registry record by profile id."
+
+[[operation]]
 name = "list_simple_kv"
 surface = "stable"
 direction = "ts_to_rust"

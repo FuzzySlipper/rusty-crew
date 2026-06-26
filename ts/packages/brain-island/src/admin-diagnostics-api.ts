@@ -11,6 +11,10 @@ import type {
 import type { BackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
 import { apiCapabilityRegistry } from "./api-command-registry.js";
 import type { RuntimeConfigValidationPreflightReport } from "./service-runtime-config.js";
+import {
+  filterAdminProfileRegistryRecords,
+  type AdminProfileRegistryDiagnostics,
+} from "./profile-registry-admin.js";
 
 export type AdminErrorCode =
   | "unauthorized"
@@ -75,6 +79,7 @@ export interface AdminDiagnosticsContext {
   configValidation?: RuntimeConfigValidationPreflightReport;
   storage?: StorageDiagnosticsProjection;
   memorySpaces?: MemorySpaceDiagnosticsProjection;
+  profileRegistry?: AdminProfileRegistryDiagnostics;
 }
 
 export interface MemorySpaceCompatibilityStatus {
@@ -206,6 +211,19 @@ export function handleAdminDiagnosticsRequest(
       return success(requestId, context.storage ?? null);
     case "/v1/admin/diagnostics/memory-spaces":
       return success(requestId, context.memorySpaces ?? null);
+    case "/v1/admin/diagnostics/profiles":
+      return success(requestId, context.profileRegistry ?? null);
+    case "/v1/admin/profiles/registry":
+      return success(
+        requestId,
+        page(
+          filterAdminProfileRegistryRecords(
+            context.profileRegistry?.records ?? [],
+            url,
+          ),
+          url,
+        ),
+      );
     case "/v1/admin/diagnostics/provider-state":
       return success(
         requestId,
@@ -229,6 +247,21 @@ export function handleAdminDiagnosticsRequest(
     case "/v1/admin/events/recent":
       return success(requestId, page(context.recentEvents ?? [], url));
     default:
+      if (url.pathname.startsWith("/v1/admin/profiles/registry/")) {
+        const profileId = decodeURIComponent(
+          url.pathname.slice("/v1/admin/profiles/registry/".length),
+        );
+        const record = (context.profileRegistry?.records ?? []).find(
+          (candidate) => candidate.profileId === profileId,
+        );
+        if (record) return success(requestId, record);
+        return failure(404, requestId, {
+          code: "not_found",
+          reason_code: "profile_registry_record_not_found",
+          message: `profile registry record ${profileId} was not found`,
+          retryable: false,
+        });
+      }
       return failure(404, requestId, {
         code: "not_found",
         reason_code: "unknown_admin_diagnostics_route",

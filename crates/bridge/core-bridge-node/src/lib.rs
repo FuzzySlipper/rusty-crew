@@ -27,17 +27,18 @@ use rusty_crew_core_persistence::{
     DataBankScopeWrite, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, QueuedMessageRecord, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeInstalledModuleSchemaDiagnostic,
-    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleCapabilityStatus,
-    RuntimeModuleLogicalStoreDiagnostic, RuntimeModuleNamedDiagnostic,
-    RuntimeModulePhysicalIndexDiagnostic, RuntimeModulePhysicalTableDiagnostic,
-    RuntimeModuleQueryCatalogDiagnostic, RuntimeModuleRetentionDiagnostic,
-    RuntimeModuleSchemaDiagnostic, RuntimeModuleSchemaRegistryDiagnostics,
-    RuntimeModuleTransferHookDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageDiagnostics,
-    RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord,
-    ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
+    ProfileMemoryWrite, ProfileRegistryQuery, QueuedMessageRecord, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
+    RuntimeInstalledModuleSchemaDiagnostic, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeModuleCapabilityStatus, RuntimeModuleLogicalStoreDiagnostic,
+    RuntimeModuleNamedDiagnostic, RuntimeModulePhysicalIndexDiagnostic,
+    RuntimeModulePhysicalTableDiagnostic, RuntimeModuleQueryCatalogDiagnostic,
+    RuntimeModuleRetentionDiagnostic, RuntimeModuleSchemaDiagnostic,
+    RuntimeModuleSchemaRegistryDiagnostics, RuntimeModuleTransferHookDiagnostic,
+    RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
+    RuntimeStorageCapability, RuntimeStorageDiagnostics, RuntimeStorageTableCount,
+    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
+    ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery,
     SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
@@ -45,7 +46,7 @@ use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
-    MessageVariantId,
+    MessageVariantId, ProfileRegistryLifecycleStatus,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -414,6 +415,20 @@ impl NativeBridge {
 
     pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
         self.engine()?.storage_schema()
+    }
+
+    pub fn list_profile_registry_records(
+        &self,
+        query: &ProfileRegistryQuery,
+    ) -> CoreResult<Vec<rusty_crew_core_bridge_api::ProfileRegistryRecord>> {
+        self.engine()?.list_profile_registry_records(query)
+    }
+
+    pub fn get_profile_registry_record(
+        &self,
+        profile_id: &rusty_crew_core_bridge_api::ProfileId,
+    ) -> CoreResult<Option<rusty_crew_core_bridge_api::ProfileRegistryRecord>> {
+        self.engine()?.get_profile_registry_record(profile_id)
     }
 
     pub fn run_maintenance(
@@ -1713,6 +1728,13 @@ struct WireRemoveDataBankScopeRequest {
     updated_at: rusty_crew_core_bridge_api::IsoTimestamp,
 }
 
+#[derive(Debug, Deserialize)]
+struct WireProfileRegistryQuery {
+    lifecycle_status: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
 #[napi_derive::napi(object)]
 pub struct JsActionBatchReceipt {
     pub wake_id: String,
@@ -2647,6 +2669,25 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn list_profile_registry_records_json(&self, query_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<WireProfileRegistryQuery>(&query_json, "profile registry query")?;
+        let records = bridge
+            .list_profile_registry_records(&to_profile_registry_query(query)?)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "profile registry records")
+    }
+
+    #[napi]
+    pub fn get_profile_registry_record_json(&self, profile_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .get_profile_registry_record(&rusty_crew_core_bridge_api::ProfileId::new(profile_id))
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "profile registry record")
+    }
+
+    #[napi]
     pub fn run_maintenance(
         &self,
         policy: JsRuntimeMaintenancePolicy,
@@ -3359,6 +3400,37 @@ fn to_profile_memory_query(query: JsProfileMemoryQuery) -> napi::Result<ProfileM
             offset: query.offset,
         }),
     })
+}
+
+fn to_profile_registry_query(
+    query: WireProfileRegistryQuery,
+) -> napi::Result<ProfileRegistryQuery> {
+    Ok(ProfileRegistryQuery {
+        lifecycle_status: query
+            .lifecycle_status
+            .as_deref()
+            .map(profile_registry_lifecycle_status_from_str)
+            .transpose()?,
+        page: Some(rusty_crew_core_persistence::QueryPage {
+            limit: query.limit,
+            offset: query.offset,
+        }),
+    })
+}
+
+fn profile_registry_lifecycle_status_from_str(
+    raw: &str,
+) -> napi::Result<ProfileRegistryLifecycleStatus> {
+    match raw {
+        "active" => Ok(ProfileRegistryLifecycleStatus::Active),
+        "paused" => Ok(ProfileRegistryLifecycleStatus::Paused),
+        "decommissioned" => Ok(ProfileRegistryLifecycleStatus::Decommissioned),
+        "archived" => Ok(ProfileRegistryLifecycleStatus::Archived),
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unsupported profile registry lifecycle status {other}"),
+        )),
+    }
 }
 
 fn to_simple_kv_query(query: JsSimpleKvQuery) -> SimpleKvQuery {

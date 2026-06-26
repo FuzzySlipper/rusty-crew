@@ -15,14 +15,15 @@ use rusty_crew_core_persistence::{
     DataBankScopeRecord, DataBankScopeWrite, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
     MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
     ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
-    ProfileMemoryTarget, ProfileMemoryWrite, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueryPage,
-    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
-    RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
-    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
+    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
+    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+    QueuedMessageState, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
+    RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery, ScheduledJobRecord,
+    ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus,
+    ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
     SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery, SimpleKvRecord,
     UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
 };
@@ -37,9 +38,9 @@ use rusty_crew_core_protocol::{
     ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ParentConsumptionPolicy, ProfileId, ProviderStateAbsenceReason, ProviderStateClearReason,
-    ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId, SessionKind, SessionState,
-    SessionStatus, ShutdownSummary, ToolProfile,
+    ParentConsumptionPolicy, ProfileId, ProfileRegistryRecord, ProviderStateAbsenceReason,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId,
+    SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -604,6 +605,20 @@ impl CoreEngine {
 
     pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
         self.store.storage_schema()
+    }
+
+    pub fn list_profile_registry_records(
+        &self,
+        query: &ProfileRegistryQuery,
+    ) -> CoreResult<Vec<ProfileRegistryRecord>> {
+        self.store.list_profile_registry_records(query)
+    }
+
+    pub fn get_profile_registry_record(
+        &self,
+        profile_id: &ProfileId,
+    ) -> CoreResult<Option<ProfileRegistryRecord>> {
+        self.store.get_profile_registry_record(profile_id)
     }
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {

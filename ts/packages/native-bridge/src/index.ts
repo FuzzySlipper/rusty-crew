@@ -371,6 +371,8 @@ interface NativeBridgeBinding {
   databaseSize(): NativeRuntimeDatabaseSize;
   storageDiagnostics(): NativeRuntimeStorageDiagnostics;
   storageSchema(): NativeRuntimeModuleSchemaRegistryDiagnostics;
+  listProfileRegistryRecordsJson(queryJson: string): string;
+  getProfileRegistryRecordJson(profileId: string): string;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
@@ -544,6 +546,59 @@ export interface NativeProfileMemoryRecord {
   revision: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export type NativeProfileRegistryLifecycleStatus =
+  | "active"
+  | "paused"
+  | "decommissioned"
+  | "archived";
+
+export interface NativeProfileRegistrySourceAssetRef {
+  assetKind: string;
+  path: string;
+  contentHash?: string;
+  lastSeenAt?: string;
+  metadataJson: unknown;
+}
+
+export interface NativeProfileRegistryDerivedRuntimeRef {
+  refKind: string;
+  refId: string;
+  status: string;
+  updatedAt?: string;
+  metadataJson: unknown;
+}
+
+export interface NativeProfileRegistryImportExportMetadata {
+  importedFrom?: string;
+  importedAt?: string;
+  exportedTo?: string;
+  exportedAt?: string;
+  metadataJson: unknown;
+}
+
+export interface NativeProfileRegistryRecord {
+  profileId: string;
+  lifecycleStatus: NativeProfileRegistryLifecycleStatus;
+  displayName?: string;
+  summary?: string;
+  defaultSessionKind?: "full" | "worker" | "delegated";
+  agentId?: string;
+  ownerId?: string;
+  activeRuntimeSettingsJson: unknown;
+  sourceAssetRefs: NativeProfileRegistrySourceAssetRef[];
+  derivedRuntimeRefs: NativeProfileRegistryDerivedRuntimeRef[];
+  importExport: NativeProfileRegistryImportExportMetadata;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NativeProfileRegistryQuery {
+  lifecycleStatus?: NativeProfileRegistryLifecycleStatus;
+  limit?: number;
+  offset?: number;
 }
 
 export interface NativeProfileMemoryQuery {
@@ -1191,6 +1246,12 @@ export interface NativeBridgeModule {
   databaseSize(): Promise<NativeRuntimeDatabaseSize>;
   storageDiagnostics(): Promise<NativeRuntimeStorageDiagnostics>;
   storageSchema(): Promise<NativeRuntimeModuleSchemaRegistryDiagnostics>;
+  listProfileRegistryRecords(
+    query?: NativeProfileRegistryQuery,
+  ): Promise<NativeProfileRegistryRecord[]>;
+  getProfileRegistryRecord(
+    profileId: string,
+  ): Promise<NativeProfileRegistryRecord | undefined>;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
@@ -1329,6 +1390,8 @@ export const nativeManifestOperationNames = [
   "remove_data_bank_scope",
   "database_size",
   "storage_schema",
+  "list_profile_registry_records",
+  "get_profile_registry_record",
   "list_simple_kv",
   "storage_diagnostics",
   "run_maintenance",
@@ -1403,6 +1466,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     databaseSize: unavailable("initialize_engine"),
     storageDiagnostics: unavailable("initialize_engine"),
     storageSchema: unavailable("initialize_engine"),
+    listProfileRegistryRecords: unavailable("initialize_engine"),
+    getProfileRegistryRecord: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
     listMemorySpaceDescriptors: unavailable("initialize_engine"),
     saveMemoryProposal: unavailable("initialize_engine"),
@@ -2096,6 +2161,20 @@ function createNativeBridgeModule(
     databaseSize: async () => binding.databaseSize(),
     storageDiagnostics: async () => binding.storageDiagnostics(),
     storageSchema: async () => binding.storageSchema(),
+    listProfileRegistryRecords: async (query = {}) =>
+      (
+        JSON.parse(
+          binding.listProfileRegistryRecordsJson(
+            JSON.stringify(toRawProfileRegistryQuery(query)),
+          ),
+        ) as RawProfileRegistryRecord[]
+      ).map(toNativeProfileRegistryRecord),
+    getProfileRegistryRecord: async (profileId) => {
+      const raw = JSON.parse(
+        binding.getProfileRegistryRecordJson(profileId),
+      ) as RawProfileRegistryRecord | null;
+      return raw ? toNativeProfileRegistryRecord(raw) : undefined;
+    },
     runMaintenance: async (policy) => binding.runMaintenance(policy),
     listMemorySpaceDescriptors: async () =>
       JSON.parse(
@@ -2841,6 +2920,55 @@ function toNativeRuntimeConfigPlan(
   };
 }
 
+function toRawProfileRegistryQuery(
+  query: NativeProfileRegistryQuery,
+): RawProfileRegistryQuery {
+  return {
+    lifecycle_status: query.lifecycleStatus,
+    limit: query.limit,
+    offset: query.offset,
+  };
+}
+
+function toNativeProfileRegistryRecord(
+  record: RawProfileRegistryRecord,
+): NativeProfileRegistryRecord {
+  return {
+    profileId: record.profile_id,
+    lifecycleStatus: record.lifecycle_status,
+    displayName: record.display_name ?? undefined,
+    summary: record.summary ?? undefined,
+    defaultSessionKind: record.default_session_kind ?? undefined,
+    agentId: record.agent_id ?? undefined,
+    ownerId: record.owner_id ?? undefined,
+    activeRuntimeSettingsJson: record.active_runtime_settings_json,
+    sourceAssetRefs: record.source_asset_refs.map((ref) => ({
+      assetKind: ref.asset_kind,
+      path: ref.path,
+      contentHash: ref.content_hash ?? undefined,
+      lastSeenAt: ref.last_seen_at ?? undefined,
+      metadataJson: ref.metadata_json,
+    })),
+    derivedRuntimeRefs: record.derived_runtime_refs.map((ref) => ({
+      refKind: ref.ref_kind,
+      refId: ref.ref_id,
+      status: ref.status,
+      updatedAt: ref.updated_at ?? undefined,
+      metadataJson: ref.metadata_json,
+    })),
+    importExport: {
+      importedFrom: record.import_export.imported_from ?? undefined,
+      importedAt: record.import_export.imported_at ?? undefined,
+      exportedTo: record.import_export.exported_to ?? undefined,
+      exportedAt: record.import_export.exported_at ?? undefined,
+      metadataJson: record.import_export.metadata_json,
+    },
+    revision: record.revision,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
+  };
+}
+
 function toRuntimeConfigDraft(
   draft: RawRuntimeConfigDraft,
 ): NativeRuntimeConfigDraft {
@@ -3477,6 +3605,53 @@ interface RawRuntimeConfigPlan {
   diagnostics: NativeRuntimeConfigDiagnostic[];
   derived_scheduled_jobs: RawScheduledJobConfigDraft[];
   derived_mcp_bindings: RawMcpBindingConfigDraft[];
+}
+
+interface RawProfileRegistryQuery {
+  lifecycle_status?: NativeProfileRegistryLifecycleStatus;
+  limit?: number;
+  offset?: number;
+}
+
+interface RawProfileRegistrySourceAssetRef {
+  asset_kind: string;
+  path: string;
+  content_hash?: string | null;
+  last_seen_at?: string | null;
+  metadata_json: unknown;
+}
+
+interface RawProfileRegistryDerivedRuntimeRef {
+  ref_kind: string;
+  ref_id: string;
+  status: string;
+  updated_at?: string | null;
+  metadata_json: unknown;
+}
+
+interface RawProfileRegistryImportExportMetadata {
+  imported_from?: string | null;
+  imported_at?: string | null;
+  exported_to?: string | null;
+  exported_at?: string | null;
+  metadata_json: unknown;
+}
+
+interface RawProfileRegistryRecord {
+  profile_id: string;
+  lifecycle_status: NativeProfileRegistryLifecycleStatus;
+  display_name?: string | null;
+  summary?: string | null;
+  default_session_kind?: "full" | "worker" | "delegated" | null;
+  agent_id?: string | null;
+  owner_id?: string | null;
+  active_runtime_settings_json: unknown;
+  source_asset_refs: RawProfileRegistrySourceAssetRef[];
+  derived_runtime_refs: RawProfileRegistryDerivedRuntimeRef[];
+  import_export: RawProfileRegistryImportExportMetadata;
+  revision: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface RawRuntimeConfigDraft {

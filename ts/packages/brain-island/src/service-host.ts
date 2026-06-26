@@ -96,6 +96,7 @@ import {
 } from "./admin-diagnostics-api.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
+import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
 import {
   buildAdapterDiagnosticsProjection,
   type ChannelAdapterBindingDiagnostics,
@@ -525,7 +526,9 @@ async function handleHttpRequest(
         url: url.toString(),
         requestId: requestId(request),
       },
-      await buildDiagnosticsContext(state),
+      await buildDiagnosticsContext(state, {
+        includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
+      }),
     );
   }
 
@@ -939,6 +942,7 @@ function writeRustyViewChatSseStream(input: {
 
 async function buildDiagnosticsContext(
   state: ServiceState,
+  options: { includeProfileRegistry?: boolean } = {},
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
   const [runtimeSummary, sessions, storage, providerStates, memorySpaces] =
@@ -951,6 +955,13 @@ async function buildDiagnosticsContext(
       state.bridge.providerStateDiagnostics().catch(() => []),
       buildMemorySpaceDiagnostics(state).catch(() => undefined),
     ]);
+  const profileRegistry = options.includeProfileRegistry
+    ? await buildAdminProfileRegistryDiagnostics({
+        bridge: state.bridge,
+        runtimeConfig: state.runtimeConfig,
+        now,
+      }).catch(() => undefined)
+    : undefined;
   const sessionDefaults = await effectiveSessionDefaultsById(state, sessions);
   const diagnostics = buildRuntimeDiagnosticsProjection({
     now,
@@ -982,6 +993,7 @@ async function buildDiagnosticsContext(
     diagnostics,
     storage,
     memorySpaces,
+    profileRegistry,
     configValidation: await preflightRustyCrewRuntimeConfig({
       serviceConfig: state.config,
       bridge: state.bridge,
@@ -1001,6 +1013,14 @@ async function buildDiagnosticsContext(
       ...state.recentEvents,
     ],
   };
+}
+
+function isProfileRegistryAdminRoute(pathname: string): boolean {
+  return (
+    pathname === "/v1/admin/diagnostics/profiles" ||
+    pathname === "/v1/admin/profiles/registry" ||
+    pathname.startsWith("/v1/admin/profiles/registry/")
+  );
 }
 
 async function buildMemorySpaceDiagnostics(
