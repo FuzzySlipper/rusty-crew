@@ -3,6 +3,8 @@
 //! This store is for Rust-owned coordination state only. Den task, project, and
 //! document data remains Den product data and is not mirrored here.
 
+pub mod module_schema;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
     AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, AttachmentId,
