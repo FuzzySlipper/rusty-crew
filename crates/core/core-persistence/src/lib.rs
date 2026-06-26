@@ -30,10 +30,11 @@ use rusty_crew_core_protocol::{
     MemoryGovernanceDecisionRecord, MemoryGovernanceMode, MemoryOperation, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus, MemoryProposalSource,
     MemoryScopeType, MemorySpaceDescriptor, MessageBlockId, MessageId, MessageSlotId,
-    MessageVariantId, ParentConsumptionPolicy, ProfileId, ProjectId, ProviderStateAbsenceReason,
-    ResourceLimits, RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId,
-    SessionIdentityRecord, SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId,
-    ToolCallMetadata, ToolProfile,
+    MessageVariantId, ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
+    ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryWrite, ProjectId,
+    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
+    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
+    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -43,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 21;
+const CURRENT_SCHEMA_VERSION: i64 = 22;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -172,6 +173,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         description: "add typed memory proposal governance storage",
         apply: migrate_v21_add_memory_proposal_governance,
     },
+    SchemaMigration {
+        version: 22,
+        description: "add DB-backed active profile registry",
+        apply: migrate_v22_add_profile_registry,
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -224,6 +230,12 @@ pub struct SessionQuery {
     pub profile_id: Option<ProfileId>,
     pub kind: Option<SessionKind>,
     pub status: Option<SessionStatus>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProfileRegistryQuery {
+    pub lifecycle_status: Option<ProfileRegistryLifecycleStatus>,
     pub page: Option<QueryPage>,
 }
 
@@ -1536,6 +1548,7 @@ pub enum DiagnosticTable {
     QueuedMessages,
     RuntimeImportBatches,
     LegacyIdMappings,
+    ProfileRegistry,
     ProfileMemories,
     MemoryProposals,
     MemoryGovernanceDecisions,
@@ -1578,6 +1591,7 @@ impl DiagnosticTable {
         Self::QueuedMessages,
         Self::RuntimeImportBatches,
         Self::LegacyIdMappings,
+        Self::ProfileRegistry,
         Self::ProfileMemories,
         Self::MemoryProposals,
         Self::MemoryGovernanceDecisions,
@@ -1620,6 +1634,7 @@ impl DiagnosticTable {
             "queued_messages" => Ok(Self::QueuedMessages),
             "runtime_import_batches" => Ok(Self::RuntimeImportBatches),
             "legacy_id_mappings" => Ok(Self::LegacyIdMappings),
+            "profile_registry" => Ok(Self::ProfileRegistry),
             "profile_memories" => Ok(Self::ProfileMemories),
             "memory_proposals" => Ok(Self::MemoryProposals),
             "memory_governance_decisions" => Ok(Self::MemoryGovernanceDecisions),
@@ -1667,6 +1682,7 @@ impl DiagnosticTable {
             Self::QueuedMessages => "queued_messages",
             Self::RuntimeImportBatches => "runtime_import_batches",
             Self::LegacyIdMappings => "legacy_id_mappings",
+            Self::ProfileRegistry => "profile_registry",
             Self::ProfileMemories => "profile_memories",
             Self::MemoryProposals => "memory_proposals",
             Self::MemoryGovernanceDecisions => "memory_governance_decisions",
@@ -1846,6 +1862,90 @@ impl CoordinationStore {
     pub fn load_session_configs(&self) -> CoreResult<Vec<SessionConfigRecord>> {
         let conn = self.conn()?;
         load_session_config_records(&conn)
+    }
+
+    pub fn create_profile_registry_record(
+        &self,
+        write: &ProfileRegistryWrite,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        validate_profile_registry_write(write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start create profile registry record", error))?;
+        if get_profile_registry_record(&tx, &write.profile_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "profile registry record {} already exists",
+                    write.profile_id
+                ),
+            ));
+        }
+        insert_profile_registry_record_in_tx(&tx, write)?;
+        let record = get_profile_registry_record(&tx, &write.profile_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "created profile registry record was not readable",
+            )
+        })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit create profile registry record", error))?;
+        Ok(record)
+    }
+
+    pub fn get_profile_registry_record(
+        &self,
+        profile_id: &ProfileId,
+    ) -> CoreResult<Option<ProfileRegistryRecord>> {
+        validate_profile_registry_id(profile_id)?;
+        let conn = self.conn()?;
+        get_profile_registry_record(&conn, profile_id)
+    }
+
+    pub fn list_profile_registry_records(
+        &self,
+        query: &ProfileRegistryQuery,
+    ) -> CoreResult<Vec<ProfileRegistryRecord>> {
+        let conn = self.conn()?;
+        query_profile_registry_records(&conn, query)
+    }
+
+    pub fn update_profile_registry_lifecycle(
+        &self,
+        update: &ProfileRegistryLifecycleUpdate,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        validate_profile_registry_id(&update.profile_id)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start update profile registry lifecycle", error))?;
+        let existing = get_profile_registry_record(&tx, &update.profile_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("profile registry record {} not found", update.profile_id),
+            )
+        })?;
+        if existing.revision != update.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "profile registry revision mismatch for {}: expected {}, found {}",
+                    update.profile_id, update.expected_revision, existing.revision
+                ),
+            ));
+        }
+        update_profile_registry_lifecycle_in_tx(&tx, update, existing.revision + 1)?;
+        let record = get_profile_registry_record(&tx, &update.profile_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "updated profile registry record was not readable",
+            )
+        })?;
+        tx.commit().map_err(|error| {
+            persistence_error("commit update profile registry lifecycle", error)
+        })?;
+        Ok(record)
     }
 
     pub fn list_profile_memory(
@@ -4260,6 +4360,7 @@ fn reject_unsupported_unversioned_schema(conn: &Connection) -> CoreResult<()> {
                 | "runtime_search_fts"
                 | "runtime_import_batches"
                 | "legacy_id_mappings"
+                | "profile_registry"
                 | "profile_memories"
                 | "provider_wire_states"
                 | "channel_bindings"
@@ -5082,6 +5183,34 @@ fn migrate_v21_add_memory_proposal_governance(tx: &rusqlite::Transaction<'_>) ->
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 21", error))
+}
+
+fn migrate_v22_add_profile_registry(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS profile_registry (
+                profile_id TEXT PRIMARY KEY,
+                lifecycle_status TEXT NOT NULL,
+                display_name TEXT,
+                summary TEXT,
+                default_session_kind TEXT,
+                agent_id TEXT,
+                owner_id TEXT,
+                active_runtime_settings_json TEXT NOT NULL,
+                source_asset_refs_json TEXT NOT NULL,
+                derived_runtime_refs_json TEXT NOT NULL,
+                import_export_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_profile_registry_lifecycle
+                ON profile_registry(lifecycle_status, updated_at DESC, profile_id);
+            CREATE INDEX IF NOT EXISTS idx_profile_registry_updated
+                ON profile_registry(updated_at DESC, profile_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 22", error))
 }
 
 fn apply_module_schema_migration_in_tx(
@@ -10146,6 +10275,276 @@ fn row_to_simple_kv(row: &rusqlite::Row<'_>) -> rusqlite::Result<SimpleKvRecord>
     })
 }
 
+fn query_profile_registry_records(
+    conn: &Connection,
+    query: &ProfileRegistryQuery,
+) -> CoreResult<Vec<ProfileRegistryRecord>> {
+    let lifecycle_status = query
+        .lifecycle_status
+        .as_ref()
+        .map(profile_registry_lifecycle_status_as_str);
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                profile_id,
+                lifecycle_status,
+                display_name,
+                summary,
+                default_session_kind,
+                agent_id,
+                owner_id,
+                active_runtime_settings_json,
+                source_asset_refs_json,
+                derived_runtime_refs_json,
+                import_export_json,
+                revision,
+                created_at,
+                updated_at
+             FROM profile_registry
+             WHERE (?1 IS NULL OR lifecycle_status = ?1)
+             ORDER BY updated_at DESC, profile_id ASC
+             LIMIT ?2 OFFSET ?3",
+        )
+        .map_err(|error| persistence_error("prepare query profile registry", error))?;
+    let rows = stmt
+        .query_map(
+            params![lifecycle_status, limit, offset],
+            row_to_profile_registry_record,
+        )
+        .map_err(|error| persistence_error("query profile registry", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load profile registry records", error))
+}
+
+fn get_profile_registry_record(
+    conn: &Connection,
+    profile_id: &ProfileId,
+) -> CoreResult<Option<ProfileRegistryRecord>> {
+    conn.query_row(
+        "SELECT
+            profile_id,
+            lifecycle_status,
+            display_name,
+            summary,
+            default_session_kind,
+            agent_id,
+            owner_id,
+            active_runtime_settings_json,
+            source_asset_refs_json,
+            derived_runtime_refs_json,
+            import_export_json,
+            revision,
+            created_at,
+            updated_at
+         FROM profile_registry
+         WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+        row_to_profile_registry_record,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get profile registry record", error))
+}
+
+fn insert_profile_registry_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &ProfileRegistryWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO profile_registry (
+            profile_id,
+            lifecycle_status,
+            display_name,
+            summary,
+            default_session_kind,
+            agent_id,
+            owner_id,
+            active_runtime_settings_json,
+            source_asset_refs_json,
+            derived_runtime_refs_json,
+            import_export_json,
+            revision,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?12)",
+        params![
+            write.profile_id.0.as_str(),
+            profile_registry_lifecycle_status_as_str(&write.lifecycle_status),
+            write.display_name.as_deref(),
+            write.summary.as_deref(),
+            write.default_session_kind.as_ref().map(session_kind_as_str),
+            write.agent_id.as_ref().map(|value| value.0.as_str()),
+            write.owner_id.as_deref(),
+            to_json_text(&write.active_runtime_settings_json)?,
+            to_json_text(&write.source_asset_refs)?,
+            to_json_text(&write.derived_runtime_refs)?,
+            to_json_text(&write.import_export)?,
+            write.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert profile registry record", error))?;
+    Ok(())
+}
+
+fn update_profile_registry_lifecycle_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    update: &ProfileRegistryLifecycleUpdate,
+    revision: u64,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE profile_registry
+         SET lifecycle_status = ?2,
+             revision = ?3,
+             updated_at = ?4
+         WHERE profile_id = ?1",
+        params![
+            update.profile_id.0.as_str(),
+            profile_registry_lifecycle_status_as_str(&update.lifecycle_status),
+            revision as i64,
+            update.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("update profile registry lifecycle", error))?;
+    Ok(())
+}
+
+fn row_to_profile_registry_record(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ProfileRegistryRecord> {
+    let lifecycle_status: String = row.get(1)?;
+    let default_session_kind: Option<String> = row.get(4)?;
+    let active_runtime_settings_json: String = row.get(7)?;
+    let source_asset_refs_json: String = row.get(8)?;
+    let derived_runtime_refs_json: String = row.get(9)?;
+    let import_export_json: String = row.get(10)?;
+    Ok(ProfileRegistryRecord {
+        profile_id: ProfileId::new(row.get::<_, String>(0)?),
+        lifecycle_status: profile_registry_lifecycle_status_from_str(&lifecycle_status)?,
+        display_name: row.get(2)?,
+        summary: row.get(3)?,
+        default_session_kind: default_session_kind
+            .as_deref()
+            .map(session_kind_from_str)
+            .transpose()?,
+        agent_id: row.get::<_, Option<String>>(5)?.map(AgentId::new),
+        owner_id: row.get(6)?,
+        active_runtime_settings_json: from_json_text(&active_runtime_settings_json)
+            .map_err(to_sql_error)?,
+        source_asset_refs: from_json_text(&source_asset_refs_json).map_err(to_sql_error)?,
+        derived_runtime_refs: from_json_text(&derived_runtime_refs_json).map_err(to_sql_error)?,
+        import_export: from_json_text(&import_export_json).map_err(to_sql_error)?,
+        revision: row.get::<_, i64>(11)? as u64,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+    })
+}
+
+fn profile_registry_lifecycle_status_as_str(
+    status: &ProfileRegistryLifecycleStatus,
+) -> &'static str {
+    match status {
+        ProfileRegistryLifecycleStatus::Active => "active",
+        ProfileRegistryLifecycleStatus::Paused => "paused",
+        ProfileRegistryLifecycleStatus::Decommissioned => "decommissioned",
+        ProfileRegistryLifecycleStatus::Archived => "archived",
+    }
+}
+
+fn profile_registry_lifecycle_status_from_str(
+    raw: &str,
+) -> rusqlite::Result<ProfileRegistryLifecycleStatus> {
+    match raw {
+        "active" => Ok(ProfileRegistryLifecycleStatus::Active),
+        "paused" => Ok(ProfileRegistryLifecycleStatus::Paused),
+        "decommissioned" => Ok(ProfileRegistryLifecycleStatus::Decommissioned),
+        "archived" => Ok(ProfileRegistryLifecycleStatus::Archived),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            1,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown profile registry lifecycle status {other}"),
+            )),
+        )),
+    }
+}
+
+fn validate_profile_registry_write(write: &ProfileRegistryWrite) -> CoreResult<()> {
+    validate_profile_registry_id(&write.profile_id)?;
+    validate_optional_short_text(
+        "profile registry display_name",
+        write.display_name.as_deref(),
+    )?;
+    validate_optional_short_text("profile registry summary", write.summary.as_deref())?;
+    if let Some(agent_id) = &write.agent_id {
+        validate_registry_id_text("profile registry agent_id", &agent_id.0)?;
+    }
+    validate_optional_short_text("profile registry owner_id", write.owner_id.as_deref())?;
+    for asset in &write.source_asset_refs {
+        validate_registry_id_text("profile registry source asset kind", &asset.asset_kind)?;
+        if asset.path.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "profile registry source asset path must be non-empty",
+            ));
+        }
+    }
+    for derived in &write.derived_runtime_refs {
+        validate_registry_id_text("profile registry derived ref kind", &derived.ref_kind)?;
+        if derived.ref_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "profile registry derived runtime ref id must be non-empty",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_profile_registry_id(profile_id: &ProfileId) -> CoreResult<()> {
+    validate_registry_id_text("profile registry profile_id", &profile_id.0)
+}
+
+fn validate_registry_id_text(label: &str, value: &str) -> CoreResult<()> {
+    if value.is_empty() || value.len() > 128 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be 1-128 characters"),
+        ));
+    }
+    if !value.chars().all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || character == '-'
+            || character == '_'
+            || character == ':'
+    }) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must use lowercase ASCII id characters"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_optional_short_text(label: &str, value: Option<&str>) -> CoreResult<()> {
+    if let Some(value) = value {
+        if value.len() > 512 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!("{label} must be at most 512 bytes"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn query_profile_memory(
     conn: &Connection,
     query: &ProfileMemoryQuery,
@@ -11788,7 +12187,9 @@ mod tests {
         MemoryOperationPolicy, MemoryPromptPolicy, MemoryProvenancePolicy,
         MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor, MemoryRecordShapeId,
         MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy, MemoryScope,
-        MemoryScopeModel, MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, ToolDescriptor,
+        MemoryScopeModel, MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy,
+        ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
+        ProfileRegistrySourceAssetRef, ToolDescriptor,
     };
     use serde_json::json;
     use std::{
@@ -11818,10 +12219,12 @@ mod tests {
         );
         assert_eq!(store.count_rows("sessions").unwrap(), 0);
         assert!(table_exists(&db_path, "module_simple_kv_entries"));
+        assert!(table_exists(&db_path, "profile_registry"));
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_scope_key"
         ));
+        assert!(index_exists(&db_path, "idx_profile_registry_lifecycle"));
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_expires_at"
@@ -11876,6 +12279,7 @@ mod tests {
         assert!(table_exists(&db_path, "module_schema_versions"));
         assert!(table_exists(&db_path, "memory_proposals"));
         assert!(table_exists(&db_path, "memory_governance_decisions"));
+        assert!(table_exists(&db_path, "profile_registry"));
         assert!(table_exists(&db_path, "module_simple_kv_entries"));
         assert!(index_exists(
             &db_path,
@@ -11906,6 +12310,7 @@ mod tests {
             &db_path,
             "idx_memory_governance_decisions_proposal"
         ));
+        assert!(index_exists(&db_path, "idx_profile_registry_lifecycle"));
 
         remove_temp_db(&db_path);
     }
@@ -12504,6 +12909,95 @@ mod tests {
         assert_eq!(store.count_rows("channel_bindings").unwrap(), 2);
         assert_eq!(store.count_rows("mcp_bindings").unwrap(), 2);
 
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn profile_registry_supports_lifecycle_revisions_and_asset_refs() {
+        let db_path = temp_db_path("profile-registry");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+
+        let created = store
+            .create_profile_registry_record(&profile_registry_write("runner-profile"))
+            .unwrap();
+        assert_eq!(created.profile_id, ProfileId::new("runner-profile"));
+        assert_eq!(
+            created.lifecycle_status,
+            ProfileRegistryLifecycleStatus::Active
+        );
+        assert_eq!(created.revision, 1);
+        assert_eq!(created.display_name.as_deref(), Some("Runner Profile"));
+        assert_eq!(created.default_session_kind, Some(SessionKind::Full));
+        assert_eq!(created.source_asset_refs.len(), 2);
+        assert_eq!(created.source_asset_refs[0].asset_kind, "profile_yaml");
+        assert_eq!(
+            created.source_asset_refs[0].path,
+            "/home/agents/rusty-crew/config/profiles/runner-profile/profile.yaml"
+        );
+        assert_eq!(created.derived_runtime_refs[0].ref_kind, "session");
+
+        let loaded = store
+            .get_profile_registry_record(&ProfileId::new("runner-profile"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.source_asset_refs, created.source_asset_refs);
+        assert_eq!(loaded.import_export.imported_from.as_deref(), Some("file"));
+
+        let duplicate = store
+            .create_profile_registry_record(&profile_registry_write("runner-profile"))
+            .unwrap_err();
+        assert_eq!(duplicate.kind, CoreErrorKind::AlreadyExists);
+
+        store
+            .create_profile_registry_record(&ProfileRegistryWrite {
+                lifecycle_status: ProfileRegistryLifecycleStatus::Paused,
+                display_name: Some("Paused Profile".to_string()),
+                now: "2026-06-26T02:00:00Z".to_string(),
+                ..profile_registry_write("paused-profile")
+            })
+            .unwrap();
+
+        let active = store
+            .list_profile_registry_records(&ProfileRegistryQuery {
+                lifecycle_status: Some(ProfileRegistryLifecycleStatus::Active),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].profile_id, ProfileId::new("runner-profile"));
+
+        let paused = store
+            .update_profile_registry_lifecycle(&ProfileRegistryLifecycleUpdate {
+                profile_id: ProfileId::new("runner-profile"),
+                lifecycle_status: ProfileRegistryLifecycleStatus::Paused,
+                expected_revision: created.revision,
+                now: "2026-06-26T03:00:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            paused.lifecycle_status,
+            ProfileRegistryLifecycleStatus::Paused
+        );
+        assert_eq!(paused.revision, 2);
+        assert_eq!(paused.created_at, "2026-06-26T01:00:00Z");
+        assert_eq!(paused.updated_at, "2026-06-26T03:00:00Z");
+
+        let stale = store
+            .update_profile_registry_lifecycle(&ProfileRegistryLifecycleUpdate {
+                profile_id: ProfileId::new("runner-profile"),
+                lifecycle_status: ProfileRegistryLifecycleStatus::Archived,
+                expected_revision: 1,
+                now: "2026-06-26T04:00:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(stale.kind, CoreErrorKind::ActionRejected);
+
+        let invalid_id = store
+            .create_profile_registry_record(&profile_registry_write("../bad"))
+            .unwrap_err();
+        assert_eq!(invalid_id.kind, CoreErrorKind::InvalidInput);
+
+        assert_eq!(store.count_rows("profile_registry").unwrap(), 2);
         remove_temp_db(&db_path);
     }
 
@@ -14954,6 +15448,55 @@ mod tests {
             content: "stale write should be rejected".to_string(),
             metadata: serde_json::json!({}),
             now: "2026-06-20T05:02:00Z".to_string(),
+        }
+    }
+
+    fn profile_registry_write(profile_id: &str) -> ProfileRegistryWrite {
+        ProfileRegistryWrite {
+            profile_id: ProfileId::new(profile_id),
+            lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+            display_name: Some("Runner Profile".to_string()),
+            summary: Some("Test registry-backed runner profile.".to_string()),
+            default_session_kind: Some(SessionKind::Full),
+            agent_id: Some(AgentId::new("runner-agent")),
+            owner_id: Some("operator".to_string()),
+            active_runtime_settings_json: json!({
+                "brainModule": "pi_agent_core",
+                "model": "gpt"
+            }),
+            source_asset_refs: vec![
+                ProfileRegistrySourceAssetRef {
+                    asset_kind: "profile_yaml".to_string(),
+                    path: format!(
+                        "/home/agents/rusty-crew/config/profiles/{profile_id}/profile.yaml"
+                    ),
+                    content_hash: Some("sha256:profile".to_string()),
+                    last_seen_at: Some("2026-06-26T00:59:00Z".to_string()),
+                    metadata_json: json!({"source": "file"}),
+                },
+                ProfileRegistrySourceAssetRef {
+                    asset_kind: "soul_md".to_string(),
+                    path: format!("/home/agents/rusty-crew/config/profiles/{profile_id}/soul.md"),
+                    content_hash: Some("sha256:soul".to_string()),
+                    last_seen_at: Some("2026-06-26T00:59:00Z".to_string()),
+                    metadata_json: json!({"source": "file"}),
+                },
+            ],
+            derived_runtime_refs: vec![ProfileRegistryDerivedRuntimeRef {
+                ref_kind: "session".to_string(),
+                ref_id: "session-runner".to_string(),
+                status: "planned".to_string(),
+                updated_at: Some("2026-06-26T00:59:00Z".to_string()),
+                metadata_json: json!({"derived": true}),
+            }],
+            import_export: ProfileRegistryImportExportMetadata {
+                imported_from: Some("file".to_string()),
+                imported_at: Some("2026-06-26T01:00:00Z".to_string()),
+                exported_to: None,
+                exported_at: None,
+                metadata_json: json!({"compatibility": "file_loader"}),
+            },
+            now: "2026-06-26T01:00:00Z".to_string(),
         }
     }
 

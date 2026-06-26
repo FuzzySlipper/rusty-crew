@@ -220,6 +220,84 @@ pub struct SessionIdentityRecord {
     pub archived_at: Option<IsoTimestamp>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileRegistryLifecycleStatus {
+    Active,
+    Paused,
+    Decommissioned,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistrySourceAssetRef {
+    pub asset_kind: String,
+    pub path: String,
+    pub content_hash: Option<String>,
+    pub last_seen_at: Option<IsoTimestamp>,
+    pub metadata_json: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryDerivedRuntimeRef {
+    pub ref_kind: String,
+    pub ref_id: String,
+    pub status: String,
+    pub updated_at: Option<IsoTimestamp>,
+    pub metadata_json: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryImportExportMetadata {
+    pub imported_from: Option<String>,
+    pub imported_at: Option<IsoTimestamp>,
+    pub exported_to: Option<String>,
+    pub exported_at: Option<IsoTimestamp>,
+    pub metadata_json: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryRecord {
+    pub profile_id: ProfileId,
+    pub lifecycle_status: ProfileRegistryLifecycleStatus,
+    pub display_name: Option<String>,
+    pub summary: Option<String>,
+    pub default_session_kind: Option<SessionKind>,
+    pub agent_id: Option<AgentId>,
+    pub owner_id: Option<String>,
+    pub active_runtime_settings_json: Value,
+    pub source_asset_refs: Vec<ProfileRegistrySourceAssetRef>,
+    pub derived_runtime_refs: Vec<ProfileRegistryDerivedRuntimeRef>,
+    pub import_export: ProfileRegistryImportExportMetadata,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryWrite {
+    pub profile_id: ProfileId,
+    pub lifecycle_status: ProfileRegistryLifecycleStatus,
+    pub display_name: Option<String>,
+    pub summary: Option<String>,
+    pub default_session_kind: Option<SessionKind>,
+    pub agent_id: Option<AgentId>,
+    pub owner_id: Option<String>,
+    pub active_runtime_settings_json: Value,
+    pub source_asset_refs: Vec<ProfileRegistrySourceAssetRef>,
+    pub derived_runtime_refs: Vec<ProfileRegistryDerivedRuntimeRef>,
+    pub import_export: ProfileRegistryImportExportMetadata,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryLifecycleUpdate {
+    pub profile_id: ProfileId,
+    pub lifecycle_status: ProfileRegistryLifecycleStatus,
+    pub expected_revision: u64,
+    pub now: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceLimits {
     pub workdir: Option<String>,
