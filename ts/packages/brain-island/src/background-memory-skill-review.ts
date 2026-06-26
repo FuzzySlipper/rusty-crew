@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ProfileId } from "@rusty-crew/contracts";
+import type { MemoryProposalEnvelope, ProfileId } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
   type AgentActivityObservationEvent,
@@ -7,6 +7,11 @@ import {
   type AgentObservationIdentity,
   workActivity,
 } from "./agent-activity-observation.js";
+import {
+  captureProposalToMemoryProposal,
+  type LegacyDenseMemoryCaptureProposal,
+  type TypedCaptureMemoryProposal,
+} from "./capture-memory-proposals.js";
 import type { LoadedSkill } from "./profile-loading.js";
 import type {
   ToolContextDiagnosticsIssue,
@@ -55,6 +60,10 @@ export interface BackgroundReviewRunnerInput {
   diagnostics?: ToolContextDiagnosticsReport;
   skills?: readonly LoadedSkill[];
   denseProfileMemory?: readonly BackgroundReviewDenseMemoryRecord[];
+  captureProposals?: readonly (
+    | TypedCaptureMemoryProposal
+    | LegacyDenseMemoryCaptureProposal
+  )[];
   observation?: {
     identity: AgentObservationIdentity;
     sink?: AgentActivityObservationSink;
@@ -68,7 +77,8 @@ export interface BackgroundReviewSourceRef {
     | "skill"
     | "dense_profile_memory"
     | "role_assembly"
-    | "scheduler_run";
+    | "scheduler_run"
+    | "capture_producer";
   ref: string;
   hash?: string;
 }
@@ -83,6 +93,7 @@ export interface BackgroundReviewFinding {
   summary: string;
   proposedAction: string;
   candidateKind: BackgroundReviewCandidateKind;
+  memoryProposal?: MemoryProposalEnvelope;
 }
 
 export interface BackgroundReviewResultRef {
@@ -137,6 +148,7 @@ export async function runBackgroundMemorySkillReview(
     ...diagnosticCandidates(input),
     ...skillCandidates(input),
     ...denseMemoryCandidates(input),
+    ...captureProposalCandidates(input),
     ...roleAssemblyCandidates(input),
   ].slice(0, maxCandidates);
   const findings = candidates
@@ -177,6 +189,7 @@ interface Candidate {
   proposedAction: string;
   candidateKind: BackgroundReviewCandidateKind;
   sourceRefs: readonly BackgroundReviewSourceRef[];
+  memoryProposal?: MemoryProposalEnvelope;
 }
 
 function diagnosticCandidates(input: BackgroundReviewRunnerInput): Candidate[] {
@@ -288,6 +301,37 @@ function denseMemoryCandidates(
   });
 }
 
+function captureProposalCandidates(
+  input: BackgroundReviewRunnerInput,
+): Candidate[] {
+  return (input.captureProposals ?? []).map((proposal) => {
+    const memoryProposal = captureProposalToMemoryProposal({
+      runId: input.runId,
+      profileId: input.payload.profileId,
+      proposal,
+    });
+    return {
+      severity: "info",
+      confidence: memoryProposal.confidence,
+      summary: proposal.summary,
+      proposedAction:
+        "Route typed Crew memory proposal through curator/manual review.",
+      candidateKind: "llm_review",
+      sourceRefs: [
+        {
+          kind: "capture_producer",
+          ref: `${memoryProposal.space_id}:${memoryProposal.proposal_id}`,
+          hash: fingerprint(
+            memoryProposal.proposal_id,
+            JSON.stringify(memoryProposal.content),
+          ).slice(0, 16),
+        },
+      ],
+      memoryProposal,
+    };
+  });
+}
+
 function roleAssemblyCandidates(
   input: BackgroundReviewRunnerInput,
 ): Candidate[] {
@@ -331,6 +375,9 @@ function toFinding(
     summary: candidate.summary,
     proposedAction: candidate.proposedAction,
     candidateKind: candidate.candidateKind,
+    ...(candidate.memoryProposal
+      ? { memoryProposal: candidate.memoryProposal }
+      : {}),
   };
 }
 

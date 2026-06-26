@@ -341,6 +341,17 @@ output shape should move toward:
 - `governance_policy`
 - `dedupe_key`
 
+Compatibility with the dense-only producer shape is operation-preserving:
+
+- `dense_memory_add` -> `profile_dense` `add`
+- `dense_memory_replace` -> `profile_dense` `replace`
+- `dense_memory_remove` -> `profile_dense` `remove`
+
+The compatibility mapper fills the `profile_dense_item` shape and profile scope,
+but generated outputs remain proposals. The mapper must not call dense profile
+CRUD directly, and approval/apply decisions must stay in the typed governance
+path.
+
 Mapping examples:
 
 - user correction about profile environment -> `profile_dense` `add`
@@ -351,6 +362,10 @@ Mapping examples:
 
 The first implementation should keep all LLM-generated proposals in curator
 review until enough real proposal data exists to calibrate auto-apply.
+
+The capture producer is a Crew memory producer. It may cite Den memory as
+evidence through an explicit `den_memory` evidence ref, but it must not write to
+Den memory and must not silently copy Den-owned memory into Crew storage.
 
 ## API And Bridge Shape
 
