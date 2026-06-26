@@ -227,6 +227,39 @@ const storage: StorageDiagnosticsProjection = {
       detail: "SQLite serializes writers",
     },
   ],
+  repositoryGroups: [
+    {
+      groupId: "queues_messages",
+      label: "Queues And Messages",
+      correctnessSensitive: true,
+      backendRequirements: [
+        {
+          capability: "transactions",
+          required: true,
+          detail: "repository writes must be atomic",
+        },
+        {
+          capability: "row_level_claims",
+          required: true,
+          detail: "queue claims need explicit backend semantics",
+        },
+      ],
+      notes: ["Queue TTL prevents stale message resurrection."],
+    },
+    {
+      groupId: "runtime_search",
+      label: "Runtime Search",
+      correctnessSensitive: true,
+      backendRequirements: [
+        {
+          capability: "runtime_full_text_search",
+          required: true,
+          detail: "search requires an indexed backend read model",
+        },
+      ],
+      notes: ["Runtime search is a diagnostics read model."],
+    },
+  ],
   indexChecks: [
     {
       name: "pending_queue_by_agent",
@@ -353,6 +386,11 @@ const storageData = okData<{
   sqlite?: { singleServiceWriter: boolean };
   postgres?: { databaseUrlEnv: string; implementationStatus: string };
   capabilities: Array<{ name: string; supported: boolean }>;
+  repositoryGroups: Array<{
+    groupId: string;
+    correctnessSensitive: boolean;
+    backendRequirements: Array<{ capability: string; required: boolean }>;
+  }>;
   tableCounts: Array<{ table: string; rows: number }>;
 }>(storageRoute);
 assert.equal(storageData.backend, "sqlite");
@@ -373,6 +411,20 @@ assert.equal(
 assert.equal(
   storageData.tableCounts.find((count) => count.table === "sessions")?.rows,
   3,
+);
+assert.equal(
+  storageData.repositoryGroups.find((group) => group.groupId === "queues_messages")
+    ?.correctnessSensitive,
+  true,
+);
+assert.equal(
+  storageData.repositoryGroups
+    .find((group) => group.groupId === "queues_messages")
+    ?.backendRequirements.some(
+      (requirement) =>
+        requirement.capability === "row_level_claims" && requirement.required,
+    ),
+  true,
 );
 
 const profileRegistry: AdminProfileRegistryDiagnostics = {

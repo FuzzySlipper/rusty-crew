@@ -283,6 +283,17 @@ export interface StorageDiagnosticsProjection {
     supported: boolean;
     detail: string;
   }[];
+  repositoryGroups: {
+    groupId: string;
+    label: string;
+    correctnessSensitive: boolean;
+    backendRequirements: {
+      capability: string;
+      required: boolean;
+      detail: string;
+    }[];
+    notes: string[];
+  }[];
   indexChecks: {
     name: string;
     usesIndex: boolean;

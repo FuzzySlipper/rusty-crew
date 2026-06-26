@@ -35,12 +35,13 @@ use rusty_crew_core_persistence::{
     RuntimeModulePhysicalTableDiagnostic, RuntimeModuleQueryCatalogDiagnostic,
     RuntimeModuleRetentionDiagnostic, RuntimeModuleSchemaDiagnostic,
     RuntimeModuleSchemaRegistryDiagnostics, RuntimeModuleTransferHookDiagnostic,
-    RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
-    RuntimeStorageCapability, RuntimeStorageDiagnostics, RuntimeStorageTableCount,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery,
-    SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
+    RuntimeRepositoryBackendRequirement, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
+    RuntimeStorageDiagnostics, RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
@@ -1547,6 +1548,22 @@ pub struct JsRuntimeStorageCapability {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsRuntimeRepositoryBackendRequirement {
+    pub capability: String,
+    pub required: bool,
+    pub detail: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeRepositoryGroupDiagnostic {
+    pub group_id: String,
+    pub label: String,
+    pub correctness_sensitive: bool,
+    pub backend_requirements: Vec<JsRuntimeRepositoryBackendRequirement>,
+    pub notes: Vec<String>,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsRuntimeModuleCapabilityStatus {
     pub capability: String,
     pub required: bool,
@@ -1670,6 +1687,7 @@ pub struct JsRuntimeStorageDiagnostics {
     pub size: JsRuntimeDatabaseSize,
     pub table_counts: Vec<JsRuntimeStorageTableCount>,
     pub capabilities: Vec<JsRuntimeStorageCapability>,
+    pub repository_groups: Vec<JsRuntimeRepositoryGroupDiagnostic>,
     pub module_registry: JsRuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<JsRuntimeQueryPlanCheck>,
     pub search_healthy: bool,
@@ -3672,6 +3690,32 @@ fn to_js_runtime_storage_capability(
     }
 }
 
+fn to_js_runtime_repository_backend_requirement(
+    requirement: RuntimeRepositoryBackendRequirement,
+) -> JsRuntimeRepositoryBackendRequirement {
+    JsRuntimeRepositoryBackendRequirement {
+        capability: requirement.capability,
+        required: requirement.required,
+        detail: requirement.detail,
+    }
+}
+
+fn to_js_runtime_repository_group_diagnostic(
+    group: RuntimeRepositoryGroupDiagnostic,
+) -> JsRuntimeRepositoryGroupDiagnostic {
+    JsRuntimeRepositoryGroupDiagnostic {
+        group_id: group.group_id,
+        label: group.label,
+        correctness_sensitive: group.correctness_sensitive,
+        backend_requirements: group
+            .backend_requirements
+            .into_iter()
+            .map(to_js_runtime_repository_backend_requirement)
+            .collect(),
+        notes: group.notes,
+    }
+}
+
 fn to_js_runtime_module_capability_status(
     status: RuntimeModuleCapabilityStatus,
 ) -> JsRuntimeModuleCapabilityStatus {
@@ -3892,6 +3936,11 @@ fn to_js_runtime_storage_diagnostics(
             .capabilities
             .into_iter()
             .map(to_js_runtime_storage_capability)
+            .collect(),
+        repository_groups: diagnostics
+            .repository_groups
+            .into_iter()
+            .map(to_js_runtime_repository_group_diagnostic)
             .collect(),
         module_registry: to_js_runtime_module_schema_registry_diagnostics(
             diagnostics.module_registry,

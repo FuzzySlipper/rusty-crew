@@ -4,6 +4,7 @@
 //! document data remains Den product data and is not mirrored here.
 
 pub mod module_schema;
+mod repositories;
 
 pub use crate::module_schema::{
     RuntimeInstalledModuleSchemaDiagnostic, RuntimeModuleCapabilityStatus,
@@ -12,6 +13,9 @@ pub use crate::module_schema::{
     RuntimeModuleQueryCatalogDiagnostic, RuntimeModuleRetentionDiagnostic,
     RuntimeModuleSchemaDiagnostic, RuntimeModuleSchemaRegistryDiagnostics,
     RuntimeModuleTransferHookDiagnostic,
+};
+pub use crate::repositories::{
+    RuntimeRepositoryBackendRequirement, RuntimeRepositoryGroupDiagnostic,
 };
 
 use crate::module_schema::{
@@ -1292,6 +1296,7 @@ pub struct RuntimeStorageDiagnostics {
     pub size: RuntimeDatabaseSize,
     pub table_counts: Vec<RuntimeStorageTableCount>,
     pub capabilities: Vec<RuntimeStorageCapability>,
+    pub repository_groups: Vec<RuntimeRepositoryGroupDiagnostic>,
     pub module_registry: RuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<RuntimeQueryPlanCheck>,
     pub search_healthy: bool,
@@ -2580,6 +2585,7 @@ impl CoordinationStore {
             size,
             table_counts,
             capabilities: sqlite_storage_capabilities(),
+            repository_groups: repositories::core_repository_group_diagnostics(),
             module_registry,
             index_checks,
             search_healthy,

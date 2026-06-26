@@ -70,6 +70,21 @@ const bridge = {
         { table: "profile_memories", rows: 1 },
       ],
       capabilities: [],
+      repositoryGroups: [
+        {
+          groupId: "queues_messages",
+          label: "Queues And Messages",
+          correctnessSensitive: true,
+          backendRequirements: [
+            {
+              capability: "transactions",
+              required: true,
+              detail: "queue writes must be atomic",
+            },
+          ],
+          notes: ["Queue TTL keeps stale pending work from resurfacing."],
+        },
+      ],
       moduleRegistry: moduleRegistryFixture,
       indexChecks: [],
       searchHealthy: true,

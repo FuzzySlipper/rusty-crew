@@ -741,6 +741,20 @@ export interface NativeRuntimeStorageCapability {
   detail: string;
 }
 
+export interface NativeRuntimeRepositoryBackendRequirement {
+  capability: string;
+  required: boolean;
+  detail: string;
+}
+
+export interface NativeRuntimeRepositoryGroupDiagnostic {
+  groupId: string;
+  label: string;
+  correctnessSensitive: boolean;
+  backendRequirements: NativeRuntimeRepositoryBackendRequirement[];
+  notes: string[];
+}
+
 export interface NativeRuntimeModuleCapabilityStatus {
   capability: string;
   required: boolean;
@@ -851,6 +865,7 @@ export interface NativeRuntimeStorageDiagnostics {
   size: NativeRuntimeDatabaseSize;
   tableCounts: NativeRuntimeStorageTableCount[];
   capabilities: NativeRuntimeStorageCapability[];
+  repositoryGroups: NativeRuntimeRepositoryGroupDiagnostic[];
   moduleRegistry: NativeRuntimeModuleSchemaRegistryDiagnostics;
   indexChecks: NativeRuntimeQueryPlanCheck[];
   searchHealthy: boolean;
