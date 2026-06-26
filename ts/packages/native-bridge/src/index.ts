@@ -371,6 +371,7 @@ interface NativeBridgeBinding {
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): NativeProfileMemoryRecord[];
+  listSimpleKv(query: NativeSimpleKvQuery): NativeSimpleKvRecord[];
   getProfileMemory(
     profileId: string,
     targetType: string,
@@ -541,6 +542,28 @@ export interface NativeProfileMemoryQuery {
   targetId?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface NativeSimpleKvQuery {
+  scopeType: string;
+  scopeId: string;
+  keyPrefix?: string;
+  includeExpired?: boolean;
+  expiredOnly?: boolean;
+  now?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface NativeSimpleKvRecord {
+  scopeType: string;
+  scopeId: string;
+  key: string;
+  valueJson: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt?: string;
 }
 
 export interface NativeProfileMemoryWrite {
@@ -1191,6 +1214,7 @@ export interface NativeBridgeModule {
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
+  listSimpleKv(query: NativeSimpleKvQuery): Promise<NativeSimpleKvRecord[]>;
   getProfileMemory(input: {
     profileId: string;
     targetType: "profile" | "user";
@@ -1285,6 +1309,7 @@ export const nativeManifestOperationNames = [
   "remove_data_bank_scope",
   "database_size",
   "storage_schema",
+  "list_simple_kv",
   "storage_diagnostics",
   "run_maintenance",
   "subscribe_events",
@@ -1391,6 +1416,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     addProfileMemory: unavailable("initialize_engine"),
     replaceProfileMemory: unavailable("initialize_engine"),
     removeProfileMemory: unavailable("initialize_engine"),
+    listSimpleKv: unavailable("initialize_engine"),
     searchRuntime: unavailable("initialize_engine"),
     queryRuntimeCounters: unavailable("initialize_engine"),
     runtimeSummary: unavailable("initialize_engine"),
@@ -2152,6 +2178,7 @@ function createNativeBridgeModule(
       };
     },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
+    listSimpleKv: async (query) => binding.listSimpleKv(query),
     getProfileMemory: async (input) =>
       binding.getProfileMemory(
         input.profileId,

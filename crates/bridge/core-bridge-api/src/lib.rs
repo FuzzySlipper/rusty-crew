@@ -77,6 +77,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "remove_data_bank_scope",
     "database_size",
     "storage_schema",
+    "list_simple_kv",
     "storage_diagnostics",
     "run_maintenance",
     "subscribe_events",

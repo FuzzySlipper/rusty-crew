@@ -559,6 +559,15 @@ errors = "core_protocol::CoreError"
 summary = "Read backend-neutral module schema registry diagnostics for admin and frontend surfaces."
 
 [[operation]]
+name = "list_simple_kv"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::SimpleKvQuery"
+output = "Vec<core_persistence::SimpleKvRecord>"
+errors = "core_protocol::CoreError"
+summary = "List simple_kv module entries through the Rust repository/query surface."
+
+[[operation]]
 name = "run_maintenance"
 surface = "stable"
 direction = "ts_to_rust"

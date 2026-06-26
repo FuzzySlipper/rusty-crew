@@ -109,6 +109,25 @@ const bridge = {
       },
     ];
   },
+  async listSimpleKv(query) {
+    assert.equal(query.scopeType, "profile");
+    assert.equal(query.scopeId, "rusty-crew-runner");
+    assert.equal(query.keyPrefix, "work");
+    assert.equal(query.includeExpired, false);
+    assert.equal(query.expiredOnly, false);
+    assert.equal(query.limit, 10);
+    return [
+      {
+        scopeType: "profile",
+        scopeId: "rusty-crew-runner",
+        key: "working_style",
+        valueJson: JSON.stringify({ style: "steady" }),
+        revision: 1,
+        createdAt: "2026-06-26T00:00:00Z",
+        updatedAt: "2026-06-26T00:00:00Z",
+      },
+    ];
+  },
   async queryConversationBranches(query) {
     assert.deepEqual(query, {
       session_id: "session-alpha",
@@ -150,6 +169,10 @@ assert.equal(catalog.status, 200);
 const catalogData = okData<StorageQueryCatalog>(catalog);
 assert.ok(catalogData.items.some((item) => item.id === "runtime.search"));
 assert.ok(catalogData.items.some((item) => item.id === "storage.schema"));
+const simpleKvDescriptor = catalogData.items.find(
+  (item) => item.id === "simple_kv.entries",
+);
+assert.equal(simpleKvDescriptor?.module?.moduleId, "simple_kv");
 
 const storageSchema = await handleStorageQueryRequest(
   {
@@ -193,6 +216,19 @@ assert.equal(search.status, 200);
 assert.equal(okData<StorageQueryResult>(search).total, 1);
 
 const memoryTool = storageQueryExecuteTool(context);
+const kv = await memoryTool.execute("call-kv", {
+  queryId: "simple_kv.entries",
+  input: {
+    scopeType: "profile",
+    scopeId: "rusty-crew-runner",
+    keyPrefix: "work",
+    limit: 10,
+  },
+});
+assert.ok(!("ok" in kv.details));
+assert.equal(kv.details.query_id, "simple_kv.entries");
+assert.equal(kv.details.items?.length, 1);
+
 const memory = await memoryTool.execute("call-memory", {
   queryId: "profile.memory",
   input: { profileId: "rusty-crew-runner" },
@@ -202,7 +238,7 @@ assert.equal(memory.details.query_id, "profile.memory");
 assert.equal(memory.details.items?.length, 1);
 
 const catalogTool = await storageQueryCatalogTool().execute("call-catalog", {});
-assert.equal(catalogTool.details.total, 6);
+assert.equal(catalogTool.details.total, 7);
 
 const invalid = await handleStorageQueryRequest(
   {
@@ -218,6 +254,25 @@ assert.equal(invalid.body.ok, false);
 assert.equal(
   invalid.body.ok ? undefined : invalid.body.error.reason_code,
   "invalid_string_parameter",
+);
+
+const invalidKv = await handleStorageQueryRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/storage/query/simple_kv.entries",
+    body: {
+      scopeType: "profile",
+      scopeId: "rusty-crew-runner",
+      expiryStatus: "expired",
+    },
+    requestId: "req-invalid-kv",
+  },
+  context,
+);
+assert.equal(invalidKv.status, 400);
+assert.equal(
+  invalidKv.body.ok ? undefined : invalidKv.body.error.reason_code,
+  "now_required_for_expired_entries",
 );
 
 const unknown = await handleStorageQueryRequest(

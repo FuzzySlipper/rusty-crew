@@ -21,8 +21,8 @@ use rusty_crew_core_persistence::{
     RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery,
     ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
     ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
-    SelectActiveVariantRequest, SelectActiveVariantResult, UpdateBranchHeadRequest,
-    UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
+    SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery, SimpleKvRecord,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, AttachmentId, BodyState,
@@ -600,6 +600,10 @@ impl CoreEngine {
 
     pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
         self.store.storage_schema()
+    }
+
+    pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
+        self.store.list_simple_kv(query)
     }
 
     pub fn run_maintenance(

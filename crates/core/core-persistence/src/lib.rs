@@ -966,7 +966,9 @@ pub struct SimpleKvDelete {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleKvQuery {
     pub scope: SimpleKvScope,
+    pub key_prefix: Option<String>,
     pub include_expired: bool,
+    pub expired_only: bool,
     pub now: Option<IsoTimestamp>,
     pub page: Option<QueryPage>,
 }
@@ -1985,7 +1987,7 @@ impl CoordinationStore {
     }
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
-        validate_simple_kv_scope(&query.scope)?;
+        validate_simple_kv_query(query)?;
         let conn = self.conn()?;
         list_simple_kv(&conn, query)
     }
@@ -9773,7 +9775,7 @@ fn load_session_config_records(conn: &Connection) -> CoreResult<Vec<SessionConfi
 }
 
 fn list_simple_kv(conn: &Connection, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
-    validate_simple_kv_scope(&query.scope)?;
+    validate_simple_kv_query(query)?;
     let (limit, offset) = query
         .page
         .unwrap_or(QueryPage {
@@ -9782,6 +9784,10 @@ fn list_simple_kv(conn: &Connection, query: &SimpleKvQuery) -> CoreResult<Vec<Si
         })
         .bounded(100, 1_000);
     let now = query.now.as_deref();
+    let key_prefix = query
+        .key_prefix
+        .as_ref()
+        .map(|prefix| sqlite_like_prefix(prefix));
     let mut stmt = conn
         .prepare(
             "SELECT
@@ -9796,9 +9802,14 @@ fn list_simple_kv(conn: &Connection, query: &SimpleKvQuery) -> CoreResult<Vec<Si
              FROM module_simple_kv_entries
              WHERE scope_type = ?1
                AND scope_id = ?2
-               AND (?3 OR expires_at IS NULL OR ?4 IS NULL OR expires_at > ?4)
+               AND (?3 IS NULL OR entry_key LIKE ?3 ESCAPE '\\')
+               AND (
+                    (?4 AND expires_at IS NOT NULL AND ?5 IS NOT NULL AND expires_at <= ?5)
+                    OR
+                    (NOT ?4 AND (?6 OR expires_at IS NULL OR ?5 IS NULL OR expires_at > ?5))
+               )
              ORDER BY entry_key ASC
-             LIMIT ?5 OFFSET ?6",
+             LIMIT ?7 OFFSET ?8",
         )
         .map_err(|error| persistence_error("prepare list simple kv", error))?;
     let rows = stmt
@@ -9806,8 +9817,10 @@ fn list_simple_kv(conn: &Connection, query: &SimpleKvQuery) -> CoreResult<Vec<Si
             params![
                 query.scope.scope_type.as_str(),
                 query.scope.scope_id.as_str(),
-                query.include_expired,
+                key_prefix.as_deref(),
+                query.expired_only,
                 now,
+                query.include_expired,
                 limit,
                 offset
             ],
@@ -10244,6 +10257,20 @@ fn validate_simple_kv_write(write: &SimpleKvWrite) -> CoreResult<()> {
     validate_simple_kv_identity(&write.scope, &write.key)
 }
 
+fn validate_simple_kv_query(query: &SimpleKvQuery) -> CoreResult<()> {
+    validate_simple_kv_scope(&query.scope)?;
+    if let Some(prefix) = &query.key_prefix {
+        validate_simple_kv_part("key_prefix", prefix, 256)?;
+    }
+    if query.expired_only && query.now.is_none() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "simple_kv expired-only queries require now",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_simple_kv_identity(scope: &SimpleKvScope, key: &str) -> CoreResult<()> {
     validate_simple_kv_scope(scope)?;
     validate_simple_kv_part("key", key, 256)
@@ -10274,6 +10301,21 @@ fn validate_simple_kv_part(label: &str, value: &str, max_bytes: usize) -> CoreRe
         ));
     }
     Ok(())
+}
+
+fn sqlite_like_prefix(prefix: &str) -> String {
+    let mut escaped = String::new();
+    for character in prefix.chars() {
+        match character {
+            '%' | '_' | '\\' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped.push('%');
+    escaped
 }
 
 fn row_to_session_config_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionConfigRecord> {
@@ -11402,7 +11444,9 @@ mod tests {
         let visible = store
             .list_simple_kv(&SimpleKvQuery {
                 scope: scope.clone(),
+                key_prefix: None,
                 include_expired: false,
+                expired_only: false,
                 now: Some("2026-06-26T00:04:45Z".to_string()),
                 page: None,
             })
@@ -11414,6 +11458,18 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["tone", "working_set"]
         );
+        let prefixed = store
+            .list_simple_kv(&SimpleKvQuery {
+                scope: scope.clone(),
+                key_prefix: Some("work".to_string()),
+                include_expired: false,
+                expired_only: false,
+                now: Some("2026-06-26T00:04:45Z".to_string()),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(prefixed.len(), 1);
+        assert_eq!(prefixed[0].key, "working_set");
 
         assert!(store
             .get_simple_kv(&scope, "tone", Some(&"2026-06-26T00:05:01Z".to_string()))
@@ -11422,12 +11478,26 @@ mod tests {
         let with_expired = store
             .list_simple_kv(&SimpleKvQuery {
                 scope: scope.clone(),
+                key_prefix: None,
                 include_expired: true,
+                expired_only: false,
                 now: Some("2026-06-26T00:05:01Z".to_string()),
                 page: None,
             })
             .unwrap();
         assert_eq!(with_expired.len(), 2);
+        let expired_only = store
+            .list_simple_kv(&SimpleKvQuery {
+                scope: scope.clone(),
+                key_prefix: None,
+                include_expired: true,
+                expired_only: true,
+                now: Some("2026-06-26T00:05:01Z".to_string()),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(expired_only.len(), 1);
+        assert_eq!(expired_only[0].key, "tone");
 
         assert_eq!(
             store
@@ -11449,7 +11519,9 @@ mod tests {
         assert!(store
             .list_simple_kv(&SimpleKvQuery {
                 scope,
+                key_prefix: None,
                 include_expired: true,
+                expired_only: false,
                 now: None,
                 page: None,
             })

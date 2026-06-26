@@ -38,8 +38,8 @@ use rusty_crew_core_persistence::{
     RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageDiagnostics,
     RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord,
     ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
-    UpdateBranchHeadRequest, UpdateBranchHeadResult,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery,
+    SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId, MessageSlotId,
@@ -620,6 +620,10 @@ impl NativeBridge {
         query: &RuntimeCounterQuery,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
         self.engine()?.query_runtime_counters(query)
+    }
+
+    pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
+        self.engine()?.list_simple_kv(query)
     }
 
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
@@ -1359,6 +1363,30 @@ pub struct JsProfileMemoryQuery {
     pub target_id: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSimpleKvQuery {
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key_prefix: Option<String>,
+    pub include_expired: Option<bool>,
+    pub expired_only: Option<bool>,
+    pub now: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSimpleKvRecord {
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key: String,
+    pub value_json: String,
+    pub revision: f64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub expires_at: Option<String>,
 }
 
 #[napi_derive::napi(object)]
@@ -2957,6 +2985,15 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn list_simple_kv(&self, query: JsSimpleKvQuery) -> napi::Result<Vec<JsSimpleKvRecord>> {
+        let bridge = self.bridge()?;
+        let records = bridge
+            .list_simple_kv(&to_simple_kv_query(query))
+            .map_err(to_napi_error)?;
+        records.into_iter().map(to_js_simple_kv_record).collect()
+    }
+
+    #[napi]
     pub fn runtime_summary(
         &self,
         scope_type: String,
@@ -3104,6 +3141,20 @@ fn to_js_profile_memory_record(record: ProfileMemoryRecord) -> napi::Result<JsPr
     })
 }
 
+fn to_js_simple_kv_record(record: SimpleKvRecord) -> napi::Result<JsSimpleKvRecord> {
+    Ok(JsSimpleKvRecord {
+        scope_type: record.scope.scope_type,
+        scope_id: record.scope.scope_id,
+        key: record.key,
+        value_json: serde_json::to_string(&record.value_json)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?,
+        revision: record.revision as f64,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        expires_at: record.expires_at,
+    })
+}
+
 fn to_js_queued_message_record(record: QueuedMessageRecord) -> JsQueuedMessageRecord {
     JsQueuedMessageRecord {
         message_id: record.message_id,
@@ -3238,6 +3289,23 @@ fn to_profile_memory_query(query: JsProfileMemoryQuery) -> napi::Result<ProfileM
             offset: query.offset,
         }),
     })
+}
+
+fn to_simple_kv_query(query: JsSimpleKvQuery) -> SimpleKvQuery {
+    SimpleKvQuery {
+        scope: SimpleKvScope {
+            scope_type: query.scope_type,
+            scope_id: query.scope_id,
+        },
+        key_prefix: query.key_prefix,
+        include_expired: query.include_expired.unwrap_or(false),
+        expired_only: query.expired_only.unwrap_or(false),
+        now: query.now,
+        page: Some(rusty_crew_core_persistence::QueryPage {
+            limit: query.limit,
+            offset: query.offset,
+        }),
+    }
 }
 
 fn to_profile_memory_write(write: JsProfileMemoryWrite) -> napi::Result<ProfileMemoryWrite> {

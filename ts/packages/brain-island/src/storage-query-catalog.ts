@@ -4,6 +4,7 @@ import type {
   NativeRuntimeCounterQuery,
   NativeRuntimeSearchQuery,
   NativeRuntimeModuleSchemaRegistryDiagnostics,
+  NativeSimpleKvQuery,
   NativeRuntimeStorageDiagnostics,
 } from "@rusty-crew/native-bridge";
 import { Type, type Static } from "typebox";
@@ -15,6 +16,7 @@ export type StorageQueryId =
   | "profile.memory"
   | "runtime.counters"
   | "runtime.search"
+  | "simple_kv.entries"
   | "storage.schema"
   | "storage.table_counts";
 
@@ -36,6 +38,15 @@ export interface StorageQueryDescriptor {
   backendAgnostic: true;
   resultShape: string;
   parameters: readonly StorageQueryParameter[];
+  module?: StorageQueryModuleMetadata;
+}
+
+export interface StorageQueryModuleMetadata {
+  moduleId: string;
+  schemaVersion: number;
+  logicalStore: string;
+  ownerCrate: string;
+  ownerModule: string;
 }
 
 export interface StorageQueryCatalog {
@@ -59,6 +70,7 @@ export interface StorageQueryContext {
     | "queryConversationBranches"
     | "queryRuntimeCounters"
     | "searchRuntime"
+    | "listSimpleKv"
     | "storageSchema"
     | "storageDiagnostics"
   >;
@@ -87,6 +99,36 @@ export type StorageQueryExecuteToolDetails =
 const MAX_LIMIT = 100;
 
 const STORAGE_QUERY_DESCRIPTORS = [
+  {
+    id: "simple_kv.entries",
+    title: "Simple KV entries",
+    description:
+      "List simple_kv module entries by scope, key prefix, and expiry status through the Rust repository.",
+    owner: "rust_coordination",
+    readOnly: true,
+    backendAgnostic: true,
+    resultShape: "module.simple_kv.entry.v1",
+    module: {
+      moduleId: "simple_kv",
+      schemaVersion: 1,
+      logicalStore: "entries",
+      ownerCrate: "core_persistence",
+      ownerModule: "simple_kv",
+    },
+    parameters: [
+      parameter("scopeType", "string", true, "Simple KV scope type."),
+      parameter("scopeId", "string", true, "Simple KV scope id."),
+      parameter("keyPrefix", "string", false, "Optional key prefix filter."),
+      enumParameter("expiryStatus", false, "Expiry filter.", [
+        "active",
+        "expired",
+        "all",
+      ]),
+      parameter("now", "string", false, "ISO timestamp used for expiry checks."),
+      parameter("limit", "integer", false, "Maximum rows to return.", 25),
+      parameter("offset", "integer", false, "Rows to skip.", 0),
+    ],
+  },
   {
     id: "storage.schema",
     title: "Storage module schema registry",
@@ -287,6 +329,8 @@ export async function executeStorageQuery(
       );
     case "storage.schema":
       return storageSchema(await context.bridge.storageSchema());
+    case "simple_kv.entries":
+      return simpleKvEntries(body, context);
     case "runtime.search":
       return runtimeSearch(body, context);
     case "profile.memory":
@@ -381,6 +425,56 @@ function storageTableCounts(
       size: diagnostics.size,
     },
   });
+}
+
+async function simpleKvEntries(
+  body: Record<string, unknown>,
+  context: StorageQueryContext,
+): Promise<StorageQueryResult> {
+  const scopeType = boundedString(body, "scopeType", 64, true);
+  const scopeId = boundedString(body, "scopeId", 256, true);
+  const keyPrefix = boundedString(body, "keyPrefix", 256, false);
+  const expiryStatus =
+    optionalEnum(body, "expiryStatus", ["active", "expired", "all"] as const) ??
+    "active";
+  const now = boundedString(body, "now", 64, false);
+  if (expiryStatus === "expired" && now === undefined) {
+    throw new StorageQueryInputError(
+      "now_required_for_expired_entries",
+      "now is required when expiryStatus is expired",
+    );
+  }
+  const { limit, offset } = pageInput(body, 25);
+  const query: NativeSimpleKvQuery = compactRecord({
+    scopeType,
+    scopeId,
+    keyPrefix,
+    includeExpired: expiryStatus === "all" || expiryStatus === "expired",
+    expiredOnly: expiryStatus === "expired",
+    now,
+    limit,
+    offset,
+  }) as unknown as NativeSimpleKvQuery;
+  const items = await context.bridge.listSimpleKv(query);
+  return {
+    query_id: "simple_kv.entries",
+    read_only: true,
+    source: "rust_bridge_read_model",
+    items,
+    total: items.length,
+    limit,
+    offset,
+    data: {
+      module: {
+        moduleId: "simple_kv",
+        logicalStore: "entries",
+        schemaVersion: 1,
+      },
+      scopeType,
+      scopeId,
+      expiryStatus,
+    },
+  };
 }
 
 async function runtimeSearch(
@@ -655,6 +749,41 @@ function optionalString(
     );
   }
   return value.trim();
+}
+
+function boundedString(
+  body: Record<string, unknown>,
+  key: string,
+  maxBytes: number,
+  required: true,
+): string;
+function boundedString(
+  body: Record<string, unknown>,
+  key: string,
+  maxBytes: number,
+  required: false,
+): string | undefined;
+function boundedString(
+  body: Record<string, unknown>,
+  key: string,
+  maxBytes: number,
+  required: boolean,
+): string | undefined {
+  const value = required ? requiredString(body, key) : optionalString(body, key);
+  if (value === undefined) return undefined;
+  if (Buffer.byteLength(value, "utf8") > maxBytes) {
+    throw new StorageQueryInputError(
+      "string_parameter_too_long",
+      `${key} must be ${maxBytes} bytes or less`,
+    );
+  }
+  if (value.includes("\0")) {
+    throw new StorageQueryInputError(
+      "invalid_string_parameter",
+      `${key} must not contain NUL bytes`,
+    );
+  }
+  return value;
 }
 
 function optionalEnum<const T extends readonly string[]>(
