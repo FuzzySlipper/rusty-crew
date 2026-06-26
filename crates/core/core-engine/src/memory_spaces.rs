@@ -65,6 +65,7 @@ pub(crate) fn profile_dense_descriptor(caps: &ProfileMemoryCaps) -> MemorySpaceD
                 operation_policy(MemoryOperation::Add, false),
                 operation_policy(MemoryOperation::Replace, true),
                 operation_policy(MemoryOperation::Remove, true),
+                operation_policy(MemoryOperation::CandidateOnly, false),
             ],
         },
         operations: vec![
@@ -73,6 +74,7 @@ pub(crate) fn profile_dense_descriptor(caps: &ProfileMemoryCaps) -> MemorySpaceD
             MemoryOperation::Add,
             MemoryOperation::Replace,
             MemoryOperation::Remove,
+            MemoryOperation::CandidateOnly,
         ],
         provenance_policy: MemoryProvenancePolicy {
             required_evidence: vec![MemoryEvidenceKind::Wake],
@@ -140,6 +142,7 @@ mod tests {
                 MemoryOperation::Add,
                 MemoryOperation::Replace,
                 MemoryOperation::Remove,
+                MemoryOperation::CandidateOnly,
             ]
         );
         assert!(descriptor

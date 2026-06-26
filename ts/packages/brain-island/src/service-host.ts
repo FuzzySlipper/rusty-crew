@@ -668,10 +668,15 @@ async function handleHttpRequest(
   }
 
   if (url.pathname.startsWith("/v1/admin/memory/")) {
+    const body =
+      (request.method ?? "GET").toUpperCase() === "POST"
+        ? await readJsonBody(request)
+        : undefined;
     return handleMemorySpaceAdminRequest(
       {
         method: request.method ?? "GET",
         url: url.toString(),
+        body,
         requestId: requestId(request),
       },
       { bridge: state.bridge },

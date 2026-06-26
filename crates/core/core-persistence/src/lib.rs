@@ -26,11 +26,14 @@ use rusty_crew_core_protocol::{
     CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DataBankScopeId,
     DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
     DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
-    FanOutGroupStatus, IsoTimestamp, MessageBlockId, MessageId, MessageSlotId, MessageVariantId,
-    ParentConsumptionPolicy, ProfileId, ProjectId, ProviderStateAbsenceReason, ResourceLimits,
-    RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
-    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
-    ToolProfile,
+    FanOutGroupStatus, IsoTimestamp, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionKind,
+    MemoryGovernanceDecisionRecord, MemoryGovernanceMode, MemoryOperation, MemoryProposalEnvelope,
+    MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus, MemoryProposalSource,
+    MemoryScopeType, MemorySpaceDescriptor, MessageBlockId, MessageId, MessageSlotId,
+    MessageVariantId, ParentConsumptionPolicy, ProfileId, ProjectId, ProviderStateAbsenceReason,
+    ResourceLimits, RunId, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId,
+    SessionIdentityRecord, SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId,
+    ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -40,7 +43,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 20;
+const CURRENT_SCHEMA_VERSION: i64 = 21;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -163,6 +166,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 20,
         description: "add module schema installed-version registry",
         apply: migrate_v20_add_module_schema_registry,
+    },
+    SchemaMigration {
+        version: 21,
+        description: "add typed memory proposal governance storage",
+        apply: migrate_v21_add_memory_proposal_governance,
     },
 ];
 
@@ -1529,6 +1537,8 @@ pub enum DiagnosticTable {
     RuntimeImportBatches,
     LegacyIdMappings,
     ProfileMemories,
+    MemoryProposals,
+    MemoryGovernanceDecisions,
     ScheduledJobs,
     ScheduledJobRuns,
     ProviderWireStates,
@@ -1569,6 +1579,8 @@ impl DiagnosticTable {
         Self::RuntimeImportBatches,
         Self::LegacyIdMappings,
         Self::ProfileMemories,
+        Self::MemoryProposals,
+        Self::MemoryGovernanceDecisions,
         Self::ScheduledJobs,
         Self::ScheduledJobRuns,
         Self::ProviderWireStates,
@@ -1609,6 +1621,8 @@ impl DiagnosticTable {
             "runtime_import_batches" => Ok(Self::RuntimeImportBatches),
             "legacy_id_mappings" => Ok(Self::LegacyIdMappings),
             "profile_memories" => Ok(Self::ProfileMemories),
+            "memory_proposals" => Ok(Self::MemoryProposals),
+            "memory_governance_decisions" => Ok(Self::MemoryGovernanceDecisions),
             "scheduled_jobs" => Ok(Self::ScheduledJobs),
             "scheduled_job_runs" => Ok(Self::ScheduledJobRuns),
             "provider_wire_states" => Ok(Self::ProviderWireStates),
@@ -1654,6 +1668,8 @@ impl DiagnosticTable {
             Self::RuntimeImportBatches => "runtime_import_batches",
             Self::LegacyIdMappings => "legacy_id_mappings",
             Self::ProfileMemories => "profile_memories",
+            Self::MemoryProposals => "memory_proposals",
+            Self::MemoryGovernanceDecisions => "memory_governance_decisions",
             Self::ScheduledJobs => "scheduled_jobs",
             Self::ScheduledJobRuns => "scheduled_job_runs",
             Self::ProviderWireStates => "provider_wire_states",
@@ -1973,6 +1989,98 @@ impl CoordinationStore {
         tx.commit()
             .map_err(|error| persistence_error("commit remove profile memory", error))?;
         Ok(existing)
+    }
+
+    pub fn save_memory_proposal(
+        &self,
+        proposal: &MemoryProposalEnvelope,
+        descriptor: &MemorySpaceDescriptor,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryProposalRecord> {
+        validate_memory_proposal(proposal, descriptor)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start save memory proposal", error))?;
+        if let Some(dedupe_key) = proposal
+            .dedupe_key
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            if let Some(existing) =
+                get_memory_proposal_by_dedupe(&tx, &proposal.space_id.0, dedupe_key)?
+            {
+                return Ok(existing);
+            }
+        }
+        if get_memory_proposal_by_id(&tx, &proposal.proposal_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("memory proposal {} already exists", proposal.proposal_id),
+            ));
+        }
+        insert_memory_proposal_in_tx(&tx, proposal, now)?;
+        insert_memory_governance_decision_in_tx(
+            &tx,
+            &MemoryGovernanceDecisionInput {
+                decision_id: format!("{}_routed", proposal.proposal_id),
+                proposal_id: proposal.proposal_id.clone(),
+                decision: MemoryGovernanceDecisionKind::RoutedToReview,
+                actor: "rusty_crew_governance".to_string(),
+                source: proposal.source,
+                evidence_refs: proposal.evidence_refs.clone(),
+                policy_mode: selected_governance_mode(proposal.governance_mode, proposal.source),
+                confidence: Some(proposal.confidence),
+                message: Some("typed memory proposals start in curator/manual review".to_string()),
+                resulting_revision: None,
+                decided_at: Some(now.clone()),
+            },
+        )?;
+        let record = get_memory_proposal_by_id(&tx, &proposal.proposal_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "saved memory proposal was not readable",
+            )
+        })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit save memory proposal", error))?;
+        Ok(record)
+    }
+
+    pub fn list_memory_proposals(
+        &self,
+        query: &MemoryProposalQuery,
+    ) -> CoreResult<Vec<MemoryProposalRecord>> {
+        let conn = self.conn()?;
+        list_memory_proposals(&conn, query)
+    }
+
+    pub fn record_memory_governance_decision(
+        &self,
+        decision: &MemoryGovernanceDecisionInput,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryGovernanceDecisionRecord> {
+        validate_memory_governance_decision(decision)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start memory governance decision", error))?;
+        let proposal = get_memory_proposal_by_id(&tx, &decision.proposal_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("memory proposal {} not found", decision.proposal_id),
+            )
+        })?;
+        validate_memory_governance_transition(proposal.status, decision.decision)?;
+        let mut stored = decision.clone();
+        if stored.decided_at.is_none() {
+            stored.decided_at = Some(now.clone());
+        }
+        let record = insert_memory_governance_decision_in_tx(&tx, &stored)?;
+        update_memory_proposal_review_state_in_tx(&tx, &record)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit memory governance decision", error))?;
+        Ok(record)
     }
 
     pub fn get_simple_kv(
@@ -4922,6 +5030,58 @@ fn migrate_v20_add_module_schema_registry(tx: &rusqlite::Transaction<'_>) -> Cor
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 20", error))
+}
+
+fn migrate_v21_add_memory_proposal_governance(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS memory_proposals (
+                proposal_id TEXT PRIMARY KEY,
+                space_id TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                shape_id TEXT NOT NULL,
+                shape_version INTEGER NOT NULL,
+                envelope_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                selected_governance_mode TEXT NOT NULL,
+                source TEXT NOT NULL,
+                dedupe_key TEXT,
+                duplicate_of TEXT,
+                resulting_revision INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                decided_at TEXT,
+                applied_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_proposals_dedupe
+                ON memory_proposals(space_id, dedupe_key)
+                WHERE dedupe_key IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_memory_proposals_status
+                ON memory_proposals(status, updated_at DESC, proposal_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_proposals_space_status
+                ON memory_proposals(space_id, status, updated_at DESC, proposal_id);
+
+            CREATE TABLE IF NOT EXISTS memory_governance_decisions (
+                decision_id TEXT PRIMARY KEY,
+                proposal_id TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                source TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                policy_mode TEXT NOT NULL,
+                confidence REAL,
+                message TEXT,
+                resulting_revision INTEGER,
+                decided_at TEXT NOT NULL,
+                FOREIGN KEY (proposal_id) REFERENCES memory_proposals(proposal_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_governance_decisions_proposal
+                ON memory_governance_decisions(proposal_id, decided_at, decision_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 21", error))
 }
 
 fn apply_module_schema_migration_in_tx(
@@ -10253,6 +10413,515 @@ fn validate_profile_memory_key(key: &str, max_key_bytes: u32) -> CoreResult<()> 
     Ok(())
 }
 
+fn validate_memory_proposal(
+    proposal: &MemoryProposalEnvelope,
+    descriptor: &MemorySpaceDescriptor,
+) -> CoreResult<()> {
+    proposal.validate_for_descriptor(descriptor)?;
+    if proposal.space_id.as_str() == "profile_dense" {
+        validate_profile_dense_memory_proposal(proposal)?;
+    }
+    Ok(())
+}
+
+fn validate_profile_dense_memory_proposal(proposal: &MemoryProposalEnvelope) -> CoreResult<()> {
+    let content = proposal.content.as_object().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "profile_dense proposal content must be an object",
+        )
+    })?;
+    let key = content
+        .get("key")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    validate_profile_memory_key(key, ProfileMemoryCaps::default().max_key_bytes)?;
+    if matches!(
+        proposal.operation,
+        MemoryOperation::Add | MemoryOperation::Replace | MemoryOperation::CandidateOnly
+    ) {
+        let body = content
+            .get("content")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if body.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "profile_dense proposal content.content must be non-empty",
+            ));
+        }
+        if body.len() > ProfileMemoryCaps::default().max_content_bytes as usize {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "profile_dense proposal content exceeds {} bytes",
+                    ProfileMemoryCaps::default().max_content_bytes
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn insert_memory_proposal_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    proposal: &MemoryProposalEnvelope,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    let envelope_json = to_json_text(proposal)?;
+    let status = MemoryProposalReviewStatus::PendingReview;
+    let selected_governance_mode =
+        selected_governance_mode(proposal.governance_mode, proposal.source);
+    tx.execute(
+        "INSERT INTO memory_proposals (
+            proposal_id,
+            space_id,
+            operation,
+            scope_type,
+            scope_id,
+            shape_id,
+            shape_version,
+            envelope_json,
+            status,
+            selected_governance_mode,
+            source,
+            dedupe_key,
+            duplicate_of,
+            resulting_revision,
+            created_at,
+            updated_at,
+            decided_at,
+            applied_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, NULL, ?13, ?13, NULL, NULL)",
+        params![
+            proposal.proposal_id.as_str(),
+            proposal.space_id.0.as_str(),
+            memory_operation_as_str(proposal.operation),
+            memory_scope_type_as_str(proposal.scope.scope_type),
+            proposal.scope.scope_id.as_str(),
+            proposal.shape.shape_id.0.as_str(),
+            proposal.shape.version as i64,
+            envelope_json,
+            memory_proposal_status_as_str(status),
+            memory_governance_mode_as_str(selected_governance_mode),
+            memory_proposal_source_as_str(proposal.source),
+            proposal.dedupe_key.as_deref(),
+            now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert memory proposal", error))?;
+    Ok(())
+}
+
+fn get_memory_proposal_by_id(
+    conn: &Connection,
+    proposal_id: &str,
+) -> CoreResult<Option<MemoryProposalRecord>> {
+    conn.query_row(
+        "SELECT envelope_json,
+                status,
+                selected_governance_mode,
+                created_at,
+                updated_at,
+                decided_at,
+                applied_at,
+                resulting_revision,
+                duplicate_of
+         FROM memory_proposals
+         WHERE proposal_id = ?1",
+        params![proposal_id],
+        row_to_memory_proposal,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get memory proposal", error))
+}
+
+fn get_memory_proposal_by_dedupe(
+    conn: &Connection,
+    space_id: &str,
+    dedupe_key: &str,
+) -> CoreResult<Option<MemoryProposalRecord>> {
+    conn.query_row(
+        "SELECT envelope_json,
+                status,
+                selected_governance_mode,
+                created_at,
+                updated_at,
+                decided_at,
+                applied_at,
+                resulting_revision,
+                duplicate_of
+         FROM memory_proposals
+         WHERE space_id = ?1 AND dedupe_key = ?2",
+        params![space_id, dedupe_key],
+        row_to_memory_proposal,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get memory proposal by dedupe", error))
+}
+
+fn list_memory_proposals(
+    conn: &Connection,
+    query: &MemoryProposalQuery,
+) -> CoreResult<Vec<MemoryProposalRecord>> {
+    let (limit, offset) = QueryPage {
+        limit: query.limit,
+        offset: query.offset,
+    }
+    .bounded(100, 1_000);
+    let status = query.status.map(memory_proposal_status_as_str);
+    let mut stmt = conn
+        .prepare(
+            "SELECT envelope_json,
+                    status,
+                    selected_governance_mode,
+                    created_at,
+                    updated_at,
+                    decided_at,
+                    applied_at,
+                    resulting_revision,
+                    duplicate_of
+             FROM memory_proposals
+             WHERE (?1 IS NULL OR space_id = ?1)
+               AND (?2 IS NULL OR status = ?2)
+               AND (?3 IS NULL OR dedupe_key = ?3)
+             ORDER BY updated_at DESC, proposal_id ASC
+             LIMIT ?4 OFFSET ?5",
+        )
+        .map_err(|error| persistence_error("prepare list memory proposals", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                query.space_id.as_ref().map(|space_id| space_id.0.as_str()),
+                status,
+                query.dedupe_key.as_deref(),
+                limit,
+                offset,
+            ],
+            row_to_memory_proposal,
+        )
+        .map_err(|error| persistence_error("query memory proposals", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load memory proposals", error))
+}
+
+fn row_to_memory_proposal(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryProposalRecord> {
+    let envelope_json: String = row.get(0)?;
+    let status: String = row.get(1)?;
+    let governance: String = row.get(2)?;
+    let resulting_revision: Option<i64> = row.get(7)?;
+    Ok(MemoryProposalRecord {
+        proposal: from_json_text(&envelope_json).map_err(to_sql_error)?,
+        status: parse_memory_proposal_status(&status).map_err(to_sql_core_error)?,
+        selected_governance_mode: parse_memory_governance_mode(&governance)
+            .map_err(to_sql_core_error)?,
+        created_at: row.get(3)?,
+        updated_at: row.get(4)?,
+        decided_at: row.get(5)?,
+        applied_at: row.get(6)?,
+        resulting_revision: resulting_revision.map(|value| value as u64),
+        duplicate_of: row.get(8)?,
+    })
+}
+
+fn validate_memory_governance_decision(decision: &MemoryGovernanceDecisionInput) -> CoreResult<()> {
+    validate_identifier("memory governance decision id", &decision.decision_id)?;
+    validate_identifier("memory governance proposal id", &decision.proposal_id)?;
+    if decision.actor.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "memory governance actor must not be empty",
+        ));
+    }
+    if let Some(confidence) = decision.confidence {
+        if !(0.0..=1.0).contains(&confidence) || confidence.is_nan() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "memory governance confidence must be between 0 and 1",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_memory_governance_transition(
+    current: MemoryProposalReviewStatus,
+    decision: MemoryGovernanceDecisionKind,
+) -> CoreResult<()> {
+    let allowed = match (current, decision) {
+        (_, MemoryGovernanceDecisionKind::RoutedToReview) => false,
+        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Approved) => true,
+        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Rejected) => true,
+        (MemoryProposalReviewStatus::Approved, MemoryGovernanceDecisionKind::Applied) => true,
+        _ => false,
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "memory governance decision {:?} is not allowed from {:?}",
+                decision, current
+            ),
+        ))
+    }
+}
+
+fn insert_memory_governance_decision_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    decision: &MemoryGovernanceDecisionInput,
+) -> CoreResult<MemoryGovernanceDecisionRecord> {
+    let decided_at = decision.decided_at.clone().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "memory governance decision requires decided_at",
+        )
+    })?;
+    let evidence_refs_json = to_json_text(&decision.evidence_refs)?;
+    tx.execute(
+        "INSERT INTO memory_governance_decisions (
+            decision_id,
+            proposal_id,
+            decision,
+            actor,
+            source,
+            evidence_refs_json,
+            policy_mode,
+            confidence,
+            message,
+            resulting_revision,
+            decided_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            decision.decision_id.as_str(),
+            decision.proposal_id.as_str(),
+            memory_governance_decision_as_str(decision.decision),
+            decision.actor.as_str(),
+            memory_proposal_source_as_str(decision.source),
+            evidence_refs_json,
+            memory_governance_mode_as_str(decision.policy_mode),
+            decision.confidence.map(|value| value as f64),
+            decision.message.as_deref(),
+            decision.resulting_revision.map(|value| value as i64),
+            decided_at.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert memory governance decision", error))?;
+    Ok(MemoryGovernanceDecisionRecord {
+        decision_id: decision.decision_id.clone(),
+        proposal_id: decision.proposal_id.clone(),
+        decision: decision.decision,
+        actor: decision.actor.clone(),
+        source: decision.source,
+        evidence_refs: decision.evidence_refs.clone(),
+        policy_mode: decision.policy_mode,
+        confidence: decision.confidence,
+        message: decision.message.clone(),
+        resulting_revision: decision.resulting_revision,
+        decided_at,
+    })
+}
+
+fn update_memory_proposal_review_state_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    decision: &MemoryGovernanceDecisionRecord,
+) -> CoreResult<()> {
+    let next_status = match decision.decision {
+        MemoryGovernanceDecisionKind::RoutedToReview => MemoryProposalReviewStatus::PendingReview,
+        MemoryGovernanceDecisionKind::Approved => MemoryProposalReviewStatus::Approved,
+        MemoryGovernanceDecisionKind::Rejected => MemoryProposalReviewStatus::Rejected,
+        MemoryGovernanceDecisionKind::Applied => MemoryProposalReviewStatus::Applied,
+    };
+    tx.execute(
+        "UPDATE memory_proposals
+         SET status = ?2,
+             updated_at = ?3,
+             decided_at = CASE WHEN ?4 IS NULL THEN decided_at ELSE ?4 END,
+             applied_at = CASE WHEN ?5 IS NULL THEN applied_at ELSE ?5 END,
+             resulting_revision = CASE WHEN ?6 IS NULL THEN resulting_revision ELSE ?6 END
+         WHERE proposal_id = ?1",
+        params![
+            decision.proposal_id.as_str(),
+            memory_proposal_status_as_str(next_status),
+            decision.decided_at.as_str(),
+            if matches!(
+                decision.decision,
+                MemoryGovernanceDecisionKind::Approved | MemoryGovernanceDecisionKind::Rejected
+            ) {
+                Some(decision.decided_at.as_str())
+            } else {
+                None
+            },
+            if decision.decision == MemoryGovernanceDecisionKind::Applied {
+                Some(decision.decided_at.as_str())
+            } else {
+                None
+            },
+            decision.resulting_revision.map(|value| value as i64),
+        ],
+    )
+    .map_err(|error| persistence_error("update memory proposal review state", error))?;
+    Ok(())
+}
+
+fn selected_governance_mode(
+    requested: MemoryGovernanceMode,
+    source: MemoryProposalSource,
+) -> MemoryGovernanceMode {
+    match (source, requested) {
+        (
+            MemoryProposalSource::InWakeTool | MemoryProposalSource::CaptureProducer,
+            MemoryGovernanceMode::DirectWrite | MemoryGovernanceMode::AutoApplyThreshold,
+        ) => MemoryGovernanceMode::CuratorRoute,
+        _ => requested,
+    }
+}
+
+fn memory_proposal_status_as_str(status: MemoryProposalReviewStatus) -> &'static str {
+    match status {
+        MemoryProposalReviewStatus::PendingReview => "pending_review",
+        MemoryProposalReviewStatus::Approved => "approved",
+        MemoryProposalReviewStatus::Rejected => "rejected",
+        MemoryProposalReviewStatus::Applied => "applied",
+    }
+}
+
+fn parse_memory_proposal_status(raw: &str) -> CoreResult<MemoryProposalReviewStatus> {
+    match raw {
+        "pending_review" => Ok(MemoryProposalReviewStatus::PendingReview),
+        "approved" => Ok(MemoryProposalReviewStatus::Approved),
+        "rejected" => Ok(MemoryProposalReviewStatus::Rejected),
+        "applied" => Ok(MemoryProposalReviewStatus::Applied),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid memory proposal status {other}"),
+        )),
+    }
+}
+
+fn memory_governance_decision_as_str(decision: MemoryGovernanceDecisionKind) -> &'static str {
+    match decision {
+        MemoryGovernanceDecisionKind::RoutedToReview => "routed_to_review",
+        MemoryGovernanceDecisionKind::Approved => "approved",
+        MemoryGovernanceDecisionKind::Rejected => "rejected",
+        MemoryGovernanceDecisionKind::Applied => "applied",
+    }
+}
+
+fn memory_governance_mode_as_str(mode: MemoryGovernanceMode) -> &'static str {
+    match mode {
+        MemoryGovernanceMode::ReadOnly => "read_only",
+        MemoryGovernanceMode::DirectWrite => "direct_write",
+        MemoryGovernanceMode::Candidate => "candidate",
+        MemoryGovernanceMode::ManualReview => "manual_review",
+        MemoryGovernanceMode::CuratorRoute => "curator_route",
+        MemoryGovernanceMode::AutoApplyThreshold => "auto_apply_threshold",
+    }
+}
+
+fn parse_memory_governance_mode(raw: &str) -> CoreResult<MemoryGovernanceMode> {
+    match raw {
+        "read_only" => Ok(MemoryGovernanceMode::ReadOnly),
+        "direct_write" => Ok(MemoryGovernanceMode::DirectWrite),
+        "candidate" => Ok(MemoryGovernanceMode::Candidate),
+        "manual_review" => Ok(MemoryGovernanceMode::ManualReview),
+        "curator_route" => Ok(MemoryGovernanceMode::CuratorRoute),
+        "auto_apply_threshold" => Ok(MemoryGovernanceMode::AutoApplyThreshold),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid memory governance mode {other}"),
+        )),
+    }
+}
+
+fn memory_operation_as_str(operation: MemoryOperation) -> &'static str {
+    match operation {
+        MemoryOperation::Read => "read",
+        MemoryOperation::List => "list",
+        MemoryOperation::Add => "add",
+        MemoryOperation::Replace => "replace",
+        MemoryOperation::Merge => "merge",
+        MemoryOperation::Supersede => "supersede",
+        MemoryOperation::Remove => "remove",
+        MemoryOperation::Archive => "archive",
+        MemoryOperation::CandidateOnly => "candidate_only",
+    }
+}
+
+fn memory_scope_type_as_str(scope_type: MemoryScopeType) -> &'static str {
+    match scope_type {
+        MemoryScopeType::Profile => "profile",
+        MemoryScopeType::User => "user",
+        MemoryScopeType::Session => "session",
+        MemoryScopeType::ConversationBranch => "conversation_branch",
+        MemoryScopeType::World => "world",
+        MemoryScopeType::Entity => "entity",
+        MemoryScopeType::Project => "project",
+    }
+}
+
+fn memory_proposal_source_as_str(source: MemoryProposalSource) -> &'static str {
+    match source {
+        MemoryProposalSource::InWakeTool => "in_wake_tool",
+        MemoryProposalSource::CaptureProducer => "capture_producer",
+        MemoryProposalSource::Ui => "ui",
+        MemoryProposalSource::Import => "import",
+        MemoryProposalSource::Migration => "migration",
+        MemoryProposalSource::Human => "human",
+        MemoryProposalSource::DenMemoryImport => "den_memory_import",
+    }
+}
+
+fn validate_identifier(label: &str, value: &str) -> CoreResult<()> {
+    if value.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must not be empty"),
+        ));
+    }
+    if value.len() > 64 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be at most 64 characters"),
+        ));
+    }
+    let mut previous_underscore = false;
+    for (index, ch) in value.chars().enumerate() {
+        let valid = ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_';
+        if !valid {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("{label} must use lowercase snake_case ASCII identifiers"),
+            ));
+        }
+        if index == 0 && !ch.is_ascii_lowercase() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("{label} must start with a lowercase letter"),
+            ));
+        }
+        if ch == '_' && (index == 0 || previous_underscore) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("{label} must not contain leading or repeated underscores"),
+            ));
+        }
+        previous_underscore = ch == '_';
+    }
+    if value.ends_with('_') {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must not end with an underscore"),
+        ));
+    }
+    Ok(())
+}
+
+fn to_sql_core_error(error: CoreError) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+}
+
 fn validate_simple_kv_write(write: &SimpleKvWrite) -> CoreResult<()> {
     validate_simple_kv_identity(&write.scope, &write.key)
 }
@@ -11113,7 +11782,14 @@ fn persistence_error(context: &str, error: impl std::error::Error) -> CoreError 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_crew_core_protocol::{AgentMessage, ToolDescriptor};
+    use rusty_crew_core_protocol::{
+        AgentMessage, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
+        MemoryEvidenceRef, MemoryExportImportPolicy, MemoryFieldType, MemoryIndexingPolicy,
+        MemoryOperationPolicy, MemoryPromptPolicy, MemoryProvenancePolicy,
+        MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor, MemoryRecordShapeId,
+        MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy, MemoryScope,
+        MemoryScopeModel, MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, ToolDescriptor,
+    };
     use serde_json::json;
     use std::{
         fs,
@@ -11198,6 +11874,8 @@ mod tests {
         assert!(table_exists(&db_path, "channel_bindings"));
         assert!(table_exists(&db_path, "mcp_bindings"));
         assert!(table_exists(&db_path, "module_schema_versions"));
+        assert!(table_exists(&db_path, "memory_proposals"));
+        assert!(table_exists(&db_path, "memory_governance_decisions"));
         assert!(table_exists(&db_path, "module_simple_kv_entries"));
         assert!(index_exists(
             &db_path,
@@ -11222,6 +11900,11 @@ mod tests {
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_expires_at"
+        ));
+        assert!(index_exists(&db_path, "idx_memory_proposals_dedupe"));
+        assert!(index_exists(
+            &db_path,
+            "idx_memory_governance_decisions_proposal"
         ));
 
         remove_temp_db(&db_path);
@@ -11998,6 +12681,159 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(too_large.kind, CoreErrorKind::ActionRejected);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn memory_proposals_persist_governance_state_without_direct_mutation() {
+        let db_path = temp_db_path("memory-proposals");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let descriptor = profile_dense_memory_space_descriptor();
+        let proposal = profile_dense_memory_proposal("proposal_one", "profile_dense:style");
+
+        let created = store
+            .save_memory_proposal(&proposal, &descriptor, &"2026-06-26T00:00:00Z".to_string())
+            .unwrap();
+        assert_eq!(created.proposal.proposal_id, "proposal_one");
+        assert_eq!(created.status, MemoryProposalReviewStatus::PendingReview);
+        assert_eq!(
+            created.selected_governance_mode,
+            MemoryGovernanceMode::CuratorRoute
+        );
+        assert!(store
+            .get_profile_memory(
+                &ProfileId::new("prime-profile"),
+                &ProfileMemoryTarget::Profile,
+                "style"
+            )
+            .unwrap()
+            .is_none());
+
+        let duplicate = store
+            .save_memory_proposal(
+                &profile_dense_memory_proposal("proposal_two", "profile_dense:style"),
+                &descriptor,
+                &"2026-06-26T00:01:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(duplicate.proposal.proposal_id, "proposal_one");
+        assert_eq!(store.count_rows("memory_proposals").unwrap(), 1);
+
+        let pending = store
+            .list_memory_proposals(&MemoryProposalQuery {
+                space_id: Some(MemorySpaceId::unchecked("profile_dense")),
+                status: Some(MemoryProposalReviewStatus::PendingReview),
+                dedupe_key: None,
+                limit: None,
+                offset: None,
+            })
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+
+        let bad_space = store
+            .save_memory_proposal(
+                &MemoryProposalEnvelope {
+                    space_id: MemorySpaceId::unchecked("roleplay_lore"),
+                    ..profile_dense_memory_proposal("proposal_bad_space", "profile_dense:bad")
+                },
+                &descriptor,
+                &"2026-06-26T00:02:00Z".to_string(),
+            )
+            .unwrap_err();
+        assert_eq!(bad_space.kind, CoreErrorKind::InvalidInput);
+
+        let bad_scope = store
+            .save_memory_proposal(
+                &MemoryProposalEnvelope {
+                    proposal_id: "proposal_bad_scope".to_string(),
+                    scope: MemoryScope {
+                        scope_type: MemoryScopeType::World,
+                        scope_id: "world-alpha".to_string(),
+                    },
+                    dedupe_key: Some("profile_dense:bad_scope".to_string()),
+                    ..proposal.clone()
+                },
+                &descriptor,
+                &"2026-06-26T00:03:00Z".to_string(),
+            )
+            .unwrap_err();
+        assert_eq!(bad_scope.kind, CoreErrorKind::InvalidInput);
+
+        let bad_operation = store
+            .save_memory_proposal(
+                &MemoryProposalEnvelope {
+                    proposal_id: "proposal_bad_operation".to_string(),
+                    operation: MemoryOperation::Merge,
+                    dedupe_key: Some("profile_dense:bad_operation".to_string()),
+                    ..proposal.clone()
+                },
+                &descriptor,
+                &"2026-06-26T00:04:00Z".to_string(),
+            )
+            .unwrap_err();
+        assert_eq!(bad_operation.kind, CoreErrorKind::InvalidInput);
+
+        let approved = store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "decision_approve".to_string(),
+                    proposal_id: "proposal_one".to_string(),
+                    decision: MemoryGovernanceDecisionKind::Approved,
+                    actor: "human_operator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: proposal.evidence_refs.clone(),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.95),
+                    message: Some("approved for later apply".to_string()),
+                    resulting_revision: None,
+                    decided_at: None,
+                },
+                &"2026-06-26T00:05:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(approved.decision, MemoryGovernanceDecisionKind::Approved);
+
+        let applied = store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "decision_apply".to_string(),
+                    proposal_id: "proposal_one".to_string(),
+                    decision: MemoryGovernanceDecisionKind::Applied,
+                    actor: "curator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: proposal.evidence_refs.clone(),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.97),
+                    message: Some("compatibility projection only".to_string()),
+                    resulting_revision: Some(7),
+                    decided_at: None,
+                },
+                &"2026-06-26T00:06:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(applied.resulting_revision, Some(7));
+
+        let records = store
+            .list_memory_proposals(&MemoryProposalQuery {
+                space_id: None,
+                status: Some(MemoryProposalReviewStatus::Applied),
+                dedupe_key: None,
+                limit: None,
+                offset: None,
+            })
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, MemoryProposalReviewStatus::Applied);
+        assert_eq!(records[0].resulting_revision, Some(7));
+        assert!(store
+            .get_profile_memory(
+                &ProfileId::new("prime-profile"),
+                &ProfileMemoryTarget::Profile,
+                "style"
+            )
+            .unwrap()
+            .is_none());
 
         remove_temp_db(&db_path);
     }
@@ -14118,6 +14954,138 @@ mod tests {
             content: "stale write should be rejected".to_string(),
             metadata: serde_json::json!({}),
             now: "2026-06-20T05:02:00Z".to_string(),
+        }
+    }
+
+    fn profile_dense_memory_proposal(
+        proposal_id: &str,
+        dedupe_key: &str,
+    ) -> MemoryProposalEnvelope {
+        MemoryProposalEnvelope {
+            proposal_id: proposal_id.to_string(),
+            space_id: MemorySpaceId::unchecked("profile_dense"),
+            operation: MemoryOperation::CandidateOnly,
+            scope: MemoryScope {
+                scope_type: MemoryScopeType::Profile,
+                scope_id: "prime-profile".to_string(),
+            },
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked("profile_dense_item"),
+                version: 1,
+            },
+            content: json!({
+                "key": "style",
+                "content": "prefers typed governance review"
+            }),
+            evidence_refs: vec![MemoryEvidenceRef {
+                evidence_type: MemoryEvidenceKind::Wake,
+                ref_id: "wake-alpha".to_string(),
+                label: Some("wake evidence".to_string()),
+            }],
+            confidence: 0.82,
+            durability_rationale: Some("stable profile preference".to_string()),
+            governance_mode: MemoryGovernanceMode::DirectWrite,
+            source: MemoryProposalSource::InWakeTool,
+            dedupe_key: Some(dedupe_key.to_string()),
+            created_at: None,
+        }
+    }
+
+    fn profile_dense_memory_space_descriptor() -> MemorySpaceDescriptor {
+        MemorySpaceDescriptor {
+            space_id: MemorySpaceId::unchecked("profile_dense"),
+            schema_version: 1,
+            module_id: Some("runtime_memory".to_string()),
+            description: "Compact stable Crew profile memory.".to_string(),
+            record_shapes: vec![MemoryRecordShapeDescriptor {
+                shape_id: MemoryRecordShapeId::unchecked("profile_dense_item"),
+                version: 1,
+                description: "Keyed profile or user memory item.".to_string(),
+                fields: vec![
+                    memory_field("key", MemoryFieldType::String, true),
+                    memory_field("content", MemoryFieldType::Markdown, true),
+                    memory_field("metadata_json", MemoryFieldType::Json, false),
+                    memory_field("revision", MemoryFieldType::Integer, true),
+                    memory_field("created_at", MemoryFieldType::Timestamp, true),
+                    memory_field("updated_at", MemoryFieldType::Timestamp, true),
+                ],
+            }],
+            scope_model: MemoryScopeModel {
+                allowed_scopes: vec![MemoryScopeType::Profile, MemoryScopeType::User],
+                primary_scope: MemoryScopeType::Profile,
+            },
+            visibility_model: MemoryVisibilityModel::ProfileLocal,
+            retrieval_strategies: vec![
+                MemoryRetrievalStrategy::DirectLookup,
+                MemoryRetrievalStrategy::QuerySearch,
+            ],
+            indexing: MemoryIndexingPolicy {
+                required_capabilities: vec![
+                    "profile_target_key_lookup".to_string(),
+                    "expected_revision_conflicts".to_string(),
+                ],
+                optional_capabilities: vec![],
+            },
+            prompt_policy: MemoryPromptPolicy::SummaryContext,
+            write_policy: MemoryWritePolicy {
+                default_mode: MemoryGovernanceMode::Candidate,
+                operation_policies: vec![
+                    memory_operation_policy(MemoryOperation::Add, false),
+                    memory_operation_policy(MemoryOperation::Replace, true),
+                    memory_operation_policy(MemoryOperation::Remove, true),
+                    memory_operation_policy(MemoryOperation::CandidateOnly, false),
+                ],
+            },
+            operations: vec![
+                MemoryOperation::Read,
+                MemoryOperation::List,
+                MemoryOperation::Add,
+                MemoryOperation::Replace,
+                MemoryOperation::Remove,
+                MemoryOperation::CandidateOnly,
+            ],
+            provenance_policy: MemoryProvenancePolicy {
+                required_evidence: vec![MemoryEvidenceKind::Wake],
+                source_required: false,
+                rationale_required: false,
+            },
+            retention_policy: MemoryRetentionPolicy::ManualOnly,
+            conflict_policy: MemoryConflictPolicy::ExpectedRevision,
+            diagnostics: MemoryDiagnosticsPolicy {
+                expose_catalog: true,
+                expose_record_counts: true,
+                expose_policy_decisions: true,
+            },
+            export_import: MemoryExportImportPolicy {
+                export_supported: true,
+                import_supported: true,
+                import_governance_mode: MemoryGovernanceMode::ManualReview,
+            },
+        }
+    }
+
+    fn memory_field(
+        field_name: &str,
+        field_type: MemoryFieldType,
+        required: bool,
+    ) -> MemoryRecordFieldDescriptor {
+        MemoryRecordFieldDescriptor {
+            field_name: field_name.to_string(),
+            field_type,
+            required,
+            description: format!("{field_name} field"),
+        }
+    }
+
+    fn memory_operation_policy(
+        operation: MemoryOperation,
+        requires_expected_revision: bool,
+    ) -> MemoryOperationPolicy {
+        MemoryOperationPolicy {
+            operation,
+            governance_mode: MemoryGovernanceMode::Candidate,
+            requires_expected_revision,
+            min_confidence: None,
         }
     }
 

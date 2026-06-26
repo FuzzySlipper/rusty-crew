@@ -34,6 +34,25 @@ const bridge: MemorySpaceReadContext["bridge"] = {
     assert.equal(input.targetId ?? "", "");
     return records.find((record) => record.key === input.key);
   },
+  async saveMemoryProposal(proposal) {
+    return {
+      proposal,
+      status: "pending_review",
+      selected_governance_mode: "curator_route",
+      created_at: "2026-06-26T00:00:00.000Z",
+      updated_at: "2026-06-26T00:00:00.000Z",
+    };
+  },
+  async listMemoryProposals(query) {
+    assert.equal(query.space_id ?? "profile_dense", "profile_dense");
+    return [];
+  },
+  async recordMemoryGovernanceDecision(decision) {
+    return {
+      ...decision,
+      decided_at: decision.decided_at ?? "2026-06-26T00:00:00.000Z",
+    };
+  },
 };
 
 const context: MemorySpaceReadContext = { bridge };
@@ -122,6 +141,86 @@ const invalidQuery = await handleMemorySpaceAdminRequest(
 );
 assert.equal(invalidQuery.status, 400);
 assert.equal(errorReason(invalidQuery), "target_id_required");
+
+const proposalCreate = await handleMemorySpaceAdminRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/memory/proposals",
+    requestId: "proposal-create",
+    body: {
+      proposal_id: "proposal_one",
+      space_id: "profile_dense",
+      operation: "candidate_only",
+      scope: { scope_type: "profile", scope_id: "rusty-crew-runner" },
+      shape: { shape_id: "profile_dense_item", version: 1 },
+      content: { key: "working_style", content: "steady" },
+      evidence_refs: [{ evidence_type: "wake", ref_id: "wake-alpha" }],
+      confidence: 0.82,
+      governance_mode: "direct_write",
+      source: "in_wake_tool",
+      dedupe_key: "profile_dense:working_style",
+    },
+  },
+  context,
+);
+assert.equal(proposalCreate.status, 200);
+assert.equal(
+  okData<{ status: string; selected_governance_mode: string }>(proposalCreate)
+    .selected_governance_mode,
+  "curator_route",
+);
+
+const proposalList = await handleMemorySpaceAdminRequest(
+  {
+    method: "GET",
+    url: "/v1/admin/memory/proposals?spaceId=profile_dense&status=pending_review",
+    requestId: "proposal-list",
+  },
+  context,
+);
+assert.equal(proposalList.status, 200);
+
+const proposalDecision = await handleMemorySpaceAdminRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/memory/proposals/proposal_one/decisions",
+    requestId: "proposal-decision",
+    body: {
+      decision_id: "decision_one",
+      proposal_id: "proposal_one",
+      decision: "approved",
+      actor: "operator",
+      source: "human",
+      evidence_refs: [{ evidence_type: "ui", ref_id: "admin" }],
+      policy_mode: "manual_review",
+    },
+  },
+  context,
+);
+assert.equal(proposalDecision.status, 200);
+
+const proposalDecisionMismatch = await handleMemorySpaceAdminRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/memory/proposals/proposal_one/decisions",
+    requestId: "proposal-decision-mismatch",
+    body: {
+      decision_id: "decision_mismatch",
+      proposal_id: "proposal_two",
+      decision: "approved",
+      actor: "operator",
+      source: "human",
+      evidence_refs: [],
+      policy_mode: "manual_review",
+    },
+  },
+  context,
+);
+assert.equal(proposalDecisionMismatch.status, 400);
+assert.equal(
+  errorReason(proposalDecisionMismatch),
+  "memory_proposal_id_mismatch",
+);
 
 const catalogTool = await memorySpaceCatalogTool(context).execute(
   "catalog",

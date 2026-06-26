@@ -42,8 +42,10 @@ use rusty_crew_core_persistence::{
     SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
-    AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId, MemorySpaceDescriptor,
-    MessageSlotId, MessageVariantId,
+    AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
+    MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
+    MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
+    MessageVariantId,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -578,6 +580,27 @@ impl NativeBridge {
 
     pub fn list_memory_space_descriptors(&self) -> CoreResult<Vec<MemorySpaceDescriptor>> {
         self.engine()?.list_memory_space_descriptors()
+    }
+
+    pub fn save_memory_proposal(
+        &self,
+        proposal: MemoryProposalEnvelope,
+    ) -> CoreResult<MemoryProposalRecord> {
+        self.engine()?.save_memory_proposal(proposal)
+    }
+
+    pub fn list_memory_proposals(
+        &self,
+        query: &MemoryProposalQuery,
+    ) -> CoreResult<Vec<MemoryProposalRecord>> {
+        self.engine()?.list_memory_proposals(query)
+    }
+
+    pub fn record_memory_governance_decision(
+        &self,
+        decision: &MemoryGovernanceDecisionInput,
+    ) -> CoreResult<MemoryGovernanceDecisionRecord> {
+        self.engine()?.record_memory_governance_decision(decision)
     }
 
     pub fn get_profile_memory(
@@ -2896,6 +2919,40 @@ impl NativeBridgeBinding {
             .list_memory_space_descriptors()
             .map_err(to_napi_error)?;
         serialize_json(&descriptors, "memory space descriptors")
+    }
+
+    #[napi]
+    pub fn save_memory_proposal_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let proposal = parse_json::<MemoryProposalEnvelope>(&input_json, "memory proposal")?;
+        let record = bridge
+            .save_memory_proposal(proposal)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "memory proposal record")
+    }
+
+    #[napi]
+    pub fn list_memory_proposals_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<MemoryProposalQuery>(&input_json, "memory proposal query")?;
+        let records = bridge
+            .list_memory_proposals(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "memory proposal records")
+    }
+
+    #[napi]
+    pub fn record_memory_governance_decision_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let decision =
+            parse_json::<MemoryGovernanceDecisionInput>(&input_json, "memory governance decision")?;
+        let record = bridge
+            .record_memory_governance_decision(&decision)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "memory governance decision record")
     }
 
     #[napi]

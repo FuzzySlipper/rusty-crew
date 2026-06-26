@@ -1,4 +1,7 @@
 import type {
+  MemoryGovernanceDecisionInput,
+  MemoryProposalEnvelope,
+  MemoryProposalQuery,
   MemorySpaceDescriptor,
   MemorySpaceId,
   SessionState,
@@ -19,13 +22,19 @@ const PROFILE_DENSE_SPACE_ID = "profile_dense";
 export interface MemorySpaceReadContext {
   bridge: Pick<
     NativeBridgeModule,
-    "getProfileMemory" | "listMemorySpaceDescriptors" | "listProfileMemory"
+    | "getProfileMemory"
+    | "listMemoryProposals"
+    | "listMemorySpaceDescriptors"
+    | "listProfileMemory"
+    | "recordMemoryGovernanceDecision"
+    | "saveMemoryProposal"
   >;
 }
 
 export interface MemorySpaceAdminRequest {
   method: string;
   url: string;
+  body?: unknown;
   requestId?: string;
 }
 
@@ -84,15 +93,21 @@ export async function handleMemorySpaceAdminRequest(
 ): Promise<AdminRouteResult> {
   const requestId = request.requestId ?? "memory-space";
   const method = request.method.toUpperCase();
-  if (method !== "GET") {
-    return routeFailure(405, requestId, {
-      reason_code: "memory_space_read_only",
-      message: "memory-space routes are read-only and only support GET",
-    });
-  }
 
   const url = new URL(request.url, "http://rusty-crew.local");
   try {
+    if (url.pathname.startsWith("/v1/admin/memory/proposals")) {
+      return await handleMemoryProposalAdminRequest(
+        { method, url, body: request.body, requestId },
+        context,
+      );
+    }
+    if (method !== "GET") {
+      return routeFailure(405, requestId, {
+        reason_code: "memory_space_read_only",
+        message: "memory-space routes are read-only and only support GET",
+      });
+    }
     const descriptors = await context.bridge.listMemorySpaceDescriptors();
     const match = matchMemorySpaceRoute(url.pathname);
     if (match.kind === "catalog") {
@@ -137,6 +152,63 @@ export async function handleMemorySpaceAdminRequest(
         error instanceof Error ? error.message : "invalid memory-space input",
     });
   }
+}
+
+async function handleMemoryProposalAdminRequest(
+  request: {
+    method: string;
+    url: URL;
+    body?: unknown;
+    requestId: string;
+  },
+  context: MemorySpaceReadContext,
+): Promise<AdminRouteResult> {
+  const match = matchMemoryProposalRoute(request.url.pathname);
+  if (match.kind === "unknown") {
+    return routeFailure(404, request.requestId, {
+      reason_code: "unknown_memory_proposal_route",
+      message: `unknown memory proposal route ${request.url.pathname}`,
+    });
+  }
+  if (match.kind === "catalog") {
+    if (request.method === "GET") {
+      return routeSuccess(
+        request.requestId,
+        await context.bridge.listMemoryProposals(
+          parseMemoryProposalQuery(request.url.searchParams),
+        ),
+      );
+    }
+    if (request.method === "POST") {
+      return routeSuccess(
+        request.requestId,
+        await context.bridge.saveMemoryProposal(
+          memoryProposalBody(request.body),
+        ),
+      );
+    }
+    return routeFailure(405, request.requestId, {
+      reason_code: "memory_proposal_method_not_allowed",
+      message: "memory proposal catalog supports GET and POST",
+    });
+  }
+  if (request.method !== "POST") {
+    return routeFailure(405, request.requestId, {
+      reason_code: "memory_proposal_decision_method_not_allowed",
+      message: "memory proposal decisions only support POST",
+    });
+  }
+  const decision = memoryGovernanceDecisionBody(request.body);
+  if (decision.proposal_id !== match.proposalId) {
+    return routeFailure(400, request.requestId, {
+      reason_code: "memory_proposal_id_mismatch",
+      message: "memory governance decision proposal_id must match the route",
+    });
+  }
+  return routeSuccess(
+    request.requestId,
+    await context.bridge.recordMemoryGovernanceDecision(decision),
+  );
 }
 
 export async function listMemorySpaceRecords(
@@ -326,6 +398,79 @@ function matchMemorySpaceRoute(
     return { kind: "record", spaceId: parts[0]!, key: parts[2]! };
   }
   return { kind: "unknown" };
+}
+
+function matchMemoryProposalRoute(
+  pathname: string,
+):
+  | { kind: "catalog" }
+  | { kind: "decision"; proposalId: string }
+  | { kind: "unknown" } {
+  if (pathname === "/v1/admin/memory/proposals") return { kind: "catalog" };
+  const prefix = "/v1/admin/memory/proposals/";
+  if (!pathname.startsWith(prefix)) return { kind: "unknown" };
+  const parts = pathname
+    .slice(prefix.length)
+    .split("/")
+    .map((part) => decodeURIComponent(part))
+    .filter((part) => part.length > 0);
+  if (parts.length === 2 && parts[1] === "decisions") {
+    return { kind: "decision", proposalId: parts[0]! };
+  }
+  return { kind: "unknown" };
+}
+
+function parseMemoryProposalQuery(
+  params: URLSearchParams,
+): MemoryProposalQuery {
+  return {
+    space_id: optionalQueryString(params, "spaceId") as
+      | MemorySpaceId
+      | undefined,
+    status: optionalQueryString(
+      params,
+      "status",
+    ) as MemoryProposalQuery["status"],
+    dedupe_key: optionalQueryString(params, "dedupeKey"),
+    limit: boundedInteger(
+      Number(params.get("limit") ?? DEFAULT_LIMIT),
+      DEFAULT_LIMIT,
+      1,
+      MAX_LIMIT,
+    ),
+    offset: boundedInteger(
+      Number(params.get("offset") ?? 0),
+      0,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  };
+}
+
+function memoryProposalBody(body: unknown): MemoryProposalEnvelope {
+  if (!isRecord(body)) {
+    throw new MemorySpaceInputError(
+      "invalid_memory_proposal_input",
+      "memory proposal request body must be an object",
+    );
+  }
+  return body as unknown as MemoryProposalEnvelope;
+}
+
+function memoryGovernanceDecisionBody(
+  body: unknown,
+): MemoryGovernanceDecisionInput {
+  if (!isRecord(body)) {
+    throw new MemorySpaceInputError(
+      "invalid_memory_governance_decision_input",
+      "memory governance decision request body must be an object",
+    );
+  }
+  return body as unknown as MemoryGovernanceDecisionInput;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function findDescriptor(

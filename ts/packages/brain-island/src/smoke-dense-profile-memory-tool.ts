@@ -26,6 +26,7 @@ try {
     "add",
     "replace",
     "remove",
+    "candidate_only",
   ]);
   assert.equal(profileDense.conflict_policy, "expected_revision");
   assert.equal(profileDense.write_policy.default_mode, "direct_write");

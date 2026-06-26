@@ -34,10 +34,12 @@ use rusty_crew_core_protocol::{
     CoreEvent, CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
     DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
-    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemorySpaceDescriptor, MessageSlotId,
-    MessageVariantId, ParentConsumptionPolicy, ProfileId, ProviderStateAbsenceReason,
-    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId,
-    SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
+    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
+    MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
+    MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
+    ParentConsumptionPolicy, ProfileId, ProviderStateAbsenceReason, ProviderStateClearReason,
+    ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId, SessionKind, SessionState,
+    SessionStatus, ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -774,6 +776,49 @@ impl CoreEngine {
         Ok(vec![memory_spaces::profile_dense_descriptor(
             &ProfileMemoryCaps::default(),
         )])
+    }
+
+    pub fn save_memory_proposal(
+        &self,
+        mut proposal: MemoryProposalEnvelope,
+    ) -> CoreResult<MemoryProposalRecord> {
+        let descriptor = self.memory_space_descriptor(&proposal.space_id)?;
+        let now = self.now();
+        if proposal.created_at.is_none() {
+            proposal.created_at = Some(now.clone());
+        }
+        self.store
+            .save_memory_proposal(&proposal, &descriptor, &now)
+    }
+
+    pub fn list_memory_proposals(
+        &self,
+        query: &MemoryProposalQuery,
+    ) -> CoreResult<Vec<MemoryProposalRecord>> {
+        self.store.list_memory_proposals(query)
+    }
+
+    pub fn record_memory_governance_decision(
+        &self,
+        decision: &MemoryGovernanceDecisionInput,
+    ) -> CoreResult<MemoryGovernanceDecisionRecord> {
+        self.store
+            .record_memory_governance_decision(decision, &self.now())
+    }
+
+    fn memory_space_descriptor(
+        &self,
+        space_id: &rusty_crew_core_protocol::MemorySpaceId,
+    ) -> CoreResult<MemorySpaceDescriptor> {
+        self.list_memory_space_descriptors()?
+            .into_iter()
+            .find(|descriptor| descriptor.space_id == *space_id)
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("memory space {} is not registered", space_id),
+                )
+            })
     }
 
     pub fn get_profile_memory(

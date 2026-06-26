@@ -1164,6 +1164,56 @@ export interface MemoryProposalEnvelope {
   created_at?: string;
 }
 
+export type MemoryProposalReviewStatus =
+  | "pending_review"
+  | "approved"
+  | "rejected"
+  | "applied";
+
+export interface MemoryProposalRecord {
+  proposal: MemoryProposalEnvelope;
+  status: MemoryProposalReviewStatus;
+  selected_governance_mode: MemoryGovernanceMode;
+  created_at: string;
+  updated_at: string;
+  decided_at?: string;
+  applied_at?: string;
+  resulting_revision?: number;
+  duplicate_of?: string;
+}
+
+export interface MemoryProposalQuery {
+  space_id?: MemorySpaceId;
+  status?: MemoryProposalReviewStatus;
+  dedupe_key?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export type MemoryGovernanceDecisionKind =
+  | "routed_to_review"
+  | "approved"
+  | "rejected"
+  | "applied";
+
+export interface MemoryGovernanceDecisionInput {
+  decision_id: string;
+  proposal_id: string;
+  decision: MemoryGovernanceDecisionKind;
+  actor: string;
+  source: MemoryProposalSource;
+  evidence_refs: MemoryEvidenceRef[];
+  policy_mode: MemoryGovernanceMode;
+  confidence?: number;
+  message?: string;
+  resulting_revision?: number;
+  decided_at?: string;
+}
+
+export interface MemoryGovernanceDecisionRecord extends MemoryGovernanceDecisionInput {
+  decided_at: string;
+}
+
 const mutableMemoryOperations = new Set<MemoryOperation>([
   "add",
   "replace",

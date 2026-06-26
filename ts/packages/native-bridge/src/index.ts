@@ -31,6 +31,11 @@ import type {
   EventSubscription,
   ExternalEvent,
   ManifestOperationName,
+  MemoryGovernanceDecisionInput,
+  MemoryGovernanceDecisionRecord,
+  MemoryProposalEnvelope,
+  MemoryProposalQuery,
+  MemoryProposalRecord,
   MemorySpaceDescriptor,
   PlatformAdapterHandle,
   PlatformAdapterRegistration,
@@ -370,6 +375,9 @@ interface NativeBridgeBinding {
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
   listMemorySpaceDescriptorsJson(): string;
+  saveMemoryProposalJson(inputJson: string): string;
+  listMemoryProposalsJson(inputJson: string): string;
+  recordMemoryGovernanceDecisionJson(inputJson: string): string;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): NativeProfileMemoryRecord[];
@@ -1187,6 +1195,15 @@ export interface NativeBridgeModule {
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
   listMemorySpaceDescriptors(): Promise<MemorySpaceDescriptor[]>;
+  saveMemoryProposal(
+    proposal: MemoryProposalEnvelope,
+  ): Promise<MemoryProposalRecord>;
+  listMemoryProposals(
+    query: MemoryProposalQuery,
+  ): Promise<MemoryProposalRecord[]>;
+  recordMemoryGovernanceDecision(
+    decision: MemoryGovernanceDecisionInput,
+  ): Promise<MemoryGovernanceDecisionRecord>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
@@ -1388,6 +1405,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     storageSchema: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
     listMemorySpaceDescriptors: unavailable("initialize_engine"),
+    saveMemoryProposal: unavailable("initialize_engine"),
+    listMemoryProposals: unavailable("initialize_engine"),
+    recordMemoryGovernanceDecision: unavailable("initialize_engine"),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
     queryMessageSlots: unavailable("query_message_slots"),
@@ -2081,6 +2101,18 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.listMemorySpaceDescriptorsJson(),
       ) as MemorySpaceDescriptor[],
+    saveMemoryProposal: async (proposal) =>
+      JSON.parse(
+        binding.saveMemoryProposalJson(JSON.stringify(proposal)),
+      ) as MemoryProposalRecord,
+    listMemoryProposals: async (query) =>
+      JSON.parse(
+        binding.listMemoryProposalsJson(JSON.stringify(query)),
+      ) as MemoryProposalRecord[],
+    recordMemoryGovernanceDecision: async (decision) =>
+      JSON.parse(
+        binding.recordMemoryGovernanceDecisionJson(JSON.stringify(decision)),
+      ) as MemoryGovernanceDecisionRecord,
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),
     saveMessageVariant: async (input) =>
@@ -2193,7 +2225,7 @@ function createNativeBridgeModule(
         input.targetType,
         input.targetId,
         input.key,
-      ),
+      ) ?? undefined,
     addProfileMemory: async (write) => binding.addProfileMemory(write),
     replaceProfileMemory: async (replace) =>
       binding.replaceProfileMemory(replace),

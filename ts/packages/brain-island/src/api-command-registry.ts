@@ -33,6 +33,7 @@ export type ApiCapabilityScope =
   | "delegation"
   | "mcp"
   | "config"
+  | "governance"
   | "maintenance"
   | "memory"
   | "scheduler"
@@ -985,6 +986,30 @@ export const API_CAPABILITIES = [
     ["memory"],
   ),
   readCapability(
+    "admin.memory.proposals.list",
+    "GET",
+    "/v1/admin/memory/proposals",
+    "List typed Rusty Crew memory proposals for review surfaces.",
+    "admin",
+    ["memory", "governance"],
+  ),
+  mutationCapability(
+    "admin.memory.proposals.create",
+    "POST",
+    "/v1/admin/memory/proposals",
+    "Create a typed Rusty Crew memory proposal without directly mutating memory records.",
+    "admin",
+    ["memory", "governance"],
+  ),
+  mutationCapability(
+    "admin.memory.proposals.decide",
+    "POST",
+    "/v1/admin/memory/proposals/{proposal_id}/decisions",
+    "Record a typed Rusty Crew memory governance decision.",
+    "admin",
+    ["memory", "governance"],
+  ),
+  readCapability(
     "admin.diagnostics.provider_state",
     "GET",
     "/v1/admin/diagnostics/provider-state",
@@ -1196,6 +1221,27 @@ function readCapability(
     description,
     auth,
     mutation: "read",
+    stability: "stable",
+    tags,
+    public: true,
+  };
+}
+
+function mutationCapability(
+  id: string,
+  method: "POST",
+  pathTemplate: string,
+  description: string,
+  auth: ApiCapabilityAuth,
+  tags: ApiCapabilityScope[],
+): ApiCapabilityDescriptor {
+  return {
+    id,
+    method,
+    path_template: pathTemplate,
+    description,
+    auth,
+    mutation: "control",
     stability: "stable",
     tags,
     public: true,

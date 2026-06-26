@@ -478,6 +478,76 @@ impl MemoryProposalEnvelope {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryProposalReviewStatus {
+    PendingReview,
+    Approved,
+    Rejected,
+    Applied,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryProposalRecord {
+    pub proposal: MemoryProposalEnvelope,
+    pub status: MemoryProposalReviewStatus,
+    pub selected_governance_mode: MemoryGovernanceMode,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub decided_at: Option<IsoTimestamp>,
+    pub applied_at: Option<IsoTimestamp>,
+    pub resulting_revision: Option<u64>,
+    pub duplicate_of: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryProposalQuery {
+    pub space_id: Option<MemorySpaceId>,
+    pub status: Option<MemoryProposalReviewStatus>,
+    pub dedupe_key: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryGovernanceDecisionKind {
+    RoutedToReview,
+    Approved,
+    Rejected,
+    Applied,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryGovernanceDecisionInput {
+    pub decision_id: String,
+    pub proposal_id: String,
+    pub decision: MemoryGovernanceDecisionKind,
+    pub actor: String,
+    pub source: MemoryProposalSource,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub policy_mode: MemoryGovernanceMode,
+    pub confidence: Option<f32>,
+    pub message: Option<String>,
+    pub resulting_revision: Option<u64>,
+    pub decided_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryGovernanceDecisionRecord {
+    pub decision_id: String,
+    pub proposal_id: String,
+    pub decision: MemoryGovernanceDecisionKind,
+    pub actor: String,
+    pub source: MemoryProposalSource,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub policy_mode: MemoryGovernanceMode,
+    pub confidence: Option<f32>,
+    pub message: Option<String>,
+    pub resulting_revision: Option<u64>,
+    pub decided_at: IsoTimestamp,
+}
+
 fn validate_identifier(label: &str, value: &str) -> CoreResult<()> {
     if value.is_empty() {
         return invalid(format!("{label} must not be empty"));
