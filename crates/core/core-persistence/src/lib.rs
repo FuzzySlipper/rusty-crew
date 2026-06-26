@@ -5,6 +5,10 @@
 
 pub mod module_schema;
 
+use crate::module_schema::{
+    compiled_module_schema_registry, validate_version_progression, InstalledModuleSchemaRecord,
+    ModuleId, ModuleSchemaCapability, ModuleSchemaRegistry,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
     AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, AttachmentId,
@@ -26,7 +30,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 19;
+const CURRENT_SCHEMA_VERSION: i64 = 20;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -144,6 +148,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 19,
         description: "add generic chat attachments and data-bank scopes",
         apply: migrate_v19_add_chat_attachments,
+    },
+    SchemaMigration {
+        version: 20,
+        description: "add module schema installed-version registry",
+        apply: migrate_v20_add_module_schema_registry,
     },
 ];
 
@@ -3484,10 +3493,46 @@ impl CoordinationStore {
         load_schema_migration_records(&conn)
     }
 
+    pub fn installed_module_schemas(&self) -> CoreResult<Vec<InstalledModuleSchemaRecord>> {
+        let conn = self.conn()?;
+        load_installed_module_schema_records(&conn)
+    }
+
+    pub fn install_module_schema_registry(
+        &self,
+        registry: &ModuleSchemaRegistry,
+        supported_capabilities: &[ModuleSchemaCapability],
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<InstalledModuleSchemaRecord>> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start module schema registry install", error))?;
+        let installed =
+            install_module_schema_registry_in_tx(&tx, registry, supported_capabilities, now)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit module schema registry install", error))?;
+        Ok(installed)
+    }
+
     fn migrate(&self) -> CoreResult<()> {
         let mut conn = self.conn()?;
         prepare_migration_metadata(&conn)?;
-        apply_schema_migrations(&mut conn, SCHEMA_MIGRATIONS)
+        apply_schema_migrations(&mut conn, SCHEMA_MIGRATIONS)?;
+        let now = "startup".to_string();
+        let tx = conn.transaction().map_err(|error| {
+            persistence_error("start compiled module schema registry install", error)
+        })?;
+        install_module_schema_registry_in_tx(
+            &tx,
+            &compiled_module_schema_registry(),
+            &sqlite_module_schema_capabilities(),
+            &now,
+        )?;
+        tx.commit().map_err(|error| {
+            persistence_error("commit compiled module schema registry install", error)
+        })?;
+        Ok(())
     }
 
     fn save_completion_packet_in_tx(
@@ -3723,6 +3768,14 @@ fn sqlite_storage_capabilities() -> Vec<RuntimeStorageCapability> {
         detail: detail.to_string(),
     })
     .collect()
+}
+
+fn sqlite_module_schema_capabilities() -> Vec<ModuleSchemaCapability> {
+    vec![
+        ModuleSchemaCapability::Transactions,
+        ModuleSchemaCapability::FullTextSearch,
+        ModuleSchemaCapability::JsonDocuments,
+    ]
 }
 
 fn hot_query_plan_checks(conn: &Connection) -> CoreResult<Vec<RuntimeQueryPlanCheck>> {
@@ -4653,6 +4706,147 @@ fn migrate_v19_add_chat_attachments(tx: &rusqlite::Transaction<'_>) -> CoreResul
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 19", error))
+}
+
+fn migrate_v20_add_module_schema_registry(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS module_schema_versions (
+                module_id TEXT PRIMARY KEY,
+                installed_version INTEGER NOT NULL,
+                descriptor_fingerprint TEXT NOT NULL,
+                installed_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_module_schema_versions_version
+                ON module_schema_versions(installed_version, module_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 20", error))
+}
+
+fn install_module_schema_registry_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    registry: &ModuleSchemaRegistry,
+    supported_capabilities: &[ModuleSchemaCapability],
+    now: &IsoTimestamp,
+) -> CoreResult<Vec<InstalledModuleSchemaRecord>> {
+    registry.validate()?;
+    registry.validate_capabilities(supported_capabilities)?;
+
+    let mut installed = Vec::new();
+    for bundle in registry.bundles() {
+        let module_id = bundle.module_id.as_str();
+        let descriptor_fingerprint = bundle.descriptor_fingerprint()?;
+        let existing = load_installed_module_schema_record(tx, module_id)?;
+        if let Some(existing) = existing {
+            validate_version_progression(Some(existing.installed_version), bundle.schema_version)?;
+            if existing.installed_version == bundle.schema_version {
+                if existing.descriptor_fingerprint != descriptor_fingerprint {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "module {module_id} descriptor fingerprint changed without a schema version bump"
+                        ),
+                    ));
+                }
+                installed.push(existing);
+                continue;
+            }
+        } else {
+            validate_version_progression(None, bundle.schema_version)?;
+        }
+
+        tx.execute(
+            "INSERT INTO module_schema_versions (
+                module_id,
+                installed_version,
+                descriptor_fingerprint,
+                installed_at,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?4)
+            ON CONFLICT(module_id) DO UPDATE SET
+                installed_version = excluded.installed_version,
+                descriptor_fingerprint = excluded.descriptor_fingerprint,
+                updated_at = excluded.updated_at",
+            params![
+                module_id,
+                bundle.schema_version as i64,
+                descriptor_fingerprint.as_str(),
+                now.as_str(),
+            ],
+        )
+        .map_err(|error| persistence_error("upsert module schema version", error))?;
+        installed.push(
+            load_installed_module_schema_record(tx, module_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    format!("module {module_id} schema version missing after install"),
+                )
+            })?,
+        );
+    }
+
+    Ok(installed)
+}
+
+fn load_installed_module_schema_records(
+    conn: &Connection,
+) -> CoreResult<Vec<InstalledModuleSchemaRecord>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT module_id, installed_version, descriptor_fingerprint, installed_at, updated_at
+             FROM module_schema_versions
+             ORDER BY module_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare installed module schema records", error))?;
+    let rows = stmt
+        .query_map([], row_to_installed_module_schema_record)
+        .map_err(|error| persistence_error("query installed module schema records", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load installed module schema records", error))
+}
+
+fn load_installed_module_schema_record(
+    conn: &Connection,
+    module_id: &str,
+) -> CoreResult<Option<InstalledModuleSchemaRecord>> {
+    conn.query_row(
+        "SELECT module_id, installed_version, descriptor_fingerprint, installed_at, updated_at
+         FROM module_schema_versions
+         WHERE module_id = ?1",
+        params![module_id],
+        row_to_installed_module_schema_record,
+    )
+    .optional()
+    .map_err(|error| persistence_error("load installed module schema record", error))
+}
+
+fn row_to_installed_module_schema_record(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<InstalledModuleSchemaRecord> {
+    let raw_module_id: String = row.get(0)?;
+    let installed_version: i64 = row.get(1)?;
+    if installed_version <= 0 || installed_version > i64::from(u32::MAX) {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            1,
+            rusqlite::types::Type::Integer,
+            Box::new(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("invalid installed module schema version {installed_version}"),
+            )),
+        ));
+    }
+    let module_id = ModuleId::new(raw_module_id).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(InstalledModuleSchemaRecord {
+        module_id,
+        installed_version: installed_version as u32,
+        descriptor_fingerprint: row.get(2)?,
+        installed_at: row.get(3)?,
+        updated_at: row.get(4)?,
+    })
 }
 
 fn save_provider_wire_state_in_tx(
@@ -10327,6 +10521,12 @@ fn persistence_error(context: &str, error: impl std::error::Error) -> CoreError 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module_schema::{
+        IndexPurpose, LogicalStoreDescriptor, ModuleCapabilityRequirement, ModuleId,
+        ModuleIndexDescriptor, ModuleOwner, ModuleRetentionDeclaration, ModuleSchemaBundle,
+        ModuleSchemaRegistry, ModuleTableDescriptor, QueryCatalogEntryDescriptor,
+        RepositoryContractDescriptor, StoreName, TableDeclaration, TableName,
+    };
     use rusty_crew_core_protocol::{AgentMessage, ToolDescriptor};
     use serde_json::json;
     use std::{
@@ -10398,6 +10598,7 @@ mod tests {
         assert!(table_exists(&db_path, "message_blocks"));
         assert!(table_exists(&db_path, "channel_bindings"));
         assert!(table_exists(&db_path, "mcp_bindings"));
+        assert!(table_exists(&db_path, "module_schema_versions"));
         assert!(index_exists(
             &db_path,
             "idx_worker_runs_parent_status_created"
@@ -10414,6 +10615,143 @@ mod tests {
         assert!(index_exists(&db_path, "idx_provider_wire_states_current"));
         assert!(index_exists(&db_path, "idx_channel_bindings_external"));
         assert!(index_exists(&db_path, "idx_mcp_bindings_agent_profile"));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn module_schema_registry_tracks_fresh_install_and_existing_descriptor() {
+        let db_path = temp_db_path("module-schema-fresh");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let registry =
+            ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(1).unwrap()]).unwrap();
+
+        let installed = store
+            .install_module_schema_registry(
+                &registry,
+                &[ModuleSchemaCapability::Transactions],
+                &"2026-06-26T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(installed.len(), 1);
+        assert_eq!(installed[0].module_id.as_str(), "simple_kv");
+        assert_eq!(installed[0].installed_version, 1);
+
+        let second = store
+            .install_module_schema_registry(
+                &registry,
+                &[ModuleSchemaCapability::Transactions],
+                &"2026-06-26T00:01:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(second, installed);
+        assert_eq!(store.installed_module_schemas().unwrap(), installed);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn module_schema_registry_allows_version_upgrade() {
+        let db_path = temp_db_path("module-schema-upgrade");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let v1 = ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(1).unwrap()]).unwrap();
+        let v2 = ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(2).unwrap()]).unwrap();
+
+        store
+            .install_module_schema_registry(
+                &v1,
+                &[ModuleSchemaCapability::Transactions],
+                &"2026-06-26T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        let installed = store
+            .install_module_schema_registry(
+                &v2,
+                &[ModuleSchemaCapability::Transactions],
+                &"2026-06-26T00:02:00Z".to_string(),
+            )
+            .unwrap();
+
+        assert_eq!(installed[0].installed_version, 2);
+        assert_eq!(installed[0].installed_at, "2026-06-26T00:00:00Z");
+        assert_eq!(installed[0].updated_at, "2026-06-26T00:02:00Z");
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn module_schema_registry_rejects_same_version_fingerprint_change() {
+        let db_path = temp_db_path("module-schema-fingerprint");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let v1 = ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(1).unwrap()]).unwrap();
+        let mut changed_bundle = simple_kv_schema_bundle(1).unwrap();
+        changed_bundle.migration_notes = vec!["same version but changed descriptor".to_string()];
+        let changed = ModuleSchemaRegistry::new(vec![changed_bundle]).unwrap();
+
+        store
+            .install_module_schema_registry(
+                &v1,
+                &[ModuleSchemaCapability::Transactions],
+                &"2026-06-26T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        let error = store
+            .install_module_schema_registry(
+                &changed,
+                &[ModuleSchemaCapability::Transactions],
+                &"2026-06-26T00:01:00Z".to_string(),
+            )
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::ActionRejected);
+        assert!(error.message.contains("fingerprint changed"));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn module_schema_registry_rejects_missing_required_capability() {
+        let db_path = temp_db_path("module-schema-capability");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let registry =
+            ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(1).unwrap()]).unwrap();
+
+        let error = store
+            .install_module_schema_registry(&registry, &[], &"2026-06-26T00:00:00Z".to_string())
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+        assert!(error
+            .message
+            .contains("requires unsupported storage capability"));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn module_schema_registry_rejects_invalid_installed_state() {
+        let db_path = temp_db_path("module-schema-invalid-state");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute(
+                "INSERT INTO module_schema_versions (
+                    module_id,
+                    installed_version,
+                    descriptor_fingerprint,
+                    installed_at,
+                    updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?4)",
+                params!["simple_kv", 0_i64, "bad", "2026-06-26T00:00:00Z"],
+            )
+            .unwrap();
+        }
+
+        let error = store.installed_module_schemas().unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
+        assert!(error
+            .message
+            .contains("invalid installed module schema version"));
 
         remove_temp_db(&db_path);
     }
@@ -12851,6 +13189,63 @@ mod tests {
             module_id: "openai-responses".to_string(),
             strategy_id: "replay".to_string(),
         }
+    }
+
+    fn simple_kv_schema_bundle(version: u32) -> CoreResult<ModuleSchemaBundle> {
+        Ok(ModuleSchemaBundle {
+            module_id: ModuleId::new("simple_kv")?,
+            schema_version: version,
+            owner: ModuleOwner {
+                crate_name: "core_persistence".to_string(),
+                rust_module: "simple_kv".to_string(),
+            },
+            logical_stores: vec![LogicalStoreDescriptor {
+                store_name: StoreName::new("entries")?,
+                description: "Simple scoped key/value records".to_string(),
+            }],
+            tables: vec![ModuleTableDescriptor {
+                table_name: TableName::new("entries")?,
+                logical_store: StoreName::new("entries")?,
+                declaration: TableDeclaration::Owned,
+            }],
+            indexes: vec![ModuleIndexDescriptor {
+                table_name: TableName::new("entries")?,
+                purpose: IndexPurpose::new("scope_key")?,
+                columns: vec![
+                    "scope_type".to_string(),
+                    "scope_id".to_string(),
+                    "entry_key".to_string(),
+                ],
+                unique: true,
+            }],
+            retention: vec![ModuleRetentionDeclaration::PurgeExpired {
+                store_name: StoreName::new("entries")?,
+                timestamp_column: "expires_at".to_string(),
+            }],
+            capability_requirements: vec![
+                ModuleCapabilityRequirement::required(ModuleSchemaCapability::Transactions),
+                ModuleCapabilityRequirement::optional(ModuleSchemaCapability::JsonDocuments),
+            ],
+            repository_contracts: vec![
+                RepositoryContractDescriptor {
+                    contract_name: "get_kv".to_string(),
+                    description: "Get a key/value entry".to_string(),
+                },
+                RepositoryContractDescriptor {
+                    contract_name: "put_kv".to_string(),
+                    description: "Create or replace a key/value entry".to_string(),
+                },
+            ],
+            query_catalog_entries: vec![QueryCatalogEntryDescriptor {
+                query_id: "list_entries_by_scope".to_string(),
+                store_name: StoreName::new("entries")?,
+                description: "List simple key/value entries for a scope".to_string(),
+                parameter_schema_id: Some("simple_kv_scope_query".to_string()),
+            }],
+            export_hooks: Vec::new(),
+            import_hooks: Vec::new(),
+            migration_notes: vec![format!("schema version {version}")],
+        })
     }
 
     struct ProviderWireStateWriteFixture<'a> {

@@ -6,6 +6,7 @@
 
 use rusty_crew_core_protocol::{CoreError, CoreErrorKind, CoreResult};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::fmt;
 
 const MAX_IDENTIFIER_BYTES: usize = 48;
@@ -224,6 +225,12 @@ impl ModuleSchemaBundle {
             physical_indexes,
         })
     }
+
+    pub fn descriptor_fingerprint(&self) -> CoreResult<String> {
+        let value = serde_json::to_value(self).map_err(descriptor_fingerprint_error)?;
+        let canonical = canonical_json(value);
+        Ok(format!("fnv1a64:{:016x}", fnv1a64(canonical.as_bytes())))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,6 +239,79 @@ pub struct ValidatedModuleSchemaBundle {
     pub schema_version: u32,
     pub physical_tables: Vec<String>,
     pub physical_indexes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleSchemaRegistry {
+    bundles: Vec<ModuleSchemaBundle>,
+}
+
+impl ModuleSchemaRegistry {
+    pub fn new(bundles: Vec<ModuleSchemaBundle>) -> CoreResult<Self> {
+        let registry = Self { bundles };
+        registry.validate()?;
+        Ok(registry)
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            bundles: Vec::new(),
+        }
+    }
+
+    pub fn bundles(&self) -> &[ModuleSchemaBundle] {
+        self.bundles.as_slice()
+    }
+
+    pub fn validate(&self) -> CoreResult<Vec<ValidatedModuleSchemaBundle>> {
+        let mut module_ids = Vec::new();
+        self.bundles
+            .iter()
+            .map(|bundle| {
+                let validated = bundle.validate()?;
+                push_unique(
+                    "module schema bundle",
+                    bundle.module_id.as_str(),
+                    &mut module_ids,
+                )?;
+                Ok(validated)
+            })
+            .collect()
+    }
+
+    pub fn validate_capabilities(
+        &self,
+        supported_capabilities: &[ModuleSchemaCapability],
+    ) -> CoreResult<()> {
+        for bundle in &self.bundles {
+            for requirement in &bundle.capability_requirements {
+                requirement.validate()?;
+                if requirement.kind == ModuleCapabilityRequirementKind::Required
+                    && !supported_capabilities.contains(&requirement.capability)
+                {
+                    return Err(invalid_descriptor(format!(
+                        "module {} requires unsupported storage capability {}",
+                        bundle.module_id,
+                        requirement.capability.as_str()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn compiled_module_schema_registry() -> ModuleSchemaRegistry {
+    ModuleSchemaRegistry::empty()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledModuleSchemaRecord {
+    pub module_id: ModuleId,
+    pub installed_version: u32,
+    pub descriptor_fingerprint: String,
+    pub installed_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -732,6 +812,50 @@ fn invalid_descriptor(message: impl Into<String>) -> CoreError {
     CoreError::new(CoreErrorKind::InvalidInput, message)
 }
 
+fn descriptor_fingerprint_error(error: serde_json::Error) -> CoreError {
+    CoreError::new(
+        CoreErrorKind::InternalError,
+        format!("serialize module schema descriptor for fingerprint: {error}"),
+    )
+}
+
+fn canonical_json(value: JsonValue) -> String {
+    match value {
+        JsonValue::Null => "null".to_string(),
+        JsonValue::Bool(value) => value.to_string(),
+        JsonValue::Number(value) => value.to_string(),
+        JsonValue::String(value) => serde_json::to_string(&value).expect("serialize string"),
+        JsonValue::Array(values) => {
+            let values = values
+                .into_iter()
+                .map(canonical_json)
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("[{values}]")
+        }
+        JsonValue::Object(values) => {
+            let values = values
+                .into_iter()
+                .map(|(key, value)| {
+                    let key = serde_json::to_string(&key).expect("serialize object key");
+                    format!("{key}:{}", canonical_json(value))
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{{{values}}}")
+        }
+    }
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -879,6 +1003,39 @@ mod tests {
 
         let error = bundle.validate().unwrap_err();
         assert!(error.message.contains("duplicate logical store"));
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_modules_and_missing_capabilities() {
+        let bundle = simple_kv_bundle().unwrap();
+        let duplicate = ModuleSchemaRegistry::new(vec![bundle.clone(), bundle.clone()]);
+        assert!(duplicate
+            .unwrap_err()
+            .message
+            .contains("duplicate module schema bundle"));
+
+        let registry = ModuleSchemaRegistry::new(vec![bundle]).unwrap();
+        let error = registry.validate_capabilities(&[]).unwrap_err();
+        assert!(error
+            .message
+            .contains("requires unsupported storage capability"));
+
+        registry
+            .validate_capabilities(&[ModuleSchemaCapability::Transactions])
+            .unwrap();
+    }
+
+    #[test]
+    fn descriptor_fingerprint_changes_with_descriptor_content() {
+        let bundle = simple_kv_bundle().unwrap();
+        let mut changed = bundle.clone();
+        changed.schema_version = 2;
+
+        let first = bundle.descriptor_fingerprint().unwrap();
+        let second = changed.descriptor_fingerprint().unwrap();
+
+        assert_ne!(first, second);
+        assert!(first.starts_with("fnv1a64:"));
     }
 
     fn simple_kv_bundle() -> CoreResult<ModuleSchemaBundle> {
