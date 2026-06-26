@@ -1,5 +1,7 @@
 //! Coordination engine composition.
 
+mod memory_spaces;
+
 use rusty_crew_core_body::{
     apply_history_window, session_kind_can_wake, BodyProjector, BrainActionExecutor,
     DefaultWakeThreshold, WakeThreshold,
@@ -32,10 +34,10 @@ use rusty_crew_core_protocol::{
     CoreEvent, CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
     DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
-    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MessageSlotId, MessageVariantId,
-    ParentConsumptionPolicy, ProfileId, ProviderStateAbsenceReason, ProviderStateClearReason,
-    ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId, SessionKind, SessionState,
-    SessionStatus, ShutdownSummary, ToolProfile,
+    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemorySpaceDescriptor, MessageSlotId,
+    MessageVariantId, ParentConsumptionPolicy, ProfileId, ProviderStateAbsenceReason,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId,
+    SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -766,6 +768,12 @@ impl CoreEngine {
         query: &ProfileMemoryQuery,
     ) -> CoreResult<Vec<ProfileMemoryRecord>> {
         self.store.list_profile_memory(query)
+    }
+
+    pub fn list_memory_space_descriptors(&self) -> CoreResult<Vec<MemorySpaceDescriptor>> {
+        Ok(vec![memory_spaces::profile_dense_descriptor(
+            &ProfileMemoryCaps::default(),
+        )])
     }
 
     pub fn get_profile_memory(

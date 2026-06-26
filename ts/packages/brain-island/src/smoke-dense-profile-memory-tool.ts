@@ -15,6 +15,30 @@ try {
     defaultTurnBudget: 4,
     defaultIdleTimeoutMs: 1_000,
   });
+  const descriptors = await firstBridge.listMemorySpaceDescriptors();
+  const profileDense = descriptors.find(
+    (descriptor) => descriptor.space_id === "profile_dense",
+  );
+  assert.ok(profileDense, "profile_dense descriptor should be projected");
+  assert.deepEqual(profileDense.operations, [
+    "read",
+    "list",
+    "add",
+    "replace",
+    "remove",
+  ]);
+  assert.equal(profileDense.conflict_policy, "expected_revision");
+  assert.equal(profileDense.write_policy.default_mode, "direct_write");
+  assert.deepEqual(profileDense.scope_model.allowed_scopes, [
+    "profile",
+    "user",
+  ]);
+  assert.equal(
+    profileDense.write_policy.operation_policies.find(
+      (policy) => policy.operation === "replace",
+    )?.requires_expected_revision,
+    true,
+  );
   const readOnly = denseProfileMemoryTool({
     client: firstBridge,
     mode: "read_only",
@@ -125,6 +149,7 @@ try {
     JSON.stringify(
       {
         deniedWrite: deniedWrite.details.reasonCode,
+        memorySpace: profileDense.space_id,
         addedRevision: record(added.details.result).revision,
         replacedRevision: record(replaced.details.result).revision,
         stale: stale.details.reasonCode,

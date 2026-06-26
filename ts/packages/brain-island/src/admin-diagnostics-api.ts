@@ -2,6 +2,7 @@ import {
   buildRuntimeHealthProjection,
   type RuntimeHealthProjection,
 } from "./runtime-health.js";
+import type { MemorySpaceDescriptor } from "@rusty-crew/contracts";
 import type {
   RuntimeDiagnosticsProjection,
   RuntimeSessionDiagnostics,
@@ -73,6 +74,33 @@ export interface AdminDiagnosticsContext {
   background?: BackgroundServiceDiagnosticsProjection;
   configValidation?: RuntimeConfigValidationPreflightReport;
   storage?: StorageDiagnosticsProjection;
+  memorySpaces?: MemorySpaceDiagnosticsProjection;
+}
+
+export interface MemorySpaceCompatibilityStatus {
+  spaceId: string;
+  status: "compatible" | "degraded" | "unavailable";
+  backingStore: string;
+  nativeMethods: string[];
+  denseProfileMemoryCaps?: {
+    maxRecordsPerProfile: number;
+    maxKeyBytes: number;
+    maxContentBytes: number;
+  };
+  conflictBehavior: "expected_revision" | "unknown";
+  promptInjectionBehavior: string;
+  toolModeBehavior: string;
+  notes: string[];
+}
+
+export interface MemorySpaceDiagnosticsItem {
+  descriptor: MemorySpaceDescriptor;
+  compatibility: MemorySpaceCompatibilityStatus;
+}
+
+export interface MemorySpaceDiagnosticsProjection {
+  generatedAt: string;
+  items: MemorySpaceDiagnosticsItem[];
 }
 
 export interface AdminPage<T> {
@@ -176,6 +204,8 @@ export function handleAdminDiagnosticsRequest(
       return success(requestId, context.diagnostics.persistence ?? null);
     case "/v1/admin/diagnostics/storage":
       return success(requestId, context.storage ?? null);
+    case "/v1/admin/diagnostics/memory-spaces":
+      return success(requestId, context.memorySpaces ?? null);
     case "/v1/admin/diagnostics/provider-state":
       return success(
         requestId,

@@ -42,8 +42,8 @@ use rusty_crew_core_persistence::{
     SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
-    AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId, MessageSlotId,
-    MessageVariantId,
+    AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId, MemorySpaceDescriptor,
+    MessageSlotId, MessageVariantId,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -574,6 +574,10 @@ impl NativeBridge {
         query: &ProfileMemoryQuery,
     ) -> CoreResult<Vec<ProfileMemoryRecord>> {
         self.engine()?.list_profile_memory(query)
+    }
+
+    pub fn list_memory_space_descriptors(&self) -> CoreResult<Vec<MemorySpaceDescriptor>> {
+        self.engine()?.list_memory_space_descriptors()
     }
 
     pub fn get_profile_memory(
@@ -2883,6 +2887,15 @@ impl NativeBridgeBinding {
             .into_iter()
             .map(to_js_profile_memory_record)
             .collect()
+    }
+
+    #[napi]
+    pub fn list_memory_space_descriptors_json(&self) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let descriptors = bridge
+            .list_memory_space_descriptors()
+            .map_err(to_napi_error)?;
+        serialize_json(&descriptors, "memory space descriptors")
     }
 
     #[napi]

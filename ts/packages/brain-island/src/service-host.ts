@@ -91,6 +91,7 @@ import { createDefaultMcpDiscoveryClient } from "./service-mcp-tools.js";
 import {
   handleAdminDiagnosticsRequest,
   type AdminDiagnosticsContext,
+  type MemorySpaceDiagnosticsProjection,
   type AdminRouteResult,
 } from "./admin-diagnostics-api.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
@@ -923,16 +924,16 @@ async function buildDiagnosticsContext(
   state: ServiceState,
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
-  const [runtimeSummary, sessions, storage, providerStates] = await Promise.all(
-    [
+  const [runtimeSummary, sessions, storage, providerStates, memorySpaces] =
+    await Promise.all([
       state.bridge
         .runtimeSummary({ scopeType: "runtime" })
         .catch(() => undefined),
       state.bridge.listSessions().catch(() => []),
       state.bridge.storageDiagnostics().catch(() => undefined),
       state.bridge.providerStateDiagnostics().catch(() => []),
-    ],
-  );
+      buildMemorySpaceDiagnostics(state).catch(() => undefined),
+    ]);
   const sessionDefaults = await effectiveSessionDefaultsById(state, sessions);
   const diagnostics = buildRuntimeDiagnosticsProjection({
     now,
@@ -963,6 +964,7 @@ async function buildDiagnosticsContext(
   return {
     diagnostics,
     storage,
+    memorySpaces,
     configValidation: await preflightRustyCrewRuntimeConfig({
       serviceConfig: state.config,
       bridge: state.bridge,
@@ -981,6 +983,59 @@ async function buildDiagnosticsContext(
       },
       ...state.recentEvents,
     ],
+  };
+}
+
+async function buildMemorySpaceDiagnostics(
+  state: ServiceState,
+): Promise<MemorySpaceDiagnosticsProjection> {
+  const descriptors = await state.bridge.listMemorySpaceDescriptors();
+  const defaultCaps = {
+    maxRecordsPerProfile: 64,
+    maxKeyBytes: 128,
+    maxContentBytes: 8 * 1024,
+  };
+  return {
+    generatedAt: state.now(),
+    items: descriptors.map((descriptor) => ({
+      descriptor,
+      compatibility:
+        descriptor.space_id === "profile_dense"
+          ? {
+              spaceId: descriptor.space_id,
+              status: "compatible",
+              backingStore: "profile_memories",
+              nativeMethods: [
+                "listProfileMemory",
+                "getProfileMemory",
+                "addProfileMemory",
+                "replaceProfileMemory",
+                "removeProfileMemory",
+              ],
+              denseProfileMemoryCaps: defaultCaps,
+              conflictBehavior: "expected_revision",
+              promptInjectionBehavior:
+                "renderDenseProfileMemoryContext injects dense records into profile role assembly when enabled",
+              toolModeBehavior:
+                "dense_profile_memory runs read_write only when profile tool selection includes the tool; otherwise read_only",
+              notes: [
+                "Descriptor projects the existing dense profile memory API without rewriting storage.",
+                "Crew profile_dense memory is runtime-owned and distinct from Den memory.",
+              ],
+            }
+          : {
+              spaceId: descriptor.space_id,
+              status: "degraded",
+              backingStore: "unknown",
+              nativeMethods: [],
+              conflictBehavior: "unknown",
+              promptInjectionBehavior: "unknown",
+              toolModeBehavior: "unknown",
+              notes: [
+                "No compatibility projection is registered for this space.",
+              ],
+            },
+    })),
   };
 }
 

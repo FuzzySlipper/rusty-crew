@@ -31,6 +31,7 @@ import type {
   EventSubscription,
   ExternalEvent,
   ManifestOperationName,
+  MemorySpaceDescriptor,
   PlatformAdapterHandle,
   PlatformAdapterRegistration,
   ProfileId,
@@ -368,6 +369,7 @@ interface NativeBridgeBinding {
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
+  listMemorySpaceDescriptorsJson(): string;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): NativeProfileMemoryRecord[];
@@ -1184,6 +1186,7 @@ export interface NativeBridgeModule {
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
+  listMemorySpaceDescriptors(): Promise<MemorySpaceDescriptor[]>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
@@ -1384,6 +1387,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     storageDiagnostics: unavailable("initialize_engine"),
     storageSchema: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
+    listMemorySpaceDescriptors: unavailable("initialize_engine"),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
     queryMessageSlots: unavailable("query_message_slots"),
@@ -2073,6 +2077,10 @@ function createNativeBridgeModule(
     storageDiagnostics: async () => binding.storageDiagnostics(),
     storageSchema: async () => binding.storageSchema(),
     runMaintenance: async (policy) => binding.runMaintenance(policy),
+    listMemorySpaceDescriptors: async () =>
+      JSON.parse(
+        binding.listMemorySpaceDescriptorsJson(),
+      ) as MemorySpaceDescriptor[],
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),
     saveMessageVariant: async (input) =>

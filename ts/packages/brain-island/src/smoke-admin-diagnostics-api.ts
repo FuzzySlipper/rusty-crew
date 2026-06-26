@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type {
   AgentId,
+  MemorySpaceDescriptor,
   ProfileId,
   SessionHandle,
   SessionId,
@@ -338,6 +339,65 @@ assert.equal(
   3,
 );
 
+const memorySpaces = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/memory-spaces" },
+  {
+    diagnostics,
+    memorySpaces: {
+      generatedAt: now,
+      items: [
+        {
+          descriptor: profileDenseDescriptor(),
+          compatibility: {
+            spaceId: "profile_dense",
+            status: "compatible",
+            backingStore: "profile_memories",
+            nativeMethods: [
+              "listProfileMemory",
+              "getProfileMemory",
+              "addProfileMemory",
+              "replaceProfileMemory",
+              "removeProfileMemory",
+            ],
+            denseProfileMemoryCaps: {
+              maxRecordsPerProfile: 64,
+              maxKeyBytes: 128,
+              maxContentBytes: 8192,
+            },
+            conflictBehavior: "expected_revision",
+            promptInjectionBehavior: "summary_context",
+            toolModeBehavior: "read_write when selected, otherwise read_only",
+            notes: ["existing dense profile memory API compatibility wrapper"],
+          },
+        },
+      ],
+    },
+  },
+);
+assert.equal(memorySpaces.status, 200);
+const memorySpaceData = okData<{
+  items: Array<{
+    descriptor: MemorySpaceDescriptor;
+    compatibility: { backingStore: string; conflictBehavior: string };
+  }>;
+}>(memorySpaces);
+assert.equal(memorySpaceData.items[0]?.descriptor.space_id, "profile_dense");
+assert.deepEqual(memorySpaceData.items[0]?.descriptor.operations, [
+  "read",
+  "list",
+  "add",
+  "replace",
+  "remove",
+]);
+assert.equal(
+  memorySpaceData.items[0]?.compatibility.backingStore,
+  "profile_memories",
+);
+assert.equal(
+  memorySpaceData.items[0]?.compatibility.conflictBehavior,
+  "expected_revision",
+);
+
 const rootDiagnostics = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics" },
   { diagnostics },
@@ -463,6 +523,7 @@ console.log(
       redacted: eventPage.items[0]?.token,
       metricsLimit: metricPage.limit,
       backgroundHealth: okData<{ health: string }>(backgroundRoute).health,
+      memorySpaces: memorySpaceData.items.length,
     },
     null,
     2,
@@ -473,6 +534,99 @@ function okData<T>(result: AdminRouteResult): T {
   assert.equal(result.body.ok, true);
   if (!result.body.ok) throw new Error("expected admin route success");
   return result.body.data as T;
+}
+
+function profileDenseDescriptor(): MemorySpaceDescriptor {
+  return {
+    space_id: "profile_dense" as never,
+    schema_version: 1,
+    module_id: "runtime_memory",
+    description: "Existing dense profile memory.",
+    record_shapes: [
+      {
+        shape_id: "profile_dense_item" as never,
+        version: 1,
+        description: "Dense profile memory record.",
+        fields: [
+          {
+            field_name: "key",
+            field_type: "string",
+            required: true,
+            description: "Memory key.",
+          },
+          {
+            field_name: "content",
+            field_type: "markdown",
+            required: true,
+            description: "Memory content.",
+          },
+          {
+            field_name: "revision",
+            field_type: "integer",
+            required: true,
+            description: "Expected revision token.",
+          },
+        ],
+      },
+    ],
+    scope_model: {
+      allowed_scopes: ["profile", "user"],
+      primary_scope: "profile",
+    },
+    visibility_model: "profile_local",
+    retrieval_strategies: ["direct_lookup", "query_search"],
+    indexing: {
+      required_capabilities: [
+        "profile_target_key_lookup",
+        "expected_revision_conflicts",
+      ],
+      optional_capabilities: [
+        "profile_scoped_listing",
+        "cap_max_records_per_profile_64",
+        "cap_max_key_bytes_128",
+        "cap_max_content_bytes_8192",
+      ],
+    },
+    prompt_policy: "summary_context",
+    write_policy: {
+      default_mode: "direct_write",
+      operation_policies: [
+        {
+          operation: "add",
+          governance_mode: "direct_write",
+          requires_expected_revision: false,
+        },
+        {
+          operation: "replace",
+          governance_mode: "direct_write",
+          requires_expected_revision: true,
+        },
+        {
+          operation: "remove",
+          governance_mode: "direct_write",
+          requires_expected_revision: true,
+        },
+      ],
+    },
+    operations: ["read", "list", "add", "replace", "remove"],
+    provenance_policy: {
+      required_evidence: ["wake"],
+      source_required: false,
+      rationale_required: false,
+    },
+    retention_policy: "manual_only",
+    conflict_policy: "expected_revision",
+    diagnostics: {
+      expose_catalog: true,
+      expose_record_counts: true,
+      expose_policy_decisions: true,
+    },
+    export_import: {
+      export_supported: true,
+      import_supported: true,
+      import_governance_mode: "manual_review",
+    },
+  };
 }
 
 function session(
