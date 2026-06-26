@@ -27,15 +27,16 @@ use crate::module_schema::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord, AgentMessage, AttachmentId,
-    AttachmentLinkId, BrainEvent, CompletionPacket, ConversationBranchId, ConversationSnapshotId,
-    CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DataBankScopeId,
-    DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage, DenRuntimeReference,
-    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, FanOutFailurePolicy,
-    FanOutGroupStatus, IsoTimestamp, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionKind,
-    MemoryGovernanceDecisionRecord, MemoryGovernanceMode, MemoryOperation, MemoryProposalEnvelope,
-    MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus, MemoryProposalSource,
-    MemoryScopeType, MemorySpaceDescriptor, MessageBlockId, MessageId, MessageSlotId,
+    session_memory_space_descriptor, AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord,
+    AgentMessage, AttachmentId, AttachmentLinkId, BrainEvent, CompletionPacket,
+    ConversationBranchId, ConversationSnapshotId, CoreError, CoreErrorKind, CoreEvent,
+    CoreEventKind, CoreResult, DataBankScopeId, DelegatedCompletion, DelegatedFanOutGroup,
+    DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
+    DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp, MemoryEvidenceRef,
+    MemoryGovernanceDecisionInput, MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord,
+    MemoryGovernanceMode, MemoryOperation, MemoryProposalEnvelope, MemoryProposalQuery,
+    MemoryProposalRecord, MemoryProposalReviewStatus, MemoryProposalSource, MemoryRecordShapeRef,
+    MemoryScope, MemoryScopeType, MemorySpaceDescriptor, MessageBlockId, MessageId, MessageSlotId,
     MessageVariantId, ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
     ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryWrite, ProjectId,
     ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
@@ -50,7 +51,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 22;
+const CURRENT_SCHEMA_VERSION: i64 = 23;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -183,6 +184,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 22,
         description: "add DB-backed active profile registry",
         apply: migrate_v22_add_profile_registry,
+    },
+    SchemaMigration {
+        version: 23,
+        description: "add session memory record persistence",
+        apply: migrate_v23_add_session_memory_records,
     },
 ];
 
@@ -950,6 +956,90 @@ pub struct ProfileMemoryQuery {
     pub page: Option<QueryPage>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMemoryRecordStatus {
+    Active,
+    Superseded,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMemoryRecord {
+    pub record_id: String,
+    pub session_id: SessionId,
+    pub scope: MemoryScope,
+    pub branch_id: Option<ConversationBranchId>,
+    pub shape: MemoryRecordShapeRef,
+    pub status: SessionMemoryRecordStatus,
+    pub revision: u64,
+    pub content: JsonValue,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub source: MemoryProposalSource,
+    pub confidence: f32,
+    pub durability_rationale: String,
+    pub supersedes_record_id: Option<String>,
+    pub superseded_by_record_id: Option<String>,
+    pub archived_at: Option<IsoTimestamp>,
+    pub archive_reason: Option<String>,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMemoryRecordWrite {
+    pub record_id: String,
+    pub session_id: SessionId,
+    pub scope: MemoryScope,
+    pub branch_id: Option<ConversationBranchId>,
+    pub shape: MemoryRecordShapeRef,
+    pub content: JsonValue,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub source: MemoryProposalSource,
+    pub confidence: f32,
+    pub durability_rationale: String,
+    pub supersedes_record_id: Option<String>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMemoryReplace {
+    pub record_id: String,
+    pub expected_revision: u64,
+    pub content: JsonValue,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub source: MemoryProposalSource,
+    pub confidence: f32,
+    pub durability_rationale: String,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMemorySupersede {
+    pub record_id: String,
+    pub expected_revision: u64,
+    pub replacement: SessionMemoryRecordWrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMemoryArchive {
+    pub record_id: String,
+    pub expected_revision: u64,
+    pub reason: Option<String>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SessionMemoryQuery {
+    pub session_id: Option<SessionId>,
+    pub branch_id: Option<ConversationBranchId>,
+    pub scope_type: Option<MemoryScopeType>,
+    pub shape_id: Option<String>,
+    pub include_superseded: bool,
+    pub include_archived: bool,
+    pub page: Option<QueryPage>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleKvScope {
     pub scope_type: String,
@@ -1568,6 +1658,7 @@ pub enum DiagnosticTable {
     LegacyIdMappings,
     ProfileRegistry,
     ProfileMemories,
+    SessionMemoryRecords,
     MemoryProposals,
     MemoryGovernanceDecisions,
     ScheduledJobs,
@@ -1611,6 +1702,7 @@ impl DiagnosticTable {
         Self::LegacyIdMappings,
         Self::ProfileRegistry,
         Self::ProfileMemories,
+        Self::SessionMemoryRecords,
         Self::MemoryProposals,
         Self::MemoryGovernanceDecisions,
         Self::ScheduledJobs,
@@ -1654,6 +1746,7 @@ impl DiagnosticTable {
             "legacy_id_mappings" => Ok(Self::LegacyIdMappings),
             "profile_registry" => Ok(Self::ProfileRegistry),
             "profile_memories" => Ok(Self::ProfileMemories),
+            "session_memory_records" => Ok(Self::SessionMemoryRecords),
             "memory_proposals" => Ok(Self::MemoryProposals),
             "memory_governance_decisions" => Ok(Self::MemoryGovernanceDecisions),
             "scheduled_jobs" => Ok(Self::ScheduledJobs),
@@ -1702,6 +1795,7 @@ impl DiagnosticTable {
             Self::LegacyIdMappings => "legacy_id_mappings",
             Self::ProfileRegistry => "profile_registry",
             Self::ProfileMemories => "profile_memories",
+            Self::SessionMemoryRecords => "session_memory_records",
             Self::MemoryProposals => "memory_proposals",
             Self::MemoryGovernanceDecisions => "memory_governance_decisions",
             Self::ScheduledJobs => "scheduled_jobs",
@@ -2107,6 +2201,184 @@ impl CoordinationStore {
         tx.commit()
             .map_err(|error| persistence_error("commit remove profile memory", error))?;
         Ok(existing)
+    }
+
+    pub fn add_session_memory_record(
+        &self,
+        write: &SessionMemoryRecordWrite,
+    ) -> CoreResult<SessionMemoryRecord> {
+        validate_session_memory_write(write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start add session memory record", error))?;
+        validate_session_memory_scope_in_tx(
+            &tx,
+            &write.session_id,
+            &write.scope,
+            &write.branch_id,
+        )?;
+        if get_session_memory_record_in_tx(&tx, &write.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("session memory record {} already exists", write.record_id),
+            ));
+        }
+        insert_session_memory_record_in_tx(&tx, write)?;
+        let record = get_session_memory_record_in_tx(&tx, &write.record_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "created session memory record was not readable",
+            )
+        })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit add session memory record", error))?;
+        Ok(record)
+    }
+
+    pub fn replace_session_memory_record(
+        &self,
+        replace: &SessionMemoryReplace,
+    ) -> CoreResult<SessionMemoryRecord> {
+        validate_session_memory_revision_input(
+            &replace.record_id,
+            replace.expected_revision,
+            &replace.evidence_refs,
+            replace.confidence,
+            &replace.durability_rationale,
+        )?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start replace session memory record", error))?;
+        let existing = active_session_memory_record_for_update(
+            &tx,
+            &replace.record_id,
+            replace.expected_revision,
+        )?;
+        validate_session_memory_content(&existing.shape, &replace.content)?;
+        update_session_memory_record_content_in_tx(&tx, replace, existing.revision + 1)?;
+        let record =
+            get_session_memory_record_in_tx(&tx, &replace.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "replaced session memory record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit replace session memory record", error))?;
+        Ok(record)
+    }
+
+    pub fn supersede_session_memory_record(
+        &self,
+        supersede: &SessionMemorySupersede,
+    ) -> CoreResult<(SessionMemoryRecord, SessionMemoryRecord)> {
+        validate_session_memory_write(&supersede.replacement)?;
+        if supersede.replacement.supersedes_record_id.as_deref()
+            != Some(supersede.record_id.as_str())
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory replacement must reference the superseded record",
+            ));
+        }
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start supersede session memory record", error))?;
+        let existing = active_session_memory_record_for_update(
+            &tx,
+            &supersede.record_id,
+            supersede.expected_revision,
+        )?;
+        validate_session_memory_scope_in_tx(
+            &tx,
+            &supersede.replacement.session_id,
+            &supersede.replacement.scope,
+            &supersede.replacement.branch_id,
+        )?;
+        if existing.session_id != supersede.replacement.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory replacement must stay in the same session",
+            ));
+        }
+        if get_session_memory_record_in_tx(&tx, &supersede.replacement.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "session memory replacement {} already exists",
+                    supersede.replacement.record_id
+                ),
+            ));
+        }
+        insert_session_memory_record_in_tx(&tx, &supersede.replacement)?;
+        mark_session_memory_superseded_in_tx(
+            &tx,
+            &existing.record_id,
+            &supersede.replacement.record_id,
+            existing.revision + 1,
+            &supersede.replacement.now,
+        )?;
+        let old_record =
+            get_session_memory_record_in_tx(&tx, &existing.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "superseded session memory record was not readable",
+                )
+            })?;
+        let new_record = get_session_memory_record_in_tx(&tx, &supersede.replacement.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "replacement session memory record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit supersede session memory record", error))?;
+        Ok((old_record, new_record))
+    }
+
+    pub fn archive_session_memory_record(
+        &self,
+        archive: &SessionMemoryArchive,
+    ) -> CoreResult<SessionMemoryRecord> {
+        validate_session_memory_record_id(&archive.record_id)?;
+        if archive.expected_revision == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory expected_revision must be greater than zero",
+            ));
+        }
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start archive session memory record", error))?;
+        let existing = active_session_memory_record_for_update(
+            &tx,
+            &archive.record_id,
+            archive.expected_revision,
+        )?;
+        archive_session_memory_record_in_tx(&tx, archive, existing.revision + 1)?;
+        let record =
+            get_session_memory_record_in_tx(&tx, &archive.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "archived session memory record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit archive session memory record", error))?;
+        Ok(record)
+    }
+
+    pub fn query_session_memory_records(
+        &self,
+        query: &SessionMemoryQuery,
+    ) -> CoreResult<Vec<SessionMemoryRecord>> {
+        let conn = self.conn()?;
+        query_session_memory_records(&conn, query)
     }
 
     pub fn save_memory_proposal(
@@ -5431,6 +5703,49 @@ fn migrate_v22_add_profile_registry(tx: &rusqlite::Transaction<'_>) -> CoreResul
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 22", error))
+}
+
+fn migrate_v23_add_session_memory_records(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS session_memory_records (
+                record_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                branch_id TEXT,
+                shape_id TEXT NOT NULL,
+                shape_version INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                content_json TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                source TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                durability_rationale TEXT NOT NULL,
+                supersedes_record_id TEXT,
+                superseded_by_record_id TEXT,
+                archived_at TEXT,
+                archive_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_memory_session_status_updated
+                ON session_memory_records(session_id, status, updated_at DESC, record_id);
+            CREATE INDEX IF NOT EXISTS idx_session_memory_branch_status_updated
+                ON session_memory_records(branch_id, status, updated_at DESC, record_id)
+                WHERE branch_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_session_memory_scope
+                ON session_memory_records(scope_type, scope_id, updated_at DESC, record_id);
+            CREATE INDEX IF NOT EXISTS idx_session_memory_shape
+                ON session_memory_records(shape_id, shape_version, updated_at DESC, record_id);
+            CREATE INDEX IF NOT EXISTS idx_session_memory_supersedes
+                ON session_memory_records(supersedes_record_id)
+                WHERE supersedes_record_id IS NOT NULL;
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 23", error))
 }
 
 fn apply_module_schema_migration_in_tx(
@@ -11032,6 +11347,546 @@ fn validate_profile_memory_key(key: &str, max_key_bytes: u32) -> CoreResult<()> 
     Ok(())
 }
 
+fn insert_session_memory_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &SessionMemoryRecordWrite,
+) -> CoreResult<()> {
+    tx.execute(
+        "INSERT INTO session_memory_records (
+            record_id,
+            session_id,
+            scope_type,
+            scope_id,
+            branch_id,
+            shape_id,
+            shape_version,
+            status,
+            revision,
+            content_json,
+            evidence_refs_json,
+            source,
+            confidence,
+            durability_rationale,
+            supersedes_record_id,
+            superseded_by_record_id,
+            archived_at,
+            archive_reason,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?11, ?12, ?13, ?14, NULL, NULL, NULL, ?15, ?15)",
+        params![
+            write.record_id.as_str(),
+            write.session_id.0.as_str(),
+            memory_scope_type_as_str(write.scope.scope_type),
+            write.scope.scope_id.as_str(),
+            write.branch_id.as_ref().map(|value| value.0.as_str()),
+            write.shape.shape_id.0.as_str(),
+            write.shape.version as i64,
+            session_memory_status_as_str(SessionMemoryRecordStatus::Active),
+            to_json_text(&write.content)?,
+            to_json_text(&write.evidence_refs)?,
+            memory_proposal_source_as_str(write.source),
+            write.confidence,
+            write.durability_rationale.as_str(),
+            write.supersedes_record_id.as_deref(),
+            write.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert session memory record", error))?;
+    Ok(())
+}
+
+fn update_session_memory_record_content_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    replace: &SessionMemoryReplace,
+    revision: u64,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE session_memory_records
+         SET content_json = ?2,
+             evidence_refs_json = ?3,
+             source = ?4,
+             confidence = ?5,
+             durability_rationale = ?6,
+             revision = ?7,
+             updated_at = ?8
+         WHERE record_id = ?1",
+        params![
+            replace.record_id.as_str(),
+            to_json_text(&replace.content)?,
+            to_json_text(&replace.evidence_refs)?,
+            memory_proposal_source_as_str(replace.source),
+            replace.confidence,
+            replace.durability_rationale.as_str(),
+            revision as i64,
+            replace.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("replace session memory record", error))?;
+    Ok(())
+}
+
+fn mark_session_memory_superseded_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: &str,
+    replacement_record_id: &str,
+    revision: u64,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE session_memory_records
+         SET status = ?2,
+             superseded_by_record_id = ?3,
+             revision = ?4,
+             updated_at = ?5
+         WHERE record_id = ?1",
+        params![
+            record_id,
+            session_memory_status_as_str(SessionMemoryRecordStatus::Superseded),
+            replacement_record_id,
+            revision as i64,
+            now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("supersede session memory record", error))?;
+    Ok(())
+}
+
+fn archive_session_memory_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    archive: &SessionMemoryArchive,
+    revision: u64,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE session_memory_records
+         SET status = ?2,
+             archived_at = ?3,
+             archive_reason = ?4,
+             revision = ?5,
+             updated_at = ?3
+         WHERE record_id = ?1",
+        params![
+            archive.record_id.as_str(),
+            session_memory_status_as_str(SessionMemoryRecordStatus::Archived),
+            archive.now.as_str(),
+            archive.reason.as_deref(),
+            revision as i64,
+        ],
+    )
+    .map_err(|error| persistence_error("archive session memory record", error))?;
+    Ok(())
+}
+
+fn get_session_memory_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: &str,
+) -> CoreResult<Option<SessionMemoryRecord>> {
+    tx.query_row(
+        "SELECT record_id, session_id, scope_type, scope_id, branch_id, shape_id,
+                shape_version, status, revision, content_json, evidence_refs_json,
+                source, confidence, durability_rationale, supersedes_record_id,
+                superseded_by_record_id, archived_at, archive_reason, created_at, updated_at
+         FROM session_memory_records
+         WHERE record_id = ?1",
+        params![record_id],
+        row_to_session_memory_record,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get session memory record", error))
+}
+
+fn query_session_memory_records(
+    conn: &Connection,
+    query: &SessionMemoryQuery,
+) -> CoreResult<Vec<SessionMemoryRecord>> {
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT record_id, session_id, scope_type, scope_id, branch_id, shape_id,
+                    shape_version, status, revision, content_json, evidence_refs_json,
+                    source, confidence, durability_rationale, supersedes_record_id,
+                    superseded_by_record_id, archived_at, archive_reason, created_at, updated_at
+             FROM session_memory_records
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR branch_id = ?2)
+               AND (?3 IS NULL OR scope_type = ?3)
+               AND (?4 IS NULL OR shape_id = ?4)
+               AND (?5 = 1 OR status != 'superseded')
+               AND (?6 = 1 OR status != 'archived')
+             ORDER BY updated_at DESC, record_id ASC
+             LIMIT ?7 OFFSET ?8",
+        )
+        .map_err(|error| persistence_error("prepare query session memory records", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                query.session_id.as_ref().map(|value| value.0.as_str()),
+                query.branch_id.as_ref().map(|value| value.0.as_str()),
+                query.scope_type.map(memory_scope_type_as_str),
+                query.shape_id.as_deref(),
+                if query.include_superseded { 1 } else { 0 },
+                if query.include_archived { 1 } else { 0 },
+                limit,
+                offset,
+            ],
+            row_to_session_memory_record,
+        )
+        .map_err(|error| persistence_error("query session memory records", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load session memory records", error))
+}
+
+fn row_to_session_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionMemoryRecord> {
+    let scope_type_raw: String = row.get(2)?;
+    let shape_id: String = row.get(5)?;
+    let status_raw: String = row.get(7)?;
+    let content_json: String = row.get(9)?;
+    let evidence_refs_json: String = row.get(10)?;
+    let source_raw: String = row.get(11)?;
+    Ok(SessionMemoryRecord {
+        record_id: row.get(0)?,
+        session_id: SessionId::new(row.get::<_, String>(1)?),
+        scope: MemoryScope {
+            scope_type: parse_memory_scope_type(&scope_type_raw).map_err(to_sql_core_error)?,
+            scope_id: row.get(3)?,
+        },
+        branch_id: row
+            .get::<_, Option<String>>(4)?
+            .map(ConversationBranchId::new),
+        shape: MemoryRecordShapeRef {
+            shape_id: rusty_crew_core_protocol::MemoryRecordShapeId::new(shape_id)
+                .map_err(to_sql_core_error)?,
+            version: row.get::<_, i64>(6)? as u32,
+        },
+        status: parse_session_memory_status(&status_raw).map_err(to_sql_core_error)?,
+        revision: row.get::<_, i64>(8)? as u64,
+        content: from_json_text(&content_json).map_err(to_sql_error)?,
+        evidence_refs: from_json_text(&evidence_refs_json).map_err(to_sql_error)?,
+        source: parse_memory_proposal_source(&source_raw).map_err(to_sql_core_error)?,
+        confidence: row.get::<_, f64>(12)? as f32,
+        durability_rationale: row.get(13)?,
+        supersedes_record_id: row.get(14)?,
+        superseded_by_record_id: row.get(15)?,
+        archived_at: row.get(16)?,
+        archive_reason: row.get(17)?,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
+    })
+}
+
+fn active_session_memory_record_for_update(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: &str,
+    expected_revision: u64,
+) -> CoreResult<SessionMemoryRecord> {
+    validate_session_memory_record_id(record_id)?;
+    if expected_revision == 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory expected_revision must be greater than zero",
+        ));
+    }
+    let existing = get_session_memory_record_in_tx(tx, record_id)?.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("session memory record {record_id} not found"),
+        )
+    })?;
+    if existing.status != SessionMemoryRecordStatus::Active {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!("session memory record {record_id} is not active"),
+        ));
+    }
+    if existing.revision != expected_revision {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "session memory revision mismatch for {record_id}: expected {}, found {}",
+                expected_revision, existing.revision
+            ),
+        ));
+    }
+    Ok(existing)
+}
+
+fn validate_session_memory_write(write: &SessionMemoryRecordWrite) -> CoreResult<()> {
+    validate_session_memory_record_id(&write.record_id)?;
+    validate_session_memory_shape(&write.shape)?;
+    validate_session_memory_content(&write.shape, &write.content)?;
+    validate_session_memory_provenance(
+        &write.evidence_refs,
+        write.confidence,
+        &write.durability_rationale,
+    )?;
+    if let Some(content_record_id) = write.content.get("record_id").and_then(JsonValue::as_str) {
+        if content_record_id != write.record_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory content.record_id must match record_id",
+            ));
+        }
+    }
+    if let Some(supersedes_record_id) = write
+        .content
+        .get("supersedes_record_id")
+        .and_then(JsonValue::as_str)
+    {
+        if write.supersedes_record_id.as_deref() != Some(supersedes_record_id) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory content.supersedes_record_id must match write metadata",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_session_memory_revision_input(
+    record_id: &str,
+    expected_revision: u64,
+    evidence_refs: &[MemoryEvidenceRef],
+    confidence: f32,
+    durability_rationale: &str,
+) -> CoreResult<()> {
+    validate_session_memory_record_id(record_id)?;
+    if expected_revision == 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory expected_revision must be greater than zero",
+        ));
+    }
+    validate_session_memory_provenance(evidence_refs, confidence, durability_rationale)
+}
+
+fn validate_session_memory_shape(shape: &MemoryRecordShapeRef) -> CoreResult<()> {
+    let descriptor = session_memory_space_descriptor();
+    descriptor.validate()?;
+    if !descriptor.has_shape(shape) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory shape is not declared by descriptor",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_session_memory_content(
+    shape_ref: &MemoryRecordShapeRef,
+    content: &JsonValue,
+) -> CoreResult<()> {
+    let descriptor = session_memory_space_descriptor();
+    let shape = descriptor
+        .record_shapes
+        .iter()
+        .find(|shape| shape.shape_id == shape_ref.shape_id && shape.version == shape_ref.version)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory shape is not declared by descriptor",
+            )
+        })?;
+    let object = content.as_object().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory content must be a JSON object",
+        )
+    })?;
+    for field in shape.fields.iter().filter(|field| field.required) {
+        if !object
+            .get(&field.field_name)
+            .map(|value| !value.is_null())
+            .unwrap_or(false)
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "session memory content missing required field {}",
+                    field.field_name
+                ),
+            ));
+        }
+    }
+    if let Some(confidence) = object.get("confidence").and_then(JsonValue::as_f64) {
+        if !(0.0..=1.0).contains(&confidence) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory content confidence must be between 0 and 1",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_session_memory_provenance(
+    evidence_refs: &[MemoryEvidenceRef],
+    confidence: f32,
+    durability_rationale: &str,
+) -> CoreResult<()> {
+    validate_memory_confidence(confidence)?;
+    if durability_rationale.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory durability_rationale is required",
+        ));
+    }
+    if evidence_refs.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory evidence_refs must not be empty",
+        ));
+    }
+    for evidence in evidence_refs {
+        if evidence.ref_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory evidence ref_id must not be empty",
+            ));
+        }
+    }
+    let descriptor = session_memory_space_descriptor();
+    for required in &descriptor.provenance_policy.required_evidence {
+        if !evidence_refs
+            .iter()
+            .any(|evidence| evidence.evidence_type == *required)
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("session memory missing required evidence {:?}", required),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_session_memory_scope_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    scope: &MemoryScope,
+    branch_id: &Option<ConversationBranchId>,
+) -> CoreResult<()> {
+    if !session_exists_in_tx(tx, session_id)? {
+        return Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("session {session_id} not found for session memory"),
+        ));
+    }
+    match scope.scope_type {
+        MemoryScopeType::Session => {
+            if scope.scope_id != session_id.0 {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "session memory session scope_id must match session_id",
+                ));
+            }
+            if branch_id.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "session-scoped memory must not carry branch_id",
+                ));
+            }
+        }
+        MemoryScopeType::ConversationBranch => {
+            let branch_id = branch_id.as_ref().ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "branch-scoped session memory requires branch_id",
+                )
+            })?;
+            if scope.scope_id != branch_id.0 {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "branch-scoped session memory scope_id must match branch_id",
+                ));
+            }
+            let branch_session_id = session_id_for_conversation_branch_in_tx(tx, branch_id)?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::NotFound,
+                        format!("conversation branch {branch_id} not found for session memory"),
+                    )
+                })?;
+            if branch_session_id != *session_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "branch-scoped session memory branch must belong to session_id",
+                ));
+            }
+        }
+        _ => {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory supports only session and conversation_branch scopes",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn session_exists_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+) -> CoreResult<bool> {
+    tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = ?1)",
+        params![session_id.0.as_str()],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|value| value != 0)
+    .map_err(|error| persistence_error("check session exists", error))
+}
+
+fn session_id_for_conversation_branch_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<Option<SessionId>> {
+    tx.query_row(
+        "SELECT session_id FROM conversation_branches WHERE branch_id = ?1",
+        params![branch_id.0.as_str()],
+        |row| Ok(SessionId::new(row.get::<_, String>(0)?)),
+    )
+    .optional()
+    .map_err(|error| persistence_error("load session id for conversation branch", error))
+}
+
+fn validate_session_memory_record_id(record_id: &str) -> CoreResult<()> {
+    if record_id.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory record_id must not be empty",
+        ));
+    }
+    if record_id.len() > 256 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory record_id must be at most 256 characters",
+        ));
+    }
+    if record_id.contains('\0') {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory record_id must not contain NUL",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_memory_confidence(value: f32) -> CoreResult<()> {
+    if !(0.0..=1.0).contains(&value) || value.is_nan() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "memory confidence must be between 0 and 1",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_memory_proposal(
     proposal: &MemoryProposalEnvelope,
     descriptor: &MemorySpaceDescriptor,
@@ -11480,6 +12335,22 @@ fn memory_scope_type_as_str(scope_type: MemoryScopeType) -> &'static str {
     }
 }
 
+fn parse_memory_scope_type(raw: &str) -> CoreResult<MemoryScopeType> {
+    match raw {
+        "profile" => Ok(MemoryScopeType::Profile),
+        "user" => Ok(MemoryScopeType::User),
+        "session" => Ok(MemoryScopeType::Session),
+        "conversation_branch" => Ok(MemoryScopeType::ConversationBranch),
+        "world" => Ok(MemoryScopeType::World),
+        "entity" => Ok(MemoryScopeType::Entity),
+        "project" => Ok(MemoryScopeType::Project),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid memory scope type {other}"),
+        )),
+    }
+}
+
 fn memory_proposal_source_as_str(source: MemoryProposalSource) -> &'static str {
     match source {
         MemoryProposalSource::InWakeTool => "in_wake_tool",
@@ -11489,6 +12360,42 @@ fn memory_proposal_source_as_str(source: MemoryProposalSource) -> &'static str {
         MemoryProposalSource::Migration => "migration",
         MemoryProposalSource::Human => "human",
         MemoryProposalSource::DenMemoryImport => "den_memory_import",
+    }
+}
+
+fn parse_memory_proposal_source(raw: &str) -> CoreResult<MemoryProposalSource> {
+    match raw {
+        "in_wake_tool" => Ok(MemoryProposalSource::InWakeTool),
+        "capture_producer" => Ok(MemoryProposalSource::CaptureProducer),
+        "ui" => Ok(MemoryProposalSource::Ui),
+        "import" => Ok(MemoryProposalSource::Import),
+        "migration" => Ok(MemoryProposalSource::Migration),
+        "human" => Ok(MemoryProposalSource::Human),
+        "den_memory_import" => Ok(MemoryProposalSource::DenMemoryImport),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid memory proposal source {other}"),
+        )),
+    }
+}
+
+fn session_memory_status_as_str(status: SessionMemoryRecordStatus) -> &'static str {
+    match status {
+        SessionMemoryRecordStatus::Active => "active",
+        SessionMemoryRecordStatus::Superseded => "superseded",
+        SessionMemoryRecordStatus::Archived => "archived",
+    }
+}
+
+fn parse_session_memory_status(raw: &str) -> CoreResult<SessionMemoryRecordStatus> {
+    match raw {
+        "active" => Ok(SessionMemoryRecordStatus::Active),
+        "superseded" => Ok(SessionMemoryRecordStatus::Superseded),
+        "archived" => Ok(SessionMemoryRecordStatus::Archived),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid session memory status {other}"),
+        )),
     }
 }
 
@@ -13640,11 +14547,16 @@ mod tests {
         assert_eq!(store.count_rows("sessions").unwrap(), 0);
         assert!(table_exists(&db_path, "module_simple_kv_entries"));
         assert!(table_exists(&db_path, "profile_registry"));
+        assert!(table_exists(&db_path, "session_memory_records"));
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_scope_key"
         ));
         assert!(index_exists(&db_path, "idx_profile_registry_lifecycle"));
+        assert!(index_exists(
+            &db_path,
+            "idx_session_memory_session_status_updated"
+        ));
         assert!(index_exists(
             &db_path,
             "idx_module_simple_kv_entries_expires_at"
@@ -13700,6 +14612,7 @@ mod tests {
         assert!(table_exists(&db_path, "memory_proposals"));
         assert!(table_exists(&db_path, "memory_governance_decisions"));
         assert!(table_exists(&db_path, "profile_registry"));
+        assert!(table_exists(&db_path, "session_memory_records"));
         assert!(table_exists(&db_path, "module_simple_kv_entries"));
         assert!(index_exists(
             &db_path,
@@ -14595,6 +15508,258 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(too_large.kind, CoreErrorKind::ActionRejected);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn session_memory_round_trips_and_isolates_by_session() {
+        let db_path = temp_db_path("session-memory-basic");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+        let mut other_session = sample_session_state();
+        other_session.session_id = SessionId::new("session-beta");
+        other_session.agent_id = AgentId::new("agent-beta");
+        other_session.handle = SessionHandle::new(2);
+        store.save_session(&other_session).unwrap();
+
+        let added = store
+            .add_session_memory_record(&session_fact_memory_write(
+                "session-fact-one",
+                &SessionId::new("session-alpha"),
+                "2026-06-26T01:00:00Z",
+            ))
+            .unwrap();
+
+        assert_eq!(added.revision, 1);
+        assert_eq!(added.status, SessionMemoryRecordStatus::Active);
+        assert_eq!(added.scope.scope_type, MemoryScopeType::Session);
+        assert_eq!(added.shape.shape_id.as_str(), "session_fact");
+        assert_eq!(
+            added.content["content"],
+            "The user prefers slow-burn pacing."
+        );
+
+        let alpha_rows = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                shape_id: Some("session_fact".to_string()),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        assert_eq!(alpha_rows, vec![added.clone()]);
+
+        let beta_rows = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-beta")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        assert!(beta_rows.is_empty());
+
+        let invalid_shape = store
+            .add_session_memory_record(&SessionMemoryRecordWrite {
+                shape: MemoryRecordShapeRef {
+                    shape_id: MemoryRecordShapeId::unchecked("transcript_message"),
+                    version: 1,
+                },
+                ..session_fact_memory_write(
+                    "session-fact-two",
+                    &SessionId::new("session-alpha"),
+                    "2026-06-26T01:01:00Z",
+                )
+            })
+            .unwrap_err();
+        assert_eq!(invalid_shape.kind, CoreErrorKind::InvalidInput);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn session_memory_validates_branch_membership() {
+        let db_path = temp_db_path("session-memory-branch");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+        let mut other_session = sample_session_state();
+        other_session.session_id = SessionId::new("session-beta");
+        other_session.agent_id = AgentId::new("agent-beta");
+        other_session.handle = SessionHandle::new(2);
+        store.save_session(&other_session).unwrap();
+        store
+            .save_conversation_branch(&ConversationBranchWrite {
+                branch_id: ConversationBranchId::new("branch-alpha"),
+                session_id: SessionId::new("session-alpha"),
+                parent_branch_id: None,
+                parent_message_id: None,
+                origin_message_id: Some(MessageId::new("message-root")),
+                head_message_id: Some(MessageId::new("message-alpha")),
+                label: Some("Branch alpha".to_string()),
+                metadata_json: json!({"fixture": true}),
+                created_at: "2026-06-26T01:00:00Z".to_string(),
+                updated_at: "2026-06-26T01:00:00Z".to_string(),
+            })
+            .unwrap();
+
+        let missing_branch_id = store
+            .add_session_memory_record(&SessionMemoryRecordWrite {
+                branch_id: None,
+                ..branch_summary_memory_write(
+                    "branch-summary-missing",
+                    &SessionId::new("session-alpha"),
+                    &ConversationBranchId::new("branch-alpha"),
+                    "2026-06-26T01:01:00Z",
+                )
+            })
+            .unwrap_err();
+        assert_eq!(missing_branch_id.kind, CoreErrorKind::InvalidInput);
+
+        let wrong_session = store
+            .add_session_memory_record(&branch_summary_memory_write(
+                "branch-summary-wrong-session",
+                &SessionId::new("session-beta"),
+                &ConversationBranchId::new("branch-alpha"),
+                "2026-06-26T01:02:00Z",
+            ))
+            .unwrap_err();
+        assert_eq!(wrong_session.kind, CoreErrorKind::InvalidInput);
+
+        let added = store
+            .add_session_memory_record(&branch_summary_memory_write(
+                "branch-summary-one",
+                &SessionId::new("session-alpha"),
+                &ConversationBranchId::new("branch-alpha"),
+                "2026-06-26T01:03:00Z",
+            ))
+            .unwrap();
+        assert_eq!(
+            added.branch_id,
+            Some(ConversationBranchId::new("branch-alpha"))
+        );
+
+        let branch_rows = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                branch_id: Some(ConversationBranchId::new("branch-alpha")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        assert_eq!(branch_rows, vec![added]);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn session_memory_replace_supersede_and_archive_enforce_revisions() {
+        let db_path = temp_db_path("session-memory-revisions");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+
+        let added = store
+            .add_session_memory_record(&session_fact_memory_write(
+                "session-fact-one",
+                &SessionId::new("session-alpha"),
+                "2026-06-26T01:00:00Z",
+            ))
+            .unwrap();
+        let replaced = store
+            .replace_session_memory_record(&SessionMemoryReplace {
+                record_id: added.record_id.clone(),
+                expected_revision: added.revision,
+                content: session_fact_content(
+                    "session-fact-one",
+                    "The user prefers slow-burn pacing with explicit clues.",
+                    "2026-06-26T01:01:00Z",
+                ),
+                evidence_refs: session_memory_evidence("wake-replace"),
+                source: MemoryProposalSource::Human,
+                confidence: 0.95,
+                durability_rationale: "Human correction refined the fact.".to_string(),
+                now: "2026-06-26T01:01:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(replaced.revision, 2);
+        assert_eq!(
+            replaced.content["content"],
+            "The user prefers slow-burn pacing with explicit clues."
+        );
+
+        let stale_replace = store
+            .replace_session_memory_record(&SessionMemoryReplace {
+                expected_revision: 1,
+                now: "2026-06-26T01:02:00Z".to_string(),
+                ..replace_session_fact_input("session-fact-one")
+            })
+            .unwrap_err();
+        assert_eq!(stale_replace.kind, CoreErrorKind::ActionRejected);
+
+        let (old_record, new_record) = store
+            .supersede_session_memory_record(&SessionMemorySupersede {
+                record_id: "session-fact-one".to_string(),
+                expected_revision: replaced.revision,
+                replacement: SessionMemoryRecordWrite {
+                    supersedes_record_id: Some("session-fact-one".to_string()),
+                    content: session_fact_content(
+                        "session-fact-two",
+                        "The user prefers mystery pacing with explicit clue checkpoints.",
+                        "2026-06-26T01:03:00Z",
+                    ),
+                    ..session_fact_memory_write(
+                        "session-fact-two",
+                        &SessionId::new("session-alpha"),
+                        "2026-06-26T01:03:00Z",
+                    )
+                },
+            })
+            .unwrap();
+        assert_eq!(old_record.status, SessionMemoryRecordStatus::Superseded);
+        assert_eq!(
+            old_record.superseded_by_record_id.as_deref(),
+            Some("session-fact-two")
+        );
+        assert_eq!(old_record.revision, 3);
+        assert_eq!(new_record.status, SessionMemoryRecordStatus::Active);
+        assert_eq!(
+            new_record.supersedes_record_id.as_deref(),
+            Some("session-fact-one")
+        );
+
+        let archived = store
+            .archive_session_memory_record(&SessionMemoryArchive {
+                record_id: "session-fact-two".to_string(),
+                expected_revision: new_record.revision,
+                reason: Some("Compacted into a later summary".to_string()),
+                now: "2026-06-26T01:04:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(archived.status, SessionMemoryRecordStatus::Archived);
+        assert_eq!(archived.revision, 2);
+
+        let stale_archive = store
+            .archive_session_memory_record(&SessionMemoryArchive {
+                record_id: "session-fact-two".to_string(),
+                expected_revision: 1,
+                reason: None,
+                now: "2026-06-26T01:05:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(stale_archive.kind, CoreErrorKind::ActionRejected);
+
+        let active_rows = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        assert!(active_rows.is_empty());
+
+        let history_rows = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                include_superseded: true,
+                include_archived: true,
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        assert_eq!(history_rows.len(), 2);
 
         remove_temp_db(&db_path);
     }
@@ -16905,6 +18070,109 @@ mod tests {
             metadata: serde_json::json!({}),
             now: "2026-06-20T05:02:00Z".to_string(),
         }
+    }
+
+    fn session_fact_memory_write(
+        record_id: &str,
+        session_id: &SessionId,
+        now: &str,
+    ) -> SessionMemoryRecordWrite {
+        SessionMemoryRecordWrite {
+            record_id: record_id.to_string(),
+            session_id: session_id.clone(),
+            scope: MemoryScope {
+                scope_type: MemoryScopeType::Session,
+                scope_id: session_id.0.clone(),
+            },
+            branch_id: None,
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked("session_fact"),
+                version: 1,
+            },
+            content: session_fact_content(record_id, "The user prefers slow-burn pacing.", now),
+            evidence_refs: session_memory_evidence("wake-add"),
+            source: MemoryProposalSource::CaptureProducer,
+            confidence: 0.9,
+            durability_rationale:
+                "Session fact should survive future wakes without duplicating transcript text."
+                    .to_string(),
+            supersedes_record_id: None,
+            now: now.to_string(),
+        }
+    }
+
+    fn replace_session_fact_input(record_id: &str) -> SessionMemoryReplace {
+        SessionMemoryReplace {
+            record_id: record_id.to_string(),
+            expected_revision: 1,
+            content: session_fact_content(
+                record_id,
+                "Stale replacement should be rejected.",
+                "2026-06-26T01:02:00Z",
+            ),
+            evidence_refs: session_memory_evidence("wake-stale"),
+            source: MemoryProposalSource::Human,
+            confidence: 0.8,
+            durability_rationale: "Testing stale revision behavior.".to_string(),
+            now: "2026-06-26T01:02:00Z".to_string(),
+        }
+    }
+
+    fn session_fact_content(record_id: &str, content: &str, now: &str) -> JsonValue {
+        json!({
+            "record_id": record_id,
+            "content": content,
+            "fact_kind": "preference",
+            "confidence": 0.9,
+            "source_summary": "Observed during a session wake.",
+            "created_at": now,
+            "updated_at": now
+        })
+    }
+
+    fn branch_summary_memory_write(
+        record_id: &str,
+        session_id: &SessionId,
+        branch_id: &ConversationBranchId,
+        now: &str,
+    ) -> SessionMemoryRecordWrite {
+        SessionMemoryRecordWrite {
+            record_id: record_id.to_string(),
+            session_id: session_id.clone(),
+            scope: MemoryScope {
+                scope_type: MemoryScopeType::ConversationBranch,
+                scope_id: branch_id.0.clone(),
+            },
+            branch_id: Some(branch_id.clone()),
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked("branch_summary"),
+                version: 1,
+            },
+            content: json!({
+                "record_id": record_id,
+                "summary": "The branch followed the quiet clue trail.",
+                "branch_id": branch_id.0,
+                "head_message_id": "message-alpha",
+                "coverage_start": "message-root",
+                "coverage_end": "message-alpha",
+                "created_at": now,
+                "updated_at": now
+            }),
+            evidence_refs: session_memory_evidence("wake-branch"),
+            source: MemoryProposalSource::CaptureProducer,
+            confidence: 0.87,
+            durability_rationale: "Branch summary should survive branch navigation.".to_string(),
+            supersedes_record_id: None,
+            now: now.to_string(),
+        }
+    }
+
+    fn session_memory_evidence(ref_id: &str) -> Vec<MemoryEvidenceRef> {
+        vec![MemoryEvidenceRef {
+            evidence_type: MemoryEvidenceKind::Wake,
+            ref_id: ref_id.to_string(),
+            label: Some("Test wake".to_string()),
+        }]
     }
 
     fn profile_registry_write(profile_id: &str) -> ProfileRegistryWrite {

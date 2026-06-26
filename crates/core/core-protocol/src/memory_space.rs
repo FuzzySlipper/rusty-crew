@@ -388,6 +388,194 @@ impl MemorySpaceDescriptor {
     }
 }
 
+pub fn session_memory_space_descriptor() -> MemorySpaceDescriptor {
+    MemorySpaceDescriptor {
+        space_id: MemorySpaceId::unchecked("session_memory"),
+        schema_version: 1,
+        module_id: Some("runtime_memory".to_string()),
+        description:
+            "Crew-owned session and branch memory; not Den memory and not transcript storage."
+                .to_string(),
+        record_shapes: vec![
+            MemoryRecordShapeDescriptor {
+                shape_id: MemoryRecordShapeId::unchecked("session_fact"),
+                version: 1,
+                description: "Durable fact observed inside one session.".to_string(),
+                fields: vec![
+                    descriptor_field("record_id", MemoryFieldType::String, true),
+                    descriptor_field("content", MemoryFieldType::Markdown, true),
+                    descriptor_field("fact_kind", MemoryFieldType::String, true),
+                    descriptor_field("confidence", MemoryFieldType::Float, true),
+                    descriptor_field("source_summary", MemoryFieldType::String, true),
+                    descriptor_field("created_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("updated_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("subject", MemoryFieldType::String, false),
+                    descriptor_field("expires_at", MemoryFieldType::Timestamp, false),
+                    descriptor_field("supersedes_record_id", MemoryFieldType::String, false),
+                    descriptor_field("tags", MemoryFieldType::Json, false),
+                    descriptor_field("metadata_json", MemoryFieldType::Json, false),
+                ],
+            },
+            MemoryRecordShapeDescriptor {
+                shape_id: MemoryRecordShapeId::unchecked("session_summary"),
+                version: 1,
+                description: "Rolling or checkpoint summary of the durable session.".to_string(),
+                fields: vec![
+                    descriptor_field("record_id", MemoryFieldType::String, true),
+                    descriptor_field("summary", MemoryFieldType::Markdown, true),
+                    descriptor_field("coverage_start", MemoryFieldType::String, true),
+                    descriptor_field("coverage_end", MemoryFieldType::String, true),
+                    descriptor_field("summary_kind", MemoryFieldType::String, true),
+                    descriptor_field("created_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("updated_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("token_estimate", MemoryFieldType::Integer, false),
+                    descriptor_field("source_record_ids", MemoryFieldType::Json, false),
+                    descriptor_field("supersedes_record_id", MemoryFieldType::String, false),
+                    descriptor_field("metadata_json", MemoryFieldType::Json, false),
+                ],
+            },
+            MemoryRecordShapeDescriptor {
+                shape_id: MemoryRecordShapeId::unchecked("branch_summary"),
+                version: 1,
+                description: "Conversation branch summary.".to_string(),
+                fields: vec![
+                    descriptor_field("record_id", MemoryFieldType::String, true),
+                    descriptor_field("summary", MemoryFieldType::Markdown, true),
+                    descriptor_field("branch_id", MemoryFieldType::String, true),
+                    descriptor_field("head_message_id", MemoryFieldType::String, true),
+                    descriptor_field("coverage_start", MemoryFieldType::String, true),
+                    descriptor_field("coverage_end", MemoryFieldType::String, true),
+                    descriptor_field("created_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("updated_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("parent_branch_id", MemoryFieldType::String, false),
+                    descriptor_field("ancestor_branch_ids", MemoryFieldType::Json, false),
+                    descriptor_field("supersedes_record_id", MemoryFieldType::String, false),
+                    descriptor_field("token_estimate", MemoryFieldType::Integer, false),
+                    descriptor_field("metadata_json", MemoryFieldType::Json, false),
+                ],
+            },
+            MemoryRecordShapeDescriptor {
+                shape_id: MemoryRecordShapeId::unchecked("user_choice"),
+                version: 1,
+                description: "Durable user choice inside a session or branch.".to_string(),
+                fields: vec![
+                    descriptor_field("record_id", MemoryFieldType::String, true),
+                    descriptor_field("choice", MemoryFieldType::Markdown, true),
+                    descriptor_field("choice_kind", MemoryFieldType::String, true),
+                    descriptor_field("chosen_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("status", MemoryFieldType::String, true),
+                    descriptor_field("created_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("updated_at", MemoryFieldType::Timestamp, true),
+                    descriptor_field("alternatives", MemoryFieldType::Json, false),
+                    descriptor_field("supersedes_record_id", MemoryFieldType::String, false),
+                    descriptor_field("reverted_by_record_id", MemoryFieldType::String, false),
+                    descriptor_field("metadata_json", MemoryFieldType::Json, false),
+                ],
+            },
+        ],
+        scope_model: MemoryScopeModel {
+            allowed_scopes: vec![
+                MemoryScopeType::Session,
+                MemoryScopeType::ConversationBranch,
+            ],
+            primary_scope: MemoryScopeType::Session,
+        },
+        visibility_model: MemoryVisibilityModel::SessionScoped,
+        retrieval_strategies: vec![
+            MemoryRetrievalStrategy::DirectLookup,
+            MemoryRetrievalStrategy::Recency,
+            MemoryRetrievalStrategy::BranchAware,
+            MemoryRetrievalStrategy::QuerySearch,
+        ],
+        indexing: MemoryIndexingPolicy {
+            required_capabilities: vec!["session_scope_lookup".to_string()],
+            optional_capabilities: vec![
+                "branch_aware_lookup".to_string(),
+                "query_search".to_string(),
+            ],
+        },
+        prompt_policy: MemoryPromptPolicy::SummaryContext,
+        write_policy: MemoryWritePolicy {
+            default_mode: MemoryGovernanceMode::Candidate,
+            operation_policies: vec![
+                descriptor_op_policy(MemoryOperation::Add, MemoryGovernanceMode::Candidate, false),
+                descriptor_op_policy(
+                    MemoryOperation::Replace,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                descriptor_op_policy(
+                    MemoryOperation::Merge,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                descriptor_op_policy(
+                    MemoryOperation::Supersede,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                descriptor_op_policy(
+                    MemoryOperation::Archive,
+                    MemoryGovernanceMode::ManualReview,
+                    true,
+                ),
+            ],
+        },
+        operations: vec![
+            MemoryOperation::Read,
+            MemoryOperation::List,
+            MemoryOperation::Add,
+            MemoryOperation::Replace,
+            MemoryOperation::Merge,
+            MemoryOperation::Supersede,
+            MemoryOperation::Archive,
+        ],
+        provenance_policy: MemoryProvenancePolicy {
+            required_evidence: vec![MemoryEvidenceKind::Wake],
+            source_required: true,
+            rationale_required: true,
+        },
+        retention_policy: MemoryRetentionPolicy::Compact,
+        conflict_policy: MemoryConflictPolicy::Supersession,
+        diagnostics: MemoryDiagnosticsPolicy {
+            expose_catalog: true,
+            expose_record_counts: true,
+            expose_policy_decisions: true,
+        },
+        export_import: MemoryExportImportPolicy {
+            export_supported: true,
+            import_supported: true,
+            import_governance_mode: MemoryGovernanceMode::ManualReview,
+        },
+    }
+}
+
+fn descriptor_field(
+    field_name: &str,
+    field_type: MemoryFieldType,
+    required: bool,
+) -> MemoryRecordFieldDescriptor {
+    MemoryRecordFieldDescriptor {
+        field_name: field_name.to_string(),
+        field_type,
+        required,
+        description: format!("{field_name} field"),
+    }
+}
+
+fn descriptor_op_policy(
+    operation: MemoryOperation,
+    governance_mode: MemoryGovernanceMode,
+    requires_expected_revision: bool,
+) -> MemoryOperationPolicy {
+    MemoryOperationPolicy {
+        operation,
+        governance_mode,
+        requires_expected_revision,
+        min_confidence: Some(0.5),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRecordShapeRef {
     pub shape_id: MemoryRecordShapeId,
@@ -966,155 +1154,7 @@ mod tests {
     }
 
     fn session_memory_descriptor() -> MemorySpaceDescriptor {
-        let mut descriptor = profile_dense_descriptor();
-        descriptor.space_id = MemorySpaceId::unchecked("session_memory");
-        descriptor.module_id = Some("runtime_memory".to_string());
-        descriptor.schema_version = 1;
-        descriptor.description =
-            "Crew-owned session and branch memory; not Den memory and not transcript storage."
-                .to_string();
-        descriptor.record_shapes = vec![
-            MemoryRecordShapeDescriptor {
-                shape_id: MemoryRecordShapeId::unchecked("session_fact"),
-                version: 1,
-                description: "Durable fact observed inside one session.".to_string(),
-                fields: vec![
-                    field("record_id", MemoryFieldType::String, true),
-                    field("content", MemoryFieldType::Markdown, true),
-                    field("fact_kind", MemoryFieldType::String, true),
-                    field("confidence", MemoryFieldType::Float, true),
-                    field("source_summary", MemoryFieldType::String, true),
-                    field("created_at", MemoryFieldType::Timestamp, true),
-                    field("updated_at", MemoryFieldType::Timestamp, true),
-                    field("subject", MemoryFieldType::String, false),
-                    field("expires_at", MemoryFieldType::Timestamp, false),
-                    field("supersedes_record_id", MemoryFieldType::String, false),
-                    field("tags", MemoryFieldType::Json, false),
-                    field("metadata_json", MemoryFieldType::Json, false),
-                ],
-            },
-            MemoryRecordShapeDescriptor {
-                shape_id: MemoryRecordShapeId::unchecked("session_summary"),
-                version: 1,
-                description: "Rolling or checkpoint summary of the durable session.".to_string(),
-                fields: vec![
-                    field("record_id", MemoryFieldType::String, true),
-                    field("summary", MemoryFieldType::Markdown, true),
-                    field("coverage_start", MemoryFieldType::String, true),
-                    field("coverage_end", MemoryFieldType::String, true),
-                    field("summary_kind", MemoryFieldType::String, true),
-                    field("created_at", MemoryFieldType::Timestamp, true),
-                    field("updated_at", MemoryFieldType::Timestamp, true),
-                    field("token_estimate", MemoryFieldType::Integer, false),
-                    field("source_record_ids", MemoryFieldType::Json, false),
-                    field("supersedes_record_id", MemoryFieldType::String, false),
-                    field("metadata_json", MemoryFieldType::Json, false),
-                ],
-            },
-            MemoryRecordShapeDescriptor {
-                shape_id: MemoryRecordShapeId::unchecked("branch_summary"),
-                version: 1,
-                description: "Conversation branch summary.".to_string(),
-                fields: vec![
-                    field("record_id", MemoryFieldType::String, true),
-                    field("summary", MemoryFieldType::Markdown, true),
-                    field("branch_id", MemoryFieldType::String, true),
-                    field("head_message_id", MemoryFieldType::String, true),
-                    field("coverage_start", MemoryFieldType::String, true),
-                    field("coverage_end", MemoryFieldType::String, true),
-                    field("created_at", MemoryFieldType::Timestamp, true),
-                    field("updated_at", MemoryFieldType::Timestamp, true),
-                    field("parent_branch_id", MemoryFieldType::String, false),
-                    field("ancestor_branch_ids", MemoryFieldType::Json, false),
-                    field("supersedes_record_id", MemoryFieldType::String, false),
-                    field("token_estimate", MemoryFieldType::Integer, false),
-                    field("metadata_json", MemoryFieldType::Json, false),
-                ],
-            },
-            MemoryRecordShapeDescriptor {
-                shape_id: MemoryRecordShapeId::unchecked("user_choice"),
-                version: 1,
-                description: "Durable user choice inside a session or branch.".to_string(),
-                fields: vec![
-                    field("record_id", MemoryFieldType::String, true),
-                    field("choice", MemoryFieldType::Markdown, true),
-                    field("choice_kind", MemoryFieldType::String, true),
-                    field("chosen_at", MemoryFieldType::Timestamp, true),
-                    field("status", MemoryFieldType::String, true),
-                    field("created_at", MemoryFieldType::Timestamp, true),
-                    field("updated_at", MemoryFieldType::Timestamp, true),
-                    field("alternatives", MemoryFieldType::Json, false),
-                    field("supersedes_record_id", MemoryFieldType::String, false),
-                    field("reverted_by_record_id", MemoryFieldType::String, false),
-                    field("metadata_json", MemoryFieldType::Json, false),
-                ],
-            },
-        ];
-        descriptor.scope_model = MemoryScopeModel {
-            allowed_scopes: vec![
-                MemoryScopeType::Session,
-                MemoryScopeType::ConversationBranch,
-            ],
-            primary_scope: MemoryScopeType::Session,
-        };
-        descriptor.visibility_model = MemoryVisibilityModel::SessionScoped;
-        descriptor.retrieval_strategies = vec![
-            MemoryRetrievalStrategy::DirectLookup,
-            MemoryRetrievalStrategy::Recency,
-            MemoryRetrievalStrategy::BranchAware,
-            MemoryRetrievalStrategy::QuerySearch,
-        ];
-        descriptor.indexing = MemoryIndexingPolicy {
-            required_capabilities: vec!["session_scope_lookup".to_string()],
-            optional_capabilities: vec![
-                "branch_aware_lookup".to_string(),
-                "query_search".to_string(),
-            ],
-        };
-        descriptor.prompt_policy = MemoryPromptPolicy::SummaryContext;
-        descriptor.operations = vec![
-            MemoryOperation::Read,
-            MemoryOperation::List,
-            MemoryOperation::Add,
-            MemoryOperation::Replace,
-            MemoryOperation::Merge,
-            MemoryOperation::Supersede,
-            MemoryOperation::Archive,
-        ];
-        descriptor.write_policy = MemoryWritePolicy {
-            default_mode: MemoryGovernanceMode::Candidate,
-            operation_policies: vec![
-                op_policy(MemoryOperation::Add, MemoryGovernanceMode::Candidate, false),
-                op_policy(
-                    MemoryOperation::Replace,
-                    MemoryGovernanceMode::CuratorRoute,
-                    true,
-                ),
-                op_policy(
-                    MemoryOperation::Merge,
-                    MemoryGovernanceMode::CuratorRoute,
-                    true,
-                ),
-                op_policy(
-                    MemoryOperation::Supersede,
-                    MemoryGovernanceMode::CuratorRoute,
-                    true,
-                ),
-                op_policy(
-                    MemoryOperation::Archive,
-                    MemoryGovernanceMode::ManualReview,
-                    true,
-                ),
-            ],
-        };
-        descriptor.provenance_policy = MemoryProvenancePolicy {
-            required_evidence: vec![MemoryEvidenceKind::Wake],
-            source_required: true,
-            rationale_required: true,
-        };
-        descriptor.retention_policy = MemoryRetentionPolicy::Compact;
-        descriptor.conflict_policy = MemoryConflictPolicy::Supersession;
-        descriptor
+        session_memory_space_descriptor()
     }
 
     fn roleplay_lore_descriptor() -> MemorySpaceDescriptor {
