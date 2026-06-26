@@ -116,10 +116,75 @@ try {
     undefined,
   );
 
+  await bridge.ensureConfiguredSession({
+    sessionId: "session-alpha",
+    agentId: "agent-alpha",
+    profileId: "prime-profile",
+    kind: "full",
+  });
+  const sessionProposal = sessionMemoryProposal(
+    "session_memory_proposal_add",
+    "session_memory:session-alpha:sqlite-first",
+  );
+  const sessionCreated = await bridge.saveMemoryProposal(sessionProposal);
+  assert.equal(sessionCreated.status, "pending_review");
+  assert.deepEqual(
+    await bridge.querySessionMemoryRecords(sessionMemoryQuery("session-alpha")),
+    [],
+  );
+  await bridge.recordMemoryGovernanceDecision({
+    decision_id: "session_memory_decision_approve",
+    proposal_id: "session_memory_proposal_add",
+    decision: "approved",
+    actor: "human_operator",
+    source: "human",
+    evidence_refs: [{ evidence_type: "ui", ref_id: "session-admin-review" }],
+    policy_mode: "manual_review",
+    confidence: 0.95,
+  });
+  const sessionApplied = await bridge.recordMemoryGovernanceDecision({
+    decision_id: "session_memory_decision_apply",
+    proposal_id: "session_memory_proposal_add",
+    decision: "applied",
+    actor: "curator",
+    source: "human",
+    evidence_refs: [{ evidence_type: "ui", ref_id: "session-admin-apply" }],
+    policy_mode: "manual_review",
+    confidence: 0.97,
+  });
+  assert.equal(sessionApplied.resulting_revision, 1);
+  const sessionRecords = await bridge.querySessionMemoryRecords({
+    ...sessionMemoryQuery("session-alpha"),
+  });
+  assert.equal(sessionRecords.length, 1);
+  assert.equal(sessionRecords[0]?.record_id, "session-fact-proposal");
+  assert.equal(sessionRecords[0]?.revision, 1);
+  assert.equal(
+    (sessionRecords[0]?.content as { content?: string }).content,
+    "User chose the sqlite-first deployment path.",
+  );
+  assert.equal(sessionRecords[0]?.source, "capture_producer");
+  assert.equal(
+    sessionRecords[0]?.durability_rationale,
+    "Session proposal should survive future wakes.",
+  );
+  assert.deepEqual(
+    sessionRecords[0]?.evidence_refs,
+    sessionProposal.evidence_refs,
+  );
+
   await bridge.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
   console.log("smoke-memory-proposals ok");
 } finally {
   rmSync(root, { recursive: true, force: true });
+}
+
+function sessionMemoryQuery(sessionId: string) {
+  return {
+    session_id: sessionId,
+    include_superseded: false,
+    include_archived: false,
+  };
 }
 
 function profileDenseProposal(
@@ -153,6 +218,46 @@ function profileDenseProposal(
     durability_rationale: "stable profile preference",
     governance_mode: "direct_write",
     source: "in_wake_tool",
+    dedupe_key: dedupeKey,
+  };
+}
+
+function sessionMemoryProposal(
+  proposalId: string,
+  dedupeKey: string,
+): MemoryProposalEnvelope {
+  return {
+    proposal_id: proposalId,
+    space_id: "session_memory" as never,
+    operation: "add",
+    scope: {
+      scope_type: "session",
+      scope_id: "session-alpha",
+    },
+    shape: {
+      shape_id: "session_fact" as never,
+      version: 1,
+    },
+    content: {
+      record_id: "session-fact-proposal",
+      content: "User chose the sqlite-first deployment path.",
+      fact_kind: "decision",
+      confidence: 0.86,
+      source_summary: "Observed during a session wake.",
+      created_at: "2026-06-26T00:00:00Z",
+      updated_at: "2026-06-26T00:00:00Z",
+    },
+    evidence_refs: [
+      {
+        evidence_type: "wake",
+        ref_id: "wake-session-memory",
+        label: "wake evidence",
+      },
+    ],
+    confidence: 0.86,
+    durability_rationale: "Session proposal should survive future wakes.",
+    governance_mode: "manual_review",
+    source: "capture_producer",
     dedupe_key: dedupeKey,
   };
 }

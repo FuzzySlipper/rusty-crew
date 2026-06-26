@@ -2532,10 +2532,22 @@ impl CoordinationStore {
             )
         })?;
         validate_memory_governance_transition(proposal.status, decision.decision)?;
+        let resulting_revision = if decision.decision == MemoryGovernanceDecisionKind::Applied
+            && proposal.proposal.space_id.as_str() == "session_memory"
+        {
+            Some(apply_session_memory_proposal_in_tx(
+                &tx,
+                &proposal.proposal,
+                now,
+            )?)
+        } else {
+            decision.resulting_revision
+        };
         let mut stored = decision.clone();
         if stored.decided_at.is_none() {
             stored.decided_at = Some(now.clone());
         }
+        stored.resulting_revision = resulting_revision;
         let record = insert_memory_governance_decision_in_tx(&tx, &stored)?;
         update_memory_proposal_review_state_in_tx(&tx, &record)?;
         tx.commit()
@@ -12582,6 +12594,282 @@ fn update_memory_proposal_review_state_in_tx(
     Ok(())
 }
 
+fn apply_session_memory_proposal_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    proposal: &MemoryProposalEnvelope,
+    now: &IsoTimestamp,
+) -> CoreResult<u64> {
+    if proposal.space_id.as_str() != "session_memory" {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "only session_memory proposals can be applied to session memory records",
+        ));
+    }
+    match proposal.operation {
+        MemoryOperation::Add => {
+            let write = session_memory_write_from_proposal(tx, proposal, now)?;
+            validate_session_memory_write(&write)?;
+            validate_session_memory_scope_in_tx(
+                tx,
+                &write.session_id,
+                &write.scope,
+                &write.branch_id,
+            )?;
+            if get_session_memory_record_in_tx(tx, &write.record_id)?.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::AlreadyExists,
+                    format!("session memory record {} already exists", write.record_id),
+                ));
+            }
+            insert_session_memory_record_in_tx(tx, &write)?;
+            Ok(1)
+        }
+        MemoryOperation::Replace | MemoryOperation::Merge => {
+            let record_id = session_memory_proposal_record_id(proposal)?;
+            let expected_revision = session_memory_proposal_expected_revision(proposal)?;
+            let durability_rationale = session_memory_proposal_rationale(proposal)?;
+            validate_session_memory_revision_input(
+                &record_id,
+                expected_revision,
+                &proposal.evidence_refs,
+                proposal.confidence,
+                durability_rationale,
+            )?;
+            let existing =
+                active_session_memory_record_for_update(tx, &record_id, expected_revision)?;
+            validate_session_memory_shape(&proposal.shape)?;
+            validate_session_memory_content(&proposal.shape, &proposal.content)?;
+            validate_session_memory_scope_in_tx(
+                tx,
+                &existing.session_id,
+                &proposal.scope,
+                &existing.branch_id,
+            )?;
+            let next_revision = existing.revision + 1;
+            update_session_memory_record_content_in_tx(
+                tx,
+                &SessionMemoryReplace {
+                    record_id,
+                    expected_revision,
+                    content: proposal.content.clone(),
+                    evidence_refs: proposal.evidence_refs.clone(),
+                    source: proposal.source,
+                    confidence: proposal.confidence,
+                    durability_rationale: durability_rationale.to_string(),
+                    now: now.clone(),
+                },
+                next_revision,
+            )?;
+            Ok(next_revision)
+        }
+        MemoryOperation::Supersede => {
+            let record_id = session_memory_proposal_supersedes_record_id(proposal)?;
+            let expected_revision = session_memory_proposal_expected_revision(proposal)?;
+            let replacement = session_memory_write_from_proposal(tx, proposal, now)?;
+            if replacement.supersedes_record_id.as_deref() != Some(record_id.as_str()) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "session memory supersede proposal must set content.supersedes_record_id",
+                ));
+            }
+            validate_session_memory_write(&replacement)?;
+            validate_session_memory_scope_in_tx(
+                tx,
+                &replacement.session_id,
+                &replacement.scope,
+                &replacement.branch_id,
+            )?;
+            let existing =
+                active_session_memory_record_for_update(tx, &record_id, expected_revision)?;
+            validate_session_memory_scope_in_tx(
+                tx,
+                &existing.session_id,
+                &existing.scope,
+                &existing.branch_id,
+            )?;
+            if get_session_memory_record_in_tx(tx, &replacement.record_id)?.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::AlreadyExists,
+                    format!(
+                        "session memory replacement record {} already exists",
+                        replacement.record_id
+                    ),
+                ));
+            }
+            insert_session_memory_record_in_tx(tx, &replacement)?;
+            mark_session_memory_superseded_in_tx(
+                tx,
+                &existing.record_id,
+                &replacement.record_id,
+                existing.revision + 1,
+                now,
+            )?;
+            Ok(1)
+        }
+        MemoryOperation::Archive => {
+            let record_id = session_memory_proposal_record_id(proposal)?;
+            let expected_revision = session_memory_proposal_expected_revision(proposal)?;
+            let existing =
+                active_session_memory_record_for_update(tx, &record_id, expected_revision)?;
+            validate_session_memory_scope_in_tx(
+                tx,
+                &existing.session_id,
+                &proposal.scope,
+                &existing.branch_id,
+            )?;
+            let next_revision = existing.revision + 1;
+            archive_session_memory_record_in_tx(
+                tx,
+                &SessionMemoryArchive {
+                    record_id,
+                    expected_revision,
+                    reason: session_memory_proposal_archive_reason(proposal),
+                    now: now.clone(),
+                },
+                next_revision,
+            )?;
+            Ok(next_revision)
+        }
+        _ => Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "session memory proposal operation {:?} cannot be applied",
+                proposal.operation
+            ),
+        )),
+    }
+}
+
+fn session_memory_write_from_proposal(
+    tx: &rusqlite::Transaction<'_>,
+    proposal: &MemoryProposalEnvelope,
+    now: &IsoTimestamp,
+) -> CoreResult<SessionMemoryRecordWrite> {
+    let record_id = session_memory_proposal_record_id(proposal)?;
+    let session_id = session_id_for_session_memory_proposal(tx, proposal)?;
+    let branch_id = match proposal.scope.scope_type {
+        MemoryScopeType::Session => None,
+        MemoryScopeType::ConversationBranch => {
+            Some(ConversationBranchId::new(proposal.scope.scope_id.clone()))
+        }
+        _ => {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal scope must be session or conversation_branch",
+            ));
+        }
+    };
+    Ok(SessionMemoryRecordWrite {
+        record_id,
+        session_id,
+        scope: proposal.scope.clone(),
+        branch_id,
+        shape: proposal.shape.clone(),
+        content: proposal.content.clone(),
+        evidence_refs: proposal.evidence_refs.clone(),
+        source: proposal.source,
+        confidence: proposal.confidence,
+        durability_rationale: session_memory_proposal_rationale(proposal)?.to_string(),
+        supersedes_record_id: session_memory_proposal_supersedes_record_id(proposal).ok(),
+        now: now.clone(),
+    })
+}
+
+fn session_id_for_session_memory_proposal(
+    tx: &rusqlite::Transaction<'_>,
+    proposal: &MemoryProposalEnvelope,
+) -> CoreResult<SessionId> {
+    match proposal.scope.scope_type {
+        MemoryScopeType::Session => Ok(SessionId::new(proposal.scope.scope_id.clone())),
+        MemoryScopeType::ConversationBranch => {
+            let branch_id = ConversationBranchId::new(proposal.scope.scope_id.clone());
+            session_id_for_conversation_branch_in_tx(tx, &branch_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "conversation branch {} not found for session memory proposal",
+                        branch_id
+                    ),
+                )
+            })
+        }
+        _ => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory proposal scope must be session or conversation_branch",
+        )),
+    }
+}
+
+fn session_memory_proposal_record_id(proposal: &MemoryProposalEnvelope) -> CoreResult<String> {
+    let record_id = proposal
+        .content
+        .get("record_id")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal content.record_id is required",
+            )
+        })?;
+    validate_session_memory_record_id(record_id)?;
+    Ok(record_id.to_string())
+}
+
+fn session_memory_proposal_expected_revision(proposal: &MemoryProposalEnvelope) -> CoreResult<u64> {
+    proposal
+        .content
+        .get("expected_revision")
+        .and_then(JsonValue::as_u64)
+        .filter(|revision| *revision > 0)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal content.expected_revision must be greater than zero",
+            )
+        })
+}
+
+fn session_memory_proposal_supersedes_record_id(
+    proposal: &MemoryProposalEnvelope,
+) -> CoreResult<String> {
+    let record_id = proposal
+        .content
+        .get("supersedes_record_id")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory supersede proposal requires content.supersedes_record_id",
+            )
+        })?;
+    validate_session_memory_record_id(record_id)?;
+    Ok(record_id.to_string())
+}
+
+fn session_memory_proposal_archive_reason(proposal: &MemoryProposalEnvelope) -> Option<String> {
+    proposal
+        .content
+        .get("archive_reason")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn session_memory_proposal_rationale(proposal: &MemoryProposalEnvelope) -> CoreResult<&str> {
+    proposal
+        .durability_rationale
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal durability_rationale is required",
+            )
+        })
+}
+
 fn selected_governance_mode(
     requested: MemoryGovernanceMode,
     source: MemoryProposalSource,
@@ -16557,6 +16845,183 @@ mod tests {
     }
 
     #[test]
+    fn applied_session_memory_proposals_create_and_update_records() {
+        let db_path = temp_db_path("session-memory-proposal-apply");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+        let descriptor = session_memory_space_descriptor();
+        let add_proposal = session_memory_record_proposal(
+            "session_memory_proposal_add",
+            MemoryOperation::Add,
+            session_fact_content(
+                "session-fact-proposal",
+                "User chose the sqlite-first deployment path.",
+                "2026-06-26T02:00:00Z",
+            ),
+        );
+
+        let created = store
+            .save_memory_proposal(
+                &add_proposal,
+                &descriptor,
+                &"2026-06-26T02:00:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(created.status, MemoryProposalReviewStatus::PendingReview);
+        assert!(store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.count_rows("message_slots").unwrap(), 0);
+        assert_eq!(store.count_rows("profile_memories").unwrap(), 0);
+
+        store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "session_memory_decision_approve".to_string(),
+                    proposal_id: "session_memory_proposal_add".to_string(),
+                    decision: MemoryGovernanceDecisionKind::Approved,
+                    actor: "human_operator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: session_memory_evidence("ui-review"),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.95),
+                    message: Some("approved session memory add".to_string()),
+                    resulting_revision: None,
+                    decided_at: None,
+                },
+                &"2026-06-26T02:01:00Z".to_string(),
+            )
+            .unwrap();
+        assert!(store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap()
+            .is_empty());
+
+        let applied = store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "session_memory_decision_apply".to_string(),
+                    proposal_id: "session_memory_proposal_add".to_string(),
+                    decision: MemoryGovernanceDecisionKind::Applied,
+                    actor: "curator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: session_memory_evidence("ui-apply"),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.97),
+                    message: Some("apply session memory add".to_string()),
+                    resulting_revision: None,
+                    decided_at: None,
+                },
+                &"2026-06-26T02:02:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(applied.resulting_revision, Some(1));
+        let records = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record_id, "session-fact-proposal");
+        assert_eq!(records[0].revision, 1);
+        assert_eq!(records[0].source, MemoryProposalSource::CaptureProducer);
+        assert_eq!(
+            records[0].durability_rationale,
+            "Session proposal should survive future wakes."
+        );
+        assert_eq!(records[0].evidence_refs, add_proposal.evidence_refs);
+        assert_eq!(store.count_rows("message_slots").unwrap(), 0);
+        assert_eq!(store.count_rows("profile_memories").unwrap(), 0);
+
+        let replace_proposal = session_memory_record_proposal(
+            "session_memory_proposal_replace",
+            MemoryOperation::Replace,
+            {
+                let mut content = session_fact_content(
+                    "session-fact-proposal",
+                    "User chose sqlite-first deployment before Postgres shakedown.",
+                    "2026-06-26T02:03:00Z",
+                );
+                content["expected_revision"] = json!(1);
+                content
+            },
+        );
+        store
+            .save_memory_proposal(
+                &replace_proposal,
+                &descriptor,
+                &"2026-06-26T02:03:00Z".to_string(),
+            )
+            .unwrap();
+        store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "session_memory_replace_approve".to_string(),
+                    proposal_id: "session_memory_proposal_replace".to_string(),
+                    decision: MemoryGovernanceDecisionKind::Approved,
+                    actor: "human_operator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: session_memory_evidence("ui-review-replace"),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.94),
+                    message: Some("approved session memory replace".to_string()),
+                    resulting_revision: None,
+                    decided_at: None,
+                },
+                &"2026-06-26T02:04:00Z".to_string(),
+            )
+            .unwrap();
+        let replaced = store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "session_memory_replace_apply".to_string(),
+                    proposal_id: "session_memory_proposal_replace".to_string(),
+                    decision: MemoryGovernanceDecisionKind::Applied,
+                    actor: "curator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: session_memory_evidence("ui-apply-replace"),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.96),
+                    message: Some("apply session memory replace".to_string()),
+                    resulting_revision: None,
+                    decided_at: None,
+                },
+                &"2026-06-26T02:05:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(replaced.resulting_revision, Some(2));
+        let replaced_record = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap()
+            .pop()
+            .expect("updated session memory record");
+        assert_eq!(replaced_record.revision, 2);
+        assert_eq!(
+            replaced_record.content["content"],
+            "User chose sqlite-first deployment before Postgres shakedown."
+        );
+        assert_eq!(
+            replaced_record.evidence_refs,
+            replace_proposal.evidence_refs
+        );
+        assert_eq!(store.count_rows("message_slots").unwrap(), 0);
+        assert_eq!(store.count_rows("profile_memories").unwrap(), 0);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
     fn future_schema_version_fails_closed() {
         let db_path = temp_db_path("future-schema");
         {
@@ -18767,6 +19232,34 @@ mod tests {
             "created_at": now,
             "updated_at": now
         })
+    }
+
+    fn session_memory_record_proposal(
+        proposal_id: &str,
+        operation: MemoryOperation,
+        content: JsonValue,
+    ) -> MemoryProposalEnvelope {
+        MemoryProposalEnvelope {
+            proposal_id: proposal_id.to_string(),
+            space_id: MemorySpaceId::unchecked("session_memory"),
+            operation,
+            scope: MemoryScope {
+                scope_type: MemoryScopeType::Session,
+                scope_id: "session-alpha".to_string(),
+            },
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked("session_fact"),
+                version: 1,
+            },
+            content,
+            evidence_refs: session_memory_evidence("wake-proposal"),
+            confidence: 0.86,
+            durability_rationale: Some("Session proposal should survive future wakes.".to_string()),
+            governance_mode: MemoryGovernanceMode::ManualReview,
+            source: MemoryProposalSource::CaptureProducer,
+            dedupe_key: Some(format!("session_memory:{proposal_id}")),
+            created_at: None,
+        }
     }
 
     fn branch_summary_memory_write(
