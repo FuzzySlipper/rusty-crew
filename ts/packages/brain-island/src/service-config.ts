@@ -54,6 +54,14 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_TELEGRAM_UPDATE_LIMIT?: string;
   RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS?: string;
   RUSTY_CREW_TELEGRAM_ADAPTER_ID?: string;
+  RUSTY_CREW_STORAGE_BACKEND?: string;
+  RUSTY_CREW_SQLITE_PATH?: string;
+  RUSTY_CREW_SQLITE_WAL?: string;
+  RUSTY_CREW_SQLITE_BUSY_TIMEOUT_MS?: string;
+  RUSTY_CREW_POSTGRES_DATABASE_URL_ENV?: string;
+  RUSTY_CREW_POSTGRES_SCHEMA?: string;
+  RUSTY_CREW_POSTGRES_MAX_CONNECTIONS?: string;
+  RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS?: string;
 }
 
 export interface RustyCrewServicePaths {
@@ -108,6 +116,29 @@ export interface RustyCrewTelegramConfig {
   messageTtlMs: number;
 }
 
+export type RustyCrewStorageBackend = "sqlite" | "postgres";
+
+export interface RustyCrewSqliteStorageConfig {
+  path: string;
+  wal: boolean;
+  busyTimeoutMs: number;
+  effectivePath: string;
+}
+
+export interface RustyCrewPostgresStorageConfig {
+  databaseUrlEnv: string;
+  schema: string;
+  maxConnections: number;
+  statementTimeoutMs: number;
+}
+
+export interface RustyCrewStorageConfig {
+  backend: RustyCrewStorageBackend;
+  sqlite: RustyCrewSqliteStorageConfig;
+  postgres: RustyCrewPostgresStorageConfig;
+  implementationStatus: "active" | "configured_unimplemented";
+}
+
 export interface RustyCrewServiceConfig {
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
@@ -116,6 +147,7 @@ export interface RustyCrewServiceConfig {
   denMemory: RustyCrewDenMemoryConfig;
   mcp: RustyCrewMcpConfig;
   telegram: RustyCrewTelegramConfig;
+  storage: RustyCrewStorageConfig;
   denSuccessorGateway?: DenSuccessorGatewayConfig;
 }
 
@@ -203,6 +235,7 @@ export function loadRustyCrewServiceConfig(
   const denMemory = loadRustyCrewDenMemoryConfig(env);
   const mcp = loadRustyCrewMcpConfig(env);
   const telegram = loadRustyCrewTelegramConfig(env);
+  const storage = loadRustyCrewStorageConfig(env, paths);
 
   validateRustyCrewServiceConfig({
     paths,
@@ -212,6 +245,7 @@ export function loadRustyCrewServiceConfig(
     denMemory,
     mcp,
     telegram,
+    storage,
     denSuccessorGateway,
   });
   return {
@@ -222,6 +256,7 @@ export function loadRustyCrewServiceConfig(
     denMemory,
     mcp,
     telegram,
+    storage,
     denSuccessorGateway,
   };
 }
@@ -254,6 +289,7 @@ export function validateRustyCrewServiceConfig(
   validateDenMemoryConfig(config.denMemory);
   validateMcpConfig(config.mcp);
   validateTelegramConfig(config.telegram);
+  validateStorageConfig(config.storage);
 }
 
 export function ensureRustyCrewServiceDirectories(
@@ -417,9 +453,91 @@ function parseAuthMode(
   }
 }
 
+function parseStorageBackend(
+  input: string | undefined,
+): RustyCrewStorageBackend {
+  const value = normalizeOptional(input);
+  if (value === undefined || value === "sqlite") return "sqlite";
+  if (value === "postgres" || value === "postgresql") return "postgres";
+  throw new Error("RUSTY_CREW_STORAGE_BACKEND must be sqlite or postgres");
+}
+
 function normalizeOptional(input: string | undefined): string | undefined {
   const value = input?.trim();
   return value ? value : undefined;
+}
+
+function loadRustyCrewStorageConfig(
+  env: RustyCrewServiceEnv,
+  paths: RustyCrewServicePaths,
+): RustyCrewStorageConfig {
+  const sqlitePath =
+    normalizeOptional(env.RUSTY_CREW_SQLITE_PATH) ?? "coordination.sqlite3";
+  const backend = parseStorageBackend(env.RUSTY_CREW_STORAGE_BACKEND);
+  return {
+    backend,
+    sqlite: {
+      path: sqlitePath,
+      wal: parseBoolean(
+        env.RUSTY_CREW_SQLITE_WAL,
+        true,
+        "RUSTY_CREW_SQLITE_WAL",
+      ),
+      busyTimeoutMs: parsePositiveInteger(
+        env.RUSTY_CREW_SQLITE_BUSY_TIMEOUT_MS,
+        5_000,
+        "RUSTY_CREW_SQLITE_BUSY_TIMEOUT_MS",
+      ),
+      effectivePath: isAbsolute(sqlitePath)
+        ? sqlitePath
+        : join(paths.engineDataDir, sqlitePath),
+    },
+    postgres: {
+      databaseUrlEnv:
+        normalizeOptional(env.RUSTY_CREW_POSTGRES_DATABASE_URL_ENV) ??
+        "RUSTY_CREW_DATABASE_URL",
+      schema: normalizeOptional(env.RUSTY_CREW_POSTGRES_SCHEMA) ?? "rusty_crew",
+      maxConnections: parsePositiveInteger(
+        env.RUSTY_CREW_POSTGRES_MAX_CONNECTIONS,
+        10,
+        "RUSTY_CREW_POSTGRES_MAX_CONNECTIONS",
+      ),
+      statementTimeoutMs: parsePositiveInteger(
+        env.RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS,
+        30_000,
+        "RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS",
+      ),
+    },
+    implementationStatus:
+      backend === "sqlite" ? "active" : "configured_unimplemented",
+  };
+}
+
+function validateStorageConfig(config: RustyCrewStorageConfig): void {
+  if (!config.sqlite.path.trim()) {
+    throw new Error("RUSTY_CREW_SQLITE_PATH must not be empty");
+  }
+  if (
+    !config.sqlite.effectivePath.trim() ||
+    !isAbsolute(config.sqlite.effectivePath)
+  ) {
+    throw new Error("RUSTY_CREW_SQLITE_PATH must resolve to an absolute path");
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.databaseUrlEnv)) {
+    throw new Error(
+      "RUSTY_CREW_POSTGRES_DATABASE_URL_ENV must be an environment variable name, not a raw URL",
+    );
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.schema)) {
+    throw new Error(
+      "RUSTY_CREW_POSTGRES_SCHEMA must be a PostgreSQL identifier",
+    );
+  }
+  if (config.backend === "postgres") {
+    throw new Error(
+      "RUSTY_CREW_STORAGE_BACKEND=postgres is parsed but not implemented yet; keep backend=sqlite and configure postgres placeholders for future readiness",
+    );
+  }
 }
 
 function loadRustyCrewDenMemoryConfig(

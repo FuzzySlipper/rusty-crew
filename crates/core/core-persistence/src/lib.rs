@@ -4138,7 +4138,7 @@ fn sqlite_storage_capabilities() -> Vec<RuntimeStorageCapability> {
             "single-node ACID transactions are supported",
         ),
         (
-            "full_text_search",
+            "runtime_full_text_search",
             true,
             "runtime search is backed by the service search capability",
         ),
@@ -4163,9 +4163,39 @@ fn sqlite_storage_capabilities() -> Vec<RuntimeStorageCapability> {
             "SQLite backend has no database-native advisory lock capability",
         ),
         (
-            "wal_checkpoint",
+            "maintenance_checkpoint",
             true,
             "SQLite WAL checkpoint maintenance is available",
+        ),
+        (
+            "maintenance_vacuum_or_optimize",
+            true,
+            "SQLite PRAGMA optimize maintenance is available",
+        ),
+        (
+            "estimated_table_size",
+            true,
+            "SQLite table row counts and database/page size diagnostics are available",
+        ),
+        (
+            "query_plan_diagnostics",
+            true,
+            "SQLite EXPLAIN QUERY PLAN checks are available for hot diagnostic queries",
+        ),
+        (
+            "row_level_claims",
+            false,
+            "SQLite claims are scoped to a single service process rather than database row locks",
+        ),
+        (
+            "listen_notify",
+            false,
+            "SQLite backend has no database-native LISTEN/NOTIFY capability",
+        ),
+        (
+            "logical_export_import",
+            false,
+            "logical cross-backend export/import records are planned but not implemented",
         ),
     ]
     .into_iter()

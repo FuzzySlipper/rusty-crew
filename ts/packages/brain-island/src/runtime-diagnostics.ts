@@ -242,6 +242,23 @@ export interface PersistenceDiagnosticsProjection extends PersistenceDiagnostics
 export interface StorageDiagnosticsProjection {
   backend: string;
   backendLabel: string;
+  configuredBackend?: string;
+  implementationStatus?: "active" | "configured_unimplemented";
+  sqlite?: {
+    path: string;
+    effectivePath: string;
+    wal: boolean;
+    busyTimeoutMs: number;
+    deploymentClass: "embedded_local";
+    singleServiceWriter: boolean;
+  };
+  postgres?: {
+    databaseUrlEnv: string;
+    schema: string;
+    maxConnections: number;
+    statementTimeoutMs: number;
+    implementationStatus: "placeholder_unimplemented";
+  };
   schemaVersion: number;
   supportedSchemaVersion: number;
   migrations: {

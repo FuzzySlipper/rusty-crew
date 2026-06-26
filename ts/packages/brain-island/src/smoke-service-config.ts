@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +17,7 @@ import {
   RUSTY_CREW_DEFAULT_ADMIN_PORT,
   RUSTY_CREW_DEFAULT_DATA_DIR,
 } from "./service-config.js";
+import { loadRustyCrewRuntimeConfig } from "./service-runtime-config.js";
 
 assert.throws(() => loadRustyCrewServiceConfig({}), /RUSTY_CREW_ADMIN_TOKEN/);
 
@@ -41,6 +48,20 @@ assert.equal(defaultConfig.telegram.pollIntervalMs, 2_000);
 assert.equal(defaultConfig.telegram.pollTimeoutSeconds, 20);
 assert.equal(defaultConfig.telegram.updateLimit, 50);
 assert.equal(defaultConfig.telegram.messageTtlMs, 300_000);
+assert.equal(defaultConfig.storage.backend, "sqlite");
+assert.equal(defaultConfig.storage.implementationStatus, "active");
+assert.equal(defaultConfig.storage.sqlite.path, "coordination.sqlite3");
+assert.equal(
+  defaultConfig.storage.sqlite.effectivePath,
+  join(RUSTY_CREW_DEFAULT_DATA_DIR, "data", "engine", "coordination.sqlite3"),
+);
+assert.equal(defaultConfig.storage.sqlite.wal, true);
+assert.equal(defaultConfig.storage.sqlite.busyTimeoutMs, 5_000);
+assert.equal(
+  defaultConfig.storage.postgres.databaseUrlEnv,
+  "RUSTY_CREW_DATABASE_URL",
+);
+assert.equal(defaultConfig.storage.postgres.schema, "rusty_crew");
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
@@ -65,6 +86,13 @@ try {
     RUSTY_CREW_TELEGRAM_UPDATE_LIMIT: "10",
     RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS: "60000",
     RUSTY_CREW_TELEGRAM_ADAPTER_ID: "telegram-field",
+    RUSTY_CREW_SQLITE_PATH: "local.sqlite3",
+    RUSTY_CREW_SQLITE_WAL: "false",
+    RUSTY_CREW_SQLITE_BUSY_TIMEOUT_MS: "2500",
+    RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_TEST_DATABASE_URL",
+    RUSTY_CREW_POSTGRES_SCHEMA: "rusty_crew_test",
+    RUSTY_CREW_POSTGRES_MAX_CONNECTIONS: "4",
+    RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS: "15000",
   });
 
   assert.equal(config.paths.configDir, join(root, "config"));
@@ -97,6 +125,21 @@ try {
   assert.equal(config.telegram.updateLimit, 10);
   assert.equal(config.telegram.messageTtlMs, 60_000);
   assert.equal(config.telegram.adapterId, "telegram-field");
+  assert.equal(config.storage.backend, "sqlite");
+  assert.equal(config.storage.sqlite.path, "local.sqlite3");
+  assert.equal(
+    config.storage.sqlite.effectivePath,
+    join(root, "data", "engine", "local.sqlite3"),
+  );
+  assert.equal(config.storage.sqlite.wal, false);
+  assert.equal(config.storage.sqlite.busyTimeoutMs, 2_500);
+  assert.equal(
+    config.storage.postgres.databaseUrlEnv,
+    "RUSTY_CREW_TEST_DATABASE_URL",
+  );
+  assert.equal(config.storage.postgres.schema, "rusty_crew_test");
+  assert.equal(config.storage.postgres.maxConnections, 4);
+  assert.equal(config.storage.postgres.statementTimeoutMs, 15_000);
 
   const noAuth = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
@@ -122,6 +165,61 @@ try {
   assert.equal(customSite.paths.staticDir, customSiteDir);
 
   ensureRustyCrewServiceDirectories(config);
+  writeFileSync(
+    config.paths.serviceConfigFile,
+    JSON.stringify(
+      {
+        storage: {
+          backend: "sqlite",
+          sqlite: {
+            path: "runtime.sqlite3",
+            wal: true,
+            busyTimeoutMs: 3000,
+          },
+          postgres: {
+            databaseUrlEnv: "RUSTY_CREW_RUNTIME_DATABASE_URL",
+            schema: "rusty_runtime",
+            maxConnections: 3,
+            statementTimeoutMs: 12000,
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
+  assert(runtimeConfig.storage);
+  assert.equal(runtimeConfig.storage.backend, "sqlite");
+  assert.equal(runtimeConfig.storage.sqlite.path, "runtime.sqlite3");
+  assert.equal(
+    runtimeConfig.storage.sqlite.effectivePath,
+    join(root, "data", "engine", "runtime.sqlite3"),
+  );
+  assert.equal(
+    runtimeConfig.storage.postgres.databaseUrlEnv,
+    "RUSTY_CREW_RUNTIME_DATABASE_URL",
+  );
+  assert.equal(runtimeConfig.storage.postgres.schema, "rusty_runtime");
+
+  writeFileSync(
+    config.paths.serviceConfigFile,
+    JSON.stringify({ storage: { backend: "mysql" } }),
+  );
+  await assert.rejects(
+    () => loadRustyCrewRuntimeConfig(config),
+    /storage.backend/,
+  );
+
+  writeFileSync(
+    config.paths.serviceConfigFile,
+    JSON.stringify({ storage: { backend: "postgres" } }),
+  );
+  await assert.rejects(
+    () => loadRustyCrewRuntimeConfig(config),
+    /not implemented yet/,
+  );
+
   for (const path of [
     config.paths.configDir,
     config.paths.engineDataDir,
@@ -243,6 +341,37 @@ try {
         RUSTY_CREW_TELEGRAM_UPDATE_LIMIT: "101",
       }),
     /TELEGRAM_UPDATE_LIMIT/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_STORAGE_BACKEND: "mysql",
+      }),
+    /STORAGE_BACKEND/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_STORAGE_BACKEND: "postgres",
+        RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
+      }),
+    /not implemented yet/,
+  );
+
+  assert.throws(
+    () =>
+      loadRustyCrewServiceConfig({
+        RUSTY_CREW_DATA_DIR: root,
+        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+        RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "postgres://unsafe",
+      }),
+    /not a raw URL/,
   );
 } finally {
   rmSync(root, { recursive: true, force: true });

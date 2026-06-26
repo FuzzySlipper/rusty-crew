@@ -19,6 +19,7 @@ import {
   type AdminRouteResult,
   type RuntimeReadinessProbe,
   type RuntimeCounterSummary,
+  type StorageDiagnosticsProjection,
 } from "./index.js";
 
 const now = "2026-06-20T14:00:00.000Z";
@@ -168,9 +169,26 @@ const background = buildBackgroundServiceDiagnosticsProjection({
     adapterDegraded: 0,
   },
 });
-const storage = {
+const storage: StorageDiagnosticsProjection = {
   backend: "sqlite",
   backendLabel: "SQLite WAL",
+  configuredBackend: "sqlite",
+  implementationStatus: "active",
+  sqlite: {
+    path: "coordination.sqlite3",
+    effectivePath: "/tmp/rusty-crew/coordination.sqlite3",
+    wal: true,
+    busyTimeoutMs: 5_000,
+    deploymentClass: "embedded_local",
+    singleServiceWriter: true,
+  },
+  postgres: {
+    databaseUrlEnv: "RUSTY_CREW_DATABASE_URL",
+    schema: "rusty_crew",
+    maxConnections: 10,
+    statementTimeoutMs: 30_000,
+    implementationStatus: "placeholder_unimplemented",
+  },
   schemaVersion: 19,
   supportedSchemaVersion: 19,
   migrations: [
@@ -197,6 +215,11 @@ const storage = {
       name: "transactions",
       supported: true,
       detail: "single-node ACID transactions are supported",
+    },
+    {
+      name: "runtime_full_text_search",
+      supported: true,
+      detail: "runtime search is backed by the service search capability",
     },
     {
       name: "concurrent_writers",
@@ -325,13 +348,25 @@ const storageRoute = handleAdminDiagnosticsRequest(
 assert.equal(storageRoute.status, 200);
 const storageData = okData<{
   backend: string;
+  configuredBackend?: string;
+  implementationStatus?: string;
+  sqlite?: { singleServiceWriter: boolean };
+  postgres?: { databaseUrlEnv: string; implementationStatus: string };
   capabilities: Array<{ name: string; supported: boolean }>;
   tableCounts: Array<{ table: string; rows: number }>;
 }>(storageRoute);
 assert.equal(storageData.backend, "sqlite");
+assert.equal(storageData.configuredBackend, "sqlite");
+assert.equal(storageData.implementationStatus, "active");
+assert.equal(storageData.sqlite?.singleServiceWriter, true);
+assert.equal(storageData.postgres?.databaseUrlEnv, "RUSTY_CREW_DATABASE_URL");
+assert.equal(
+  storageData.postgres?.implementationStatus,
+  "placeholder_unimplemented",
+);
 assert.equal(
   storageData.capabilities.find(
-    (capability) => capability.name === "transactions",
+    (capability) => capability.name === "runtime_full_text_search",
   )?.supported,
   true,
 );

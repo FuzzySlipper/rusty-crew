@@ -497,6 +497,7 @@ export type {
   RuntimeDiagnosticsInput,
   RuntimeDiagnosticsProjection,
   RuntimeSessionDiagnostics,
+  StorageDiagnosticsProjection,
   ToolDiagnosticsProjection,
 } from "./runtime-diagnostics.js";
 export { buildRuntimeHealthProjection, issueDomain } from "./runtime-health.js";

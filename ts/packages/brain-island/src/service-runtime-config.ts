@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type {
   AgentId,
   BrainAction,
@@ -81,7 +81,11 @@ import {
   type ServiceMcpToolDiscoveryClientFactory,
   type ServiceMcpToolExecutorFactory,
 } from "./service-mcp-tools.js";
-import type { RustyCrewServiceConfig } from "./service-config.js";
+import type {
+  RustyCrewServiceConfig,
+  RustyCrewStorageBackend,
+  RustyCrewStorageConfig,
+} from "./service-config.js";
 import { RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND } from "./scheduled-host-executors.js";
 import { planRuntimeConfigWithRust } from "./runtime-config-validation.js";
 import {
@@ -138,6 +142,7 @@ export interface RustyCrewScheduledJob {
 export interface RustyCrewRuntimeConfig {
   profilesDir: string;
   skillsDir?: string;
+  storage?: RustyCrewStorageConfig;
   brains: RustyCrewConfiguredBrain[];
   sessions: RustyCrewConfiguredSession[];
   scheduledJobs: RustyCrewScheduledJob[];
@@ -566,6 +571,7 @@ function runtimeConfigFromNativeDraft(
   return {
     profilesDir: draft.profilesDir,
     skillsDir: draft.skillsDir,
+    storage: original.storage,
     brains: draft.brains.map((brain) => ({
       implementationId: brain.implementationId as BrainImplementationId,
       profileId: brain.profileId as ProfileId,
@@ -1369,6 +1375,7 @@ function emptyRuntimeConfig(
 ): RustyCrewRuntimeConfig {
   return {
     profilesDir: join(serviceConfig.paths.configDir, "profiles"),
+    storage: serviceConfig.storage,
     brains: [],
     sessions: [],
     scheduledJobs: [],
@@ -1393,6 +1400,7 @@ function validateRuntimeConfig(
   return {
     profilesDir,
     skillsDir,
+    storage: runtimeStorageConfig(parsed.storage, serviceConfig),
     brains: arrayValue(parsed.brains).map((item, index) =>
       configuredBrain(item, index),
     ),
@@ -1409,6 +1417,87 @@ function validateRuntimeConfig(
       configuredMcpBinding(item, index),
     ),
   };
+}
+
+function runtimeStorageConfig(
+  input: unknown,
+  serviceConfig: RustyCrewServiceConfig,
+): RustyCrewStorageConfig {
+  if (input === undefined) return serviceConfig.storage;
+  if (!isRecord(input)) {
+    throw new Error("storage config must be an object");
+  }
+  const backend = runtimeStorageBackend(input.backend);
+  const sqlite = isRecord(input.sqlite) ? input.sqlite : {};
+  const postgres = isRecord(input.postgres) ? input.postgres : {};
+  const sqlitePath =
+    optionalString(sqlite.path) ?? serviceConfig.storage.sqlite.path;
+  const postgresDatabaseUrlEnv =
+    optionalString(postgres.databaseUrlEnv) ??
+    serviceConfig.storage.postgres.databaseUrlEnv;
+  const postgresSchema =
+    optionalString(postgres.schema) ?? serviceConfig.storage.postgres.schema;
+  const config: RustyCrewStorageConfig = {
+    backend,
+    sqlite: {
+      path: sqlitePath,
+      wal:
+        optionalBoolean(sqlite.wal, "storage.sqlite.wal") ??
+        serviceConfig.storage.sqlite.wal,
+      busyTimeoutMs:
+        optionalPositiveInteger(
+          sqlite.busyTimeoutMs,
+          "storage.sqlite.busyTimeoutMs",
+        ) ?? serviceConfig.storage.sqlite.busyTimeoutMs,
+      effectivePath: isAbsolute(sqlitePath)
+        ? sqlitePath
+        : join(serviceConfig.paths.engineDataDir, sqlitePath),
+    },
+    postgres: {
+      databaseUrlEnv: postgresDatabaseUrlEnv,
+      schema: postgresSchema,
+      maxConnections:
+        optionalPositiveInteger(
+          postgres.maxConnections,
+          "storage.postgres.maxConnections",
+        ) ?? serviceConfig.storage.postgres.maxConnections,
+      statementTimeoutMs:
+        optionalPositiveInteger(
+          postgres.statementTimeoutMs,
+          "storage.postgres.statementTimeoutMs",
+        ) ?? serviceConfig.storage.postgres.statementTimeoutMs,
+    },
+    implementationStatus:
+      backend === "sqlite" ? "active" : "configured_unimplemented",
+  };
+  validateRuntimeStorageConfig(config);
+  return config;
+}
+
+function runtimeStorageBackend(input: unknown): RustyCrewStorageBackend {
+  const value = optionalString(input);
+  if (value === undefined || value === "sqlite") return "sqlite";
+  if (value === "postgres" || value === "postgresql") return "postgres";
+  throw new Error("storage.backend must be sqlite or postgres");
+}
+
+function validateRuntimeStorageConfig(config: RustyCrewStorageConfig): void {
+  if (!config.sqlite.path.trim()) {
+    throw new Error("storage.sqlite.path must not be empty");
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.databaseUrlEnv)) {
+    throw new Error(
+      "storage.postgres.databaseUrlEnv must be an environment variable name",
+    );
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.schema)) {
+    throw new Error("storage.postgres.schema must be a PostgreSQL identifier");
+  }
+  if (config.backend === "postgres") {
+    throw new Error(
+      "storage.backend=postgres is parsed but not implemented yet; use sqlite until the PostgreSQL backend module lands",
+    );
+  }
 }
 
 function configuredScheduledJob(
@@ -1667,6 +1756,14 @@ function optionalNumber(input: unknown): number | undefined {
   return typeof input === "number" && Number.isFinite(input)
     ? input
     : undefined;
+}
+
+function optionalBoolean(input: unknown, name: string): boolean | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (typeof input !== "boolean") {
+    throw new Error(`${name} must be a boolean`);
+  }
+  return input;
 }
 
 function optionalPositiveInteger(

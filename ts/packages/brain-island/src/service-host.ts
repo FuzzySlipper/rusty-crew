@@ -235,6 +235,7 @@ import {
   type RustyCrewServiceConfig,
   type RustyCrewServiceEnv,
   type RustyCrewServiceLock,
+  type RustyCrewStorageConfig,
 } from "./service-config.js";
 import {
   applyRustyCrewRuntimeConfig,
@@ -951,7 +952,15 @@ async function buildDiagnosticsContext(
         .runtimeSummary({ scopeType: "runtime" })
         .catch(() => undefined),
       state.bridge.listSessions().catch(() => []),
-      state.bridge.storageDiagnostics().catch(() => undefined),
+      state.bridge
+        .storageDiagnostics()
+        .then((diagnostics) =>
+          storageDiagnosticsProjection(
+            diagnostics,
+            state.runtimeConfig.storage ?? state.config.storage,
+          ),
+        )
+        .catch(() => undefined),
       state.bridge.providerStateDiagnostics().catch(() => []),
       buildMemorySpaceDiagnostics(state).catch(() => undefined),
     ]);
@@ -1082,6 +1091,32 @@ function tableCountMap(
   return Object.fromEntries(
     (storage?.tableCounts ?? []).map((count) => [count.table, count.rows]),
   );
+}
+
+function storageDiagnosticsProjection(
+  storage: StorageDiagnosticsProjection,
+  config: RustyCrewStorageConfig,
+): StorageDiagnosticsProjection {
+  return {
+    ...storage,
+    configuredBackend: config.backend,
+    implementationStatus: config.implementationStatus,
+    sqlite: {
+      path: config.sqlite.path,
+      effectivePath: config.sqlite.effectivePath,
+      wal: config.sqlite.wal,
+      busyTimeoutMs: config.sqlite.busyTimeoutMs,
+      deploymentClass: "embedded_local",
+      singleServiceWriter: true,
+    },
+    postgres: {
+      databaseUrlEnv: config.postgres.databaseUrlEnv,
+      schema: config.postgres.schema,
+      maxConnections: config.postgres.maxConnections,
+      statementTimeoutMs: config.postgres.statementTimeoutMs,
+      implementationStatus: "placeholder_unimplemented",
+    },
+  };
 }
 
 function brainModuleDiagnostics(
