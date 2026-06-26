@@ -7,6 +7,7 @@
 use rusty_crew_core_protocol::{CoreError, CoreErrorKind, CoreResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 const MAX_IDENTIFIER_BYTES: usize = 48;
@@ -315,6 +316,298 @@ pub struct InstalledModuleSchemaRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleSchemaRegistryDiagnostics {
+    pub source: String,
+    pub backend_capabilities: Vec<String>,
+    pub modules: Vec<RuntimeModuleSchemaDiagnostic>,
+    pub orphan_installed_modules: Vec<RuntimeInstalledModuleSchemaDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleSchemaDiagnostic {
+    pub module_id: String,
+    pub owner_crate: String,
+    pub owner_module: String,
+    pub descriptor_version: u32,
+    pub installed_version: Option<u32>,
+    pub migration_status: String,
+    pub descriptor_fingerprint: String,
+    pub installed_descriptor_fingerprint: Option<String>,
+    pub installed_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub capability_status: Vec<RuntimeModuleCapabilityStatus>,
+    pub logical_stores: Vec<RuntimeModuleLogicalStoreDiagnostic>,
+    pub physical_tables: Vec<RuntimeModulePhysicalTableDiagnostic>,
+    pub physical_indexes: Vec<RuntimeModulePhysicalIndexDiagnostic>,
+    pub retention: Vec<RuntimeModuleRetentionDiagnostic>,
+    pub repository_contracts: Vec<RuntimeModuleNamedDiagnostic>,
+    pub query_catalog_entries: Vec<RuntimeModuleQueryCatalogDiagnostic>,
+    pub export_hooks: Vec<RuntimeModuleTransferHookDiagnostic>,
+    pub import_hooks: Vec<RuntimeModuleTransferHookDiagnostic>,
+    pub migration_notes: Vec<String>,
+    pub degraded_reasons: Vec<String>,
+    pub blocked_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleCapabilityStatus {
+    pub capability: String,
+    pub required: bool,
+    pub supported: bool,
+    pub backend_variant: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleLogicalStoreDiagnostic {
+    pub store_name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModulePhysicalTableDiagnostic {
+    pub table_name: String,
+    pub logical_store: String,
+    pub physical_table: String,
+    pub declaration: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModulePhysicalIndexDiagnostic {
+    pub table_name: String,
+    pub purpose: String,
+    pub physical_index: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleRetentionDiagnostic {
+    pub store_name: String,
+    pub policy: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleNamedDiagnostic {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleQueryCatalogDiagnostic {
+    pub query_id: String,
+    pub store_name: String,
+    pub description: String,
+    pub parameter_schema_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeModuleTransferHookDiagnostic {
+    pub hook_name: String,
+    pub format_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeInstalledModuleSchemaDiagnostic {
+    pub module_id: String,
+    pub installed_version: u32,
+    pub descriptor_fingerprint: String,
+    pub installed_at: String,
+    pub updated_at: String,
+}
+
+pub fn module_schema_registry_diagnostics(
+    registry: &ModuleSchemaRegistry,
+    installed: &[InstalledModuleSchemaRecord],
+    supported_capabilities: &[ModuleSchemaCapability],
+) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+    let supported = supported_capabilities
+        .iter()
+        .map(|capability| capability.as_str().to_string())
+        .collect::<HashSet<_>>();
+    let installed_by_module = installed
+        .iter()
+        .map(|record| (record.module_id.as_str().to_string(), record))
+        .collect::<HashMap<_, _>>();
+    let mut registered_module_ids = HashSet::new();
+
+    let mut modules = Vec::new();
+    for bundle in registry.bundles() {
+        let validated = bundle.validate()?;
+        let module_id = bundle.module_id.as_str().to_string();
+        registered_module_ids.insert(module_id.clone());
+        let descriptor_fingerprint = bundle.descriptor_fingerprint()?;
+        let installed_record = installed_by_module.get(&module_id).copied();
+        let mut degraded_reasons = Vec::new();
+        let mut blocked_reasons = Vec::new();
+        let capability_status = bundle
+            .capability_requirements
+            .iter()
+            .map(|requirement| {
+                let capability = requirement.capability.as_str().to_string();
+                let is_supported = supported.contains(&capability);
+                if !is_supported {
+                    match requirement.kind {
+                        ModuleCapabilityRequirementKind::Required => blocked_reasons.push(format!(
+                            "required capability {capability} is not supported by this backend"
+                        )),
+                        ModuleCapabilityRequirementKind::Optional => {
+                            degraded_reasons.push(format!(
+                                "optional capability {capability} is not supported by this backend"
+                            ))
+                        }
+                    }
+                }
+                RuntimeModuleCapabilityStatus {
+                    capability,
+                    required: requirement.kind == ModuleCapabilityRequirementKind::Required,
+                    supported: is_supported,
+                    backend_variant: requirement.backend_variant.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let migration_status = match installed_record {
+            None if blocked_reasons.is_empty() => "not_installed",
+            None => "blocked",
+            Some(record) if record.installed_version > bundle.schema_version => {
+                blocked_reasons.push(format!(
+                    "installed version {} is newer than descriptor version {}",
+                    record.installed_version, bundle.schema_version
+                ));
+                "blocked"
+            }
+            Some(record)
+                if record.installed_version == bundle.schema_version
+                    && record.descriptor_fingerprint != descriptor_fingerprint =>
+            {
+                blocked_reasons.push(
+                    "installed descriptor fingerprint differs without a version change".to_string(),
+                );
+                "blocked"
+            }
+            Some(record) if record.installed_version < bundle.schema_version => "upgrade_available",
+            Some(_) if !blocked_reasons.is_empty() => "blocked",
+            Some(_) if !degraded_reasons.is_empty() => "degraded",
+            Some(_) => "installed",
+        }
+        .to_string();
+
+        modules.push(RuntimeModuleSchemaDiagnostic {
+            module_id,
+            owner_crate: bundle.owner.crate_name.clone(),
+            owner_module: bundle.owner.rust_module.clone(),
+            descriptor_version: validated.schema_version,
+            installed_version: installed_record.map(|record| record.installed_version),
+            migration_status,
+            descriptor_fingerprint,
+            installed_descriptor_fingerprint: installed_record
+                .map(|record| record.descriptor_fingerprint.clone()),
+            installed_at: installed_record.map(|record| record.installed_at.clone()),
+            updated_at: installed_record.map(|record| record.updated_at.clone()),
+            capability_status,
+            logical_stores: bundle
+                .logical_stores
+                .iter()
+                .map(|store| RuntimeModuleLogicalStoreDiagnostic {
+                    store_name: store.store_name.as_str().to_string(),
+                    description: store.description.clone(),
+                })
+                .collect(),
+            physical_tables: bundle
+                .tables
+                .iter()
+                .map(|table| {
+                    Ok(RuntimeModulePhysicalTableDiagnostic {
+                        table_name: table.table_name.as_str().to_string(),
+                        logical_store: table.logical_store.as_str().to_string(),
+                        physical_table: table.physical_name(&bundle.module_id)?,
+                        declaration: table.declaration.diagnostic_label().to_string(),
+                    })
+                })
+                .collect::<CoreResult<Vec<_>>>()?,
+            physical_indexes: bundle
+                .indexes
+                .iter()
+                .map(|index| {
+                    Ok(RuntimeModulePhysicalIndexDiagnostic {
+                        table_name: index.table_name.as_str().to_string(),
+                        purpose: index.purpose.as_str().to_string(),
+                        physical_index: index.physical_name(&bundle.module_id)?,
+                        columns: index.columns.clone(),
+                        unique: index.unique,
+                    })
+                })
+                .collect::<CoreResult<Vec<_>>>()?,
+            retention: bundle
+                .retention
+                .iter()
+                .map(ModuleRetentionDeclaration::diagnostic)
+                .collect(),
+            repository_contracts: bundle
+                .repository_contracts
+                .iter()
+                .map(|contract| RuntimeModuleNamedDiagnostic {
+                    name: contract.contract_name.clone(),
+                    description: contract.description.clone(),
+                })
+                .collect(),
+            query_catalog_entries: bundle
+                .query_catalog_entries
+                .iter()
+                .map(|entry| RuntimeModuleQueryCatalogDiagnostic {
+                    query_id: entry.query_id.clone(),
+                    store_name: entry.store_name.as_str().to_string(),
+                    description: entry.description.clone(),
+                    parameter_schema_id: entry.parameter_schema_id.clone(),
+                })
+                .collect(),
+            export_hooks: bundle
+                .export_hooks
+                .iter()
+                .map(|hook| RuntimeModuleTransferHookDiagnostic {
+                    hook_name: hook.hook_name.clone(),
+                    format_version: hook.format_version,
+                })
+                .collect(),
+            import_hooks: bundle
+                .import_hooks
+                .iter()
+                .map(|hook| RuntimeModuleTransferHookDiagnostic {
+                    hook_name: hook.hook_name.clone(),
+                    format_version: hook.format_version,
+                })
+                .collect(),
+            migration_notes: bundle.migration_notes.clone(),
+            degraded_reasons,
+            blocked_reasons,
+        });
+    }
+
+    let orphan_installed_modules = installed
+        .iter()
+        .filter(|record| !registered_module_ids.contains(record.module_id.as_str()))
+        .map(|record| RuntimeInstalledModuleSchemaDiagnostic {
+            module_id: record.module_id.as_str().to_string(),
+            installed_version: record.installed_version,
+            descriptor_fingerprint: record.descriptor_fingerprint.clone(),
+            installed_at: record.installed_at.clone(),
+            updated_at: record.updated_at.clone(),
+        })
+        .collect();
+
+    Ok(RuntimeModuleSchemaRegistryDiagnostics {
+        source: "compiled_module_schema_registry".to_string(),
+        backend_capabilities: supported_capabilities
+            .iter()
+            .map(|capability| capability.as_str().to_string())
+            .collect(),
+        modules,
+        orphan_installed_modules,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleOwner {
     pub crate_name: String,
     pub rust_module: String,
@@ -478,6 +771,13 @@ impl TableDeclaration {
             }
         }
     }
+
+    fn diagnostic_label(&self) -> &'static str {
+        match self {
+            Self::Owned => "owned",
+            Self::MigrationFragment { .. } => "migration_fragment",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -553,6 +853,32 @@ impl ModuleRetentionDeclaration {
             Self::CompactAfter { policy_id, .. } => {
                 validate_schema_identifier(policy_id, IdentifierKind::RetentionPolicy)
             }
+        }
+    }
+
+    fn diagnostic(&self) -> RuntimeModuleRetentionDiagnostic {
+        match self {
+            Self::ManualOnly { store_name } => RuntimeModuleRetentionDiagnostic {
+                store_name: store_name.as_str().to_string(),
+                policy: "manual_only".to_string(),
+                detail: None,
+            },
+            Self::PurgeExpired {
+                store_name,
+                timestamp_column,
+            } => RuntimeModuleRetentionDiagnostic {
+                store_name: store_name.as_str().to_string(),
+                policy: "purge_expired".to_string(),
+                detail: Some(timestamp_column.clone()),
+            },
+            Self::CompactAfter {
+                store_name,
+                policy_id,
+            } => RuntimeModuleRetentionDiagnostic {
+                store_name: store_name.as_str().to_string(),
+                policy: "compact_after".to_string(),
+                detail: Some(policy_id.clone()),
+            },
         }
     }
 }
@@ -1036,6 +1362,73 @@ mod tests {
 
         assert_ne!(first, second);
         assert!(first.starts_with("fnv1a64:"));
+    }
+
+    #[test]
+    fn registry_diagnostics_reports_schema_projection_without_introspection() {
+        let bundle = simple_kv_bundle().unwrap();
+        let fingerprint = bundle.descriptor_fingerprint().unwrap();
+        let registry = ModuleSchemaRegistry::new(vec![bundle]).unwrap();
+        let installed = vec![InstalledModuleSchemaRecord {
+            module_id: ModuleId::new("simple_kv").unwrap(),
+            installed_version: 1,
+            descriptor_fingerprint: fingerprint.clone(),
+            installed_at: "2026-06-26T00:00:00Z".to_string(),
+            updated_at: "2026-06-26T00:00:00Z".to_string(),
+        }];
+
+        let diagnostics = module_schema_registry_diagnostics(
+            &registry,
+            &installed,
+            &[ModuleSchemaCapability::Transactions],
+        )
+        .unwrap();
+
+        assert_eq!(diagnostics.modules.len(), 1);
+        let module = &diagnostics.modules[0];
+        assert_eq!(module.module_id, "simple_kv");
+        assert_eq!(module.migration_status, "degraded");
+        assert_eq!(module.descriptor_fingerprint, fingerprint);
+        assert_eq!(
+            module.physical_tables[0].physical_table,
+            "module_simple_kv_entries"
+        );
+        assert_eq!(
+            module.physical_indexes[0].physical_index,
+            "idx_module_simple_kv_entries_scope_key"
+        );
+        assert_eq!(module.logical_stores[0].store_name, "entries");
+        assert_eq!(module.retention[0].policy, "purge_expired");
+        assert!(module
+            .degraded_reasons
+            .iter()
+            .any(|reason| reason.contains("json_documents")));
+        assert!(diagnostics.orphan_installed_modules.is_empty());
+    }
+
+    #[test]
+    fn registry_diagnostics_reports_blocked_and_orphan_state() {
+        let registry = ModuleSchemaRegistry::new(vec![simple_kv_bundle().unwrap()]).unwrap();
+        let installed = vec![InstalledModuleSchemaRecord {
+            module_id: ModuleId::new("old_module").unwrap(),
+            installed_version: 1,
+            descriptor_fingerprint: "fnv1a64:0000000000000000".to_string(),
+            installed_at: "2026-06-26T00:00:00Z".to_string(),
+            updated_at: "2026-06-26T00:00:00Z".to_string(),
+        }];
+
+        let diagnostics = module_schema_registry_diagnostics(&registry, &installed, &[]).unwrap();
+
+        assert_eq!(diagnostics.modules[0].migration_status, "blocked");
+        assert!(diagnostics.modules[0]
+            .blocked_reasons
+            .iter()
+            .any(|reason| reason.contains("transactions")));
+        assert_eq!(diagnostics.orphan_installed_modules.len(), 1);
+        assert_eq!(
+            diagnostics.orphan_installed_modules[0].module_id,
+            "old_module"
+        );
     }
 
     fn simple_kv_bundle() -> CoreResult<ModuleSchemaBundle> {

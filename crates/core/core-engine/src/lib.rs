@@ -17,12 +17,12 @@ use rusty_crew_core_persistence::{
     ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueryPage,
     QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
     RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
-    RuntimeMaintenanceReport, RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary,
-    RuntimeStorageDiagnostics, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
-    ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
-    SelectActiveVariantResult, UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord,
-    WorkerRunStatus,
+    RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery,
+    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
+    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
+    SelectActiveVariantRequest, SelectActiveVariantResult, UpdateBranchHeadRequest,
+    UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, AttachmentId, BodyState,
@@ -596,6 +596,10 @@ impl CoreEngine {
 
     pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
         self.store.storage_diagnostics()
+    }
+
+    pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+        self.store.storage_schema()
     }
 
     pub fn run_maintenance(

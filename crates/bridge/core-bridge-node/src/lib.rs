@@ -28,11 +28,16 @@ use rusty_crew_core_persistence::{
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
     ProfileMemoryWrite, QueuedMessageRecord, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeSearchFilter, RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary,
-    RuntimeStorageCapability, RuntimeStorageDiagnostics, RuntimeStorageTableCount,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeInstalledModuleSchemaDiagnostic,
+    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleCapabilityStatus,
+    RuntimeModuleLogicalStoreDiagnostic, RuntimeModuleNamedDiagnostic,
+    RuntimeModulePhysicalIndexDiagnostic, RuntimeModulePhysicalTableDiagnostic,
+    RuntimeModuleQueryCatalogDiagnostic, RuntimeModuleRetentionDiagnostic,
+    RuntimeModuleSchemaDiagnostic, RuntimeModuleSchemaRegistryDiagnostics,
+    RuntimeModuleTransferHookDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageDiagnostics,
+    RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord,
+    ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
@@ -403,6 +408,10 @@ impl NativeBridge {
 
     pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
         self.engine()?.storage_diagnostics()
+    }
+
+    pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+        self.engine()?.storage_schema()
     }
 
     pub fn run_maintenance(
@@ -1468,6 +1477,107 @@ pub struct JsRuntimeStorageCapability {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsRuntimeModuleCapabilityStatus {
+    pub capability: String,
+    pub required: bool,
+    pub supported: bool,
+    pub backend_variant: Option<String>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModuleLogicalStoreDiagnostic {
+    pub store_name: String,
+    pub description: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModulePhysicalTableDiagnostic {
+    pub table_name: String,
+    pub logical_store: String,
+    pub physical_table: String,
+    pub declaration: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModulePhysicalIndexDiagnostic {
+    pub table_name: String,
+    pub purpose: String,
+    pub physical_index: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModuleRetentionDiagnostic {
+    pub store_name: String,
+    pub policy: String,
+    pub detail: Option<String>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModuleNamedDiagnostic {
+    pub name: String,
+    pub description: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModuleQueryCatalogDiagnostic {
+    pub query_id: String,
+    pub store_name: String,
+    pub description: String,
+    pub parameter_schema_id: Option<String>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModuleTransferHookDiagnostic {
+    pub hook_name: String,
+    pub format_version: f64,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeInstalledModuleSchemaDiagnostic {
+    pub module_id: String,
+    pub installed_version: f64,
+    pub descriptor_fingerprint: String,
+    pub installed_at: String,
+    pub updated_at: String,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModuleSchemaDiagnostic {
+    pub module_id: String,
+    pub owner_crate: String,
+    pub owner_module: String,
+    pub descriptor_version: f64,
+    pub installed_version: Option<f64>,
+    pub migration_status: String,
+    pub descriptor_fingerprint: String,
+    pub installed_descriptor_fingerprint: Option<String>,
+    pub installed_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub capability_status: Vec<JsRuntimeModuleCapabilityStatus>,
+    pub logical_stores: Vec<JsRuntimeModuleLogicalStoreDiagnostic>,
+    pub physical_tables: Vec<JsRuntimeModulePhysicalTableDiagnostic>,
+    pub physical_indexes: Vec<JsRuntimeModulePhysicalIndexDiagnostic>,
+    pub retention: Vec<JsRuntimeModuleRetentionDiagnostic>,
+    pub repository_contracts: Vec<JsRuntimeModuleNamedDiagnostic>,
+    pub query_catalog_entries: Vec<JsRuntimeModuleQueryCatalogDiagnostic>,
+    pub export_hooks: Vec<JsRuntimeModuleTransferHookDiagnostic>,
+    pub import_hooks: Vec<JsRuntimeModuleTransferHookDiagnostic>,
+    pub migration_notes: Vec<String>,
+    pub degraded_reasons: Vec<String>,
+    pub blocked_reasons: Vec<String>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsRuntimeModuleSchemaRegistryDiagnostics {
+    pub source: String,
+    pub backend_capabilities: Vec<String>,
+    pub modules: Vec<JsRuntimeModuleSchemaDiagnostic>,
+    pub orphan_installed_modules: Vec<JsRuntimeInstalledModuleSchemaDiagnostic>,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsRuntimeStorageTableCount {
     pub table: String,
     pub rows: f64,
@@ -1490,6 +1600,7 @@ pub struct JsRuntimeStorageDiagnostics {
     pub size: JsRuntimeDatabaseSize,
     pub table_counts: Vec<JsRuntimeStorageTableCount>,
     pub capabilities: Vec<JsRuntimeStorageCapability>,
+    pub module_registry: JsRuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<JsRuntimeQueryPlanCheck>,
     pub search_healthy: bool,
     pub pressure: bool,
@@ -2472,6 +2583,15 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn storage_schema(&self) -> napi::Result<JsRuntimeModuleSchemaRegistryDiagnostics> {
+        let bridge = self.bridge()?;
+        let diagnostics = bridge.storage_schema().map_err(to_napi_error)?;
+        Ok(to_js_runtime_module_schema_registry_diagnostics(
+            diagnostics,
+        ))
+    }
+
+    #[napi]
     pub fn run_maintenance(
         &self,
         policy: JsRuntimeMaintenancePolicy,
@@ -3342,6 +3462,184 @@ fn to_js_runtime_storage_capability(
     }
 }
 
+fn to_js_runtime_module_capability_status(
+    status: RuntimeModuleCapabilityStatus,
+) -> JsRuntimeModuleCapabilityStatus {
+    JsRuntimeModuleCapabilityStatus {
+        capability: status.capability,
+        required: status.required,
+        supported: status.supported,
+        backend_variant: status.backend_variant,
+    }
+}
+
+fn to_js_runtime_module_logical_store_diagnostic(
+    store: RuntimeModuleLogicalStoreDiagnostic,
+) -> JsRuntimeModuleLogicalStoreDiagnostic {
+    JsRuntimeModuleLogicalStoreDiagnostic {
+        store_name: store.store_name,
+        description: store.description,
+    }
+}
+
+fn to_js_runtime_module_physical_table_diagnostic(
+    table: RuntimeModulePhysicalTableDiagnostic,
+) -> JsRuntimeModulePhysicalTableDiagnostic {
+    JsRuntimeModulePhysicalTableDiagnostic {
+        table_name: table.table_name,
+        logical_store: table.logical_store,
+        physical_table: table.physical_table,
+        declaration: table.declaration,
+    }
+}
+
+fn to_js_runtime_module_physical_index_diagnostic(
+    index: RuntimeModulePhysicalIndexDiagnostic,
+) -> JsRuntimeModulePhysicalIndexDiagnostic {
+    JsRuntimeModulePhysicalIndexDiagnostic {
+        table_name: index.table_name,
+        purpose: index.purpose,
+        physical_index: index.physical_index,
+        columns: index.columns,
+        unique: index.unique,
+    }
+}
+
+fn to_js_runtime_module_retention_diagnostic(
+    retention: RuntimeModuleRetentionDiagnostic,
+) -> JsRuntimeModuleRetentionDiagnostic {
+    JsRuntimeModuleRetentionDiagnostic {
+        store_name: retention.store_name,
+        policy: retention.policy,
+        detail: retention.detail,
+    }
+}
+
+fn to_js_runtime_module_named_diagnostic(
+    contract: RuntimeModuleNamedDiagnostic,
+) -> JsRuntimeModuleNamedDiagnostic {
+    JsRuntimeModuleNamedDiagnostic {
+        name: contract.name,
+        description: contract.description,
+    }
+}
+
+fn to_js_runtime_module_query_catalog_diagnostic(
+    entry: RuntimeModuleQueryCatalogDiagnostic,
+) -> JsRuntimeModuleQueryCatalogDiagnostic {
+    JsRuntimeModuleQueryCatalogDiagnostic {
+        query_id: entry.query_id,
+        store_name: entry.store_name,
+        description: entry.description,
+        parameter_schema_id: entry.parameter_schema_id,
+    }
+}
+
+fn to_js_runtime_module_transfer_hook_diagnostic(
+    hook: RuntimeModuleTransferHookDiagnostic,
+) -> JsRuntimeModuleTransferHookDiagnostic {
+    JsRuntimeModuleTransferHookDiagnostic {
+        hook_name: hook.hook_name,
+        format_version: hook.format_version as f64,
+    }
+}
+
+fn to_js_runtime_installed_module_schema_diagnostic(
+    installed: RuntimeInstalledModuleSchemaDiagnostic,
+) -> JsRuntimeInstalledModuleSchemaDiagnostic {
+    JsRuntimeInstalledModuleSchemaDiagnostic {
+        module_id: installed.module_id,
+        installed_version: installed.installed_version as f64,
+        descriptor_fingerprint: installed.descriptor_fingerprint,
+        installed_at: installed.installed_at,
+        updated_at: installed.updated_at,
+    }
+}
+
+fn to_js_runtime_module_schema_diagnostic(
+    module: RuntimeModuleSchemaDiagnostic,
+) -> JsRuntimeModuleSchemaDiagnostic {
+    JsRuntimeModuleSchemaDiagnostic {
+        module_id: module.module_id,
+        owner_crate: module.owner_crate,
+        owner_module: module.owner_module,
+        descriptor_version: module.descriptor_version as f64,
+        installed_version: module.installed_version.map(|version| version as f64),
+        migration_status: module.migration_status,
+        descriptor_fingerprint: module.descriptor_fingerprint,
+        installed_descriptor_fingerprint: module.installed_descriptor_fingerprint,
+        installed_at: module.installed_at,
+        updated_at: module.updated_at,
+        capability_status: module
+            .capability_status
+            .into_iter()
+            .map(to_js_runtime_module_capability_status)
+            .collect(),
+        logical_stores: module
+            .logical_stores
+            .into_iter()
+            .map(to_js_runtime_module_logical_store_diagnostic)
+            .collect(),
+        physical_tables: module
+            .physical_tables
+            .into_iter()
+            .map(to_js_runtime_module_physical_table_diagnostic)
+            .collect(),
+        physical_indexes: module
+            .physical_indexes
+            .into_iter()
+            .map(to_js_runtime_module_physical_index_diagnostic)
+            .collect(),
+        retention: module
+            .retention
+            .into_iter()
+            .map(to_js_runtime_module_retention_diagnostic)
+            .collect(),
+        repository_contracts: module
+            .repository_contracts
+            .into_iter()
+            .map(to_js_runtime_module_named_diagnostic)
+            .collect(),
+        query_catalog_entries: module
+            .query_catalog_entries
+            .into_iter()
+            .map(to_js_runtime_module_query_catalog_diagnostic)
+            .collect(),
+        export_hooks: module
+            .export_hooks
+            .into_iter()
+            .map(to_js_runtime_module_transfer_hook_diagnostic)
+            .collect(),
+        import_hooks: module
+            .import_hooks
+            .into_iter()
+            .map(to_js_runtime_module_transfer_hook_diagnostic)
+            .collect(),
+        migration_notes: module.migration_notes,
+        degraded_reasons: module.degraded_reasons,
+        blocked_reasons: module.blocked_reasons,
+    }
+}
+
+fn to_js_runtime_module_schema_registry_diagnostics(
+    diagnostics: RuntimeModuleSchemaRegistryDiagnostics,
+) -> JsRuntimeModuleSchemaRegistryDiagnostics {
+    JsRuntimeModuleSchemaRegistryDiagnostics {
+        source: diagnostics.source,
+        backend_capabilities: diagnostics.backend_capabilities,
+        modules: diagnostics
+            .modules
+            .into_iter()
+            .map(to_js_runtime_module_schema_diagnostic)
+            .collect(),
+        orphan_installed_modules: diagnostics
+            .orphan_installed_modules
+            .into_iter()
+            .map(to_js_runtime_installed_module_schema_diagnostic)
+            .collect(),
+    }
+}
+
 fn to_js_runtime_storage_table_count(
     count: RuntimeStorageTableCount,
 ) -> JsRuntimeStorageTableCount {
@@ -3385,6 +3683,9 @@ fn to_js_runtime_storage_diagnostics(
             .into_iter()
             .map(to_js_runtime_storage_capability)
             .collect(),
+        module_registry: to_js_runtime_module_schema_registry_diagnostics(
+            diagnostics.module_registry,
+        ),
         index_checks: diagnostics
             .index_checks
             .into_iter()

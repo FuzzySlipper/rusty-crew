@@ -3,6 +3,7 @@ import type {
   NativeProfileMemoryQuery,
   NativeRuntimeCounterQuery,
   NativeRuntimeSearchQuery,
+  NativeRuntimeModuleSchemaRegistryDiagnostics,
   NativeRuntimeStorageDiagnostics,
 } from "@rusty-crew/native-bridge";
 import { Type, type Static } from "typebox";
@@ -14,6 +15,7 @@ export type StorageQueryId =
   | "profile.memory"
   | "runtime.counters"
   | "runtime.search"
+  | "storage.schema"
   | "storage.table_counts";
 
 export interface StorageQueryParameter {
@@ -57,6 +59,7 @@ export interface StorageQueryContext {
     | "queryConversationBranches"
     | "queryRuntimeCounters"
     | "searchRuntime"
+    | "storageSchema"
     | "storageDiagnostics"
   >;
 }
@@ -84,6 +87,17 @@ export type StorageQueryExecuteToolDetails =
 const MAX_LIMIT = 100;
 
 const STORAGE_QUERY_DESCRIPTORS = [
+  {
+    id: "storage.schema",
+    title: "Storage module schema registry",
+    description:
+      "Read registered module schemas, installed versions, backend capability status, and physical ownership declarations.",
+    owner: "rust_coordination",
+    readOnly: true,
+    backendAgnostic: true,
+    resultShape: "storage.module_schema_registry.v1",
+    parameters: [],
+  },
   {
     id: "storage.table_counts",
     title: "Storage table row counts",
@@ -218,6 +232,16 @@ export async function handleStorageQueryRequest(
     return routeSuccess(requestId, storageQueryCatalog());
   }
 
+  if (url.pathname === "/v1/admin/storage/schema") {
+    if (method !== "GET") {
+      return routeFailure(405, requestId, {
+        reason_code: "storage_schema_read_only",
+        message: "storage schema diagnostics only support GET",
+      });
+    }
+    return routeSuccess(requestId, await context.bridge.storageSchema());
+  }
+
   const queryId = decodeStorageQueryId(url.pathname);
   if (!queryId) {
     return routeFailure(404, requestId, {
@@ -261,6 +285,8 @@ export async function executeStorageQuery(
         body,
         await context.bridge.storageDiagnostics(),
       );
+    case "storage.schema":
+      return storageSchema(await context.bridge.storageSchema());
     case "runtime.search":
       return runtimeSearch(body, context);
     case "profile.memory":
@@ -318,6 +344,17 @@ export function storageQueryExecuteTool(
         await executeStorageQuery(queryId, params.input, context),
       );
     },
+  };
+}
+
+function storageSchema(
+  diagnostics: NativeRuntimeModuleSchemaRegistryDiagnostics,
+): StorageQueryResult<never, NativeRuntimeModuleSchemaRegistryDiagnostics> {
+  return {
+    query_id: "storage.schema",
+    read_only: true,
+    source: "rust_bridge_read_model",
+    data: diagnostics,
   };
 }
 

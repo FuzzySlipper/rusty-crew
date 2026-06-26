@@ -1005,6 +1005,7 @@ export const manifestOperationNames = [
   "query_data_bank_scopes",
   "remove_data_bank_scope",
   "database_size",
+  "storage_schema",
   "storage_diagnostics",
   "run_maintenance",
   "subscribe_events",

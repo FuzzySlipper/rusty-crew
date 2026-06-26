@@ -9,6 +9,45 @@ import {
   type StorageQueryResult,
 } from "./index.js";
 
+const moduleRegistryFixture = {
+  source: "compiled_module_schema_registry",
+  backendCapabilities: ["transactions", "json_documents"],
+  modules: [
+    {
+      moduleId: "simple_kv",
+      ownerCrate: "core_persistence",
+      ownerModule: "simple_kv",
+      descriptorVersion: 1,
+      installedVersion: 1,
+      migrationStatus: "installed",
+      descriptorFingerprint: "fnv1a64:1234",
+      installedDescriptorFingerprint: "fnv1a64:1234",
+      installedAt: "2026-06-26T00:00:00Z",
+      updatedAt: "2026-06-26T00:00:00Z",
+      capabilityStatus: [],
+      logicalStores: [{ storeName: "entries", description: "Simple entries" }],
+      physicalTables: [
+        {
+          tableName: "entries",
+          logicalStore: "entries",
+          physicalTable: "module_simple_kv_entries",
+          declaration: "owned",
+        },
+      ],
+      physicalIndexes: [],
+      retention: [],
+      repositoryContracts: [],
+      queryCatalogEntries: [],
+      exportHooks: [],
+      importHooks: [],
+      migrationNotes: [],
+      degradedReasons: [],
+      blockedReasons: [],
+    },
+  ],
+  orphanInstalledModules: [],
+} satisfies Awaited<ReturnType<StorageQueryContext["bridge"]["storageSchema"]>>;
+
 const bridge = {
   async storageDiagnostics() {
     return {
@@ -31,10 +70,14 @@ const bridge = {
         { table: "profile_memories", rows: 1 },
       ],
       capabilities: [],
+      moduleRegistry: moduleRegistryFixture,
       indexChecks: [],
       searchHealthy: true,
       pressure: false,
     };
+  },
+  async storageSchema() {
+    return moduleRegistryFixture;
   },
   async searchRuntime(query) {
     assert.equal(query.rowType, "queue_message");
@@ -106,6 +149,22 @@ const catalog = await handleStorageQueryRequest(
 assert.equal(catalog.status, 200);
 const catalogData = okData<StorageQueryCatalog>(catalog);
 assert.ok(catalogData.items.some((item) => item.id === "runtime.search"));
+assert.ok(catalogData.items.some((item) => item.id === "storage.schema"));
+
+const storageSchema = await handleStorageQueryRequest(
+  {
+    method: "GET",
+    url: "/v1/admin/storage/schema",
+    requestId: "req-schema",
+  },
+  context,
+);
+assert.equal(storageSchema.status, 200);
+assert.equal(
+  okData<Awaited<ReturnType<typeof bridge.storageSchema>>>(storageSchema)
+    .modules[0]?.moduleId,
+  "simple_kv",
+);
 
 const tableCounts = await handleStorageQueryRequest(
   {
@@ -143,7 +202,7 @@ assert.equal(memory.details.query_id, "profile.memory");
 assert.equal(memory.details.items?.length, 1);
 
 const catalogTool = await storageQueryCatalogTool().execute("call-catalog", {});
-assert.equal(catalogTool.details.total, 5);
+assert.equal(catalogTool.details.total, 6);
 
 const invalid = await handleStorageQueryRequest(
   {

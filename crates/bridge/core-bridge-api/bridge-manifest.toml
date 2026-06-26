@@ -550,6 +550,15 @@ errors = "core_protocol::CoreError"
 summary = "Read SQLite database size, free-list, and WAL byte counts for diagnostics."
 
 [[operation]]
+name = "storage_schema"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "core_persistence::RuntimeModuleSchemaRegistryDiagnostics"
+errors = "core_protocol::CoreError"
+summary = "Read backend-neutral module schema registry diagnostics for admin and frontend surfaces."
+
+[[operation]]
 name = "run_maintenance"
 surface = "stable"
 direction = "ts_to_rust"

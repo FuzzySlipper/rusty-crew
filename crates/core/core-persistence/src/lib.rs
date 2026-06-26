@@ -5,9 +5,19 @@
 
 pub mod module_schema;
 
+pub use crate::module_schema::{
+    RuntimeInstalledModuleSchemaDiagnostic, RuntimeModuleCapabilityStatus,
+    RuntimeModuleLogicalStoreDiagnostic, RuntimeModuleNamedDiagnostic,
+    RuntimeModulePhysicalIndexDiagnostic, RuntimeModulePhysicalTableDiagnostic,
+    RuntimeModuleQueryCatalogDiagnostic, RuntimeModuleRetentionDiagnostic,
+    RuntimeModuleSchemaDiagnostic, RuntimeModuleSchemaRegistryDiagnostics,
+    RuntimeModuleTransferHookDiagnostic,
+};
+
 use crate::module_schema::{
-    compiled_module_schema_registry, validate_version_progression, InstalledModuleSchemaRecord,
-    ModuleId, ModuleSchemaCapability, ModuleSchemaRegistry,
+    compiled_module_schema_registry, module_schema_registry_diagnostics,
+    validate_version_progression, InstalledModuleSchemaRecord, ModuleId, ModuleSchemaCapability,
+    ModuleSchemaRegistry,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
@@ -1213,6 +1223,7 @@ pub struct RuntimeStorageDiagnostics {
     pub size: RuntimeDatabaseSize,
     pub table_counts: Vec<RuntimeStorageTableCount>,
     pub capabilities: Vec<RuntimeStorageCapability>,
+    pub module_registry: RuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<RuntimeQueryPlanCheck>,
     pub search_healthy: bool,
     pub pressure: bool,
@@ -2179,6 +2190,11 @@ impl CoordinationStore {
             .collect::<CoreResult<Vec<_>>>()?;
         let index_checks = hot_query_plan_checks(&conn)?;
         let search_healthy = sqlite_table_exists(&conn, "runtime_search_fts")?;
+        let module_registry = storage_schema_for_registry(
+            &conn,
+            &compiled_module_schema_registry(),
+            &sqlite_module_schema_capabilities(),
+        )?;
         let pressure = size.wal_bytes > 64 * 1024 * 1024
             || (size.database_bytes > 0 && size.freelist_bytes > size.database_bytes / 4)
             || !index_checks.iter().all(|check| check.uses_index)
@@ -2192,10 +2208,29 @@ impl CoordinationStore {
             size,
             table_counts,
             capabilities: sqlite_storage_capabilities(),
+            module_registry,
             index_checks,
             search_healthy,
             pressure,
         })
+    }
+
+    pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+        let conn = self.conn()?;
+        storage_schema_for_registry(
+            &conn,
+            &compiled_module_schema_registry(),
+            &sqlite_module_schema_capabilities(),
+        )
+    }
+
+    pub fn storage_schema_for_registry(
+        &self,
+        registry: &ModuleSchemaRegistry,
+        supported_capabilities: &[ModuleSchemaCapability],
+    ) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+        let conn = self.conn()?;
+        storage_schema_for_registry(&conn, registry, supported_capabilities)
     }
 
     pub fn run_maintenance(
@@ -4805,6 +4840,15 @@ fn load_installed_module_schema_records(
         .map_err(|error| persistence_error("query installed module schema records", error))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| persistence_error("load installed module schema records", error))
+}
+
+fn storage_schema_for_registry(
+    conn: &Connection,
+    registry: &ModuleSchemaRegistry,
+    supported_capabilities: &[ModuleSchemaCapability],
+) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+    let installed = load_installed_module_schema_records(conn)?;
+    module_schema_registry_diagnostics(registry, &installed, supported_capabilities)
 }
 
 fn load_installed_module_schema_record(
@@ -10752,6 +10796,50 @@ mod tests {
         assert!(error
             .message
             .contains("invalid installed module schema version"));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn storage_schema_diagnostics_project_installed_module_registry() {
+        let db_path = temp_db_path("module-schema-diagnostics");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let registry =
+            ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(1).unwrap()]).unwrap();
+
+        store
+            .install_module_schema_registry(
+                &registry,
+                &[
+                    ModuleSchemaCapability::Transactions,
+                    ModuleSchemaCapability::JsonDocuments,
+                ],
+                &"2026-06-26T00:00:00Z".to_string(),
+            )
+            .unwrap();
+
+        let diagnostics = store
+            .storage_schema_for_registry(
+                &registry,
+                &[
+                    ModuleSchemaCapability::Transactions,
+                    ModuleSchemaCapability::JsonDocuments,
+                ],
+            )
+            .unwrap();
+
+        assert_eq!(diagnostics.modules.len(), 1);
+        let module = &diagnostics.modules[0];
+        assert_eq!(module.module_id, "simple_kv");
+        assert_eq!(module.migration_status, "installed");
+        assert_eq!(module.installed_version, Some(1));
+        assert_eq!(module.logical_stores[0].store_name, "entries");
+        assert_eq!(
+            module.physical_tables[0].physical_table,
+            "module_simple_kv_entries"
+        );
+        assert!(module.blocked_reasons.is_empty());
+        assert!(module.degraded_reasons.is_empty());
 
         remove_temp_db(&db_path);
     }

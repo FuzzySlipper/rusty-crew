@@ -521,6 +521,14 @@ export const ADMIN_CONTROL_CAPABILITIES = [
 
 export const API_CAPABILITIES = [
   readCapability(
+    "admin.storage.schema",
+    "GET",
+    "/v1/admin/storage/schema",
+    "Read backend-neutral module schema registry diagnostics.",
+    "admin",
+    ["storage", "diagnostics"],
+  ),
+  readCapability(
     "chat.sessions.list",
     "GET",
     "/v1/chat/sessions",
