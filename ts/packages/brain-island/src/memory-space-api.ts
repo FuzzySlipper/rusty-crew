@@ -9,6 +9,8 @@ import type {
 import type {
   NativeBridgeModule,
   NativeProfileMemoryRecord,
+  NativeSessionMemoryPromptContext,
+  NativeSessionMemoryRecord,
 } from "@rusty-crew/native-bridge";
 import { Type, type Static } from "typebox";
 import type { AdminRouteResult } from "./admin-diagnostics-api.js";
@@ -18,14 +20,17 @@ import type { BrainToolResolver } from "./tool-session-selection.js";
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 25;
 const PROFILE_DENSE_SPACE_ID = "profile_dense";
+const SESSION_MEMORY_SPACE_ID = "session_memory";
 
 export interface MemorySpaceReadContext {
   bridge: Pick<
     NativeBridgeModule,
     | "getProfileMemory"
+    | "buildSessionMemoryPromptContext"
     | "listMemoryProposals"
     | "listMemorySpaceDescriptors"
     | "listProfileMemory"
+    | "querySessionMemoryRecords"
     | "recordMemoryGovernanceDecision"
     | "saveMemoryProposal"
   >;
@@ -39,9 +44,16 @@ export interface MemorySpaceAdminRequest {
 }
 
 export interface MemorySpaceRecordQuery {
-  profileId: string;
+  profileId?: string;
   targetType?: "profile" | "user";
   targetId?: string;
+  sessionId?: string;
+  branchId?: string;
+  activeBranchId?: string;
+  includeAncestors?: boolean;
+  includeSiblings?: boolean;
+  shapeId?: string;
+  promptContextOnly?: boolean;
   limit: number;
   offset: number;
 }
@@ -50,7 +62,8 @@ export interface MemorySpaceRecordListResult {
   space_id: MemorySpaceId | string;
   read_only: true;
   source: "rust_bridge_memory_space";
-  items: NativeProfileMemoryRecord[];
+  items: Array<NativeProfileMemoryRecord | NativeSessionMemoryRecord>;
+  diagnostics?: NativeSessionMemoryPromptContext["diagnostics"];
   total: number;
   limit: number;
   offset: number;
@@ -61,7 +74,7 @@ export interface MemorySpaceRecordReadResult {
   space_id: MemorySpaceId | string;
   read_only: true;
   source: "rust_bridge_memory_space";
-  item?: NativeProfileMemoryRecord;
+  item?: NativeProfileMemoryRecord | NativeSessionMemoryRecord;
 }
 
 export interface MemorySpaceCatalogResult {
@@ -131,13 +144,13 @@ export async function handleMemorySpaceAdminRequest(
       return routeSuccess(requestId, descriptor);
     }
     if (match.kind === "records") {
-      const query = parseProfileDenseQuery(url.searchParams);
+      const query = parseMemorySpaceRecordQuery(descriptor, url.searchParams);
       return routeSuccess(
         requestId,
         await listMemorySpaceRecords(descriptor, query, context),
       );
     }
-    const query = parseProfileDenseQuery(url.searchParams);
+    const query = parseMemorySpaceRecordQuery(descriptor, url.searchParams);
     return routeSuccess(
       requestId,
       await readMemorySpaceRecord(descriptor, query, match.key, context),
@@ -216,19 +229,17 @@ export async function listMemorySpaceRecords(
   query: MemorySpaceRecordQuery,
   context: MemorySpaceReadContext,
 ): Promise<MemorySpaceRecordListResult> {
-  assertProfileDenseRecordsSupported(descriptor);
-  const items = await context.bridge.listProfileMemory({
-    profileId: query.profileId,
-    targetType: query.targetType,
-    targetId: query.targetId,
-    limit: query.limit,
-    offset: query.offset,
-  });
+  const { items, diagnostics } = await listMemorySpaceRecordItems(
+    descriptor,
+    query,
+    context,
+  );
   return {
     space_id: descriptor.space_id,
     read_only: true,
     source: "rust_bridge_memory_space",
     items,
+    ...(diagnostics ? { diagnostics } : {}),
     total: items.length,
     limit: query.limit,
     offset: query.offset,
@@ -244,19 +255,34 @@ export async function readMemorySpaceRecord(
   key: string,
   context: MemorySpaceReadContext,
 ): Promise<MemorySpaceRecordReadResult> {
-  assertProfileDenseRecordsSupported(descriptor);
   if (key.trim().length === 0) {
     throw new MemorySpaceInputError(
       "invalid_memory_space_key",
       "memory-space record key must not be empty",
     );
   }
-  const item = await context.bridge.getProfileMemory({
-    profileId: query.profileId,
-    targetType: query.targetType ?? "profile",
-    targetId: query.targetId,
-    key,
-  });
+  const item =
+    descriptor.space_id === PROFILE_DENSE_SPACE_ID
+      ? await context.bridge.getProfileMemory({
+          profileId:
+            query.profileId ??
+            missing("profileId is required for profile_dense record reads"),
+          targetType: query.targetType ?? "profile",
+          targetId: query.targetId,
+          key,
+        })
+      : descriptor.space_id === SESSION_MEMORY_SPACE_ID
+        ? (
+            await context.bridge.querySessionMemoryRecords({
+              session_id:
+                query.sessionId ??
+                missing("sessionId is required for session_memory record reads"),
+              include_archived: true,
+              include_superseded: true,
+              page: { limit: MAX_LIMIT, offset: 0 },
+            })
+          ).find((record) => record.record_id === key)
+        : unsupportedMemorySpaceRecords(descriptor);
   return {
     space_id: descriptor.space_id,
     read_only: true,
@@ -289,6 +315,12 @@ const readToolParameters = Type.Object({
     Type.Union([Type.Literal("profile"), Type.Literal("user")]),
   ),
   targetId: Type.Optional(Type.String({ minLength: 1 })),
+  sessionId: Type.Optional(Type.String({ minLength: 1 })),
+  activeBranchId: Type.Optional(Type.String({ minLength: 1 })),
+  includeAncestors: Type.Optional(Type.Boolean()),
+  includeSiblings: Type.Optional(Type.Boolean()),
+  shapeId: Type.Optional(Type.String({ minLength: 1 })),
+  promptContextOnly: Type.Optional(Type.Boolean()),
   key: Type.Optional(Type.String({ minLength: 1 })),
   limit: Type.Optional(Type.Number({ minimum: 1 })),
   offset: Type.Optional(Type.Number({ minimum: 0 })),
@@ -321,11 +353,19 @@ export function memorySpaceReadTool(input: {
           profileId:
             params.profileId ??
             input.session?.profileId ??
-            missing(
-              "profileId is required when no session profile is available",
-            ),
+            (descriptor.space_id === PROFILE_DENSE_SPACE_ID
+              ? missing(
+                  "profileId is required when no session profile is available",
+                )
+              : undefined),
           targetType: params.targetType,
           targetId: params.targetId,
+          sessionId: params.sessionId,
+          activeBranchId: params.activeBranchId,
+          includeAncestors: params.includeAncestors,
+          includeSiblings: params.includeSiblings,
+          shapeId: params.shapeId,
+          promptContextOnly: params.promptContextOnly,
           limit: boundedInteger(params.limit, DEFAULT_LIMIT, 1, MAX_LIMIT),
           offset: boundedInteger(params.offset, 0, 0, Number.MAX_SAFE_INTEGER),
         };
@@ -480,15 +520,82 @@ function findDescriptor(
   return descriptors.find((descriptor) => descriptor.space_id === spaceId);
 }
 
-function assertProfileDenseRecordsSupported(
+async function listMemorySpaceRecordItems(
   descriptor: MemorySpaceDescriptor,
-): void {
-  if (descriptor.space_id !== PROFILE_DENSE_SPACE_ID) {
-    throw new MemorySpaceInputError(
-      "memory_space_records_unsupported",
-      `memory space ${descriptor.space_id} does not expose record reads yet`,
-    );
+  query: MemorySpaceRecordQuery,
+  context: MemorySpaceReadContext,
+): Promise<{
+  items: Array<NativeProfileMemoryRecord | NativeSessionMemoryRecord>;
+  diagnostics?: NativeSessionMemoryPromptContext["diagnostics"];
+}> {
+  if (descriptor.space_id === PROFILE_DENSE_SPACE_ID) {
+    return {
+      items: await context.bridge.listProfileMemory({
+        profileId:
+          query.profileId ??
+          missing("profileId is required for profile_dense record reads"),
+        targetType: query.targetType,
+        targetId: query.targetId,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    };
   }
+  if (descriptor.space_id === SESSION_MEMORY_SPACE_ID) {
+    const sessionId =
+      query.sessionId ??
+      missing("sessionId is required for session_memory record reads");
+    if (query.promptContextOnly === true || query.activeBranchId !== undefined) {
+      const contextResult = await context.bridge.buildSessionMemoryPromptContext(
+        {
+          session_id: sessionId,
+          active_branch_id: query.activeBranchId,
+          include_ancestors: query.includeAncestors ?? true,
+          include_siblings: query.includeSiblings ?? false,
+          shape_id: query.shapeId,
+          prompt_context_only: query.promptContextOnly ?? true,
+          page: { limit: query.limit, offset: query.offset },
+        },
+      );
+      return {
+        items: contextResult.records,
+        diagnostics: contextResult.diagnostics,
+      };
+    }
+    return {
+      items: await context.bridge.querySessionMemoryRecords({
+        session_id: sessionId,
+        branch_id: query.branchId,
+        shape_id: query.shapeId,
+        include_archived: query.promptContextOnly === false,
+        include_superseded: query.promptContextOnly === false,
+        page: { limit: query.limit, offset: query.offset },
+      }),
+    };
+  }
+  return unsupportedMemorySpaceRecords(descriptor);
+}
+
+function unsupportedMemorySpaceRecords(
+  descriptor: MemorySpaceDescriptor,
+): never {
+  throw new MemorySpaceInputError(
+    "memory_space_records_unsupported",
+    `memory space ${descriptor.space_id} does not expose record reads yet`,
+  );
+}
+
+function parseMemorySpaceRecordQuery(
+  descriptor: MemorySpaceDescriptor,
+  params: URLSearchParams,
+): MemorySpaceRecordQuery {
+  if (descriptor.space_id === PROFILE_DENSE_SPACE_ID) {
+    return parseProfileDenseQuery(params);
+  }
+  if (descriptor.space_id === SESSION_MEMORY_SPACE_ID) {
+    return parseSessionMemoryQuery(params);
+  }
+  return unsupportedMemorySpaceRecords(descriptor);
 }
 
 function parseProfileDenseQuery(
@@ -507,6 +614,30 @@ function parseProfileDenseQuery(
     profileId,
     targetType,
     targetId,
+    limit: boundedInteger(
+      Number(params.get("limit") ?? DEFAULT_LIMIT),
+      DEFAULT_LIMIT,
+      1,
+      MAX_LIMIT,
+    ),
+    offset: boundedInteger(
+      Number(params.get("offset") ?? 0),
+      0,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  };
+}
+
+function parseSessionMemoryQuery(params: URLSearchParams): MemorySpaceRecordQuery {
+  return {
+    sessionId: requiredQueryString(params, "sessionId"),
+    branchId: optionalQueryString(params, "branchId"),
+    activeBranchId: optionalQueryString(params, "activeBranchId"),
+    includeAncestors: optionalBoolean(params, "includeAncestors"),
+    includeSiblings: optionalBoolean(params, "includeSiblings"),
+    shapeId: optionalQueryString(params, "shapeId"),
+    promptContextOnly: optionalBoolean(params, "promptContextOnly"),
     limit: boundedInteger(
       Number(params.get("limit") ?? DEFAULT_LIMIT),
       DEFAULT_LIMIT,
@@ -551,6 +682,20 @@ function optionalQueryString(
   const value = params.get(name);
   if (value === null || value.trim().length === 0) return undefined;
   return value;
+}
+
+function optionalBoolean(
+  params: URLSearchParams,
+  name: string,
+): boolean | undefined {
+  const value = params.get(name);
+  if (value === null || value.trim().length === 0) return undefined;
+  if (value === "true" || value === "1") return true;
+  if (value === "false" || value === "0") return false;
+  throw new MemorySpaceInputError(
+    "invalid_memory_space_input",
+    `${name} must be true or false`,
+  );
 }
 
 function boundedInteger(

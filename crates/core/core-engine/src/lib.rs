@@ -8,34 +8,36 @@ use rusty_crew_core_body::{
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
-    AttachmentQuery, AttachmentRecord, AttachmentWrite, ConversationBranchQuery,
-    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
-    ConversationJumpRequest, ConversationJumpResult, ConversationSnapshotQuery,
-    ConversationSnapshotRecord, ConversationSnapshotWrite, CoordinationStore, DataBankScopeQuery,
-    DataBankScopeRecord, DataBankScopeWrite, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
-    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
-    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
-    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
-    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
-    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-    QueuedMessageState, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
-    RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery, ScheduledJobRecord,
-    ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
-    SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery, SimpleKvRecord,
+    AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
+    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
+    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
+    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
+    CoordinationStore, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
+    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueryPage,
+    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
+    RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery,
+    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
+    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
+    SelectActiveVariantRequest, SelectActiveVariantResult, SessionMemoryPromptContext,
+    SessionMemoryQuery, SessionMemoryRecord, SimpleKvQuery, SimpleKvRecord,
     UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
-    ActionBatchReceipt, ActionRejection, AgentId, AgentMessage, AttachmentId, BodyState,
-    BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainImplementationRegistration,
-    BrainProviderStateScope, BrainWakeProviderStateInput, BrainWakeProviderStateOutput,
-    BrainWakeProviderStateUpdate, ClockConfig, CompletionStatus, CoreError, CoreErrorKind,
-    CoreEvent, CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
-    DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
-    DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
-    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
+    session_memory_space_descriptor, ActionBatchReceipt, ActionRejection, AgentId, AgentMessage,
+    AttachmentId, BodyState, BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope,
+    BrainImplementationRegistration, BrainProviderStateScope, BrainWakeProviderStateInput,
+    BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, ClockConfig, CompletionStatus,
+    CoreError, CoreErrorKind, CoreEvent, CoreResult, DataBankScopeId,
+    DelegatedResourceCleanupReport, DelegatedRunStatus, DelegatedSessionRuntimeStatus,
+    DelegationLifecycleEvent, DelegationLifecyclePhase, DelegationLineage, DenDataUpdate,
+    EngineConfig, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
+    FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
     ParentConsumptionPolicy, ProfileId, ProfileRegistryRecord, ProviderStateAbsenceReason,
@@ -788,9 +790,24 @@ impl CoreEngine {
     }
 
     pub fn list_memory_space_descriptors(&self) -> CoreResult<Vec<MemorySpaceDescriptor>> {
-        Ok(vec![memory_spaces::profile_dense_descriptor(
-            &ProfileMemoryCaps::default(),
-        )])
+        Ok(vec![
+            memory_spaces::profile_dense_descriptor(&ProfileMemoryCaps::default()),
+            session_memory_space_descriptor(),
+        ])
+    }
+
+    pub fn query_session_memory_records(
+        &self,
+        query: &SessionMemoryQuery,
+    ) -> CoreResult<Vec<SessionMemoryRecord>> {
+        self.store.query_session_memory_records(query)
+    }
+
+    pub fn build_session_memory_prompt_context(
+        &self,
+        query: &BranchAwareSessionMemoryQuery,
+    ) -> CoreResult<SessionMemoryPromptContext> {
+        self.store.build_session_memory_prompt_context(query)
     }
 
     pub fn save_memory_proposal(

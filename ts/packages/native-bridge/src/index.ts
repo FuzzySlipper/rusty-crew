@@ -377,6 +377,8 @@ interface NativeBridgeBinding {
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
   listMemorySpaceDescriptorsJson(): string;
+  querySessionMemoryRecordsJson(inputJson: string): string;
+  buildSessionMemoryPromptContextJson(inputJson: string): string;
   saveMemoryProposalJson(inputJson: string): string;
   listMemoryProposalsJson(inputJson: string): string;
   recordMemoryGovernanceDecisionJson(inputJson: string): string;
@@ -546,6 +548,70 @@ export interface NativeProfileMemoryRecord {
   revision: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface NativeSessionMemoryRecord {
+  record_id: string;
+  session_id: string;
+  scope: { scope_type: string; scope_id: string };
+  branch_id?: string | null;
+  shape: { shape_id: string; version: number };
+  status: "active" | "superseded" | "archived";
+  revision: number;
+  content: unknown;
+  evidence_refs: unknown[];
+  source: string;
+  confidence: number;
+  durability_rationale: string;
+  supersedes_record_id?: string | null;
+  superseded_by_record_id?: string | null;
+  archived_at?: string | null;
+  archive_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NativeSessionMemoryQuery {
+  session_id?: string;
+  branch_id?: string;
+  scope_type?: string;
+  shape_id?: string;
+  include_superseded?: boolean;
+  include_archived?: boolean;
+  page?: { limit?: number; offset?: number };
+}
+
+export interface NativeBranchAwareSessionMemoryQuery {
+  session_id: string;
+  active_branch_id?: string | null;
+  include_ancestors: boolean;
+  include_siblings: boolean;
+  shape_id?: string | null;
+  prompt_context_only: boolean;
+  page?: { limit?: number; offset?: number } | null;
+}
+
+export interface NativeSessionMemoryPromptContext {
+  records: NativeSessionMemoryRecord[];
+  diagnostics: {
+    descriptor_id: string;
+    descriptor_schema_version: number;
+    session_id: string;
+    active_branch_id?: string | null;
+    selected_records: Array<{ record_id: string; shape_id: string }>;
+    excluded_counts: {
+      wrong_branch: number;
+      sibling_branch: number;
+      tool_only: number;
+      archived: number;
+      superseded: number;
+      limit_exceeded: number;
+      policy_disabled: number;
+    };
+    character_estimate: number;
+    token_estimate: number;
+    context_policy: "summary_context" | "tool_only";
+  };
 }
 
 export type NativeProfileRegistryLifecycleStatus =
@@ -1330,6 +1396,12 @@ export interface NativeBridgeModule {
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
   listMemorySpaceDescriptors(): Promise<MemorySpaceDescriptor[]>;
+  querySessionMemoryRecords(
+    query: NativeSessionMemoryQuery,
+  ): Promise<NativeSessionMemoryRecord[]>;
+  buildSessionMemoryPromptContext(
+    query: NativeBranchAwareSessionMemoryQuery,
+  ): Promise<NativeSessionMemoryPromptContext>;
   saveMemoryProposal(
     proposal: MemoryProposalEnvelope,
   ): Promise<MemoryProposalRecord>;
@@ -1544,6 +1616,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     getProfileRegistryRecord: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
     listMemorySpaceDescriptors: unavailable("initialize_engine"),
+    querySessionMemoryRecords: unavailable("initialize_engine"),
+    buildSessionMemoryPromptContext: unavailable("initialize_engine"),
     saveMemoryProposal: unavailable("initialize_engine"),
     listMemoryProposals: unavailable("initialize_engine"),
     recordMemoryGovernanceDecision: unavailable("initialize_engine"),
@@ -2254,6 +2328,14 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.listMemorySpaceDescriptorsJson(),
       ) as MemorySpaceDescriptor[],
+    querySessionMemoryRecords: async (query) =>
+      JSON.parse(
+        binding.querySessionMemoryRecordsJson(JSON.stringify(query)),
+      ) as NativeSessionMemoryRecord[],
+    buildSessionMemoryPromptContext: async (query) =>
+      JSON.parse(
+        binding.buildSessionMemoryPromptContextJson(JSON.stringify(query)),
+      ) as NativeSessionMemoryPromptContext,
     saveMemoryProposal: async (proposal) =>
       JSON.parse(
         binding.saveMemoryProposalJson(JSON.stringify(proposal)),

@@ -20,28 +20,29 @@ use rusty_crew_core_config::{
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
-    AttachmentQuery, AttachmentRecord, AttachmentWrite, ConversationBranchQuery,
-    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
-    ConversationJumpRequest, ConversationJumpResult, ConversationSnapshotQuery,
-    ConversationSnapshotRecord, ConversationSnapshotWrite, DataBankScopeQuery, DataBankScopeRecord,
-    DataBankScopeWrite, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProfileRegistryQuery, QueuedMessageRecord, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
-    RuntimeInstalledModuleSchemaDiagnostic, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeModuleCapabilityStatus, RuntimeModuleLogicalStoreDiagnostic,
-    RuntimeModuleNamedDiagnostic, RuntimeModulePhysicalIndexDiagnostic,
-    RuntimeModulePhysicalTableDiagnostic, RuntimeModuleQueryCatalogDiagnostic,
-    RuntimeModuleRetentionDiagnostic, RuntimeModuleSchemaDiagnostic,
-    RuntimeModuleSchemaRegistryDiagnostics, RuntimeModuleTransferHookDiagnostic,
-    RuntimeRepositoryBackendRequirement, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageDiagnostics, RuntimeStoragePressureSignal, RuntimeStorageTableCount,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery,
-    SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
+    AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
+    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
+    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
+    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, MessageSlotQuery,
+    MessageSlotRecord, MessageSlotWrite, MessageVariantQuery, MessageVariantRecord,
+    MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
+    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
+    ProfileRegistryQuery, QueuedMessageRecord, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeInstalledModuleSchemaDiagnostic,
+    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleCapabilityStatus,
+    RuntimeModuleLogicalStoreDiagnostic, RuntimeModuleNamedDiagnostic,
+    RuntimeModulePhysicalIndexDiagnostic, RuntimeModulePhysicalTableDiagnostic,
+    RuntimeModuleQueryCatalogDiagnostic, RuntimeModuleRetentionDiagnostic,
+    RuntimeModuleSchemaDiagnostic, RuntimeModuleSchemaRegistryDiagnostics,
+    RuntimeModuleTransferHookDiagnostic, RuntimeRepositoryBackendRequirement,
+    RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageDiagnostics,
+    RuntimeStoragePressureSignal, RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord,
+    SimpleKvQuery, SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
@@ -596,6 +597,20 @@ impl NativeBridge {
 
     pub fn list_memory_space_descriptors(&self) -> CoreResult<Vec<MemorySpaceDescriptor>> {
         self.engine()?.list_memory_space_descriptors()
+    }
+
+    pub fn query_session_memory_records(
+        &self,
+        query: &SessionMemoryQuery,
+    ) -> CoreResult<Vec<SessionMemoryRecord>> {
+        self.engine()?.query_session_memory_records(query)
+    }
+
+    pub fn build_session_memory_prompt_context(
+        &self,
+        query: &BranchAwareSessionMemoryQuery,
+    ) -> CoreResult<SessionMemoryPromptContext> {
+        self.engine()?.build_session_memory_prompt_context(query)
     }
 
     pub fn save_memory_proposal(
@@ -2989,6 +3004,32 @@ impl NativeBridgeBinding {
             .list_memory_space_descriptors()
             .map_err(to_napi_error)?;
         serialize_json(&descriptors, "memory space descriptors")
+    }
+
+    #[napi]
+    pub fn query_session_memory_records_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<SessionMemoryQuery>(&input_json, "session memory query")?;
+        let records = bridge
+            .query_session_memory_records(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "session memory records")
+    }
+
+    #[napi]
+    pub fn build_session_memory_prompt_context_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<BranchAwareSessionMemoryQuery>(
+            &input_json,
+            "session memory prompt context query",
+        )?;
+        let context = bridge
+            .build_session_memory_prompt_context(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&context, "session memory prompt context")
     }
 
     #[napi]
