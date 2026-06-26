@@ -108,6 +108,18 @@ export interface ProfileConfig {
   channelDefaults?: ProfileChannelDefaultsConfig;
 }
 
+export type ProfileConfigSourceFormat = "flat_json" | "directory_yaml";
+
+export interface LoadedProfileConfigSource {
+  profile: ProfileConfig;
+  profilePath: string;
+  profileDir: string;
+  sourceFormat: ProfileConfigSourceFormat;
+  rawProfileConfig: Record<string, unknown>;
+  soulMarkdown?: string;
+  memoryMarkdown?: string;
+}
+
 export interface LoadedSkill {
   slug: string;
   title?: string;
@@ -164,6 +176,13 @@ export async function loadProfileConfig(
   profilesDir: string,
   profileId: ProfileId,
 ): Promise<ProfileConfig> {
+  return (await loadProfileConfigWithSource(profilesDir, profileId)).profile;
+}
+
+export async function loadProfileConfigWithSource(
+  profilesDir: string,
+  profileId: ProfileId,
+): Promise<LoadedProfileConfigSource> {
   const profilePath = join(profilesDir, `${profileId}.json`);
   let raw: string;
   try {
@@ -186,9 +205,23 @@ export async function loadProfileConfig(
     );
   }
 
-  return validateProfileConfig(parsed, profileId, profilePath, {
+  if (!isRecord(parsed)) {
+    throw invalidProfile(
+      profileId,
+      profilePath,
+      "profile root must be an object",
+    );
+  }
+
+  return {
+    profile: validateProfileConfig(parsed, profileId, profilePath, {
+      profileDir: profilesDir,
+    }),
+    profilePath,
     profileDir: profilesDir,
-  });
+    sourceFormat: "flat_json",
+    rawProfileConfig: parsed,
+  };
 }
 
 export function parseProfileConfigDraft(input: {
@@ -214,7 +247,7 @@ async function loadProfileDirectoryConfig(
   profilesDir: string,
   profileId: ProfileId,
   jsonError: unknown,
-): Promise<ProfileConfig> {
+): Promise<LoadedProfileConfigSource> {
   const profileDir = join(profilesDir, profileId);
   const profilePath = join(profileDir, "profile.yaml");
   let raw: string;
@@ -228,7 +261,7 @@ async function loadProfileDirectoryConfig(
     );
   }
 
-  let parsed: unknown;
+  let parsed: Record<string, unknown>;
   try {
     parsed = parseSimpleYaml(raw);
   } catch (error) {
@@ -243,11 +276,19 @@ async function loadProfileDirectoryConfig(
     readOptionalProfileMarkdown(profileDir, "soul.md"),
     readOptionalProfileMarkdown(profileDir, "memory.md"),
   ]);
-  return validateProfileConfig(parsed, profileId, profilePath, {
+  return {
+    profile: validateProfileConfig(parsed, profileId, profilePath, {
+      profileDir,
+      soulMarkdown,
+      memoryMarkdown,
+    }),
+    profilePath,
     profileDir,
+    sourceFormat: "directory_yaml",
+    rawProfileConfig: parsed,
     soulMarkdown,
     memoryMarkdown,
-  });
+  };
 }
 
 async function loadProfileSkills(

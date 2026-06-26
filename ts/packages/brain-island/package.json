@@ -94,6 +94,7 @@
     "smoke:mcp-surfaces-e2e": "tsx src/smoke-mcp-surfaces-e2e.ts",
     "smoke:tool-profile-selection": "tsx src/smoke-tool-profile-selection.ts",
     "smoke:profile-loading": "tsx src/smoke-profile-loading.ts",
+    "smoke:profile-registry-import": "tsx src/smoke-profile-registry-import.ts",
     "smoke:profile-role-assembly": "tsx src/smoke-profile-role-assembly.ts",
     "smoke:tool-session-selection": "tsx src/smoke-tool-session-selection.ts",
     "smoke:brain-tool-pi-adapter": "tsx src/smoke-brain-tool-pi-adapter.ts",

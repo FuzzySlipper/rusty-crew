@@ -858,19 +858,33 @@ export type {
 } from "./tool-profile-selection.js";
 export {
   loadProfileConfig,
+  loadProfileConfigWithSource,
   loadProfileContext,
   loadSkill,
   ProfileLoadError,
 } from "./profile-loading.js";
 export type {
   LoadedProfileContext,
+  LoadedProfileConfigSource,
   LoadedSkill,
   LoadProfileContextInput,
   ProfileConfig,
+  ProfileConfigSourceFormat,
   ProfileLoadErrorCode,
   ProfilePromptFragments,
   ProfileRuntimeConfig,
 } from "./profile-loading.js";
+export { buildProfileRegistryImportPlan } from "./profile-registry-import.js";
+export type {
+  BuildProfileRegistryImportPlanInput,
+  ProfileRegistryDerivedRuntimeRefDraft,
+  ProfileRegistryImportExportMetadataDraft,
+  ProfileRegistryImportMode,
+  ProfileRegistryImportPlan,
+  ProfileRegistryLifecycleStatus,
+  ProfileRegistrySourceAssetRefDraft,
+  ProfileRegistryWriteDraft,
+} from "./profile-registry-import.js";
 export {
   planCreateProfileWithRust,
   planRuntimeConfigWithRust,
