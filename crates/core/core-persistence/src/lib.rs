@@ -1040,6 +1040,60 @@ pub struct SessionMemoryQuery {
     pub page: Option<QueryPage>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchAwareSessionMemoryQuery {
+    pub session_id: SessionId,
+    pub active_branch_id: Option<ConversationBranchId>,
+    pub include_ancestors: bool,
+    pub include_siblings: bool,
+    pub shape_id: Option<String>,
+    pub prompt_context_only: bool,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMemoryPromptContext {
+    pub records: Vec<SessionMemoryRecord>,
+    pub diagnostics: SessionMemoryPromptDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMemoryPromptDiagnostics {
+    pub descriptor_id: String,
+    pub descriptor_schema_version: u32,
+    pub session_id: SessionId,
+    pub active_branch_id: Option<ConversationBranchId>,
+    pub selected_records: Vec<SessionMemorySelectedRecordDiagnostic>,
+    pub excluded_counts: SessionMemoryPromptExcludedCounts,
+    pub character_estimate: u64,
+    pub token_estimate: u64,
+    pub context_policy: SessionMemoryPromptContextPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMemorySelectedRecordDiagnostic {
+    pub record_id: String,
+    pub shape_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SessionMemoryPromptExcludedCounts {
+    pub wrong_branch: u64,
+    pub sibling_branch: u64,
+    pub tool_only: u64,
+    pub archived: u64,
+    pub superseded: u64,
+    pub limit_exceeded: u64,
+    pub policy_disabled: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMemoryPromptContextPolicy {
+    SummaryContext,
+    ToolOnly,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleKvScope {
     pub scope_type: String,
@@ -2379,6 +2433,22 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<SessionMemoryRecord>> {
         let conn = self.conn()?;
         query_session_memory_records(&conn, query)
+    }
+
+    pub fn query_branch_aware_session_memory_records(
+        &self,
+        query: &BranchAwareSessionMemoryQuery,
+    ) -> CoreResult<Vec<SessionMemoryRecord>> {
+        let conn = self.conn()?;
+        Ok(select_branch_aware_session_memory(&conn, query)?.records)
+    }
+
+    pub fn build_session_memory_prompt_context(
+        &self,
+        query: &BranchAwareSessionMemoryQuery,
+    ) -> CoreResult<SessionMemoryPromptContext> {
+        let conn = self.conn()?;
+        select_branch_aware_session_memory(&conn, query)
     }
 
     pub fn save_memory_proposal(
@@ -11542,6 +11612,279 @@ fn query_session_memory_records(
         .map_err(|error| persistence_error("load session memory records", error))
 }
 
+fn select_branch_aware_session_memory(
+    conn: &Connection,
+    query: &BranchAwareSessionMemoryQuery,
+) -> CoreResult<SessionMemoryPromptContext> {
+    let descriptor = session_memory_space_descriptor();
+    let ancestor_distances =
+        load_branch_ancestor_distances(conn, &query.session_id, &query.active_branch_id)?;
+    let mut records = query_session_memory_records(
+        conn,
+        &SessionMemoryQuery {
+            session_id: Some(query.session_id.clone()),
+            shape_id: query.shape_id.clone(),
+            include_superseded: true,
+            include_archived: true,
+            page: None,
+            ..SessionMemoryQuery::default()
+        },
+    )?;
+    records.sort_by(|left, right| {
+        let left_key = session_memory_sort_key(left, query, &ancestor_distances);
+        let right_key = session_memory_sort_key(right, query, &ancestor_distances);
+        left_key
+            .cmp(&right_key)
+            .then_with(|| right.updated_at.cmp(&left.updated_at))
+            .then_with(|| left.record_id.cmp(&right.record_id))
+    });
+
+    let mut excluded_counts = SessionMemoryPromptExcludedCounts::default();
+    let mut candidates = Vec::new();
+    for record in records {
+        if let Some(reason) = session_memory_exclusion_reason(&record, query, &ancestor_distances) {
+            increment_session_memory_excluded_count(&mut excluded_counts, reason);
+            continue;
+        }
+        candidates.push(record);
+    }
+
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let limit = limit as usize;
+    let offset = offset as usize;
+    let selected = candidates
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    excluded_counts.limit_exceeded = candidates.len().saturating_sub(selected.len()) as u64;
+    let character_estimate = selected
+        .iter()
+        .map(session_memory_record_character_estimate)
+        .sum::<u64>();
+    let token_estimate = character_estimate.div_ceil(4);
+    let selected_records = selected
+        .iter()
+        .map(|record| SessionMemorySelectedRecordDiagnostic {
+            record_id: record.record_id.clone(),
+            shape_id: record.shape.shape_id.0.clone(),
+        })
+        .collect();
+
+    Ok(SessionMemoryPromptContext {
+        records: selected,
+        diagnostics: SessionMemoryPromptDiagnostics {
+            descriptor_id: descriptor.space_id.0,
+            descriptor_schema_version: descriptor.schema_version,
+            session_id: query.session_id.clone(),
+            active_branch_id: query.active_branch_id.clone(),
+            selected_records,
+            excluded_counts,
+            character_estimate,
+            token_estimate,
+            context_policy: if query.prompt_context_only {
+                SessionMemoryPromptContextPolicy::SummaryContext
+            } else {
+                SessionMemoryPromptContextPolicy::ToolOnly
+            },
+        },
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionMemoryPromptExclusionReason {
+    WrongBranch,
+    SiblingBranch,
+    ToolOnly,
+    Archived,
+    Superseded,
+    PolicyDisabled,
+}
+
+fn session_memory_exclusion_reason(
+    record: &SessionMemoryRecord,
+    query: &BranchAwareSessionMemoryQuery,
+    ancestor_distances: &[(ConversationBranchId, u32)],
+) -> Option<SessionMemoryPromptExclusionReason> {
+    match record.scope.scope_type {
+        MemoryScopeType::Session => {}
+        MemoryScopeType::ConversationBranch => {
+            let Some(record_branch_id) = &record.branch_id else {
+                return Some(SessionMemoryPromptExclusionReason::WrongBranch);
+            };
+            if query.active_branch_id.as_ref() == Some(record_branch_id) {
+            } else if ancestor_distances
+                .iter()
+                .any(|(branch_id, _)| branch_id == record_branch_id)
+            {
+                if !query.include_ancestors {
+                    return Some(SessionMemoryPromptExclusionReason::WrongBranch);
+                }
+            } else if query.include_siblings {
+            } else if query.active_branch_id.is_some() {
+                return Some(SessionMemoryPromptExclusionReason::SiblingBranch);
+            } else {
+                return Some(SessionMemoryPromptExclusionReason::WrongBranch);
+            }
+        }
+        _ => return Some(SessionMemoryPromptExclusionReason::WrongBranch),
+    }
+
+    if query.prompt_context_only {
+        match record.status {
+            SessionMemoryRecordStatus::Archived => {
+                return Some(SessionMemoryPromptExclusionReason::Archived);
+            }
+            SessionMemoryRecordStatus::Superseded => {
+                return Some(SessionMemoryPromptExclusionReason::Superseded);
+            }
+            SessionMemoryRecordStatus::Active => {}
+        }
+        if session_memory_policy_disabled(record) {
+            return Some(SessionMemoryPromptExclusionReason::PolicyDisabled);
+        }
+        if session_memory_tool_only(record) {
+            return Some(SessionMemoryPromptExclusionReason::ToolOnly);
+        }
+    }
+
+    None
+}
+
+fn increment_session_memory_excluded_count(
+    counts: &mut SessionMemoryPromptExcludedCounts,
+    reason: SessionMemoryPromptExclusionReason,
+) {
+    match reason {
+        SessionMemoryPromptExclusionReason::WrongBranch => counts.wrong_branch += 1,
+        SessionMemoryPromptExclusionReason::SiblingBranch => counts.sibling_branch += 1,
+        SessionMemoryPromptExclusionReason::ToolOnly => counts.tool_only += 1,
+        SessionMemoryPromptExclusionReason::Archived => counts.archived += 1,
+        SessionMemoryPromptExclusionReason::Superseded => counts.superseded += 1,
+        SessionMemoryPromptExclusionReason::PolicyDisabled => counts.policy_disabled += 1,
+    }
+}
+
+fn session_memory_sort_key(
+    record: &SessionMemoryRecord,
+    query: &BranchAwareSessionMemoryQuery,
+    ancestor_distances: &[(ConversationBranchId, u32)],
+) -> (u8, u32, u8) {
+    let shape_priority = session_memory_shape_prompt_priority(record.shape.shape_id.as_str());
+    match record.scope.scope_type {
+        MemoryScopeType::ConversationBranch => {
+            if query.active_branch_id.as_ref() == record.branch_id.as_ref() {
+                (0, 0, shape_priority)
+            } else if let Some((_, distance)) =
+                record.branch_id.as_ref().and_then(|record_branch| {
+                    ancestor_distances
+                        .iter()
+                        .find(|(branch_id, _)| branch_id == record_branch)
+                })
+            {
+                (1, *distance, shape_priority)
+            } else {
+                (3, u32::MAX, shape_priority)
+            }
+        }
+        MemoryScopeType::Session => (2, 0, shape_priority),
+        _ => (4, u32::MAX, shape_priority),
+    }
+}
+
+fn session_memory_shape_prompt_priority(shape_id: &str) -> u8 {
+    match shape_id {
+        "branch_summary" | "session_summary" => 0,
+        "user_choice" => 1,
+        "session_fact" => 2,
+        _ => 3,
+    }
+}
+
+fn load_branch_ancestor_distances(
+    conn: &Connection,
+    session_id: &SessionId,
+    active_branch_id: &Option<ConversationBranchId>,
+) -> CoreResult<Vec<(ConversationBranchId, u32)>> {
+    let Some(active_branch_id) = active_branch_id else {
+        return Ok(Vec::new());
+    };
+    let active_branch = load_conversation_branch(conn, active_branch_id)?;
+    if active_branch.session_id != *session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "active_branch_id does not belong to session_id",
+        ));
+    }
+    let mut ancestors = Vec::new();
+    let mut parent = active_branch.parent_branch_id;
+    let mut distance = 1;
+    while let Some(parent_branch_id) = parent {
+        let branch = load_conversation_branch(conn, &parent_branch_id)?;
+        if branch.session_id != *session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "conversation branch ancestry crosses session boundary",
+            ));
+        }
+        parent = branch.parent_branch_id.clone();
+        ancestors.push((branch.branch_id, distance));
+        distance += 1;
+    }
+    Ok(ancestors)
+}
+
+fn session_memory_tool_only(record: &SessionMemoryRecord) -> bool {
+    session_memory_json_policy_flag(&record.content, "tool_only")
+        || session_memory_json_policy_eq(&record.content, "prompt_policy", "tool_only")
+        || record
+            .content
+            .get("metadata_json")
+            .map(|metadata| {
+                session_memory_json_policy_flag(metadata, "tool_only")
+                    || session_memory_json_policy_eq(metadata, "prompt_policy", "tool_only")
+            })
+            .unwrap_or(false)
+}
+
+fn session_memory_policy_disabled(record: &SessionMemoryRecord) -> bool {
+    session_memory_json_policy_flag(&record.content, "prompt_disabled")
+        || session_memory_json_policy_eq(&record.content, "prompt_policy", "never_prompt")
+        || record
+            .content
+            .get("metadata_json")
+            .map(|metadata| {
+                session_memory_json_policy_flag(metadata, "prompt_disabled")
+                    || session_memory_json_policy_eq(metadata, "prompt_policy", "never_prompt")
+            })
+            .unwrap_or(false)
+}
+
+fn session_memory_json_policy_flag(value: &JsonValue, key: &str) -> bool {
+    value.get(key).and_then(JsonValue::as_bool).unwrap_or(false)
+}
+
+fn session_memory_json_policy_eq(value: &JsonValue, key: &str, expected: &str) -> bool {
+    value
+        .get(key)
+        .and_then(JsonValue::as_str)
+        .map(|actual| actual == expected)
+        .unwrap_or(false)
+}
+
+fn session_memory_record_character_estimate(record: &SessionMemoryRecord) -> u64 {
+    to_json_text(&record.content)
+        .map(|value| value.len() as u64)
+        .unwrap_or(0)
+}
+
 fn row_to_session_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionMemoryRecord> {
     let scope_type_raw: String = row.get(2)?;
     let shape_id: String = row.get(5)?;
@@ -15765,6 +16108,302 @@ mod tests {
     }
 
     #[test]
+    fn branch_aware_session_memory_orders_active_ancestor_then_session() {
+        let db_path = temp_db_path("session-memory-branch-aware-order");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+        save_branch_tree(&store);
+
+        store
+            .add_session_memory_record(&branch_summary_memory_write(
+                "memory-root-branch",
+                &SessionId::new("session-alpha"),
+                &ConversationBranchId::new("branch-root"),
+                "2026-06-26T01:01:00Z",
+            ))
+            .unwrap();
+        store
+            .add_session_memory_record(&branch_summary_memory_write(
+                "memory-active-branch",
+                &SessionId::new("session-alpha"),
+                &ConversationBranchId::new("branch-active"),
+                "2026-06-26T01:02:00Z",
+            ))
+            .unwrap();
+        store
+            .add_session_memory_record(&session_fact_memory_write(
+                "memory-session",
+                &SessionId::new("session-alpha"),
+                "2026-06-26T01:03:00Z",
+            ))
+            .unwrap();
+
+        let context = store
+            .build_session_memory_prompt_context(&BranchAwareSessionMemoryQuery {
+                session_id: SessionId::new("session-alpha"),
+                active_branch_id: Some(ConversationBranchId::new("branch-active")),
+                include_ancestors: true,
+                include_siblings: false,
+                shape_id: None,
+                prompt_context_only: true,
+                page: None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            context
+                .records
+                .iter()
+                .map(|record| record.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "memory-active-branch",
+                "memory-root-branch",
+                "memory-session"
+            ]
+        );
+        assert_eq!(
+            context.diagnostics.selected_records[0].record_id,
+            "memory-active-branch"
+        );
+        assert_eq!(context.diagnostics.excluded_counts.sibling_branch, 0);
+        assert!(context.diagnostics.character_estimate > 0);
+        assert!(context.diagnostics.token_estimate > 0);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn branch_aware_session_memory_excludes_siblings_by_default() {
+        let db_path = temp_db_path("session-memory-branch-aware-siblings");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+        save_branch_tree(&store);
+
+        for (record_id, branch_id, now) in [
+            ("memory-root-branch", "branch-root", "2026-06-26T01:01:00Z"),
+            (
+                "memory-active-branch",
+                "branch-active",
+                "2026-06-26T01:02:00Z",
+            ),
+            (
+                "memory-sibling-branch",
+                "branch-sibling",
+                "2026-06-26T01:03:00Z",
+            ),
+        ] {
+            store
+                .add_session_memory_record(&branch_summary_memory_write(
+                    record_id,
+                    &SessionId::new("session-alpha"),
+                    &ConversationBranchId::new(branch_id),
+                    now,
+                ))
+                .unwrap();
+        }
+
+        let default_context = store
+            .build_session_memory_prompt_context(&BranchAwareSessionMemoryQuery {
+                session_id: SessionId::new("session-alpha"),
+                active_branch_id: Some(ConversationBranchId::new("branch-active")),
+                include_ancestors: true,
+                include_siblings: false,
+                shape_id: None,
+                prompt_context_only: true,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            default_context
+                .records
+                .iter()
+                .map(|record| record.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["memory-active-branch", "memory-root-branch"]
+        );
+        assert_eq!(
+            default_context.diagnostics.excluded_counts.sibling_branch,
+            1
+        );
+
+        let sibling_context = store
+            .build_session_memory_prompt_context(&BranchAwareSessionMemoryQuery {
+                include_siblings: true,
+                ..BranchAwareSessionMemoryQuery {
+                    session_id: SessionId::new("session-alpha"),
+                    active_branch_id: Some(ConversationBranchId::new("branch-active")),
+                    include_ancestors: true,
+                    include_siblings: false,
+                    shape_id: None,
+                    prompt_context_only: true,
+                    page: None,
+                }
+            })
+            .unwrap();
+        assert_eq!(
+            sibling_context
+                .records
+                .iter()
+                .map(|record| record.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "memory-active-branch",
+                "memory-root-branch",
+                "memory-sibling-branch"
+            ]
+        );
+        assert_eq!(
+            sibling_context.diagnostics.excluded_counts.sibling_branch,
+            0
+        );
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn prompt_context_reports_policy_status_and_limit_exclusions() {
+        let db_path = temp_db_path("session-memory-prompt-diagnostics");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+
+        store
+            .add_session_memory_record(&session_fact_memory_write(
+                "memory-selected",
+                &SessionId::new("session-alpha"),
+                "2026-06-26T01:00:00Z",
+            ))
+            .unwrap();
+        let archived = store
+            .add_session_memory_record(&session_fact_memory_write(
+                "memory-archived",
+                &SessionId::new("session-alpha"),
+                "2026-06-26T01:01:00Z",
+            ))
+            .unwrap();
+        store
+            .archive_session_memory_record(&SessionMemoryArchive {
+                record_id: archived.record_id,
+                expected_revision: archived.revision,
+                reason: Some("No longer useful".to_string()),
+                now: "2026-06-26T01:02:00Z".to_string(),
+            })
+            .unwrap();
+        let superseded = store
+            .add_session_memory_record(&session_fact_memory_write(
+                "memory-superseded",
+                &SessionId::new("session-alpha"),
+                "2026-06-26T01:03:00Z",
+            ))
+            .unwrap();
+        store
+            .supersede_session_memory_record(&SessionMemorySupersede {
+                record_id: superseded.record_id,
+                expected_revision: superseded.revision,
+                replacement: SessionMemoryRecordWrite {
+                    supersedes_record_id: Some("memory-superseded".to_string()),
+                    content: session_fact_content(
+                        "memory-replacement",
+                        "Replacement fact remains selectable.",
+                        "2026-06-26T01:04:00Z",
+                    ),
+                    ..session_fact_memory_write(
+                        "memory-replacement",
+                        &SessionId::new("session-alpha"),
+                        "2026-06-26T01:04:00Z",
+                    )
+                },
+            })
+            .unwrap();
+        store
+            .add_session_memory_record(&SessionMemoryRecordWrite {
+                content: {
+                    let mut content = session_fact_content(
+                        "memory-tool-only",
+                        "Tool-only diagnostic detail.",
+                        "2026-06-26T01:05:00Z",
+                    );
+                    content["metadata_json"] = json!({"prompt_policy": "tool_only"});
+                    content
+                },
+                ..session_fact_memory_write(
+                    "memory-tool-only",
+                    &SessionId::new("session-alpha"),
+                    "2026-06-26T01:05:00Z",
+                )
+            })
+            .unwrap();
+        store
+            .add_session_memory_record(&SessionMemoryRecordWrite {
+                content: {
+                    let mut content = session_fact_content(
+                        "memory-policy-disabled",
+                        "Never prompt detail.",
+                        "2026-06-26T01:06:00Z",
+                    );
+                    content["metadata_json"] = json!({"prompt_policy": "never_prompt"});
+                    content
+                },
+                ..session_fact_memory_write(
+                    "memory-policy-disabled",
+                    &SessionId::new("session-alpha"),
+                    "2026-06-26T01:06:00Z",
+                )
+            })
+            .unwrap();
+
+        let context = store
+            .build_session_memory_prompt_context(&BranchAwareSessionMemoryQuery {
+                session_id: SessionId::new("session-alpha"),
+                active_branch_id: None,
+                include_ancestors: false,
+                include_siblings: false,
+                shape_id: None,
+                prompt_context_only: true,
+                page: Some(QueryPage {
+                    limit: Some(1),
+                    offset: None,
+                }),
+            })
+            .unwrap();
+
+        assert_eq!(context.records.len(), 1);
+        assert_eq!(
+            context.diagnostics.context_policy,
+            SessionMemoryPromptContextPolicy::SummaryContext
+        );
+        assert_eq!(context.diagnostics.excluded_counts.archived, 1);
+        assert_eq!(context.diagnostics.excluded_counts.superseded, 1);
+        assert_eq!(context.diagnostics.excluded_counts.tool_only, 1);
+        assert_eq!(context.diagnostics.excluded_counts.policy_disabled, 1);
+        assert_eq!(context.diagnostics.excluded_counts.limit_exceeded, 1);
+        assert_eq!(context.diagnostics.selected_records.len(), 1);
+
+        let history = store
+            .build_session_memory_prompt_context(&BranchAwareSessionMemoryQuery {
+                prompt_context_only: false,
+                page: None,
+                ..BranchAwareSessionMemoryQuery {
+                    session_id: SessionId::new("session-alpha"),
+                    active_branch_id: None,
+                    include_ancestors: false,
+                    include_siblings: false,
+                    shape_id: None,
+                    prompt_context_only: true,
+                    page: None,
+                }
+            })
+            .unwrap();
+        assert_eq!(
+            history.diagnostics.context_policy,
+            SessionMemoryPromptContextPolicy::ToolOnly
+        );
+        assert!(history.records.len() > context.records.len());
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
     fn memory_proposals_persist_governance_state_without_direct_mutation() {
         let db_path = temp_db_path("memory-proposals");
         let store = CoordinationStore::open_file(&db_path).unwrap();
@@ -18164,6 +18803,33 @@ mod tests {
             durability_rationale: "Branch summary should survive branch navigation.".to_string(),
             supersedes_record_id: None,
             now: now.to_string(),
+        }
+    }
+
+    fn save_branch_tree(store: &CoordinationStore) {
+        for (branch_id, parent_branch_id, now) in [
+            ("branch-root", None, "2026-06-26T01:00:00Z"),
+            ("branch-active", Some("branch-root"), "2026-06-26T01:01:00Z"),
+            (
+                "branch-sibling",
+                Some("branch-root"),
+                "2026-06-26T01:02:00Z",
+            ),
+        ] {
+            store
+                .save_conversation_branch(&ConversationBranchWrite {
+                    branch_id: ConversationBranchId::new(branch_id),
+                    session_id: SessionId::new("session-alpha"),
+                    parent_branch_id: parent_branch_id.map(ConversationBranchId::new),
+                    parent_message_id: None,
+                    origin_message_id: Some(MessageId::new(format!("{branch_id}:origin"))),
+                    head_message_id: Some(MessageId::new(format!("{branch_id}:head"))),
+                    label: Some(branch_id.to_string()),
+                    metadata_json: json!({"fixture": true}),
+                    created_at: now.to_string(),
+                    updated_at: now.to_string(),
+                })
+                .unwrap();
         }
     }
 
