@@ -57,6 +57,7 @@ import { resolveDenMemoryTools } from "./den-memory-tools.js";
 import { resolveDelegationTools } from "./delegation-tools.js";
 import type { BrainImplementation } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
+import { createMemorySpaceToolResolver } from "./memory-space-api.js";
 import type { PiAgentFactory } from "./pi-agent-brain.js";
 import { providerStateScopeForProfile } from "./provider-state-fingerprints.js";
 import {
@@ -1191,7 +1192,11 @@ function createMemoryToolResolver(
   },
 ): BrainToolResolver {
   const denMemoryClient = createServiceDenMemoryClient(options.serviceConfig);
-  return ({ wake }) => [
+  const memorySpaceResolver = options.bridge
+    ? createMemorySpaceToolResolver({ bridge: options.bridge })
+    : undefined;
+  return (input) => [
+    ...(memorySpaceResolver?.(input) ?? []),
     ...resolveDenMemoryTools({
       client: denMemoryClient,
       policy: {
@@ -1201,12 +1206,12 @@ function createMemoryToolResolver(
       runtimeContext: {
         projectId: options.serviceConfig?.denConversationProjectId,
       },
-      session: wake.state.session,
+      session: input.wake.state.session,
     }),
     denseProfileMemoryTool({
       client: options.bridge,
       mode: denseProfileMemoryMode(profile),
-      session: wake.state.session,
+      session: input.wake.state.session,
     }),
   ];
 }

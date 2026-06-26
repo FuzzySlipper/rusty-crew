@@ -34,6 +34,7 @@ export type ApiCapabilityScope =
   | "mcp"
   | "config"
   | "maintenance"
+  | "memory"
   | "scheduler"
   | "search"
   | "storage"
@@ -951,6 +952,38 @@ export const API_CAPABILITIES = [
     tags: ["storage", "diagnostics"],
     public: true,
   },
+  readCapability(
+    "admin.memory.spaces.list",
+    "GET",
+    "/v1/admin/memory/spaces",
+    "List Rusty Crew runtime-owned memory-space descriptors.",
+    "admin",
+    ["memory", "diagnostics"],
+  ),
+  readCapability(
+    "admin.memory.spaces.read",
+    "GET",
+    "/v1/admin/memory/spaces/{space_id}",
+    "Read one Rusty Crew memory-space descriptor.",
+    "admin",
+    ["memory", "diagnostics"],
+  ),
+  readCapability(
+    "admin.memory.spaces.records.list",
+    "GET",
+    "/v1/admin/memory/spaces/{space_id}/records",
+    "List bounded records for a supported Rusty Crew memory space.",
+    "admin",
+    ["memory"],
+  ),
+  readCapability(
+    "admin.memory.spaces.records.read",
+    "GET",
+    "/v1/admin/memory/spaces/{space_id}/records/{key}",
+    "Read one record for a supported Rusty Crew memory space.",
+    "admin",
+    ["memory"],
+  ),
   readCapability(
     "admin.diagnostics.provider_state",
     "GET",

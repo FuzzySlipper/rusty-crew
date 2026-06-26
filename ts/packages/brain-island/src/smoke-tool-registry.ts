@@ -85,6 +85,8 @@ assert.deepEqual(
     "den_memory_recall",
     "den_memory_read",
     "den_memory_search",
+    "memory_space_catalog",
+    "memory_space_read",
     "skills_list",
     "skill_view",
     "todo",

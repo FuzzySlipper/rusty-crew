@@ -293,6 +293,26 @@
       "version": "0.1.0"
     },
     {
+      "name": "memory_space_catalog",
+      "description": "List Rusty Crew runtime-owned memory spaces without reading Den memory.",
+      "category": "memory",
+      "toolsets": ["memory_profile", "memory_space_read"],
+      "surfaces": ["brain", "admin"],
+      "safety": ["read_only"],
+      "output_shape": "runtime.memory_space_catalog.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "memory_space_read",
+      "description": "Read supported Rusty Crew memory-space records through bounded read-only runtime APIs.",
+      "category": "memory",
+      "toolsets": ["memory_profile", "memory_space_read"],
+      "surfaces": ["brain", "admin"],
+      "safety": ["read_only"],
+      "output_shape": "runtime.memory_space_read_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "skills_list",
       "description": "List configured skills visible to the current profile.",
       "category": "skills",
@@ -340,6 +360,26 @@
       "surfaces": ["brain"],
       "safety": ["read_only", "coordination_action"],
       "output_shape": "runtime.session_search_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "storage_query_catalog",
+      "description": "List curated read-only Rusty Crew storage queries without exposing raw SQL.",
+      "category": "storage",
+      "toolsets": ["storage_read", "diagnostics_read"],
+      "surfaces": ["brain", "admin"],
+      "safety": ["read_only"],
+      "output_shape": "storage.query_catalog.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "storage_query_execute",
+      "description": "Execute one curated read-only Rusty Crew storage query by id; raw SQL is not supported.",
+      "category": "storage",
+      "toolsets": ["storage_read", "diagnostics_read"],
+      "surfaces": ["brain", "admin"],
+      "safety": ["read_only"],
+      "output_shape": "storage.query_result.v1",
       "version": "0.1.0"
     },
     {

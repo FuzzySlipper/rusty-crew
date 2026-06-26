@@ -37,6 +37,7 @@
     "smoke:tool-context-diagnostics": "tsx src/smoke-tool-context-diagnostics.ts",
     "smoke:den-memory-tools": "tsx src/smoke-den-memory-tools.ts",
     "smoke:dense-profile-memory-tool": "tsx src/smoke-dense-profile-memory-tool.ts",
+    "smoke:memory-space-api": "tsx src/smoke-memory-space-api.ts",
     "smoke:session-search-tool": "tsx src/smoke-session-search-tool.ts",
     "smoke:channel-readback-tool": "tsx src/smoke-channel-readback-tool.ts",
     "smoke:channel-wake-policy": "tsx src/smoke-channel-wake-policy.ts",

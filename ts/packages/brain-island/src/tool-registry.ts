@@ -560,6 +560,32 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:tool-registry",
   },
   {
+    name: "memory_space_catalog",
+    description:
+      "List Rusty Crew runtime-owned memory spaces without reading Den memory.",
+    category: "memory",
+    toolsets: ["memory_profile", "memory_space_read"],
+    implementationModule: "./memory-space-api.js#memorySpaceCatalogTool",
+    surfaces: ["brain", "admin"],
+    safety: ["read_only"],
+    outputShape: "runtime.memory_space_catalog.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:memory-space-api",
+  },
+  {
+    name: "memory_space_read",
+    description:
+      "Read supported Rusty Crew memory-space records through bounded read-only runtime APIs.",
+    category: "memory",
+    toolsets: ["memory_profile", "memory_space_read"],
+    implementationModule: "./memory-space-api.js#memorySpaceReadTool",
+    surfaces: ["brain", "admin"],
+    safety: ["read_only"],
+    outputShape: "runtime.memory_space_read_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:memory-space-api",
+  },
+  {
     name: "skills_list",
     description: "List configured skills visible to the current profile.",
     category: "skills",

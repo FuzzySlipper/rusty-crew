@@ -94,6 +94,7 @@ import {
   type MemorySpaceDiagnosticsProjection,
   type AdminRouteResult,
 } from "./admin-diagnostics-api.js";
+import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import {
   buildAdapterDiagnosticsProjection,
@@ -660,6 +661,17 @@ async function handleHttpRequest(
         method: request.method ?? "GET",
         url: url.toString(),
         body,
+        requestId: requestId(request),
+      },
+      { bridge: state.bridge },
+    );
+  }
+
+  if (url.pathname.startsWith("/v1/admin/memory/")) {
+    return handleMemorySpaceAdminRequest(
+      {
+        method: request.method ?? "GET",
+        url: url.toString(),
         requestId: requestId(request),
       },
       { bridge: state.bridge },

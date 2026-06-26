@@ -878,3 +878,17 @@ export type {
   ProfileRoleAssemblyResult,
   RenderDenseProfileMemoryContextOptions,
 } from "./profile-role-assembly.js";
+export {
+  createMemorySpaceToolResolver,
+  handleMemorySpaceAdminRequest,
+  memorySpaceCatalogTool,
+  memorySpaceReadTool,
+} from "./memory-space-api.js";
+export type {
+  MemorySpaceCatalogResult,
+  MemorySpaceReadContext,
+  MemorySpaceRecordListResult,
+  MemorySpaceRecordQuery,
+  MemorySpaceRecordReadResult,
+  MemorySpaceToolDetails,
+} from "./memory-space-api.js";
