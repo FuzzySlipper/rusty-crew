@@ -12974,6 +12974,218 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_small_roleplay_deployment_storage_proof() {
+        let data_dir = temp_data_dir("small-roleplay-storage");
+        let store = CoordinationStore::open(&data_dir).unwrap();
+        let session_id = SessionId::new("session-alpha");
+        let profile_id = ProfileId::new("full-profile");
+        let now = "2026-06-26T00:00:00Z".to_string();
+
+        store
+            .create_profile_registry_record(&profile_registry_write("full-profile"))
+            .unwrap();
+        store
+            .save_session_with_config(&sample_session_state(), &sample_session_config())
+            .unwrap();
+
+        let branch_id = ConversationBranchId::new("branch-roleplay-root");
+        let root_message_id = MessageId::new("message-roleplay-root");
+        store
+            .save_conversation_branch(&ConversationBranchWrite {
+                branch_id: branch_id.clone(),
+                session_id: session_id.clone(),
+                parent_branch_id: None,
+                parent_message_id: None,
+                origin_message_id: None,
+                head_message_id: Some(root_message_id.clone()),
+                label: Some("Roleplay Root".to_string()),
+                metadata_json: json!({"deployment": "small_sqlite"}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+
+        let slot_id = MessageSlotId::new("slot-roleplay-root");
+        let variant_id = MessageVariantId::new("variant-roleplay-primary");
+        store
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: session_id.clone(),
+                primary_variant_id: variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({"kind": "roleplay_turn"}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        let mut variant = variant_write(
+            &slot_id,
+            &variant_id,
+            MessageVariantSource::Primary,
+            0,
+            &root_message_id.0,
+            "The moonlit tavern keeps a private lore ledger.",
+        );
+        variant.message.session_id = session_id.clone();
+        variant.message.branch_id = Some(branch_id.clone());
+        store.save_message_variant(&variant).unwrap();
+
+        store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: profile_id.clone(),
+                    target: ProfileMemoryTarget::User("player-1".to_string()),
+                    key: "tone".to_string(),
+                    content: "prefers slow-burn mystery with grounded sensory detail".to_string(),
+                    metadata: json!({"source": "roleplay_smoke"}),
+                    now: "2026-06-26T00:01:00Z".to_string(),
+                },
+                &ProfileMemoryCaps::default(),
+            )
+            .unwrap();
+
+        store
+            .save_event(
+                1,
+                &CoreEvent::AgentMessageRouted {
+                    message: AgentMessage {
+                        from: AgentId::new("player-1"),
+                        to: AgentId::new("agent-alpha"),
+                        body: "roleplay search needle: ask about the tavern ledger".to_string(),
+                        correlation_id: Some("roleplay-search".to_string()),
+                    },
+                },
+            )
+            .unwrap();
+
+        store
+            .save_provider_wire_state(&sample_provider_wire_state_write(
+                ProviderWireStateWriteFixture {
+                    key: sample_provider_wire_state_key(),
+                    profile_fingerprint: "profile:roleplay:v1",
+                    provider_fingerprint: "provider:gpt:v1",
+                    payload_version: "responses:v1",
+                    payload_json: json!({"response_id": "resp_roleplay_root"}),
+                    now: "2026-06-26T00:02:00Z",
+                    expires_at: Some("2026-06-26T06:00:00Z"),
+                    last_wake_id: Some("wake-roleplay"),
+                },
+            ))
+            .unwrap();
+
+        store
+            .upsert_scheduled_job(&ScheduledJobRecord {
+                job_id: "roleplay-maintenance".to_string(),
+                job_kind: "maintenance".to_string(),
+                target_session_id: Some(session_id.clone()),
+                interval_ms: Some(300_000),
+                next_due_at: Some("2026-06-26T00:05:00Z".to_string()),
+                payload_json: json!({"mode": "small_sqlite"}),
+                status: ScheduledJobStatus::Active,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+                paused_at: None,
+            })
+            .unwrap();
+
+        let sessions = store.load_sessions().unwrap();
+        let branches = store
+            .query_conversation_branches(&ConversationBranchQuery {
+                session_id: Some(session_id.clone()),
+                parent_branch_id: None,
+                page: None,
+            })
+            .unwrap();
+        let slots = store
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(session_id.clone()),
+                include_alternates: false,
+                page: None,
+            })
+            .unwrap();
+        let memories = store
+            .list_profile_memory(&ProfileMemoryQuery {
+                profile_id,
+                target: Some(ProfileMemoryTarget::User("player-1".to_string())),
+                page: None,
+            })
+            .unwrap();
+        let search = store
+            .search_runtime(&RuntimeSearchFilter {
+                query: "tavern".to_string(),
+                row_type: Some(RuntimeSearchRowType::Message),
+                session_id: None,
+                agent_id: Some(AgentId::new("agent-alpha")),
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(CoreEventKind::AgentMessageRouted),
+                recorded_after: None,
+                recorded_before: None,
+                limit: Some(10),
+            })
+            .unwrap();
+        let provider = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: sample_provider_wire_state_key(),
+                profile_fingerprint: "profile:roleplay:v1".to_string(),
+                provider_fingerprint: "provider:gpt:v1".to_string(),
+                now: "2026-06-26T00:03:00Z".to_string(),
+            })
+            .unwrap();
+        let scheduled = store
+            .query_scheduled_jobs(&ScheduledJobQuery {
+                status: Some(ScheduledJobStatus::Active),
+                job_kind: Some("maintenance".to_string()),
+                due_at_or_before: Some("2026-06-26T00:05:00Z".to_string()),
+                page: None,
+            })
+            .unwrap();
+        let before_maintenance = store.storage_diagnostics().unwrap();
+        let maintenance = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                run_wal_checkpoint: true,
+                run_optimize: true,
+                ..RuntimeMaintenancePolicy::default()
+            })
+            .unwrap();
+        let after_maintenance = store.storage_diagnostics().unwrap();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(branches.len(), 1);
+        assert_eq!(slots[0].primary.message.body, variant.message.body);
+        assert_eq!(memories.len(), 1);
+        assert_eq!(search.len(), 1);
+        assert!(provider.record.unwrap().is_current());
+        assert_eq!(scheduled.len(), 1);
+        assert_eq!(before_maintenance.backend, "sqlite");
+        assert!(before_maintenance.search_healthy);
+        assert!(before_maintenance
+            .capabilities
+            .iter()
+            .any(|capability| capability.name == "maintenance_checkpoint" && capability.supported));
+        assert!(before_maintenance
+            .capabilities
+            .iter()
+            .any(
+                |capability| capability.name == "maintenance_vacuum_or_optimize"
+                    && capability.supported
+            ));
+        assert!(before_maintenance
+            .repository_groups
+            .iter()
+            .any(|group| group.group_id == "conversations_attachments"));
+        assert!(before_maintenance
+            .repository_groups
+            .iter()
+            .any(|group| group.group_id == "profile_memory"));
+        assert!(maintenance.wal_checkpoint_ran);
+        assert!(maintenance.optimize_ran);
+        assert!(after_maintenance.size.wal_bytes < 64 * 1024 * 1024);
+
+        remove_temp_dir(&data_dir);
+    }
+
+    #[test]
     fn diagnostic_table_names_are_whitelisted() {
         for table in DiagnosticTable::ALL {
             assert_eq!(DiagnosticTable::parse(table.as_str()).unwrap(), *table);
@@ -16062,6 +16274,14 @@ mod tests {
         ))
     }
 
+    fn temp_data_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("rusty-crew-{label}-{}-{nanos}", std::process::id()))
+    }
+
     fn table_has_column(db_path: &Path, table: &str, column: &str) -> bool {
         let conn = Connection::open(db_path).unwrap();
         let mut stmt = conn
@@ -16105,6 +16325,10 @@ mod tests {
         let _ = fs::remove_file(db_path);
         let _ = fs::remove_file(format!("{}-wal", db_path.display()));
         let _ = fs::remove_file(format!("{}-shm", db_path.display()));
+    }
+
+    fn remove_temp_dir(path: &Path) {
+        let _ = fs::remove_dir_all(path);
     }
 
     fn sample_provider_wire_state_key() -> ProviderWireStateKey {
