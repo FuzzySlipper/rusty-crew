@@ -4,7 +4,12 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = []
+postgres-proof = ["dep:postgres"]
+
 [dependencies]
+postgres = { workspace = true, optional = true }
 rusqlite.workspace = true
 rusty-crew-core-protocol = { path = "../core-protocol" }
 serde.workspace = true

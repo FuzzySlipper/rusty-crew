@@ -4,6 +4,8 @@
 //! document data remains Den product data and is not mirrored here.
 
 pub mod module_schema;
+#[cfg(feature = "postgres-proof")]
+pub mod postgres_proof;
 mod repositories;
 
 pub use crate::module_schema::{
