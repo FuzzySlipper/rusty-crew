@@ -12234,6 +12234,743 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    mod repository_conformance {
+        use super::*;
+
+        trait RepositoryConformanceBackend {
+            fn with_store<F>(&self, label: &str, test: F)
+            where
+                F: FnOnce(&CoordinationStore);
+        }
+
+        struct SqliteRepositoryConformance;
+
+        impl RepositoryConformanceBackend for SqliteRepositoryConformance {
+            fn with_store<F>(&self, label: &str, test: F)
+            where
+                F: FnOnce(&CoordinationStore),
+            {
+                let db_path = temp_db_path(&format!("sqlite-conformance-{label}"));
+                let store = CoordinationStore::open_file(&db_path).unwrap();
+                test(&store);
+                remove_temp_db(&db_path);
+            }
+        }
+
+        #[test]
+        fn sqlite_satisfies_repository_conformance_suite() {
+            run_repository_conformance_suite(&SqliteRepositoryConformance);
+        }
+
+        fn run_repository_conformance_suite<B: RepositoryConformanceBackend>(backend: &B) {
+            session_persistence_contract(backend);
+            event_ordering_projection_contract(backend);
+            queued_message_ttl_no_resurrection_contract(backend);
+            scheduler_claim_and_expiry_contract(backend);
+            runtime_counters_contract(backend);
+            dense_profile_memory_revision_contract(backend);
+            runtime_search_contract(backend);
+            conversation_branch_message_contract(backend);
+            provider_wire_state_expiry_contract(backend);
+        }
+
+        fn page() -> QueryPage {
+            QueryPage {
+                limit: Some(10),
+                offset: Some(0),
+            }
+        }
+
+        fn session_persistence_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("session-persistence", |store| {
+                let state = sample_session_state();
+                let config = sample_session_config();
+                store.save_session_with_config(&state, &config).unwrap();
+
+                let sessions = store
+                    .query_sessions(&SessionQuery {
+                        agent_id: Some(AgentId::new("agent-alpha")),
+                        profile_id: Some(ProfileId::new("full-profile")),
+                        kind: Some(SessionKind::Full),
+                        status: Some(SessionStatus::Idle),
+                        page: Some(page()),
+                    })
+                    .unwrap();
+                let configs = store.load_session_configs().unwrap();
+                let identities = store.load_session_identities().unwrap();
+
+                assert_eq!(sessions.len(), 1);
+                assert_eq!(sessions[0].session_id, SessionId::new("session-alpha"));
+                assert_eq!(configs.len(), 1);
+                assert_eq!(
+                    configs[0].config.resource_limits.max_duration_ms,
+                    Some(60_000)
+                );
+                assert_eq!(configs[0].tool_profile.tools[0].name, "apply_patch");
+                assert_eq!(identities.len(), 1);
+                assert_eq!(
+                    identities[0].instance_id,
+                    AgentInstanceId::new("instance:session-alpha")
+                );
+            });
+        }
+
+        fn event_ordering_projection_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("event-ordering-projections", |store| {
+                let session = sample_session_state();
+                store
+                    .save_event(
+                        1,
+                        &CoreEvent::SessionCreated {
+                            state: Box::new(session.clone()),
+                        },
+                    )
+                    .unwrap();
+                store
+                    .save_event(
+                        2,
+                        &CoreEvent::AgentMessageRouted {
+                            message: AgentMessage {
+                                from: AgentId::new("agent-alpha"),
+                                to: AgentId::new("agent-beta"),
+                                body: "projected conformance message".to_string(),
+                                correlation_id: Some("conformance-corr".to_string()),
+                            },
+                        },
+                    )
+                    .unwrap();
+                store
+                    .save_event(
+                        3,
+                        &CoreEvent::BrainEventObserved {
+                            session_id: session.session_id.clone(),
+                            wake_id: Some("wake-conformance".to_string()),
+                            event: BrainEvent::Started,
+                        },
+                    )
+                    .unwrap();
+
+                let all = store
+                    .query_events(&RuntimeEventFilter {
+                        limit: Some(10),
+                        ..RuntimeEventFilter::default()
+                    })
+                    .unwrap();
+                let by_session = store
+                    .query_events(&RuntimeEventFilter {
+                        session_id: Some(SessionId::new("session-alpha")),
+                        ..RuntimeEventFilter::default()
+                    })
+                    .unwrap();
+                let by_agent = store
+                    .query_events(&RuntimeEventFilter {
+                        agent_id: Some(AgentId::new("agent-beta")),
+                        ..RuntimeEventFilter::default()
+                    })
+                    .unwrap();
+                let by_correlation = store
+                    .query_events(&RuntimeEventFilter {
+                        correlation_id: Some("conformance-corr".to_string()),
+                        ..RuntimeEventFilter::default()
+                    })
+                    .unwrap();
+                let by_wake = store
+                    .query_events(&RuntimeEventFilter {
+                        source_wake_id: Some("wake-conformance".to_string()),
+                        ..RuntimeEventFilter::default()
+                    })
+                    .unwrap();
+
+                assert_eq!(
+                    all.iter().map(|event| event.sequence).collect::<Vec<_>>(),
+                    vec![1, 2, 3]
+                );
+                assert_eq!(by_session.len(), 2);
+                assert_eq!(by_agent.len(), 1);
+                assert_eq!(by_agent[0].agent_ids.len(), 2);
+                assert_eq!(by_correlation[0].sequence, 2);
+                assert_eq!(by_wake[0].source_wake_ids, vec!["wake-conformance"]);
+            });
+        }
+
+        fn queued_message_ttl_no_resurrection_contract<B: RepositoryConformanceBackend>(
+            backend: &B,
+        ) {
+            backend.with_store("queue-ttl-no-resurrection", |store| {
+                let record = QueuedMessageRecord {
+                    message_id: "queue-conformance-1".to_string(),
+                    owner_session_id: Some(SessionId::new("session-alpha")),
+                    owner_agent_id: AgentId::new("agent-alpha"),
+                    message: AgentMessage {
+                        from: AgentId::new("operator"),
+                        to: AgentId::new("agent-alpha"),
+                        body: "ttl bounded conformance queue".to_string(),
+                        correlation_id: Some("queue-conformance".to_string()),
+                    },
+                    source_sequence: Some(42),
+                    enqueued_at: "2026-06-20T00:00:00Z".to_string(),
+                    expires_at: "2026-06-20T00:00:05Z".to_string(),
+                    ttl_ms: 5_000,
+                    delivery_attempts: 0,
+                    state: QueuedMessageState::Pending,
+                    terminal_at: None,
+                    state_reason: None,
+                };
+
+                store.save_queued_message(&record).unwrap();
+                assert_eq!(pending_queue_messages(store).len(), 1);
+                assert!(store
+                    .expire_queued_messages_at(&"2026-06-20T00:00:04Z".to_string())
+                    .unwrap()
+                    .is_empty());
+                assert_eq!(pending_queue_messages(store).len(), 1);
+
+                let expired = store
+                    .expire_queued_messages_at(&"2026-06-20T00:00:06Z".to_string())
+                    .unwrap();
+                assert_eq!(expired.len(), 1);
+                assert_eq!(expired[0].state, QueuedMessageState::Expired);
+                assert_eq!(expired[0].state_reason.as_deref(), Some("ttl_expired"));
+                assert!(pending_queue_messages(store).is_empty());
+
+                let expired_query = store
+                    .load_queued_messages(&QueuedMessageFilter {
+                        state: Some(QueuedMessageState::Expired),
+                        owner_session_id: Some(SessionId::new("session-alpha")),
+                        owner_agent_id: Some(AgentId::new("agent-alpha")),
+                        limit: Some(10),
+                    })
+                    .unwrap();
+                assert_eq!(expired_query.len(), 1);
+                assert!(store
+                    .expire_queued_messages_at(&"2026-06-20T00:00:10Z".to_string())
+                    .unwrap()
+                    .is_empty());
+                assert!(pending_queue_messages(store).is_empty());
+                assert_eq!(
+                    store
+                        .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                            "session-alpha"
+                        )))
+                        .unwrap()
+                        .queue_expirations,
+                    1
+                );
+            });
+        }
+
+        fn pending_queue_messages(store: &CoordinationStore) -> Vec<QueuedMessageRecord> {
+            store
+                .load_queued_messages(&QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: Some(SessionId::new("session-alpha")),
+                    owner_agent_id: Some(AgentId::new("agent-alpha")),
+                    limit: Some(10),
+                })
+                .unwrap()
+        }
+
+        fn scheduler_claim_and_expiry_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("scheduler-claim-expiry", |store| {
+                store
+                    .upsert_scheduled_job(&ScheduledJobRecord {
+                        job_id: "conformance-wake".to_string(),
+                        job_kind: "wake".to_string(),
+                        target_session_id: Some(SessionId::new("session-alpha")),
+                        interval_ms: Some(60_000),
+                        next_due_at: Some("2026-06-20T06:00:00Z".to_string()),
+                        payload_json: json!({"reason": "conformance"}),
+                        status: ScheduledJobStatus::Active,
+                        created_at: "2026-06-20T05:59:00Z".to_string(),
+                        updated_at: "2026-06-20T05:59:00Z".to_string(),
+                        paused_at: None,
+                    })
+                    .unwrap();
+
+                let due = store
+                    .query_scheduled_jobs(&ScheduledJobQuery {
+                        status: Some(ScheduledJobStatus::Active),
+                        job_kind: Some("wake".to_string()),
+                        due_at_or_before: Some("2026-06-20T06:00:00Z".to_string()),
+                        page: Some(page()),
+                    })
+                    .unwrap();
+                assert_eq!(due.len(), 1);
+
+                let claimed = ScheduledRunRecord {
+                    run_id: RunId::new("scheduled:conformance-wake:1"),
+                    job_id: "conformance-wake".to_string(),
+                    job_kind: "wake".to_string(),
+                    target_session_id: Some(SessionId::new("session-alpha")),
+                    status: ScheduledRunStatus::Claimed,
+                    trigger: ScheduledRunTrigger::Due,
+                    scheduled_for: Some("2026-06-20T06:00:00Z".to_string()),
+                    claimed_at: "2026-06-20T06:00:01Z".to_string(),
+                    claim_deadline_at: "2026-06-20T06:01:00Z".to_string(),
+                    completed_at: None,
+                    error: None,
+                    output_json: json!({}),
+                    created_at: "2026-06-20T06:00:01Z".to_string(),
+                    updated_at: "2026-06-20T06:00:01Z".to_string(),
+                };
+                store
+                    .claim_scheduled_run(&claimed, Some(&"2026-06-20T06:05:00Z".to_string()))
+                    .unwrap();
+                assert_eq!(
+                    store
+                        .load_scheduled_job("conformance-wake")
+                        .unwrap()
+                        .unwrap()
+                        .next_due_at,
+                    Some("2026-06-20T06:05:00Z".to_string())
+                );
+                store
+                    .complete_scheduled_run(
+                        &RunId::new("scheduled:conformance-wake:1"),
+                        ScheduledRunStatus::Completed,
+                        &"2026-06-20T06:00:30Z".to_string(),
+                        &json!({"woke": true}),
+                        None,
+                    )
+                    .unwrap();
+                assert_eq!(
+                    scheduled_runs(store, Some(ScheduledRunStatus::Completed)).len(),
+                    1
+                );
+
+                let stale = ScheduledRunRecord {
+                    run_id: RunId::new("scheduled:conformance-wake:2"),
+                    job_id: "conformance-wake".to_string(),
+                    job_kind: "wake".to_string(),
+                    target_session_id: Some(SessionId::new("session-alpha")),
+                    status: ScheduledRunStatus::Claimed,
+                    trigger: ScheduledRunTrigger::Manual,
+                    scheduled_for: None,
+                    claimed_at: "2026-06-20T06:01:00Z".to_string(),
+                    claim_deadline_at: "2026-06-20T06:02:00Z".to_string(),
+                    completed_at: None,
+                    error: None,
+                    output_json: json!({}),
+                    created_at: "2026-06-20T06:01:00Z".to_string(),
+                    updated_at: "2026-06-20T06:01:00Z".to_string(),
+                };
+                store.claim_scheduled_run(&stale, None).unwrap();
+                let expired = store
+                    .expire_stale_scheduled_runs(
+                        &"2026-06-20T06:02:01Z".to_string(),
+                        &"2026-06-20T06:03:00Z".to_string(),
+                    )
+                    .unwrap();
+                assert_eq!(expired.len(), 1);
+                assert_eq!(
+                    expired[0].run_id,
+                    RunId::new("scheduled:conformance-wake:2")
+                );
+                assert_eq!(
+                    scheduled_runs(store, Some(ScheduledRunStatus::Expired))[0]
+                        .error
+                        .as_deref(),
+                    Some("claim deadline elapsed")
+                );
+            });
+        }
+
+        fn scheduled_runs(
+            store: &CoordinationStore,
+            status: Option<ScheduledRunStatus>,
+        ) -> Vec<ScheduledRunRecord> {
+            store
+                .query_scheduled_runs(&ScheduledRunQuery {
+                    job_id: Some("conformance-wake".to_string()),
+                    status,
+                    trigger: None,
+                    target_session_id: None,
+                    stale_claim_deadline_before: None,
+                    page: Some(page()),
+                })
+                .unwrap()
+        }
+
+        fn runtime_counters_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("runtime-counters", |store| {
+                store
+                    .save_event(
+                        1,
+                        &CoreEvent::BrainWakeRequested {
+                            session_id: SessionId::new("session-alpha"),
+                        },
+                    )
+                    .unwrap();
+                store
+                    .save_event(
+                        2,
+                        &CoreEvent::BrainActionsAccepted {
+                            session_id: SessionId::new("session-alpha"),
+                            count: 2,
+                        },
+                    )
+                    .unwrap();
+                store
+                    .save_event(
+                        3,
+                        &CoreEvent::AgentMessageRouted {
+                            message: AgentMessage {
+                                from: AgentId::new("agent-alpha"),
+                                to: AgentId::new("agent-beta"),
+                                body: "counter conformance message".to_string(),
+                                correlation_id: None,
+                            },
+                        },
+                    )
+                    .unwrap();
+
+                let runtime = store
+                    .runtime_summary(&RuntimeCounterScope::Runtime)
+                    .unwrap();
+                let session = store
+                    .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                        "session-alpha",
+                    )))
+                    .unwrap();
+                let message_counter = store
+                    .query_runtime_counters(&RuntimeCounterQuery {
+                        scope: Some(RuntimeCounterScope::Runtime),
+                        counter_name: Some(COUNTER_MESSAGES.to_string()),
+                        page: Some(page()),
+                    })
+                    .unwrap();
+
+                assert_eq!(runtime.wakes, 1);
+                assert_eq!(runtime.brain_turns, 1);
+                assert_eq!(runtime.messages, 1);
+                assert_eq!(session.wakes, 1);
+                assert_eq!(message_counter[0].value, 1);
+            });
+        }
+
+        fn dense_profile_memory_revision_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("profile-memory-revisions", |store| {
+                let profile_id = ProfileId::new("profile-conformance");
+                let target = ProfileMemoryTarget::Profile;
+                let added = store
+                    .add_profile_memory(
+                        &ProfileMemoryWrite {
+                            profile_id: profile_id.clone(),
+                            target: target.clone(),
+                            key: "tone".to_string(),
+                            content: "prefers direct conformance checks".to_string(),
+                            metadata: json!({"source": "test"}),
+                            now: "2026-06-20T05:00:00Z".to_string(),
+                        },
+                        &ProfileMemoryCaps::default(),
+                    )
+                    .unwrap();
+                assert_eq!(added.revision, 1);
+
+                let replaced = store
+                    .replace_profile_memory(
+                        &ProfileMemoryReplace {
+                            write: ProfileMemoryWrite {
+                                profile_id: profile_id.clone(),
+                                target: target.clone(),
+                                key: "tone".to_string(),
+                                content: "prefers backend-neutral repository checks".to_string(),
+                                metadata: json!({"source": "replace"}),
+                                now: "2026-06-20T05:01:00Z".to_string(),
+                            },
+                            expected_revision: 1,
+                        },
+                        &ProfileMemoryCaps::default(),
+                    )
+                    .unwrap();
+                assert_eq!(replaced.revision, 2);
+                assert!(store
+                    .replace_profile_memory(
+                        &ProfileMemoryReplace {
+                            write: replaced_write("profile-conformance", target.clone(), "tone"),
+                            expected_revision: 1,
+                        },
+                        &ProfileMemoryCaps::default(),
+                    )
+                    .is_err());
+                assert_eq!(
+                    store
+                        .get_profile_memory(&profile_id, &target, "tone")
+                        .unwrap()
+                        .unwrap()
+                        .content,
+                    "prefers backend-neutral repository checks"
+                );
+                assert_eq!(
+                    store
+                        .list_profile_memory(&ProfileMemoryQuery {
+                            profile_id,
+                            target: Some(target),
+                            page: Some(page()),
+                        })
+                        .unwrap()
+                        .len(),
+                    1
+                );
+            });
+        }
+
+        fn runtime_search_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("runtime-search", |store| {
+                store
+                    .save_session_with_config(&sample_session_state(), &sample_session_config())
+                    .unwrap();
+                store
+                    .save_event(
+                        1,
+                        &CoreEvent::AgentMessageRouted {
+                            message: AgentMessage {
+                                from: AgentId::new("agent-alpha"),
+                                to: AgentId::new("agent-beta"),
+                                body: "needle event search".to_string(),
+                                correlation_id: Some("search-conformance".to_string()),
+                            },
+                        },
+                    )
+                    .unwrap();
+                store
+                    .save_queued_message(&QueuedMessageRecord {
+                        message_id: "queue-search-conformance".to_string(),
+                        owner_session_id: Some(SessionId::new("session-alpha")),
+                        owner_agent_id: AgentId::new("agent-alpha"),
+                        message: AgentMessage {
+                            from: AgentId::new("operator"),
+                            to: AgentId::new("agent-alpha"),
+                            body: "needle queue search".to_string(),
+                            correlation_id: None,
+                        },
+                        source_sequence: Some(1),
+                        enqueued_at: "2026-06-20T00:00:00Z".to_string(),
+                        expires_at: "2026-06-20T00:05:00Z".to_string(),
+                        ttl_ms: 300_000,
+                        delivery_attempts: 0,
+                        state: QueuedMessageState::Pending,
+                        terminal_at: None,
+                        state_reason: None,
+                    })
+                    .unwrap();
+
+                let sessions = store
+                    .search_runtime(&RuntimeSearchFilter {
+                        query: "tools".to_string(),
+                        row_type: Some(RuntimeSearchRowType::Session),
+                        session_id: Some(SessionId::new("session-alpha")),
+                        agent_id: None,
+                        instance_id: None,
+                        task_id: None,
+                        event_kind: None,
+                        recorded_after: None,
+                        recorded_before: None,
+                        limit: Some(10),
+                    })
+                    .unwrap();
+                let messages = store
+                    .search_runtime(&RuntimeSearchFilter {
+                        query: "needle".to_string(),
+                        row_type: Some(RuntimeSearchRowType::Message),
+                        session_id: None,
+                        agent_id: Some(AgentId::new("agent-beta")),
+                        instance_id: None,
+                        task_id: None,
+                        event_kind: Some(CoreEventKind::AgentMessageRouted),
+                        recorded_after: None,
+                        recorded_before: None,
+                        limit: Some(10),
+                    })
+                    .unwrap();
+                let queued = store
+                    .search_runtime(&RuntimeSearchFilter {
+                        query: "needle".to_string(),
+                        row_type: Some(RuntimeSearchRowType::QueueMessage),
+                        session_id: Some(SessionId::new("session-alpha")),
+                        agent_id: Some(AgentId::new("agent-alpha")),
+                        instance_id: None,
+                        task_id: None,
+                        event_kind: None,
+                        recorded_after: None,
+                        recorded_before: None,
+                        limit: Some(10),
+                    })
+                    .unwrap();
+
+                assert_eq!(sessions.len(), 1);
+                assert_eq!(sessions[0].row_type, RuntimeSearchRowType::Session);
+                assert_eq!(messages.len(), 1);
+                assert_eq!(messages[0].sequence, Some(1));
+                assert_eq!(queued.len(), 1);
+                assert_eq!(queued[0].row_key, "queue-search-conformance");
+            });
+        }
+
+        fn conversation_branch_message_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("conversation-branch-message", |store| {
+                let now = "2026-06-25T04:00:00Z".to_string();
+                let session_id = SessionId::new("session-1");
+                let root_branch = ConversationBranchId::new("branch-conformance-root");
+                let slot_id = MessageSlotId::new("slot-conformance");
+                let primary_variant_id = MessageVariantId::new("variant-conformance-primary");
+                let root_message_id = MessageId::new("message-conformance-root");
+                store
+                    .save_conversation_branch(&ConversationBranchWrite {
+                        branch_id: root_branch.clone(),
+                        session_id: session_id.clone(),
+                        parent_branch_id: None,
+                        parent_message_id: None,
+                        origin_message_id: None,
+                        head_message_id: Some(root_message_id.clone()),
+                        label: Some("Root".to_string()),
+                        metadata_json: json!({"kind": "conformance"}),
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
+                    })
+                    .unwrap();
+                store
+                    .save_message_slot(&MessageSlotWrite {
+                        slot_id: slot_id.clone(),
+                        session_id: session_id.clone(),
+                        primary_variant_id: primary_variant_id.clone(),
+                        active_variant_id: None,
+                        metadata_json: json!({"origin": "conformance"}),
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
+                    })
+                    .unwrap();
+                let mut variant = variant_write(
+                    &slot_id,
+                    &primary_variant_id,
+                    MessageVariantSource::Primary,
+                    0,
+                    &root_message_id.0,
+                    "root conformance body",
+                );
+                variant.message.branch_id = Some(root_branch.clone());
+                store.save_message_variant(&variant).unwrap();
+
+                let branches = store
+                    .query_conversation_branches(&ConversationBranchQuery {
+                        session_id: Some(session_id.clone()),
+                        parent_branch_id: None,
+                        page: Some(page()),
+                    })
+                    .unwrap();
+                let slots = store
+                    .query_message_slots(&MessageSlotQuery {
+                        session_id: Some(session_id.clone()),
+                        include_alternates: false,
+                        page: Some(page()),
+                    })
+                    .unwrap();
+                let selected = store
+                    .select_active_conversation_branch(&SelectActiveBranchRequest {
+                        session_id: session_id.clone(),
+                        active_branch_id: Some(root_branch.clone()),
+                        expected: ActiveBranchExpectation::None,
+                        updated_at: "2026-06-25T04:01:00Z".to_string(),
+                    })
+                    .unwrap();
+                let updated = store
+                    .update_conversation_branch_head(&UpdateBranchHeadRequest {
+                        branch_id: root_branch.clone(),
+                        head_message_id: Some(root_message_id.clone()),
+                        expected: BranchHeadExpectation::Message(root_message_id.clone()),
+                        updated_at: "2026-06-25T04:02:00Z".to_string(),
+                    })
+                    .unwrap();
+                let jump = store
+                    .resolve_conversation_jump(&ConversationJumpRequest {
+                        session_id,
+                        target: ConversationJumpTarget::Message {
+                            message_id: root_message_id.clone(),
+                        },
+                    })
+                    .unwrap();
+
+                assert_eq!(branches.len(), 1);
+                assert_eq!(slots.len(), 1);
+                assert_eq!(slots[0].primary.message.body, "root conformance body");
+                assert!(selected.conflict.is_none());
+                assert_eq!(selected.state.active_branch_id, Some(root_branch.clone()));
+                assert!(updated.conflict.is_none());
+                assert_eq!(jump.branch_id, Some(root_branch));
+            });
+        }
+
+        fn provider_wire_state_expiry_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("provider-wire-state-expiry", |store| {
+                let key = sample_provider_wire_state_key();
+                store
+                    .save_provider_wire_state(&sample_provider_wire_state_write(
+                        ProviderWireStateWriteFixture {
+                            key: key.clone(),
+                            profile_fingerprint: "profile:v1",
+                            provider_fingerprint: "provider:v1",
+                            payload_version: "responses:v1",
+                            payload_json: json!({"response_id": "resp_conformance"}),
+                            now: "2026-06-20T00:00:00Z",
+                            expires_at: Some("2026-06-20T00:00:05Z"),
+                            last_wake_id: Some("wake-conformance"),
+                        },
+                    ))
+                    .unwrap();
+                let current = store
+                    .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                        key: key.clone(),
+                        profile_fingerprint: "profile:v1".to_string(),
+                        provider_fingerprint: "provider:v1".to_string(),
+                        now: "2026-06-20T00:00:04Z".to_string(),
+                    })
+                    .unwrap();
+                assert!(current.record.unwrap().is_current());
+
+                let expired_lookup = store
+                    .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                        key: key.clone(),
+                        profile_fingerprint: "profile:v1".to_string(),
+                        provider_fingerprint: "provider:v1".to_string(),
+                        now: "2026-06-20T00:00:06Z".to_string(),
+                    })
+                    .unwrap();
+                assert!(expired_lookup.record.is_none());
+                assert_eq!(
+                    expired_lookup.absence_reason,
+                    Some(ProviderStateAbsenceReason::Expired)
+                );
+
+                store
+                    .save_provider_wire_state(&sample_provider_wire_state_write(
+                        ProviderWireStateWriteFixture {
+                            key: key.clone(),
+                            profile_fingerprint: "profile:v1",
+                            provider_fingerprint: "provider:v1",
+                            payload_version: "responses:v2",
+                            payload_json: json!({"response_id": "resp_maintenance"}),
+                            now: "2026-06-20T00:00:07Z",
+                            expires_at: Some("2026-06-20T00:00:08Z"),
+                            last_wake_id: Some("wake-maintenance"),
+                        },
+                    ))
+                    .unwrap();
+                let expired = store
+                    .expire_provider_wire_states_at(&"2026-06-20T00:00:09Z".to_string())
+                    .unwrap();
+                assert_eq!(expired.len(), 1);
+                assert_eq!(
+                    expired[0].invalidation_reason,
+                    Some(ProviderWireStateInvalidationReason::Expired)
+                );
+                assert!(store
+                    .expire_provider_wire_states_at(&"2026-06-20T00:00:10Z".to_string())
+                    .unwrap()
+                    .is_empty());
+            });
+        }
+    }
+
     #[test]
     fn diagnostic_table_names_are_whitelisted() {
         for table in DiagnosticTable::ALL {

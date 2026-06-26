@@ -38,6 +38,7 @@ pub enum ToolCategory {
     Web,
     Browser,
     Memory,
+    Storage,
     Skills,
     Mcp,
     Delegation,
@@ -455,7 +456,7 @@ mod tests {
 
         assert_eq!(artifact.schema_version, 1);
         assert_eq!(artifact.catalog_id, "default-local-tools");
-        assert_eq!(artifact.tools.len(), 37);
+        assert_eq!(artifact.tools.len(), 41);
 
         let result = validate_tool_metadata_list(&artifact.tools);
 
