@@ -16,8 +16,8 @@ pub use crate::module_schema::{
 
 use crate::module_schema::{
     compiled_module_schema_registry, module_schema_registry_diagnostics,
-    validate_version_progression, InstalledModuleSchemaRecord, ModuleId, ModuleSchemaCapability,
-    ModuleSchemaRegistry,
+    validate_version_progression, InstalledModuleSchemaRecord, ModuleId, ModuleSchemaBundle,
+    ModuleSchemaCapability, ModuleSchemaRegistry,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
@@ -921,6 +921,53 @@ pub struct ProfileMemoryDelete {
 pub struct ProfileMemoryQuery {
     pub profile_id: ProfileId,
     pub target: Option<ProfileMemoryTarget>,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleKvScope {
+    pub scope_type: String,
+    pub scope_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleKvRecord {
+    pub scope: SimpleKvScope,
+    pub key: String,
+    pub value_json: JsonValue,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub expires_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleKvWrite {
+    pub scope: SimpleKvScope,
+    pub key: String,
+    pub value_json: JsonValue,
+    pub now: IsoTimestamp,
+    pub expires_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleKvCompareAndSwap {
+    pub write: SimpleKvWrite,
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleKvDelete {
+    pub scope: SimpleKvScope,
+    pub key: String,
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleKvQuery {
+    pub scope: SimpleKvScope,
+    pub include_expired: bool,
+    pub now: Option<IsoTimestamp>,
     pub page: Option<QueryPage>,
 }
 
@@ -1924,6 +1971,121 @@ impl CoordinationStore {
         tx.commit()
             .map_err(|error| persistence_error("commit remove profile memory", error))?;
         Ok(existing)
+    }
+
+    pub fn get_simple_kv(
+        &self,
+        scope: &SimpleKvScope,
+        key: &str,
+        now: Option<&IsoTimestamp>,
+    ) -> CoreResult<Option<SimpleKvRecord>> {
+        validate_simple_kv_identity(scope, key)?;
+        let conn = self.conn()?;
+        get_simple_kv(&conn, scope, key, now)
+    }
+
+    pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
+        validate_simple_kv_scope(&query.scope)?;
+        let conn = self.conn()?;
+        list_simple_kv(&conn, query)
+    }
+
+    pub fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
+        validate_simple_kv_write(write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start put simple kv", error))?;
+        let record = put_simple_kv_in_tx(&tx, write)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit put simple kv", error))?;
+        Ok(record)
+    }
+
+    pub fn compare_and_swap_simple_kv(
+        &self,
+        compare_and_swap: &SimpleKvCompareAndSwap,
+    ) -> CoreResult<SimpleKvRecord> {
+        validate_simple_kv_write(&compare_and_swap.write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start compare-and-swap simple kv", error))?;
+        let existing = get_simple_kv(
+            &tx,
+            &compare_and_swap.write.scope,
+            &compare_and_swap.write.key,
+            None,
+        )?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "simple_kv entry {}/{} not found",
+                    compare_and_swap.write.scope.scope_id, compare_and_swap.write.key
+                ),
+            )
+        })?;
+        if existing.revision != compare_and_swap.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "simple_kv revision mismatch for {}/{}: expected {}, found {}",
+                    compare_and_swap.write.scope.scope_id,
+                    compare_and_swap.write.key,
+                    compare_and_swap.expected_revision,
+                    existing.revision
+                ),
+            ));
+        }
+        let record = update_simple_kv_in_tx(&tx, &compare_and_swap.write, existing.revision + 1)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit compare-and-swap simple kv", error))?;
+        Ok(record)
+    }
+
+    pub fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
+        validate_simple_kv_identity(&delete.scope, &delete.key)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start delete simple kv", error))?;
+        let existing = get_simple_kv(&tx, &delete.scope, &delete.key, None)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "simple_kv entry {}/{} not found",
+                    delete.scope.scope_id, delete.key
+                ),
+            )
+        })?;
+        if existing.revision != delete.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "simple_kv revision mismatch for {}/{}: expected {}, found {}",
+                    delete.scope.scope_id, delete.key, delete.expected_revision, existing.revision
+                ),
+            ));
+        }
+        tx.execute(
+            "DELETE FROM module_simple_kv_entries
+             WHERE scope_type = ?1 AND scope_id = ?2 AND entry_key = ?3",
+            params![
+                delete.scope.scope_type.as_str(),
+                delete.scope.scope_id.as_str(),
+                delete.key.as_str()
+            ],
+        )
+        .map_err(|error| persistence_error("delete simple kv", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit delete simple kv", error))?;
+        Ok(existing)
+    }
+
+    pub fn expire_simple_kv(&self, now: &IsoTimestamp) -> CoreResult<u64> {
+        let conn = self.conn()?;
+        expire_simple_kv(&conn, now)
     }
 
     pub fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
@@ -4760,6 +4922,111 @@ fn migrate_v20_add_module_schema_registry(tx: &rusqlite::Transaction<'_>) -> Cor
     .map_err(|error| persistence_error("apply schema migration 20", error))
 }
 
+fn apply_module_schema_migration_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    bundle: &ModuleSchemaBundle,
+    installed_version: Option<u32>,
+) -> CoreResult<()> {
+    match bundle.module_id.as_str() {
+        "simple_kv" => apply_simple_kv_module_schema_in_tx(tx, bundle, installed_version),
+        module_id => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("module {module_id} has no registered migration implementation"),
+        )),
+    }
+}
+
+fn apply_simple_kv_module_schema_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    bundle: &ModuleSchemaBundle,
+    _installed_version: Option<u32>,
+) -> CoreResult<()> {
+    if bundle.schema_version != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!(
+                "simple_kv schema version {} has no migration implementation",
+                bundle.schema_version
+            ),
+        ));
+    }
+    let table = bundle
+        .tables
+        .iter()
+        .find(|table| table.table_name.as_str() == "entries")
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "simple_kv descriptor is missing entries table",
+            )
+        })?
+        .physical_name(&bundle.module_id)?;
+    let index = bundle
+        .indexes
+        .iter()
+        .find(|index| {
+            index.table_name.as_str() == "entries" && index.purpose.as_str() == "scope_key"
+        })
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "simple_kv descriptor is missing scope_key index",
+            )
+        })?
+        .physical_name(&bundle.module_id)?;
+    let expiry_index = bundle
+        .indexes
+        .iter()
+        .find(|index| {
+            index.table_name.as_str() == "entries" && index.purpose.as_str() == "expires_at"
+        })
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "simple_kv descriptor is missing expires_at index",
+            )
+        })?
+        .physical_name(&bundle.module_id)?;
+    let table = sqlite_identifier(&table)?;
+    let index = sqlite_identifier(&index)?;
+    let expiry_index = sqlite_identifier(&expiry_index)?;
+    tx.execute_batch(&format!(
+        "
+            CREATE TABLE IF NOT EXISTS {table} (
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                entry_key TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK (revision > 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT,
+                PRIMARY KEY (scope_type, scope_id, entry_key)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS {index}
+                ON {table}(scope_type, scope_id, entry_key);
+            CREATE INDEX IF NOT EXISTS {expiry_index}
+                ON {table}(expires_at)
+                WHERE expires_at IS NOT NULL;
+            "
+    ))
+    .map_err(|error| persistence_error("apply simple_kv module schema", error))
+}
+
+fn sqlite_identifier(identifier: &str) -> CoreResult<String> {
+    if identifier.is_empty()
+        || !identifier.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+        })
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unsafe sqlite identifier {identifier:?}"),
+        ));
+    }
+    Ok(identifier.to_string())
+}
+
 fn install_module_schema_registry_in_tx(
     tx: &rusqlite::Transaction<'_>,
     registry: &ModuleSchemaRegistry,
@@ -4776,6 +5043,7 @@ fn install_module_schema_registry_in_tx(
         let existing = load_installed_module_schema_record(tx, module_id)?;
         if let Some(existing) = existing {
             validate_version_progression(Some(existing.installed_version), bundle.schema_version)?;
+            apply_module_schema_migration_in_tx(tx, bundle, Some(existing.installed_version))?;
             if existing.installed_version == bundle.schema_version {
                 if existing.descriptor_fingerprint != descriptor_fingerprint {
                     return Err(CoreError::new(
@@ -4790,6 +5058,7 @@ fn install_module_schema_registry_in_tx(
             }
         } else {
             validate_version_progression(None, bundle.schema_version)?;
+            apply_module_schema_migration_in_tx(tx, bundle, None)?;
         }
 
         tx.execute(
@@ -9503,6 +9772,207 @@ fn load_session_config_records(conn: &Connection) -> CoreResult<Vec<SessionConfi
         .map_err(|error| persistence_error("load session configs", error))
 }
 
+fn list_simple_kv(conn: &Connection, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
+    validate_simple_kv_scope(&query.scope)?;
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let now = query.now.as_deref();
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                scope_type,
+                scope_id,
+                entry_key,
+                value_json,
+                revision,
+                created_at,
+                updated_at,
+                expires_at
+             FROM module_simple_kv_entries
+             WHERE scope_type = ?1
+               AND scope_id = ?2
+               AND (?3 OR expires_at IS NULL OR ?4 IS NULL OR expires_at > ?4)
+             ORDER BY entry_key ASC
+             LIMIT ?5 OFFSET ?6",
+        )
+        .map_err(|error| persistence_error("prepare list simple kv", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                query.scope.scope_type.as_str(),
+                query.scope.scope_id.as_str(),
+                query.include_expired,
+                now,
+                limit,
+                offset
+            ],
+            row_to_simple_kv,
+        )
+        .map_err(|error| persistence_error("query simple kv", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load simple kv", error))
+}
+
+fn get_simple_kv(
+    conn: &Connection,
+    scope: &SimpleKvScope,
+    key: &str,
+    now: Option<&IsoTimestamp>,
+) -> CoreResult<Option<SimpleKvRecord>> {
+    validate_simple_kv_identity(scope, key)?;
+    conn.query_row(
+        "SELECT
+            scope_type,
+            scope_id,
+            entry_key,
+            value_json,
+            revision,
+            created_at,
+            updated_at,
+            expires_at
+         FROM module_simple_kv_entries
+         WHERE scope_type = ?1
+           AND scope_id = ?2
+           AND entry_key = ?3
+           AND (expires_at IS NULL OR ?4 IS NULL OR expires_at > ?4)",
+        params![scope.scope_type.as_str(), scope.scope_id.as_str(), key, now],
+        row_to_simple_kv,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get simple kv", error))
+}
+
+fn put_simple_kv_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &SimpleKvWrite,
+) -> CoreResult<SimpleKvRecord> {
+    let existing = get_simple_kv(tx, &write.scope, &write.key, None)?;
+    match existing {
+        Some(record) => update_simple_kv_in_tx(tx, write, record.revision + 1),
+        None => insert_simple_kv_in_tx(tx, write),
+    }
+}
+
+fn insert_simple_kv_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &SimpleKvWrite,
+) -> CoreResult<SimpleKvRecord> {
+    let value_json = to_json_text(&write.value_json)?;
+    tx.execute(
+        "INSERT INTO module_simple_kv_entries (
+            scope_type,
+            scope_id,
+            entry_key,
+            value_json,
+            revision,
+            created_at,
+            updated_at,
+            expires_at
+        ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5, ?6)",
+        params![
+            write.scope.scope_type.as_str(),
+            write.scope.scope_id.as_str(),
+            write.key.as_str(),
+            value_json,
+            write.now.as_str(),
+            write.expires_at.as_deref(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert simple kv", error))?;
+    Ok(SimpleKvRecord {
+        scope: write.scope.clone(),
+        key: write.key.clone(),
+        value_json: write.value_json.clone(),
+        revision: 1,
+        created_at: write.now.clone(),
+        updated_at: write.now.clone(),
+        expires_at: write.expires_at.clone(),
+    })
+}
+
+fn update_simple_kv_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &SimpleKvWrite,
+    revision: u64,
+) -> CoreResult<SimpleKvRecord> {
+    let value_json = to_json_text(&write.value_json)?;
+    let created_at = get_simple_kv(tx, &write.scope, &write.key, None)?
+        .map(|record| record.created_at)
+        .unwrap_or_else(|| write.now.clone());
+    tx.execute(
+        "UPDATE module_simple_kv_entries
+         SET value_json = ?4,
+             revision = ?5,
+             updated_at = ?6,
+             expires_at = ?7
+         WHERE scope_type = ?1
+           AND scope_id = ?2
+           AND entry_key = ?3",
+        params![
+            write.scope.scope_type.as_str(),
+            write.scope.scope_id.as_str(),
+            write.key.as_str(),
+            value_json,
+            revision as i64,
+            write.now.as_str(),
+            write.expires_at.as_deref(),
+        ],
+    )
+    .map_err(|error| persistence_error("update simple kv", error))?;
+    Ok(SimpleKvRecord {
+        scope: write.scope.clone(),
+        key: write.key.clone(),
+        value_json: write.value_json.clone(),
+        revision,
+        created_at,
+        updated_at: write.now.clone(),
+        expires_at: write.expires_at.clone(),
+    })
+}
+
+fn expire_simple_kv(conn: &Connection, now: &IsoTimestamp) -> CoreResult<u64> {
+    let changed = conn
+        .execute(
+            "DELETE FROM module_simple_kv_entries
+             WHERE expires_at IS NOT NULL AND expires_at <= ?1",
+            params![now.as_str()],
+        )
+        .map_err(|error| persistence_error("expire simple kv", error))?;
+    Ok(changed as u64)
+}
+
+fn row_to_simple_kv(row: &rusqlite::Row<'_>) -> rusqlite::Result<SimpleKvRecord> {
+    let value_json: String = row.get(3)?;
+    let revision: i64 = row.get(4)?;
+    if revision <= 0 {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Integer,
+            Box::new(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("invalid simple_kv revision {revision}"),
+            )),
+        ));
+    }
+    Ok(SimpleKvRecord {
+        scope: SimpleKvScope {
+            scope_type: row.get(0)?,
+            scope_id: row.get(1)?,
+        },
+        key: row.get(2)?,
+        value_json: from_json_text(&value_json).map_err(to_sql_error)?,
+        revision: revision as u64,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+        expires_at: row.get(7)?,
+    })
+}
+
 fn query_profile_memory(
     conn: &Connection,
     query: &ProfileMemoryQuery,
@@ -9765,6 +10235,42 @@ fn validate_profile_memory_key(key: &str, max_key_bytes: u32) -> CoreResult<()> 
         return Err(CoreError::new(
             CoreErrorKind::ActionRejected,
             format!("profile memory key exceeds {max_key_bytes} bytes"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_simple_kv_write(write: &SimpleKvWrite) -> CoreResult<()> {
+    validate_simple_kv_identity(&write.scope, &write.key)
+}
+
+fn validate_simple_kv_identity(scope: &SimpleKvScope, key: &str) -> CoreResult<()> {
+    validate_simple_kv_scope(scope)?;
+    validate_simple_kv_part("key", key, 256)
+}
+
+fn validate_simple_kv_scope(scope: &SimpleKvScope) -> CoreResult<()> {
+    validate_simple_kv_part("scope_type", &scope.scope_type, 64)?;
+    validate_simple_kv_part("scope_id", &scope.scope_id, 256)
+}
+
+fn validate_simple_kv_part(label: &str, value: &str, max_bytes: usize) -> CoreResult<()> {
+    if value.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("simple_kv {label} must be non-empty"),
+        ));
+    }
+    if value.len() > max_bytes {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!("simple_kv {label} exceeds {max_bytes} bytes"),
+        ));
+    }
+    if value.contains('\0') {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("simple_kv {label} must not contain NUL bytes"),
         ));
     }
     Ok(())
@@ -10565,12 +11071,6 @@ fn persistence_error(context: &str, error: impl std::error::Error) -> CoreError 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::module_schema::{
-        IndexPurpose, LogicalStoreDescriptor, ModuleCapabilityRequirement, ModuleId,
-        ModuleIndexDescriptor, ModuleOwner, ModuleRetentionDeclaration, ModuleSchemaBundle,
-        ModuleSchemaRegistry, ModuleTableDescriptor, QueryCatalogEntryDescriptor,
-        RepositoryContractDescriptor, StoreName, TableDeclaration, TableName,
-    };
     use rusty_crew_core_protocol::{AgentMessage, ToolDescriptor};
     use serde_json::json;
     use std::{
@@ -10599,6 +11099,19 @@ mod tests {
             SCHEMA_MIGRATIONS.len()
         );
         assert_eq!(store.count_rows("sessions").unwrap(), 0);
+        assert!(table_exists(&db_path, "module_simple_kv_entries"));
+        assert!(index_exists(
+            &db_path,
+            "idx_module_simple_kv_entries_scope_key"
+        ));
+        assert!(index_exists(
+            &db_path,
+            "idx_module_simple_kv_entries_expires_at"
+        ));
+        let installed = store.installed_module_schemas().unwrap();
+        assert_eq!(installed.len(), 1);
+        assert_eq!(installed[0].module_id.as_str(), "simple_kv");
+        assert_eq!(installed[0].installed_version, 1);
 
         remove_temp_db(&db_path);
     }
@@ -10643,6 +11156,7 @@ mod tests {
         assert!(table_exists(&db_path, "channel_bindings"));
         assert!(table_exists(&db_path, "mcp_bindings"));
         assert!(table_exists(&db_path, "module_schema_versions"));
+        assert!(table_exists(&db_path, "module_simple_kv_entries"));
         assert!(index_exists(
             &db_path,
             "idx_worker_runs_parent_status_created"
@@ -10659,6 +11173,14 @@ mod tests {
         assert!(index_exists(&db_path, "idx_provider_wire_states_current"));
         assert!(index_exists(&db_path, "idx_channel_bindings_external"));
         assert!(index_exists(&db_path, "idx_mcp_bindings_agent_profile"));
+        assert!(index_exists(
+            &db_path,
+            "idx_module_simple_kv_entries_scope_key"
+        ));
+        assert!(index_exists(
+            &db_path,
+            "idx_module_simple_kv_entries_expires_at"
+        ));
 
         remove_temp_db(&db_path);
     }
@@ -10695,7 +11217,7 @@ mod tests {
     }
 
     #[test]
-    fn module_schema_registry_allows_version_upgrade() {
+    fn module_schema_registry_rejects_upgrade_without_migration_implementation() {
         let db_path = temp_db_path("module-schema-upgrade");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         let v1 = ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle(1).unwrap()]).unwrap();
@@ -10708,17 +11230,16 @@ mod tests {
                 &"2026-06-26T00:00:00Z".to_string(),
             )
             .unwrap();
-        let installed = store
+        let error = store
             .install_module_schema_registry(
                 &v2,
                 &[ModuleSchemaCapability::Transactions],
                 &"2026-06-26T00:02:00Z".to_string(),
             )
-            .unwrap();
+            .unwrap_err();
 
-        assert_eq!(installed[0].installed_version, 2);
-        assert_eq!(installed[0].installed_at, "2026-06-26T00:00:00Z");
-        assert_eq!(installed[0].updated_at, "2026-06-26T00:02:00Z");
+        assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
+        assert!(error.message.contains("no migration implementation"));
 
         remove_temp_db(&db_path);
     }
@@ -10786,7 +11307,7 @@ mod tests {
                     installed_at,
                     updated_at
                  ) VALUES (?1, ?2, ?3, ?4, ?4)",
-                params!["simple_kv", 0_i64, "bad", "2026-06-26T00:00:00Z"],
+                params!["old_module", 0_i64, "bad", "2026-06-26T00:00:00Z"],
             )
             .unwrap();
         }
@@ -10796,6 +11317,144 @@ mod tests {
         assert!(error
             .message
             .contains("invalid installed module schema version"));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn simple_kv_repository_round_trips_revisions_and_expiry() {
+        let db_path = temp_db_path("simple-kv-repository");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let scope = SimpleKvScope {
+            scope_type: "profile".to_string(),
+            scope_id: "rusty-crew-runner".to_string(),
+        };
+
+        let first = store
+            .put_simple_kv(&SimpleKvWrite {
+                scope: scope.clone(),
+                key: "tone".to_string(),
+                value_json: json!({"style": "steady"}),
+                now: "2026-06-26T00:00:00Z".to_string(),
+                expires_at: None,
+            })
+            .unwrap();
+        assert_eq!(first.revision, 1);
+        assert_eq!(first.value_json, json!({"style": "steady"}));
+
+        let fetched = store
+            .get_simple_kv(&scope, "tone", Some(&"2026-06-26T00:01:00Z".to_string()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched, first);
+
+        let second = store
+            .put_simple_kv(&SimpleKvWrite {
+                scope: scope.clone(),
+                key: "tone".to_string(),
+                value_json: json!({"style": "direct"}),
+                now: "2026-06-26T00:02:00Z".to_string(),
+                expires_at: Some("2026-06-26T01:00:00Z".to_string()),
+            })
+            .unwrap();
+        assert_eq!(second.revision, 2);
+        assert_eq!(second.created_at, first.created_at);
+        assert_eq!(second.value_json, json!({"style": "direct"}));
+
+        let stale = store
+            .compare_and_swap_simple_kv(&SimpleKvCompareAndSwap {
+                write: SimpleKvWrite {
+                    scope: scope.clone(),
+                    key: "tone".to_string(),
+                    value_json: json!({"style": "stale"}),
+                    now: "2026-06-26T00:03:00Z".to_string(),
+                    expires_at: None,
+                },
+                expected_revision: 1,
+            })
+            .unwrap_err();
+        assert_eq!(stale.kind, CoreErrorKind::ActionRejected);
+
+        let third = store
+            .compare_and_swap_simple_kv(&SimpleKvCompareAndSwap {
+                write: SimpleKvWrite {
+                    scope: scope.clone(),
+                    key: "tone".to_string(),
+                    value_json: json!({"style": "precise"}),
+                    now: "2026-06-26T00:04:00Z".to_string(),
+                    expires_at: Some("2026-06-26T00:05:00Z".to_string()),
+                },
+                expected_revision: 2,
+            })
+            .unwrap();
+        assert_eq!(third.revision, 3);
+
+        store
+            .put_simple_kv(&SimpleKvWrite {
+                scope: scope.clone(),
+                key: "working_set".to_string(),
+                value_json: json!(["a", "b"]),
+                now: "2026-06-26T00:04:30Z".to_string(),
+                expires_at: None,
+            })
+            .unwrap();
+
+        let visible = store
+            .list_simple_kv(&SimpleKvQuery {
+                scope: scope.clone(),
+                include_expired: false,
+                now: Some("2026-06-26T00:04:45Z".to_string()),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            visible
+                .iter()
+                .map(|record| record.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["tone", "working_set"]
+        );
+
+        assert!(store
+            .get_simple_kv(&scope, "tone", Some(&"2026-06-26T00:05:01Z".to_string()))
+            .unwrap()
+            .is_none());
+        let with_expired = store
+            .list_simple_kv(&SimpleKvQuery {
+                scope: scope.clone(),
+                include_expired: true,
+                now: Some("2026-06-26T00:05:01Z".to_string()),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(with_expired.len(), 2);
+
+        assert_eq!(
+            store
+                .delete_simple_kv(&SimpleKvDelete {
+                    scope: scope.clone(),
+                    key: "working_set".to_string(),
+                    expected_revision: 1,
+                })
+                .unwrap()
+                .key,
+            "working_set"
+        );
+        assert_eq!(
+            store
+                .expire_simple_kv(&"2026-06-26T00:05:01Z".to_string())
+                .unwrap(),
+            1
+        );
+        assert!(store
+            .list_simple_kv(&SimpleKvQuery {
+                scope,
+                include_expired: true,
+                now: None,
+                page: None,
+            })
+            .unwrap()
+            .is_empty());
 
         remove_temp_db(&db_path);
     }
@@ -13280,60 +13939,14 @@ mod tests {
     }
 
     fn simple_kv_schema_bundle(version: u32) -> CoreResult<ModuleSchemaBundle> {
-        Ok(ModuleSchemaBundle {
-            module_id: ModuleId::new("simple_kv")?,
-            schema_version: version,
-            owner: ModuleOwner {
-                crate_name: "core_persistence".to_string(),
-                rust_module: "simple_kv".to_string(),
-            },
-            logical_stores: vec![LogicalStoreDescriptor {
-                store_name: StoreName::new("entries")?,
-                description: "Simple scoped key/value records".to_string(),
-            }],
-            tables: vec![ModuleTableDescriptor {
-                table_name: TableName::new("entries")?,
-                logical_store: StoreName::new("entries")?,
-                declaration: TableDeclaration::Owned,
-            }],
-            indexes: vec![ModuleIndexDescriptor {
-                table_name: TableName::new("entries")?,
-                purpose: IndexPurpose::new("scope_key")?,
-                columns: vec![
-                    "scope_type".to_string(),
-                    "scope_id".to_string(),
-                    "entry_key".to_string(),
-                ],
-                unique: true,
-            }],
-            retention: vec![ModuleRetentionDeclaration::PurgeExpired {
-                store_name: StoreName::new("entries")?,
-                timestamp_column: "expires_at".to_string(),
-            }],
-            capability_requirements: vec![
-                ModuleCapabilityRequirement::required(ModuleSchemaCapability::Transactions),
-                ModuleCapabilityRequirement::optional(ModuleSchemaCapability::JsonDocuments),
-            ],
-            repository_contracts: vec![
-                RepositoryContractDescriptor {
-                    contract_name: "get_kv".to_string(),
-                    description: "Get a key/value entry".to_string(),
-                },
-                RepositoryContractDescriptor {
-                    contract_name: "put_kv".to_string(),
-                    description: "Create or replace a key/value entry".to_string(),
-                },
-            ],
-            query_catalog_entries: vec![QueryCatalogEntryDescriptor {
-                query_id: "list_entries_by_scope".to_string(),
-                store_name: StoreName::new("entries")?,
-                description: "List simple key/value entries for a scope".to_string(),
-                parameter_schema_id: Some("simple_kv_scope_query".to_string()),
-            }],
-            export_hooks: Vec::new(),
-            import_hooks: Vec::new(),
-            migration_notes: vec![format!("schema version {version}")],
-        })
+        let mut bundle = crate::module_schema::simple_kv_schema_bundle();
+        bundle.schema_version = version;
+        if version != 1 {
+            bundle
+                .migration_notes
+                .push(format!("test schema version {version}"));
+        }
+        Ok(bundle)
     }
 
     struct ProviderWireStateWriteFixture<'a> {

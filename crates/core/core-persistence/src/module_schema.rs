@@ -303,7 +303,95 @@ impl ModuleSchemaRegistry {
 }
 
 pub fn compiled_module_schema_registry() -> ModuleSchemaRegistry {
-    ModuleSchemaRegistry::empty()
+    ModuleSchemaRegistry::new(vec![simple_kv_schema_bundle()])
+        .expect("compiled module schema registry must be valid")
+}
+
+pub fn simple_kv_schema_bundle() -> ModuleSchemaBundle {
+    ModuleSchemaBundle {
+        module_id: ModuleId::new("simple_kv").expect("valid simple_kv module id"),
+        schema_version: 1,
+        owner: ModuleOwner {
+            crate_name: "core_persistence".to_string(),
+            rust_module: "simple_kv".to_string(),
+        },
+        logical_stores: vec![LogicalStoreDescriptor {
+            store_name: StoreName::new("entries").expect("valid simple_kv store name"),
+            description: "Simple scoped key/value records".to_string(),
+        }],
+        tables: vec![ModuleTableDescriptor {
+            table_name: TableName::new("entries").expect("valid simple_kv table name"),
+            logical_store: StoreName::new("entries").expect("valid simple_kv store name"),
+            declaration: TableDeclaration::Owned,
+        }],
+        indexes: vec![
+            ModuleIndexDescriptor {
+                table_name: TableName::new("entries").expect("valid simple_kv table name"),
+                purpose: IndexPurpose::new("scope_key").expect("valid simple_kv index purpose"),
+                columns: vec![
+                    "scope_type".to_string(),
+                    "scope_id".to_string(),
+                    "entry_key".to_string(),
+                ],
+                unique: true,
+            },
+            ModuleIndexDescriptor {
+                table_name: TableName::new("entries").expect("valid simple_kv table name"),
+                purpose: IndexPurpose::new("expires_at").expect("valid simple_kv index purpose"),
+                columns: vec!["expires_at".to_string()],
+                unique: false,
+            },
+        ],
+        retention: vec![ModuleRetentionDeclaration::PurgeExpired {
+            store_name: StoreName::new("entries").expect("valid simple_kv store name"),
+            timestamp_column: "expires_at".to_string(),
+        }],
+        capability_requirements: vec![
+            ModuleCapabilityRequirement::required(ModuleSchemaCapability::Transactions),
+            ModuleCapabilityRequirement::optional(ModuleSchemaCapability::JsonDocuments),
+        ],
+        repository_contracts: vec![
+            RepositoryContractDescriptor {
+                contract_name: "get_kv".to_string(),
+                description: "Get a key/value entry".to_string(),
+            },
+            RepositoryContractDescriptor {
+                contract_name: "list_kv".to_string(),
+                description: "List key/value entries by scope".to_string(),
+            },
+            RepositoryContractDescriptor {
+                contract_name: "put_kv".to_string(),
+                description: "Create or replace a key/value entry".to_string(),
+            },
+            RepositoryContractDescriptor {
+                contract_name: "compare_and_swap_kv".to_string(),
+                description: "Replace a key/value entry when its revision matches".to_string(),
+            },
+            RepositoryContractDescriptor {
+                contract_name: "delete_kv".to_string(),
+                description: "Delete a key/value entry when its revision matches".to_string(),
+            },
+            RepositoryContractDescriptor {
+                contract_name: "expire_kv".to_string(),
+                description: "Remove expired key/value entries".to_string(),
+            },
+        ],
+        query_catalog_entries: vec![QueryCatalogEntryDescriptor {
+            query_id: "list_entries_by_scope".to_string(),
+            store_name: StoreName::new("entries").expect("valid simple_kv store name"),
+            description: "List simple key/value entries for a scope".to_string(),
+            parameter_schema_id: Some("simple_kv_scope_query".to_string()),
+        }],
+        export_hooks: vec![ModuleTransferHookDescriptor {
+            hook_name: "export_simple_kv".to_string(),
+            format_version: 1,
+        }],
+        import_hooks: vec![ModuleTransferHookDescriptor {
+            hook_name: "import_simple_kv".to_string(),
+            format_version: 1,
+        }],
+        migration_notes: vec!["initial simple_kv module schema".to_string()],
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1196,7 +1284,10 @@ mod tests {
         assert_eq!(validated.physical_tables, vec!["module_simple_kv_entries"]);
         assert_eq!(
             validated.physical_indexes,
-            vec!["idx_module_simple_kv_entries_scope_key"]
+            vec![
+                "idx_module_simple_kv_entries_scope_key",
+                "idx_module_simple_kv_entries_expires_at"
+            ]
         );
         assert_eq!(
             generated_module_trigger_name(
@@ -1432,65 +1523,6 @@ mod tests {
     }
 
     fn simple_kv_bundle() -> CoreResult<ModuleSchemaBundle> {
-        Ok(ModuleSchemaBundle {
-            module_id: ModuleId::new("simple_kv")?,
-            schema_version: 1,
-            owner: ModuleOwner {
-                crate_name: "core_persistence".to_string(),
-                rust_module: "simple_kv".to_string(),
-            },
-            logical_stores: vec![LogicalStoreDescriptor {
-                store_name: StoreName::new("entries")?,
-                description: "Simple scoped key/value records".to_string(),
-            }],
-            tables: vec![ModuleTableDescriptor {
-                table_name: TableName::new("entries")?,
-                logical_store: StoreName::new("entries")?,
-                declaration: TableDeclaration::Owned,
-            }],
-            indexes: vec![ModuleIndexDescriptor {
-                table_name: TableName::new("entries")?,
-                purpose: IndexPurpose::new("scope_key")?,
-                columns: vec![
-                    "scope_type".to_string(),
-                    "scope_id".to_string(),
-                    "entry_key".to_string(),
-                ],
-                unique: true,
-            }],
-            retention: vec![ModuleRetentionDeclaration::PurgeExpired {
-                store_name: StoreName::new("entries")?,
-                timestamp_column: "expires_at".to_string(),
-            }],
-            capability_requirements: vec![
-                ModuleCapabilityRequirement::required(ModuleSchemaCapability::Transactions),
-                ModuleCapabilityRequirement::optional(ModuleSchemaCapability::JsonDocuments),
-            ],
-            repository_contracts: vec![
-                RepositoryContractDescriptor {
-                    contract_name: "get_kv".to_string(),
-                    description: "Get a key/value entry".to_string(),
-                },
-                RepositoryContractDescriptor {
-                    contract_name: "put_kv".to_string(),
-                    description: "Create or replace a key/value entry".to_string(),
-                },
-            ],
-            query_catalog_entries: vec![QueryCatalogEntryDescriptor {
-                query_id: "list_entries_by_scope".to_string(),
-                store_name: StoreName::new("entries")?,
-                description: "List simple key/value entries for a scope".to_string(),
-                parameter_schema_id: Some("simple_kv_scope_query".to_string()),
-            }],
-            export_hooks: vec![ModuleTransferHookDescriptor {
-                hook_name: "export_simple_kv".to_string(),
-                format_version: 1,
-            }],
-            import_hooks: vec![ModuleTransferHookDescriptor {
-                hook_name: "import_simple_kv".to_string(),
-                format_version: 1,
-            }],
-            migration_notes: vec!["initial descriptor fixture".to_string()],
-        })
+        Ok(simple_kv_schema_bundle())
     }
 }
