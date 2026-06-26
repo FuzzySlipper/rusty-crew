@@ -88,6 +88,7 @@ const bridge = {
       moduleRegistry: moduleRegistryFixture,
       indexChecks: [],
       searchHealthy: true,
+      pressureSignals: [],
       pressure: false,
     };
   },

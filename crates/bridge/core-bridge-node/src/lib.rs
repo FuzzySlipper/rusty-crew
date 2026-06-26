@@ -37,11 +37,11 @@ use rusty_crew_core_persistence::{
     RuntimeModuleSchemaRegistryDiagnostics, RuntimeModuleTransferHookDiagnostic,
     RuntimeRepositoryBackendRequirement, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
     RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageDiagnostics, RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
-    SelectActiveVariantResult, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
-    UpdateBranchHeadRequest, UpdateBranchHeadResult,
+    RuntimeStorageDiagnostics, RuntimeStoragePressureSignal, RuntimeStorageTableCount,
+    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
+    ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SimpleKvQuery,
+    SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
@@ -1678,6 +1678,16 @@ pub struct JsRuntimeQueryPlanCheck {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsRuntimeStoragePressureSignal {
+    pub name: String,
+    pub active: bool,
+    pub severity: String,
+    pub observed_value: f64,
+    pub threshold_value: Option<f64>,
+    pub detail: String,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsRuntimeStorageDiagnostics {
     pub backend: String,
     pub backend_label: String,
@@ -1691,6 +1701,7 @@ pub struct JsRuntimeStorageDiagnostics {
     pub module_registry: JsRuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<JsRuntimeQueryPlanCheck>,
     pub search_healthy: bool,
+    pub pressure_signals: Vec<JsRuntimeStoragePressureSignal>,
     pub pressure: bool,
 }
 
@@ -3913,6 +3924,19 @@ fn to_js_runtime_query_plan_check(
     }
 }
 
+fn to_js_runtime_storage_pressure_signal(
+    signal: RuntimeStoragePressureSignal,
+) -> JsRuntimeStoragePressureSignal {
+    JsRuntimeStoragePressureSignal {
+        name: signal.name,
+        active: signal.active,
+        severity: signal.severity,
+        observed_value: signal.observed_value as f64,
+        threshold_value: signal.threshold_value.map(|value| value as f64),
+        detail: signal.detail,
+    }
+}
+
 fn to_js_runtime_storage_diagnostics(
     diagnostics: RuntimeStorageDiagnostics,
 ) -> JsRuntimeStorageDiagnostics {
@@ -3951,6 +3975,11 @@ fn to_js_runtime_storage_diagnostics(
             .map(to_js_runtime_query_plan_check)
             .collect(),
         search_healthy: diagnostics.search_healthy,
+        pressure_signals: diagnostics
+            .pressure_signals
+            .into_iter()
+            .map(to_js_runtime_storage_pressure_signal)
+            .collect(),
         pressure: diagnostics.pressure,
     }
 }

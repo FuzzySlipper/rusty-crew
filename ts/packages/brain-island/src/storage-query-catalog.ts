@@ -124,7 +124,12 @@ const STORAGE_QUERY_DESCRIPTORS = [
         "expired",
         "all",
       ]),
-      parameter("now", "string", false, "ISO timestamp used for expiry checks."),
+      parameter(
+        "now",
+        "string",
+        false,
+        "ISO timestamp used for expiry checks.",
+      ),
       parameter("limit", "integer", false, "Maximum rows to return.", 25),
       parameter("offset", "integer", false, "Rows to skip.", 0),
     ],
@@ -422,6 +427,7 @@ function storageTableCounts(
       backend: diagnostics.backend,
       backendLabel: diagnostics.backendLabel,
       pressure: diagnostics.pressure,
+      pressureSignals: diagnostics.pressureSignals,
       size: diagnostics.size,
     },
   });
@@ -769,7 +775,9 @@ function boundedString(
   maxBytes: number,
   required: boolean,
 ): string | undefined {
-  const value = required ? requiredString(body, key) : optionalString(body, key);
+  const value = required
+    ? requiredString(body, key)
+    : optionalString(body, key);
   if (value === undefined) return undefined;
   if (Buffer.byteLength(value, "utf8") > maxBytes) {
     throw new StorageQueryInputError(

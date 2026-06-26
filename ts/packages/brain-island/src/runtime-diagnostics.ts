@@ -300,6 +300,14 @@ export interface StorageDiagnosticsProjection {
     detail: string;
   }[];
   searchHealthy: boolean;
+  pressureSignals: {
+    name: string;
+    active: boolean;
+    severity: string;
+    observedValue: number;
+    thresholdValue?: number;
+    detail: string;
+  }[];
   pressure: boolean;
 }
 

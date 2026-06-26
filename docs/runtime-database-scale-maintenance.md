@@ -73,6 +73,12 @@ bytes, database bytes, and WAL bytes. `run_maintenance` returns before/after
 snapshots so operators can tell whether retention and checkpointing changed the
 pressure.
 
+`CoordinationStore::storage_diagnostics` exposes a boolean `pressure` summary
+and a structured `pressure_signals` list. The signal list is guidance for
+operators and admin UIs; it is not an automatic backend migration trigger.
+SQLite remains the default for local, container, and small roleplay
+deployments.
+
 Useful warning signals:
 
 - WAL grows faster than maintenance windows can checkpoint;
@@ -88,6 +94,24 @@ Any of those should start a PostgreSQL migration plan. The typed persistence
 APIs should remain the contract; PostgreSQL should replace the backend, not
 leak a second query language through the service.
 
+Current SQLite warning thresholds are deliberately small enough for fixtures
+and local diagnostics to exercise them before a production service is in pain:
+
+| Signal | Warning threshold | Why it matters |
+| --- | ---: | --- |
+| `sqlite_wal_bytes` | 64 MiB | WAL growth above this suggests checkpoint/maintenance windows are falling behind. |
+| `sqlite_freelist_percent` | 25% | Persistent freelist pressure suggests export/backup/VACUUM planning. |
+| `sqlite_hot_query_plan_failures` | 0 failures | Hot queue/message/search diagnostics should stay indexed. |
+| `runtime_search_health` | healthy FTS table required | Search is backend-sensitive and must stay valid before growth. |
+| `active_agent_count` | 32 sessions/agent instances | Dozens of active agents increase wake, queue, scheduler, and writer pressure. |
+| `conversation_transcript_growth` | 64 transcript/tree rows | Multi-user roleplay transcripts are an expected PostgreSQL pressure area. |
+| `memory_lore_growth` | 64 memory/lore-like rows | Lore, profile memory, data-bank, and attachment growth should remain visible in one store. |
+| `runtime_search_growth` | 64 search rows | SQLite FTS5 and PostgreSQL search are not equivalent, so growth needs early visibility. |
+| `queued_message_retention` | 32 queue rows | Queues need aggressive TTL/no-resurrection checks as retained rows grow. |
+| `scheduler_row_growth` | 32 scheduler rows | Scheduler claims become more sensitive when multiple writers are needed. |
+| `provider_wire_state_growth` | 32 provider-state rows | Provider wire state may contain large opaque payloads and expiry semantics. |
+| `single_service_writer_assumption` | informational | Independent writer processes should trigger PostgreSQL planning. |
+
 ## Backup And Export
 
 SQLite backup/export should be service-owned and quiesced or snapshot-based.
@@ -98,9 +122,9 @@ what was captured.
 
 ## Scale Fixture
 
-The persistence tests include a dozens-of-agents fixture that creates many
-sessions, worker runs, routed messages, queued messages, search rows, counters,
-and then runs maintenance. It verifies:
+The persistence tests include two scale-oriented guardrails. The maintenance
+fixture creates many sessions, worker runs, routed messages, queued messages,
+search rows, counters, and then runs maintenance. It verifies:
 
 - expired queue rows can be removed without redelivering them;
 - purged queue rows leave runtime search;
@@ -108,6 +132,12 @@ and then runs maintenance. It verifies:
 - size reporting is populated;
 - hot query-plan checks keep index coverage.
 
-That fixture is intentionally a guardrail, not a benchmark. If production
+The backend-pressure fixture extends this toward expected PostgreSQL pressure
+areas: dozens of active sessions, larger transcript trees, dense
+memory/lore-like records, runtime search rows, scheduler rows, queued messages,
+and provider wire state. It asserts that the named pressure signals activate and
+that expired queue rows are still not resurrected after maintenance.
+
+These fixtures are intentionally guardrails, not benchmarks. If production
 behavior starts approaching the warning signals above, add a dedicated benchmark
-or replay corpus before tuning indexes further.
+or replay corpus before tuning indexes further or switching backends.

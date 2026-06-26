@@ -268,6 +268,7 @@ const storage: StorageDiagnosticsProjection = {
     },
   ],
   searchHealthy: true,
+  pressureSignals: [],
   pressure: false,
 };
 
@@ -413,8 +414,9 @@ assert.equal(
   3,
 );
 assert.equal(
-  storageData.repositoryGroups.find((group) => group.groupId === "queues_messages")
-    ?.correctnessSensitive,
+  storageData.repositoryGroups.find(
+    (group) => group.groupId === "queues_messages",
+  )?.correctnessSensitive,
   true,
 );
 assert.equal(

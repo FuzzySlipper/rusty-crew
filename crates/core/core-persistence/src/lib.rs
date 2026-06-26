@@ -1289,6 +1289,16 @@ pub struct RuntimeStorageTableCount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStoragePressureSignal {
+    pub name: String,
+    pub active: bool,
+    pub severity: String,
+    pub observed_value: u64,
+    pub threshold_value: Option<u64>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeStorageDiagnostics {
     pub backend: String,
     pub backend_label: String,
@@ -1302,6 +1312,7 @@ pub struct RuntimeStorageDiagnostics {
     pub module_registry: RuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<RuntimeQueryPlanCheck>,
     pub search_healthy: bool,
+    pub pressure_signals: Vec<RuntimeStoragePressureSignal>,
     pub pressure: bool,
 }
 
@@ -2574,10 +2585,9 @@ impl CoordinationStore {
             &compiled_module_schema_registry(),
             &sqlite_module_schema_capabilities(),
         )?;
-        let pressure = size.wal_bytes > 64 * 1024 * 1024
-            || (size.database_bytes > 0 && size.freelist_bytes > size.database_bytes / 4)
-            || !index_checks.iter().all(|check| check.uses_index)
-            || !search_healthy;
+        let pressure_signals =
+            sqlite_storage_pressure_signals(&size, &table_counts, &index_checks, search_healthy);
+        let pressure = pressure_signals.iter().any(|signal| signal.active);
         Ok(RuntimeStorageDiagnostics {
             backend: "sqlite".to_string(),
             backend_label: "SQLite WAL".to_string(),
@@ -2591,6 +2601,7 @@ impl CoordinationStore {
             module_registry,
             index_checks,
             search_healthy,
+            pressure_signals,
             pressure,
         })
     }
@@ -4095,6 +4106,177 @@ fn database_size(conn: &Connection) -> CoreResult<RuntimeDatabaseSize> {
         freelist_bytes,
         wal_bytes,
     })
+}
+
+const SQLITE_WAL_PRESSURE_BYTES: u64 = 64 * 1024 * 1024;
+const SQLITE_FREELIST_PRESSURE_PERCENT: u64 = 25;
+const SQLITE_ACTIVE_AGENT_WARNING_ROWS: u64 = 32;
+const SQLITE_TRANSCRIPT_WARNING_ROWS: u64 = 64;
+const SQLITE_MEMORY_LORE_WARNING_ROWS: u64 = 64;
+const SQLITE_RUNTIME_SEARCH_WARNING_ROWS: u64 = 64;
+const SQLITE_QUEUE_WARNING_ROWS: u64 = 32;
+const SQLITE_SCHEDULER_WARNING_ROWS: u64 = 32;
+const SQLITE_PROVIDER_STATE_WARNING_ROWS: u64 = 32;
+
+fn sqlite_storage_pressure_signals(
+    size: &RuntimeDatabaseSize,
+    table_counts: &[RuntimeStorageTableCount],
+    index_checks: &[RuntimeQueryPlanCheck],
+    search_healthy: bool,
+) -> Vec<RuntimeStoragePressureSignal> {
+    let row_count = |table: &str| -> u64 {
+        table_counts
+            .iter()
+            .find(|count| count.table == table)
+            .map(|count| count.rows)
+            .unwrap_or(0)
+    };
+    let summed_rows =
+        |tables: &[&str]| -> u64 { tables.iter().map(|table| row_count(table)).sum() };
+    let freelist_percent = size
+        .freelist_bytes
+        .saturating_mul(100)
+        .checked_div(size.database_bytes)
+        .unwrap_or(0);
+    let failed_query_plans = index_checks
+        .iter()
+        .filter(|check| !check.uses_index)
+        .count() as u64;
+    let active_agents = row_count("agent_instances").max(row_count("sessions"));
+    let transcript_rows = summed_rows(&[
+        "messages",
+        "message_slots",
+        "message_variants",
+        "message_blocks",
+        "conversation_branches",
+        "conversation_snapshots",
+    ]);
+    let memory_lore_rows = summed_rows(&[
+        "profile_memories",
+        "memory_proposals",
+        "memory_governance_decisions",
+        "data_bank_scopes",
+        "attachments",
+        "attachment_links",
+    ]);
+    let scheduler_rows = summed_rows(&["scheduled_jobs", "scheduled_job_runs"]);
+
+    vec![
+        storage_pressure_signal(
+            "sqlite_wal_bytes",
+            size.wal_bytes > SQLITE_WAL_PRESSURE_BYTES,
+            "warning",
+            size.wal_bytes,
+            Some(SQLITE_WAL_PRESSURE_BYTES),
+            "WAL growth above the checkpoint threshold suggests maintenance windows are not keeping up.",
+        ),
+        storage_pressure_signal(
+            "sqlite_freelist_percent",
+            size.database_bytes > 0 && freelist_percent > SQLITE_FREELIST_PRESSURE_PERCENT,
+            "warning",
+            freelist_percent,
+            Some(SQLITE_FREELIST_PRESSURE_PERCENT),
+            "Freelist pressure above 25% after retention suggests export/backup/VACUUM planning.",
+        ),
+        storage_pressure_signal(
+            "sqlite_hot_query_plan_failures",
+            failed_query_plans > 0,
+            "critical",
+            failed_query_plans,
+            Some(0),
+            "Hot diagnostic query plans should keep index coverage before load grows.",
+        ),
+        storage_pressure_signal(
+            "runtime_search_health",
+            !search_healthy,
+            "critical",
+            if search_healthy { 1 } else { 0 },
+            Some(1),
+            "Runtime search must remain healthy before transcript/lore/search rows grow.",
+        ),
+        storage_pressure_signal(
+            "active_agent_count",
+            active_agents > SQLITE_ACTIVE_AGENT_WARNING_ROWS,
+            "warning",
+            active_agents,
+            Some(SQLITE_ACTIVE_AGENT_WARNING_ROWS),
+            "Dozens of active agents increase wake, queue, scheduler, and writer contention pressure.",
+        ),
+        storage_pressure_signal(
+            "conversation_transcript_growth",
+            transcript_rows > SQLITE_TRANSCRIPT_WARNING_ROWS,
+            "warning",
+            transcript_rows,
+            Some(SQLITE_TRANSCRIPT_WARNING_ROWS),
+            "Large transcript trees are an early PostgreSQL pressure area for multi-user roleplay.",
+        ),
+        storage_pressure_signal(
+            "memory_lore_growth",
+            memory_lore_rows > SQLITE_MEMORY_LORE_WARNING_ROWS,
+            "warning",
+            memory_lore_rows,
+            Some(SQLITE_MEMORY_LORE_WARNING_ROWS),
+            "Dense memory, lore, attachments, and data-bank rows should stay visible before they become a separate store.",
+        ),
+        storage_pressure_signal(
+            "runtime_search_growth",
+            row_count("runtime_search_fts") > SQLITE_RUNTIME_SEARCH_WARNING_ROWS,
+            "warning",
+            row_count("runtime_search_fts"),
+            Some(SQLITE_RUNTIME_SEARCH_WARNING_ROWS),
+            "Search row growth is backend-sensitive because SQLite FTS5 and PostgreSQL search are not equivalent.",
+        ),
+        storage_pressure_signal(
+            "queued_message_retention",
+            row_count("queued_messages") > SQLITE_QUEUE_WARNING_ROWS,
+            "warning",
+            row_count("queued_messages"),
+            Some(SQLITE_QUEUE_WARNING_ROWS),
+            "Queued messages need aggressive TTL/no-resurrection checks when retention volume grows.",
+        ),
+        storage_pressure_signal(
+            "scheduler_row_growth",
+            scheduler_rows > SQLITE_SCHEDULER_WARNING_ROWS,
+            "warning",
+            scheduler_rows,
+            Some(SQLITE_SCHEDULER_WARNING_ROWS),
+            "Scheduler rows become correctness-sensitive once claims need multi-process concurrency semantics.",
+        ),
+        storage_pressure_signal(
+            "provider_wire_state_growth",
+            row_count("provider_wire_states") > SQLITE_PROVIDER_STATE_WARNING_ROWS,
+            "warning",
+            row_count("provider_wire_states"),
+            Some(SQLITE_PROVIDER_STATE_WARNING_ROWS),
+            "Provider wire state can hold large opaque payloads and should be monitored before it dominates local storage.",
+        ),
+        storage_pressure_signal(
+            "single_service_writer_assumption",
+            false,
+            "info",
+            1,
+            Some(1),
+            "SQLite remains the local default while one Rusty Crew service owns writes; independent writer processes should trigger PostgreSQL planning.",
+        ),
+    ]
+}
+
+fn storage_pressure_signal(
+    name: &str,
+    active: bool,
+    severity: &str,
+    observed_value: u64,
+    threshold_value: Option<u64>,
+    detail: &str,
+) -> RuntimeStoragePressureSignal {
+    RuntimeStoragePressureSignal {
+        name: name.to_string(),
+        active,
+        severity: severity.to_string(),
+        observed_value,
+        threshold_value,
+        detail: detail.to_string(),
+    }
 }
 
 fn pragma_u64(conn: &Connection, name: &str) -> CoreResult<u64> {
@@ -13186,6 +13368,257 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_scale_fixture_reports_backend_move_pressure_without_resurrection() {
+        let data_dir = temp_data_dir("scale-backend-pressure");
+        let store = CoordinationStore::open(&data_dir).unwrap();
+        let now = "2026-06-26T02:00:00Z".to_string();
+        let mut sequence = 1_u64;
+
+        for index in 0..36 {
+            let session_id = SessionId::new(format!("scale-session-{index:02}"));
+            let agent_id = AgentId::new(format!("scale-agent-{index:02}"));
+            let profile_id = ProfileId::new(format!("scale-profile-{index:02}"));
+            store
+                .create_profile_registry_record(&profile_registry_write(&profile_id.0))
+                .unwrap();
+            let config = SessionConfig {
+                session_id: session_id.clone(),
+                agent_id: agent_id.clone(),
+                profile_id: profile_id.clone(),
+                kind: SessionKind::Full,
+                delegation: None,
+                resource_limits: sample_resource_limits(),
+                tool_profile: sample_tool_profile(),
+                history_window: None,
+            };
+            store
+                .save_session_with_config(
+                    &SessionState {
+                        handle: SessionHandle::new((index + 1) as u64),
+                        session_id: session_id.clone(),
+                        agent_id: agent_id.clone(),
+                        profile_id: profile_id.clone(),
+                        kind: SessionKind::Full,
+                        delegation: None,
+                        resource_limits: sample_resource_limits(),
+                        tool_profile: sample_tool_profile(),
+                        history_window: None,
+                        status: SessionStatus::Idle,
+                        brain_turn_count: 0,
+                        created_at: now.clone(),
+                        last_active_at: now.clone(),
+                    },
+                    &config,
+                )
+                .unwrap();
+            for memory_index in 0..2 {
+                store
+                    .add_profile_memory(
+                        &ProfileMemoryWrite {
+                            profile_id: profile_id.clone(),
+                            target: ProfileMemoryTarget::User(format!("player-{memory_index}")),
+                            key: format!("lore-seed-{memory_index}"),
+                            content: format!(
+                                "scale lore memory {index}-{memory_index}: persistent roleplay fact"
+                            ),
+                            metadata: json!({"fixture": "scale_backend_pressure"}),
+                            now: now.clone(),
+                        },
+                        &ProfileMemoryCaps::default(),
+                    )
+                    .unwrap();
+            }
+        }
+
+        let session_id = SessionId::new("scale-session-00");
+        let branch_id = ConversationBranchId::new("scale-branch-root");
+        store
+            .save_conversation_branch(&ConversationBranchWrite {
+                branch_id: branch_id.clone(),
+                session_id: session_id.clone(),
+                parent_branch_id: None,
+                parent_message_id: None,
+                origin_message_id: None,
+                head_message_id: Some(MessageId::new("scale-message-069")),
+                label: Some("Scale transcript root".to_string()),
+                metadata_json: json!({"fixture": "scale_backend_pressure"}),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        for turn in 0..70 {
+            let slot_id = MessageSlotId::new(format!("scale-slot-{turn:03}"));
+            let variant_id = MessageVariantId::new(format!("scale-variant-{turn:03}"));
+            let message_id = format!("scale-message-{turn:03}");
+            store
+                .save_message_slot(&MessageSlotWrite {
+                    slot_id: slot_id.clone(),
+                    session_id: session_id.clone(),
+                    primary_variant_id: variant_id.clone(),
+                    active_variant_id: None,
+                    metadata_json: json!({"turn": turn}),
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                })
+                .unwrap();
+            let mut variant = variant_write(
+                &slot_id,
+                &variant_id,
+                MessageVariantSource::Primary,
+                0,
+                &message_id,
+                &format!("scale transcript turn {turn}: roleplay lore and search pressure needle"),
+            );
+            variant.message.session_id = session_id.clone();
+            variant.message.branch_id = Some(branch_id.clone());
+            store.save_message_variant(&variant).unwrap();
+            store
+                .save_event(
+                    sequence,
+                    &CoreEvent::AgentMessageRouted {
+                        message: AgentMessage {
+                            from: AgentId::new(format!("scale-agent-{:02}", turn % 36)),
+                            to: AgentId::new(format!("scale-agent-{:02}", (turn + 1) % 36)),
+                            body: format!("scale search row {turn}: roleplay lore needle"),
+                            correlation_id: Some("scale-pressure".to_string()),
+                        },
+                    },
+                )
+                .unwrap();
+            sequence += 1;
+        }
+
+        for index in 0..34 {
+            store
+                .upsert_scheduled_job(&ScheduledJobRecord {
+                    job_id: format!("scale-job-{index:02}"),
+                    job_kind: "maintenance".to_string(),
+                    target_session_id: Some(SessionId::new(format!(
+                        "scale-session-{:02}",
+                        index % 36
+                    ))),
+                    interval_ms: Some(300_000),
+                    next_due_at: Some("2026-06-26T02:05:00Z".to_string()),
+                    payload_json: json!({"fixture": "scale_backend_pressure", "index": index}),
+                    status: ScheduledJobStatus::Active,
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                    paused_at: None,
+                })
+                .unwrap();
+            store
+                .save_provider_wire_state(&sample_provider_wire_state_write(
+                    ProviderWireStateWriteFixture {
+                        key: ProviderWireStateKey {
+                            session_id: SessionId::new(format!("scale-session-{:02}", index % 36)),
+                            module_id: "openai-responses".to_string(),
+                            strategy_id: format!("scale-wire-{index:02}"),
+                        },
+                        profile_fingerprint: "profile:scale:v1",
+                        provider_fingerprint: "provider:gpt:v1",
+                        payload_version: "responses:v1",
+                        payload_json: json!({"response_id": format!("resp_scale_{index:02}")}),
+                        now: "2026-06-26T02:01:00Z",
+                        expires_at: Some("2026-06-27T02:01:00Z"),
+                        last_wake_id: Some("wake-scale"),
+                    },
+                ))
+                .unwrap();
+        }
+
+        for index in 0..40 {
+            let expires_at = if index < 5 {
+                "2026-06-26T02:00:01Z"
+            } else {
+                "2026-06-26T03:00:00Z"
+            };
+            store
+                .save_queued_message(&QueuedMessageRecord {
+                    message_id: format!("scale-queue-{index:02}"),
+                    owner_session_id: Some(session_id.clone()),
+                    owner_agent_id: AgentId::new("scale-agent-00"),
+                    message: AgentMessage {
+                        from: AgentId::new("operator"),
+                        to: AgentId::new("scale-agent-00"),
+                        body: format!("scale queued message {index}"),
+                        correlation_id: Some("scale-queue".to_string()),
+                    },
+                    source_sequence: Some(sequence + index as u64),
+                    enqueued_at: "2026-06-26T02:00:00Z".to_string(),
+                    expires_at: expires_at.to_string(),
+                    ttl_ms: if index < 5 { 1_000 } else { 3_600_000 },
+                    delivery_attempts: 0,
+                    state: QueuedMessageState::Pending,
+                    terminal_at: None,
+                    state_reason: None,
+                })
+                .unwrap();
+        }
+
+        let before_maintenance = store.storage_diagnostics().unwrap();
+        assert!(before_maintenance.pressure);
+        assert_active_storage_signal(&before_maintenance, "active_agent_count");
+        assert_active_storage_signal(&before_maintenance, "conversation_transcript_growth");
+        assert_active_storage_signal(&before_maintenance, "memory_lore_growth");
+        assert_active_storage_signal(&before_maintenance, "runtime_search_growth");
+        assert_active_storage_signal(&before_maintenance, "queued_message_retention");
+        assert_active_storage_signal(&before_maintenance, "scheduler_row_growth");
+        assert_active_storage_signal(&before_maintenance, "provider_wire_state_growth");
+        assert_inactive_storage_signal(&before_maintenance, "single_service_writer_assumption");
+
+        let report = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                expire_queued_messages_at: Some("2026-06-26T02:00:02Z".to_string()),
+                purge_terminal_queued_messages_before: Some("2026-06-26T02:00:03Z".to_string()),
+                run_wal_checkpoint: true,
+                run_optimize: true,
+                ..RuntimeMaintenancePolicy::default()
+            })
+            .unwrap();
+        assert_eq!(report.expired_queue_messages, 5);
+        assert_eq!(report.purged_terminal_queue_messages, 5);
+        assert_eq!(store.count_rows("queued_messages").unwrap(), 35);
+
+        let pending = store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(session_id.clone()),
+                owner_agent_id: Some(AgentId::new("scale-agent-00")),
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(pending.len(), 35);
+        assert!(pending.iter().all(|message| !matches!(
+            message.message_id.as_str(),
+            "scale-queue-00"
+                | "scale-queue-01"
+                | "scale-queue-02"
+                | "scale-queue-03"
+                | "scale-queue-04"
+        )));
+        assert_eq!(
+            store
+                .search_runtime(&RuntimeSearchFilter {
+                    query: "scale queued message 0".to_string(),
+                    row_type: Some(RuntimeSearchRowType::QueueMessage),
+                    session_id: Some(session_id),
+                    agent_id: Some(AgentId::new("scale-agent-00")),
+                    instance_id: None,
+                    task_id: None,
+                    event_kind: None,
+                    recorded_after: None,
+                    recorded_before: None,
+                    limit: Some(10),
+                })
+                .unwrap()
+                .len(),
+            0
+        );
+
+        remove_temp_dir(&data_dir);
+    }
+
+    #[test]
     fn diagnostic_table_names_are_whitelisted() {
         for table in DiagnosticTable::ALL {
             assert_eq!(DiagnosticTable::parse(table.as_str()).unwrap(), *table);
@@ -16329,6 +16762,30 @@ mod tests {
 
     fn remove_temp_dir(path: &Path) {
         let _ = fs::remove_dir_all(path);
+    }
+
+    fn assert_active_storage_signal(diagnostics: &RuntimeStorageDiagnostics, signal_name: &str) {
+        let signal = diagnostics
+            .pressure_signals
+            .iter()
+            .find(|signal| signal.name == signal_name)
+            .unwrap_or_else(|| panic!("missing storage pressure signal {signal_name}"));
+        assert!(
+            signal.active,
+            "expected active storage pressure signal {signal_name}: {signal:?}"
+        );
+    }
+
+    fn assert_inactive_storage_signal(diagnostics: &RuntimeStorageDiagnostics, signal_name: &str) {
+        let signal = diagnostics
+            .pressure_signals
+            .iter()
+            .find(|signal| signal.name == signal_name)
+            .unwrap_or_else(|| panic!("missing storage pressure signal {signal_name}"));
+        assert!(
+            !signal.active,
+            "expected inactive storage pressure signal {signal_name}: {signal:?}"
+        );
     }
 
     fn sample_provider_wire_state_key() -> ProviderWireStateKey {

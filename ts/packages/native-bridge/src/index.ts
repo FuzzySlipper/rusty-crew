@@ -856,6 +856,15 @@ export interface NativeRuntimeQueryPlanCheck {
   detail: string;
 }
 
+export interface NativeRuntimeStoragePressureSignal {
+  name: string;
+  active: boolean;
+  severity: string;
+  observedValue: number;
+  thresholdValue?: number;
+  detail: string;
+}
+
 export interface NativeRuntimeStorageDiagnostics {
   backend: string;
   backendLabel: string;
@@ -869,6 +878,7 @@ export interface NativeRuntimeStorageDiagnostics {
   moduleRegistry: NativeRuntimeModuleSchemaRegistryDiagnostics;
   indexChecks: NativeRuntimeQueryPlanCheck[];
   searchHealthy: boolean;
+  pressureSignals: NativeRuntimeStoragePressureSignal[];
   pressure: boolean;
 }
 
