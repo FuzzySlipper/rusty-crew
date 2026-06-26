@@ -7,5 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "smoke:memory-space-contracts": "tsx src/smoke-memory-space-contracts.ts"
   }
 }

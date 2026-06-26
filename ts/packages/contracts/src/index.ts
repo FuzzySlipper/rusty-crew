@@ -946,6 +946,408 @@ export interface SchedulerTickReport {
   runsFailed: number;
 }
 
+export type MemorySpaceId = Brand<string, "MemorySpaceId">;
+export type MemoryRecordShapeId = Brand<string, "MemoryRecordShapeId">;
+
+export type MemoryScopeType =
+  | "profile"
+  | "user"
+  | "session"
+  | "conversation_branch"
+  | "world"
+  | "entity"
+  | "project";
+
+export type MemoryRetrievalStrategy =
+  | "direct_lookup"
+  | "query_search"
+  | "recency"
+  | "relevance"
+  | "branch_aware"
+  | "domain_specific";
+
+export type MemoryPromptPolicy =
+  | "auto_context"
+  | "summary_context"
+  | "tool_only"
+  | "explicit_user_context"
+  | "never_prompt";
+
+export type MemoryGovernanceMode =
+  | "read_only"
+  | "direct_write"
+  | "candidate"
+  | "manual_review"
+  | "curator_route"
+  | "auto_apply_threshold";
+
+export type MemoryOperation =
+  | "read"
+  | "list"
+  | "add"
+  | "replace"
+  | "merge"
+  | "supersede"
+  | "remove"
+  | "archive"
+  | "candidate_only";
+
+export type MemoryVisibilityModel =
+  | "profile_local"
+  | "user_scoped"
+  | "session_scoped"
+  | "world_scoped"
+  | "project_scoped"
+  | "service_internal"
+  | "explicit_policy";
+
+export type MemoryFieldType =
+  | "string"
+  | "markdown"
+  | "json"
+  | "integer"
+  | "float"
+  | "boolean"
+  | "timestamp";
+
+export type MemoryEvidenceKind =
+  | "wake"
+  | "event"
+  | "tool_call"
+  | "transcript"
+  | "user_correction"
+  | "source_document"
+  | "den_memory"
+  | "import"
+  | "migration"
+  | "ui"
+  | "other";
+
+export type MemoryRetentionPolicy =
+  | "manual_only"
+  | "expire"
+  | "archive"
+  | "tombstone"
+  | "compact"
+  | "domain_specific";
+
+export type MemoryConflictPolicy =
+  | "expected_revision"
+  | "supersession"
+  | "merge"
+  | "immutable"
+  | "domain_specific";
+
+export type MemoryProposalSource =
+  | "in_wake_tool"
+  | "capture_producer"
+  | "ui"
+  | "import"
+  | "migration"
+  | "human"
+  | "den_memory_import";
+
+export interface MemoryScope {
+  scope_type: MemoryScopeType;
+  scope_id: string;
+}
+
+export interface MemoryRecordFieldDescriptor {
+  field_name: string;
+  field_type: MemoryFieldType;
+  required: boolean;
+  description: string;
+}
+
+export interface MemoryRecordShapeDescriptor {
+  shape_id: MemoryRecordShapeId;
+  version: number;
+  description: string;
+  fields: MemoryRecordFieldDescriptor[];
+}
+
+export interface MemoryScopeModel {
+  allowed_scopes: MemoryScopeType[];
+  primary_scope: MemoryScopeType;
+}
+
+export interface MemoryIndexingPolicy {
+  required_capabilities: string[];
+  optional_capabilities: string[];
+}
+
+export interface MemoryOperationPolicy {
+  operation: MemoryOperation;
+  governance_mode: MemoryGovernanceMode;
+  requires_expected_revision: boolean;
+  min_confidence?: number;
+}
+
+export interface MemoryWritePolicy {
+  default_mode: MemoryGovernanceMode;
+  operation_policies: MemoryOperationPolicy[];
+}
+
+export interface MemoryProvenancePolicy {
+  required_evidence: MemoryEvidenceKind[];
+  source_required: boolean;
+  rationale_required: boolean;
+}
+
+export interface MemoryDiagnosticsPolicy {
+  expose_catalog: boolean;
+  expose_record_counts: boolean;
+  expose_policy_decisions: boolean;
+}
+
+export interface MemoryExportImportPolicy {
+  export_supported: boolean;
+  import_supported: boolean;
+  import_governance_mode: MemoryGovernanceMode;
+}
+
+/**
+ * Rust-owned Crew runtime memory-space descriptor.
+ *
+ * Crew memory spaces live in Rusty Crew service storage and may be projected
+ * into prompts according to descriptor policy. Den memory remains external
+ * Den-owned memory unless explicitly imported or proposed with provenance.
+ */
+export interface MemorySpaceDescriptor {
+  space_id: MemorySpaceId;
+  schema_version: number;
+  module_id?: string;
+  description: string;
+  record_shapes: MemoryRecordShapeDescriptor[];
+  scope_model: MemoryScopeModel;
+  visibility_model: MemoryVisibilityModel;
+  retrieval_strategies: MemoryRetrievalStrategy[];
+  indexing: MemoryIndexingPolicy;
+  prompt_policy: MemoryPromptPolicy;
+  write_policy: MemoryWritePolicy;
+  operations: MemoryOperation[];
+  provenance_policy: MemoryProvenancePolicy;
+  retention_policy: MemoryRetentionPolicy;
+  conflict_policy: MemoryConflictPolicy;
+  diagnostics: MemoryDiagnosticsPolicy;
+  export_import: MemoryExportImportPolicy;
+}
+
+export interface MemoryRecordShapeRef {
+  shape_id: MemoryRecordShapeId;
+  version: number;
+}
+
+export interface MemoryEvidenceRef {
+  evidence_type: MemoryEvidenceKind;
+  ref_id: string;
+  label?: string;
+}
+
+/**
+ * Proposed Crew memory mutation. This is never a write by itself; Rust validates
+ * it against the Rust-owned descriptor and routes it through governance.
+ */
+export interface MemoryProposalEnvelope {
+  proposal_id: string;
+  space_id: MemorySpaceId;
+  operation: MemoryOperation;
+  scope: MemoryScope;
+  shape: MemoryRecordShapeRef;
+  content: unknown;
+  evidence_refs: MemoryEvidenceRef[];
+  confidence: number;
+  durability_rationale?: string;
+  governance_mode: MemoryGovernanceMode;
+  source: MemoryProposalSource;
+  dedupe_key?: string;
+  created_at?: string;
+}
+
+const mutableMemoryOperations = new Set<MemoryOperation>([
+  "add",
+  "replace",
+  "merge",
+  "supersede",
+  "remove",
+  "archive",
+  "candidate_only",
+]);
+
+export function validateMemorySpaceDescriptor(
+  descriptor: MemorySpaceDescriptor,
+): string[] {
+  const errors: string[] = [];
+  validateIdentifier("memory space id", descriptor.space_id, errors);
+  if (
+    !Number.isInteger(descriptor.schema_version) ||
+    descriptor.schema_version < 1
+  ) {
+    errors.push("memory space schema_version must be greater than zero");
+  }
+  if (descriptor.module_id !== undefined) {
+    validateIdentifier("memory module id", descriptor.module_id, errors);
+  }
+  if (descriptor.record_shapes.length === 0) {
+    errors.push("memory space must declare at least one record shape");
+  }
+  for (const shape of descriptor.record_shapes) {
+    validateIdentifier("memory record shape id", shape.shape_id, errors);
+    if (!Number.isInteger(shape.version) || shape.version < 1) {
+      errors.push(
+        `memory record shape ${shape.shape_id} version must be greater than zero`,
+      );
+    }
+    if (shape.fields.length === 0) {
+      errors.push(
+        `memory record shape ${shape.shape_id} must declare at least one field`,
+      );
+    }
+    for (const field of shape.fields) {
+      validateIdentifier("memory record field name", field.field_name, errors);
+    }
+  }
+  if (descriptor.scope_model.allowed_scopes.length === 0) {
+    errors.push("memory space must allow at least one scope type");
+  }
+  if (
+    !descriptor.scope_model.allowed_scopes.includes(
+      descriptor.scope_model.primary_scope,
+    )
+  ) {
+    errors.push("memory space primary_scope must be in allowed_scopes");
+  }
+  if (descriptor.retrieval_strategies.length === 0) {
+    errors.push("memory space must declare at least one retrieval strategy");
+  }
+  if (descriptor.operations.length === 0) {
+    errors.push("memory space must declare at least one operation");
+  }
+  for (const policy of descriptor.write_policy.operation_policies) {
+    if (!descriptor.operations.includes(policy.operation)) {
+      errors.push(
+        `memory operation policy references unsupported operation ${policy.operation}`,
+      );
+    }
+    if (policy.min_confidence !== undefined) {
+      validateConfidence(policy.min_confidence, errors);
+    }
+  }
+  return errors;
+}
+
+export function assertValidMemorySpaceDescriptor(
+  descriptor: MemorySpaceDescriptor,
+): void {
+  const errors = validateMemorySpaceDescriptor(descriptor);
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
+}
+
+export function validateMemoryProposalEnvelope(
+  proposal: MemoryProposalEnvelope,
+  descriptor: MemorySpaceDescriptor,
+): string[] {
+  const errors = validateMemorySpaceDescriptor(descriptor);
+  validateIdentifier("memory proposal id", proposal.proposal_id, errors);
+  if (proposal.space_id !== descriptor.space_id) {
+    errors.push("memory proposal space_id does not match descriptor");
+  }
+  if (!mutableMemoryOperations.has(proposal.operation)) {
+    errors.push("memory proposal operation must mutate memory");
+  }
+  if (!descriptor.operations.includes(proposal.operation)) {
+    errors.push("memory proposal operation is not supported by descriptor");
+  }
+  validateScopeId(proposal.scope.scope_id, errors);
+  if (
+    !descriptor.scope_model.allowed_scopes.includes(proposal.scope.scope_type)
+  ) {
+    errors.push("memory proposal scope_type is not supported by descriptor");
+  }
+  validateIdentifier("memory record shape id", proposal.shape.shape_id, errors);
+  if (!Number.isInteger(proposal.shape.version) || proposal.shape.version < 1) {
+    errors.push("memory proposal shape version must be greater than zero");
+  }
+  if (
+    !descriptor.record_shapes.some(
+      (shape) =>
+        shape.shape_id === proposal.shape.shape_id &&
+        shape.version === proposal.shape.version,
+    )
+  ) {
+    errors.push("memory proposal shape is not declared by descriptor");
+  }
+  validateConfidence(proposal.confidence, errors);
+  for (const evidence of proposal.evidence_refs) {
+    if (evidence.ref_id.trim().length === 0) {
+      errors.push("memory proposal evidence ref_id must not be empty");
+    }
+  }
+  for (const required of descriptor.provenance_policy.required_evidence) {
+    if (
+      !proposal.evidence_refs.some(
+        (evidence) => evidence.evidence_type === required,
+      )
+    ) {
+      errors.push(`memory proposal missing required evidence ${required}`);
+    }
+  }
+  if (
+    descriptor.provenance_policy.rationale_required &&
+    (proposal.durability_rationale?.trim().length ?? 0) === 0
+  ) {
+    errors.push("memory proposal durability_rationale is required");
+  }
+  return errors;
+}
+
+export function assertValidMemoryProposalEnvelope(
+  proposal: MemoryProposalEnvelope,
+  descriptor: MemorySpaceDescriptor,
+): void {
+  const errors = validateMemoryProposalEnvelope(proposal, descriptor);
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
+}
+
+function validateIdentifier(
+  label: string,
+  value: string,
+  errors: string[],
+): void {
+  if (value.length === 0) {
+    errors.push(`${label} must not be empty`);
+    return;
+  }
+  if (value.length > 64) {
+    errors.push(`${label} must be at most 64 characters`);
+  }
+  if (!/^[a-z][a-z0-9_]*[a-z0-9]$/.test(value) || value.includes("__")) {
+    errors.push(`${label} must use lowercase snake_case ASCII identifiers`);
+  }
+}
+
+function validateScopeId(value: string, errors: string[]): void {
+  if (value.trim().length === 0) {
+    errors.push("memory scope_id must not be empty");
+  }
+  if (value.length > 256) {
+    errors.push("memory scope_id must be at most 256 characters");
+  }
+  if (value.includes("\0")) {
+    errors.push("memory scope_id must not contain NUL");
+  }
+}
+
+function validateConfidence(value: number, errors: string[]): void {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    errors.push("memory confidence must be between 0 and 1");
+  }
+}
+
 export const manifestOperationNames = [
   "initialize_engine",
   "shutdown_engine",
