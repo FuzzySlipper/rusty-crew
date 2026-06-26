@@ -96,6 +96,7 @@
     "smoke:profile-loading": "tsx src/smoke-profile-loading.ts",
     "smoke:profile-registry-import": "tsx src/smoke-profile-registry-import.ts",
     "smoke:profile-registry-admin": "tsx src/smoke-profile-registry-admin.ts",
+    "smoke:profile-registry-export": "tsx src/smoke-profile-registry-export.ts",
     "smoke:profile-role-assembly": "tsx src/smoke-profile-role-assembly.ts",
     "smoke:tool-session-selection": "tsx src/smoke-tool-session-selection.ts",
     "smoke:brain-tool-pi-adapter": "tsx src/smoke-brain-tool-pi-adapter.ts",

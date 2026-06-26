@@ -897,6 +897,17 @@ export type {
   AdminProfileRegistrySource,
 } from "./profile-registry-admin.js";
 export {
+  buildProfileBundleExportPlan,
+  ProfileBundleExportPlanError,
+} from "./profile-registry-export.js";
+export type {
+  BuildProfileBundleExportPlanInput,
+  ProfileBundleExportEntry,
+  ProfileBundleExportEntryKind,
+  ProfileBundleExportPlan,
+  ProfileBundleExportSource,
+} from "./profile-registry-export.js";
+export {
   planCreateProfileWithRust,
   planRuntimeConfigWithRust,
   runtimeConfigValidationInput,

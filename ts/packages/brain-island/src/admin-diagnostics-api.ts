@@ -15,6 +15,10 @@ import {
   filterAdminProfileRegistryRecords,
   type AdminProfileRegistryDiagnostics,
 } from "./profile-registry-admin.js";
+import {
+  buildProfileBundleExportPlan,
+  ProfileBundleExportPlanError,
+} from "./profile-registry-export.js";
 
 export type AdminErrorCode =
   | "unauthorized"
@@ -247,6 +251,44 @@ export function handleAdminDiagnosticsRequest(
     case "/v1/admin/events/recent":
       return success(requestId, page(context.recentEvents ?? [], url));
     default:
+      if (
+        url.pathname.startsWith("/v1/admin/profiles/registry/") &&
+        url.pathname.endsWith("/export-plan")
+      ) {
+        const profileId = decodeURIComponent(
+          url.pathname.slice(
+            "/v1/admin/profiles/registry/".length,
+            -"/export-plan".length,
+          ),
+        );
+        try {
+          return success(
+            requestId,
+            buildProfileBundleExportPlan({
+              profileId,
+              diagnostics: context.profileRegistry ?? {
+                generatedAt: new Date(0).toISOString(),
+                records: [],
+                registryCount: 0,
+                fileFallbackCount: 0,
+                driftCount: 0,
+                missingAssetCount: 0,
+                diagnostics: [],
+              },
+            }),
+          );
+        } catch (error) {
+          if (error instanceof ProfileBundleExportPlanError) {
+            return failure(404, requestId, {
+              code: "not_found",
+              reason_code: error.reasonCode,
+              message: error.message,
+              retryable: false,
+            });
+          }
+          throw error;
+        }
+      }
       if (url.pathname.startsWith("/v1/admin/profiles/registry/")) {
         const profileId = decodeURIComponent(
           url.pathname.slice("/v1/admin/profiles/registry/".length),

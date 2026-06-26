@@ -958,6 +958,14 @@ export const API_CAPABILITIES = [
     ["diagnostics", "profile"],
   ),
   readCapability(
+    "admin.profiles.registry.export_plan",
+    "GET",
+    "/v1/admin/profiles/registry/{profile_id}/export-plan",
+    "Plan a profile bundle export from registry state and file-backed assets without embedding raw prompt file contents.",
+    "admin",
+    ["diagnostics", "profile"],
+  ),
+  readCapability(
     "admin.storage.query_catalog",
     "GET",
     "/v1/admin/storage/query-catalog",
