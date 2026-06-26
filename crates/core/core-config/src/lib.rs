@@ -5,10 +5,13 @@
 //! render prompts, discover tools, call providers, or mutate runtime state.
 
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ProfileId, ResourceLimits,
-    SessionHistoryWindow, SessionId, SessionKind,
+    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ProfileId,
+    ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
+    ProfileRegistryLifecycleStatus, ProfileRegistrySourceAssetRef, ProfileRegistryWrite,
+    ResourceLimits, SessionHistoryWindow, SessionId, SessionKind,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 const MAX_HISTORY_MESSAGES: u32 = 10_000;
@@ -47,6 +50,8 @@ pub struct CreateProfilePlanInput {
     pub runtime_config: RuntimeConfigDraft,
     #[serde(default)]
     pub profiles: Vec<ProfileRuntimeMetadata>,
+    #[serde(default)]
+    pub profile_registry: Vec<ProfileRegistryRuntimeMetadata>,
     pub request: CreateProfileRequest,
 }
 
@@ -61,8 +66,24 @@ pub struct CreateProfileRequest {
     pub model_config: Option<ProfileModelConfigSeed>,
     pub brain: Option<ProfileBrainMetadata>,
     pub mcp_tool_profile: Option<String>,
+    pub source: Option<CreateProfileSourceRequest>,
+    pub now: Option<String>,
     #[serde(default)]
     pub profile_file_exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryRuntimeMetadata {
+    pub profile_id: ProfileId,
+    pub lifecycle_status: Option<ProfileRegistryLifecycleStatus>,
+    pub revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfileSourceRequest {
+    pub template_id: Option<String>,
+    pub source_profile_id: Option<ProfileId>,
+    pub source_bundle_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +100,11 @@ pub struct ProfileModelConfigSeed {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateProfilePlan {
     pub diagnostics: Vec<RuntimeConfigDiagnostic>,
+    pub registry_write: Option<ProfileRegistryWrite>,
+    #[serde(default)]
+    pub file_asset_actions: Vec<CreateProfileFileAssetAction>,
+    #[serde(default)]
+    pub derived_runtime_actions: Vec<CreateProfileDerivedRuntimeAction>,
     pub profile_seed: Option<CreateProfileSeedMetadata>,
     pub runtime_brain: Option<BrainConfigDraft>,
     pub runtime_session: Option<SessionConfigDraft>,
@@ -101,6 +127,38 @@ pub struct CreateProfileSeedMetadata {
     pub model_config: ProfileModelConfigSeed,
     pub brain: ProfileBrainMetadata,
     pub skills_mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CreateProfileFileAssetActionKind {
+    WriteProfileJson,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfileFileAssetAction {
+    pub kind: CreateProfileFileAssetActionKind,
+    pub profile_id: ProfileId,
+    pub relative_path: String,
+    pub overwrite: bool,
+    pub metadata_json: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CreateProfileDerivedRuntimeActionKind {
+    AddBrain,
+    AddSession,
+    AddProfileMcpConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfileDerivedRuntimeAction {
+    pub kind: CreateProfileDerivedRuntimeActionKind,
+    pub ref_kind: String,
+    pub ref_id: String,
+    pub apply_phase: String,
+    pub metadata_json: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -598,6 +656,22 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             format!("profile metadata for {profile_id} already exists"),
         ));
     }
+    if let Some(existing_registry) = input
+        .profile_registry
+        .iter()
+        .find(|record| record.profile_id == profile_id)
+    {
+        let lifecycle = existing_registry
+            .lifecycle_status
+            .as_ref()
+            .map(|status| format!(" with lifecycle status {status:?}"))
+            .unwrap_or_default();
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "duplicate_profile_registry_record",
+            "request.profileId",
+            format!("profile registry record for {profile_id} already exists{lifecycle}"),
+        ));
+    }
     if input
         .runtime_config
         .brains
@@ -665,6 +739,9 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
     {
         return CreateProfilePlan {
             diagnostics,
+            registry_write: None,
+            file_asset_actions: Vec::new(),
+            derived_runtime_actions: Vec::new(),
             profile_seed: None,
             runtime_brain: None,
             runtime_session: None,
@@ -694,9 +771,131 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         transport: None,
         tool_profile: Some(mcp_tool_profile),
     };
+    let now = input
+        .request
+        .now
+        .clone()
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string());
+    let registry_write = ProfileRegistryWrite {
+        profile_id: profile_id.clone(),
+        lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+        display_name: input.request.display_name.clone(),
+        summary: None,
+        default_session_kind: Some(runtime_session.kind.clone()),
+        agent_id: Some(runtime_session.agent_id.clone()),
+        owner_id: runtime_session.owner_id.clone(),
+        active_runtime_settings_json: create_profile_runtime_settings_json(
+            &model_config,
+            &brain,
+            &profile_mcp_config,
+            input.request.source.as_ref(),
+        ),
+        source_asset_refs: vec![ProfileRegistrySourceAssetRef {
+            asset_kind: "profile_json".to_string(),
+            path: format!("{}.json", profile_id),
+            content_hash: None,
+            last_seen_at: None,
+            metadata_json: json!({
+                "planned_by": "create_profile",
+                "compatibility_export": true,
+            }),
+        }],
+        derived_runtime_refs: vec![
+            ProfileRegistryDerivedRuntimeRef {
+                ref_kind: "brain".to_string(),
+                ref_id: runtime_brain.implementation_id.to_string(),
+                status: "planned".to_string(),
+                updated_at: None,
+                metadata_json: json!({
+                    "profile_id": runtime_brain.profile_id,
+                }),
+            },
+            ProfileRegistryDerivedRuntimeRef {
+                ref_kind: "session".to_string(),
+                ref_id: runtime_session.session_id.to_string(),
+                status: "planned".to_string(),
+                updated_at: None,
+                metadata_json: json!({
+                    "agent_id": runtime_session.agent_id,
+                    "profile_id": runtime_session.profile_id,
+                    "kind": runtime_session.kind,
+                }),
+            },
+            ProfileRegistryDerivedRuntimeRef {
+                ref_kind: "profile_mcp_config".to_string(),
+                ref_id: profile_mcp_config
+                    .binding_id
+                    .clone()
+                    .unwrap_or_else(|| format!("{agent_id}-mcp")),
+                status: "planned".to_string(),
+                updated_at: None,
+                metadata_json: json!({
+                    "tool_profile": profile_mcp_config.tool_profile,
+                }),
+            },
+        ],
+        import_export: ProfileRegistryImportExportMetadata {
+            imported_from: create_profile_import_source(input.request.source.as_ref()),
+            imported_at: input.request.source.as_ref().map(|_| now.clone()),
+            exported_to: None,
+            exported_at: None,
+            metadata_json: json!({
+                "created_by": "create_profile_plan",
+                "source": input.request.source,
+            }),
+        },
+        now,
+    };
+    let file_asset_actions = vec![CreateProfileFileAssetAction {
+        kind: CreateProfileFileAssetActionKind::WriteProfileJson,
+        profile_id: profile_id.clone(),
+        relative_path: format!("{}.json", profile_id),
+        overwrite: false,
+        metadata_json: json!({
+            "compatibility": true,
+            "registry_first": true,
+        }),
+    }];
+    let derived_runtime_actions = vec![
+        CreateProfileDerivedRuntimeAction {
+            kind: CreateProfileDerivedRuntimeActionKind::AddBrain,
+            ref_kind: "brain".to_string(),
+            ref_id: runtime_brain.implementation_id.to_string(),
+            apply_phase: "compatibility_runtime_config".to_string(),
+            metadata_json: json!({
+                "profile_id": runtime_brain.profile_id,
+            }),
+        },
+        CreateProfileDerivedRuntimeAction {
+            kind: CreateProfileDerivedRuntimeActionKind::AddSession,
+            ref_kind: "session".to_string(),
+            ref_id: runtime_session.session_id.to_string(),
+            apply_phase: "compatibility_runtime_config".to_string(),
+            metadata_json: json!({
+                "agent_id": runtime_session.agent_id,
+                "profile_id": runtime_session.profile_id,
+                "kind": runtime_session.kind,
+            }),
+        },
+        CreateProfileDerivedRuntimeAction {
+            kind: CreateProfileDerivedRuntimeActionKind::AddProfileMcpConfig,
+            ref_kind: "profile_mcp_config".to_string(),
+            ref_id: profile_mcp_config
+                .binding_id
+                .clone()
+                .unwrap_or_else(|| format!("{agent_id}-mcp")),
+            apply_phase: "compatibility_profile_file".to_string(),
+            metadata_json: json!({
+                "tool_profile": profile_mcp_config.tool_profile,
+            }),
+        },
+    ];
 
     CreateProfilePlan {
         diagnostics,
+        registry_write: Some(registry_write),
+        file_asset_actions,
+        derived_runtime_actions,
         profile_seed: Some(CreateProfileSeedMetadata {
             profile_id,
             display_name: input.request.display_name.clone(),
@@ -708,6 +907,35 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         runtime_session: Some(runtime_session),
         profile_mcp_config: Some(profile_mcp_config),
     }
+}
+
+fn create_profile_runtime_settings_json(
+    model_config: &ProfileModelConfigSeed,
+    brain: &ProfileBrainMetadata,
+    mcp_config: &ProfileMcpConfig,
+    source: Option<&CreateProfileSourceRequest>,
+) -> Value {
+    json!({
+        "model_config": model_config,
+        "brain": brain,
+        "skills_mode": "all",
+        "mcp_config": mcp_config,
+        "source": source,
+    })
+}
+
+fn create_profile_import_source(source: Option<&CreateProfileSourceRequest>) -> Option<String> {
+    let source = source?;
+    if let Some(source_bundle_path) = source.source_bundle_path.as_deref() {
+        return Some(format!("bundle:{source_bundle_path}"));
+    }
+    if let Some(source_profile_id) = source.source_profile_id.as_ref() {
+        return Some(format!("profile:{source_profile_id}"));
+    }
+    source
+        .template_id
+        .as_deref()
+        .map(|template_id| format!("template:{template_id}"))
 }
 
 fn default_profile_model_config() -> ProfileModelConfigSeed {
@@ -1608,6 +1836,7 @@ mod tests {
         let input = CreateProfilePlanInput {
             runtime_config: valid_draft(),
             profiles: vec![profile("runner")],
+            profile_registry: Vec::new(),
             request: CreateProfileRequest {
                 profile_id: "field-created-profile".to_string(),
                 display_name: Some("Field Created Profile".to_string()),
@@ -1618,6 +1847,12 @@ mod tests {
                 model_config: None,
                 brain: None,
                 mcp_tool_profile: None,
+                source: Some(CreateProfileSourceRequest {
+                    template_id: Some("starter".to_string()),
+                    source_profile_id: None,
+                    source_bundle_path: None,
+                }),
+                now: Some("2026-06-26T09:30:00.000Z".to_string()),
                 profile_file_exists: false,
             },
         };
@@ -1663,6 +1898,45 @@ mod tests {
         );
         assert_eq!(mcp.server_names, vec!["field-created-profile"]);
         assert_eq!(mcp.tool_profile.as_deref(), Some("field-created-profile"));
+        let registry_write = plan
+            .registry_write
+            .expect("registry write should be planned first");
+        assert_eq!(
+            registry_write.profile_id,
+            ProfileId::new("field-created-profile")
+        );
+        assert_eq!(
+            registry_write.lifecycle_status,
+            ProfileRegistryLifecycleStatus::Active
+        );
+        assert_eq!(
+            registry_write.import_export.imported_from.as_deref(),
+            Some("template:starter")
+        );
+        assert_eq!(registry_write.derived_runtime_refs.len(), 3);
+        assert!(registry_write
+            .derived_runtime_refs
+            .iter()
+            .any(|runtime_ref| runtime_ref.ref_kind == "session"
+                && runtime_ref.ref_id == "field-created-profile-session"));
+        assert_eq!(plan.file_asset_actions.len(), 1);
+        assert_eq!(
+            plan.file_asset_actions[0].kind,
+            CreateProfileFileAssetActionKind::WriteProfileJson
+        );
+        assert_eq!(
+            plan.file_asset_actions[0].relative_path,
+            "field-created-profile.json"
+        );
+        assert!(!plan.file_asset_actions[0].overwrite);
+        assert_eq!(plan.derived_runtime_actions.len(), 3);
+        assert_eq!(
+            plan.derived_runtime_actions
+                .iter()
+                .map(|action| action.ref_kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["brain", "session", "profile_mcp_config"]
+        );
     }
 
     #[test]
@@ -1670,6 +1944,11 @@ mod tests {
         let input = CreateProfilePlanInput {
             runtime_config: valid_draft(),
             profiles: vec![profile("runner")],
+            profile_registry: vec![ProfileRegistryRuntimeMetadata {
+                profile_id: ProfileId::new("runner"),
+                lifecycle_status: Some(ProfileRegistryLifecycleStatus::Active),
+                revision: Some(7),
+            }],
             request: CreateProfileRequest {
                 profile_id: "runner".to_string(),
                 display_name: None,
@@ -1680,6 +1959,8 @@ mod tests {
                 model_config: None,
                 brain: None,
                 mcp_tool_profile: None,
+                source: None,
+                now: None,
                 profile_file_exists: true,
             },
         };
@@ -1694,6 +1975,7 @@ mod tests {
             &[
                 "profile_file_exists",
                 "duplicate_profile_id",
+                "duplicate_profile_registry_record",
                 "duplicate_profile_brain",
                 "duplicate_brain_implementation_id",
                 "duplicate_profile_session",
@@ -1708,6 +1990,7 @@ mod tests {
         let input = CreateProfilePlanInput {
             runtime_config: valid_draft(),
             profiles: vec![profile("runner")],
+            profile_registry: Vec::new(),
             request: CreateProfileRequest {
                 profile_id: "../bad".to_string(),
                 display_name: None,
@@ -1726,6 +2009,8 @@ mod tests {
                 }),
                 brain: None,
                 mcp_tool_profile: Some("bad tool".to_string()),
+                source: None,
+                now: None,
                 profile_file_exists: false,
             },
         };
@@ -1790,6 +2075,7 @@ mod tests {
         let create_plan = plan_create_profile(&CreateProfilePlanInput {
             runtime_config: input.runtime_config,
             profiles: input.profiles,
+            profile_registry: Vec::new(),
             request,
         });
         assert!(create_plan.ok(), "{:?}", create_plan.diagnostics);

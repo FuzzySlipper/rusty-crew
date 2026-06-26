@@ -1013,6 +1013,7 @@ export interface NativeProfileRuntimeMetadata {
 export interface NativeCreateProfilePlanInput {
   runtimeConfig: NativeRuntimeConfigDraft;
   profiles: NativeProfileRuntimeMetadata[];
+  profileRegistry?: NativeProfileRegistryRuntimeMetadata[];
   request: NativeCreateProfileRequest;
 }
 
@@ -1029,7 +1030,21 @@ export interface NativeCreateProfileRequest {
     strategy?: string;
   };
   mcpToolProfile?: string;
+  source?: NativeCreateProfileSourceRequest;
+  now?: string;
   profileFileExists?: boolean;
+}
+
+export interface NativeProfileRegistryRuntimeMetadata {
+  profileId: string;
+  lifecycleStatus?: NativeProfileRegistryLifecycleStatus;
+  revision?: number;
+}
+
+export interface NativeCreateProfileSourceRequest {
+  templateId?: string;
+  sourceProfileId?: string;
+  sourceBundlePath?: string;
 }
 
 export interface NativeProfileModelConfigSeed {
@@ -1044,10 +1059,44 @@ export interface NativeProfileModelConfigSeed {
 
 export interface NativeCreateProfilePlan {
   diagnostics: NativeRuntimeConfigDiagnostic[];
+  registryWrite?: NativeProfileRegistryWrite;
+  fileAssetActions: NativeCreateProfileFileAssetAction[];
+  derivedRuntimeActions: NativeCreateProfileDerivedRuntimeAction[];
   profileSeed?: NativeCreateProfileSeedMetadata;
   runtimeBrain?: NativeBrainConfigDraft;
   runtimeSession?: NativeSessionConfigDraft;
   profileMcpConfig?: NativeProfileRuntimeMetadata["mcpConfig"];
+}
+
+export interface NativeProfileRegistryWrite {
+  profileId: string;
+  lifecycleStatus: NativeProfileRegistryLifecycleStatus;
+  displayName?: string;
+  summary?: string;
+  defaultSessionKind?: "full" | "worker" | "delegated";
+  agentId?: string;
+  ownerId?: string;
+  activeRuntimeSettingsJson: unknown;
+  sourceAssetRefs: NativeProfileRegistrySourceAssetRef[];
+  derivedRuntimeRefs: NativeProfileRegistryDerivedRuntimeRef[];
+  importExport: NativeProfileRegistryImportExportMetadata;
+  now: string;
+}
+
+export interface NativeCreateProfileFileAssetAction {
+  kind: "write_profile_json";
+  profileId: string;
+  relativePath: string;
+  overwrite: boolean;
+  metadataJson: unknown;
+}
+
+export interface NativeCreateProfileDerivedRuntimeAction {
+  kind: "add_brain" | "add_session" | "add_profile_mcp_config";
+  refKind: string;
+  refId: string;
+  applyPhase: string;
+  metadataJson: unknown;
 }
 
 export interface NativeCreateProfileSeedMetadata {
@@ -2812,6 +2861,11 @@ function toNativeCreateProfilePlanInput(
   }) as Record<string, unknown>;
   return {
     ...base,
+    profile_registry: input.profileRegistry?.map((record) => ({
+      profile_id: record.profileId,
+      lifecycle_status: record.lifecycleStatus,
+      revision: record.revision,
+    })),
     request: {
       profile_id: input.request.profileId,
       display_name: input.request.displayName,
@@ -2837,6 +2891,14 @@ function toNativeCreateProfilePlanInput(
           }
         : undefined,
       mcp_tool_profile: input.request.mcpToolProfile,
+      source: input.request.source
+        ? {
+            template_id: input.request.source.templateId,
+            source_profile_id: input.request.source.sourceProfileId,
+            source_bundle_path: input.request.source.sourceBundlePath,
+          }
+        : undefined,
+      now: input.request.now,
       profile_file_exists: input.request.profileFileExists ?? false,
     },
   };
@@ -2858,6 +2920,25 @@ function toNativeCreateProfilePlan(
 ): NativeCreateProfilePlan {
   return {
     diagnostics: plan.diagnostics,
+    registryWrite: plan.registry_write
+      ? toNativeProfileRegistryWrite(plan.registry_write)
+      : undefined,
+    fileAssetActions: (plan.file_asset_actions ?? []).map((action) => ({
+      kind: action.kind,
+      profileId: action.profile_id,
+      relativePath: action.relative_path,
+      overwrite: action.overwrite,
+      metadataJson: action.metadata_json,
+    })),
+    derivedRuntimeActions: (plan.derived_runtime_actions ?? []).map(
+      (action) => ({
+        kind: action.kind,
+        refKind: action.ref_kind,
+        refId: action.ref_id,
+        applyPhase: action.apply_phase,
+        metadataJson: action.metadata_json,
+      }),
+    ),
     profileSeed: plan.profile_seed
       ? {
           profileId: plan.profile_seed.profile_id,
@@ -2909,6 +2990,29 @@ function toNativeCreateProfilePlan(
   };
 }
 
+function toNativeProfileRegistryWrite(
+  write: RawProfileRegistryWrite,
+): NativeProfileRegistryWrite {
+  return {
+    profileId: write.profile_id,
+    lifecycleStatus: write.lifecycle_status,
+    displayName: write.display_name ?? undefined,
+    summary: write.summary ?? undefined,
+    defaultSessionKind: write.default_session_kind ?? undefined,
+    agentId: write.agent_id ?? undefined,
+    ownerId: write.owner_id ?? undefined,
+    activeRuntimeSettingsJson: write.active_runtime_settings_json,
+    sourceAssetRefs: write.source_asset_refs.map(
+      toNativeProfileRegistryAssetRef,
+    ),
+    derivedRuntimeRefs: write.derived_runtime_refs.map(
+      toNativeProfileRegistryRuntimeRef,
+    ),
+    importExport: toNativeProfileRegistryImportExport(write.import_export),
+    now: write.now,
+  };
+}
+
 function toNativeRuntimeConfigPlan(
   plan: RawRuntimeConfigPlan,
 ): NativeRuntimeConfigPlan {
@@ -2942,30 +3046,52 @@ function toNativeProfileRegistryRecord(
     agentId: record.agent_id ?? undefined,
     ownerId: record.owner_id ?? undefined,
     activeRuntimeSettingsJson: record.active_runtime_settings_json,
-    sourceAssetRefs: record.source_asset_refs.map((ref) => ({
-      assetKind: ref.asset_kind,
-      path: ref.path,
-      contentHash: ref.content_hash ?? undefined,
-      lastSeenAt: ref.last_seen_at ?? undefined,
-      metadataJson: ref.metadata_json,
-    })),
-    derivedRuntimeRefs: record.derived_runtime_refs.map((ref) => ({
-      refKind: ref.ref_kind,
-      refId: ref.ref_id,
-      status: ref.status,
-      updatedAt: ref.updated_at ?? undefined,
-      metadataJson: ref.metadata_json,
-    })),
-    importExport: {
-      importedFrom: record.import_export.imported_from ?? undefined,
-      importedAt: record.import_export.imported_at ?? undefined,
-      exportedTo: record.import_export.exported_to ?? undefined,
-      exportedAt: record.import_export.exported_at ?? undefined,
-      metadataJson: record.import_export.metadata_json,
-    },
+    sourceAssetRefs: record.source_asset_refs.map(
+      toNativeProfileRegistryAssetRef,
+    ),
+    derivedRuntimeRefs: record.derived_runtime_refs.map(
+      toNativeProfileRegistryRuntimeRef,
+    ),
+    importExport: toNativeProfileRegistryImportExport(record.import_export),
     revision: record.revision,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
+  };
+}
+
+function toNativeProfileRegistryAssetRef(
+  ref: RawProfileRegistrySourceAssetRef,
+): NativeProfileRegistrySourceAssetRef {
+  return {
+    assetKind: ref.asset_kind,
+    path: ref.path,
+    contentHash: ref.content_hash ?? undefined,
+    lastSeenAt: ref.last_seen_at ?? undefined,
+    metadataJson: ref.metadata_json,
+  };
+}
+
+function toNativeProfileRegistryRuntimeRef(
+  ref: RawProfileRegistryDerivedRuntimeRef,
+): NativeProfileRegistryDerivedRuntimeRef {
+  return {
+    refKind: ref.ref_kind,
+    refId: ref.ref_id,
+    status: ref.status,
+    updatedAt: ref.updated_at ?? undefined,
+    metadataJson: ref.metadata_json,
+  };
+}
+
+function toNativeProfileRegistryImportExport(
+  metadata: RawProfileRegistryImportExportMetadata,
+): NativeProfileRegistryImportExportMetadata {
+  return {
+    importedFrom: metadata.imported_from ?? undefined,
+    importedAt: metadata.imported_at ?? undefined,
+    exportedTo: metadata.exported_to ?? undefined,
+    exportedAt: metadata.exported_at ?? undefined,
+    metadataJson: metadata.metadata_json,
   };
 }
 
@@ -3564,6 +3690,9 @@ interface RawDelegatedResourceCleanupReport {
 
 interface RawCreateProfilePlan {
   diagnostics: NativeRuntimeConfigDiagnostic[];
+  registry_write?: RawProfileRegistryWrite;
+  file_asset_actions: RawCreateProfileFileAssetAction[];
+  derived_runtime_actions: RawCreateProfileDerivedRuntimeAction[];
   profile_seed?: {
     profile_id: string;
     display_name?: string;
@@ -3598,6 +3727,37 @@ interface RawCreateProfilePlan {
     transport?: string;
     tool_profile?: string;
   };
+}
+
+interface RawProfileRegistryWrite {
+  profile_id: string;
+  lifecycle_status: NativeProfileRegistryLifecycleStatus;
+  display_name?: string;
+  summary?: string;
+  default_session_kind?: "full" | "worker" | "delegated";
+  agent_id?: string;
+  owner_id?: string;
+  active_runtime_settings_json: unknown;
+  source_asset_refs: RawProfileRegistrySourceAssetRef[];
+  derived_runtime_refs: RawProfileRegistryDerivedRuntimeRef[];
+  import_export: RawProfileRegistryImportExportMetadata;
+  now: string;
+}
+
+interface RawCreateProfileFileAssetAction {
+  kind: "write_profile_json";
+  profile_id: string;
+  relative_path: string;
+  overwrite: boolean;
+  metadata_json: unknown;
+}
+
+interface RawCreateProfileDerivedRuntimeAction {
+  kind: "add_brain" | "add_session" | "add_profile_mcp_config";
+  ref_kind: string;
+  ref_id: string;
+  apply_phase: string;
+  metadata_json: unknown;
 }
 
 interface RawRuntimeConfigPlan {

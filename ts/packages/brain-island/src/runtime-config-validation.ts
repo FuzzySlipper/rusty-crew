@@ -99,6 +99,9 @@ export async function planCreateProfileWithRust(input: {
   bridge: Pick<NativeBridgeModule, "planCreateProfile">;
   runtimeConfig: RustyCrewRuntimeConfig;
   profiles: readonly ProfileConfig[];
+  profileRegistry?: Parameters<
+    NativeBridgeModule["planCreateProfile"]
+  >[0]["profileRegistry"];
   request: NativeCreateProfileRequest;
 }): Promise<NativeCreateProfilePlan> {
   const validationInput = runtimeConfigValidationInput(
@@ -107,6 +110,7 @@ export async function planCreateProfileWithRust(input: {
   );
   return input.bridge.planCreateProfile({
     ...validationInput,
+    profileRegistry: input.profileRegistry,
     request: input.request,
   });
 }

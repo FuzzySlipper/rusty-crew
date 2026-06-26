@@ -522,6 +522,27 @@ try {
       "field-created-profile-session",
     );
     assert.equal(
+      createdProfile.body.data.outcome.result.registryWrite.profileId,
+      "field-created-profile",
+    );
+    assert.equal(
+      createdProfile.body.data.outcome.result.fileAssetActions[0].kind,
+      "write_profile_json",
+    );
+    assert.deepEqual(
+      createdProfile.body.data.outcome.result.derivedRuntimeActions.map(
+        (action: { refKind: string; refId: string }) => [
+          action.refKind,
+          action.refId,
+        ],
+      ),
+      [
+        ["brain", "field-created-profile-brain"],
+        ["session", "field-created-profile-session"],
+        ["profile_mcp_config", "field-created-profile-mcp"],
+      ],
+    );
+    assert.equal(
       existsSync(
         join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
       ),

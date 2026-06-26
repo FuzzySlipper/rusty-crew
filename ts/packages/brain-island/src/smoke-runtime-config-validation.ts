@@ -201,10 +201,75 @@ const createPlan = await planCreateProfileWithRust({
   request: {
     profileId: "field-created-profile",
     displayName: "Field Created Profile",
+    source: { templateId: "starter" },
+    now: "2026-06-26T09:30:00.000Z",
     profileFileExists: false,
   },
 });
 assert.deepEqual(createPlan.diagnostics, []);
+assert.equal(createPlan.registryWrite?.profileId, "field-created-profile");
+assert.equal(createPlan.registryWrite?.lifecycleStatus, "active");
+assert.equal(createPlan.registryWrite?.defaultSessionKind, "full");
+assert.equal(createPlan.registryWrite?.agentId, "field-created-profile");
+assert.equal(
+  createPlan.registryWrite?.importExport.importedFrom,
+  "template:starter",
+);
+assert.equal(
+  createPlan.registryWrite?.sourceAssetRefs[0]?.path,
+  "field-created-profile.json",
+);
+assert.deepEqual(
+  createPlan.registryWrite?.derivedRuntimeRefs.map((runtimeRef) => [
+    runtimeRef.refKind,
+    runtimeRef.refId,
+  ]),
+  [
+    ["brain", "field-created-profile-brain"],
+    ["session", "field-created-profile-session"],
+    ["profile_mcp_config", "field-created-profile-mcp"],
+  ],
+);
+assert.deepEqual(createPlan.fileAssetActions, [
+  {
+    kind: "write_profile_json",
+    profileId: "field-created-profile",
+    relativePath: "field-created-profile.json",
+    overwrite: false,
+    metadataJson: {
+      compatibility: true,
+      registry_first: true,
+    },
+  },
+]);
+assert.deepEqual(
+  createPlan.derivedRuntimeActions.map((action) => [
+    action.kind,
+    action.refKind,
+    action.refId,
+    action.applyPhase,
+  ]),
+  [
+    [
+      "add_brain",
+      "brain",
+      "field-created-profile-brain",
+      "compatibility_runtime_config",
+    ],
+    [
+      "add_session",
+      "session",
+      "field-created-profile-session",
+      "compatibility_runtime_config",
+    ],
+    [
+      "add_profile_mcp_config",
+      "profile_mcp_config",
+      "field-created-profile-mcp",
+      "compatibility_profile_file",
+    ],
+  ],
+);
 assert.equal(createPlan.profileSeed?.profileId, "field-created-profile");
 assert.equal(createPlan.profileSeed?.displayName, "Field Created Profile");
 assert.equal(createPlan.profileSeed?.modelConfig.provider, "local");
@@ -225,6 +290,13 @@ const duplicatePlan = await planCreateProfileWithRust({
   bridge,
   runtimeConfig,
   profiles: [profile],
+  profileRegistry: [
+    {
+      profileId,
+      lifecycleStatus: "active",
+      revision: 3,
+    },
+  ],
   request: {
     profileId: profileId,
     agentId: agentId,
@@ -238,6 +310,13 @@ assert(
     (diagnostic) =>
       diagnostic.code === "duplicate_session_id" &&
       diagnostic.path === "request.sessionId",
+  ),
+);
+assert(
+  duplicatePlan.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.code === "duplicate_profile_registry_record" &&
+      diagnostic.path === "request.profileId",
   ),
 );
 assert.equal(duplicatePlan.profileSeed, undefined);

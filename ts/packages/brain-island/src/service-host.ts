@@ -2172,6 +2172,9 @@ interface CreatedServiceProfile {
   implementationId: string;
   profilePath: string;
   runtimeConfigPath: string;
+  registryWrite?: NativeCreateProfilePlan["registryWrite"];
+  fileAssetActions: NativeCreateProfilePlan["fileAssetActions"];
+  derivedRuntimeActions: NativeCreateProfilePlan["derivedRuntimeActions"];
   applyResult: RustyCrewRuntimeConfigApplyResult;
 }
 
@@ -2605,6 +2608,8 @@ async function createServiceProfile(
         command.body.brain ?? command.body.brainSelection,
       ),
       mcpToolProfile: optionalBodyString(command, "mcpToolProfile"),
+      source: profileCreateSourceFromBody(command.body.source),
+      now: state.now(),
       profileFileExists:
         profilePath === undefined ? false : existsSync(profilePath),
     },
@@ -2620,9 +2625,12 @@ async function createServiceProfile(
       "create-profile plan did not include required profile/runtime entries",
     );
   }
+  const profileFileAction = plan.fileAssetActions.find(
+    (action) => action.kind === "write_profile_json",
+  );
   const plannedProfilePath = join(
     state.runtimeConfig.profilesDir,
-    `${profileSeed.profileId}.json`,
+    profileFileAction?.relativePath ?? `${profileSeed.profileId}.json`,
   );
 
   await mkdir(state.runtimeConfig.profilesDir, { recursive: true });
@@ -2659,6 +2667,9 @@ async function createServiceProfile(
     implementationId: runtimeBrain.implementationId,
     profilePath: plannedProfilePath,
     runtimeConfigPath: state.config.paths.serviceConfigFile,
+    registryWrite: plan.registryWrite,
+    fileAssetActions: plan.fileAssetActions,
+    derivedRuntimeActions: plan.derivedRuntimeActions,
     applyResult,
   };
 }
@@ -2713,6 +2724,29 @@ function profileBrainFromBody(
     module: optionalString(brain.module),
     strategy: optionalString(brain.strategy),
   }) as { module?: string; strategy?: string };
+}
+
+function profileCreateSourceFromBody(input: unknown):
+  | {
+      templateId?: string;
+      sourceProfileId?: string;
+      sourceBundlePath?: string;
+    }
+  | undefined {
+  const source = optionalRecord(input);
+  if (!source) {
+    return undefined;
+  }
+  const result = compactRecord({
+    templateId: optionalString(source.templateId),
+    sourceProfileId: optionalString(source.sourceProfileId),
+    sourceBundlePath: optionalString(source.sourceBundlePath),
+  }) as {
+    templateId?: string;
+    sourceProfileId?: string;
+    sourceBundlePath?: string;
+  };
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function assertCreateProfilePlan(plan: NativeCreateProfilePlan): void {
