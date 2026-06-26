@@ -674,6 +674,201 @@ mod tests {
     }
 
     #[test]
+    fn session_memory_descriptor_declares_shapes_scopes_and_conservative_operations() {
+        let descriptor = session_memory_descriptor();
+        descriptor
+            .validate()
+            .expect("session memory descriptor is valid");
+
+        assert_eq!(descriptor.space_id.as_str(), "session_memory");
+        assert_eq!(descriptor.module_id.as_deref(), Some("runtime_memory"));
+        assert!(
+            descriptor
+                .description
+                .contains("not Den memory and not transcript storage"),
+            "descriptor should document the Crew-memory boundary"
+        );
+        assert_eq!(
+            descriptor.scope_model.allowed_scopes,
+            vec![
+                MemoryScopeType::Session,
+                MemoryScopeType::ConversationBranch,
+            ]
+        );
+        assert_eq!(
+            descriptor.retrieval_strategies,
+            vec![
+                MemoryRetrievalStrategy::DirectLookup,
+                MemoryRetrievalStrategy::Recency,
+                MemoryRetrievalStrategy::BranchAware,
+                MemoryRetrievalStrategy::QuerySearch,
+            ]
+        );
+        assert_eq!(
+            descriptor.operations,
+            vec![
+                MemoryOperation::Read,
+                MemoryOperation::List,
+                MemoryOperation::Add,
+                MemoryOperation::Replace,
+                MemoryOperation::Merge,
+                MemoryOperation::Supersede,
+                MemoryOperation::Archive,
+            ]
+        );
+        assert_eq!(descriptor.retention_policy, MemoryRetentionPolicy::Compact);
+        assert_eq!(
+            descriptor.conflict_policy,
+            MemoryConflictPolicy::Supersession
+        );
+
+        for shape_id in [
+            "session_fact",
+            "session_summary",
+            "branch_summary",
+            "user_choice",
+        ] {
+            let shape = descriptor
+                .record_shapes
+                .iter()
+                .find(|shape| shape.shape_id.as_str() == shape_id)
+                .unwrap_or_else(|| panic!("missing session_memory shape {shape_id}"));
+            assert_eq!(shape.version, 1);
+            assert!(shape
+                .fields
+                .iter()
+                .any(|field| field.field_name == "record_id" && field.required));
+            assert!(shape
+                .fields
+                .iter()
+                .any(|field| field.field_name == "created_at" && field.required));
+            assert!(shape
+                .fields
+                .iter()
+                .any(|field| field.field_name == "updated_at" && field.required));
+        }
+
+        assert_required_fields(
+            &descriptor,
+            "session_fact",
+            &[
+                "record_id",
+                "content",
+                "fact_kind",
+                "confidence",
+                "source_summary",
+                "created_at",
+                "updated_at",
+            ],
+        );
+        assert_required_fields(
+            &descriptor,
+            "session_summary",
+            &[
+                "record_id",
+                "summary",
+                "coverage_start",
+                "coverage_end",
+                "summary_kind",
+                "created_at",
+                "updated_at",
+            ],
+        );
+        assert_required_fields(
+            &descriptor,
+            "branch_summary",
+            &[
+                "record_id",
+                "summary",
+                "branch_id",
+                "head_message_id",
+                "coverage_start",
+                "coverage_end",
+                "created_at",
+                "updated_at",
+            ],
+        );
+        assert_required_fields(
+            &descriptor,
+            "user_choice",
+            &[
+                "record_id",
+                "choice",
+                "choice_kind",
+                "chosen_at",
+                "status",
+                "created_at",
+                "updated_at",
+            ],
+        );
+
+        assert_operation_policy(
+            &descriptor,
+            MemoryOperation::Add,
+            MemoryGovernanceMode::Candidate,
+            false,
+        );
+        assert_operation_policy(
+            &descriptor,
+            MemoryOperation::Replace,
+            MemoryGovernanceMode::CuratorRoute,
+            true,
+        );
+        assert_operation_policy(
+            &descriptor,
+            MemoryOperation::Merge,
+            MemoryGovernanceMode::CuratorRoute,
+            true,
+        );
+        assert_operation_policy(
+            &descriptor,
+            MemoryOperation::Supersede,
+            MemoryGovernanceMode::CuratorRoute,
+            true,
+        );
+        assert_operation_policy(
+            &descriptor,
+            MemoryOperation::Archive,
+            MemoryGovernanceMode::ManualReview,
+            true,
+        );
+    }
+
+    #[test]
+    fn session_memory_proposal_validation_rejects_invalid_scope_operation_and_shape() {
+        let descriptor = session_memory_descriptor();
+        let proposal = valid_session_memory_proposal(
+            MemoryOperation::Add,
+            MemoryScopeType::Session,
+            "session_fact",
+        );
+        proposal
+            .validate_for_descriptor(&descriptor)
+            .expect("session memory proposal matches descriptor");
+
+        let mut bad_scope = proposal.clone();
+        bad_scope.scope.scope_type = MemoryScopeType::Profile;
+        assert!(bad_scope.validate_for_descriptor(&descriptor).is_err());
+
+        let mut bad_operation = proposal.clone();
+        bad_operation.operation = MemoryOperation::Remove;
+        assert!(bad_operation.validate_for_descriptor(&descriptor).is_err());
+
+        let mut bad_shape = proposal.clone();
+        bad_shape.shape.shape_id = MemoryRecordShapeId::unchecked("transcript_message");
+        assert!(bad_shape.validate_for_descriptor(&descriptor).is_err());
+
+        let branch_summary = valid_session_memory_proposal(
+            MemoryOperation::Supersede,
+            MemoryScopeType::ConversationBranch,
+            "branch_summary",
+        );
+        branch_summary
+            .validate_for_descriptor(&descriptor)
+            .expect("branch summary proposal matches descriptor");
+    }
+
+    #[test]
     fn serializes_descriptor_and_proposal_with_snake_case_enums() {
         let descriptor = roleplay_lore_descriptor();
         let value = serde_json::to_value(&descriptor).expect("serialize descriptor");
@@ -774,22 +969,85 @@ mod tests {
         let mut descriptor = profile_dense_descriptor();
         descriptor.space_id = MemorySpaceId::unchecked("session_memory");
         descriptor.module_id = Some("runtime_memory".to_string());
-        descriptor.description = "Crew session and branch memory summaries.".to_string();
+        descriptor.schema_version = 1;
+        descriptor.description =
+            "Crew-owned session and branch memory; not Den memory and not transcript storage."
+                .to_string();
         descriptor.record_shapes = vec![
             MemoryRecordShapeDescriptor {
                 shape_id: MemoryRecordShapeId::unchecked("session_fact"),
                 version: 1,
-                description: "Fact observed inside a session.".to_string(),
+                description: "Durable fact observed inside one session.".to_string(),
                 fields: vec![
+                    field("record_id", MemoryFieldType::String, true),
                     field("content", MemoryFieldType::Markdown, true),
-                    field("confidence", MemoryFieldType::Float, false),
+                    field("fact_kind", MemoryFieldType::String, true),
+                    field("confidence", MemoryFieldType::Float, true),
+                    field("source_summary", MemoryFieldType::String, true),
+                    field("created_at", MemoryFieldType::Timestamp, true),
+                    field("updated_at", MemoryFieldType::Timestamp, true),
+                    field("subject", MemoryFieldType::String, false),
+                    field("expires_at", MemoryFieldType::Timestamp, false),
+                    field("supersedes_record_id", MemoryFieldType::String, false),
+                    field("tags", MemoryFieldType::Json, false),
+                    field("metadata_json", MemoryFieldType::Json, false),
+                ],
+            },
+            MemoryRecordShapeDescriptor {
+                shape_id: MemoryRecordShapeId::unchecked("session_summary"),
+                version: 1,
+                description: "Rolling or checkpoint summary of the durable session.".to_string(),
+                fields: vec![
+                    field("record_id", MemoryFieldType::String, true),
+                    field("summary", MemoryFieldType::Markdown, true),
+                    field("coverage_start", MemoryFieldType::String, true),
+                    field("coverage_end", MemoryFieldType::String, true),
+                    field("summary_kind", MemoryFieldType::String, true),
+                    field("created_at", MemoryFieldType::Timestamp, true),
+                    field("updated_at", MemoryFieldType::Timestamp, true),
+                    field("token_estimate", MemoryFieldType::Integer, false),
+                    field("source_record_ids", MemoryFieldType::Json, false),
+                    field("supersedes_record_id", MemoryFieldType::String, false),
+                    field("metadata_json", MemoryFieldType::Json, false),
                 ],
             },
             MemoryRecordShapeDescriptor {
                 shape_id: MemoryRecordShapeId::unchecked("branch_summary"),
                 version: 1,
                 description: "Conversation branch summary.".to_string(),
-                fields: vec![field("summary", MemoryFieldType::Markdown, true)],
+                fields: vec![
+                    field("record_id", MemoryFieldType::String, true),
+                    field("summary", MemoryFieldType::Markdown, true),
+                    field("branch_id", MemoryFieldType::String, true),
+                    field("head_message_id", MemoryFieldType::String, true),
+                    field("coverage_start", MemoryFieldType::String, true),
+                    field("coverage_end", MemoryFieldType::String, true),
+                    field("created_at", MemoryFieldType::Timestamp, true),
+                    field("updated_at", MemoryFieldType::Timestamp, true),
+                    field("parent_branch_id", MemoryFieldType::String, false),
+                    field("ancestor_branch_ids", MemoryFieldType::Json, false),
+                    field("supersedes_record_id", MemoryFieldType::String, false),
+                    field("token_estimate", MemoryFieldType::Integer, false),
+                    field("metadata_json", MemoryFieldType::Json, false),
+                ],
+            },
+            MemoryRecordShapeDescriptor {
+                shape_id: MemoryRecordShapeId::unchecked("user_choice"),
+                version: 1,
+                description: "Durable user choice inside a session or branch.".to_string(),
+                fields: vec![
+                    field("record_id", MemoryFieldType::String, true),
+                    field("choice", MemoryFieldType::Markdown, true),
+                    field("choice_kind", MemoryFieldType::String, true),
+                    field("chosen_at", MemoryFieldType::Timestamp, true),
+                    field("status", MemoryFieldType::String, true),
+                    field("created_at", MemoryFieldType::Timestamp, true),
+                    field("updated_at", MemoryFieldType::Timestamp, true),
+                    field("alternatives", MemoryFieldType::Json, false),
+                    field("supersedes_record_id", MemoryFieldType::String, false),
+                    field("reverted_by_record_id", MemoryFieldType::String, false),
+                    field("metadata_json", MemoryFieldType::Json, false),
+                ],
             },
         ];
         descriptor.scope_model = MemoryScopeModel {
@@ -801,30 +1059,60 @@ mod tests {
         };
         descriptor.visibility_model = MemoryVisibilityModel::SessionScoped;
         descriptor.retrieval_strategies = vec![
+            MemoryRetrievalStrategy::DirectLookup,
             MemoryRetrievalStrategy::Recency,
             MemoryRetrievalStrategy::BranchAware,
+            MemoryRetrievalStrategy::QuerySearch,
         ];
+        descriptor.indexing = MemoryIndexingPolicy {
+            required_capabilities: vec!["session_scope_lookup".to_string()],
+            optional_capabilities: vec![
+                "branch_aware_lookup".to_string(),
+                "query_search".to_string(),
+            ],
+        };
         descriptor.prompt_policy = MemoryPromptPolicy::SummaryContext;
         descriptor.operations = vec![
             MemoryOperation::Read,
             MemoryOperation::List,
             MemoryOperation::Add,
+            MemoryOperation::Replace,
             MemoryOperation::Merge,
             MemoryOperation::Supersede,
+            MemoryOperation::Archive,
         ];
-        descriptor.write_policy.operation_policies = vec![
-            op_policy(MemoryOperation::Add, MemoryGovernanceMode::Candidate, false),
-            op_policy(
-                MemoryOperation::Merge,
-                MemoryGovernanceMode::CuratorRoute,
-                true,
-            ),
-            op_policy(
-                MemoryOperation::Supersede,
-                MemoryGovernanceMode::CuratorRoute,
-                true,
-            ),
-        ];
+        descriptor.write_policy = MemoryWritePolicy {
+            default_mode: MemoryGovernanceMode::Candidate,
+            operation_policies: vec![
+                op_policy(MemoryOperation::Add, MemoryGovernanceMode::Candidate, false),
+                op_policy(
+                    MemoryOperation::Replace,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                op_policy(
+                    MemoryOperation::Merge,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                op_policy(
+                    MemoryOperation::Supersede,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                op_policy(
+                    MemoryOperation::Archive,
+                    MemoryGovernanceMode::ManualReview,
+                    true,
+                ),
+            ],
+        };
+        descriptor.provenance_policy = MemoryProvenancePolicy {
+            required_evidence: vec![MemoryEvidenceKind::Wake],
+            source_required: true,
+            rationale_required: true,
+        };
+        descriptor.retention_policy = MemoryRetentionPolicy::Compact;
         descriptor.conflict_policy = MemoryConflictPolicy::Supersession;
         descriptor
     }
@@ -907,6 +1195,104 @@ mod tests {
             dedupe_key: Some("profile_dense:memory_boundary".to_string()),
             created_at: Some("2026-06-26T00:00:00Z".to_string()),
         }
+    }
+
+    fn valid_session_memory_proposal(
+        operation: MemoryOperation,
+        scope_type: MemoryScopeType,
+        shape_id: &str,
+    ) -> MemoryProposalEnvelope {
+        MemoryProposalEnvelope {
+            proposal_id: "session_memory_proposal_one".to_string(),
+            space_id: MemorySpaceId::unchecked("session_memory"),
+            operation,
+            scope: MemoryScope {
+                scope_type,
+                scope_id: match scope_type {
+                    MemoryScopeType::ConversationBranch => "branch-alpha".to_string(),
+                    _ => "session-alpha".to_string(),
+                },
+            },
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked(shape_id),
+                version: 1,
+            },
+            content: match shape_id {
+                "branch_summary" => json!({
+                    "record_id": "branch-summary-one",
+                    "summary": "The branch followed the quiet clue trail.",
+                    "branch_id": "branch-alpha",
+                    "head_message_id": "message-alpha",
+                    "coverage_start": "message-root",
+                    "coverage_end": "message-alpha",
+                    "created_at": "2026-06-26T00:00:00Z",
+                    "updated_at": "2026-06-26T00:00:00Z"
+                }),
+                _ => json!({
+                    "record_id": "session-fact-one",
+                    "content": "The user prefers slow-burn mystery pacing.",
+                    "fact_kind": "preference",
+                    "confidence": 0.9,
+                    "source_summary": "User corrected pacing in the active session.",
+                    "created_at": "2026-06-26T00:00:00Z",
+                    "updated_at": "2026-06-26T00:00:00Z"
+                }),
+            },
+            evidence_refs: vec![MemoryEvidenceRef {
+                evidence_type: MemoryEvidenceKind::Wake,
+                ref_id: "wake-session-1".to_string(),
+                label: Some("Session wake".to_string()),
+            }],
+            confidence: 0.9,
+            durability_rationale: Some(
+                "Session-level memory should survive wakes without duplicating transcript storage."
+                    .to_string(),
+            ),
+            governance_mode: MemoryGovernanceMode::Candidate,
+            source: MemoryProposalSource::CaptureProducer,
+            dedupe_key: Some("session_memory:preference:pacing".to_string()),
+            created_at: Some("2026-06-26T00:00:00Z".to_string()),
+        }
+    }
+
+    fn assert_required_fields(
+        descriptor: &MemorySpaceDescriptor,
+        shape_id: &str,
+        expected_fields: &[&str],
+    ) {
+        let shape = descriptor
+            .record_shapes
+            .iter()
+            .find(|shape| shape.shape_id.as_str() == shape_id)
+            .unwrap_or_else(|| panic!("missing memory shape {shape_id}"));
+        for expected_field in expected_fields {
+            assert!(
+                shape
+                    .fields
+                    .iter()
+                    .any(|field| field.field_name == *expected_field && field.required),
+                "shape {shape_id} missing required field {expected_field}"
+            );
+        }
+    }
+
+    fn assert_operation_policy(
+        descriptor: &MemorySpaceDescriptor,
+        operation: MemoryOperation,
+        governance_mode: MemoryGovernanceMode,
+        requires_expected_revision: bool,
+    ) {
+        let policy = descriptor
+            .write_policy
+            .operation_policies
+            .iter()
+            .find(|policy| policy.operation == operation)
+            .unwrap_or_else(|| panic!("missing operation policy {operation:?}"));
+        assert_eq!(policy.governance_mode, governance_mode);
+        assert_eq!(
+            policy.requires_expected_revision,
+            requires_expected_revision
+        );
     }
 
     fn field(
