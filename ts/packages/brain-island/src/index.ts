@@ -918,6 +918,7 @@ export {
   buildProfileRoleAssembly,
   renderDenMemoryContext,
   renderDenseProfileMemoryContext,
+  renderSessionMemoryContext,
   renderPlanningContext,
 } from "./profile-role-assembly.js";
 export type {
@@ -928,6 +929,7 @@ export type {
   PlanningPromptContext,
   ProfileRoleAssemblyResult,
   RenderDenseProfileMemoryContextOptions,
+  RenderSessionMemoryContextOptions,
 } from "./profile-role-assembly.js";
 export {
   createMemorySpaceToolResolver,

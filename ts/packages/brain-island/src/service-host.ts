@@ -120,8 +120,12 @@ import {
   loadProfileContext,
   parseProfileConfigDraft,
   type ProfileConfig,
+  type SessionMemoryPromptConfig,
 } from "./profile-loading.js";
-import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
+import {
+  buildProfileRoleAssembly,
+  renderSessionMemoryContext,
+} from "./profile-role-assembly.js";
 import {
   planCreateProfileWithRust,
   planRuntimeConfigWithRust,
@@ -246,6 +250,7 @@ import {
   rebuildConfiguredBrainRuntime,
   registerConfiguredScheduledJobs,
   ensureConfiguredSessionForChannelBinding,
+  type RustyCrewConfiguredSession,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
 } from "./service-runtime-config.js";
@@ -1069,18 +1074,37 @@ async function buildMemorySpaceDiagnostics(
                 "Crew profile_dense memory is runtime-owned and distinct from Den memory.",
               ],
             }
-          : {
-              spaceId: descriptor.space_id,
-              status: "degraded",
-              backingStore: "unknown",
-              nativeMethods: [],
-              conflictBehavior: "unknown",
-              promptInjectionBehavior: "unknown",
-              toolModeBehavior: "unknown",
-              notes: [
-                "No compatibility projection is registered for this space.",
-              ],
-            },
+          : descriptor.space_id === "session_memory"
+            ? {
+                spaceId: descriptor.space_id,
+                status: "compatible",
+                backingStore: "session_memory_records",
+                nativeMethods: [
+                  "querySessionMemoryRecords",
+                  "buildSessionMemoryPromptContext",
+                ],
+                conflictBehavior: "expected_revision",
+                promptInjectionBehavior:
+                  "Rust buildSessionMemoryPromptContext selects bounded branch-aware records; TypeScript only renders the returned context when profile/session config enables it.",
+                toolModeBehavior:
+                  "session_memory is readable through memory-space tools and prompt assembly; write/governance apply paths are intentionally separate.",
+                notes: [
+                  "Active branch and ancestor records are eligible by default.",
+                  "Sibling branch records are excluded from prompt context unless explicitly requested.",
+                ],
+              }
+            : {
+                spaceId: descriptor.space_id,
+                status: "degraded",
+                backingStore: "unknown",
+                nativeMethods: [],
+                conflictBehavior: "unknown",
+                promptInjectionBehavior: "unknown",
+                toolModeBehavior: "unknown",
+                notes: [
+                  "No compatibility projection is registered for this space.",
+                ],
+              },
     })),
   };
 }
@@ -1191,6 +1215,87 @@ function configuredSessionForRuntimeSession(
       configured.sessionId === session.sessionId &&
       configured.profileId === session.profileId,
   );
+}
+
+async function buildSessionMemoryContextForWake(
+  state: ServiceState,
+  input: {
+    session: Pick<SessionState, "sessionId" | "profileId">;
+    configuredSession?: Pick<RustyCrewConfiguredSession, "sessionMemoryPrompt">;
+    profileContext: Awaited<ReturnType<typeof loadProfileContext>>;
+  },
+): Promise<string | undefined> {
+  const config = effectiveSessionMemoryPromptConfig(
+    input.profileContext.profile.memoryConfig,
+    input.configuredSession?.sessionMemoryPrompt,
+  );
+  if (!config.enabled) {
+    return undefined;
+  }
+  let activeBranchId: string | null = null;
+  try {
+    const branchState = (await state.bridge.getConversationBranchState({
+      session_id: input.session.sessionId,
+      default_updated_at: state.now(),
+    })) as ConversationBranchStateRecord;
+    activeBranchId = branchState.active_branch_id ?? null;
+  } catch (error) {
+    recordServiceEvent(state, {
+      source: "session_memory_prompt",
+      eventType: "session_memory_prompt_branch_state_degraded",
+      severity: "warning",
+      summary: `session memory prompt for ${input.session.sessionId} could not read active branch: ${errorMessage(error, "unknown branch-state error")}`,
+    });
+  }
+  try {
+    const context = await state.bridge.buildSessionMemoryPromptContext({
+      session_id: input.session.sessionId,
+      active_branch_id: activeBranchId,
+      include_ancestors: config.includeAncestors ?? true,
+      include_siblings: config.includeSiblings ?? false,
+      prompt_context_only: true,
+      page: {
+        limit: boundedSessionMemoryPromptLimit(config.maxRecords),
+        offset: 0,
+      },
+    });
+    return renderSessionMemoryContext(context);
+  } catch (error) {
+    recordServiceEvent(state, {
+      source: "session_memory_prompt",
+      eventType: "session_memory_prompt_context_degraded",
+      severity: "warning",
+      summary: `session memory prompt for ${input.session.sessionId} could not build context: ${errorMessage(error, "unknown prompt-context error")}`,
+    });
+    return undefined;
+  }
+}
+
+function effectiveSessionMemoryPromptConfig(
+  profileMemory: ProfileConfig["memoryConfig"] | undefined,
+  sessionPrompt: SessionMemoryPromptConfig | undefined,
+): Required<Pick<SessionMemoryPromptConfig, "enabled">> &
+  Omit<SessionMemoryPromptConfig, "enabled"> {
+  const profilePrompt = profileMemory?.sessionMemoryPrompt;
+  const profileEnabled =
+    profilePrompt?.enabled ??
+    profileMemory?.sessionMemory ??
+    (profileMemory?.enabled === true && profileMemory.sessionMemory !== false);
+  return {
+    enabled: sessionPrompt?.enabled ?? profileEnabled ?? false,
+    maxRecords: sessionPrompt?.maxRecords ?? profilePrompt?.maxRecords,
+    includeAncestors:
+      sessionPrompt?.includeAncestors ?? profilePrompt?.includeAncestors,
+    includeSiblings:
+      sessionPrompt?.includeSiblings ?? profilePrompt?.includeSiblings,
+  };
+}
+
+function boundedSessionMemoryPromptLimit(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return 12;
+  }
+  return Math.max(1, Math.min(32, Math.floor(value)));
 }
 
 async function buildServiceBackgroundDiagnostics(
@@ -7085,7 +7190,14 @@ async function dispatchWake(
       state.runtimeConfig,
       session,
     );
-    const role = buildProfileRoleAssembly(profileContext);
+    const sessionMemoryContext = await buildSessionMemoryContextForWake(state, {
+      session,
+      configuredSession: configured,
+      profileContext,
+    });
+    const role = buildProfileRoleAssembly(profileContext, {
+      sessionMemoryContext,
+    });
     const turnTimeoutMs = effectiveTurnTimeoutMs(
       effectiveWakeTimeoutMs({
         session: configured,

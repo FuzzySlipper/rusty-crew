@@ -72,6 +72,15 @@ export interface ProfileMemoryConfig {
   enabled?: boolean;
   denMemory?: boolean;
   denseProfileMemory?: boolean;
+  sessionMemory?: boolean;
+  sessionMemoryPrompt?: SessionMemoryPromptConfig;
+}
+
+export interface SessionMemoryPromptConfig {
+  enabled?: boolean;
+  maxRecords?: number;
+  includeAncestors?: boolean;
+  includeSiblings?: boolean;
 }
 
 export interface ProfileSessionDefaultsConfig {
@@ -734,6 +743,28 @@ function profileMemoryConfig(
     denseProfileMemory:
       typeof raw.denseProfileMemory === "boolean"
         ? raw.denseProfileMemory
+        : undefined,
+    sessionMemory:
+      typeof raw.sessionMemory === "boolean" ? raw.sessionMemory : undefined,
+    sessionMemoryPrompt: isRecord(raw.sessionMemoryPrompt)
+      ? sessionMemoryPromptConfig(raw.sessionMemoryPrompt)
+      : undefined,
+  };
+}
+
+export function sessionMemoryPromptConfig(
+  raw: Record<string, unknown>,
+): SessionMemoryPromptConfig {
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : undefined,
+    maxRecords: optionalNumber(raw.maxRecords),
+    includeAncestors:
+      typeof raw.includeAncestors === "boolean"
+        ? raw.includeAncestors
+        : undefined,
+    includeSiblings:
+      typeof raw.includeSiblings === "boolean"
+        ? raw.includeSiblings
         : undefined,
   };
 }

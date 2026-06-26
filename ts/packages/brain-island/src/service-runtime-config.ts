@@ -72,7 +72,9 @@ import {
 import {
   loadProfileConfig,
   loadProfileContext,
+  sessionMemoryPromptConfig,
   type ProfileConfig,
+  type SessionMemoryPromptConfig,
 } from "./profile-loading.js";
 import {
   buildServiceMcpToolCatalog,
@@ -114,6 +116,7 @@ export interface RustyCrewConfiguredSession {
   ownerId?: string;
   maxHistoryMessages?: number;
   turnTimeoutMs?: number;
+  sessionMemoryPrompt?: SessionMemoryPromptConfig;
 }
 
 export interface EffectiveSessionDefaults {
@@ -1598,6 +1601,9 @@ function configuredSession(
     ownerId: optionalString(parsed.ownerId),
     maxHistoryMessages: optionalNumber(parsed.maxHistoryMessages),
     turnTimeoutMs: optionalNumber(parsed.turnTimeoutMs),
+    sessionMemoryPrompt: isRecord(parsed.sessionMemoryPrompt)
+      ? sessionMemoryPromptConfig(parsed.sessionMemoryPrompt)
+      : undefined,
   };
 }
 

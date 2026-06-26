@@ -1,4 +1,8 @@
 import type { BrainRoleAssembly } from "./index.js";
+import type {
+  NativeSessionMemoryPromptContext,
+  NativeSessionMemoryRecord,
+} from "@rusty-crew/native-bridge";
 import type { LoadedProfileContext } from "./profile-loading.js";
 
 export type DenMemoryPromptMode =
@@ -41,6 +45,7 @@ export interface BuildProfileRoleAssemblyOptions {
   includeSkillBodies?: boolean;
   denMemoryContext?: string;
   denseProfileMemoryContext?: string;
+  sessionMemoryContext?: string;
   planningContext?: string;
   todoContext?: string;
 }
@@ -66,6 +71,7 @@ export function buildProfileRoleAssembly(
     instructionSection(context.profile.prompt?.instructions ?? []),
     options.denMemoryContext,
     options.denseProfileMemoryContext,
+    options.sessionMemoryContext,
     skillSection(context, options.includeSkillBodies ?? true),
     options.includeToolInventory === false
       ? undefined
@@ -137,6 +143,37 @@ export function renderDenseProfileMemoryContext(
     .join("\n");
 }
 
+export interface RenderSessionMemoryContextOptions {
+  maxContentChars?: number;
+}
+
+export function renderSessionMemoryContext(
+  context: NativeSessionMemoryPromptContext | undefined,
+  options: RenderSessionMemoryContextOptions = {},
+): string | undefined {
+  if (!context || context.records.length === 0) {
+    return undefined;
+  }
+  const maxContentChars = options.maxContentChars ?? 700;
+  const rendered = context.records.map((record) => {
+    const branch = record.branch_id ? ` branch=${record.branch_id}` : "";
+    return `- [${record.shape.shape_id} ${record.record_id} scope=${record.scope.scope_type}:${record.scope.scope_id}${branch}] ${truncate(sessionMemoryRecordText(record), maxContentChars)}`;
+  });
+  const diagnostics = context.diagnostics;
+  return [
+    "# Session Memory",
+    "Rust-selected branch-aware session memory. Treat these as compact durable summaries, choices, and facts; prefer current conversation evidence when it conflicts.",
+    `Session: ${diagnostics.session_id}`,
+    diagnostics.active_branch_id
+      ? `Active branch: ${diagnostics.active_branch_id}`
+      : undefined,
+    ...rendered,
+    `Diagnostics: selected=${diagnostics.selected_records.length}; excluded wrong_branch=${diagnostics.excluded_counts.wrong_branch}, sibling_branch=${diagnostics.excluded_counts.sibling_branch}, tool_only=${diagnostics.excluded_counts.tool_only}, archived=${diagnostics.excluded_counts.archived}, superseded=${diagnostics.excluded_counts.superseded}, limit_exceeded=${diagnostics.excluded_counts.limit_exceeded}, policy_disabled=${diagnostics.excluded_counts.policy_disabled}; tokens~${diagnostics.token_estimate}`,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
 export function renderPlanningContext(
   context: PlanningPromptContext,
 ): string | undefined {
@@ -177,6 +214,37 @@ function markdownSection(
     return undefined;
   }
   return [`# ${title}`, body.trim()].join("\n");
+}
+
+function sessionMemoryRecordText(record: NativeSessionMemoryRecord): string {
+  const content = record.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const map = content as Record<string, unknown>;
+    for (const key of [
+      "summary",
+      "choice",
+      "decision",
+      "fact",
+      "content",
+      "text",
+      "value",
+      "note",
+    ]) {
+      const value = map[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    const title = typeof map.title === "string" ? map.title.trim() : "";
+    const summary = typeof map.summary === "string" ? map.summary.trim() : "";
+    if (title || summary) {
+      return [title, summary].filter(Boolean).join(": ");
+    }
+  }
+  return JSON.stringify(content);
 }
 
 function instructionSection(
