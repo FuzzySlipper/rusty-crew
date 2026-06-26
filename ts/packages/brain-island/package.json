@@ -66,6 +66,7 @@
     "smoke:runtime-activity-observer": "tsx src/smoke-runtime-activity-observer.ts",
     "smoke:observation-activity-e2e": "tsx src/smoke-observation-activity-e2e.ts",
     "smoke:admin-diagnostics-api": "tsx src/smoke-admin-diagnostics-api.ts",
+    "smoke:storage-query-catalog": "tsx src/smoke-storage-query-catalog.ts",
     "smoke:direct-debug-service": "tsx src/smoke-direct-debug-service.ts",
     "smoke:debug-api-client": "tsx src/smoke-debug-api-client.ts",
     "smoke:admin-control-api": "tsx src/smoke-admin-control-api.ts",

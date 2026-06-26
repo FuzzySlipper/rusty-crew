@@ -93,6 +93,7 @@ import {
   type AdminDiagnosticsContext,
   type AdminRouteResult,
 } from "./admin-diagnostics-api.js";
+import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import {
   buildAdapterDiagnosticsProjection,
   type ChannelAdapterBindingDiagnostics,
@@ -646,6 +647,22 @@ async function handleHttpRequest(
 
   if (url.pathname.startsWith("/v1/admin/scheduler/")) {
     return handleSchedulerReadRequest(request, url, state);
+  }
+
+  if (url.pathname.startsWith("/v1/admin/storage/")) {
+    const body =
+      (request.method ?? "GET").toUpperCase() === "POST"
+        ? await readJsonBody(request)
+        : undefined;
+    return handleStorageQueryRequest(
+      {
+        method: request.method ?? "GET",
+        url: url.toString(),
+        body,
+        requestId: requestId(request),
+      },
+      { bridge: state.bridge },
+    );
   }
 
   if (url.pathname.startsWith("/v1/admin/")) {

@@ -11,6 +11,7 @@ export type ToolCategory =
   | "mcp"
   | "delegation"
   | "planning"
+  | "storage"
   | "diagnostics";
 
 export type ToolSurface = "brain" | "mcp" | "admin" | "tui" | "diagnostic";
@@ -620,6 +621,32 @@ const defaultToolRegistryDefinitions = [
     outputShape: "runtime.session_search_result.v1",
     version: "0.1.0",
     inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "storage_query_catalog",
+    description:
+      "List curated read-only Rusty Crew storage queries without exposing raw SQL.",
+    category: "storage",
+    toolsets: ["storage_read", "diagnostics_read"],
+    implementationModule: "./storage-query-catalog.js#storageQueryCatalogTool",
+    surfaces: ["brain", "admin"],
+    safety: ["read_only"],
+    outputShape: "storage.query_catalog.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:storage-query-catalog",
+  },
+  {
+    name: "storage_query_execute",
+    description:
+      "Execute one curated read-only Rusty Crew storage query by id; raw SQL is not supported.",
+    category: "storage",
+    toolsets: ["storage_read", "diagnostics_read"],
+    implementationModule: "./storage-query-catalog.js#storageQueryExecuteTool",
+    surfaces: ["brain", "admin"],
+    safety: ["read_only"],
+    outputShape: "storage.query_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:storage-query-catalog",
   },
   {
     name: "channel_readback",

@@ -36,6 +36,7 @@ export type ApiCapabilityScope =
   | "maintenance"
   | "scheduler"
   | "search"
+  | "storage"
   | "curator"
   | "service";
 
@@ -920,8 +921,28 @@ export const API_CAPABILITIES = [
     "/v1/admin/diagnostics/storage",
     "Read backend storage diagnostics and capability projection.",
     "admin",
-    ["diagnostics"],
+    ["diagnostics", "storage"],
   ),
+  readCapability(
+    "admin.storage.query_catalog",
+    "GET",
+    "/v1/admin/storage/query-catalog",
+    "List curated read-only storage queries.",
+    "admin",
+    ["storage"],
+  ),
+  {
+    id: "admin.storage.query.execute",
+    method: "POST",
+    path_template: "/v1/admin/storage/query/{query_id}",
+    description:
+      "Execute one curated read-only storage query by id. Raw SQL is not supported.",
+    auth: "admin",
+    mutation: "read",
+    stability: "stable",
+    tags: ["storage", "diagnostics"],
+    public: true,
+  },
   readCapability(
     "admin.diagnostics.provider_state",
     "GET",
@@ -1054,7 +1075,7 @@ export function chatApiCapabilityPaths(): string[] {
   return [
     ...new Set(
       API_CAPABILITIES.filter((capability) =>
-        capability.tags.includes("chat"),
+        (capability.tags as readonly ApiCapabilityScope[]).includes("chat"),
       ).map((capability) => capability.path_template),
     ),
   ];

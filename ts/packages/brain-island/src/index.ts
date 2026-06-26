@@ -712,6 +712,23 @@ export type {
   AdminRouteResult,
 } from "./admin-diagnostics-api.js";
 export {
+  executeStorageQuery,
+  handleStorageQueryRequest,
+  storageQueryCatalog,
+  storageQueryCatalogTool,
+  storageQueryExecuteTool,
+} from "./storage-query-catalog.js";
+export type {
+  StorageQueryCatalog,
+  StorageQueryContext,
+  StorageQueryDescriptor,
+  StorageQueryExecuteToolDetails,
+  StorageQueryId,
+  StorageQueryParameter,
+  StorageQueryResult,
+  StorageQueryRouteRequest,
+} from "./storage-query-catalog.js";
+export {
   createMemoryAdminControlAuditSink,
   handleAdminControlRequest,
 } from "./admin-control-api.js";
