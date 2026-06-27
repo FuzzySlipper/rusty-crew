@@ -74,7 +74,7 @@ use rusty_crew_core_protocol::{
 };
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 13;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 14;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -1914,7 +1914,7 @@ impl PostgresRuntimeCounterProofStore {
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
             proof_repository:
-                "sessions,events,queued_messages,scheduled_jobs,worker_runs,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore"
+                "sessions,events,queued_messages,scheduled_jobs,worker_runs,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers"
                     .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
@@ -2049,6 +2049,26 @@ impl PostgresRuntimeCounterProofStore {
                 RuntimeStorageTableCount {
                     table: "module_roleplay_lore_provenance_events".to_string(),
                     rows: self.table_rows("module_roleplay_lore_provenance_events")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "module_roleplay_lore_layers".to_string(),
+                    rows: self.table_rows("module_roleplay_lore_layers")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "module_roleplay_lore_layer_entries".to_string(),
+                    rows: self.table_rows("module_roleplay_lore_layer_entries")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "module_roleplay_chat_layers".to_string(),
+                    rows: self.table_rows("module_roleplay_chat_layers")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "module_roleplay_lore_recall_traces".to_string(),
+                    rows: self.table_rows("module_roleplay_lore_recall_traces")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "module_roleplay_lore_layer_config".to_string(),
+                    rows: self.table_rows("module_roleplay_lore_layer_config")?,
                 },
             ],
             capabilities: postgres_proof_capabilities(),
@@ -4587,7 +4607,71 @@ impl PostgresRuntimeCounterProofStore {
                  CREATE INDEX IF NOT EXISTS roleplay_lore_provenance_record_idx
                     ON {schema}.module_roleplay_lore_provenance_events(record_id, created_at, event_id);
                  CREATE INDEX IF NOT EXISTS roleplay_lore_provenance_world_idx
-                    ON {schema}.module_roleplay_lore_provenance_events(world_id, created_at, event_id);"
+                    ON {schema}.module_roleplay_lore_provenance_events(world_id, created_at, event_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_layers (
+                    layer_id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    purpose TEXT NOT NULL DEFAULT 'mixed',
+                    write_policy TEXT NOT NULL DEFAULT 'manual',
+                    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_layers_profile_idx
+                    ON {schema}.module_roleplay_lore_layers(profile_id, is_archived, name);
+                 CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_layer_entries (
+                    layer_id TEXT NOT NULL REFERENCES {schema}.module_roleplay_lore_layers(layer_id) ON DELETE CASCADE,
+                    record_id TEXT NOT NULL REFERENCES {schema}.module_roleplay_lore_records(record_id) ON DELETE CASCADE,
+                    is_constant BOOLEAN NOT NULL DEFAULT FALSE,
+                    priority BIGINT NOT NULL DEFAULT 0,
+                    added_at TEXT NOT NULL,
+                    PRIMARY KEY(layer_id, record_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_layer_entries_record_idx
+                    ON {schema}.module_roleplay_lore_layer_entries(record_id, layer_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_chat_layers (
+                    chat_id TEXT NOT NULL,
+                    layer_id TEXT NOT NULL REFERENCES {schema}.module_roleplay_lore_layers(layer_id) ON DELETE CASCADE,
+                    priority BIGINT NOT NULL DEFAULT 0,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(chat_id, layer_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS roleplay_chat_layers_enabled_idx
+                    ON {schema}.module_roleplay_chat_layers(chat_id, enabled, priority, layer_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_recall_traces (
+                    trace_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    layer_ids JSONB NOT NULL,
+                    query_text TEXT,
+                    active_subjects JSONB,
+                    excluded_subjects JSONB,
+                    config_snapshot JSONB NOT NULL,
+                    entries_considered BIGINT NOT NULL,
+                    entries_returned BIGINT NOT NULL,
+                    token_budget BIGINT,
+                    tokens_consumed BIGINT,
+                    created_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_recall_traces_session_idx
+                    ON {schema}.module_roleplay_lore_recall_traces(session_id, created_at DESC, trace_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_layer_config (
+                    config_id TEXT PRIMARY KEY,
+                    layer_id TEXT NOT NULL UNIQUE REFERENCES {schema}.module_roleplay_lore_layers(layer_id) ON DELETE CASCADE,
+                    fts_weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+                    subject_weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+                    canon_weight DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+                    tag_boost_weight DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+                    recency_weight DOUBLE PRECISION NOT NULL DEFAULT 0.2,
+                    default_token_budget BIGINT NOT NULL DEFAULT 4000,
+                    constant_token_reserve BIGINT NOT NULL DEFAULT 500,
+                    min_relevance_score DOUBLE PRECISION NOT NULL DEFAULT 0.3,
+                    max_constants BIGINT NOT NULL DEFAULT 5,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL runtime counter proof", error))
     }
@@ -5421,7 +5505,7 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
             } else if group.group_id == "profile_memory" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for profile_dense descriptor projection and dense profile memory conformance; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL proof status: implemented for profile_dense descriptor projection, dense profile memory conformance, and roleplay_lore record/layer physical schema; not yet wired as the full service backend.".to_string(),
                 );
             } else {
                 group.notes.insert(
