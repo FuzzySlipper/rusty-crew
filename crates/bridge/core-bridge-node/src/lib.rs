@@ -2298,6 +2298,7 @@ impl NativeBridgeBinding {
         let output = json!({
             "stream": result.stream.drain_until_terminal().map_err(to_napi_error)?,
             "provider_state": result.provider_state,
+            "transport_metrics": result.transport_metrics,
         });
         serde_json::to_string(&output)
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))

@@ -1861,6 +1861,7 @@ mod tests {
                 session_id: None,
                 implementation_id: None,
                 kind: None,
+                provider_alias: None,
                 model_config: None,
                 brain: None,
                 mcp_tool_profile: None,
@@ -1973,6 +1974,7 @@ mod tests {
                 session_id: Some("runner-session".to_string()),
                 implementation_id: Some("runner-brain".to_string()),
                 kind: Some(SessionKind::Full),
+                provider_alias: None,
                 model_config: None,
                 brain: None,
                 mcp_tool_profile: None,
@@ -2015,6 +2017,7 @@ mod tests {
                 session_id: None,
                 implementation_id: None,
                 kind: None,
+                provider_alias: None,
                 model_config: Some(ProfileModelConfigSeed {
                     provider: "".to_string(),
                     model_name: "".to_string(),

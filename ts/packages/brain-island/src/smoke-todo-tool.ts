@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildProfileRoleAssembly,
+  FileSessionTodoStore,
   MemorySessionTodoStore,
   renderSessionTodoContext,
   todoTool,
@@ -95,6 +99,39 @@ nowMs = Date.parse("2026-06-20T08:00:02.000Z");
 const expired = await tool.execute("read-expired", { action: "read" });
 assert.equal(expired.details.state?.items.length, 0);
 
+const fileRoot = mkdtempSync(join(tmpdir(), "rusty-crew-todos-"));
+try {
+  nowMs = Date.parse("2026-06-20T09:00:00.000Z");
+  const firstFileStore = new FileSessionTodoStore({
+    rootDir: fileRoot,
+    now: () => new Date(nowMs),
+  });
+  const fileTool = todoTool({
+    store: firstFileStore,
+    sessionId: "session-restart-safe",
+  });
+  const persisted = await fileTool.execute("file-replace", {
+    action: "replace",
+    ttlMs: 1_000,
+    items: [{ id: "persisted", title: "Survive restart", status: "pending" }],
+  });
+  assert.equal(persisted.details.ok, true);
+
+  const secondFileStore = new FileSessionTodoStore({
+    rootDir: fileRoot,
+    now: () => new Date(nowMs),
+  });
+  assert.equal(
+    secondFileStore.read("session-restart-safe").items[0]?.id,
+    "persisted",
+  );
+
+  nowMs = Date.parse("2026-06-20T09:00:02.000Z");
+  assert.equal(secondFileStore.read("session-restart-safe").items.length, 0);
+} finally {
+  rmSync(fileRoot, { recursive: true, force: true });
+}
+
 console.log(
   JSON.stringify(
     {
@@ -105,6 +142,7 @@ console.log(
         assembled.roleAssembly.instructions ?? "",
       ),
       expired: expired.details.state?.items.length,
+      fileStoreRestartSafe: true,
     },
     null,
     2,

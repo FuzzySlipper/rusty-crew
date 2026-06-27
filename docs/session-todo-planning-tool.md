@@ -7,10 +7,15 @@ state. This is intentionally separate from Den tasks and project truth.
 
 ## Scope
 
-The first implementation is restart-bounded TypeScript-local state. It is
-session-scoped, capped, and may have explicit TTL expiry. It is useful for a
-brain to keep lightweight local planning notes during a session, not for durable
-work tracking.
+The tool stores session-scoped, capped planning notes with optional explicit TTL
+expiry. In service mode the store is file-backed under
+`<dataDir>/data/session-todos`, so notes survive normal process restarts while
+remaining bounded scratch state. Non-service/test callers can still use the
+in-memory store.
+
+This is useful for a brain to keep lightweight local planning notes during a
+session. It is not durable work tracking and must not be treated as Den task or
+project truth.
 
 ## Tool Behavior
 
@@ -28,8 +33,10 @@ Todo statuses:
 - `blocked`
 - `cancelled`
 
-The in-memory store enforces a max item cap and rejects invalid items. `ttlMs`
-can be supplied on replace/merge to make the state expire aggressively.
+Both stores enforce a max item cap and reject invalid items. `ttlMs` can be
+supplied on replace/merge to make the state expire aggressively. Expired or
+corrupt file-backed session todo files are removed and read back as an empty
+state for that session.
 
 ## Context Injection
 
@@ -50,3 +57,4 @@ it as a section in role instructions when supplied.
 - context-message rendering
 - profile role assembly injection
 - TTL expiry
+- file-backed restart survival

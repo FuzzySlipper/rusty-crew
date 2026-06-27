@@ -5,6 +5,16 @@ import type {
   NativeRuntimeCounterSummary,
   NativeRuntimeSearchResult,
 } from "@rusty-crew/native-bridge";
+import { Buffer } from "node:buffer";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 import type {
   ChannelReadbackReasonCode,
   ChannelReadbackVisibilityFilter,
@@ -104,18 +114,92 @@ export class MemorySessionTodoStore implements SessionTodoStore {
     items: readonly TodoItem[],
     ttlMs: number | undefined,
   ): SessionTodoState {
-    if (items.length > this.maxItems) {
-      throw new TodoInputError("todo_too_many_items");
+    return nextTodoState(sessionId, items, ttlMs, this.maxItems, this.now);
+  }
+
+  private isExpired(state: SessionTodoState): boolean {
+    return Boolean(
+      state.expiresAt && state.expiresAt <= this.now().toISOString(),
+    );
+  }
+}
+
+export interface FileSessionTodoStoreOptions extends MemorySessionTodoStoreOptions {
+  rootDir: string;
+}
+
+export class FileSessionTodoStore implements SessionTodoStore {
+  private readonly rootDir: string;
+  private readonly now: () => Date;
+  private readonly maxItems: number;
+
+  constructor(options: FileSessionTodoStoreOptions) {
+    this.rootDir = options.rootDir;
+    this.now = options.now ?? (() => new Date());
+    this.maxItems = options.maxItems ?? 50;
+    mkdirSync(this.rootDir, { recursive: true });
+  }
+
+  read(sessionId: string): SessionTodoState {
+    const path = this.pathForSession(sessionId);
+    if (!existsSync(path)) return { sessionId, items: [] };
+    try {
+      const state = normalizeTodoState(
+        JSON.parse(readFileSync(path, "utf8")),
+        sessionId,
+      );
+      if (this.isExpired(state)) {
+        rmSync(path, { force: true });
+        return { sessionId, items: [] };
+      }
+      return state;
+    } catch {
+      rmSync(path, { force: true });
+      return { sessionId, items: [] };
     }
-    const now = this.now();
-    return {
+  }
+
+  replace(
+    sessionId: string,
+    items: readonly TodoItem[],
+    ttlMs?: number,
+  ): SessionTodoState {
+    const state = nextTodoState(
       sessionId,
-      items: items.map(normalizeTodoItem),
-      updatedAt: now.toISOString(),
-      expiresAt: ttlMs
-        ? new Date(now.getTime() + ttlMs).toISOString()
-        : undefined,
-    };
+      items,
+      ttlMs,
+      this.maxItems,
+      this.now,
+    );
+    this.write(state);
+    return state;
+  }
+
+  merge(
+    sessionId: string,
+    items: readonly TodoItem[],
+    ttlMs?: number,
+  ): SessionTodoState {
+    const existing = new Map(
+      this.read(sessionId).items.map((item) => [item.id, item]),
+    );
+    for (const item of items) {
+      existing.set(item.id, { ...existing.get(item.id), ...item });
+    }
+    return this.replace(sessionId, [...existing.values()], ttlMs);
+  }
+
+  private write(state: SessionTodoState): void {
+    mkdirSync(this.rootDir, { recursive: true });
+    const path = this.pathForSession(state.sessionId);
+    const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`);
+    renameSync(tmpPath, path);
+  }
+
+  private pathForSession(sessionId: string): string {
+    const name = Buffer.from(sessionId, "utf8").toString("base64url");
+    return join(this.rootDir, `${name}.json`);
   }
 
   private isExpired(state: SessionTodoState): boolean {
@@ -838,6 +922,73 @@ function normalizeTodoItem(item: TodoItem): TodoItem {
     id: item.id.trim(),
     title: item.title.trim(),
   };
+}
+
+function nextTodoState(
+  sessionId: string,
+  items: readonly TodoItem[],
+  ttlMs: number | undefined,
+  maxItems: number,
+  nowProvider: () => Date,
+): SessionTodoState {
+  if (items.length > maxItems) {
+    throw new TodoInputError("todo_too_many_items");
+  }
+  const now = nowProvider();
+  return {
+    sessionId,
+    items: items.map(normalizeTodoItem),
+    updatedAt: now.toISOString(),
+    expiresAt: ttlMs
+      ? new Date(now.getTime() + ttlMs).toISOString()
+      : undefined,
+  };
+}
+
+function normalizeTodoState(raw: unknown, sessionId: string): SessionTodoState {
+  if (!isRecord(raw)) throw new TodoInputError("todo_state_invalid");
+  const rawSessionId =
+    typeof raw.sessionId === "string" ? raw.sessionId : sessionId;
+  if (rawSessionId !== sessionId)
+    throw new TodoInputError("todo_state_invalid");
+  if (!Array.isArray(raw.items)) throw new TodoInputError("todo_state_invalid");
+  return {
+    sessionId,
+    items: raw.items.map((item) =>
+      normalizeTodoItem(normalizeRawTodoItem(item)),
+    ),
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+    expiresAt: typeof raw.expiresAt === "string" ? raw.expiresAt : undefined,
+  };
+}
+
+function normalizeRawTodoItem(raw: unknown): TodoItem {
+  if (!isRecord(raw)) throw new TodoInputError("todo_item_invalid");
+  if (typeof raw.id !== "string" || typeof raw.title !== "string") {
+    throw new TodoInputError("todo_item_invalid");
+  }
+  if (!isTodoStatus(raw.status)) throw new TodoInputError("todo_item_invalid");
+  return {
+    id: raw.id,
+    title: raw.title,
+    status: raw.status,
+    notes: typeof raw.notes === "string" ? raw.notes : undefined,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+  };
+}
+
+function isTodoStatus(value: unknown): value is TodoStatus {
+  return (
+    value === "pending" ||
+    value === "in_progress" ||
+    value === "done" ||
+    value === "blocked" ||
+    value === "cancelled"
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 class TodoInputError extends Error {

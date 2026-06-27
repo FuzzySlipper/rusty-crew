@@ -67,8 +67,10 @@ import {
   counterResetTool,
   curatorExecuteTool,
   type CuratorExecuteContext,
+  FileSessionTodoStore,
   MemorySessionTodoStore,
   sessionSearchTool,
+  type SessionTodoStore,
   todoTool,
 } from "./planning-tools.js";
 import {
@@ -1246,7 +1248,7 @@ function createServiceToolResolver(
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   },
 ): BrainToolResolver {
-  const todoStore = new MemorySessionTodoStore();
+  const todoStore = createServiceTodoStore(options.serviceConfig);
   const browserManager = new BrowserSessionManager();
   const browserScreenshotStore = new MemoryBrowserScreenshotStore();
   return combineResolvers(
@@ -1281,6 +1283,15 @@ function createServiceToolResolver(
       todoStore,
     }),
   );
+}
+
+function createServiceTodoStore(
+  serviceConfig: RustyCrewServiceConfig | undefined,
+): SessionTodoStore {
+  if (!serviceConfig) return new MemorySessionTodoStore();
+  return new FileSessionTodoStore({
+    rootDir: join(serviceConfig.paths.dataDir, "data", "session-todos"),
+  });
 }
 
 function createMemoryToolResolver(
@@ -1343,7 +1354,7 @@ function createPlanningToolResolver(input: {
   bridge?: NativeBridgeModule;
   runtimeConfig?: RustyCrewRuntimeConfig;
   curatorExecutor?: CuratorExecuteContext["executor"];
-  todoStore: MemorySessionTodoStore;
+  todoStore: SessionTodoStore;
 }): BrainToolResolver {
   return ({ wake }) => {
     const session = wake.state.session;

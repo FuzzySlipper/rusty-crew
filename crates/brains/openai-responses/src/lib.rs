@@ -18,7 +18,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const MODULE_ID: &str = "openai-responses";
 pub const REPLAY_STRATEGY_ID: &str = "replay";
@@ -909,6 +909,113 @@ pub trait ResponsesClient {
     ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponsesTransportMetrics {
+    pub effective_transport: String,
+    pub selected_strategy_id: String,
+    pub effective_strategy_id: String,
+    pub fallback_reason: Option<String>,
+    pub provider_request_count: u64,
+    pub continuation_round_count: u64,
+    pub provider_request_payload_bytes: u64,
+    pub provider_event_counts: HashMap<String, u64>,
+    pub first_text_delta_latency_ms: Option<u64>,
+    pub total_turn_duration_ms: u64,
+}
+
+struct ResponsesTransportMetricsBuilder {
+    selected_strategy_id: &'static str,
+    effective_strategy_id: &'static str,
+    fallback_reason: Option<PreviousResponseChainFallbackReason>,
+    provider_request_count: u64,
+    continuation_round_count: u64,
+    provider_request_payload_bytes: u64,
+    provider_event_counts: HashMap<String, u64>,
+    first_text_delta_latency_ms: Option<u64>,
+    turn_started_at: Instant,
+}
+
+impl ResponsesTransportMetricsBuilder {
+    fn new(config: &ResponsesBrainConfig) -> Self {
+        let selected_strategy_id = config.strategy.strategy_id();
+        Self {
+            selected_strategy_id,
+            effective_strategy_id: selected_strategy_id,
+            fallback_reason: None,
+            provider_request_count: 0,
+            continuation_round_count: 0,
+            provider_request_payload_bytes: 0,
+            provider_event_counts: HashMap::new(),
+            first_text_delta_latency_ms: None,
+            turn_started_at: Instant::now(),
+        }
+    }
+
+    fn observe_fallback(&mut self, reason: PreviousResponseChainFallbackReason) {
+        self.effective_strategy_id = REPLAY_STRATEGY_ID;
+        self.fallback_reason.get_or_insert(reason);
+    }
+
+    fn observe_request(&mut self, request: &ResponsesRequest) {
+        self.provider_request_count += 1;
+        if let Ok(payload) = serde_json::to_vec(request) {
+            self.provider_request_payload_bytes += payload.len() as u64;
+        }
+    }
+
+    fn observe_events(&mut self, events: &[ResponsesEvent], elapsed: Duration) {
+        for event in events {
+            *self
+                .provider_event_counts
+                .entry(responses_event_kind(event).to_string())
+                .or_insert(0) += 1;
+            if self.first_text_delta_latency_ms.is_none()
+                && matches!(event, ResponsesEvent::TextDelta(_))
+            {
+                self.first_text_delta_latency_ms = Some(duration_ms(elapsed));
+            }
+        }
+    }
+
+    fn observe_continuation_round(&mut self) {
+        self.continuation_round_count += 1;
+    }
+
+    fn finish(&self) -> ResponsesTransportMetrics {
+        ResponsesTransportMetrics {
+            effective_transport: "http-sse".to_string(),
+            selected_strategy_id: self.selected_strategy_id.to_string(),
+            effective_strategy_id: self.effective_strategy_id.to_string(),
+            fallback_reason: self
+                .fallback_reason
+                .map(|reason| reason.as_str().to_string()),
+            provider_request_count: self.provider_request_count,
+            continuation_round_count: self.continuation_round_count,
+            provider_request_payload_bytes: self.provider_request_payload_bytes,
+            provider_event_counts: self.provider_event_counts.clone(),
+            first_text_delta_latency_ms: self.first_text_delta_latency_ms,
+            total_turn_duration_ms: duration_ms(self.turn_started_at.elapsed()),
+        }
+    }
+}
+
+fn responses_event_kind(event: &ResponsesEvent) -> &'static str {
+    match event {
+        ResponsesEvent::TextDelta(_) => "response.output_text.delta",
+        ResponsesEvent::ReasoningDelta(_) => "response.reasoning.delta",
+        ResponsesEvent::OutputItemAdded(_) => "response.output_item.added",
+        ResponsesEvent::OutputItemDone(_) => "response.output_item.done",
+        ResponsesEvent::Completed { .. } => "response.completed",
+        ResponsesEvent::Failed(_) => "response.failed",
+        ResponsesEvent::Incomplete(_) => "response.incomplete",
+    }
+}
+
+fn duration_ms(duration: Duration) -> u64 {
+    duration.as_millis().try_into().unwrap_or(u64::MAX)
+}
+
 #[derive(Debug, Clone)]
 pub struct LiveResponsesClient {
     client: HttpClient,
@@ -1210,6 +1317,7 @@ where
         request: BrainWakeRequest,
         history: ResponsesReplayProjection,
     ) -> CoreResult<ResponsesBrainWakeResult> {
+        let mut metrics = ResponsesTransportMetricsBuilder::new(&self.request_builder.config);
         let mut items = vec![event(&request, BrainEvent::Started)];
         if let Some(absence) = &request.provider_state_absence {
             if matches!(
@@ -1247,14 +1355,23 @@ where
                 continuation_items.clone(),
             );
             if let Some(reason) = planned_request.fallback_reason {
+                metrics.observe_fallback(reason);
                 items.push(previous_response_chain_fallback_event(&request, reason));
             }
             let planned_fingerprint = request_fingerprint(&planned_request.request);
             let committed_input_items = planned_request.request.input.clone();
+            metrics.observe_request(&planned_request.request);
+            let request_started_at = Instant::now();
             let events = match self.client.stream(planned_request.request.clone()) {
-                Ok(events) => events,
+                Ok(events) => {
+                    metrics.observe_events(&events, request_started_at.elapsed());
+                    events
+                }
                 Err(error) => {
                     if planned_request.request.previous_response_id.is_some() {
+                        metrics.observe_fallback(
+                            PreviousResponseChainFallbackReason::PredecessorRejectedByProvider,
+                        );
                         items.push(previous_response_chain_fallback_event(
                             &request,
                             PreviousResponseChainFallbackReason::PredecessorRejectedByProvider,
@@ -1267,21 +1384,30 @@ where
                         );
                         let replay_fingerprint = request_fingerprint(&replay_request);
                         let replay_input_items = replay_request.input.clone();
+                        metrics.observe_request(&replay_request);
+                        let request_started_at = Instant::now();
                         let completed_without_pending = match self.client.stream(replay_request) {
-                            Ok(events) => self.process_provider_events(
-                                &request,
-                                &mut items,
-                                events,
-                                &mut continuation_items,
-                                &mut committed_output_items,
-                                &mut last_response_id,
-                                &mut last_usage,
-                            ),
-                            Err(error) => return Ok(failed_result(&request, items, error)),
+                            Ok(events) => {
+                                metrics.observe_events(&events, request_started_at.elapsed());
+                                self.process_provider_events(
+                                    &request,
+                                    &mut items,
+                                    events,
+                                    &mut continuation_items,
+                                    &mut committed_output_items,
+                                    &mut last_response_id,
+                                    &mut last_usage,
+                                )
+                            }
+                            Err(error) => {
+                                return Ok(failed_result(&request, items, error, metrics.finish()))
+                            }
                         };
                         let completed_without_pending = match completed_without_pending {
                             Ok(done) => done,
-                            Err(error) => return Ok(failed_result(&request, items, error)),
+                            Err(error) => {
+                                return Ok(failed_result(&request, items, error, metrics.finish()))
+                            }
                         };
                         if continuation_items.is_empty() {
                             debug_assert!(completed_without_pending);
@@ -1296,11 +1422,13 @@ where
                                     committed_input_items: replay_input_items,
                                     request_fingerprint: replay_fingerprint,
                                 },
+                                metrics.finish(),
                             ));
                         }
+                        metrics.observe_continuation_round();
                         continue;
                     }
-                    return Ok(failed_result(&request, items, error));
+                    return Ok(failed_result(&request, items, error, metrics.finish()));
                 }
             };
             let completed_without_pending = self.process_provider_events(
@@ -1314,7 +1442,7 @@ where
             );
             let completed_without_pending = match completed_without_pending {
                 Ok(done) => done,
-                Err(error) => return Ok(failed_result(&request, items, error)),
+                Err(error) => return Ok(failed_result(&request, items, error, metrics.finish())),
             };
             if completed_without_pending {
                 return Ok(finish_responses_wake(
@@ -1328,14 +1456,17 @@ where
                         committed_input_items,
                         request_fingerprint: planned_fingerprint,
                     },
+                    metrics.finish(),
                 ));
             }
+            metrics.observe_continuation_round();
         }
 
         Ok(failed_result(
             &request,
             items,
             ResponsesStreamError::IdleTimeout,
+            metrics.finish(),
         ))
     }
 
@@ -1465,6 +1596,7 @@ where
 pub struct ResponsesBrainWakeResult {
     pub stream: BrainWakeStream,
     pub provider_state: Option<BrainWakeProviderStateOutput>,
+    pub transport_metrics: ResponsesTransportMetrics,
 }
 
 struct CompletedResponsesAttempt {
@@ -1480,6 +1612,7 @@ fn finish_responses_wake(
     config: &ResponsesBrainConfig,
     mut items: Vec<BrainWakeStreamItem>,
     completed: CompletedResponsesAttempt,
+    transport_metrics: ResponsesTransportMetrics,
 ) -> ResponsesBrainWakeResult {
     items.push(event(request, BrainEvent::Finished));
     let batch = BrainActionBatch {
@@ -1508,6 +1641,7 @@ fn finish_responses_wake(
     ResponsesBrainWakeResult {
         stream: BrainWakeStream::from_items(items),
         provider_state: Some(provider_state),
+        transport_metrics,
     }
 }
 
@@ -1597,6 +1731,7 @@ fn failed_result(
     request: &BrainWakeRequest,
     mut items: Vec<BrainWakeStreamItem>,
     error: ResponsesStreamError,
+    transport_metrics: ResponsesTransportMetrics,
 ) -> ResponsesBrainWakeResult {
     items.push(BrainWakeStreamItem::wake_failed(BrainWakeFailure {
         wake_id: request.wake_id.clone(),
@@ -1607,6 +1742,7 @@ fn failed_result(
     ResponsesBrainWakeResult {
         stream: BrainWakeStream::from_items(items),
         provider_state: None,
+        transport_metrics,
     }
 }
 
@@ -2166,6 +2302,38 @@ mod tests {
             result.provider_state,
             Some(BrainWakeProviderStateOutput::Replace { .. })
         ));
+        assert_eq!(result.transport_metrics.effective_transport, "http-sse");
+        assert_eq!(
+            result.transport_metrics.selected_strategy_id,
+            REPLAY_STRATEGY_ID
+        );
+        assert_eq!(
+            result.transport_metrics.effective_strategy_id,
+            REPLAY_STRATEGY_ID
+        );
+        assert_eq!(result.transport_metrics.provider_request_count, 1);
+        assert!(
+            result.transport_metrics.provider_request_payload_bytes > 0,
+            "request payload bytes should be measured"
+        );
+        assert_eq!(
+            result
+                .transport_metrics
+                .provider_event_counts
+                .get("response.output_text.delta"),
+            Some(&1)
+        );
+        assert_eq!(
+            result
+                .transport_metrics
+                .provider_event_counts
+                .get("response.completed"),
+            Some(&1)
+        );
+        assert!(result
+            .transport_metrics
+            .first_text_delta_latency_ms
+            .is_some());
         let Some(BrainWakeProviderStateOutput::Replace { state }) = result.provider_state else {
             panic!("expected provider-state replacement");
         };
@@ -2224,6 +2392,22 @@ mod tests {
             result.provider_state,
             Some(BrainWakeProviderStateOutput::Replace { .. })
         ));
+        assert_eq!(result.transport_metrics.provider_request_count, 2);
+        assert_eq!(result.transport_metrics.continuation_round_count, 1);
+        assert_eq!(
+            result
+                .transport_metrics
+                .provider_event_counts
+                .get("response.output_item.done"),
+            Some(&1)
+        );
+        assert_eq!(
+            result
+                .transport_metrics
+                .provider_event_counts
+                .get("response.completed"),
+            Some(&2)
+        );
         let Some(BrainWakeProviderStateOutput::Replace { state }) = result.provider_state else {
             panic!("expected provider-state replacement");
         };

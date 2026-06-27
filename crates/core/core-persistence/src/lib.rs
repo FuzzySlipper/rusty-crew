@@ -2394,6 +2394,54 @@ pub struct RoleplayChatLayerRecord {
     pub layer: RoleplayLoreLayerRecord,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoreRecallQuery {
+    pub chat_id: String,
+    pub session_id: Option<SessionId>,
+    pub query_text: Option<String>,
+    pub active_subjects: Vec<String>,
+    pub excluded_subjects: Vec<String>,
+    pub token_budget: Option<u32>,
+    pub trace_id: Option<String>,
+    pub record_trace: bool,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoreRecallEntry {
+    pub record: RoleplayLoreRecord,
+    pub layer_id: String,
+    pub score: f32,
+    pub token_estimate: u32,
+    pub is_constant: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoreRecallTraceRecord {
+    pub trace_id: String,
+    pub session_id: Option<SessionId>,
+    pub layer_ids: Vec<String>,
+    pub query_text: Option<String>,
+    pub active_subjects: Vec<String>,
+    pub excluded_subjects: Vec<String>,
+    pub config_snapshot: JsonValue,
+    pub entries_considered: u32,
+    pub entries_returned: u32,
+    pub token_budget: Option<u32>,
+    pub tokens_consumed: u32,
+    pub created_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoreRecallResult {
+    pub chat_id: String,
+    pub entries: Vec<LoreRecallEntry>,
+    pub entries_considered: u32,
+    pub tokens_consumed: u32,
+    pub token_budget: Option<u32>,
+    pub trace: Option<LoreRecallTraceRecord>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleKvScope {
     pub scope_type: String,
@@ -3186,6 +3234,13 @@ pub enum DiagnosticTable {
     ModelProviders,
     ProfileMemories,
     SessionMemoryRecords,
+    RoleplayLoreRecords,
+    RoleplayLoreProvenanceEvents,
+    RoleplayLoreLayers,
+    RoleplayLoreLayerEntries,
+    RoleplayChatLayers,
+    RoleplayLoreRecallTraces,
+    RoleplayLoreLayerConfig,
     MemoryProposals,
     MemoryGovernanceDecisions,
     ScheduledJobs,
@@ -3231,6 +3286,13 @@ impl DiagnosticTable {
         Self::ModelProviders,
         Self::ProfileMemories,
         Self::SessionMemoryRecords,
+        Self::RoleplayLoreRecords,
+        Self::RoleplayLoreProvenanceEvents,
+        Self::RoleplayLoreLayers,
+        Self::RoleplayLoreLayerEntries,
+        Self::RoleplayChatLayers,
+        Self::RoleplayLoreRecallTraces,
+        Self::RoleplayLoreLayerConfig,
         Self::MemoryProposals,
         Self::MemoryGovernanceDecisions,
         Self::ScheduledJobs,
@@ -3276,6 +3338,13 @@ impl DiagnosticTable {
             "model_providers" => Ok(Self::ModelProviders),
             "profile_memories" => Ok(Self::ProfileMemories),
             "session_memory_records" => Ok(Self::SessionMemoryRecords),
+            "module_roleplay_lore_records" => Ok(Self::RoleplayLoreRecords),
+            "module_roleplay_lore_provenance_events" => Ok(Self::RoleplayLoreProvenanceEvents),
+            "module_roleplay_lore_layers" => Ok(Self::RoleplayLoreLayers),
+            "module_roleplay_lore_layer_entries" => Ok(Self::RoleplayLoreLayerEntries),
+            "module_roleplay_chat_layers" => Ok(Self::RoleplayChatLayers),
+            "module_roleplay_lore_recall_traces" => Ok(Self::RoleplayLoreRecallTraces),
+            "module_roleplay_lore_layer_config" => Ok(Self::RoleplayLoreLayerConfig),
             "memory_proposals" => Ok(Self::MemoryProposals),
             "memory_governance_decisions" => Ok(Self::MemoryGovernanceDecisions),
             "scheduled_jobs" => Ok(Self::ScheduledJobs),
@@ -3326,6 +3395,13 @@ impl DiagnosticTable {
             Self::ModelProviders => "model_providers",
             Self::ProfileMemories => "profile_memories",
             Self::SessionMemoryRecords => "session_memory_records",
+            Self::RoleplayLoreRecords => "module_roleplay_lore_records",
+            Self::RoleplayLoreProvenanceEvents => "module_roleplay_lore_provenance_events",
+            Self::RoleplayLoreLayers => "module_roleplay_lore_layers",
+            Self::RoleplayLoreLayerEntries => "module_roleplay_lore_layer_entries",
+            Self::RoleplayChatLayers => "module_roleplay_chat_layers",
+            Self::RoleplayLoreRecallTraces => "module_roleplay_lore_recall_traces",
+            Self::RoleplayLoreLayerConfig => "module_roleplay_lore_layer_config",
             Self::MemoryProposals => "memory_proposals",
             Self::MemoryGovernanceDecisions => "memory_governance_decisions",
             Self::ScheduledJobs => "scheduled_jobs",
@@ -4677,6 +4753,115 @@ impl CoordinationStore {
         }
         tx.commit()
             .map_err(|error| persistence_error("commit reorder roleplay chat layers", error))
+    }
+
+    pub fn recall_lore(&self, query: &LoreRecallQuery) -> CoreResult<LoreRecallResult> {
+        validate_lore_recall_query(query)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start roleplay lore recall", error))?;
+        let layers = get_chat_layers_in_tx(&tx, &query.chat_id)?
+            .into_iter()
+            .filter(|layer| layer.enabled && !layer.layer.is_archived)
+            .collect::<Vec<_>>();
+        let mut layer_configs = Vec::new();
+        for layer in &layers {
+            let config = get_lore_layer_config_in_tx(&tx, &layer.layer_id)?
+                .unwrap_or_else(|| default_lore_layer_config(&layer.layer_id, &query.now));
+            layer_configs.push((layer.clone(), config));
+        }
+
+        let token_budget = query.token_budget.unwrap_or_else(|| {
+            layer_configs
+                .first()
+                .map(|(_, config)| config.default_token_budget)
+                .unwrap_or(4_000)
+        });
+        let mut remaining = token_budget;
+        let mut entries = Vec::new();
+        let mut seen_records = BTreeSet::new();
+        let mut entries_considered = 0_u32;
+
+        for (layer, config) in &layer_configs {
+            let constants = constant_lore_entries_for_layer(&tx, &layer.layer_id, config)?;
+            let mut reserve_remaining = config.constant_token_reserve;
+            for mut entry in constants {
+                entries_considered += 1;
+                if excluded_subject_match(&entry.record, &query.excluded_subjects) {
+                    continue;
+                }
+                entry.token_estimate = estimate_lore_tokens(&entry.record);
+                if entry.token_estimate > remaining || entry.token_estimate > reserve_remaining {
+                    continue;
+                }
+                remaining -= entry.token_estimate;
+                reserve_remaining -= entry.token_estimate;
+                seen_records.insert(entry.record.record_id.clone());
+                entries.push(entry);
+            }
+        }
+
+        let mut scored = if query
+            .query_text
+            .as_deref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        {
+            scored_lore_entries_for_recall(&tx, query, &layer_configs, &seen_records)?
+        } else {
+            Vec::new()
+        };
+        entries_considered += scored.len() as u32;
+        scored.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.record.updated_at.cmp(&right.record.updated_at))
+                .then_with(|| left.record.record_id.cmp(&right.record.record_id))
+        });
+        for entry in scored {
+            if entry.token_estimate > remaining {
+                continue;
+            }
+            remaining -= entry.token_estimate;
+            entries.push(entry);
+        }
+
+        let tokens_consumed = token_budget.saturating_sub(remaining);
+        let trace = if query.record_trace {
+            let trace = LoreRecallTraceRecord {
+                trace_id: query.trace_id.clone().unwrap_or_else(|| {
+                    format!("recall:{}:{}:{}", query.chat_id, query.now, entries.len())
+                }),
+                session_id: query.session_id.clone(),
+                layer_ids: layers.iter().map(|layer| layer.layer_id.clone()).collect(),
+                query_text: query.query_text.clone(),
+                active_subjects: query.active_subjects.clone(),
+                excluded_subjects: query.excluded_subjects.clone(),
+                config_snapshot: lore_recall_config_snapshot(&layer_configs),
+                entries_considered,
+                entries_returned: entries.len() as u32,
+                token_budget: Some(token_budget),
+                tokens_consumed,
+                created_at: query.now.clone(),
+            };
+            insert_lore_recall_trace_in_tx(&tx, &trace)?;
+            Some(trace)
+        } else {
+            None
+        };
+        tx.commit()
+            .map_err(|error| persistence_error("commit roleplay lore recall", error))?;
+        Ok(LoreRecallResult {
+            chat_id: query.chat_id.clone(),
+            entries,
+            entries_considered,
+            tokens_consumed,
+            token_budget: Some(token_budget),
+            trace,
+        })
     }
 
     pub fn save_memory_proposal(
@@ -16642,6 +16827,323 @@ fn require_lore_layer_and_record(
     Ok(())
 }
 
+fn constant_lore_entries_for_layer(
+    tx: &rusqlite::Transaction<'_>,
+    layer_id: &str,
+    config: &RoleplayLoreLayerConfigRecord,
+) -> CoreResult<Vec<LoreRecallEntry>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT e.layer_id,
+                    e.record_id,
+                    e.is_constant,
+                    e.priority,
+                    e.added_at,
+                    r.record_id,
+                    r.world_id,
+                    r.entity_id,
+                    r.session_id,
+                    r.branch_id,
+                    r.shape_id,
+                    r.shape_version,
+                    r.canon_status,
+                    r.visibility,
+                    r.status,
+                    r.revision,
+                    r.title,
+                    r.body,
+                    r.content_json,
+                    r.evidence_refs_json,
+                    r.source,
+                    r.confidence,
+                    r.durability_rationale,
+                    r.supersedes_record_id,
+                    r.superseded_by_record_id,
+                    r.tombstoned_at,
+                    r.tombstone_reason,
+                    r.created_at,
+                    r.updated_at
+             FROM module_roleplay_lore_layer_entries e
+             JOIN module_roleplay_lore_records r ON r.record_id = e.record_id
+             WHERE e.layer_id = ?1
+               AND e.is_constant = 1
+               AND r.status = 'active'
+             ORDER BY e.priority ASC, r.updated_at DESC, e.record_id ASC
+             LIMIT ?2",
+        )
+        .map_err(|error| persistence_error("prepare roleplay lore constant recall", error))?;
+    let rows = stmt
+        .query_map(params![layer_id, config.max_constants as i64], |row| {
+            let join = row_to_lore_layer_entry_join(row)?;
+            let token_estimate = estimate_lore_tokens(&join.record);
+            Ok(LoreRecallEntry {
+                record: join.record,
+                layer_id: join.layer_id,
+                score: 1_000.0 - join.priority as f32,
+                token_estimate,
+                is_constant: true,
+            })
+        })
+        .map_err(|error| persistence_error("query roleplay lore constant recall", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load roleplay lore constant recall", error))
+}
+
+fn scored_lore_entries_for_recall(
+    tx: &rusqlite::Transaction<'_>,
+    query: &LoreRecallQuery,
+    layer_configs: &[(RoleplayChatLayerRecord, RoleplayLoreLayerConfigRecord)],
+    seen_records: &BTreeSet<String>,
+) -> CoreResult<Vec<LoreRecallEntry>> {
+    let Some(query_text) = query.query_text.as_deref().map(str::trim) else {
+        return Ok(Vec::new());
+    };
+    if query_text.is_empty() || layer_configs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let fts_query = quote_fts_query(query_text);
+    let mut out = Vec::new();
+    for (layer, config) in layer_configs {
+        let mut stmt = tx
+            .prepare(
+                "SELECT e.layer_id,
+                        e.record_id,
+                        e.is_constant,
+                        e.priority,
+                        e.added_at,
+                        r.record_id,
+                        r.world_id,
+                        r.entity_id,
+                        r.session_id,
+                        r.branch_id,
+                        r.shape_id,
+                        r.shape_version,
+                        r.canon_status,
+                        r.visibility,
+                        r.status,
+                        r.revision,
+                        r.title,
+                        r.body,
+                        r.content_json,
+                        r.evidence_refs_json,
+                        r.source,
+                        r.confidence,
+                        r.durability_rationale,
+                        r.supersedes_record_id,
+                        r.superseded_by_record_id,
+                        r.tombstoned_at,
+                        r.tombstone_reason,
+                        r.created_at,
+                        r.updated_at,
+                        bm25(module_roleplay_lore_records_fts) AS fts_rank
+                 FROM module_roleplay_lore_records_fts
+                 JOIN module_roleplay_lore_records r
+                    ON r.rowid = module_roleplay_lore_records_fts.rowid
+                 JOIN module_roleplay_lore_layer_entries e
+                    ON e.record_id = r.record_id
+                 WHERE module_roleplay_lore_records_fts MATCH ?1
+                   AND e.layer_id = ?2
+                   AND r.status = 'active'
+                 ORDER BY fts_rank ASC, e.priority ASC, r.updated_at DESC
+                 LIMIT 100",
+            )
+            .map_err(|error| persistence_error("prepare roleplay lore scored recall", error))?;
+        let rows = stmt
+            .query_map(
+                params![fts_query.as_str(), layer.layer_id.as_str()],
+                |row| {
+                    let join = row_to_lore_layer_entry_join(row)?;
+                    let fts_rank = row.get::<_, f64>(29)? as f32;
+                    let token_estimate = estimate_lore_tokens(&join.record);
+                    let score = score_lore_recall_entry(
+                        &join.record,
+                        config,
+                        layer.priority,
+                        join.priority,
+                        fts_rank,
+                        query_text,
+                        &query.active_subjects,
+                    );
+                    Ok(LoreRecallEntry {
+                        record: join.record,
+                        layer_id: join.layer_id,
+                        score,
+                        token_estimate,
+                        is_constant: false,
+                    })
+                },
+            )
+            .map_err(|error| persistence_error("query roleplay lore scored recall", error))?;
+        for entry in rows {
+            let entry = entry
+                .map_err(|error| persistence_error("load roleplay lore scored recall", error))?;
+            if seen_records.contains(&entry.record.record_id) {
+                continue;
+            }
+            if excluded_subject_match(&entry.record, &query.excluded_subjects) {
+                continue;
+            }
+            if entry.score < config.min_relevance_score {
+                continue;
+            }
+            out.push(entry);
+        }
+    }
+    Ok(out)
+}
+
+fn score_lore_recall_entry(
+    record: &RoleplayLoreRecord,
+    config: &RoleplayLoreLayerConfigRecord,
+    chat_layer_priority: i64,
+    entry_priority: i64,
+    fts_rank: f32,
+    query_text: &str,
+    active_subjects: &[String],
+) -> f32 {
+    let fts_score = (1.0 / (1.0 + fts_rank.max(0.0))) * config.fts_weight;
+    let subject_score = if subject_match(record, active_subjects) {
+        config.subject_weight
+    } else {
+        0.0
+    };
+    let canon_score = match record.canon_status {
+        RoleplayLoreCanonStatus::Canon => 1.0,
+        RoleplayLoreCanonStatus::Contested => 0.5,
+        RoleplayLoreCanonStatus::Draft => 0.25,
+        RoleplayLoreCanonStatus::Deprecated => 0.0,
+    } * config.canon_weight;
+    let layer_boost = 1.0 / (1.0 + chat_layer_priority.max(0) as f32);
+    let priority_boost = 1.0 / (1.0 + entry_priority.max(0) as f32);
+    let tag_overlap = lore_query_overlap(record, query_text) * config.tag_boost_weight;
+    let recency = config.recency_weight;
+    fts_score + subject_score + canon_score + layer_boost + priority_boost + tag_overlap + recency
+}
+
+fn subject_match(record: &RoleplayLoreRecord, subjects: &[String]) -> bool {
+    subjects.iter().any(|subject| {
+        let normalized = subject.trim();
+        !normalized.is_empty()
+            && (record.world_id == normalized
+                || record.entity_id.as_deref() == Some(normalized)
+                || record.title.contains(normalized)
+                || record.body.contains(normalized))
+    })
+}
+
+fn excluded_subject_match(record: &RoleplayLoreRecord, subjects: &[String]) -> bool {
+    subject_match(record, subjects)
+}
+
+fn lore_query_overlap(record: &RoleplayLoreRecord, query_text: &str) -> f32 {
+    let haystack = format!(
+        "{} {} {}",
+        record.title.to_lowercase(),
+        record.body.to_lowercase(),
+        record.content.to_string().to_lowercase()
+    );
+    let mut total = 0_u32;
+    let mut matched = 0_u32;
+    for token in query_text
+        .split(|ch: char| !ch.is_alphanumeric())
+        .map(str::trim)
+        .filter(|token| token.len() >= 3)
+    {
+        total += 1;
+        if haystack.contains(&token.to_lowercase()) {
+            matched += 1;
+        }
+    }
+    if total == 0 {
+        0.0
+    } else {
+        matched as f32 / total as f32
+    }
+}
+
+fn estimate_lore_tokens(record: &RoleplayLoreRecord) -> u32 {
+    let words = record.title.split_whitespace().count() + record.body.split_whitespace().count();
+    ((words as f32) * 1.35).ceil().max(1.0) as u32
+}
+
+fn default_lore_layer_config(layer_id: &str, now: &IsoTimestamp) -> RoleplayLoreLayerConfigRecord {
+    RoleplayLoreLayerConfigRecord {
+        config_id: format!("{layer_id}:default"),
+        layer_id: layer_id.to_string(),
+        fts_weight: 1.0,
+        subject_weight: 1.0,
+        canon_weight: 0.5,
+        tag_boost_weight: 0.5,
+        recency_weight: 0.2,
+        default_token_budget: 4_000,
+        constant_token_reserve: 500,
+        min_relevance_score: 0.3,
+        max_constants: 5,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    }
+}
+
+fn lore_recall_config_snapshot(
+    layer_configs: &[(RoleplayChatLayerRecord, RoleplayLoreLayerConfigRecord)],
+) -> JsonValue {
+    serde_json::json!({
+        "layers": layer_configs
+            .iter()
+            .map(|(layer, config)| {
+                serde_json::json!({
+                    "layer_id": layer.layer_id,
+                    "priority": layer.priority,
+                    "config": config,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+}
+
+fn insert_lore_recall_trace_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    trace: &LoreRecallTraceRecord,
+) -> CoreResult<()> {
+    validate_roleplay_lore_identifier("roleplay lore recall trace_id", &trace.trace_id)?;
+    let layer_ids = to_json_text(&trace.layer_ids)?;
+    let active_subjects = to_json_text(&trace.active_subjects)?;
+    let excluded_subjects = to_json_text(&trace.excluded_subjects)?;
+    let config_snapshot = to_json_text(&trace.config_snapshot)?;
+    tx.execute(
+        "INSERT INTO module_roleplay_lore_recall_traces (
+            trace_id,
+            session_id,
+            layer_ids,
+            query_text,
+            active_subjects,
+            excluded_subjects,
+            config_snapshot,
+            entries_considered,
+            entries_returned,
+            token_budget,
+            tokens_consumed,
+            created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            trace.trace_id.as_str(),
+            trace.session_id.as_ref().map(|value| value.0.as_str()),
+            layer_ids,
+            trace.query_text.as_deref(),
+            active_subjects,
+            excluded_subjects,
+            config_snapshot,
+            trace.entries_considered as i64,
+            trace.entries_returned as i64,
+            trace.token_budget.map(|value| value as i64),
+            trace.tokens_consumed as i64,
+            trace.created_at.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert roleplay lore recall trace", error))?;
+    Ok(())
+}
+
 fn row_to_roleplay_lore_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RoleplayLoreRecord> {
     row_to_roleplay_lore_record_at(row, 0)
 }
@@ -16968,6 +17470,22 @@ fn validate_roleplay_chat_layers_write(write: &RoleplayChatLayersWrite) -> CoreR
         .map(|layer| layer.layer_id.clone())
         .collect::<Vec<_>>();
     validate_unique_roleplay_ids("roleplay chat layer_ids", &layer_ids)?;
+    Ok(())
+}
+
+fn validate_lore_recall_query(query: &LoreRecallQuery) -> CoreResult<()> {
+    validate_roleplay_lore_identifier("roleplay chat_id", &query.chat_id)?;
+    if let Some(trace_id) = &query.trace_id {
+        validate_roleplay_lore_identifier("roleplay lore recall trace_id", trace_id)?;
+    }
+    if let Some(token_budget) = query.token_budget {
+        validate_positive_u32("roleplay lore recall token_budget", token_budget)?;
+    }
+    validate_unique_roleplay_ids("roleplay lore active_subjects", &query.active_subjects)?;
+    validate_unique_roleplay_ids("roleplay lore excluded_subjects", &query.excluded_subjects)?;
+    if let Some(query_text) = &query.query_text {
+        validate_optional_lore_text("roleplay lore recall query_text", Some(query_text))?;
+    }
     Ok(())
 }
 
@@ -19936,6 +20454,9 @@ mod tests {
                 &["layer-world".to_string(), "layer-story".to_string()],
             )
             .unwrap();
+        store
+            .toggle_chat_layer("chat-moonlit", "layer-world", true)
+            .unwrap();
         assert_eq!(
             store
                 .get_chat_layers("chat-moonlit")
@@ -19944,6 +20465,30 @@ mod tests {
                 .map(|layer| layer.layer_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["layer-world", "layer-story"]
+        );
+
+        let recall = store
+            .recall_lore(&LoreRecallQuery {
+                chat_id: "chat-moonlit".to_string(),
+                session_id: Some(SessionId::new("session-moonlit")),
+                query_text: Some("moon gate tide".to_string()),
+                active_subjects: vec!["entity-clockmaker".to_string()],
+                excluded_subjects: Vec::new(),
+                token_budget: Some(120),
+                trace_id: Some("trace-moonlit-1".to_string()),
+                record_trace: true,
+                now: "2026-06-27T01:08:30Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(recall.entries.len(), 1);
+        assert_eq!(recall.entries[0].record.record_id, "lore-tide-calendar");
+        assert!(recall.tokens_consumed > 0);
+        assert_eq!(recall.trace.as_ref().unwrap().trace_id, "trace-moonlit-1");
+        assert_eq!(
+            store
+                .count_rows("module_roleplay_lore_recall_traces")
+                .unwrap(),
+            1
         );
 
         store
