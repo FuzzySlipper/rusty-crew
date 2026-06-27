@@ -524,9 +524,9 @@ function assertServiceStorageBootAllowed(
   storage: RustyCrewStorageConfig,
   context: string,
 ): void {
-  if (storage.backend === "postgres") {
+  if (storage.backend === "postgres" && storage.postgres.bootMode !== "active") {
     throw new Error(
-      `${context}: storage.backend=postgres is selected, but the full-service PostgreSQL backend is not production-ready yet. This fails closed before opening the coordination engine so the service cannot silently fall back to SQLite. PostgreSQL proof/admin diagnostics are available through bounded storage proof tests and projections only, not full service boot.`,
+      `${context}: storage.backend=postgres requires storage.postgres.bootMode=active for full service startup; current mode is ${storage.postgres.bootMode}. This fails closed so the service cannot silently fall back to SQLite.`,
     );
   }
 }
@@ -743,7 +743,9 @@ async function handleHttpRequest(
         url: url.toString(),
         requestId: requestId(request),
       },
-      await buildDiagnosticsContext(state),
+      await buildDiagnosticsContext(state, {
+        includeProfileRegistry: isProfileRegistryAdminRoute(url.pathname),
+      }),
     );
   }
 
@@ -2653,6 +2655,9 @@ interface CreatedServiceProfile {
   profilePath: string;
   runtimeConfigPath: string;
   registryWrite?: NativeCreateProfilePlan["registryWrite"];
+  registryRecord?: Awaited<
+    ReturnType<ServiceState["bridge"]["createProfileRegistryRecord"]>
+  >;
   fileAssetActions: NativeCreateProfilePlan["fileAssetActions"];
   derivedRuntimeActions: NativeCreateProfilePlan["derivedRuntimeActions"];
   applyResult: RustyCrewRuntimeConfigApplyResult;
@@ -3112,6 +3117,9 @@ async function createServiceProfile(
     state.runtimeConfig.profilesDir,
     profileFileAction?.relativePath ?? `${profileSeed.profileId}.json`,
   );
+  const registryRecord = plan.registryWrite
+    ? await state.bridge.createProfileRegistryRecord(plan.registryWrite)
+    : undefined;
 
   await mkdir(state.runtimeConfig.profilesDir, { recursive: true });
   await writeJsonFileAtomic(plannedProfilePath, {
@@ -3148,6 +3156,7 @@ async function createServiceProfile(
     profilePath: plannedProfilePath,
     runtimeConfigPath: state.config.paths.serviceConfigFile,
     registryWrite: plan.registryWrite,
+    registryRecord,
     fileAssetActions: plan.fileAssetActions,
     derivedRuntimeActions: plan.derivedRuntimeActions,
     applyResult,

@@ -6548,7 +6548,7 @@ fn query_attachments<C: GenericClient>(
     let rows = conn
         .query(
             &format!(
-                "SELECT DISTINCT a.attachment_id
+                "SELECT DISTINCT a.attachment_id, a.created_at
                  FROM {schema}.attachments a
                  LEFT JOIN {schema}.attachment_links l ON l.attachment_id = a.attachment_id
                  WHERE ($1::text IS NULL OR a.session_id = $1)
@@ -12243,7 +12243,14 @@ mod tests {
         assert_eq!(diagnostics.backend, "postgres");
         assert_eq!(diagnostics.schema_version, POSTGRES_PROOF_SCHEMA_VERSION);
         assert_eq!(diagnostics.repository_groups[0].group_id, "storage_admin");
-        assert_eq!(diagnostics.table_counts[0].rows, 2);
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "runtime_counters")
+                .map(|count| count.rows),
+            Some(2)
+        );
 
         store.drop_schema_for_test().unwrap();
     }

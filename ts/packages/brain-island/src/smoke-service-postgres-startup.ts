@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import { rmSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
@@ -65,10 +66,155 @@ try {
     envelope.data?.postgres?.productionReadiness?.status,
     "ready",
   );
+
+  const profileCreate = await postJson(`${host.url}/v1/admin/control/profiles`, {
+    profileId: "postgres-created-profile",
+    displayName: "Postgres Created Profile",
+  });
+  assert.equal(profileCreate.status, 200, JSON.stringify(profileCreate.body));
+  const profileCreateEnvelope = profileCreate.body as {
+    ok: boolean;
+    data?: {
+      outcome?: {
+        result?: {
+          profileId?: string;
+          sessionId?: string;
+          registryRecord?: {
+            profileId?: string;
+            lifecycleStatus?: string;
+            revision?: number;
+          };
+        };
+      };
+    };
+  };
+  assert.equal(profileCreateEnvelope.ok, true);
+  assert.equal(
+    profileCreateEnvelope.data?.outcome?.result?.profileId,
+    "postgres-created-profile",
+  );
+  assert.equal(
+    profileCreateEnvelope.data?.outcome?.result?.sessionId,
+    "postgres-created-profile-session",
+  );
+  assert.equal(
+    profileCreateEnvelope.data?.outcome?.result?.registryRecord?.profileId,
+    "postgres-created-profile",
+  );
+  assert.equal(
+    profileCreateEnvelope.data?.outcome?.result?.registryRecord
+      ?.lifecycleStatus,
+    "active",
+  );
+  assert.equal(
+    profileCreateEnvelope.data?.outcome?.result?.registryRecord?.revision,
+    1,
+  );
+  assert.equal(
+    existsSync(join(root, "config", "profiles", "postgres-created-profile.json")),
+    true,
+  );
+  const createdProfileConfig = JSON.parse(
+    readFileSync(
+      join(root, "config", "profiles", "postgres-created-profile.json"),
+      "utf8",
+    ),
+  ) as { displayName?: string; mcpConfig?: { toolProfile?: string } };
+  assert.equal(createdProfileConfig.displayName, "Postgres Created Profile");
+  assert.equal(
+    createdProfileConfig.mcpConfig?.toolProfile,
+    "postgres-created-profile",
+  );
+
+  const registryResponse = await fetch(
+    `${host.url}/v1/admin/profiles/registry?limit=10`,
+  );
+  assert.equal(registryResponse.status, 200);
+  const registryEnvelope = (await registryResponse.json()) as {
+    ok: boolean;
+    data?: {
+      items?: Array<{
+        source?: string;
+        profileId?: string;
+        lifecycleStatus?: string;
+        fallbackStatus?: string;
+      }>;
+    };
+  };
+  assert.equal(registryEnvelope.ok, true);
+  const registryRecord = registryEnvelope.data?.items?.find(
+    (record) => record.profileId === "postgres-created-profile",
+  );
+  assert.equal(
+    registryRecord?.source,
+    "registry",
+    JSON.stringify(registryEnvelope),
+  );
+  assert.equal(registryRecord?.lifecycleStatus, "active");
+  assert.equal(registryRecord?.fallbackStatus, "registry_authoritative");
+
+  const catalogResponse = await fetch(
+    `${host.url}/v1/admin/storage/query-catalog`,
+  );
+  assert.equal(catalogResponse.status, 200);
+  const catalogEnvelope = (await catalogResponse.json()) as {
+    ok: boolean;
+    data?: { items?: Array<{ id?: string; readOnly?: boolean }> };
+  };
+  assert.equal(catalogEnvelope.ok, true);
+  assert.equal(
+    catalogEnvelope.data?.items?.some(
+      (query) => query.id === "storage.table_counts" && query.readOnly,
+    ),
+    true,
+    JSON.stringify(catalogEnvelope),
+  );
+
+  const tableCounts = await postJson(
+    `${host.url}/v1/admin/storage/query/storage.table_counts`,
+    { limit: 50 },
+  );
+  assert.equal(tableCounts.status, 200);
+  const tableCountsEnvelope = tableCounts.body as {
+    ok: boolean;
+    data?: {
+      items?: Array<{ table?: string; rows?: number }>;
+      data?: { backend?: string };
+    };
+  };
+  assert.equal(tableCountsEnvelope.ok, true);
+  assert.equal(
+    tableCountsEnvelope.data?.data?.backend,
+    "postgres",
+    JSON.stringify(tableCountsEnvelope),
+  );
+  assert.equal(
+    tableCountsEnvelope.data?.items?.some(
+      (row) => row.table === "profile_registry" && (row.rows ?? 0) >= 1,
+    ),
+    true,
+  );
+  assert.equal(existsSync(join(root, "data", "coordination.sqlite3")), false);
+  assert.equal(existsSync(join(root, "coordination.sqlite3")), false);
   console.log("service postgres startup smoke passed");
 } finally {
   await host?.stop();
   rmSync(root, { recursive: true, force: true });
+}
+
+async function postJson(
+  url: string,
+  body: unknown,
+): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: await response.json(),
+  };
 }
 
 async function openPort(): Promise<number> {

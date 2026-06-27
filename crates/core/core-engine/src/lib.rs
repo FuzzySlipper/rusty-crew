@@ -40,9 +40,10 @@ use rusty_crew_core_protocol::{
     FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ParentConsumptionPolicy, ProfileId, ProfileRegistryRecord, ProviderStateAbsenceReason,
-    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId,
-    SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
+    ParentConsumptionPolicy, ProfileId, ProfileRegistryRecord, ProfileRegistryWrite,
+    ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId,
+    SessionConfig, SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary,
+    ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -615,6 +616,13 @@ impl CoreEngine {
         query: &ProfileRegistryQuery,
     ) -> CoreResult<Vec<ProfileRegistryRecord>> {
         self.store.list_profile_registry_records(query)
+    }
+
+    pub fn create_profile_registry_record(
+        &self,
+        write: &ProfileRegistryWrite,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        self.store.create_profile_registry_record(write)
     }
 
     pub fn get_profile_registry_record(

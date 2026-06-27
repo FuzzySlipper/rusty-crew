@@ -538,6 +538,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_profile_registry_record(
+        &self,
+        write: &ProfileRegistryWrite,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.create_profile_registry_record(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.create_profile_registry_record(write),
+        }
+    }
+
     pub fn get_profile_registry_record(
         &self,
         profile_id: &ProfileId,

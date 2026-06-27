@@ -376,6 +376,7 @@ interface NativeBridgeBinding {
   databaseSize(): NativeRuntimeDatabaseSize;
   storageDiagnostics(): NativeRuntimeStorageDiagnostics;
   storageSchema(): NativeRuntimeModuleSchemaRegistryDiagnostics;
+  createProfileRegistryRecordJson(writeJson: string): string;
   listProfileRegistryRecordsJson(queryJson: string): string;
   getProfileRegistryRecordJson(profileId: string): string;
   runMaintenance(
@@ -1407,6 +1408,9 @@ export interface NativeBridgeModule {
   databaseSize(): Promise<NativeRuntimeDatabaseSize>;
   storageDiagnostics(): Promise<NativeRuntimeStorageDiagnostics>;
   storageSchema(): Promise<NativeRuntimeModuleSchemaRegistryDiagnostics>;
+  createProfileRegistryRecord(
+    write: NativeProfileRegistryWrite,
+  ): Promise<NativeProfileRegistryRecord>;
   listProfileRegistryRecords(
     query?: NativeProfileRegistryQuery,
   ): Promise<NativeProfileRegistryRecord[]>;
@@ -1633,6 +1637,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     databaseSize: unavailable("initialize_engine"),
     storageDiagnostics: unavailable("initialize_engine"),
     storageSchema: unavailable("initialize_engine"),
+    createProfileRegistryRecord: unavailable("initialize_engine"),
     listProfileRegistryRecords: unavailable("initialize_engine"),
     getProfileRegistryRecord: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
@@ -2347,6 +2352,14 @@ function createNativeBridgeModule(
     databaseSize: async () => binding.databaseSize(),
     storageDiagnostics: async () => binding.storageDiagnostics(),
     storageSchema: async () => binding.storageSchema(),
+    createProfileRegistryRecord: async (write) =>
+      toNativeProfileRegistryRecord(
+        JSON.parse(
+          binding.createProfileRegistryRecordJson(
+            JSON.stringify(toRawProfileRegistryWrite(write)),
+          ),
+        ) as RawProfileRegistryRecord,
+      ),
     listProfileRegistryRecords: async (query = {}) =>
       (
         JSON.parse(
@@ -3179,6 +3192,27 @@ function toRawProfileRegistryQuery(
   };
 }
 
+function toRawProfileRegistryWrite(
+  write: NativeProfileRegistryWrite,
+): RawProfileRegistryWrite {
+  return {
+    profile_id: write.profileId,
+    lifecycle_status: write.lifecycleStatus,
+    display_name: write.displayName,
+    summary: write.summary,
+    default_session_kind: write.defaultSessionKind,
+    agent_id: write.agentId,
+    owner_id: write.ownerId,
+    active_runtime_settings_json: write.activeRuntimeSettingsJson,
+    source_asset_refs: write.sourceAssetRefs.map(toRawProfileRegistryAssetRef),
+    derived_runtime_refs: write.derivedRuntimeRefs.map(
+      toRawProfileRegistryRuntimeRef,
+    ),
+    import_export: toRawProfileRegistryImportExport(write.importExport),
+    now: write.now,
+  };
+}
+
 function toNativeProfileRegistryRecord(
   record: RawProfileRegistryRecord,
 ): NativeProfileRegistryRecord {
@@ -3216,6 +3250,18 @@ function toNativeProfileRegistryAssetRef(
   };
 }
 
+function toRawProfileRegistryAssetRef(
+  ref: NativeProfileRegistrySourceAssetRef,
+): RawProfileRegistrySourceAssetRef {
+  return {
+    asset_kind: ref.assetKind,
+    path: ref.path,
+    content_hash: ref.contentHash,
+    last_seen_at: ref.lastSeenAt,
+    metadata_json: ref.metadataJson,
+  };
+}
+
 function toNativeProfileRegistryRuntimeRef(
   ref: RawProfileRegistryDerivedRuntimeRef,
 ): NativeProfileRegistryDerivedRuntimeRef {
@@ -3228,6 +3274,18 @@ function toNativeProfileRegistryRuntimeRef(
   };
 }
 
+function toRawProfileRegistryRuntimeRef(
+  ref: NativeProfileRegistryDerivedRuntimeRef,
+): RawProfileRegistryDerivedRuntimeRef {
+  return {
+    ref_kind: ref.refKind,
+    ref_id: ref.refId,
+    status: ref.status,
+    updated_at: ref.updatedAt,
+    metadata_json: ref.metadataJson,
+  };
+}
+
 function toNativeProfileRegistryImportExport(
   metadata: RawProfileRegistryImportExportMetadata,
 ): NativeProfileRegistryImportExportMetadata {
@@ -3237,6 +3295,18 @@ function toNativeProfileRegistryImportExport(
     exportedTo: metadata.exported_to ?? undefined,
     exportedAt: metadata.exported_at ?? undefined,
     metadataJson: metadata.metadata_json,
+  };
+}
+
+function toRawProfileRegistryImportExport(
+  metadata: NativeProfileRegistryImportExportMetadata,
+): RawProfileRegistryImportExportMetadata {
+  return {
+    imported_from: metadata.importedFrom,
+    imported_at: metadata.importedAt,
+    exported_to: metadata.exportedTo,
+    exported_at: metadata.exportedAt,
+    metadata_json: metadata.metadataJson,
   };
 }
 
