@@ -288,7 +288,7 @@ interface NativeBridgeBinding {
     sessionId: string,
     from: string,
     body: string,
-    correlationId?: string,
+    correlationId: string | null,
   ): NativeQueuedMessageRecord;
   registerScheduledWakeJobJson(
     jobId: string,
@@ -2189,7 +2189,7 @@ function createNativeBridgeModule(
         input.sessionId,
         input.from,
         input.body,
-        input.correlationId,
+        input.correlationId ?? null,
       ),
     registerScheduledWakeJob: async (input) =>
       toScheduledJobSummary(

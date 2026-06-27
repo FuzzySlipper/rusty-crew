@@ -3585,7 +3585,7 @@ async function buildDirectDebugContext(
           let wakeReport: ServiceWakeDispatchReport | undefined;
           const queued = await state.bridge.enqueueBodyFollowUpMessage({
             sessionId: input.session.sessionId,
-            from: input.actorId as never,
+            from: (input.actorId || "direct-debug-operator") as never,
             body: input.body,
             correlationId: input.idempotencyKey,
           });

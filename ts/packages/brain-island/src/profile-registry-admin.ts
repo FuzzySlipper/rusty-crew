@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import type {
   NativeBridgeModule,
   NativeProfileRegistryRecord,
@@ -94,7 +95,9 @@ export async function buildAdminProfileRegistryDiagnostics(
   );
   const records = [
     ...(await Promise.all(
-      registryRecords.map((record) => registryAdminRecord(record)),
+      registryRecords.map((record) =>
+        registryAdminRecord(record, input.runtimeConfig.profilesDir),
+      ),
     )),
     ...(await Promise.all(
       fallbackPlans.flatMap((fallback) =>
@@ -146,8 +149,12 @@ export function filterAdminProfileRegistryRecords(
 
 async function registryAdminRecord(
   record: NativeProfileRegistryRecord,
+  profilesDir: string,
 ): Promise<AdminProfileRegistryRecord> {
-  const sourceAssetStatuses = await assetStatuses(record.sourceAssetRefs);
+  const sourceAssetStatuses = await assetStatuses(
+    record.sourceAssetRefs,
+    profilesDir,
+  );
   return {
     source: "registry",
     profileId: record.profileId,
@@ -248,11 +255,16 @@ async function assetStatuses(
     contentHash?: string;
     metadataJson?: unknown;
   }[],
+  relativeBaseDir?: string,
 ): Promise<AdminProfileRegistryAssetStatus[]> {
   return Promise.all(
     refs.map(async (ref) => {
+      const assetPath =
+        relativeBaseDir === undefined || isAbsolute(ref.path)
+          ? ref.path
+          : resolve(relativeBaseDir, ref.path);
       try {
-        const raw = await readFile(ref.path);
+        const raw = await readFile(assetPath);
         const currentContentHash = `sha256:${createHash("sha256")
           .update(raw)
           .digest("hex")}`;
