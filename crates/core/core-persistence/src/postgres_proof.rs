@@ -6,10 +6,18 @@
 //! beyond SQLite.
 
 use crate::{
-    counter_value, from_json_text, profile_memory_target_parts, repositories,
-    roleplay_lore_canon_status_as_str, roleplay_lore_memory_space_descriptor,
-    roleplay_lore_record_status_as_str, roleplay_lore_visibility_as_str, to_json_text,
+    counter_value, default_lore_layer_config, estimate_lore_tokens, excluded_subject_match,
+    from_json_text, lore_recall_config_snapshot, memory_proposal_source_as_str,
+    normalized_optional_text, profile_memory_target_parts, repositories,
+    roleplay_lore_canon_status_as_str, roleplay_lore_layer_purpose_as_str,
+    roleplay_lore_layer_write_policy_as_str, roleplay_lore_memory_space_descriptor,
+    roleplay_lore_record_status_as_str, roleplay_lore_visibility_as_str, score_lore_recall_entry,
+    to_json_text, validate_lore_recall_query, validate_lore_recall_trace_query,
     validate_profile_memory_key, validate_profile_memory_write, validate_provider_wire_state_key,
+    validate_roleplay_chat_layers_write, validate_roleplay_lore_entry_promotion,
+    validate_roleplay_lore_fact_capture, validate_roleplay_lore_identifier,
+    validate_roleplay_lore_layer_config_write, validate_roleplay_lore_layer_entry_link,
+    validate_roleplay_lore_layer_update, validate_roleplay_lore_layer_write,
     validate_roleplay_lore_record_id, validate_roleplay_lore_write, validate_simple_kv_identity,
     validate_simple_kv_query, validate_simple_kv_write, ActiveBranchConflict,
     ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation, AdapterId, AgentId,
@@ -25,31 +33,36 @@ use crate::{
     DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite, DelegatedCompletion,
     DenRuntimeReference, DurableAgentKind, DurableAgentRecord, DurableIdentityStatus,
     DurableMessageRecord, DurableMessageStatus, DurableMessageWrite, ExternalBindingStatus,
-    IsoTimestamp, McpBindingQuery, McpBindingRecord, MessageBlockRecord, MessageId, MessageSlotId,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
-    ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
-    ModelProviderStatus, ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps,
-    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
-    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
-    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
-    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
-    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-    QueuedMessageState, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
-    RoleplayLoreRecordStatus, RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone,
-    RoleplayLoreWrite, RunId, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
-    RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord, RuntimeMaintenancePolicy,
-    RuntimeMaintenanceReport, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageTableCount, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
-    ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
-    SelectActiveVariantResult, SessionConfig, SessionConfigRecord, SessionId,
-    SessionIdentityRecord, SessionKind, SessionMemoryArchive, SessionMemoryCompactionReport,
-    SessionMemoryPromptContext, SessionMemoryPromptContextPolicy, SessionMemoryPromptDiagnostics,
-    SessionMemoryPromptExcludedCounts, SessionMemoryQuery, SessionMemoryRecord,
-    SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
+    IsoTimestamp, LoreRecallEntry, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockRecord, MessageId,
+    MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantSource, MessageVariantStatus,
+    MessageVariantWrite, ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery,
+    ModelProviderRecord, ModelProviderStatus, ModelProviderWrite, PersistedEvent, ProfileId,
+    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryLifecycleStatus,
+    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
+    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
+    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
+    QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
+    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
+    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
+    RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
+    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
+    RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageTableCount,
+    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SessionConfig,
+    SessionConfigRecord, SessionId, SessionIdentityRecord, SessionKind, SessionMemoryArchive,
+    SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
+    SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
+    SessionMemoryRecord, SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionState, SessionStatus,
     SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
     SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
@@ -59,7 +72,7 @@ use crate::{
     COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS,
     COUNTER_WAKES,
 };
-use postgres::{Client, GenericClient, NoTls, Row, Transaction};
+use postgres::{types::ToSql, Client, GenericClient, NoTls, Row, Transaction};
 use rusty_crew_core_protocol::{
     session_memory_space_descriptor, BrainEvent, CompletionPacket, CompletionStatus,
     FanOutFailurePolicy, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
@@ -72,9 +85,10 @@ use rusty_crew_core_protocol::{
     MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor, MemorySpaceId,
     MemoryVisibilityModel, MemoryWritePolicy, ParentConsumptionPolicy,
 };
+use std::collections::BTreeSet;
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 14;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 15;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -2832,6 +2846,811 @@ impl PostgresRuntimeCounterProofStore {
         roleplay_lore_provenance_events(&mut *client, &schema, record_id)
     }
 
+    pub fn create_lore_layer(
+        &self,
+        write: &RoleplayLoreLayerWrite,
+    ) -> CoreResult<RoleplayLoreLayerRecord> {
+        validate_roleplay_lore_layer_write(write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start create PostgreSQL roleplay lore layer", error)
+        })?;
+        if get_lore_layer(&mut tx, &schema, &write.layer_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("roleplay lore layer {} already exists", write.layer_id),
+            ));
+        }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.module_roleplay_lore_layers (
+                    layer_id,
+                    profile_id,
+                    name,
+                    description,
+                    purpose,
+                    write_policy,
+                    is_archived,
+                    created_at,
+                    updated_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $7)"
+            ),
+            &[
+                &write.layer_id,
+                &write.profile_id,
+                &write.name,
+                &normalized_optional_text(write.description.as_deref()),
+                &roleplay_lore_layer_purpose_as_str(write.purpose),
+                &roleplay_lore_layer_write_policy_as_str(write.write_policy),
+                &write.now,
+            ],
+        )
+        .map_err(|error| postgres_error("insert PostgreSQL roleplay lore layer", error))?;
+        let layer = get_lore_layer(&mut tx, &schema, &write.layer_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "created PostgreSQL roleplay lore layer was not readable",
+            )
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit create PostgreSQL roleplay lore layer", error)
+        })?;
+        Ok(layer)
+    }
+
+    pub fn get_lore_layer(&self, layer_id: &str) -> CoreResult<Option<RoleplayLoreLayerRecord>> {
+        validate_roleplay_lore_identifier("roleplay lore layer_id", layer_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_lore_layer(&mut *client, &schema, layer_id)
+    }
+
+    pub fn list_lore_layers_by_profile(
+        &self,
+        profile_id: &str,
+    ) -> CoreResult<Vec<RoleplayLoreLayerRecord>> {
+        validate_roleplay_lore_identifier("roleplay lore profile_id", profile_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        list_lore_layers_by_profile(&mut *client, &schema, profile_id)
+    }
+
+    pub fn update_lore_layer(
+        &self,
+        update: &RoleplayLoreLayerUpdate,
+    ) -> CoreResult<RoleplayLoreLayerRecord> {
+        validate_roleplay_lore_layer_update(update)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start update PostgreSQL roleplay lore layer", error)
+        })?;
+        let mut existing =
+            get_lore_layer(&mut tx, &schema, &update.layer_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("roleplay lore layer {} not found", update.layer_id),
+                )
+            })?;
+        if let Some(name) = &update.name {
+            existing.name = name.trim().to_string();
+        }
+        if let Some(description) = &update.description {
+            existing.description = normalized_optional_text(description.as_deref());
+        }
+        if let Some(purpose) = update.purpose {
+            existing.purpose = purpose;
+        }
+        if let Some(write_policy) = update.write_policy {
+            existing.write_policy = write_policy;
+        }
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.module_roleplay_lore_layers
+                 SET name = $2,
+                     description = $3,
+                     purpose = $4,
+                     write_policy = $5,
+                     updated_at = $6
+                 WHERE layer_id = $1"
+            ),
+            &[
+                &update.layer_id,
+                &existing.name,
+                &existing.description,
+                &roleplay_lore_layer_purpose_as_str(existing.purpose),
+                &roleplay_lore_layer_write_policy_as_str(existing.write_policy),
+                &update.now,
+            ],
+        )
+        .map_err(|error| postgres_error("update PostgreSQL roleplay lore layer", error))?;
+        let layer = get_lore_layer(&mut tx, &schema, &update.layer_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "updated PostgreSQL roleplay lore layer was not readable",
+            )
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit update PostgreSQL roleplay lore layer", error)
+        })?;
+        Ok(layer)
+    }
+
+    pub fn archive_lore_layer(
+        &self,
+        archive: &RoleplayLoreLayerArchive,
+    ) -> CoreResult<RoleplayLoreLayerRecord> {
+        validate_roleplay_lore_identifier("roleplay lore layer_id", &archive.layer_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start archive PostgreSQL roleplay lore layer", error)
+        })?;
+        if get_lore_layer(&mut tx, &schema, &archive.layer_id)?.is_none() {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("roleplay lore layer {} not found", archive.layer_id),
+            ));
+        }
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.module_roleplay_lore_layers
+                 SET is_archived = TRUE,
+                     updated_at = $2
+                 WHERE layer_id = $1"
+            ),
+            &[&archive.layer_id, &archive.now],
+        )
+        .map_err(|error| postgres_error("archive PostgreSQL roleplay lore layer", error))?;
+        let layer = get_lore_layer(&mut tx, &schema, &archive.layer_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "archived PostgreSQL roleplay lore layer was not readable",
+            )
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit archive PostgreSQL roleplay lore layer", error)
+        })?;
+        Ok(layer)
+    }
+
+    pub fn get_lore_layer_config(
+        &self,
+        layer_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreLayerConfigRecord>> {
+        validate_roleplay_lore_identifier("roleplay lore layer_id", layer_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_lore_layer_config(&mut *client, &schema, layer_id)
+    }
+
+    pub fn set_lore_layer_config(
+        &self,
+        write: &RoleplayLoreLayerConfigWrite,
+    ) -> CoreResult<RoleplayLoreLayerConfigRecord> {
+        validate_roleplay_lore_layer_config_write(write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start set PostgreSQL roleplay lore layer config", error)
+        })?;
+        if get_lore_layer(&mut tx, &schema, &write.layer_id)?.is_none() {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("roleplay lore layer {} not found", write.layer_id),
+            ));
+        }
+        let existing = get_lore_layer_config(&mut tx, &schema, &write.layer_id)?;
+        let created_at = existing
+            .as_ref()
+            .map(|record| record.created_at.as_str())
+            .unwrap_or_else(|| write.now.as_str());
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.module_roleplay_lore_layer_config (
+                    config_id,
+                    layer_id,
+                    fts_weight,
+                    subject_weight,
+                    canon_weight,
+                    tag_boost_weight,
+                    recency_weight,
+                    default_token_budget,
+                    constant_token_reserve,
+                    min_relevance_score,
+                    max_constants,
+                    created_at,
+                    updated_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 ON CONFLICT(layer_id) DO UPDATE SET
+                    config_id = excluded.config_id,
+                    fts_weight = excluded.fts_weight,
+                    subject_weight = excluded.subject_weight,
+                    canon_weight = excluded.canon_weight,
+                    tag_boost_weight = excluded.tag_boost_weight,
+                    recency_weight = excluded.recency_weight,
+                    default_token_budget = excluded.default_token_budget,
+                    constant_token_reserve = excluded.constant_token_reserve,
+                    min_relevance_score = excluded.min_relevance_score,
+                    max_constants = excluded.max_constants,
+                    updated_at = excluded.updated_at"
+            ),
+            &[
+                &write.config_id,
+                &write.layer_id,
+                &(write.fts_weight as f64),
+                &(write.subject_weight as f64),
+                &(write.canon_weight as f64),
+                &(write.tag_boost_weight as f64),
+                &(write.recency_weight as f64),
+                &(write.default_token_budget as i64),
+                &(write.constant_token_reserve as i64),
+                &(write.min_relevance_score as f64),
+                &(write.max_constants as i64),
+                &created_at,
+                &write.now,
+            ],
+        )
+        .map_err(|error| postgres_error("upsert PostgreSQL roleplay lore layer config", error))?;
+        let config =
+            get_lore_layer_config(&mut tx, &schema, &write.layer_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "saved PostgreSQL roleplay lore layer config was not readable",
+                )
+            })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit set PostgreSQL roleplay lore layer config", error)
+        })?;
+        Ok(config)
+    }
+
+    pub fn add_entry_to_layer(&self, link: &RoleplayLoreLayerEntryLink) -> CoreResult<()> {
+        validate_roleplay_lore_layer_entry_link(link)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start add PostgreSQL roleplay lore entry to layer", error)
+        })?;
+        require_lore_layer_and_record(&mut tx, &schema, &link.layer_id, &link.record_id)?;
+        insert_lore_layer_entry(&mut tx, &schema, link)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit add PostgreSQL roleplay lore entry to layer", error)
+        })
+    }
+
+    pub fn capture_lore_fact(
+        &self,
+        capture: &RoleplayLoreFactCapture,
+    ) -> CoreResult<RoleplayLoreLayerEntryJoin> {
+        validate_roleplay_lore_fact_capture(capture)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start capture PostgreSQL roleplay lore fact", error)
+        })?;
+        let layer = get_lore_layer(&mut tx, &schema, &capture.layer_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("roleplay lore layer {} not found", capture.layer_id),
+            )
+        })?;
+        if layer.is_archived {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!("roleplay lore layer {} is archived", capture.layer_id),
+            ));
+        }
+        if layer.write_policy != RoleplayLoreLayerWritePolicy::AutoCapture {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "roleplay lore layer {} does not allow auto capture",
+                    capture.layer_id
+                ),
+            ));
+        }
+        if get_roleplay_lore_record(&mut tx, &schema, &capture.write.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "roleplay lore record {} already exists",
+                    capture.write.record_id
+                ),
+            ));
+        }
+        insert_roleplay_lore_record(&mut tx, &schema, &capture.write)?;
+        insert_lore_layer_entry(
+            &mut tx,
+            &schema,
+            &RoleplayLoreLayerEntryLink {
+                layer_id: capture.layer_id.clone(),
+                record_id: capture.write.record_id.clone(),
+                is_constant: capture.is_constant,
+                priority: capture.priority,
+                added_at: capture.write.now.clone(),
+            },
+        )?;
+        insert_roleplay_lore_provenance_event(
+            &mut tx,
+            &schema,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!("{}:captured:{}", capture.write.record_id, capture.layer_id),
+                record_id: capture.write.record_id.clone(),
+                world_id: capture.write.world_id.clone(),
+                evidence_refs: capture.write.evidence_refs.clone(),
+                source: capture.write.source,
+                actor: memory_proposal_source_as_str(capture.write.source).to_string(),
+                note: capture
+                    .capture_reason
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .or_else(|| Some("captured roleplay lore fact".to_string())),
+                created_at: capture.write.now.clone(),
+            },
+        )?;
+        let entry = get_lore_layer_entry_join(
+            &mut tx,
+            &schema,
+            &capture.layer_id,
+            &capture.write.record_id,
+        )?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "captured PostgreSQL roleplay lore layer entry was not readable",
+            )
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit capture PostgreSQL roleplay lore fact", error)
+        })?;
+        Ok(entry)
+    }
+
+    pub fn promote_lore_entry(
+        &self,
+        promotion: &RoleplayLoreEntryPromotion,
+    ) -> CoreResult<RoleplayLoreLayerEntryJoin> {
+        validate_roleplay_lore_entry_promotion(promotion)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start promote PostgreSQL roleplay lore entry", error)
+        })?;
+        let source = get_lore_layer_entry_join(
+            &mut tx,
+            &schema,
+            &promotion.source_layer_id,
+            &promotion.source_record_id,
+        )?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "roleplay lore source entry {}/{} not found",
+                    promotion.source_layer_id, promotion.source_record_id
+                ),
+            )
+        })?;
+        if source.record.status != RoleplayLoreRecordStatus::Active {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "roleplay lore source record {} is not active",
+                    promotion.source_record_id
+                ),
+            ));
+        }
+        let target =
+            get_lore_layer(&mut tx, &schema, &promotion.target_layer_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "roleplay lore target layer {} not found",
+                        promotion.target_layer_id
+                    ),
+                )
+            })?;
+        if target.is_archived {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "roleplay lore target layer {} is archived",
+                    promotion.target_layer_id
+                ),
+            ));
+        }
+        if target.write_policy == RoleplayLoreLayerWritePolicy::Readonly {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "roleplay lore target layer {} is readonly",
+                    promotion.target_layer_id
+                ),
+            ));
+        }
+        if get_roleplay_lore_record(&mut tx, &schema, &promotion.new_record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "roleplay lore promoted record {} already exists",
+                    promotion.new_record_id
+                ),
+            ));
+        }
+        let promoted = RoleplayLoreWrite {
+            record_id: promotion.new_record_id.clone(),
+            world_id: source.record.world_id.clone(),
+            entity_id: source.record.entity_id.clone(),
+            session_id: source.record.session_id.clone(),
+            branch_id: source.record.branch_id.clone(),
+            shape: source.record.shape.clone(),
+            canon_status: source.record.canon_status,
+            visibility: source.record.visibility,
+            title: source.record.title.clone(),
+            body: source.record.body.clone(),
+            content: source.record.content.clone(),
+            evidence_refs: source.record.evidence_refs.clone(),
+            source: source.record.source,
+            confidence: source.record.confidence,
+            durability_rationale: source.record.durability_rationale.clone(),
+            supersedes_record_id: None,
+            now: promotion.now.clone(),
+        };
+        insert_roleplay_lore_record(&mut tx, &schema, &promoted)?;
+        insert_lore_layer_entry(
+            &mut tx,
+            &schema,
+            &RoleplayLoreLayerEntryLink {
+                layer_id: promotion.target_layer_id.clone(),
+                record_id: promotion.new_record_id.clone(),
+                is_constant: promotion.is_constant,
+                priority: promotion.priority,
+                added_at: promotion.now.clone(),
+            },
+        )?;
+        insert_roleplay_lore_provenance_event(
+            &mut tx,
+            &schema,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!(
+                    "{}:promoted_from:{}:{}",
+                    promotion.new_record_id, promotion.source_layer_id, promotion.source_record_id
+                ),
+                record_id: promotion.new_record_id.clone(),
+                world_id: source.record.world_id.clone(),
+                evidence_refs: source.record.evidence_refs.clone(),
+                source: source.record.source,
+                actor: "rusty_crew_storage".to_string(),
+                note: Some(format!(
+                    "promoted from {}:{}",
+                    promotion.source_layer_id, promotion.source_record_id
+                )),
+                created_at: promotion.now.clone(),
+            },
+        )?;
+        let entry = get_lore_layer_entry_join(
+            &mut tx,
+            &schema,
+            &promotion.target_layer_id,
+            &promotion.new_record_id,
+        )?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "promoted PostgreSQL roleplay lore layer entry was not readable",
+            )
+        })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit promote PostgreSQL roleplay lore entry", error)
+        })?;
+        Ok(entry)
+    }
+
+    pub fn remove_entry_from_layer(&self, layer_id: &str, record_id: &str) -> CoreResult<()> {
+        validate_roleplay_lore_identifier("roleplay lore layer_id", layer_id)?;
+        validate_roleplay_lore_record_id(record_id)?;
+        let schema = self.quoted_schema();
+        self.client()?
+            .execute(
+                &format!(
+                    "DELETE FROM {schema}.module_roleplay_lore_layer_entries
+                     WHERE layer_id = $1 AND record_id = $2"
+                ),
+                &[&layer_id, &record_id],
+            )
+            .map_err(|error| {
+                postgres_error("remove PostgreSQL roleplay lore entry from layer", error)
+            })?;
+        Ok(())
+    }
+
+    pub fn set_entry_constant(
+        &self,
+        layer_id: &str,
+        record_id: &str,
+        is_constant: bool,
+    ) -> CoreResult<()> {
+        validate_roleplay_lore_identifier("roleplay lore layer_id", layer_id)?;
+        validate_roleplay_lore_record_id(record_id)?;
+        let schema = self.quoted_schema();
+        let changed = self
+            .client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.module_roleplay_lore_layer_entries
+                     SET is_constant = $3
+                     WHERE layer_id = $1 AND record_id = $2"
+                ),
+                &[&layer_id, &record_id, &is_constant],
+            )
+            .map_err(|error| {
+                postgres_error("set PostgreSQL roleplay lore entry constant", error)
+            })?;
+        if changed == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("roleplay lore layer entry {layer_id}/{record_id} not found"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn list_entries_by_layer(
+        &self,
+        layer_id: &str,
+    ) -> CoreResult<Vec<RoleplayLoreLayerEntryJoin>> {
+        validate_roleplay_lore_identifier("roleplay lore layer_id", layer_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        list_entries_by_layer(&mut *client, &schema, layer_id)
+    }
+
+    pub fn set_chat_layers(&self, write: &RoleplayChatLayersWrite) -> CoreResult<()> {
+        validate_roleplay_chat_layers_write(write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start set PostgreSQL roleplay chat layers", error))?;
+        tx.execute(
+            &format!("DELETE FROM {schema}.module_roleplay_chat_layers WHERE chat_id = $1"),
+            &[&write.chat_id],
+        )
+        .map_err(|error| postgres_error("clear PostgreSQL roleplay chat layers", error))?;
+        for layer in &write.layers {
+            if get_lore_layer(&mut tx, &schema, &layer.layer_id)?.is_none() {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("roleplay lore layer {} not found", layer.layer_id),
+                ));
+            }
+            tx.execute(
+                &format!(
+                    "INSERT INTO {schema}.module_roleplay_chat_layers (
+                        chat_id,
+                        layer_id,
+                        priority,
+                        enabled,
+                        created_at
+                     ) VALUES ($1, $2, $3, $4, $5)"
+                ),
+                &[
+                    &write.chat_id,
+                    &layer.layer_id,
+                    &layer.priority,
+                    &layer.enabled,
+                    &write.now,
+                ],
+            )
+            .map_err(|error| postgres_error("insert PostgreSQL roleplay chat layer", error))?;
+        }
+        tx.commit()
+            .map_err(|error| postgres_error("commit set PostgreSQL roleplay chat layers", error))
+    }
+
+    pub fn get_chat_layers(&self, chat_id: &str) -> CoreResult<Vec<RoleplayChatLayerRecord>> {
+        validate_roleplay_lore_identifier("roleplay chat_id", chat_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_chat_layers(&mut *client, &schema, chat_id)
+    }
+
+    pub fn toggle_chat_layer(
+        &self,
+        chat_id: &str,
+        layer_id: &str,
+        enabled: bool,
+    ) -> CoreResult<()> {
+        validate_roleplay_lore_identifier("roleplay chat_id", chat_id)?;
+        validate_roleplay_lore_identifier("roleplay lore layer_id", layer_id)?;
+        let schema = self.quoted_schema();
+        let changed = self
+            .client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.module_roleplay_chat_layers
+                     SET enabled = $3
+                     WHERE chat_id = $1 AND layer_id = $2"
+                ),
+                &[&chat_id, &layer_id, &enabled],
+            )
+            .map_err(|error| postgres_error("toggle PostgreSQL roleplay chat layer", error))?;
+        if changed == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("roleplay chat layer {chat_id}/{layer_id} not found"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn reorder_chat_layers(&self, chat_id: &str, layer_ids: &[String]) -> CoreResult<()> {
+        validate_roleplay_lore_identifier("roleplay chat_id", chat_id)?;
+        crate::validate_unique_roleplay_ids("roleplay chat layer_ids", layer_ids)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start reorder PostgreSQL roleplay chat layers", error)
+        })?;
+        let existing = get_chat_layers(&mut tx, &schema, chat_id)?;
+        if existing.len() != layer_ids.len() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "roleplay chat layer reorder must include exactly the existing layers",
+            ));
+        }
+        let existing_ids = existing
+            .iter()
+            .map(|record| record.layer_id.as_str())
+            .collect::<BTreeSet<_>>();
+        for layer_id in layer_ids {
+            if !existing_ids.contains(layer_id.as_str()) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    format!("roleplay chat layer {layer_id} is not attached to chat {chat_id}"),
+                ));
+            }
+        }
+        for (priority, layer_id) in layer_ids.iter().enumerate() {
+            tx.execute(
+                &format!(
+                    "UPDATE {schema}.module_roleplay_chat_layers
+                     SET priority = $3
+                     WHERE chat_id = $1 AND layer_id = $2"
+                ),
+                &[&chat_id, &layer_id, &(priority as i64)],
+            )
+            .map_err(|error| postgres_error("reorder PostgreSQL roleplay chat layer", error))?;
+        }
+        tx.commit().map_err(|error| {
+            postgres_error("commit reorder PostgreSQL roleplay chat layers", error)
+        })
+    }
+
+    pub fn recall_lore(&self, query: &LoreRecallQuery) -> CoreResult<LoreRecallResult> {
+        validate_lore_recall_query(query)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL roleplay lore recall", error))?;
+        let layers = get_chat_layers(&mut tx, &schema, &query.chat_id)?
+            .into_iter()
+            .filter(|layer| layer.enabled && !layer.layer.is_archived)
+            .collect::<Vec<_>>();
+        let mut layer_configs = Vec::new();
+        for layer in &layers {
+            let config = get_lore_layer_config(&mut tx, &schema, &layer.layer_id)?
+                .unwrap_or_else(|| default_lore_layer_config(&layer.layer_id, &query.now));
+            layer_configs.push((layer.clone(), config));
+        }
+
+        let token_budget = query.token_budget.unwrap_or_else(|| {
+            layer_configs
+                .first()
+                .map(|(_, config)| config.default_token_budget)
+                .unwrap_or(4_000)
+        });
+        let mut remaining = token_budget;
+        let mut entries = Vec::new();
+        let mut seen_records = BTreeSet::new();
+        let mut entries_considered = 0_u32;
+
+        for (layer, config) in &layer_configs {
+            let constants =
+                constant_lore_entries_for_layer(&mut tx, &schema, &layer.layer_id, config)?;
+            let mut reserve_remaining = config.constant_token_reserve;
+            for mut entry in constants {
+                entries_considered += 1;
+                if excluded_subject_match(&entry.record, &query.excluded_subjects) {
+                    continue;
+                }
+                entry.token_estimate = estimate_lore_tokens(&entry.record);
+                if entry.token_estimate > remaining || entry.token_estimate > reserve_remaining {
+                    continue;
+                }
+                remaining -= entry.token_estimate;
+                reserve_remaining -= entry.token_estimate;
+                seen_records.insert(entry.record.record_id.clone());
+                entries.push(entry);
+            }
+        }
+
+        let mut scored =
+            scored_lore_entries_for_recall(&mut tx, &schema, query, &layer_configs, &seen_records)?;
+        entries_considered += scored.len() as u32;
+        scored.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.record.updated_at.cmp(&right.record.updated_at))
+                .then_with(|| left.record.record_id.cmp(&right.record.record_id))
+        });
+        for entry in scored {
+            if entry.token_estimate > remaining {
+                continue;
+            }
+            remaining -= entry.token_estimate;
+            entries.push(entry);
+        }
+
+        let tokens_consumed = token_budget.saturating_sub(remaining);
+        let trace = if query.record_trace {
+            let trace = LoreRecallTraceRecord {
+                trace_id: query.trace_id.clone().unwrap_or_else(|| {
+                    format!("recall:{}:{}:{}", query.chat_id, query.now, entries.len())
+                }),
+                session_id: query.session_id.clone(),
+                layer_ids: layers.iter().map(|layer| layer.layer_id.clone()).collect(),
+                query_text: query.query_text.clone(),
+                active_subjects: query.active_subjects.clone(),
+                excluded_subjects: query.excluded_subjects.clone(),
+                config_snapshot: lore_recall_config_snapshot(&layer_configs),
+                entries_considered,
+                entries_returned: entries.len() as u32,
+                token_budget: Some(token_budget),
+                tokens_consumed,
+                created_at: query.now.clone(),
+            };
+            insert_lore_recall_trace(&mut tx, &schema, &trace)?;
+            Some(trace)
+        } else {
+            None
+        };
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL roleplay lore recall", error))?;
+        Ok(LoreRecallResult {
+            chat_id: query.chat_id.clone(),
+            entries,
+            entries_considered,
+            tokens_consumed,
+            token_budget: Some(token_budget),
+            trace,
+        })
+    }
+
+    pub fn list_recall_traces(
+        &self,
+        query: &LoreRecallTraceQuery,
+    ) -> CoreResult<Vec<LoreRecallTraceRecord>> {
+        validate_lore_recall_trace_query(query)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        list_lore_recall_traces(&mut *client, &schema, query)
+    }
+
+    pub fn get_recall_trace(&self, trace_id: &str) -> CoreResult<Option<LoreRecallTraceRecord>> {
+        validate_roleplay_lore_identifier("roleplay lore recall trace_id", trace_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_lore_recall_trace(&mut *client, &schema, trace_id)
+    }
+
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
@@ -4643,7 +5462,7 @@ impl PostgresRuntimeCounterProofStore {
                     ON {schema}.module_roleplay_chat_layers(chat_id, enabled, priority, layer_id);
                  CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_recall_traces (
                     trace_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
+                    session_id TEXT,
                     layer_ids JSONB NOT NULL,
                     query_text TEXT,
                     active_subjects JSONB,
@@ -4655,6 +5474,8 @@ impl PostgresRuntimeCounterProofStore {
                     tokens_consumed BIGINT,
                     created_at TEXT NOT NULL
                  );
+                 ALTER TABLE {schema}.module_roleplay_lore_recall_traces
+                    ALTER COLUMN session_id DROP NOT NULL;
                  CREATE INDEX IF NOT EXISTS roleplay_lore_recall_traces_session_idx
                     ON {schema}.module_roleplay_lore_recall_traces(session_id, created_at DESC, trace_id);
                  CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_layer_config (
@@ -10270,32 +11091,36 @@ fn roleplay_lore_provenance_events<C: GenericClient>(
 }
 
 fn row_to_roleplay_lore_record(row: &Row) -> CoreResult<RoleplayLoreRecord> {
-    let shape_version: i64 = row.get(6);
-    let revision: i64 = row.get(10);
-    let content_json: String = row.get(13);
-    let evidence_refs_json: String = row.get(14);
-    let source: String = row.get(15);
-    let canon_status: String = row.get(7);
-    let visibility: String = row.get(8);
-    let status: String = row.get(9);
+    row_to_roleplay_lore_record_at(row, 0)
+}
+
+fn row_to_roleplay_lore_record_at(row: &Row, base: usize) -> CoreResult<RoleplayLoreRecord> {
+    let shape_version: i64 = row.get(base + 6);
+    let revision: i64 = row.get(base + 10);
+    let content_json: String = row.get(base + 13);
+    let evidence_refs_json: String = row.get(base + 14);
+    let source: String = row.get(base + 15);
+    let canon_status: String = row.get(base + 7);
+    let visibility: String = row.get(base + 8);
+    let status: String = row.get(base + 9);
     Ok(RoleplayLoreRecord {
-        record_id: row.get(0),
-        world_id: row.get(1),
-        entity_id: row.get(2),
-        session_id: row.get::<_, Option<String>>(3).map(SessionId::new),
+        record_id: row.get(base),
+        world_id: row.get(base + 1),
+        entity_id: row.get(base + 2),
+        session_id: row.get::<_, Option<String>>(base + 3).map(SessionId::new),
         branch_id: row
-            .get::<_, Option<String>>(4)
+            .get::<_, Option<String>>(base + 4)
             .map(ConversationBranchId::new),
         shape: MemoryRecordShapeRef {
-            shape_id: MemoryRecordShapeId::new(row.get::<_, String>(5))?,
+            shape_id: MemoryRecordShapeId::new(row.get::<_, String>(base + 5))?,
             version: shape_version as u32,
         },
         canon_status: crate::parse_roleplay_lore_canon_status(&canon_status)?,
         visibility: crate::parse_roleplay_lore_visibility(&visibility)?,
         status: crate::parse_roleplay_lore_record_status(&status)?,
         revision: revision as u64,
-        title: row.get(11),
-        body: row.get(12),
+        title: row.get(base + 11),
+        body: row.get(base + 12),
         content: parse_postgres_json(&content_json, "roleplay lore content_json")?,
         evidence_refs: from_json_text(&evidence_refs_json).map_err(|error| {
             CoreError::new(
@@ -10304,14 +11129,14 @@ fn row_to_roleplay_lore_record(row: &Row) -> CoreResult<RoleplayLoreRecord> {
             )
         })?,
         source: crate::parse_memory_proposal_source(&source)?,
-        confidence: row.get::<_, f64>(16) as f32,
-        durability_rationale: row.get(17),
-        supersedes_record_id: row.get(18),
-        superseded_by_record_id: row.get(19),
-        tombstoned_at: row.get(20),
-        tombstone_reason: row.get(21),
-        created_at: row.get(22),
-        updated_at: row.get(23),
+        confidence: row.get::<_, f64>(base + 16) as f32,
+        durability_rationale: row.get(base + 17),
+        supersedes_record_id: row.get(base + 18),
+        superseded_by_record_id: row.get(base + 19),
+        tombstoned_at: row.get(base + 20),
+        tombstone_reason: row.get(base + 21),
+        created_at: row.get(base + 22),
+        updated_at: row.get(base + 23),
     })
 }
 
@@ -10332,6 +11157,602 @@ fn row_to_roleplay_lore_provenance_event(row: &Row) -> CoreResult<RoleplayLorePr
         actor: row.get(5),
         note: row.get(6),
         created_at: row.get(7),
+    })
+}
+
+fn get_lore_layer<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    layer_id: &str,
+) -> CoreResult<Option<RoleplayLoreLayerRecord>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT layer_id,
+                        profile_id,
+                        name,
+                        description,
+                        purpose,
+                        write_policy,
+                        is_archived,
+                        created_at,
+                        updated_at
+                 FROM {schema}.module_roleplay_lore_layers
+                 WHERE layer_id = $1"
+            ),
+            &[&layer_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL roleplay lore layer", error))?;
+    row.as_ref().map(row_to_lore_layer).transpose()
+}
+
+fn list_lore_layers_by_profile<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    profile_id: &str,
+) -> CoreResult<Vec<RoleplayLoreLayerRecord>> {
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT layer_id,
+                        profile_id,
+                        name,
+                        description,
+                        purpose,
+                        write_policy,
+                        is_archived,
+                        created_at,
+                        updated_at
+                 FROM {schema}.module_roleplay_lore_layers
+                 WHERE profile_id = $1 AND is_archived = FALSE
+                 ORDER BY name ASC, layer_id ASC"
+            ),
+            &[&profile_id],
+        )
+        .map_err(|error| postgres_error("list PostgreSQL roleplay lore layers", error))?;
+    rows.iter().map(row_to_lore_layer).collect()
+}
+
+fn get_lore_layer_config<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    layer_id: &str,
+) -> CoreResult<Option<RoleplayLoreLayerConfigRecord>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT config_id,
+                        layer_id,
+                        fts_weight,
+                        subject_weight,
+                        canon_weight,
+                        tag_boost_weight,
+                        recency_weight,
+                        default_token_budget,
+                        constant_token_reserve,
+                        min_relevance_score,
+                        max_constants,
+                        created_at,
+                        updated_at
+                 FROM {schema}.module_roleplay_lore_layer_config
+                 WHERE layer_id = $1"
+            ),
+            &[&layer_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL roleplay lore layer config", error))?;
+    row.as_ref().map(row_to_lore_layer_config).transpose()
+}
+
+fn list_entries_by_layer<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    layer_id: &str,
+) -> CoreResult<Vec<RoleplayLoreLayerEntryJoin>> {
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT {}
+                 FROM {schema}.module_roleplay_lore_layer_entries e
+                 JOIN {schema}.module_roleplay_lore_records r ON r.record_id = e.record_id
+                 WHERE e.layer_id = $1
+                 ORDER BY e.is_constant DESC, e.priority ASC, r.updated_at DESC, e.record_id ASC",
+                lore_layer_entry_join_select()
+            ),
+            &[&layer_id],
+        )
+        .map_err(|error| postgres_error("list PostgreSQL roleplay lore layer entries", error))?;
+    rows.iter().map(row_to_lore_layer_entry_join).collect()
+}
+
+fn get_lore_layer_entry_join<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    layer_id: &str,
+    record_id: &str,
+) -> CoreResult<Option<RoleplayLoreLayerEntryJoin>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT {}
+                 FROM {schema}.module_roleplay_lore_layer_entries e
+                 JOIN {schema}.module_roleplay_lore_records r ON r.record_id = e.record_id
+                 WHERE e.layer_id = $1 AND e.record_id = $2",
+                lore_layer_entry_join_select()
+            ),
+            &[&layer_id, &record_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL roleplay lore layer entry", error))?;
+    row.as_ref().map(row_to_lore_layer_entry_join).transpose()
+}
+
+fn insert_lore_layer_entry<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    link: &RoleplayLoreLayerEntryLink,
+) -> CoreResult<()> {
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.module_roleplay_lore_layer_entries (
+                layer_id,
+                record_id,
+                is_constant,
+                priority,
+                added_at
+             ) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT(layer_id, record_id) DO UPDATE SET
+                is_constant = excluded.is_constant,
+                priority = excluded.priority"
+        ),
+        &[
+            &link.layer_id,
+            &link.record_id,
+            &link.is_constant,
+            &link.priority,
+            &link.added_at,
+        ],
+    )
+    .map_err(|error| postgres_error("upsert PostgreSQL roleplay lore layer entry", error))?;
+    Ok(())
+}
+
+fn get_chat_layers<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    chat_id: &str,
+) -> CoreResult<Vec<RoleplayChatLayerRecord>> {
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT c.chat_id,
+                        c.layer_id,
+                        c.priority,
+                        c.enabled,
+                        c.created_at,
+                        l.layer_id,
+                        l.profile_id,
+                        l.name,
+                        l.description,
+                        l.purpose,
+                        l.write_policy,
+                        l.is_archived,
+                        l.created_at,
+                        l.updated_at
+                 FROM {schema}.module_roleplay_chat_layers c
+                 JOIN {schema}.module_roleplay_lore_layers l ON l.layer_id = c.layer_id
+                 WHERE c.chat_id = $1
+                 ORDER BY c.priority ASC, c.layer_id ASC"
+            ),
+            &[&chat_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL roleplay chat layers", error))?;
+    rows.iter().map(row_to_chat_layer_record).collect()
+}
+
+fn require_lore_layer_and_record<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    layer_id: &str,
+    record_id: &str,
+) -> CoreResult<()> {
+    if get_lore_layer(conn, schema, layer_id)?.is_none() {
+        return Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("roleplay lore layer {layer_id} not found"),
+        ));
+    }
+    if get_roleplay_lore_record(conn, schema, record_id)?.is_none() {
+        return Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("roleplay lore record {record_id} not found"),
+        ));
+    }
+    Ok(())
+}
+
+fn constant_lore_entries_for_layer<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    layer_id: &str,
+    config: &RoleplayLoreLayerConfigRecord,
+) -> CoreResult<Vec<LoreRecallEntry>> {
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT {}
+                 FROM {schema}.module_roleplay_lore_layer_entries e
+                 JOIN {schema}.module_roleplay_lore_records r ON r.record_id = e.record_id
+                 WHERE e.layer_id = $1
+                   AND e.is_constant = TRUE
+                   AND r.status = 'active'
+                 ORDER BY e.priority ASC, r.updated_at DESC, e.record_id ASC
+                 LIMIT $2",
+                lore_layer_entry_join_select()
+            ),
+            &[&layer_id, &(config.max_constants as i64)],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL roleplay lore constant recall", error))?;
+    rows.iter()
+        .map(|row| {
+            let join = row_to_lore_layer_entry_join(row)?;
+            let token_estimate = estimate_lore_tokens(&join.record);
+            Ok(LoreRecallEntry {
+                record: join.record,
+                layer_id: join.layer_id,
+                score: 1_000.0 - join.priority as f32,
+                token_estimate,
+                is_constant: true,
+            })
+        })
+        .collect()
+}
+
+fn scored_lore_entries_for_recall<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &LoreRecallQuery,
+    layer_configs: &[(RoleplayChatLayerRecord, RoleplayLoreLayerConfigRecord)],
+    seen_records: &BTreeSet<String>,
+) -> CoreResult<Vec<LoreRecallEntry>> {
+    let Some(query_text) = query.query_text.as_deref().map(str::trim) else {
+        return Ok(Vec::new());
+    };
+    if query_text.is_empty() || layer_configs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for (layer, config) in layer_configs {
+        let rows = conn
+            .query(
+                &format!(
+                    "SELECT {},
+                            (1.0 - LEAST(ts_rank(r.search_vector, plainto_tsquery('simple', $1)), 1.0)) AS fts_rank
+                     FROM {schema}.module_roleplay_lore_layer_entries e
+                     JOIN {schema}.module_roleplay_lore_records r ON r.record_id = e.record_id
+                     WHERE r.search_vector @@ plainto_tsquery('simple', $1)
+                       AND e.layer_id = $2
+                       AND r.status = 'active'
+                     ORDER BY fts_rank ASC, e.priority ASC, r.updated_at DESC
+                     LIMIT 100",
+                    lore_layer_entry_join_select()
+                ),
+                &[&query_text, &layer.layer_id],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL roleplay lore scored recall", error))?;
+        for row in rows {
+            let join = row_to_lore_layer_entry_join(&row)?;
+            if seen_records.contains(&join.record.record_id)
+                || excluded_subject_match(&join.record, &query.excluded_subjects)
+            {
+                continue;
+            }
+            let fts_rank = row.get::<_, f64>(29) as f32;
+            let token_estimate = estimate_lore_tokens(&join.record);
+            let score = score_lore_recall_entry(
+                &join.record,
+                config,
+                layer.priority,
+                join.priority,
+                fts_rank,
+                query_text,
+                &query.active_subjects,
+            );
+            if score < config.min_relevance_score {
+                continue;
+            }
+            out.push(LoreRecallEntry {
+                record: join.record,
+                layer_id: join.layer_id,
+                score,
+                token_estimate,
+                is_constant: false,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn insert_lore_recall_trace<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    trace: &LoreRecallTraceRecord,
+) -> CoreResult<()> {
+    validate_roleplay_lore_identifier("roleplay lore recall trace_id", &trace.trace_id)?;
+    let layer_ids = to_json_text(&trace.layer_ids)?;
+    let active_subjects = to_json_text(&trace.active_subjects)?;
+    let excluded_subjects = to_json_text(&trace.excluded_subjects)?;
+    let config_snapshot = to_json_text(&trace.config_snapshot)?;
+    let entries_considered = trace.entries_considered as i64;
+    let entries_returned = trace.entries_returned as i64;
+    let token_budget = trace.token_budget.map(|value| value as i64);
+    let tokens_consumed = trace.tokens_consumed as i64;
+    let query_text = trace.query_text.clone();
+    if let Some(session_id) = trace.session_id.as_ref().map(|value| value.0.clone()) {
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &trace.trace_id,
+            &session_id,
+            &layer_ids,
+            &query_text,
+            &active_subjects,
+            &excluded_subjects,
+            &config_snapshot,
+            &entries_considered,
+            &entries_returned,
+            &token_budget,
+            &tokens_consumed,
+            &trace.created_at,
+        ];
+        conn.execute(
+            &format!(
+                "INSERT INTO {schema}.module_roleplay_lore_recall_traces (
+                    trace_id,
+                    session_id,
+                    layer_ids,
+                    query_text,
+                    active_subjects,
+                    excluded_subjects,
+                    config_snapshot,
+                    entries_considered,
+                    entries_returned,
+                    token_budget,
+                    tokens_consumed,
+                    created_at
+                 ) VALUES ($1::text, $2::text, ($3::text)::jsonb, $4::text, ($5::text)::jsonb, ($6::text)::jsonb, ($7::text)::jsonb, $8::bigint, $9::bigint, $10::bigint, $11::bigint, $12::text)"
+            ),
+            params,
+        )
+    } else {
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &trace.trace_id,
+            &layer_ids,
+            &query_text,
+            &active_subjects,
+            &excluded_subjects,
+            &config_snapshot,
+            &entries_considered,
+            &entries_returned,
+            &token_budget,
+            &tokens_consumed,
+            &trace.created_at,
+        ];
+        conn.execute(
+            &format!(
+                "INSERT INTO {schema}.module_roleplay_lore_recall_traces (
+                    trace_id,
+                    session_id,
+                    layer_ids,
+                    query_text,
+                    active_subjects,
+                    excluded_subjects,
+                    config_snapshot,
+                    entries_considered,
+                    entries_returned,
+                    token_budget,
+                    tokens_consumed,
+                    created_at
+                 ) VALUES ($1::text, NULL, ($2::text)::jsonb, $3::text, ($4::text)::jsonb, ($5::text)::jsonb, ($6::text)::jsonb, $7::bigint, $8::bigint, $9::bigint, $10::bigint, $11::text)"
+            ),
+            params,
+        )
+    }
+    .map_err(|error| postgres_error("insert PostgreSQL roleplay lore recall trace", error))?;
+    Ok(())
+}
+
+fn list_lore_recall_traces<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &LoreRecallTraceQuery,
+) -> CoreResult<Vec<LoreRecallTraceRecord>> {
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 500);
+    let session_id = query.session_id.as_ref().map(|value| value.0.clone());
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT trace_id,
+                        session_id,
+                        layer_ids::text,
+                        query_text,
+                        active_subjects::text,
+                        excluded_subjects::text,
+                        config_snapshot::text,
+                        entries_considered,
+                        entries_returned,
+                        token_budget,
+                        tokens_consumed,
+                        created_at
+                 FROM {schema}.module_roleplay_lore_recall_traces
+                 WHERE ($1::text IS NULL OR session_id = $1)
+                   AND ($2::text IS NULL OR trace_id LIKE $2 || ':%' OR trace_id LIKE 'recall:' || $2 || ':%')
+                 ORDER BY created_at DESC, trace_id DESC
+                 LIMIT $3 OFFSET $4"
+            ),
+            &[&session_id, &query.chat_id, &limit, &offset],
+        )
+        .map_err(|error| postgres_error("list PostgreSQL roleplay lore recall traces", error))?;
+    rows.iter().map(row_to_lore_recall_trace).collect()
+}
+
+fn get_lore_recall_trace<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    trace_id: &str,
+) -> CoreResult<Option<LoreRecallTraceRecord>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT trace_id,
+                        session_id,
+                        layer_ids::text,
+                        query_text,
+                        active_subjects::text,
+                        excluded_subjects::text,
+                        config_snapshot::text,
+                        entries_considered,
+                        entries_returned,
+                        token_budget,
+                        tokens_consumed,
+                        created_at
+                 FROM {schema}.module_roleplay_lore_recall_traces
+                 WHERE trace_id = $1"
+            ),
+            &[&trace_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL roleplay lore recall trace", error))?;
+    row.as_ref().map(row_to_lore_recall_trace).transpose()
+}
+
+fn lore_layer_entry_join_select() -> &'static str {
+    "e.layer_id,
+     e.record_id,
+     e.is_constant,
+     e.priority,
+     e.added_at,
+     r.record_id,
+     r.world_id,
+     r.entity_id,
+     r.session_id,
+     r.branch_id,
+     r.shape_id,
+     r.shape_version,
+     r.canon_status,
+     r.visibility,
+     r.status,
+     r.revision,
+     r.title,
+     r.body,
+     r.content_json::text,
+     r.evidence_refs_json::text,
+     r.source,
+     r.confidence,
+     r.durability_rationale,
+     r.supersedes_record_id,
+     r.superseded_by_record_id,
+     r.tombstoned_at,
+     r.tombstone_reason,
+     r.created_at,
+     r.updated_at"
+}
+
+fn row_to_lore_layer(row: &Row) -> CoreResult<RoleplayLoreLayerRecord> {
+    row_to_lore_layer_at(row, 0)
+}
+
+fn row_to_lore_layer_at(row: &Row, base: usize) -> CoreResult<RoleplayLoreLayerRecord> {
+    let purpose: String = row.get(base + 4);
+    let write_policy: String = row.get(base + 5);
+    Ok(RoleplayLoreLayerRecord {
+        layer_id: row.get(base),
+        profile_id: row.get(base + 1),
+        name: row.get(base + 2),
+        description: row.get(base + 3),
+        purpose: crate::parse_roleplay_lore_layer_purpose(&purpose)?,
+        write_policy: crate::parse_roleplay_lore_layer_write_policy(&write_policy)?,
+        is_archived: row.get(base + 6),
+        created_at: row.get(base + 7),
+        updated_at: row.get(base + 8),
+    })
+}
+
+fn row_to_lore_layer_config(row: &Row) -> CoreResult<RoleplayLoreLayerConfigRecord> {
+    let default_token_budget: i64 = row.get(7);
+    let constant_token_reserve: i64 = row.get(8);
+    let max_constants: i64 = row.get(10);
+    Ok(RoleplayLoreLayerConfigRecord {
+        config_id: row.get(0),
+        layer_id: row.get(1),
+        fts_weight: row.get::<_, f64>(2) as f32,
+        subject_weight: row.get::<_, f64>(3) as f32,
+        canon_weight: row.get::<_, f64>(4) as f32,
+        tag_boost_weight: row.get::<_, f64>(5) as f32,
+        recency_weight: row.get::<_, f64>(6) as f32,
+        default_token_budget: default_token_budget as u32,
+        constant_token_reserve: constant_token_reserve as u32,
+        min_relevance_score: row.get::<_, f64>(9) as f32,
+        max_constants: max_constants as u32,
+        created_at: row.get(11),
+        updated_at: row.get(12),
+    })
+}
+
+fn row_to_lore_layer_entry_join(row: &Row) -> CoreResult<RoleplayLoreLayerEntryJoin> {
+    Ok(RoleplayLoreLayerEntryJoin {
+        layer_id: row.get(0),
+        record_id: row.get(1),
+        is_constant: row.get(2),
+        priority: row.get(3),
+        added_at: row.get(4),
+        record: row_to_roleplay_lore_record_at(row, 5)?,
+    })
+}
+
+fn row_to_chat_layer_record(row: &Row) -> CoreResult<RoleplayChatLayerRecord> {
+    Ok(RoleplayChatLayerRecord {
+        chat_id: row.get(0),
+        layer_id: row.get(1),
+        priority: row.get(2),
+        enabled: row.get(3),
+        created_at: row.get(4),
+        layer: row_to_lore_layer_at(row, 5)?,
+    })
+}
+
+fn row_to_lore_recall_trace(row: &Row) -> CoreResult<LoreRecallTraceRecord> {
+    let layer_ids_json: String = row.get(2);
+    let active_subjects_json: String = row.get(4);
+    let excluded_subjects_json: String = row.get(5);
+    let config_snapshot_json: String = row.get(6);
+    let entries_considered: i64 = row.get(7);
+    let entries_returned: i64 = row.get(8);
+    let token_budget: Option<i64> = row.get(9);
+    let tokens_consumed: i64 = row.get(10);
+    Ok(LoreRecallTraceRecord {
+        trace_id: row.get(0),
+        session_id: row.get::<_, Option<String>>(1).map(SessionId::new),
+        layer_ids: parse_postgres_json(&layer_ids_json, "roleplay lore trace layer_ids")?,
+        query_text: row.get(3),
+        active_subjects: parse_postgres_json(
+            &active_subjects_json,
+            "roleplay lore trace active_subjects",
+        )?,
+        excluded_subjects: parse_postgres_json(
+            &excluded_subjects_json,
+            "roleplay lore trace excluded_subjects",
+        )?,
+        config_snapshot: parse_postgres_json(
+            &config_snapshot_json,
+            "roleplay lore trace config_snapshot",
+        )?,
+        entries_considered: entries_considered as u32,
+        entries_returned: entries_returned as u32,
+        token_budget: token_budget.map(|value| value as u32),
+        tokens_consumed: tokens_consumed as u32,
+        created_at: row.get(11),
     })
 }
 
@@ -10599,7 +12020,8 @@ mod tests {
     use super::*;
     use crate::{
         CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
-        RoleplayLoreCanonStatus, RoleplayLoreVisibility, COUNTER_MESSAGES, COUNTER_WAKES,
+        RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
+        RoleplayLoreVisibility, COUNTER_MESSAGES, COUNTER_WAKES,
     };
     use rusty_crew_core_protocol::{
         AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource,
@@ -12925,6 +14347,204 @@ mod tests {
                 .find(|count| count.table == "module_roleplay_lore_provenance_events")
                 .map(|count| count.rows),
             Some(7)
+        );
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_roleplay_lore_layers_and_recall_are_implemented() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL roleplay lore layer proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_roleplay_lore_layers_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+
+        store
+            .create_lore_layer(&RoleplayLoreLayerWrite {
+                layer_id: "layer-world".to_string(),
+                profile_id: "profile-narrator".to_string(),
+                name: "World Details".to_string(),
+                description: Some("Durable world facts.".to_string()),
+                purpose: RoleplayLoreLayerPurpose::World,
+                write_policy: RoleplayLoreLayerWritePolicy::Manual,
+                now: "2026-06-27T01:00:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .create_lore_layer(&RoleplayLoreLayerWrite {
+                layer_id: "layer-story".to_string(),
+                profile_id: "profile-narrator".to_string(),
+                name: "Current Story".to_string(),
+                description: None,
+                purpose: RoleplayLoreLayerPurpose::Story,
+                write_policy: RoleplayLoreLayerWritePolicy::AutoCapture,
+                now: "2026-06-27T01:01:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .set_lore_layer_config(&RoleplayLoreLayerConfigWrite {
+                config_id: "config-world".to_string(),
+                layer_id: "layer-world".to_string(),
+                fts_weight: 1.25,
+                subject_weight: 1.0,
+                canon_weight: 0.75,
+                tag_boost_weight: 0.5,
+                recency_weight: 0.1,
+                default_token_budget: 3200,
+                constant_token_reserve: 400,
+                min_relevance_score: 0.25,
+                max_constants: 7,
+                now: "2026-06-27T01:02:00Z".to_string(),
+            })
+            .unwrap();
+
+        store
+            .add_roleplay_lore_record(&roleplay_lore_write(RoleplayLoreWriteFixture {
+                record_id: "lore-tide-calendar",
+                world_id: "world-moonlit",
+                entity_id: Some("entity-clockmaker"),
+                shape_id: "lore_entry",
+                title: "Tide Calendar",
+                body: "The tide calendar opens the moon gate.",
+                canon_status: RoleplayLoreCanonStatus::Canon,
+                visibility: RoleplayLoreVisibility::Public,
+                evidence_ref_id: "wake-lore",
+                now: "2026-06-27T01:03:00Z",
+                supersedes_record_id: None,
+            }))
+            .unwrap();
+        store
+            .add_entry_to_layer(&RoleplayLoreLayerEntryLink {
+                layer_id: "layer-world".to_string(),
+                record_id: "lore-tide-calendar".to_string(),
+                is_constant: false,
+                priority: 10,
+                added_at: "2026-06-27T01:04:00Z".to_string(),
+            })
+            .unwrap();
+
+        let mut captured_write = roleplay_lore_write(RoleplayLoreWriteFixture {
+            record_id: "lore-captured-orchard",
+            world_id: "world-moonlit",
+            entity_id: Some("entity-clockmaker"),
+            shape_id: "lore_entry",
+            title: "Silver Orchard",
+            body: "The silver orchard blooms after the clockmaker sings.",
+            canon_status: RoleplayLoreCanonStatus::Draft,
+            visibility: RoleplayLoreVisibility::Private,
+            evidence_ref_id: "wake-capture",
+            now: "2026-06-27T01:05:00Z",
+            supersedes_record_id: None,
+        });
+        captured_write.source = MemoryProposalSource::CaptureProducer;
+        let captured = store
+            .capture_lore_fact(&RoleplayLoreFactCapture {
+                layer_id: "layer-story".to_string(),
+                write: captured_write,
+                is_constant: false,
+                priority: 4,
+                capture_reason: Some("observed in chat turn".to_string()),
+            })
+            .unwrap();
+        assert_eq!(captured.record.record_id, "lore-captured-orchard");
+
+        let promoted = store
+            .promote_lore_entry(&RoleplayLoreEntryPromotion {
+                source_layer_id: "layer-story".to_string(),
+                source_record_id: "lore-captured-orchard".to_string(),
+                target_layer_id: "layer-world".to_string(),
+                new_record_id: "lore-promoted-orchard".to_string(),
+                is_constant: false,
+                priority: 2,
+                now: "2026-06-27T01:06:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(promoted.layer_id, "layer-world");
+        assert_eq!(promoted.record.title, "Silver Orchard");
+
+        store
+            .set_chat_layers(&RoleplayChatLayersWrite {
+                chat_id: "chat-moonlit".to_string(),
+                layers: vec![
+                    RoleplayChatLayerLink {
+                        layer_id: "layer-world".to_string(),
+                        priority: 0,
+                        enabled: true,
+                    },
+                    RoleplayChatLayerLink {
+                        layer_id: "layer-story".to_string(),
+                        priority: 1,
+                        enabled: true,
+                    },
+                ],
+                now: "2026-06-27T01:07:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .reorder_chat_layers(
+                "chat-moonlit",
+                &["layer-story".to_string(), "layer-world".to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            store.get_chat_layers("chat-moonlit").unwrap()[0].layer_id,
+            "layer-story"
+        );
+        store
+            .toggle_chat_layer("chat-moonlit", "layer-story", false)
+            .unwrap();
+
+        let recall = store
+            .recall_lore(&LoreRecallQuery {
+                chat_id: "chat-moonlit".to_string(),
+                session_id: None,
+                query_text: Some("moon gate tide".to_string()),
+                active_subjects: vec!["entity-clockmaker".to_string()],
+                excluded_subjects: Vec::new(),
+                token_budget: Some(120),
+                trace_id: None,
+                record_trace: true,
+                now: "2026-06-27T01:08:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(recall.entries.len(), 1);
+        assert_eq!(recall.entries[0].record.record_id, "lore-tide-calendar");
+        let traces = store
+            .list_recall_traces(&LoreRecallTraceQuery {
+                session_id: None,
+                chat_id: Some("chat-moonlit".to_string()),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(traces.len(), 1);
+        assert_eq!(
+            store
+                .get_recall_trace(&traces[0].trace_id)
+                .unwrap()
+                .unwrap()
+                .entries_returned,
+            1
+        );
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "module_roleplay_lore_layers")
+                .map(|count| count.rows),
+            Some(2)
+        );
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "module_roleplay_lore_recall_traces")
+                .map(|count| count.rows),
+            Some(1)
         );
 
         store.drop_schema_for_test().unwrap();

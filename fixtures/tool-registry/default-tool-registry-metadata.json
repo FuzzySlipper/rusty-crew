@@ -313,6 +313,76 @@
       "version": "0.1.0"
     },
     {
+      "name": "recall_lore",
+      "description": "Recall scored roleplay lore from active chat layers through runtime-owned APIs.",
+      "category": "memory",
+      "toolsets": ["roleplay_lore_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "roleplay.lore_recall_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "capture_lore_fact",
+      "description": "Capture a roleplay fact into an automatic lore layer through runtime-owned APIs.",
+      "category": "memory",
+      "toolsets": ["roleplay_lore_write"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "roleplay.lore_capture_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "promote_lore_entry",
+      "description": "Promote a captured roleplay lore entry into another lore layer.",
+      "category": "memory",
+      "toolsets": ["roleplay_lore_write"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "roleplay.lore_promotion_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "search_lore",
+      "description": "Search roleplay lore entries and optionally narrow results to chat or explicit layers.",
+      "category": "memory",
+      "toolsets": ["roleplay_lore_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "roleplay.lore_search_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "list_lore_layers",
+      "description": "List roleplay lore layers available to a profile.",
+      "category": "memory",
+      "toolsets": ["roleplay_lore_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "roleplay.lore_layer_list_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "manage_lore_layers",
+      "description": "Create, update, archive, toggle, and reorder roleplay lore layers.",
+      "category": "memory",
+      "toolsets": ["roleplay_lore_manage"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "roleplay.lore_layer_management_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "get_lore_layer_config",
+      "description": "Read retrieval and capture config for a roleplay lore layer.",
+      "category": "memory",
+      "toolsets": ["roleplay_lore_read"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "roleplay.lore_layer_config_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "skills_list",
       "description": "List configured skills visible to the current profile.",
       "category": "skills",

@@ -234,14 +234,6 @@ pub enum CoreCoordinationStore {
     Postgres(Arc<postgres_proof::PostgresRuntimeCounterProofStore>),
 }
 
-#[cfg(feature = "postgres")]
-fn postgres_roleplay_lore_layer_unsupported<T>() -> CoreResult<T> {
-    Err(CoreError::new(
-        CoreErrorKind::ActionRejected,
-        "PostgreSQL roleplay lore layer/recall APIs are not implemented yet",
-    ))
-}
-
 impl CoreCoordinationStore {
     pub fn open_storage(
         engine_data_dir: impl AsRef<Path>,
@@ -702,7 +694,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.create_lore_layer(write),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.create_lore_layer(write),
         }
     }
 
@@ -710,7 +702,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.get_lore_layer(layer_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.get_lore_layer(layer_id),
         }
     }
 
@@ -721,7 +713,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.list_lore_layers_by_profile(profile_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.list_lore_layers_by_profile(profile_id),
         }
     }
 
@@ -732,7 +724,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.update_lore_layer(update),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.update_lore_layer(update),
         }
     }
 
@@ -743,7 +735,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.archive_lore_layer(archive),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.archive_lore_layer(archive),
         }
     }
 
@@ -754,7 +746,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.get_lore_layer_config(layer_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.get_lore_layer_config(layer_id),
         }
     }
 
@@ -765,7 +757,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.set_lore_layer_config(write),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.set_lore_layer_config(write),
         }
     }
 
@@ -773,7 +765,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.add_entry_to_layer(link),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.add_entry_to_layer(link),
         }
     }
 
@@ -784,7 +776,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.capture_lore_fact(capture),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.capture_lore_fact(capture),
         }
     }
 
@@ -795,7 +787,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.promote_lore_entry(promotion),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.promote_lore_entry(promotion),
         }
     }
 
@@ -803,7 +795,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.remove_entry_from_layer(layer_id, record_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.remove_entry_from_layer(layer_id, record_id),
         }
     }
 
@@ -816,7 +808,9 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.set_entry_constant(layer_id, record_id, is_constant),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => {
+                postgres.set_entry_constant(layer_id, record_id, is_constant)
+            }
         }
     }
 
@@ -827,7 +821,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.list_entries_by_layer(layer_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.list_entries_by_layer(layer_id),
         }
     }
 
@@ -835,7 +829,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.set_chat_layers(write),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.set_chat_layers(write),
         }
     }
 
@@ -843,7 +837,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.get_chat_layers(chat_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.get_chat_layers(chat_id),
         }
     }
 
@@ -856,7 +850,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.toggle_chat_layer(chat_id, layer_id, enabled),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.toggle_chat_layer(chat_id, layer_id, enabled),
         }
     }
 
@@ -864,7 +858,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.reorder_chat_layers(chat_id, layer_ids),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.reorder_chat_layers(chat_id, layer_ids),
         }
     }
 
@@ -872,7 +866,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.recall_lore(query),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.recall_lore(query),
         }
     }
 
@@ -883,7 +877,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.list_recall_traces(query),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.list_recall_traces(query),
         }
     }
 
@@ -891,7 +885,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.get_recall_trace(trace_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_roleplay_lore_layer_unsupported(),
+            Self::Postgres(postgres) => postgres.get_recall_trace(trace_id),
         }
     }
 

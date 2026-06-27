@@ -375,6 +375,22 @@ export type {
   DenseProfileMemoryToolDetails,
 } from "./dense-profile-memory-tool.js";
 export {
+  captureLoreFactTool,
+  createLoreMemoryToolResolver,
+  getLoreLayerConfigTool,
+  listLoreLayersTool,
+  manageLoreLayersTool,
+  promoteLoreEntryTool,
+  recallLoreTool,
+  resolveLoreMemoryTools,
+  searchLoreTool,
+} from "./lore-memory-tool.js";
+export type {
+  LoreMemoryToolContext,
+  LoreMemoryToolDetails,
+  LoreMemoryToolOperation,
+} from "./lore-memory-tool.js";
+export {
   channelReadbackTool,
   curatorExecuteTool,
   counterResetTool,

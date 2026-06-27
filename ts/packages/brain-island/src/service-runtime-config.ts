@@ -57,6 +57,7 @@ import {
 } from "./dense-profile-memory-tool.js";
 import { resolveDenMemoryTools } from "./den-memory-tools.js";
 import { resolveDelegationTools } from "./delegation-tools.js";
+import { resolveLoreMemoryTools } from "./lore-memory-tool.js";
 import type { BrainImplementation } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
@@ -1321,6 +1322,10 @@ function createMemoryToolResolver(
     denseProfileMemoryTool({
       client: options.bridge,
       mode: denseProfileMemoryMode(profile),
+      session: input.wake.state.session,
+    }),
+    ...resolveLoreMemoryTools({
+      client: options.bridge,
       session: input.wake.state.session,
     }),
   ];
