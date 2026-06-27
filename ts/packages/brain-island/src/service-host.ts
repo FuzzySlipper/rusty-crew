@@ -27,6 +27,7 @@ import type {
   ChannelSubscriptionStatus,
   CoreEvent,
   EngineHandle,
+  EngineStorageConfig,
   McpBindingRecord,
   ProfileId,
   ScheduledJobStatus,
@@ -398,7 +399,8 @@ const DEV_NO_AUTH_CONTROL_TOKEN = "__rusty_crew_dev_no_auth__";
 export async function startRustyCrewServiceHost(
   options: RustyCrewServiceHostOptions = {},
 ): Promise<RustyCrewServiceHost> {
-  const config = options.config ?? loadRustyCrewServiceConfig(options.env);
+  const serviceEnv = options.env ?? process.env;
+  const config = options.config ?? loadRustyCrewServiceConfig(serviceEnv);
 
   ensureRustyCrewServiceDirectories(config);
   const lock = acquireRustyCrewServiceLock(config);
@@ -408,15 +410,13 @@ export async function startRustyCrewServiceHost(
 
   try {
     const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
-    assertServiceStorageBootAllowed(
-      runtimeConfig.storage ?? config.storage,
-      "service startup",
-    );
+    const storage = runtimeConfig.storage ?? config.storage;
     engine = await bridge.initializeEngine({
       engineDataDir: config.paths.engineDataDir,
       clock: "system",
       defaultTurnBudget: 16,
       defaultIdleTimeoutMs: 30_000,
+      storage: engineStorageConfig(storage, serviceEnv),
     });
     const profileChannelWakePolicies =
       await loadProfileChannelWakePolicies(runtimeConfig);
@@ -529,6 +529,35 @@ function assertServiceStorageBootAllowed(
       `${context}: storage.backend=postgres is selected, but the full-service PostgreSQL backend is not production-ready yet. This fails closed before opening the coordination engine so the service cannot silently fall back to SQLite. PostgreSQL proof/admin diagnostics are available through bounded storage proof tests and projections only, not full service boot.`,
     );
   }
+}
+
+function engineStorageConfig(
+  storage: RustyCrewStorageConfig,
+  env: RustyCrewServiceEnv,
+): EngineStorageConfig {
+  if (storage.backend === "sqlite") {
+    return { backend: "sqlite" };
+  }
+  if (storage.postgres.bootMode !== "active") {
+    throw new Error(
+      `storage.backend=postgres requires storage.postgres.bootMode=active for full service startup; current mode is ${storage.postgres.bootMode}`,
+    );
+  }
+  const databaseUrl = (env as Record<string, string | undefined>)[
+    storage.postgres.databaseUrlEnv
+  ];
+  if (databaseUrl === undefined || databaseUrl.trim() === "") {
+    throw new Error(
+      `storage.backend=postgres requires ${storage.postgres.databaseUrlEnv} to be set`,
+    );
+  }
+  return {
+    backend: "postgres",
+    databaseUrl,
+    schema: storage.postgres.schema,
+    maxConnections: storage.postgres.maxConnections,
+    statementTimeoutMs: storage.postgres.statementTimeoutMs,
+  };
 }
 
 async function handleHttpRequest(
@@ -1143,9 +1172,11 @@ function storageDiagnosticsProjection(
     selectorStatus:
       config.backend === "sqlite"
         ? "active"
-        : config.postgres.bootMode === "proof_admin"
-          ? "proof_admin_only"
-          : "blocked",
+        : config.postgres.bootMode === "active"
+          ? "active"
+          : config.postgres.bootMode === "proof_admin"
+            ? "proof_admin_only"
+            : "blocked",
     implementationStatus: config.implementationStatus,
     sqlite: {
       path: config.sqlite.path,
@@ -1162,9 +1193,11 @@ function storageDiagnosticsProjection(
       maxConnections: config.postgres.maxConnections,
       statementTimeoutMs: config.postgres.statementTimeoutMs,
       implementationStatus:
-        config.postgres.bootMode === "proof_admin"
-          ? "proof_admin_only"
-          : "blocked_unimplemented",
+        config.postgres.bootMode === "active"
+          ? "active"
+          : config.postgres.bootMode === "proof_admin"
+            ? "proof_admin_only"
+            : "blocked_unimplemented",
       productionReadiness: postgresProductionReadiness(
         config.postgres.bootMode,
         storage.repositoryGroups,
@@ -1182,39 +1215,39 @@ function storageDiagnosticsProjection(
 function postgresStorageCapabilities(
   bootMode: RustyCrewStorageConfig["postgres"]["bootMode"],
 ): NonNullable<StorageDiagnosticsProjection["postgres"]>["capabilities"] {
-  const proofAdmin = bootMode === "proof_admin";
+  const postgresConnected = bootMode === "proof_admin" || bootMode === "active";
   return [
     {
       name: "transactions",
-      supported: proofAdmin,
-      detail: proofAdmin
-        ? "PostgreSQL transactions are available for bounded proof/admin diagnostics."
-        : "PostgreSQL full service boot is blocked until repository coverage exists.",
+      supported: postgresConnected,
+      detail: postgresConnected
+        ? "PostgreSQL transactions are available for covered repository groups."
+        : "PostgreSQL service boot is blocked until active mode is selected.",
     },
     {
       name: "json_metadata",
-      supported: proofAdmin,
+      supported: postgresConnected,
       detail:
-        "PostgreSQL can support JSON metadata; only proof/admin paths may rely on it today.",
+        "PostgreSQL JSON metadata is available for covered repository groups.",
     },
     {
       name: "concurrent_writers",
-      supported: proofAdmin,
+      supported: postgresConnected,
       detail:
-        "PostgreSQL supports concurrent writers; proof slices exercise bounded repository conformance but are not wired as the full coordination backend.",
+        "PostgreSQL supports concurrent writers; covered repository groups use the Postgres backend facade.",
     },
     {
       name: "row_level_claims",
-      supported: proofAdmin,
-      detail: proofAdmin
+      supported: postgresConnected,
+      detail: postgresConnected
         ? "Scheduler stale-run expiry uses PostgreSQL row-level claim semantics in the proof slice."
-        : "Row-level claim proof exists, but full service PostgreSQL boot remains blocked.",
+        : "Row-level claim support requires active PostgreSQL service mode.",
     },
     {
       name: "runtime_full_text_search",
       supported: false,
       detail:
-        "A PostgreSQL runtime-search proof slice exists, but full service runtime search remains SQLite-backed until repository wiring and readiness gates land.",
+        "A PostgreSQL runtime-search proof slice exists, but full service runtime search remains degraded until query readiness gates are promoted.",
     },
     {
       name: "logical_export_import",
@@ -1385,6 +1418,15 @@ function postgresSearchDiagnostics(
         "Runtime search has a PostgreSQL proof slice behind typed APIs; backend tsquery syntax is not exposed through admin or tool routes.",
     };
   }
+  if (bootMode === "active") {
+    return {
+      backend: "postgres_tsvector",
+      status: "proof",
+      degraded: true,
+      detail:
+        "Runtime search is wired through the PostgreSQL backend facade for typed queries, but remains marked degraded until full query/readiness coverage is promoted.",
+    };
+  }
   return {
     backend: "postgres_tsvector",
     status: "unsupported",
@@ -1421,9 +1463,11 @@ function postgresProductionReadiness(
     }
   }
   const reasonCodes = [
-    bootMode === "proof_admin"
-      ? "postgres_proof_admin_only"
-      : "postgres_full_service_boot_blocked",
+    bootMode === "active"
+      ? "postgres_active_with_repository_gaps"
+      : bootMode === "proof_admin"
+        ? "postgres_proof_admin_only"
+        : "postgres_full_service_boot_blocked",
     ...blockers.map(
       (blocker) => `postgres_repository_${blocker.status}:${blocker.groupId}`,
     ),
@@ -1431,13 +1475,19 @@ function postgresProductionReadiness(
   return {
     ready: false,
     status:
-      bootMode === "proof_admin" ? "proof_admin_only" : "blocked_unimplemented",
+      bootMode === "active"
+        ? "degraded"
+        : bootMode === "proof_admin"
+          ? "proof_admin_only"
+          : "blocked_unimplemented",
     reasonCodes,
     blockers,
     detail:
-      bootMode === "proof_admin"
-        ? "PostgreSQL is available only for bounded proof/admin diagnostics; full service boot is blocked until the Rust coordination engine can construct a real PostgreSQL backend."
-        : "PostgreSQL full service boot is blocked until required repository groups are implemented or explicitly unsupported for a selected deployment mode.",
+      bootMode === "active"
+        ? "PostgreSQL is the active coordination backend, but readiness remains fail-closed until every correctness-sensitive repository group is implemented."
+        : bootMode === "proof_admin"
+          ? "PostgreSQL is available only for bounded proof/admin diagnostics; full service startup requires active mode."
+          : "PostgreSQL full service boot is blocked until active mode is selected and required repository groups are implemented or explicitly unsupported for a selected deployment mode.",
   };
 }
 

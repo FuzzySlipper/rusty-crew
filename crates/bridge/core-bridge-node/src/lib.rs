@@ -9,7 +9,7 @@ use rusty_crew_core_bridge_api::{
     BrainImplementationHandle, BrainImplementationRegistration, BrainWakeAccepted,
     BrainWakeBufferInput, BrainWakeProviderStateOutput, BrainWakeRequest, BridgeManifestSummary,
     CoreError, CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle,
-    EventReceipt, EventSubscription, ExternalEvent, PlatformAdapterHandle,
+    EngineStorageConfig, EventReceipt, EventSubscription, ExternalEvent, PlatformAdapterHandle,
     PlatformAdapterRegistration, ProfileId, RuntimeBufferHandle, RuntimeBufferStore,
     RuntimeBufferView, SessionId, ShutdownRequest, ShutdownSummary, SubscriptionHandle, Unit,
     MANIFEST_VERSION, OPERATION_NAMES,
@@ -1244,12 +1244,54 @@ fn not_implemented(operation: &str) -> CoreError {
     )
 }
 
+fn js_engine_storage_config(config: &JsEngineConfig) -> napi::Result<Option<EngineStorageConfig>> {
+    let Some(backend) = config.storage_backend.as_deref() else {
+        return Ok(None);
+    };
+    match backend {
+        "sqlite" => Ok(Some(EngineStorageConfig::Sqlite)),
+        "postgres" | "postgresql" => {
+            let database_url = config.postgres_database_url.clone().ok_or_else(|| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    "postgresDatabaseUrl is required when storageBackend=postgres",
+                )
+            })?;
+            if database_url.trim().is_empty() {
+                return Err(napi::Error::new(
+                    napi::Status::InvalidArg,
+                    "postgresDatabaseUrl must not be empty",
+                ));
+            }
+            let schema = config
+                .postgres_schema
+                .clone()
+                .unwrap_or_else(|| "rusty_crew".to_string());
+            Ok(Some(EngineStorageConfig::Postgres {
+                database_url,
+                schema,
+                max_connections: config.postgres_max_connections,
+                statement_timeout_ms: config.postgres_statement_timeout_ms,
+            }))
+        }
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unsupported storageBackend {other}"),
+        )),
+    }
+}
+
 #[napi_derive::napi(object)]
 pub struct JsEngineConfig {
     pub engine_data_dir: String,
     pub fixed_clock: Option<String>,
     pub default_turn_budget: u32,
     pub default_idle_timeout_ms: u32,
+    pub storage_backend: Option<String>,
+    pub postgres_database_url: Option<String>,
+    pub postgres_schema: Option<String>,
+    pub postgres_max_connections: Option<u32>,
+    pub postgres_statement_timeout_ms: Option<u32>,
 }
 
 #[napi_derive::napi(object)]
@@ -1954,6 +1996,7 @@ impl NativeBridgeBinding {
     #[napi]
     pub fn initialize_engine(&self, config: JsEngineConfig) -> napi::Result<f64> {
         let mut bridge = self.bridge()?;
+        let storage = js_engine_storage_config(&config)?;
         let handle = bridge
             .initialize_engine(EngineConfig {
                 engine_data_dir: config.engine_data_dir,
@@ -1963,6 +2006,7 @@ impl NativeBridgeBinding {
                 },
                 default_turn_budget: config.default_turn_budget,
                 default_idle_timeout_ms: config.default_idle_timeout_ms,
+                storage,
             })
             .map_err(to_napi_error)?;
         Ok(handle.get() as f64)
@@ -4713,6 +4757,7 @@ mod tests {
                 },
                 default_turn_budget: 3,
                 default_idle_timeout_ms: 1000,
+                storage: None,
             })
             .unwrap();
         let planner = bridge
@@ -4793,6 +4838,7 @@ mod tests {
                 },
                 default_turn_budget: 3,
                 default_idle_timeout_ms: 1000,
+                storage: None,
             })
             .unwrap();
         let optional_handle = bridge
@@ -4969,6 +5015,7 @@ mod tests {
                 },
                 default_turn_budget: 3,
                 default_idle_timeout_ms: 1000,
+                storage: None,
             })
             .unwrap();
 
@@ -4997,6 +5044,7 @@ mod tests {
                 },
                 default_turn_budget: 3,
                 default_idle_timeout_ms: 1000,
+                storage: None,
             })
             .unwrap();
         bridge

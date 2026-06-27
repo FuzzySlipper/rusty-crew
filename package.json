@@ -94,6 +94,7 @@
     "smoke:patch-tool": "npm run smoke:patch-tool -w @rusty-crew/brain-island",
     "smoke:service-config": "npm run smoke:service-config -w @rusty-crew/brain-island",
     "smoke:service-host": "npm run smoke:service-host -w @rusty-crew/brain-island",
+    "smoke:service-postgres-startup": "npm run smoke:service-postgres-startup -w @rusty-crew/brain-island",
     "smoke:service-den-router-tools": "npm run smoke:service-den-router-tools -w @rusty-crew/brain-island",
     "smoke:pi-agent-brain-events": "npm run smoke:pi-agent-brain-events -w @rusty-crew/brain-island",
     "service:debug-turn": "npm run service:debug-turn -w @rusty-crew/brain-island --",

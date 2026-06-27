@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AgentId,
+  EngineConfig,
   McpBindingRecord,
   ProfileId,
   SessionId,
@@ -36,6 +37,8 @@ try {
           RUSTY_CREW_ADMIN_PORT: String(blockedPostgresPort),
           RUSTY_CREW_ADMIN_AUTH_MODE: "none",
           RUSTY_CREW_STORAGE_BACKEND: "postgres",
+          RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
+          RUSTY_CREW_POSTGRES_BOOT_MODE: "active",
         },
         bridge: {
           manifestVersion: 1,
@@ -46,11 +49,12 @@ try {
           },
         } as unknown as NativeBridgeModule,
       }),
-    /full-service PostgreSQL backend is not production-ready/,
+    /storage\.backend=postgres requires RUSTY_CREW_DATABASE_URL to be set/,
   );
   assert.equal(initializeCalled, false);
 
   initializeCalled = false;
+  let capturedStorageBackend: string | undefined;
   await assert.rejects(
     () =>
       startRustyCrewServiceHost({
@@ -61,20 +65,25 @@ try {
           RUSTY_CREW_ADMIN_PORT: String(blockedPostgresPort),
           RUSTY_CREW_ADMIN_AUTH_MODE: "none",
           RUSTY_CREW_STORAGE_BACKEND: "postgres",
-          RUSTY_CREW_POSTGRES_BOOT_MODE: "proof_admin",
+          RUSTY_CREW_DATABASE_URL:
+            "postgres://rusty_crew:local@127.0.0.1:5432/rusty_crew",
+          RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
+          RUSTY_CREW_POSTGRES_BOOT_MODE: "active",
         },
         bridge: {
           manifestVersion: 1,
           operationNames: [],
-          initializeEngine: async () => {
+          initializeEngine: async (config: EngineConfig) => {
             initializeCalled = true;
-            throw new Error("initializeEngine should not be called");
+            capturedStorageBackend = config.storage?.backend;
+            throw new Error("postgres init sentinel");
           },
         } as unknown as NativeBridgeModule,
       }),
-    /full-service PostgreSQL backend is not production-ready/,
+    /postgres init sentinel/,
   );
-  assert.equal(initializeCalled, false);
+  assert.equal(initializeCalled, true);
+  assert.equal(capturedStorageBackend, "postgres");
 } finally {
   rmSync(blockedPostgresRoot, { recursive: true, force: true });
 }

@@ -50,6 +50,7 @@ fn run_case(
         },
         default_turn_budget: 3,
         default_idle_timeout_ms: 1000,
+        storage: None,
     })?;
 
     let session_id = SessionId::new(format!("throughput-session-{producer_batch_size}"));

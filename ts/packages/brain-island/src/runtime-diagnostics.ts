@@ -260,13 +260,20 @@ export interface StorageDiagnosticsProjection {
   postgres?: {
     databaseUrlEnv: string;
     schema: string;
-    bootMode: "blocked" | "proof_admin";
+    bootMode: "blocked" | "proof_admin" | "active";
     maxConnections: number;
     statementTimeoutMs: number;
-    implementationStatus: "blocked_unimplemented" | "proof_admin_only";
+    implementationStatus:
+      | "active"
+      | "blocked_unimplemented"
+      | "proof_admin_only";
     productionReadiness: {
       ready: boolean;
-      status: "blocked_unimplemented" | "proof_admin_only" | "ready";
+      status:
+        | "blocked_unimplemented"
+        | "proof_admin_only"
+        | "degraded"
+        | "ready";
       reasonCodes: string[];
       blockers: {
         groupId: string;
@@ -293,6 +300,11 @@ export interface StorageDiagnosticsProjection {
       coverageStatus: "implemented" | "proof" | "unsupported" | "degraded";
       implementationStatus:
         | "proof_admin"
+        | "proof_sessions_identities"
+        | "proof_events_projections"
+        | "proof_queues_messages"
+        | "proof_scheduler_jobs"
+        | "proof_worker_runs_completions"
         | "proof_runtime_counter"
         | "proof_simple_kv"
         | "proof_runtime_search"

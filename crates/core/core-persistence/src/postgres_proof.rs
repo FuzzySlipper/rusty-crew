@@ -97,6 +97,15 @@ pub struct PostgresRuntimeCounterProofStore {
     client: Mutex<Client>,
 }
 
+impl std::fmt::Debug for PostgresRuntimeCounterProofStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PostgresRuntimeCounterProofStore")
+            .field("schema", &self.schema)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PostgresRuntimeCounterProofStore {
     pub fn connect_from_env(config: &PostgresRuntimeCounterProofConfig) -> CoreResult<Self> {
         let database_url = std::env::var(&config.database_url_env).map_err(|error| {

@@ -16,6 +16,7 @@ import {
 } from "@rusty-crew/adapter-den";
 
 export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
+  [key: string]: string | undefined;
   RUSTY_CREW_DATA_DIR?: string;
   RUSTY_CREW_CONFIG_DIR?: string;
   RUSTY_CREW_ENGINE_DATA_DIR?: string;
@@ -129,7 +130,7 @@ export interface RustyCrewSqliteStorageConfig {
 export interface RustyCrewPostgresStorageConfig {
   databaseUrlEnv: string;
   schema: string;
-  bootMode: "blocked" | "proof_admin";
+  bootMode: "blocked" | "proof_admin" | "active";
   maxConnections: number;
   statementTimeoutMs: number;
 }
@@ -466,12 +467,13 @@ function parseStorageBackend(
 
 function parsePostgresBootMode(
   input: string | undefined,
-): "blocked" | "proof_admin" {
+): "blocked" | "proof_admin" | "active" {
   const value = normalizeOptional(input);
   if (value === undefined || value === "blocked") return "blocked";
   if (value === "proof_admin" || value === "proof-admin") return "proof_admin";
+  if (value === "active") return "active";
   throw new Error(
-    "RUSTY_CREW_POSTGRES_BOOT_MODE must be blocked or proof_admin",
+    "RUSTY_CREW_POSTGRES_BOOT_MODE must be blocked, proof_admin, or active",
   );
 }
 
@@ -528,9 +530,11 @@ function loadRustyCrewStorageConfig(
     implementationStatus:
       backend === "sqlite"
         ? "active"
-        : postgresBootMode === "proof_admin"
-          ? "proof_admin_only"
-          : "blocked_unimplemented",
+        : postgresBootMode === "active"
+          ? "active"
+          : postgresBootMode === "proof_admin"
+            ? "proof_admin_only"
+            : "blocked_unimplemented",
   };
 }
 

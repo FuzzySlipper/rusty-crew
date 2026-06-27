@@ -92,6 +92,11 @@ interface NativeBridgeBinding {
     fixedClock?: string;
     defaultTurnBudget: number;
     defaultIdleTimeoutMs: number;
+    storageBackend?: string;
+    postgresDatabaseUrl?: string;
+    postgresSchema?: string;
+    postgresMaxConnections?: number;
+    postgresStatementTimeoutMs?: number;
   }): number;
   registerBrainImplementation(registration: {
     implementationId: string;
@@ -1948,6 +1953,23 @@ function createNativeBridgeModule(
         fixedClock: config.clock === "system" ? undefined : config.clock.fixed,
         defaultTurnBudget: config.defaultTurnBudget,
         defaultIdleTimeoutMs: config.defaultIdleTimeoutMs,
+        storageBackend: config.storage?.backend,
+        postgresDatabaseUrl:
+          config.storage?.backend === "postgres"
+            ? config.storage.databaseUrl
+            : undefined,
+        postgresSchema:
+          config.storage?.backend === "postgres"
+            ? config.storage.schema
+            : undefined,
+        postgresMaxConnections:
+          config.storage?.backend === "postgres"
+            ? config.storage.maxConnections
+            : undefined,
+        postgresStatementTimeoutMs:
+          config.storage?.backend === "postgres"
+            ? config.storage.statementTimeoutMs
+            : undefined,
       }) as EngineHandle,
     shutdownEngine: async (request) =>
       binding.shutdownEngine(request.engine, request.drainTimeoutMs),

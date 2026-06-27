@@ -4,7 +4,7 @@
 //! document data remains Den product data and is not mirrored here.
 
 pub mod module_schema;
-#[cfg(feature = "postgres-proof")]
+#[cfg(feature = "postgres")]
 pub mod postgres_proof;
 mod repositories;
 
@@ -32,9 +32,9 @@ use rusty_crew_core_protocol::{
     ConversationBranchId, ConversationSnapshotId, CoreError, CoreErrorKind, CoreEvent,
     CoreEventKind, CoreResult, DataBankScopeId, DelegatedCompletion, DelegatedFanOutGroup,
     DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
-    DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp,
-    MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryEvidenceRef,
-    MemoryExportImportPolicy, MemoryFieldType, MemoryGovernanceDecisionInput,
+    DurableIdentityStatus, EngineStorageConfig, FanOutFailurePolicy, FanOutGroupStatus,
+    IsoTimestamp, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
+    MemoryEvidenceRef, MemoryExportImportPolicy, MemoryFieldType, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord, MemoryGovernanceMode,
     MemoryIndexingPolicy, MemoryOperation, MemoryOperationPolicy, MemoryPromptPolicy,
     MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus,
@@ -212,43 +212,941 @@ pub struct CoordinationStore {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreCoordinationStoreBackend {
     Sqlite,
+    Postgres,
 }
 
 #[derive(Debug, Clone)]
-pub struct CoreCoordinationStore {
-    backend: CoreCoordinationStoreBackend,
-    sqlite: CoordinationStore,
+pub enum CoreCoordinationStore {
+    Sqlite(CoordinationStore),
+    #[cfg(feature = "postgres")]
+    Postgres(Arc<postgres_proof::PostgresRuntimeCounterProofStore>),
 }
 
 impl CoreCoordinationStore {
+    pub fn open_storage(
+        engine_data_dir: impl AsRef<Path>,
+        storage: Option<&EngineStorageConfig>,
+    ) -> CoreResult<Self> {
+        match storage {
+            None | Some(EngineStorageConfig::Sqlite) => Self::open_sqlite(engine_data_dir),
+            Some(EngineStorageConfig::Postgres {
+                database_url,
+                schema,
+                ..
+            }) => Self::open_postgres(database_url, schema),
+        }
+    }
+
     pub fn open_sqlite(engine_data_dir: impl AsRef<Path>) -> CoreResult<Self> {
-        Ok(Self {
-            backend: CoreCoordinationStoreBackend::Sqlite,
-            sqlite: CoordinationStore::open(engine_data_dir)?,
-        })
+        Ok(Self::Sqlite(CoordinationStore::open(engine_data_dir)?))
     }
 
     pub fn open_sqlite_file(path: impl AsRef<Path>) -> CoreResult<Self> {
-        Ok(Self {
-            backend: CoreCoordinationStoreBackend::Sqlite,
-            sqlite: CoordinationStore::open_file(path)?,
-        })
+        Ok(Self::Sqlite(CoordinationStore::open_file(path)?))
+    }
+
+    #[cfg(feature = "postgres")]
+    pub fn open_postgres(database_url: &str, schema: &str) -> CoreResult<Self> {
+        Ok(Self::Postgres(Arc::new(
+            postgres_proof::PostgresRuntimeCounterProofStore::connect(database_url, schema)?,
+        )))
+    }
+
+    #[cfg(not(feature = "postgres"))]
+    pub fn open_postgres(_database_url: &str, _schema: &str) -> CoreResult<Self> {
+        Err(CoreError::new(
+            CoreErrorKind::AdapterUnavailable,
+            "PostgreSQL coordination backend is not compiled into this build",
+        ))
     }
 
     pub fn backend(&self) -> CoreCoordinationStoreBackend {
-        self.backend
+        match self {
+            Self::Sqlite(_) => CoreCoordinationStoreBackend::Sqlite,
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => CoreCoordinationStoreBackend::Postgres,
+        }
     }
 
     pub fn sqlite_compat_store(&self) -> &CoordinationStore {
-        &self.sqlite
+        match self {
+            Self::Sqlite(sqlite) => sqlite,
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => {
+                panic!("sqlite_compat_store called on PostgreSQL coordination backend")
+            }
+        }
+    }
+
+    pub fn save_session(&self, state: &SessionState) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_session(state),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_session(state),
+        }
+    }
+
+    pub fn save_session_with_config(
+        &self,
+        state: &SessionState,
+        config: &SessionConfig,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_session_with_config(state, config),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_session_with_config(state, config),
+        }
+    }
+
+    pub fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_sessions(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_sessions(),
+        }
+    }
+
+    pub fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_event(sequence, event),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_event(sequence, event),
+        }
+    }
+
+    pub fn load_event_history(&self) -> CoreResult<Vec<PersistedEvent>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_event_history(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_event_history(),
+        }
+    }
+
+    pub fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_tool_call_history(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_tool_call_history(),
+        }
+    }
+
+    pub fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_queued_message(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_queued_message(record),
+        }
+    }
+
+    pub fn expire_queued_messages_at(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.expire_queued_messages_at(now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.expire_queued_messages_at(now),
+        }
+    }
+
+    pub fn load_queued_messages(
+        &self,
+        filter: &QueuedMessageFilter,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_queued_messages(filter),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_queued_messages(filter),
+        }
+    }
+
+    pub fn delegated_completions_for_parent(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> CoreResult<Vec<DelegatedCompletion>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.delegated_completions_for_parent(parent_session_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.delegated_completions_for_parent(parent_session_id)
+            }
+        }
+    }
+
+    pub fn fan_out_groups_for_parent(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> CoreResult<Vec<DelegatedFanOutGroup>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.fan_out_groups_for_parent(parent_session_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                let runs = postgres.query_worker_runs(&WorkerRunQuery {
+                    parent_session_id: Some(parent_session_id.clone()),
+                    ..Default::default()
+                })?;
+                Ok(aggregate_fan_out_groups(
+                    runs.into_iter()
+                        .filter(|run| run.fan_out_group_id.is_some())
+                        .collect(),
+                ))
+            }
+        }
+    }
+
+    pub fn load_provider_wire_state_for_wake(
+        &self,
+        lookup: &ProviderWireStateWakeLookup,
+    ) -> CoreResult<ProviderWireStateWakeResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_provider_wire_state_for_wake(lookup),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_provider_wire_state_for_wake(lookup),
+        }
+    }
+
+    pub fn save_provider_wire_state(&self, write: &ProviderWireStateWrite) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_provider_wire_state(write).map(|_| ()),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_provider_wire_state(write).map(|_| ()),
+        }
+    }
+
+    pub fn clear_provider_wire_state(
+        &self,
+        key: &ProviderWireStateKey,
+        now: &IsoTimestamp,
+        reason: ProviderWireStateInvalidationReason,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite
+                .clear_provider_wire_state(key, now, reason)
+                .map(|_| ()),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres
+                .clear_provider_wire_state(key, now, reason)
+                .map(|_| ()),
+        }
+    }
+
+    pub fn list_provider_wire_state_diagnostics(
+        &self,
+        limit: u32,
+    ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_provider_wire_state_diagnostics(limit),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_provider_wire_state_diagnostics(limit),
+        }
+    }
+
+    pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.count_rows(table),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                let table = DiagnosticTable::parse(table)?.as_str().to_string();
+                postgres
+                    .storage_diagnostics()?
+                    .table_counts
+                    .into_iter()
+                    .find(|count| count.table == table)
+                    .map(|count| count.rows)
+                    .ok_or_else(|| {
+                        CoreError::new(
+                            CoreErrorKind::InvalidInput,
+                            format!("unsupported PostgreSQL diagnostic table {table}"),
+                        )
+                    })
+            }
+        }
+    }
+
+    pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.database_size(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.database_size(),
+        }
+    }
+
+    pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.storage_diagnostics(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                let diagnostics = postgres.storage_diagnostics()?;
+                let size = postgres.database_size()?;
+                let module_registry = self.storage_schema()?;
+                Ok(RuntimeStorageDiagnostics {
+                    backend: diagnostics.backend,
+                    backend_label: "PostgreSQL".to_string(),
+                    schema_version: diagnostics.schema_version,
+                    supported_schema_version: diagnostics.schema_version,
+                    migrations: Vec::new(),
+                    size,
+                    table_counts: diagnostics.table_counts,
+                    capabilities: diagnostics.capabilities,
+                    repository_groups: diagnostics.repository_groups,
+                    module_registry,
+                    index_checks: Vec::new(),
+                    search_healthy: false,
+                    pressure_signals: Vec::new(),
+                    pressure: false,
+                })
+            }
+        }
+    }
+
+    pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.storage_schema(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => {
+                module_schema_registry_diagnostics(&compiled_module_schema_registry(), &[], &[])
+            }
+        }
+    }
+
+    pub fn list_profile_registry_records(
+        &self,
+        query: &ProfileRegistryQuery,
+    ) -> CoreResult<Vec<ProfileRegistryRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_profile_registry_records(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("profile registry list"),
+        }
+    }
+
+    pub fn get_profile_registry_record(
+        &self,
+        profile_id: &ProfileId,
+    ) -> CoreResult<Option<ProfileRegistryRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_profile_registry_record(profile_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("profile registry get"),
+        }
+    }
+
+    pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_simple_kv(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_simple_kv(query),
+        }
+    }
+
+    pub fn run_maintenance(
+        &self,
+        policy: &RuntimeMaintenancePolicy,
+    ) -> CoreResult<RuntimeMaintenanceReport> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.run_maintenance(policy),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.run_maintenance(policy),
+        }
+    }
+
+    pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_message_slot(slot),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_message_slot(slot),
+        }
+    }
+
+    pub fn save_message_variant(
+        &self,
+        variant: &MessageVariantWrite,
+    ) -> CoreResult<MessageVariantRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_message_variant(variant),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_message_variant(variant),
+        }
+    }
+
+    pub fn query_message_slots(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<Vec<MessageSlotRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_message_slots(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_message_slots(query),
+        }
+    }
+
+    pub fn query_message_variants(
+        &self,
+        query: &MessageVariantQuery,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_message_variants(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_message_variants(query),
+        }
+    }
+
+    pub fn select_active_message_variant(
+        &self,
+        request: &SelectActiveVariantRequest,
+    ) -> CoreResult<SelectActiveVariantResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.select_active_message_variant(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.select_active_message_variant(request),
+        }
+    }
+
+    pub fn delete_message_variant(
+        &self,
+        slot_id: &MessageSlotId,
+        variant_id: &MessageVariantId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<MessageSlotRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.delete_message_variant(slot_id, variant_id, updated_at),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("delete message variant"),
+        }
+    }
+
+    pub fn reorder_message_variants(
+        &self,
+        slot_id: &MessageSlotId,
+        ordered_variant_ids: &[MessageVariantId],
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("reorder message variants"),
+        }
+    }
+
+    pub fn save_conversation_branch(
+        &self,
+        branch: &ConversationBranchWrite,
+    ) -> CoreResult<ConversationBranchRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_conversation_branch(branch),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_conversation_branch(branch),
+        }
+    }
+
+    pub fn query_conversation_branches(
+        &self,
+        query: &ConversationBranchQuery,
+    ) -> CoreResult<Vec<ConversationBranchRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_conversation_branches(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_conversation_branches(query),
+        }
+    }
+
+    pub fn get_conversation_branch_state(
+        &self,
+        session_id: &SessionId,
+        default_updated_at: &IsoTimestamp,
+    ) -> CoreResult<ConversationBranchStateRecord> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.get_conversation_branch_state(session_id, default_updated_at)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.get_conversation_branch_state(session_id, default_updated_at)
+            }
+        }
+    }
+
+    pub fn select_active_conversation_branch(
+        &self,
+        request: &SelectActiveBranchRequest,
+    ) -> CoreResult<SelectActiveBranchResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.select_active_conversation_branch(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.select_active_conversation_branch(request),
+        }
+    }
+
+    pub fn update_conversation_branch_head(
+        &self,
+        request: &UpdateBranchHeadRequest,
+    ) -> CoreResult<UpdateBranchHeadResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.update_conversation_branch_head(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.update_conversation_branch_head(request),
+        }
+    }
+
+    pub fn save_conversation_snapshot(
+        &self,
+        snapshot: &ConversationSnapshotWrite,
+    ) -> CoreResult<ConversationSnapshotRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_conversation_snapshot(snapshot),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_conversation_snapshot(snapshot),
+        }
+    }
+
+    pub fn query_conversation_snapshots(
+        &self,
+        query: &ConversationSnapshotQuery,
+    ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_conversation_snapshots(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_conversation_snapshots(query),
+        }
+    }
+
+    pub fn resolve_conversation_jump(
+        &self,
+        request: &ConversationJumpRequest,
+    ) -> CoreResult<ConversationJumpResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.resolve_conversation_jump(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.resolve_conversation_jump(request),
+        }
+    }
+
+    pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_attachment(attachment),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_attachment(attachment),
+        }
+    }
+
+    pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_attachments(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_attachments(query),
+        }
+    }
+
+    pub fn remove_attachment(
+        &self,
+        attachment_id: &AttachmentId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<AttachmentRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.remove_attachment(attachment_id, updated_at),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.remove_attachment(attachment_id, updated_at),
+        }
+    }
+
+    pub fn save_data_bank_scope(
+        &self,
+        scope: &DataBankScopeWrite,
+    ) -> CoreResult<DataBankScopeRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_data_bank_scope(scope),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_data_bank_scope(scope),
+        }
+    }
+
+    pub fn query_data_bank_scopes(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<Vec<DataBankScopeRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_data_bank_scopes(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_data_bank_scopes(query),
+        }
+    }
+
+    pub fn remove_data_bank_scope(
+        &self,
+        scope_id: &DataBankScopeId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<DataBankScopeRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.remove_data_bank_scope(scope_id, updated_at),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.remove_data_bank_scope(scope_id, updated_at),
+        }
+    }
+
+    pub fn list_profile_memory(
+        &self,
+        query: &ProfileMemoryQuery,
+    ) -> CoreResult<Vec<ProfileMemoryRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_profile_memory(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_profile_memory(query),
+        }
+    }
+
+    pub fn get_profile_memory(
+        &self,
+        profile_id: &ProfileId,
+        target: &ProfileMemoryTarget,
+        key: &str,
+    ) -> CoreResult<Option<ProfileMemoryRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_profile_memory(profile_id, target, key),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_profile_memory(profile_id, target, key),
+        }
+    }
+
+    pub fn add_profile_memory(
+        &self,
+        write: &ProfileMemoryWrite,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.add_profile_memory(write, caps),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.add_profile_memory(write, caps),
+        }
+    }
+
+    pub fn replace_profile_memory(
+        &self,
+        replace: &ProfileMemoryReplace,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.replace_profile_memory(replace, caps),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.replace_profile_memory(replace, caps),
+        }
+    }
+
+    pub fn remove_profile_memory(
+        &self,
+        delete: &ProfileMemoryDelete,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.remove_profile_memory(delete),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.remove_profile_memory(delete),
+        }
+    }
+
+    pub fn query_session_memory_records(
+        &self,
+        query: &SessionMemoryQuery,
+    ) -> CoreResult<Vec<SessionMemoryRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_session_memory_records(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("session memory query"),
+        }
+    }
+
+    pub fn build_session_memory_prompt_context(
+        &self,
+        query: &BranchAwareSessionMemoryQuery,
+    ) -> CoreResult<SessionMemoryPromptContext> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.build_session_memory_prompt_context(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("session memory prompt context"),
+        }
+    }
+
+    pub fn list_memory_proposals(
+        &self,
+        query: &MemoryProposalQuery,
+    ) -> CoreResult<Vec<MemoryProposalRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_memory_proposals(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("memory proposals list"),
+        }
+    }
+
+    pub fn save_memory_proposal(
+        &self,
+        proposal: &MemoryProposalEnvelope,
+        descriptor: &MemorySpaceDescriptor,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryProposalRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_memory_proposal(proposal, descriptor, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("memory proposal save"),
+        }
+    }
+
+    pub fn record_memory_governance_decision(
+        &self,
+        decision: &MemoryGovernanceDecisionInput,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryGovernanceDecisionRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.record_memory_governance_decision(decision, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("memory governance decision"),
+        }
+    }
+
+    pub fn search_runtime(
+        &self,
+        filter: &RuntimeSearchFilter,
+    ) -> CoreResult<Vec<RuntimeSearchResult>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.search_runtime(filter),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.search_runtime(filter),
+        }
+    }
+
+    pub fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_runtime_counters(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_runtime_counters(query),
+        }
+    }
+
+    pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.runtime_summary(scope),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.runtime_summary(scope),
+        }
+    }
+
+    pub fn reset_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+        now: IsoTimestamp,
+    ) -> CoreResult<u64> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.reset_runtime_counters(query, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.reset_runtime_counters(query, now),
+        }
+    }
+
+    pub fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.upsert_scheduled_job(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.upsert_scheduled_job(record),
+        }
+    }
+
+    pub fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_scheduled_job(job_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_scheduled_job(job_id),
+        }
+    }
+
+    pub fn query_scheduled_jobs(
+        &self,
+        query: &ScheduledJobQuery,
+    ) -> CoreResult<Vec<ScheduledJobRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_scheduled_jobs(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_scheduled_jobs(query),
+        }
+    }
+
+    pub fn pause_scheduled_job(&self, job_id: &str, now: &IsoTimestamp) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.pause_scheduled_job(job_id, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("pause scheduled job"),
+        }
+    }
+
+    pub fn resume_scheduled_job(
+        &self,
+        job_id: &str,
+        next_due_at: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.resume_scheduled_job(job_id, next_due_at, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(_) => postgres_unsupported("resume scheduled job"),
+        }
+    }
+
+    pub fn claim_scheduled_run(
+        &self,
+        run: &ScheduledRunRecord,
+        next_due_at: Option<&IsoTimestamp>,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.claim_scheduled_run(run, next_due_at),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.claim_scheduled_run(run, next_due_at),
+        }
+    }
+
+    pub fn complete_scheduled_run(
+        &self,
+        run_id: &RunId,
+        status: ScheduledRunStatus,
+        completed_at: &IsoTimestamp,
+        output_json: &JsonValue,
+        error: Option<&str>,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.complete_scheduled_run(run_id, status, completed_at, output_json, error)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.complete_scheduled_run(run_id, status, completed_at, output_json, error)
+            }
+        }
+    }
+
+    pub fn query_scheduled_runs(
+        &self,
+        query: &ScheduledRunQuery,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_scheduled_runs(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_scheduled_runs(query),
+        }
+    }
+
+    pub fn expire_stale_scheduled_runs(
+        &self,
+        stale_before: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.expire_stale_scheduled_runs(stale_before, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.expire_stale_scheduled_runs(stale_before, now),
+        }
+    }
+
+    pub fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_worker_run_requested(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_worker_run_requested(record),
+        }
+    }
+
+    pub fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.load_worker_run(run_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.load_worker_run(run_id),
+        }
+    }
+
+    pub fn load_worker_run_by_delegated_session(
+        &self,
+        delegated_session_id: &SessionId,
+    ) -> CoreResult<Option<WorkerRunRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.load_worker_run_by_delegated_session(delegated_session_id)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.load_worker_run_by_delegated_session(delegated_session_id)
+            }
+        }
+    }
+
+    pub fn update_worker_run_status_by_delegated_session(
+        &self,
+        delegated_session_id: &SessionId,
+        status: WorkerRunStatus,
+        now: IsoTimestamp,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.update_worker_run_status_by_delegated_session(
+                delegated_session_id,
+                status,
+                now,
+            ),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.update_worker_run_status_by_delegated_session(
+                delegated_session_id,
+                status,
+                now,
+            ),
+        }
+    }
+
+    pub fn update_worker_run_status(
+        &self,
+        run_id: &RunId,
+        status: WorkerRunStatus,
+        now: IsoTimestamp,
+    ) -> CoreResult<()> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.update_worker_run_status(run_id, status, now),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.update_worker_run_status(run_id, status, now),
+        }
+    }
+
+    pub fn worker_runs_for_fan_out_group(
+        &self,
+        parent_session_id: &SessionId,
+        group_id: &str,
+    ) -> CoreResult<Vec<WorkerRunRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.worker_runs_for_fan_out_group(parent_session_id, group_id)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => Ok(postgres
+                .query_worker_runs(&WorkerRunQuery {
+                    parent_session_id: Some(parent_session_id.clone()),
+                    ..Default::default()
+                })?
+                .into_iter()
+                .filter(|run| run.fan_out_group_id.as_deref() == Some(group_id))
+                .collect()),
+        }
     }
 }
 
+#[cfg(feature = "postgres")]
+fn postgres_unsupported<T>(operation: &str) -> CoreResult<T> {
+    Err(CoreError::new(
+        CoreErrorKind::AdapterUnavailable,
+        format!("PostgreSQL coordination backend does not yet support {operation}"),
+    ))
+}
+
+#[cfg(test)]
 impl std::ops::Deref for CoreCoordinationStore {
     type Target = CoordinationStore;
 
     fn deref(&self) -> &Self::Target {
-        &self.sqlite
+        self.sqlite_compat_store()
     }
 }
 

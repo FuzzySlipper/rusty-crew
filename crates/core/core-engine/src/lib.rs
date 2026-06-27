@@ -101,7 +101,8 @@ struct FanOutValidationGroup {
 
 impl CoreEngine {
     pub fn initialize(config: EngineConfig) -> CoreResult<Self> {
-        let store = CoreCoordinationStore::open_sqlite(&config.engine_data_dir)?;
+        let store =
+            CoreCoordinationStore::open_storage(&config.engine_data_dir, config.storage.as_ref())?;
         let persisted_sessions = store.load_sessions()?;
         let persisted_events = store
             .load_event_history()?
@@ -2302,9 +2303,9 @@ mod tests {
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
-        DelegationLifecyclePhase, ExternalEventPayload, ProfileId, ProjectId, ResourceLimits,
-        SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor,
-        ToolProfile,
+        DelegationLifecyclePhase, EngineStorageConfig, ExternalEventPayload, ProfileId, ProjectId,
+        ResourceLimits, SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
+        ToolDescriptor, ToolProfile,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2938,6 +2939,7 @@ mod tests {
             },
             default_turn_budget: 3,
             default_idle_timeout_ms: 1000,
+            storage: None,
         })
         .unwrap();
         let prepared = late_engine
@@ -4972,6 +4974,7 @@ mod tests {
             clock: ClockConfig::System,
             default_turn_budget: 3,
             default_idle_timeout_ms: 1000,
+            storage: None,
         })
         .unwrap();
         let planner = engine
@@ -5036,6 +5039,39 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "postgres")]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_engine_initialization_uses_postgres_without_sqlite_fallback() {
+        let database_url = std::env::var("RUSTY_CREW_DATABASE_URL")
+            .expect("RUSTY_CREW_DATABASE_URL must be set for live PostgreSQL engine smoke");
+        let data_dir = unique_data_dir("postgres-engine-no-sqlite");
+        let schema = format!(
+            "rc_engine_{}_{}",
+            std::process::id(),
+            NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed)
+        );
+        let engine = CoreEngine::initialize(EngineConfig {
+            engine_data_dir: data_dir.to_string_lossy().to_string(),
+            clock: ClockConfig::Fixed {
+                at: "2026-06-27T00:00:00Z".to_string(),
+            },
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1000,
+            storage: Some(EngineStorageConfig::Postgres {
+                database_url,
+                schema,
+                max_connections: None,
+                statement_timeout_ms: None,
+            }),
+        })
+        .unwrap();
+
+        let diagnostics = engine.storage_diagnostics().unwrap();
+        assert_eq!(diagnostics.backend, "postgres");
+        assert!(!data_dir.join("coordination.sqlite3").exists());
+    }
+
+    #[test]
     fn persistence_open_failures_are_typed() {
         let data_dir = unique_data_dir("blocked");
         std::fs::write(&data_dir, "not a directory").unwrap();
@@ -5062,6 +5098,7 @@ mod tests {
             },
             default_turn_budget: 3,
             default_idle_timeout_ms: 1000,
+            storage: None,
         }
     }
 

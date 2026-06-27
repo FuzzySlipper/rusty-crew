@@ -6,7 +6,8 @@ version.workspace = true
 
 [features]
 default = []
-postgres-proof = ["dep:postgres"]
+postgres = ["dep:postgres"]
+postgres-proof = ["postgres"]
 
 [dependencies]
 postgres = { workspace = true, optional = true }

@@ -1477,9 +1477,11 @@ function runtimeStorageConfig(
     implementationStatus:
       backend === "sqlite"
         ? "active"
-        : postgresBootMode === "proof_admin"
-          ? "proof_admin_only"
-          : "blocked_unimplemented",
+        : postgresBootMode === "active"
+          ? "active"
+          : postgresBootMode === "proof_admin"
+            ? "proof_admin_only"
+            : "blocked_unimplemented",
   };
   validateRuntimeStorageConfig(config);
   return config;
@@ -1494,12 +1496,15 @@ function runtimeStorageBackend(input: unknown): RustyCrewStorageBackend {
 
 function runtimePostgresBootMode(
   input: unknown,
-): "blocked" | "proof_admin" | undefined {
+): "blocked" | "proof_admin" | "active" | undefined {
   const value = optionalString(input);
   if (value === undefined) return undefined;
   if (value === "blocked") return "blocked";
   if (value === "proof_admin" || value === "proof-admin") return "proof_admin";
-  throw new Error("storage.postgres.bootMode must be blocked or proof_admin");
+  if (value === "active") return "active";
+  throw new Error(
+    "storage.postgres.bootMode must be blocked, proof_admin, or active",
+  );
 }
 
 function validateRuntimeStorageConfig(config: RustyCrewStorageConfig): void {

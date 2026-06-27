@@ -29,7 +29,18 @@ export interface EngineConfig {
   clock: ClockConfig;
   defaultTurnBudget: number;
   defaultIdleTimeoutMs: number;
+  storage?: EngineStorageConfig;
 }
+
+export type EngineStorageConfig =
+  | { backend: "sqlite" }
+  | {
+      backend: "postgres";
+      databaseUrl: string;
+      schema: string;
+      maxConnections?: number;
+      statementTimeoutMs?: number;
+    };
 
 export interface ShutdownRequest {
   engine: EngineHandle;
