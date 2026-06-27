@@ -214,6 +214,13 @@ const storage: StorageDiagnosticsProjection = {
         detail: "runtime counter proof is implemented",
       },
       {
+        groupId: "module_schema_registry",
+        label: "Module Schema Registry",
+        correctnessSensitive: true,
+        implementationStatus: "proof_simple_kv",
+        detail: "simple_kv proof table is implemented",
+      },
+      {
         groupId: "queues_messages",
         label: "Queues And Messages",
         correctnessSensitive: true,
@@ -286,6 +293,19 @@ const storage: StorageDiagnosticsProjection = {
         },
       ],
       notes: ["Runtime counter proof is available."],
+    },
+    {
+      groupId: "module_schema_registry",
+      label: "Module Schema Registry",
+      correctnessSensitive: true,
+      backendRequirements: [
+        {
+          capability: "transactions",
+          required: true,
+          detail: "module-owned table changes must be transactional",
+        },
+      ],
+      notes: ["Module-owned simple_kv proof table is available."],
     },
     {
       groupId: "queues_messages",
@@ -493,6 +513,12 @@ assert.equal(
     (group) => group.groupId === "runtime_counters",
   )?.implementationStatus,
   "proof_runtime_counter",
+);
+assert.equal(
+  storageData.postgres?.repositoryGroups.find(
+    (group) => group.groupId === "module_schema_registry",
+  )?.implementationStatus,
+  "proof_simple_kv",
 );
 assert.equal(
   storageData.postgres?.repositoryGroups.find(

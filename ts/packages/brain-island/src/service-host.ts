@@ -1227,6 +1227,16 @@ function postgresRepositoryGroupDiagnostics(
           "Implemented in the Rust PostgreSQL proof slice; not wired as the full service coordination backend.",
       };
     }
+    if (group.groupId === "module_schema_registry") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        implementationStatus: "proof_simple_kv",
+        detail:
+          "Implemented only for the simple_kv module-owned data proof table; the full module schema registry is not wired as a PostgreSQL service backend.",
+      };
+    }
     return {
       groupId: group.groupId,
       label: group.label,

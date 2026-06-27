@@ -276,6 +276,7 @@ export interface StorageDiagnosticsProjection {
       implementationStatus:
         | "proof_admin"
         | "proof_runtime_counter"
+        | "proof_simple_kv"
         | "unsupported";
       detail: string;
     }[];
