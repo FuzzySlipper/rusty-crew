@@ -524,12 +524,9 @@ function assertServiceStorageBootAllowed(
   storage: RustyCrewStorageConfig,
   context: string,
 ): void {
-  if (
-    storage.backend === "postgres" &&
-    storage.postgres.bootMode !== "proof_admin"
-  ) {
+  if (storage.backend === "postgres") {
     throw new Error(
-      `${context}: storage.backend=postgres is selected, but the full-service PostgreSQL backend is not production-ready yet. This fails closed before opening the coordination engine so the service cannot silently fall back to SQLite. Set storage.postgres.bootMode=proof_admin only for bounded storage-admin diagnostics smoke mode.`,
+      `${context}: storage.backend=postgres is selected, but the full-service PostgreSQL backend is not production-ready yet. This fails closed before opening the coordination engine so the service cannot silently fall back to SQLite. PostgreSQL proof/admin diagnostics are available through bounded storage proof tests and projections only, not full service boot.`,
     );
   }
 }
@@ -1204,13 +1201,14 @@ function postgresStorageCapabilities(
       name: "concurrent_writers",
       supported: proofAdmin,
       detail:
-        "PostgreSQL supports concurrent writers, but Rusty Crew has not ported correctness-sensitive repositories yet.",
+        "PostgreSQL supports concurrent writers; proof slices exercise bounded repository conformance but are not wired as the full coordination backend.",
     },
     {
       name: "row_level_claims",
-      supported: false,
-      detail:
-        "Queue and scheduler claim semantics are not implemented for the PostgreSQL backend.",
+      supported: proofAdmin,
+      detail: proofAdmin
+        ? "Scheduler stale-run expiry uses PostgreSQL row-level claim semantics in the proof slice."
+        : "Row-level claim proof exists, but full service PostgreSQL boot remains blocked.",
     },
     {
       name: "runtime_full_text_search",
@@ -1240,6 +1238,61 @@ function postgresRepositoryGroupDiagnostics(
         implementationStatus: "proof_admin",
         detail:
           "Implemented only for backend selector projection, env-var references, and storage-admin diagnostics.",
+      };
+    }
+    if (group.groupId === "sessions_identities") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_sessions_identities",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice for session/config/identity hydration; not wired as the full service backend.",
+      };
+    }
+    if (group.groupId === "events_projections") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_events_projections",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice for event history, event indexing, completion packets, and tool telemetry; not wired as the full service backend.",
+      };
+    }
+    if (group.groupId === "queues_messages") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_queues_messages",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice for queued-message TTL, no-resurrection behavior, and maintenance purging; not wired as the full service backend.",
+      };
+    }
+    if (group.groupId === "scheduler_jobs") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_scheduler_jobs",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice for scheduled jobs, scheduled run claim/completion, and stale-run row-level expiry; not wired as the full service backend.",
+      };
+    }
+    if (group.groupId === "worker_runs_completions") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_worker_runs_completions",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice for worker lifecycle, terminal-status queries, completion packet persistence, and delegated completion lookup; not wired as the full service backend.",
       };
     }
     if (group.groupId === "runtime_counters") {
@@ -1383,7 +1436,7 @@ function postgresProductionReadiness(
     blockers,
     detail:
       bootMode === "proof_admin"
-        ? "PostgreSQL is available only for bounded proof/admin diagnostics; full service coordination still uses SQLite."
+        ? "PostgreSQL is available only for bounded proof/admin diagnostics; full service boot is blocked until the Rust coordination engine can construct a real PostgreSQL backend."
         : "PostgreSQL full service boot is blocked until required repository groups are implemented or explicitly unsupported for a selected deployment mode.",
   };
 }

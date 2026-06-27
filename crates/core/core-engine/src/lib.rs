@@ -12,7 +12,7 @@ use rusty_crew_core_persistence::{
     ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
     ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
     ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
-    CoordinationStore, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
+    CoreCoordinationStore, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
     MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
@@ -75,7 +75,7 @@ pub struct CoreEngine {
     config: EngineConfig,
     bus: CoreBus,
     sessions: SessionRegistry,
-    store: CoordinationStore,
+    store: CoreCoordinationStore,
     body_projector: BodyProjector,
     action_executor: BrainActionExecutor,
     profile_tool_profiles: Arc<Mutex<HashMap<ProfileId, ToolProfile>>>,
@@ -101,7 +101,7 @@ struct FanOutValidationGroup {
 
 impl CoreEngine {
     pub fn initialize(config: EngineConfig) -> CoreResult<Self> {
-        let store = CoordinationStore::open(&config.engine_data_dir)?;
+        let store = CoreCoordinationStore::open_sqlite(&config.engine_data_dir)?;
         let persisted_sessions = store.load_sessions()?;
         let persisted_events = store
             .load_event_history()?

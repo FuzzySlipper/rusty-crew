@@ -209,6 +209,49 @@ pub struct CoordinationStore {
     conn: Arc<Mutex<Connection>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreCoordinationStoreBackend {
+    Sqlite,
+}
+
+#[derive(Debug, Clone)]
+pub struct CoreCoordinationStore {
+    backend: CoreCoordinationStoreBackend,
+    sqlite: CoordinationStore,
+}
+
+impl CoreCoordinationStore {
+    pub fn open_sqlite(engine_data_dir: impl AsRef<Path>) -> CoreResult<Self> {
+        Ok(Self {
+            backend: CoreCoordinationStoreBackend::Sqlite,
+            sqlite: CoordinationStore::open(engine_data_dir)?,
+        })
+    }
+
+    pub fn open_sqlite_file(path: impl AsRef<Path>) -> CoreResult<Self> {
+        Ok(Self {
+            backend: CoreCoordinationStoreBackend::Sqlite,
+            sqlite: CoordinationStore::open_file(path)?,
+        })
+    }
+
+    pub fn backend(&self) -> CoreCoordinationStoreBackend {
+        self.backend
+    }
+
+    pub fn sqlite_compat_store(&self) -> &CoordinationStore {
+        &self.sqlite
+    }
+}
+
+impl std::ops::Deref for CoreCoordinationStore {
+    type Target = CoordinationStore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.sqlite
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaMigrationRecord {
     pub version: i64,
@@ -16031,9 +16074,29 @@ mod tests {
             }
         }
 
+        struct SqliteFacadeRepositoryConformance;
+
+        impl RepositoryConformanceBackend for SqliteFacadeRepositoryConformance {
+            fn with_store<F>(&self, label: &str, test: F)
+            where
+                F: FnOnce(&CoordinationStore),
+            {
+                let db_path = temp_db_path(&format!("sqlite-facade-conformance-{label}"));
+                let store = CoreCoordinationStore::open_sqlite_file(&db_path).unwrap();
+                assert_eq!(store.backend(), CoreCoordinationStoreBackend::Sqlite);
+                test(store.sqlite_compat_store());
+                remove_temp_db(&db_path);
+            }
+        }
+
         #[test]
         fn sqlite_satisfies_repository_conformance_suite() {
             run_repository_conformance_suite(&SqliteRepositoryConformance);
+        }
+
+        #[test]
+        fn sqlite_facade_satisfies_repository_conformance_suite() {
+            run_repository_conformance_suite(&SqliteFacadeRepositoryConformance);
         }
 
         fn run_repository_conformance_suite<B: RepositoryConformanceBackend>(backend: &B) {

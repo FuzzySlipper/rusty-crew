@@ -12,48 +12,58 @@ use crate::{
     validate_profile_memory_key, validate_profile_memory_write, validate_provider_wire_state_key,
     validate_roleplay_lore_record_id, validate_roleplay_lore_write, validate_simple_kv_identity,
     validate_simple_kv_query, validate_simple_kv_write, ActiveBranchConflict,
-    ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation, AttachmentId,
-    AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite, AttachmentQuery, AttachmentRecord,
-    AttachmentStatus, AttachmentWrite, BranchHeadConflict, BranchHeadExpectation,
-    ConversationBranchId, ConversationBranchQuery, ConversationBranchRecord,
-    ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
-    ConversationJumpResult, ConversationJumpTarget, ConversationSnapshotId,
-    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotSource,
-    ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreResult, DataBankScopeId,
-    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite,
+    ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation, AgentId,
+    AgentInstanceId, AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite,
+    AttachmentQuery, AttachmentRecord, AttachmentStatus, AttachmentWrite, BranchHeadConflict,
+    BranchHeadExpectation, CompletionPacketQuery, CompletionPacketRecord, ConversationBranchId,
+    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
+    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
+    ConversationJumpTarget, ConversationSnapshotId, ConversationSnapshotQuery,
+    ConversationSnapshotRecord, ConversationSnapshotSource, ConversationSnapshotWrite, CoreError,
+    CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DataBankScopeId, DataBankScopeQuery,
+    DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite, DelegatedCompletion,
+    DenRuntimeReference, DurableAgentKind, DurableAgentRecord, DurableIdentityStatus,
     DurableMessageRecord, DurableMessageStatus, DurableMessageWrite, IsoTimestamp,
     MessageBlockRecord, MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord,
     MessageSlotWrite, MessageVariantId, MessageVariantQuery, MessageVariantRecord,
-    MessageVariantSource, MessageVariantStatus, MessageVariantWrite, ProfileId, ProfileMemoryCaps,
-    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
-    ProfileMemoryTarget, ProfileMemoryWrite, ProviderStateAbsenceReason,
+    MessageVariantSource, MessageVariantStatus, MessageVariantWrite, PersistedEvent, ProfileId,
+    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProviderStateAbsenceReason,
     ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
     ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
-    ProviderWireStateWrite, QueryPage, RoleplayLoreProvenanceEvent, RoleplayLoreQuery,
-    RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace, RoleplayLoreSupersede,
-    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
+    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+    QueuedMessageState, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
+    RoleplayLoreRecordStatus, RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone,
+    RoleplayLoreWrite, RunId, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
+    RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord, RuntimeMaintenancePolicy,
+    RuntimeMaintenanceReport, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
     RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageTableCount, SelectActiveBranchRequest, SelectActiveBranchResult,
-    SelectActiveVariantRequest, SelectActiveVariantResult, SessionId, SimpleKvCompareAndSwap,
-    SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope, SimpleKvWrite,
-    UpdateBranchHeadRequest, UpdateBranchHeadResult, COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS,
-    COUNTER_DELEGATIONS_CANCELLED, COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED,
-    COUNTER_DELEGATIONS_FAILED, COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES,
-    COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS, COUNTER_WAKES,
+    RuntimeStorageTableCount, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
+    ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, SessionConfig, SessionConfigRecord, SessionId,
+    SessionIdentityRecord, SessionKind, SessionMemoryCompactionReport, SessionState, SessionStatus,
+    SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
+    SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
+    UpdateBranchHeadResult, WorkerRunQuery, WorkerRunRecord, WorkerRunStatus, COUNTER_BRAIN_TURNS,
+    COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED, COUNTER_DELEGATIONS_COMPLETED,
+    COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED, COUNTER_DELEGATIONS_TIMED_OUT,
+    COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS,
+    COUNTER_WAKES,
 };
 use postgres::{Client, GenericClient, NoTls, Row, Transaction};
 use rusty_crew_core_protocol::{
-    MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryExportImportPolicy,
-    MemoryFieldType, MemoryGovernanceMode, MemoryIndexingPolicy, MemoryOperation,
-    MemoryOperationPolicy, MemoryPromptPolicy, MemoryProvenancePolicy, MemoryRecordFieldDescriptor,
+    BrainEvent, CompletionPacket, CompletionStatus, FanOutFailurePolicy, MemoryConflictPolicy,
+    MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryExportImportPolicy, MemoryFieldType,
+    MemoryGovernanceMode, MemoryIndexingPolicy, MemoryOperation, MemoryOperationPolicy,
+    MemoryPromptPolicy, MemoryProvenancePolicy, MemoryRecordFieldDescriptor,
     MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy,
     MemoryRetrievalStrategy, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
-    MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy,
+    MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, ParentConsumptionPolicy,
 };
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 8;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 11;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -111,6 +121,815 @@ impl PostgresRuntimeCounterProofStore {
         };
         store.migrate()?;
         Ok(store)
+    }
+
+    pub fn save_session(&self, state: &SessionState) -> CoreResult<()> {
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL session", error))?;
+        self.save_session_in_tx(&mut tx, state)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL session", error))?;
+        Ok(())
+    }
+
+    pub fn save_session_with_config(
+        &self,
+        state: &SessionState,
+        config: &SessionConfig,
+    ) -> CoreResult<()> {
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL session with config", error))?;
+        self.save_session_in_tx(&mut tx, state)?;
+        self.save_session_config_in_tx(&mut tx, config, &state.created_at)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL session with config", error))?;
+        Ok(())
+    }
+
+    pub fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
+        let schema = self.quoted_schema();
+        let rows = self
+            .client()?
+            .query(
+                &format!("SELECT state_json FROM {schema}.sessions ORDER BY session_id ASC"),
+                &[],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL sessions", error))?;
+        rows.into_iter()
+            .map(|row| {
+                let state_json: String = row.get(0);
+                parse_postgres_json(&state_json, "session state_json")
+            })
+            .collect()
+    }
+
+    pub fn load_agent_identities(&self) -> CoreResult<Vec<DurableAgentRecord>> {
+        self.load_json_records("agent_identities", "record_json", "agent_id")
+    }
+
+    pub fn load_agent_instances(
+        &self,
+    ) -> CoreResult<Vec<rusty_crew_core_protocol::AgentInstanceRecord>> {
+        self.load_json_records("agent_instances", "record_json", "instance_id")
+    }
+
+    pub fn load_session_identities(&self) -> CoreResult<Vec<SessionIdentityRecord>> {
+        self.load_json_records("session_identities", "record_json", "session_id")
+    }
+
+    pub fn load_session_configs(&self) -> CoreResult<Vec<SessionConfigRecord>> {
+        let schema = self.quoted_schema();
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT session_id, profile_id, kind, record_json, created_at
+                     FROM {schema}.session_configs
+                     ORDER BY session_id ASC"
+                ),
+                &[],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL session configs", error))?;
+        rows.into_iter()
+            .map(|row| {
+                let session_id: String = row.get(0);
+                let profile_id: String = row.get(1);
+                let config_json: String = row.get(3);
+                let config: SessionConfig =
+                    parse_postgres_json(&config_json, "session config_json")?;
+                Ok(SessionConfigRecord {
+                    session_id: SessionId(session_id),
+                    profile_id: ProfileId(profile_id),
+                    kind: config.kind.clone(),
+                    resource_limits: config.resource_limits.clone(),
+                    tool_profile: config.tool_profile.clone(),
+                    config,
+                    created_at: row.get(4),
+                })
+            })
+            .collect()
+    }
+
+    pub fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+        if !postgres_should_persist_event(event) {
+            return Ok(());
+        }
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL event", error))?;
+        let schema = self.quoted_schema();
+        let event_kind = format!("{:?}", CoreEventKind::of(event));
+        let event_json = to_json_text(event)?;
+        let is_new = tx
+            .query_one(
+                &format!(
+                    "SELECT NOT EXISTS(
+                        SELECT 1 FROM {schema}.event_history WHERE sequence = $1
+                     )"
+                ),
+                &[&(sequence as i64)],
+            )
+            .map_err(|error| postgres_error("check PostgreSQL event existence", error))?
+            .get::<_, bool>(0);
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.event_history (sequence, event_kind, event_json)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT(sequence) DO UPDATE SET
+                    event_kind = EXCLUDED.event_kind,
+                    event_json = EXCLUDED.event_json"
+            ),
+            &[&(sequence as i64), &event_kind, &event_json],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL event history", error))?;
+        self.replace_event_indexes_in_tx(&mut tx, sequence, event)?;
+        if let CoreEvent::CompletionPacketDelivered { packet } = event {
+            save_completion_packet_in_tx(&mut tx, &schema, sequence, packet)?;
+        }
+        if let CoreEvent::BrainEventObserved {
+            session_id,
+            wake_id,
+            event,
+        } = event
+        {
+            save_tool_call_in_tx(
+                &mut tx,
+                &schema,
+                sequence,
+                session_id,
+                wake_id.as_deref(),
+                event,
+            )?;
+        }
+        if is_new {
+            for scope in postgres_event_counter_scopes(event) {
+                for (counter_name, amount) in postgres_event_counter_deltas(event) {
+                    self.increment_counter_in_tx(&mut tx, &scope, counter_name, amount)?;
+                }
+            }
+        }
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL event", error))?;
+        Ok(())
+    }
+
+    pub fn load_event_history(&self) -> CoreResult<Vec<PersistedEvent>> {
+        let schema = self.quoted_schema();
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT sequence, event_json
+                     FROM {schema}.event_history
+                     ORDER BY sequence ASC"
+                ),
+                &[],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL event history", error))?;
+        rows.into_iter()
+            .map(|row| {
+                let sequence: i64 = row.get(0);
+                let event_json: String = row.get(1);
+                Ok(PersistedEvent {
+                    sequence: sequence as u64,
+                    event: parse_postgres_json(&event_json, "event event_json")?,
+                })
+            })
+            .collect()
+    }
+
+    pub fn query_events(&self, filter: &RuntimeEventFilter) -> CoreResult<Vec<RuntimeEventRecord>> {
+        let schema = self.quoted_schema();
+        let kind = filter.kind.as_ref().map(|kind| format!("{kind:?}"));
+        let session_id = filter.session_id.as_ref().map(|value| value.0.as_str());
+        let agent_id = filter.agent_id.as_ref().map(|value| value.0.as_str());
+        let instance_id = filter.instance_id.as_ref().map(|value| value.0.as_str());
+        let correlation_id = filter.correlation_id.as_deref();
+        let source_wake_id = filter.source_wake_id.as_deref();
+        let limit = filter.limit.unwrap_or(1_000).max(1) as i64;
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT sequence, event_kind, recorded_at, event_json
+                     FROM {schema}.event_history
+                     WHERE ($1::TEXT IS NULL OR event_kind = $1)
+                       AND ($2::TEXT IS NULL OR EXISTS (
+                            SELECT 1 FROM {schema}.event_index
+                            WHERE event_index.sequence = event_history.sequence
+                              AND projection = 'session'
+                              AND value = $2
+                       ))
+                       AND ($3::TEXT IS NULL OR EXISTS (
+                            SELECT 1 FROM {schema}.event_index
+                            WHERE event_index.sequence = event_history.sequence
+                              AND projection = 'agent'
+                              AND value = $3
+                       ))
+                       AND ($4::TEXT IS NULL OR EXISTS (
+                            SELECT 1 FROM {schema}.event_index
+                            WHERE event_index.sequence = event_history.sequence
+                              AND projection = 'instance'
+                              AND value = $4
+                       ))
+                       AND ($5::TEXT IS NULL OR EXISTS (
+                            SELECT 1 FROM {schema}.event_index
+                            WHERE event_index.sequence = event_history.sequence
+                              AND projection = 'correlation'
+                              AND value = $5
+                       ))
+                       AND ($6::TEXT IS NULL OR EXISTS (
+                            SELECT 1 FROM {schema}.event_index
+                            WHERE event_index.sequence = event_history.sequence
+                              AND projection = 'wake'
+                              AND value = $6
+                       ))
+                     ORDER BY sequence ASC
+                     LIMIT $7"
+                ),
+                &[
+                    &kind,
+                    &session_id,
+                    &agent_id,
+                    &instance_id,
+                    &correlation_id,
+                    &source_wake_id,
+                    &limit,
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL events", error))?;
+        rows.into_iter()
+            .map(|row| self.row_to_event_record(row))
+            .collect()
+    }
+
+    pub fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL queued message", error))?;
+        self.save_queued_message_in_tx(&mut tx, record)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL queued message", error))?;
+        Ok(())
+    }
+
+    pub fn expire_queued_messages_at(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start expire PostgreSQL queued messages", error))?;
+        let expired = self.expire_queued_messages_in_tx(&mut tx, now)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit expire PostgreSQL queued messages", error))?;
+        Ok(expired)
+    }
+
+    pub fn load_queued_messages(
+        &self,
+        filter: &QueuedMessageFilter,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        let mut client = self.client()?;
+        self.load_queued_messages_in_tx(&mut *client, filter)
+    }
+
+    pub fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
+        let schema = self.quoted_schema();
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT sequence,
+                            session_id,
+                            wake_id,
+                            tool_name,
+                            phase,
+                            is_error,
+                            metadata_json
+                     FROM {schema}.tool_call_history
+                     ORDER BY sequence ASC"
+                ),
+                &[],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL tool call history", error))?;
+        rows.iter().map(row_to_tool_call_record).collect()
+    }
+
+    pub fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let payload_json = to_json_text(&record.payload_json)?;
+        let status = postgres_scheduled_job_status_as_str(record.status).to_string();
+        self.client()?
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.scheduled_jobs (
+                        job_id,
+                        job_kind,
+                        target_session_id,
+                        interval_ms,
+                        next_due_at,
+                        payload_json,
+                        status,
+                        created_at,
+                        updated_at,
+                        paused_at
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                     ON CONFLICT(job_id) DO UPDATE SET
+                        job_kind = EXCLUDED.job_kind,
+                        target_session_id = EXCLUDED.target_session_id,
+                        interval_ms = EXCLUDED.interval_ms,
+                        next_due_at = EXCLUDED.next_due_at,
+                        payload_json = EXCLUDED.payload_json,
+                        status = EXCLUDED.status,
+                        updated_at = EXCLUDED.updated_at,
+                        paused_at = EXCLUDED.paused_at"
+                ),
+                &[
+                    &record.job_id,
+                    &record.job_kind,
+                    &record
+                        .target_session_id
+                        .as_ref()
+                        .map(|session_id| session_id.0.as_str()),
+                    &record.interval_ms.map(|value| value as i64),
+                    &record.next_due_at,
+                    &payload_json,
+                    &status,
+                    &record.created_at,
+                    &record.updated_at,
+                    &record.paused_at,
+                ],
+            )
+            .map_err(|error| postgres_error("upsert PostgreSQL scheduled job", error))?;
+        Ok(())
+    }
+
+    pub fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
+        let schema = self.quoted_schema();
+        let row = self
+            .client()?
+            .query_opt(
+                &format!(
+                    "SELECT job_id,
+                            job_kind,
+                            target_session_id,
+                            interval_ms,
+                            next_due_at,
+                            payload_json,
+                            status,
+                            created_at,
+                            updated_at,
+                            paused_at
+                     FROM {schema}.scheduled_jobs
+                     WHERE job_id = $1"
+                ),
+                &[&job_id],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL scheduled job", error))?;
+        row.as_ref().map(row_to_scheduled_job).transpose()
+    }
+
+    pub fn query_scheduled_jobs(
+        &self,
+        query: &ScheduledJobQuery,
+    ) -> CoreResult<Vec<ScheduledJobRecord>> {
+        let schema = self.quoted_schema();
+        let status = query
+            .status
+            .map(postgres_scheduled_job_status_as_str)
+            .map(str::to_string);
+        let job_kind = query.job_kind.as_deref();
+        let due_at_or_before = query.due_at_or_before.as_deref();
+        let (limit, offset) = query
+            .page
+            .unwrap_or(QueryPage {
+                limit: None,
+                offset: None,
+            })
+            .bounded(100, 1_000);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT job_id,
+                            job_kind,
+                            target_session_id,
+                            interval_ms,
+                            next_due_at,
+                            payload_json,
+                            status,
+                            created_at,
+                            updated_at,
+                            paused_at
+                     FROM {schema}.scheduled_jobs
+                     WHERE ($1::TEXT IS NULL OR status = $1)
+                       AND ($2::TEXT IS NULL OR job_kind = $2)
+                       AND ($3::TEXT IS NULL OR (next_due_at IS NOT NULL AND next_due_at <= $3))
+                     ORDER BY COALESCE(next_due_at, created_at) ASC, job_id ASC
+                     LIMIT $4 OFFSET $5"
+                ),
+                &[&status, &job_kind, &due_at_or_before, &limit, &offset],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL scheduled jobs", error))?;
+        rows.iter().map(row_to_scheduled_job).collect()
+    }
+
+    pub fn claim_scheduled_run(
+        &self,
+        run: &ScheduledRunRecord,
+        next_due_at: Option<&IsoTimestamp>,
+    ) -> CoreResult<()> {
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start claim PostgreSQL scheduled run", error))?;
+        let schema = self.quoted_schema();
+        save_scheduled_run_in_tx(&mut tx, &schema, run)?;
+        if run.trigger == ScheduledRunTrigger::Due {
+            tx.execute(
+                &format!(
+                    "UPDATE {schema}.scheduled_jobs
+                     SET next_due_at = $2,
+                         updated_at = $3
+                     WHERE job_id = $1
+                       AND status = 'active'"
+                ),
+                &[&run.job_id, &next_due_at, &run.updated_at],
+            )
+            .map_err(|error| postgres_error("advance PostgreSQL scheduled job", error))?;
+        }
+        tx.commit()
+            .map_err(|error| postgres_error("commit claim PostgreSQL scheduled run", error))?;
+        Ok(())
+    }
+
+    pub fn complete_scheduled_run(
+        &self,
+        run_id: &RunId,
+        status: ScheduledRunStatus,
+        completed_at: &IsoTimestamp,
+        output_json: &serde_json::Value,
+        error: Option<&str>,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let status = postgres_scheduled_run_status_as_str(status).to_string();
+        let output_json = to_json_text(output_json)?;
+        self.client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.scheduled_job_runs
+                     SET status = $2,
+                         completed_at = $3,
+                         updated_at = $3,
+                         output_json = $4,
+                         error = $5
+                     WHERE run_id = $1"
+                ),
+                &[&run_id.0, &status, completed_at, &output_json, &error],
+            )
+            .map_err(|error| postgres_error("complete PostgreSQL scheduled run", error))?;
+        Ok(())
+    }
+
+    pub fn query_scheduled_runs(
+        &self,
+        query: &ScheduledRunQuery,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        let schema = self.quoted_schema();
+        let job_id = query.job_id.as_deref();
+        let status = query
+            .status
+            .map(postgres_scheduled_run_status_as_str)
+            .map(str::to_string);
+        let trigger = query
+            .trigger
+            .map(postgres_scheduled_run_trigger_as_str)
+            .map(str::to_string);
+        let target_session_id = query
+            .target_session_id
+            .as_ref()
+            .map(|value| value.0.as_str());
+        let stale_before = query.stale_claim_deadline_before.as_deref();
+        let (limit, offset) = query
+            .page
+            .unwrap_or(QueryPage {
+                limit: None,
+                offset: None,
+            })
+            .bounded(100, 1_000);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT run_id,
+                            job_id,
+                            job_kind,
+                            target_session_id,
+                            status,
+                            trigger_kind,
+                            scheduled_for,
+                            claimed_at,
+                            claim_deadline_at,
+                            completed_at,
+                            error,
+                            output_json,
+                            created_at,
+                            updated_at
+                     FROM {schema}.scheduled_job_runs
+                     WHERE ($1::TEXT IS NULL OR job_id = $1)
+                       AND ($2::TEXT IS NULL OR status = $2)
+                       AND ($3::TEXT IS NULL OR trigger_kind = $3)
+                       AND ($4::TEXT IS NULL OR target_session_id = $4)
+                       AND ($5::TEXT IS NULL OR claim_deadline_at < $5)
+                     ORDER BY created_at ASC, run_id ASC
+                     LIMIT $6 OFFSET $7"
+                ),
+                &[
+                    &job_id,
+                    &status,
+                    &trigger,
+                    &target_session_id,
+                    &stale_before,
+                    &limit,
+                    &offset,
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL scheduled runs", error))?;
+        rows.iter().map(row_to_scheduled_run).collect()
+    }
+
+    pub fn expire_stale_scheduled_runs(
+        &self,
+        stale_before: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start expire stale PostgreSQL scheduled runs", error)
+        })?;
+        let schema = self.quoted_schema();
+        let rows = tx
+            .query(
+                &format!(
+                    "SELECT run_id,
+                            job_id,
+                            job_kind,
+                            target_session_id,
+                            status,
+                            trigger_kind,
+                            scheduled_for,
+                            claimed_at,
+                            claim_deadline_at,
+                            completed_at,
+                            error,
+                            output_json,
+                            created_at,
+                            updated_at
+                     FROM {schema}.scheduled_job_runs
+                     WHERE status = 'claimed'
+                       AND claim_deadline_at < $1
+                     ORDER BY created_at ASC, run_id ASC
+                     FOR UPDATE SKIP LOCKED"
+                ),
+                &[stale_before],
+            )
+            .map_err(|error| postgres_error("query stale PostgreSQL scheduled runs", error))?;
+        let stale = rows
+            .iter()
+            .map(row_to_scheduled_run)
+            .collect::<CoreResult<Vec<_>>>()?;
+        for run in &stale {
+            tx.execute(
+                &format!(
+                    "UPDATE {schema}.scheduled_job_runs
+                     SET status = 'expired',
+                         completed_at = $2,
+                         updated_at = $2,
+                         error = 'claim deadline elapsed'
+                     WHERE run_id = $1
+                       AND status = 'claimed'"
+                ),
+                &[&run.run_id.0, now],
+            )
+            .map_err(|error| postgres_error("expire stale PostgreSQL scheduled run", error))?;
+        }
+        tx.commit().map_err(|error| {
+            postgres_error("commit expire stale PostgreSQL scheduled runs", error)
+        })?;
+        Ok(stale)
+    }
+
+    pub fn query_completion_packets(
+        &self,
+        query: &CompletionPacketQuery,
+    ) -> CoreResult<Vec<CompletionPacketRecord>> {
+        let schema = self.quoted_schema();
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let status = query
+            .status
+            .as_ref()
+            .map(postgres_completion_status_as_str)
+            .map(str::to_string);
+        let (limit, offset) = query
+            .page
+            .unwrap_or(QueryPage {
+                limit: None,
+                offset: None,
+            })
+            .bounded(100, 1_000);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT sequence, packet_json
+                     FROM {schema}.completion_packets
+                     WHERE ($1::TEXT IS NULL OR session_id = $1)
+                       AND ($2::TEXT IS NULL OR status = $2)
+                     ORDER BY sequence ASC
+                     LIMIT $3 OFFSET $4"
+                ),
+                &[&session_id, &status, &limit, &offset],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL completion packets", error))?;
+        rows.iter().map(row_to_completion_packet_record).collect()
+    }
+
+    pub fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        save_worker_run_in_client(&mut *self.client()?, &schema, record)
+    }
+
+    pub fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>> {
+        let schema = self.quoted_schema();
+        let row = self
+            .client()?
+            .query_opt(
+                &format!("{WORKER_RUN_SELECT} FROM {schema}.worker_runs WHERE run_id = $1"),
+                &[&run_id.0],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL worker run", error))?;
+        row.as_ref().map(row_to_worker_run).transpose()
+    }
+
+    pub fn load_worker_run_by_delegated_session(
+        &self,
+        delegated_session_id: &SessionId,
+    ) -> CoreResult<Option<WorkerRunRecord>> {
+        let schema = self.quoted_schema();
+        let row = self
+            .client()?
+            .query_opt(
+                &format!(
+                    "{WORKER_RUN_SELECT} FROM {schema}.worker_runs WHERE delegated_session_id = $1"
+                ),
+                &[&delegated_session_id.0],
+            )
+            .map_err(|error| {
+                postgres_error("load PostgreSQL worker run by delegated session", error)
+            })?;
+        row.as_ref().map(row_to_worker_run).transpose()
+    }
+
+    pub fn query_worker_runs(&self, query: &WorkerRunQuery) -> CoreResult<Vec<WorkerRunRecord>> {
+        let schema = self.quoted_schema();
+        let parent_session_id = query
+            .parent_session_id
+            .as_ref()
+            .map(|value| value.0.as_str());
+        let delegated_session_id = query
+            .delegated_session_id
+            .as_ref()
+            .map(|value| value.0.as_str());
+        let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+        let task_id = query.task_id.as_ref().map(|value| value.0.as_str());
+        let status = query
+            .status
+            .as_ref()
+            .map(worker_run_status_as_str)
+            .map(str::to_string);
+        let terminal = query.terminal;
+        let (limit, offset) = query
+            .page
+            .unwrap_or(QueryPage {
+                limit: None,
+                offset: None,
+            })
+            .bounded(100, 1_000);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "{WORKER_RUN_SELECT}
+                     FROM {schema}.worker_runs
+                     WHERE ($1::TEXT IS NULL OR session_id = $1)
+                       AND ($2::TEXT IS NULL OR delegated_session_id = $2)
+                       AND ($3::TEXT IS NULL OR profile_id = $3)
+                       AND ($4::TEXT IS NULL OR task_id = $4)
+                       AND ($5::TEXT IS NULL OR status = $5)
+                       AND (
+                           $6::BOOLEAN IS NULL
+                           OR ($6 AND status IN ('completed', 'failed', 'blocked', 'exhausted', 'cancelled', 'expired'))
+                           OR (NOT $6 AND status NOT IN ('completed', 'failed', 'blocked', 'exhausted', 'cancelled', 'expired'))
+                       )
+                     ORDER BY created_at ASC, run_id ASC
+                     LIMIT $7 OFFSET $8"
+                ),
+                &[
+                    &parent_session_id,
+                    &delegated_session_id,
+                    &profile_id,
+                    &task_id,
+                    &status,
+                    &terminal,
+                    &limit,
+                    &offset,
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL worker runs", error))?;
+        rows.iter().map(row_to_worker_run).collect()
+    }
+
+    pub fn update_worker_run_status_by_delegated_session(
+        &self,
+        delegated_session_id: &SessionId,
+        status: WorkerRunStatus,
+        now: IsoTimestamp,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let status = worker_run_status_as_str(&status).to_string();
+        self.client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.worker_runs
+                     SET status = $1,
+                         last_updated_at = $2
+                     WHERE delegated_session_id = $3"
+                ),
+                &[&status, &now, &delegated_session_id.0],
+            )
+            .map_err(|error| postgres_error("update PostgreSQL worker run status", error))?;
+        Ok(())
+    }
+
+    pub fn update_worker_run_status(
+        &self,
+        run_id: &RunId,
+        status: WorkerRunStatus,
+        now: IsoTimestamp,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let status = worker_run_status_as_str(&status).to_string();
+        self.client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.worker_runs
+                     SET status = $1,
+                         last_updated_at = $2
+                     WHERE run_id = $3"
+                ),
+                &[&status, &now, &run_id.0],
+            )
+            .map_err(|error| {
+                postgres_error("update PostgreSQL worker run status by run id", error)
+            })?;
+        Ok(())
+    }
+
+    pub fn delegated_completions_for_parent(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> CoreResult<Vec<DelegatedCompletion>> {
+        let schema = self.quoted_schema();
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT worker_runs.run_id,
+                            worker_runs.delegated_session_id,
+                            worker_runs.task_id,
+                            worker_runs.source_wake_id,
+                            worker_runs.source_action_index,
+                            worker_runs.delegation_correlation_id,
+                            worker_runs.parent_consumption,
+                            completion_packets.packet_json
+                     FROM {schema}.worker_runs
+                     JOIN {schema}.completion_packets
+                       ON completion_packets.session_id = worker_runs.delegated_session_id
+                     WHERE worker_runs.session_id = $1
+                     ORDER BY completion_packets.sequence ASC"
+                ),
+                &[&parent_session_id.0],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL delegated completions", error))?;
+        rows.iter().map(row_to_delegated_completion).collect()
     }
 
     pub fn increment_counter(
@@ -231,6 +1050,73 @@ impl PostgresRuntimeCounterProofStore {
             messages: counter_value(&counters, COUNTER_MESSAGES),
             completions: counter_value(&counters, COUNTER_COMPLETIONS),
             queue_expirations: counter_value(&counters, COUNTER_QUEUE_EXPIRATIONS),
+        })
+    }
+
+    pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
+        let row = self
+            .client()?
+            .query_one("SELECT pg_database_size(current_database())::BIGINT", &[])
+            .map_err(|error| postgres_error("read PostgreSQL database size", error))?;
+        let database_bytes: i64 = row.get(0);
+        Ok(RuntimeDatabaseSize {
+            database_bytes: database_bytes.max(0) as u64,
+            page_count: 0,
+            page_size_bytes: 0,
+            freelist_pages: 0,
+            freelist_bytes: 0,
+            wal_bytes: 0,
+        })
+    }
+
+    pub fn run_maintenance(
+        &self,
+        policy: &RuntimeMaintenancePolicy,
+    ) -> CoreResult<RuntimeMaintenanceReport> {
+        let size_before = self.database_size()?;
+        let mut expired_queue_messages = 0;
+        let mut purged_terminal_queue_messages = 0;
+        let mut expired_provider_wire_states = 0;
+        {
+            let mut client = self.client()?;
+            let mut tx = client
+                .transaction()
+                .map_err(|error| postgres_error("start PostgreSQL runtime maintenance", error))?;
+            if let Some(now) = &policy.expire_queued_messages_at {
+                let expired = self.expire_queued_messages_in_tx(&mut tx, now)?;
+                expired_queue_messages = expired.len() as u64;
+            }
+            if let Some(cutoff) = &policy.purge_terminal_queued_messages_before {
+                purged_terminal_queue_messages =
+                    purge_terminal_queued_messages_in_tx(&mut tx, &self.quoted_schema(), cutoff)?;
+            }
+            if let Some(now) = &policy.expire_provider_wire_states_at {
+                let schema = self.quoted_schema();
+                let expiring = load_expired_current_provider_wire_states(&mut tx, &schema, now)?;
+                for record in &expiring {
+                    invalidate_provider_wire_state_by_row_in_tx(
+                        &mut tx,
+                        &schema,
+                        record.row_id,
+                        now,
+                        ProviderWireStateInvalidationReason::Expired,
+                    )?;
+                }
+                expired_provider_wire_states = expiring.len() as u64;
+            }
+            tx.commit()
+                .map_err(|error| postgres_error("commit PostgreSQL runtime maintenance", error))?;
+        }
+        let size_after = self.database_size()?;
+        Ok(RuntimeMaintenanceReport {
+            size_before,
+            size_after,
+            expired_queue_messages,
+            purged_terminal_queue_messages,
+            expired_provider_wire_states,
+            session_memory_compaction: SessionMemoryCompactionReport::default(),
+            wal_checkpoint_ran: false,
+            optimize_ran: false,
         })
     }
 
@@ -411,10 +1297,54 @@ impl PostgresRuntimeCounterProofStore {
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
             proof_repository:
-                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore"
+                "sessions,events,queued_messages,scheduled_jobs,worker_runs,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore"
                     .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
+                RuntimeStorageTableCount {
+                    table: "sessions".to_string(),
+                    rows: self.table_rows("sessions")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "session_configs".to_string(),
+                    rows: self.table_rows("session_configs")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "session_identities".to_string(),
+                    rows: self.table_rows("session_identities")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "event_history".to_string(),
+                    rows: self.table_rows("event_history")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "event_index".to_string(),
+                    rows: self.table_rows("event_index")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "queued_messages".to_string(),
+                    rows: self.table_rows("queued_messages")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "scheduled_jobs".to_string(),
+                    rows: self.table_rows("scheduled_jobs")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "scheduled_job_runs".to_string(),
+                    rows: self.table_rows("scheduled_job_runs")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "worker_runs".to_string(),
+                    rows: self.table_rows("worker_runs")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "completion_packets".to_string(),
+                    rows: self.table_rows("completion_packets")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "tool_call_history".to_string(),
+                    rows: self.table_rows("tool_call_history")?,
+                },
                 RuntimeStorageTableCount {
                     table: "runtime_counters".to_string(),
                     rows: self.runtime_counter_rows()?,
@@ -1965,6 +2895,183 @@ impl PostgresRuntimeCounterProofStore {
                  );
                  CREATE INDEX IF NOT EXISTS runtime_counters_scope_idx
                     ON {schema}.runtime_counters(scope_type, scope_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.sessions (
+                    session_id TEXT PRIMARY KEY,
+                    handle BIGINT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    state_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_active_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS sessions_agent_profile_idx
+                    ON {schema}.sessions(agent_id, profile_id, kind, status, session_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.session_configs (
+                    session_id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS {schema}.agent_identities (
+                    agent_id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    archived_at TEXT
+                 );
+                 CREATE TABLE IF NOT EXISTS {schema}.agent_instances (
+                    instance_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_active_at TEXT NOT NULL,
+                    archived_at TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS agent_instances_agent_idx
+                    ON {schema}.agent_instances(agent_id, status, last_active_at DESC);
+                 CREATE TABLE IF NOT EXISTS {schema}.session_identities (
+                    session_id TEXT PRIMARY KEY,
+                    instance_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_active_at TEXT NOT NULL,
+                    archived_at TEXT
+                 );
+                 CREATE TABLE IF NOT EXISTS {schema}.event_history (
+                    sequence BIGINT PRIMARY KEY,
+                    event_kind TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL DEFAULT to_char(
+                        CURRENT_TIMESTAMP AT TIME ZONE 'UTC',
+                        'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'
+                    ),
+                    event_json TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS event_history_kind_idx
+                    ON {schema}.event_history(event_kind, sequence);
+                 CREATE TABLE IF NOT EXISTS {schema}.event_index (
+                    sequence BIGINT NOT NULL REFERENCES {schema}.event_history(sequence) ON DELETE CASCADE,
+                    projection TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    PRIMARY KEY(sequence, projection, value)
+                 );
+                 CREATE INDEX IF NOT EXISTS event_index_lookup_idx
+                    ON {schema}.event_index(projection, value, sequence);
+                 CREATE TABLE IF NOT EXISTS {schema}.queued_messages (
+                    message_id TEXT PRIMARY KEY,
+                    owner_session_id TEXT,
+                    owner_agent_id TEXT NOT NULL,
+                    from_agent TEXT NOT NULL,
+                    to_agent TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    correlation_id TEXT,
+                    source_sequence BIGINT,
+                    enqueued_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    ttl_ms BIGINT NOT NULL,
+                    delivery_attempts BIGINT NOT NULL,
+                    state TEXT NOT NULL,
+                    terminal_at TEXT,
+                    state_reason TEXT,
+                    message_json TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS queued_messages_state_expiry_idx
+                    ON {schema}.queued_messages(state, expires_at);
+                 CREATE INDEX IF NOT EXISTS queued_messages_owner_agent_idx
+                    ON {schema}.queued_messages(owner_agent_id, state, expires_at);
+                 CREATE INDEX IF NOT EXISTS queued_messages_owner_session_idx
+                    ON {schema}.queued_messages(owner_session_id, state, expires_at);
+                 CREATE TABLE IF NOT EXISTS {schema}.scheduled_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    job_kind TEXT NOT NULL,
+                    target_session_id TEXT,
+                    interval_ms BIGINT,
+                    next_due_at TEXT,
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    paused_at TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx
+                    ON {schema}.scheduled_jobs(status, next_due_at, job_id);
+                 CREATE INDEX IF NOT EXISTS scheduled_jobs_kind_due_idx
+                    ON {schema}.scheduled_jobs(job_kind, status, next_due_at, job_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.scheduled_job_runs (
+                    run_id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL,
+                    job_kind TEXT NOT NULL,
+                    target_session_id TEXT,
+                    status TEXT NOT NULL,
+                    trigger_kind TEXT NOT NULL,
+                    scheduled_for TEXT,
+                    claimed_at TEXT NOT NULL,
+                    claim_deadline_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    error TEXT,
+                    output_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS scheduled_job_runs_job_status_idx
+                    ON {schema}.scheduled_job_runs(job_id, status, created_at, run_id);
+                 CREATE INDEX IF NOT EXISTS scheduled_job_runs_claim_idx
+                    ON {schema}.scheduled_job_runs(status, claim_deadline_at, run_id);
+                 CREATE INDEX IF NOT EXISTS scheduled_job_runs_session_idx
+                    ON {schema}.scheduled_job_runs(target_session_id, status, created_at, run_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.worker_runs (
+                    run_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    delegated_session_id TEXT,
+                    parent_agent_id TEXT,
+                    profile_id TEXT NOT NULL,
+                    task_id TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_updated_at TEXT NOT NULL,
+                    source_wake_id TEXT NOT NULL,
+                    source_action_index BIGINT NOT NULL,
+                    delegation_correlation_id TEXT,
+                    parent_consumption TEXT NOT NULL,
+                    fan_out_group_id TEXT,
+                    fan_out_max_concurrency BIGINT,
+                    fan_out_failure_policy TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS worker_runs_parent_status_created_idx
+                    ON {schema}.worker_runs(session_id, status, created_at, run_id);
+                 CREATE INDEX IF NOT EXISTS worker_runs_delegated_session_idx
+                    ON {schema}.worker_runs(delegated_session_id);
+                 CREATE INDEX IF NOT EXISTS worker_runs_profile_task_created_idx
+                    ON {schema}.worker_runs(profile_id, task_id, created_at, run_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.completion_packets (
+                    sequence BIGINT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    packet_json TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS completion_packets_session_sequence_idx
+                    ON {schema}.completion_packets(session_id, sequence);
+                 CREATE TABLE IF NOT EXISTS {schema}.tool_call_history (
+                    sequence BIGINT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    wake_id TEXT,
+                    tool_name TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    is_error BOOLEAN,
+                    metadata_json TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS tool_call_history_session_sequence_idx
+                    ON {schema}.tool_call_history(session_id, sequence);
                  CREATE TABLE IF NOT EXISTS {schema}.module_simple_kv_entries (
                     scope_type TEXT NOT NULL,
                     scope_id TEXT NOT NULL,
@@ -2305,6 +3412,554 @@ impl PostgresRuntimeCounterProofStore {
         })
     }
 
+    fn save_session_in_tx(&self, tx: &mut Transaction<'_>, state: &SessionState) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let state_json = to_json_text(state)?;
+        let kind = postgres_session_kind_as_str(&state.kind).to_string();
+        let status = postgres_session_status_as_str(&state.status).to_string();
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.sessions (
+                    session_id,
+                    handle,
+                    agent_id,
+                    profile_id,
+                    kind,
+                    status,
+                    state_json,
+                    created_at,
+                    last_active_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 ON CONFLICT(session_id) DO UPDATE SET
+                    handle = EXCLUDED.handle,
+                    agent_id = EXCLUDED.agent_id,
+                    profile_id = EXCLUDED.profile_id,
+                    kind = EXCLUDED.kind,
+                    status = EXCLUDED.status,
+                    state_json = EXCLUDED.state_json,
+                    last_active_at = EXCLUDED.last_active_at"
+            ),
+            &[
+                &state.session_id.0,
+                &(state.handle.get() as i64),
+                &state.agent_id.0,
+                &state.profile_id.0,
+                &kind,
+                &status,
+                &state_json,
+                &state.created_at,
+                &state.last_active_at,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL session", error))?;
+        let (agent, instance, session) = postgres_default_identity_for_session(state);
+        self.save_agent_identity_in_tx(tx, &agent)?;
+        self.save_agent_instance_in_tx(tx, &instance)?;
+        self.save_session_identity_in_tx(tx, &session)?;
+        Ok(())
+    }
+
+    fn save_session_config_in_tx(
+        &self,
+        tx: &mut Transaction<'_>,
+        config: &SessionConfig,
+        created_at: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let config_json = to_json_text(config)?;
+        let kind = postgres_session_kind_as_str(&config.kind).to_string();
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.session_configs (
+                    session_id,
+                    profile_id,
+                    kind,
+                    record_json,
+                    created_at
+                 ) VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT(session_id) DO NOTHING"
+            ),
+            &[
+                &config.session_id.0,
+                &config.profile_id.0,
+                &kind,
+                &config_json,
+                created_at,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL session config", error))?;
+        Ok(())
+    }
+
+    fn save_agent_identity_in_tx(
+        &self,
+        tx: &mut Transaction<'_>,
+        record: &DurableAgentRecord,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let record_json = to_json_text(record)?;
+        let status = postgres_durable_status_as_str(&record.status).to_string();
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.agent_identities (
+                    agent_id,
+                    profile_id,
+                    status,
+                    record_json,
+                    created_at,
+                    archived_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT(agent_id) DO UPDATE SET
+                    profile_id = EXCLUDED.profile_id,
+                    status = EXCLUDED.status,
+                    record_json = EXCLUDED.record_json,
+                    archived_at = EXCLUDED.archived_at"
+            ),
+            &[
+                &record.agent_id.0,
+                &record.profile_id.0,
+                &status,
+                &record_json,
+                &record.created_at,
+                &record.archived_at,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL agent identity", error))?;
+        Ok(())
+    }
+
+    fn save_agent_instance_in_tx(
+        &self,
+        tx: &mut Transaction<'_>,
+        record: &rusty_crew_core_protocol::AgentInstanceRecord,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let record_json = to_json_text(record)?;
+        let status = postgres_durable_status_as_str(&record.status).to_string();
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.agent_instances (
+                    instance_id,
+                    agent_id,
+                    profile_id,
+                    status,
+                    record_json,
+                    created_at,
+                    last_active_at,
+                    archived_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 ON CONFLICT(instance_id) DO UPDATE SET
+                    agent_id = EXCLUDED.agent_id,
+                    profile_id = EXCLUDED.profile_id,
+                    status = EXCLUDED.status,
+                    record_json = EXCLUDED.record_json,
+                    last_active_at = EXCLUDED.last_active_at,
+                    archived_at = EXCLUDED.archived_at"
+            ),
+            &[
+                &record.instance_id.0,
+                &record.agent_id.0,
+                &record.profile_id.0,
+                &status,
+                &record_json,
+                &record.created_at,
+                &record.last_active_at,
+                &record.archived_at,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL agent instance", error))?;
+        Ok(())
+    }
+
+    fn save_session_identity_in_tx(
+        &self,
+        tx: &mut Transaction<'_>,
+        record: &SessionIdentityRecord,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let record_json = to_json_text(record)?;
+        let kind = postgres_session_kind_as_str(&record.kind).to_string();
+        let status = postgres_session_status_as_str(&record.status).to_string();
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.session_identities (
+                    session_id,
+                    instance_id,
+                    agent_id,
+                    profile_id,
+                    kind,
+                    status,
+                    record_json,
+                    created_at,
+                    last_active_at,
+                    archived_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT(session_id) DO UPDATE SET
+                    instance_id = EXCLUDED.instance_id,
+                    agent_id = EXCLUDED.agent_id,
+                    profile_id = EXCLUDED.profile_id,
+                    kind = EXCLUDED.kind,
+                    status = EXCLUDED.status,
+                    record_json = EXCLUDED.record_json,
+                    last_active_at = EXCLUDED.last_active_at,
+                    archived_at = EXCLUDED.archived_at"
+            ),
+            &[
+                &record.session_id.0,
+                &record.instance_id.0,
+                &record.agent_id.0,
+                &record.profile_id.0,
+                &kind,
+                &status,
+                &record_json,
+                &record.created_at,
+                &record.last_active_at,
+                &record.archived_at,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL session identity", error))?;
+        Ok(())
+    }
+
+    fn load_json_records<T>(&self, table: &str, column: &str, order_by: &str) -> CoreResult<Vec<T>>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        validate_postgres_identifier("postgres table", table)?;
+        validate_postgres_identifier("postgres column", column)?;
+        validate_postgres_identifier("postgres order column", order_by)?;
+        let schema = self.quoted_schema();
+        let table = quote_postgres_identifier(table);
+        let column = quote_postgres_identifier(column);
+        let order_by = quote_postgres_identifier(order_by);
+        let rows = self
+            .client()?
+            .query(
+                &format!("SELECT {column} FROM {schema}.{table} ORDER BY {order_by} ASC"),
+                &[],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL JSON records", error))?;
+        rows.into_iter()
+            .map(|row| {
+                let record_json: String = row.get(0);
+                parse_postgres_json(&record_json, "record_json")
+            })
+            .collect()
+    }
+
+    fn increment_counter_in_tx(
+        &self,
+        tx: &mut impl GenericClient,
+        scope: &RuntimeCounterScope,
+        counter_name: &str,
+        amount: u64,
+    ) -> CoreResult<()> {
+        if amount == 0 {
+            return Ok(());
+        }
+        validate_counter_amount(amount)?;
+        let (scope_type, scope_id) = runtime_counter_scope_parts(scope);
+        let schema = self.quoted_schema();
+        let now = postgres_now_iso(tx)?;
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.runtime_counters (
+                    scope_type,
+                    scope_id,
+                    counter_name,
+                    value,
+                    updated_at
+                ) VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT(scope_type, scope_id, counter_name) DO UPDATE SET
+                    value = runtime_counters.value + EXCLUDED.value,
+                    updated_at = EXCLUDED.updated_at"
+            ),
+            &[
+                &scope_type,
+                &scope_id,
+                &counter_name,
+                &(amount as i64),
+                &now,
+            ],
+        )
+        .map_err(|error| postgres_error("increment PostgreSQL runtime counter in tx", error))?;
+        Ok(())
+    }
+
+    fn replace_event_indexes_in_tx(
+        &self,
+        tx: &mut Transaction<'_>,
+        sequence: u64,
+        event: &CoreEvent,
+    ) -> CoreResult<()> {
+        self.replace_event_index_values_in_tx(
+            tx,
+            sequence,
+            "session",
+            postgres_event_session_ids(event)
+                .into_iter()
+                .map(|value| value.0)
+                .collect(),
+        )?;
+        self.replace_event_index_values_in_tx(
+            tx,
+            sequence,
+            "agent",
+            postgres_event_agent_ids(event)
+                .into_iter()
+                .map(|value| value.0)
+                .collect(),
+        )?;
+        self.replace_event_index_values_in_tx(
+            tx,
+            sequence,
+            "instance",
+            postgres_event_session_ids(event)
+                .into_iter()
+                .map(|value| AgentInstanceId::new(format!("instance:{value}")).0)
+                .collect(),
+        )?;
+        self.replace_event_index_values_in_tx(
+            tx,
+            sequence,
+            "correlation",
+            postgres_event_correlation_ids(event),
+        )?;
+        self.replace_event_index_values_in_tx(
+            tx,
+            sequence,
+            "wake",
+            postgres_event_source_wake_ids(event),
+        )
+    }
+
+    fn replace_event_index_values_in_tx(
+        &self,
+        tx: &mut Transaction<'_>,
+        sequence: u64,
+        projection: &str,
+        values: Vec<String>,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        tx.execute(
+            &format!(
+                "DELETE FROM {schema}.event_index
+                 WHERE sequence = $1 AND projection = $2"
+            ),
+            &[&(sequence as i64), &projection],
+        )
+        .map_err(|error| postgres_error("delete PostgreSQL event index values", error))?;
+        for value in postgres_dedupe_non_empty(values) {
+            tx.execute(
+                &format!(
+                    "INSERT INTO {schema}.event_index (sequence, projection, value)
+                     VALUES ($1, $2, $3)
+                     ON CONFLICT DO NOTHING"
+                ),
+                &[&(sequence as i64), &projection, &value],
+            )
+            .map_err(|error| postgres_error("insert PostgreSQL event index value", error))?;
+        }
+        Ok(())
+    }
+
+    fn row_to_event_record(&self, row: Row) -> CoreResult<RuntimeEventRecord> {
+        let sequence = row.get::<_, i64>(0) as u64;
+        let event_json: String = row.get(3);
+        let event = parse_postgres_json::<CoreEvent>(&event_json, "event event_json")?;
+        Ok(RuntimeEventRecord {
+            sequence,
+            kind: CoreEventKind::of(&event),
+            recorded_at: row.get(2),
+            event,
+            session_ids: self
+                .event_index_values(sequence, "session")?
+                .into_iter()
+                .map(SessionId)
+                .collect(),
+            agent_ids: self
+                .event_index_values(sequence, "agent")?
+                .into_iter()
+                .map(AgentId)
+                .collect(),
+            instance_ids: self
+                .event_index_values(sequence, "instance")?
+                .into_iter()
+                .map(AgentInstanceId)
+                .collect(),
+            correlation_ids: self.event_index_values(sequence, "correlation")?,
+            source_wake_ids: self.event_index_values(sequence, "wake")?,
+        })
+    }
+
+    fn event_index_values(&self, sequence: u64, projection: &str) -> CoreResult<Vec<String>> {
+        let schema = self.quoted_schema();
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT value
+                     FROM {schema}.event_index
+                     WHERE sequence = $1 AND projection = $2
+                     ORDER BY value ASC"
+                ),
+                &[&(sequence as i64), &projection],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL event index values", error))?;
+        Ok(rows.into_iter().map(|row| row.get(0)).collect())
+    }
+
+    fn save_queued_message_in_tx(
+        &self,
+        tx: &mut impl GenericClient,
+        record: &QueuedMessageRecord,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let message_json = to_json_text(&record.message)?;
+        let state = postgres_queued_message_state_as_str(record.state).to_string();
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.queued_messages (
+                    message_id,
+                    owner_session_id,
+                    owner_agent_id,
+                    from_agent,
+                    to_agent,
+                    body,
+                    correlation_id,
+                    source_sequence,
+                    enqueued_at,
+                    expires_at,
+                    ttl_ms,
+                    delivery_attempts,
+                    state,
+                    terminal_at,
+                    state_reason,
+                    message_json
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                 ON CONFLICT(message_id) DO UPDATE SET
+                    owner_session_id = EXCLUDED.owner_session_id,
+                    owner_agent_id = EXCLUDED.owner_agent_id,
+                    from_agent = EXCLUDED.from_agent,
+                    to_agent = EXCLUDED.to_agent,
+                    body = EXCLUDED.body,
+                    correlation_id = EXCLUDED.correlation_id,
+                    source_sequence = EXCLUDED.source_sequence,
+                    expires_at = EXCLUDED.expires_at,
+                    ttl_ms = EXCLUDED.ttl_ms,
+                    delivery_attempts = EXCLUDED.delivery_attempts,
+                    state = EXCLUDED.state,
+                    terminal_at = EXCLUDED.terminal_at,
+                    state_reason = EXCLUDED.state_reason,
+                    message_json = EXCLUDED.message_json"
+            ),
+            &[
+                &record.message_id,
+                &record
+                    .owner_session_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                &record.owner_agent_id.0,
+                &record.message.from.0,
+                &record.message.to.0,
+                &record.message.body,
+                &record.message.correlation_id,
+                &record.source_sequence.map(|value| value as i64),
+                &record.enqueued_at,
+                &record.expires_at,
+                &(record.ttl_ms as i64),
+                &(record.delivery_attempts as i64),
+                &state,
+                &record.terminal_at,
+                &record.state_reason,
+                &message_json,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL queued message", error))?;
+        Ok(())
+    }
+
+    fn load_queued_messages_in_tx(
+        &self,
+        client: &mut impl GenericClient,
+        filter: &QueuedMessageFilter,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        let schema = self.quoted_schema();
+        let state = filter
+            .state
+            .map(postgres_queued_message_state_as_str)
+            .map(str::to_string);
+        let owner_session_id = filter
+            .owner_session_id
+            .as_ref()
+            .map(|value| value.0.as_str());
+        let owner_agent_id = filter.owner_agent_id.as_ref().map(|value| value.0.as_str());
+        let limit = filter.limit.unwrap_or(1_000).clamp(1, 10_000) as i64;
+        let rows = client
+            .query(
+                &format!(
+                    "SELECT
+                        message_id,
+                        owner_session_id,
+                        owner_agent_id,
+                        from_agent,
+                        to_agent,
+                        body,
+                        correlation_id,
+                        source_sequence,
+                        enqueued_at,
+                        expires_at,
+                        ttl_ms,
+                        delivery_attempts,
+                        state,
+                        terminal_at,
+                        state_reason,
+                        message_json
+                     FROM {schema}.queued_messages
+                     WHERE ($1::TEXT IS NULL OR state = $1)
+                       AND ($2::TEXT IS NULL OR owner_session_id = $2)
+                       AND ($3::TEXT IS NULL OR owner_agent_id = $3)
+                     ORDER BY enqueued_at ASC, message_id ASC
+                     LIMIT $4"
+                ),
+                &[&state, &owner_session_id, &owner_agent_id, &limit],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL queued messages", error))?;
+        rows.into_iter().map(row_to_queued_message).collect()
+    }
+
+    fn expire_queued_messages_in_tx(
+        &self,
+        tx: &mut impl GenericClient,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        let expiring = self
+            .load_queued_messages_in_tx(
+                tx,
+                &QueuedMessageFilter {
+                    state: Some(QueuedMessageState::Pending),
+                    owner_session_id: None,
+                    owner_agent_id: None,
+                    limit: None,
+                },
+            )?
+            .into_iter()
+            .filter(|message| message.expires_at <= *now)
+            .collect::<Vec<_>>();
+        let mut expired = Vec::new();
+        for mut message in expiring {
+            message.state = QueuedMessageState::Expired;
+            message.terminal_at = Some(now.clone());
+            message.state_reason = Some("ttl_expired".to_string());
+            self.save_queued_message_in_tx(tx, &message)?;
+            for scope in postgres_queued_message_counter_scopes(&message) {
+                self.increment_counter_in_tx(tx, &scope, COUNTER_QUEUE_EXPIRATIONS, 1)?;
+            }
+            expired.push(message);
+        }
+        Ok(expired)
+    }
+
     fn update_simple_kv(&self, write: &SimpleKvWrite, revision: u64) -> CoreResult<SimpleKvRecord> {
         validate_counter_amount(revision)?;
         let existing = self.get_simple_kv(&write.scope, &write.key, None)?;
@@ -2463,8 +4118,8 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
         ),
         (
             "row_level_claims",
-            false,
-            "not exercised by the runtime counter proof slice",
+            true,
+            "PostgreSQL scheduler expiry uses FOR UPDATE SKIP LOCKED row-level claim semantics",
         ),
         (
             "runtime_full_text_search",
@@ -2494,6 +4149,31 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
                 group.notes.insert(
                     0,
                     "PostgreSQL proof status: implemented for proof-owned migrations and storage diagnostics only.".to_string(),
+                );
+            } else if group.group_id == "sessions_identities" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for session/config/identity hydration conformance; not yet wired as the full service backend.".to_string(),
+                );
+            } else if group.group_id == "events_projections" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for event history and typed event-index query conformance; not yet wired as the full service backend.".to_string(),
+                );
+            } else if group.group_id == "queues_messages" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for queued-message TTL and no-resurrection conformance; not yet wired as the full service backend.".to_string(),
+                );
+            } else if group.group_id == "scheduler_jobs" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for scheduled jobs, scheduled run claim/completion, stale-run expiry, and row-level claim conformance; not yet wired as the full service backend.".to_string(),
+                );
+            } else if group.group_id == "worker_runs_completions" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for worker run lifecycle, delegated completion lookup, completion packet persistence, and terminal-status conformance; not yet wired as the full service backend.".to_string(),
                 );
             } else if group.group_id == "module_schema_registry" {
                 group.notes.insert(
@@ -2534,6 +4214,858 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
             group
         })
         .collect()
+}
+
+fn postgres_session_kind_as_str(kind: &SessionKind) -> &'static str {
+    match kind {
+        SessionKind::Full => "full",
+        SessionKind::Worker => "worker",
+        SessionKind::Delegated => "delegated",
+    }
+}
+
+fn postgres_session_status_as_str(status: &SessionStatus) -> &'static str {
+    match status {
+        SessionStatus::Active => "active",
+        SessionStatus::Idle => "idle",
+        SessionStatus::Archived => "archived",
+    }
+}
+
+fn postgres_durable_status_as_str(status: &DurableIdentityStatus) -> &'static str {
+    match status {
+        DurableIdentityStatus::Active => "active",
+        DurableIdentityStatus::Archived => "archived",
+    }
+}
+
+fn postgres_durable_agent_kind_from_session_kind(kind: &SessionKind) -> DurableAgentKind {
+    match kind {
+        SessionKind::Full => DurableAgentKind::Full,
+        SessionKind::Worker => DurableAgentKind::WorkerPoolWorker,
+        SessionKind::Delegated => DurableAgentKind::Delegated,
+    }
+}
+
+fn postgres_durable_status_from_session_status(status: &SessionStatus) -> DurableIdentityStatus {
+    match status {
+        SessionStatus::Active | SessionStatus::Idle => DurableIdentityStatus::Active,
+        SessionStatus::Archived => DurableIdentityStatus::Archived,
+    }
+}
+
+fn postgres_default_identity_for_session(
+    state: &SessionState,
+) -> (
+    DurableAgentRecord,
+    rusty_crew_core_protocol::AgentInstanceRecord,
+    SessionIdentityRecord,
+) {
+    let den = DenRuntimeReference {
+        project_id: None,
+        task_id: state
+            .delegation
+            .as_ref()
+            .and_then(|lineage| lineage.requested_task_id.clone()),
+    };
+    let archived_at = if state.status == SessionStatus::Archived {
+        Some(state.last_active_at.clone())
+    } else {
+        None
+    };
+    let status = postgres_durable_status_from_session_status(&state.status);
+    let instance_id = AgentInstanceId::new(format!("instance:{}", state.session_id));
+    (
+        DurableAgentRecord {
+            agent_id: state.agent_id.clone(),
+            display_label: state.agent_id.to_string(),
+            profile_id: state.profile_id.clone(),
+            kind: postgres_durable_agent_kind_from_session_kind(&state.kind),
+            status: status.clone(),
+            source: None,
+            den: den.clone(),
+            created_at: state.created_at.clone(),
+            archived_at: archived_at.clone(),
+        },
+        rusty_crew_core_protocol::AgentInstanceRecord {
+            instance_id: instance_id.clone(),
+            agent_id: state.agent_id.clone(),
+            display_label: state.session_id.to_string(),
+            profile_id: state.profile_id.clone(),
+            status: status.clone(),
+            source: None,
+            den: den.clone(),
+            created_at: state.created_at.clone(),
+            last_active_at: state.last_active_at.clone(),
+            archived_at: archived_at.clone(),
+        },
+        SessionIdentityRecord {
+            session_id: state.session_id.clone(),
+            instance_id,
+            agent_id: state.agent_id.clone(),
+            profile_id: state.profile_id.clone(),
+            kind: state.kind.clone(),
+            status: state.status.clone(),
+            source: None,
+            den,
+            created_at: state.created_at.clone(),
+            last_active_at: state.last_active_at.clone(),
+            archived_at,
+        },
+    )
+}
+
+fn postgres_should_persist_event(event: &CoreEvent) -> bool {
+    !matches!(
+        event,
+        CoreEvent::DenDataUpdated { .. } | CoreEvent::ExternalEventInjected { .. }
+    )
+}
+
+fn postgres_event_session_ids(event: &CoreEvent) -> Vec<SessionId> {
+    match event {
+        CoreEvent::SessionCreated { state } => vec![state.session_id.clone()],
+        CoreEvent::SessionArchived { session_id } => vec![session_id.clone()],
+        CoreEvent::DelegationLifecycleObserved { lifecycle } => vec![
+            lifecycle.parent_session_id.clone(),
+            lifecycle.delegated_session_id.clone(),
+        ],
+        CoreEvent::BrainWakeRequested { session_id }
+        | CoreEvent::BrainEventObserved { session_id, .. }
+        | CoreEvent::BrainActionsAccepted { session_id, .. } => vec![session_id.clone()],
+        CoreEvent::CompletionPacketDelivered { packet } => vec![packet.session_id.clone()],
+        CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. } => Vec::new(),
+    }
+}
+
+fn postgres_event_agent_ids(event: &CoreEvent) -> Vec<AgentId> {
+    match event {
+        CoreEvent::SessionCreated { state } => vec![state.agent_id.clone()],
+        CoreEvent::AgentMessageRouted { message } => vec![message.from.clone(), message.to.clone()],
+        CoreEvent::SessionArchived { .. }
+        | CoreEvent::DelegationLifecycleObserved { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. }
+        | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::BrainEventObserved { .. }
+        | CoreEvent::BrainActionsAccepted { .. }
+        | CoreEvent::CompletionPacketDelivered { .. } => Vec::new(),
+    }
+}
+
+fn postgres_event_correlation_ids(event: &CoreEvent) -> Vec<String> {
+    match event {
+        CoreEvent::SessionCreated { state } => state
+            .delegation
+            .as_ref()
+            .map(|lineage| lineage.correlation_id.clone())
+            .into_iter()
+            .collect(),
+        CoreEvent::AgentMessageRouted { message } => {
+            message.correlation_id.clone().into_iter().collect()
+        }
+        CoreEvent::SessionArchived { .. }
+        | CoreEvent::DelegationLifecycleObserved { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. }
+        | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::BrainEventObserved { .. }
+        | CoreEvent::BrainActionsAccepted { .. }
+        | CoreEvent::CompletionPacketDelivered { .. } => Vec::new(),
+    }
+}
+
+fn postgres_event_source_wake_ids(event: &CoreEvent) -> Vec<String> {
+    match event {
+        CoreEvent::SessionCreated { state } => state
+            .delegation
+            .as_ref()
+            .map(|lineage| lineage.source_wake_id.clone())
+            .into_iter()
+            .collect(),
+        CoreEvent::BrainEventObserved {
+            wake_id: Some(wake_id),
+            ..
+        } => vec![wake_id.clone()],
+        CoreEvent::SessionArchived { .. }
+        | CoreEvent::AgentMessageRouted { .. }
+        | CoreEvent::DelegationLifecycleObserved { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. }
+        | CoreEvent::BrainWakeRequested { .. }
+        | CoreEvent::BrainEventObserved { wake_id: None, .. }
+        | CoreEvent::BrainActionsAccepted { .. }
+        | CoreEvent::CompletionPacketDelivered { .. } => Vec::new(),
+    }
+}
+
+fn postgres_event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> {
+    match event {
+        CoreEvent::BrainWakeRequested { .. } => vec![(COUNTER_WAKES, 1)],
+        CoreEvent::AgentMessageRouted { .. } => vec![(COUNTER_MESSAGES, 1)],
+        CoreEvent::BrainActionsAccepted { count, .. } => {
+            vec![
+                (COUNTER_BRAIN_TURNS, 1),
+                ("accepted_actions", u64::from(*count)),
+            ]
+        }
+        CoreEvent::BrainEventObserved { event, .. } => match event {
+            BrainEvent::ToolCallStarted { .. } => vec![(COUNTER_TOOL_CALLS, 1)],
+            BrainEvent::ToolCallFinished { is_error: true, .. } => {
+                vec![(COUNTER_TOOL_ERRORS, 1)]
+            }
+            _ => Vec::new(),
+        },
+        CoreEvent::DelegationLifecycleObserved { lifecycle } => match lifecycle.phase {
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Created => {
+                vec![(COUNTER_DELEGATIONS_CREATED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Completed => {
+                vec![(COUNTER_DELEGATIONS_COMPLETED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Failed
+            | rusty_crew_core_protocol::DelegationLifecyclePhase::Blocked
+            | rusty_crew_core_protocol::DelegationLifecyclePhase::Exhausted => {
+                vec![(COUNTER_DELEGATIONS_FAILED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::TimedOut => {
+                vec![(COUNTER_DELEGATIONS_TIMED_OUT, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::Cancelled => {
+                vec![(COUNTER_DELEGATIONS_CANCELLED, 1)]
+            }
+            rusty_crew_core_protocol::DelegationLifecyclePhase::WakeRequested
+            | rusty_crew_core_protocol::DelegationLifecyclePhase::CheckpointRequested => Vec::new(),
+        },
+        CoreEvent::CompletionPacketDelivered { .. } => vec![(COUNTER_COMPLETIONS, 1)],
+        CoreEvent::SessionArchived { .. }
+        | CoreEvent::SessionCreated { .. }
+        | CoreEvent::ExternalEventInjected { .. }
+        | CoreEvent::DenDataUpdated { .. } => Vec::new(),
+    }
+}
+
+fn postgres_event_counter_scopes(event: &CoreEvent) -> Vec<RuntimeCounterScope> {
+    let mut scopes = vec![RuntimeCounterScope::Runtime];
+    for agent_id in postgres_event_agent_ids(event) {
+        scopes.push(RuntimeCounterScope::Agent(agent_id));
+    }
+    let session_ids = postgres_event_session_ids(event);
+    for session_id in &session_ids {
+        scopes.push(RuntimeCounterScope::Session(session_id.clone()));
+    }
+    for session_id in session_ids {
+        scopes.push(RuntimeCounterScope::Instance(AgentInstanceId::new(
+            format!("instance:{session_id}"),
+        )));
+    }
+    scopes
+}
+
+fn postgres_queued_message_state_as_str(state: QueuedMessageState) -> &'static str {
+    match state {
+        QueuedMessageState::Pending => "pending",
+        QueuedMessageState::Delivered => "delivered",
+        QueuedMessageState::Expired => "expired",
+        QueuedMessageState::Discarded => "discarded",
+        QueuedMessageState::Cancelled => "cancelled",
+    }
+}
+
+fn postgres_queued_message_state_from_str(raw: &str) -> CoreResult<QueuedMessageState> {
+    match raw {
+        "pending" => Ok(QueuedMessageState::Pending),
+        "delivered" => Ok(QueuedMessageState::Delivered),
+        "expired" => Ok(QueuedMessageState::Expired),
+        "discarded" => Ok(QueuedMessageState::Discarded),
+        "cancelled" => Ok(QueuedMessageState::Cancelled),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL queued message state {other}"),
+        )),
+    }
+}
+
+fn postgres_queued_message_counter_scopes(
+    message: &QueuedMessageRecord,
+) -> Vec<RuntimeCounterScope> {
+    let mut scopes = vec![RuntimeCounterScope::Runtime];
+    if let Some(session_id) = &message.owner_session_id {
+        scopes.push(RuntimeCounterScope::Session(session_id.clone()));
+    }
+    scopes
+}
+
+fn postgres_dedupe_non_empty(values: Vec<String>) -> Vec<String> {
+    let mut deduped = Vec::new();
+    for value in values {
+        if value.trim().is_empty() || deduped.contains(&value) {
+            continue;
+        }
+        deduped.push(value);
+    }
+    deduped
+}
+
+fn postgres_now_iso(client: &mut impl GenericClient) -> CoreResult<IsoTimestamp> {
+    let row = client
+        .query_one(
+            "SELECT to_char(
+                CURRENT_TIMESTAMP AT TIME ZONE 'UTC',
+                'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'
+             )",
+            &[],
+        )
+        .map_err(|error| postgres_error("read PostgreSQL current timestamp", error))?;
+    Ok(row.get(0))
+}
+
+fn row_to_queued_message(row: Row) -> CoreResult<QueuedMessageRecord> {
+    let message_json: String = row.get(15);
+    let state: String = row.get(12);
+    Ok(QueuedMessageRecord {
+        message_id: row.get(0),
+        owner_session_id: row.get::<_, Option<String>>(1).map(SessionId),
+        owner_agent_id: AgentId(row.get(2)),
+        message: parse_postgres_json(&message_json, "queued message_json")?,
+        source_sequence: row.get::<_, Option<i64>>(7).map(|value| value as u64),
+        enqueued_at: row.get(8),
+        expires_at: row.get(9),
+        ttl_ms: row.get::<_, i64>(10) as u32,
+        delivery_attempts: row.get::<_, i64>(11) as u32,
+        state: postgres_queued_message_state_from_str(&state)?,
+        terminal_at: row.get(13),
+        state_reason: row.get(14),
+    })
+}
+
+const WORKER_RUN_SELECT: &str = "SELECT
+    run_id,
+    session_id,
+    delegated_session_id,
+    parent_agent_id,
+    profile_id,
+    task_id,
+    status,
+    created_at,
+    last_updated_at,
+    source_wake_id,
+    source_action_index,
+    delegation_correlation_id,
+    parent_consumption,
+    fan_out_group_id,
+    fan_out_max_concurrency,
+    fan_out_failure_policy";
+
+fn save_completion_packet_in_tx(
+    tx: &mut impl GenericClient,
+    schema: &str,
+    sequence: u64,
+    packet: &CompletionPacket,
+) -> CoreResult<()> {
+    let status = postgres_completion_status_as_str(&packet.status).to_string();
+    let packet_json = to_json_text(packet)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.completion_packets (
+                sequence,
+                session_id,
+                status,
+                summary,
+                packet_json
+             ) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT(sequence) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                status = EXCLUDED.status,
+                summary = EXCLUDED.summary,
+                packet_json = EXCLUDED.packet_json"
+        ),
+        &[
+            &(sequence as i64),
+            &packet.session_id.0,
+            &status,
+            &packet.summary,
+            &packet_json,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL completion packet", error))?;
+    Ok(())
+}
+
+fn save_tool_call_in_tx(
+    tx: &mut impl GenericClient,
+    schema: &str,
+    sequence: u64,
+    session_id: &SessionId,
+    wake_id: Option<&str>,
+    event: &BrainEvent,
+) -> CoreResult<()> {
+    let (tool_name, phase, is_error, metadata) = match event {
+        BrainEvent::ToolCallStarted {
+            tool_name,
+            metadata,
+        } => (tool_name, ToolCallPhase::Started, None, metadata),
+        BrainEvent::ToolCallFinished {
+            tool_name,
+            is_error,
+            metadata,
+        } => (
+            tool_name,
+            ToolCallPhase::Finished,
+            Some(*is_error),
+            metadata,
+        ),
+        _ => return Ok(()),
+    };
+    let phase = tool_call_phase_as_str(phase).to_string();
+    let metadata_json = metadata.as_ref().map(to_json_text).transpose()?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.tool_call_history (
+                sequence,
+                session_id,
+                wake_id,
+                tool_name,
+                phase,
+                is_error,
+                metadata_json
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT(sequence) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                wake_id = EXCLUDED.wake_id,
+                tool_name = EXCLUDED.tool_name,
+                phase = EXCLUDED.phase,
+                is_error = EXCLUDED.is_error,
+                metadata_json = EXCLUDED.metadata_json"
+        ),
+        &[
+            &(sequence as i64),
+            &session_id.0,
+            &wake_id,
+            tool_name,
+            &phase,
+            &is_error,
+            &metadata_json,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL tool call history", error))?;
+    Ok(())
+}
+
+fn row_to_tool_call_record(row: &Row) -> CoreResult<ToolCallRecord> {
+    let sequence: i64 = row.get(0);
+    let phase: String = row.get(4);
+    let metadata_json: Option<String> = row.get(6);
+    Ok(ToolCallRecord {
+        sequence: sequence as u64,
+        session_id: SessionId::new(row.get::<_, String>(1)),
+        wake_id: row.get(2),
+        tool_name: row.get(3),
+        phase: tool_call_phase_from_str(&phase)?,
+        is_error: row.get(5),
+        metadata: metadata_json
+            .as_deref()
+            .map(|value| parse_postgres_json(value, "tool call metadata_json"))
+            .transpose()?,
+    })
+}
+
+fn tool_call_phase_as_str(phase: ToolCallPhase) -> &'static str {
+    match phase {
+        ToolCallPhase::Started => "started",
+        ToolCallPhase::Finished => "finished",
+    }
+}
+
+fn tool_call_phase_from_str(raw: &str) -> CoreResult<ToolCallPhase> {
+    match raw {
+        "started" => Ok(ToolCallPhase::Started),
+        "finished" => Ok(ToolCallPhase::Finished),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL tool call phase {other}"),
+        )),
+    }
+}
+
+fn purge_terminal_queued_messages_in_tx(
+    tx: &mut impl GenericClient,
+    schema: &str,
+    cutoff: &IsoTimestamp,
+) -> CoreResult<u64> {
+    tx.execute(
+        &format!(
+            "DELETE FROM {schema}.queued_messages
+             WHERE state IN ('delivered', 'expired', 'discarded', 'cancelled')
+               AND terminal_at IS NOT NULL
+               AND terminal_at < $1"
+        ),
+        &[cutoff],
+    )
+    .map_err(|error| postgres_error("purge PostgreSQL terminal queued messages", error))
+}
+
+fn row_to_completion_packet_record(row: &Row) -> CoreResult<CompletionPacketRecord> {
+    let sequence: i64 = row.get(0);
+    let packet_json: String = row.get(1);
+    Ok(CompletionPacketRecord {
+        sequence: sequence as u64,
+        packet: parse_postgres_json(&packet_json, "completion packet_json")?,
+    })
+}
+
+fn save_worker_run_in_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    record: &WorkerRunRecord,
+) -> CoreResult<()> {
+    let status = worker_run_status_as_str(&record.status).to_string();
+    let parent_consumption = parent_consumption_policy_as_str(&record.parent_consumption);
+    let fan_out_failure_policy = fan_out_failure_policy_as_str(&record.fan_out_failure_policy);
+    client
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.worker_runs (
+                    run_id,
+                    session_id,
+                    delegated_session_id,
+                    parent_agent_id,
+                    profile_id,
+                    task_id,
+                    status,
+                    created_at,
+                    last_updated_at,
+                    source_wake_id,
+                    source_action_index,
+                    delegation_correlation_id,
+                    parent_consumption,
+                    fan_out_group_id,
+                    fan_out_max_concurrency,
+                    fan_out_failure_policy
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                 ON CONFLICT(run_id) DO UPDATE SET
+                    session_id = EXCLUDED.session_id,
+                    delegated_session_id = EXCLUDED.delegated_session_id,
+                    parent_agent_id = EXCLUDED.parent_agent_id,
+                    profile_id = EXCLUDED.profile_id,
+                    task_id = EXCLUDED.task_id,
+                    status = EXCLUDED.status,
+                    last_updated_at = EXCLUDED.last_updated_at,
+                    source_wake_id = EXCLUDED.source_wake_id,
+                    source_action_index = EXCLUDED.source_action_index,
+                    delegation_correlation_id = EXCLUDED.delegation_correlation_id,
+                    parent_consumption = EXCLUDED.parent_consumption,
+                    fan_out_group_id = EXCLUDED.fan_out_group_id,
+                    fan_out_max_concurrency = EXCLUDED.fan_out_max_concurrency,
+                    fan_out_failure_policy = EXCLUDED.fan_out_failure_policy"
+            ),
+            &[
+                &record.run_id.0,
+                &record.parent_session_id.0,
+                &record
+                    .delegated_session_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                &record
+                    .parent_agent_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                &record.profile_id.0,
+                &record.task_id.as_ref().map(|value| value.0.as_str()),
+                &status,
+                &record.created_at,
+                &record.last_updated_at,
+                &record.source_wake_id,
+                &(record.source_action_index as i64),
+                &record.delegation_correlation_id,
+                &parent_consumption,
+                &record.fan_out_group_id,
+                &record.fan_out_max_concurrency.map(|value| value as i64),
+                &fan_out_failure_policy,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL worker run", error))?;
+    Ok(())
+}
+
+fn row_to_worker_run(row: &Row) -> CoreResult<WorkerRunRecord> {
+    let status: String = row.get(6);
+    let parent_consumption: String = row.get(12);
+    let fan_out_failure_policy: String = row.get(15);
+    Ok(WorkerRunRecord {
+        run_id: RunId::new(row.get::<_, String>(0)),
+        parent_session_id: SessionId::new(row.get::<_, String>(1)),
+        delegated_session_id: row.get::<_, Option<String>>(2).map(SessionId::new),
+        parent_agent_id: row.get::<_, Option<String>>(3).map(AgentId::new),
+        profile_id: ProfileId::new(row.get::<_, String>(4)),
+        task_id: row.get::<_, Option<String>>(5).map(TaskId::new),
+        status: worker_run_status_from_str(&status)?,
+        created_at: row.get(7),
+        last_updated_at: row.get(8),
+        source_wake_id: row.get(9),
+        source_action_index: row.get::<_, i64>(10) as u32,
+        delegation_correlation_id: row.get(11),
+        parent_consumption: parent_consumption_policy_from_str(&parent_consumption)?,
+        fan_out_group_id: row.get(13),
+        fan_out_max_concurrency: row.get::<_, Option<i64>>(14).map(|value| value as u32),
+        fan_out_failure_policy: fan_out_failure_policy_from_str(&fan_out_failure_policy)?,
+    })
+}
+
+fn row_to_delegated_completion(row: &Row) -> CoreResult<DelegatedCompletion> {
+    let child_session_id = row.get::<_, Option<String>>(1).ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "delegated completion row is missing delegated_session_id",
+        )
+    })?;
+    let parent_consumption: String = row.get(6);
+    let packet_json: String = row.get(7);
+    Ok(DelegatedCompletion {
+        run_id: RunId::new(row.get::<_, String>(0)),
+        child_session_id: SessionId::new(child_session_id),
+        requested_task_id: row.get::<_, Option<String>>(2).map(TaskId::new),
+        source_wake_id: row.get(3),
+        source_action_index: row.get::<_, i64>(4) as u32,
+        correlation_id: row.get(5),
+        parent_consumption: parent_consumption_policy_from_str(&parent_consumption)?,
+        packet: parse_postgres_json(&packet_json, "delegated completion packet_json")?,
+    })
+}
+
+fn postgres_completion_status_as_str(status: &CompletionStatus) -> &'static str {
+    match status {
+        CompletionStatus::Completed => "completed",
+        CompletionStatus::Failed => "failed",
+        CompletionStatus::Blocked => "blocked",
+        CompletionStatus::Exhausted => "exhausted",
+    }
+}
+
+fn worker_run_status_as_str(status: &WorkerRunStatus) -> &'static str {
+    match status {
+        WorkerRunStatus::Requested => "requested",
+        WorkerRunStatus::SessionCreated => "session_created",
+        WorkerRunStatus::WakeRequested => "wake_requested",
+        WorkerRunStatus::Running => "running",
+        WorkerRunStatus::CheckpointWaiting => "checkpoint_waiting",
+        WorkerRunStatus::Completed => "completed",
+        WorkerRunStatus::Failed => "failed",
+        WorkerRunStatus::Blocked => "blocked",
+        WorkerRunStatus::Exhausted => "exhausted",
+        WorkerRunStatus::Cancelled => "cancelled",
+        WorkerRunStatus::Expired => "expired",
+    }
+}
+
+fn worker_run_status_from_str(raw: &str) -> CoreResult<WorkerRunStatus> {
+    match raw {
+        "requested" => Ok(WorkerRunStatus::Requested),
+        "session_created" => Ok(WorkerRunStatus::SessionCreated),
+        "wake_requested" => Ok(WorkerRunStatus::WakeRequested),
+        "running" => Ok(WorkerRunStatus::Running),
+        "checkpoint_waiting" => Ok(WorkerRunStatus::CheckpointWaiting),
+        "completed" => Ok(WorkerRunStatus::Completed),
+        "failed" => Ok(WorkerRunStatus::Failed),
+        "blocked" => Ok(WorkerRunStatus::Blocked),
+        "exhausted" => Ok(WorkerRunStatus::Exhausted),
+        "cancelled" => Ok(WorkerRunStatus::Cancelled),
+        "expired" => Ok(WorkerRunStatus::Expired),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL worker run status {other}"),
+        )),
+    }
+}
+
+fn parent_consumption_policy_as_str(policy: &ParentConsumptionPolicy) -> &'static str {
+    match policy {
+        ParentConsumptionPolicy::AwaitCompletion => "await_completion",
+        ParentConsumptionPolicy::ObserveOnly => "observe_only",
+    }
+}
+
+fn parent_consumption_policy_from_str(raw: &str) -> CoreResult<ParentConsumptionPolicy> {
+    match raw {
+        "await_completion" => Ok(ParentConsumptionPolicy::AwaitCompletion),
+        "observe_only" => Ok(ParentConsumptionPolicy::ObserveOnly),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL parent consumption policy {other}"),
+        )),
+    }
+}
+
+fn fan_out_failure_policy_as_str(policy: &FanOutFailurePolicy) -> &'static str {
+    match policy {
+        FanOutFailurePolicy::FailFast => "fail_fast",
+        FanOutFailurePolicy::FailSoft => "fail_soft",
+    }
+}
+
+fn fan_out_failure_policy_from_str(raw: &str) -> CoreResult<FanOutFailurePolicy> {
+    match raw {
+        "fail_fast" => Ok(FanOutFailurePolicy::FailFast),
+        "fail_soft" => Ok(FanOutFailurePolicy::FailSoft),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL fan-out failure policy {other}"),
+        )),
+    }
+}
+
+fn save_scheduled_run_in_tx(
+    tx: &mut impl GenericClient,
+    schema: &str,
+    run: &ScheduledRunRecord,
+) -> CoreResult<()> {
+    let status = postgres_scheduled_run_status_as_str(run.status).to_string();
+    let trigger = postgres_scheduled_run_trigger_as_str(run.trigger).to_string();
+    let output_json = to_json_text(&run.output_json)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.scheduled_job_runs (
+                run_id,
+                job_id,
+                job_kind,
+                target_session_id,
+                status,
+                trigger_kind,
+                scheduled_for,
+                claimed_at,
+                claim_deadline_at,
+                completed_at,
+                error,
+                output_json,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"
+        ),
+        &[
+            &run.run_id.0,
+            &run.job_id,
+            &run.job_kind,
+            &run.target_session_id.as_ref().map(|value| value.0.as_str()),
+            &status,
+            &trigger,
+            &run.scheduled_for,
+            &run.claimed_at,
+            &run.claim_deadline_at,
+            &run.completed_at,
+            &run.error,
+            &output_json,
+            &run.created_at,
+            &run.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL scheduled run", error))?;
+    Ok(())
+}
+
+fn row_to_scheduled_job(row: &Row) -> CoreResult<ScheduledJobRecord> {
+    let interval_ms = row.get::<_, Option<i64>>(3).map(|value| value as u64);
+    let payload_json: String = row.get(5);
+    let status: String = row.get(6);
+    Ok(ScheduledJobRecord {
+        job_id: row.get(0),
+        job_kind: row.get(1),
+        target_session_id: row.get::<_, Option<String>>(2).map(SessionId),
+        interval_ms,
+        next_due_at: row.get(4),
+        payload_json: parse_postgres_json(&payload_json, "scheduled job payload_json")?,
+        status: postgres_scheduled_job_status_from_str(&status)?,
+        created_at: row.get(7),
+        updated_at: row.get(8),
+        paused_at: row.get(9),
+    })
+}
+
+fn row_to_scheduled_run(row: &Row) -> CoreResult<ScheduledRunRecord> {
+    let status: String = row.get(4);
+    let trigger: String = row.get(5);
+    let output_json: String = row.get(11);
+    Ok(ScheduledRunRecord {
+        run_id: RunId::new(row.get::<_, String>(0)),
+        job_id: row.get(1),
+        job_kind: row.get(2),
+        target_session_id: row.get::<_, Option<String>>(3).map(SessionId),
+        status: postgres_scheduled_run_status_from_str(&status)?,
+        trigger: postgres_scheduled_run_trigger_from_str(&trigger)?,
+        scheduled_for: row.get(6),
+        claimed_at: row.get(7),
+        claim_deadline_at: row.get(8),
+        completed_at: row.get(9),
+        error: row.get(10),
+        output_json: parse_postgres_json(&output_json, "scheduled run output_json")?,
+        created_at: row.get(12),
+        updated_at: row.get(13),
+    })
+}
+
+fn postgres_scheduled_job_status_as_str(status: ScheduledJobStatus) -> &'static str {
+    match status {
+        ScheduledJobStatus::Active => "active",
+        ScheduledJobStatus::Paused => "paused",
+        ScheduledJobStatus::Archived => "archived",
+    }
+}
+
+fn postgres_scheduled_job_status_from_str(raw: &str) -> CoreResult<ScheduledJobStatus> {
+    match raw {
+        "active" => Ok(ScheduledJobStatus::Active),
+        "paused" => Ok(ScheduledJobStatus::Paused),
+        "archived" => Ok(ScheduledJobStatus::Archived),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL scheduled job status {other}"),
+        )),
+    }
+}
+
+fn postgres_scheduled_run_status_as_str(status: ScheduledRunStatus) -> &'static str {
+    match status {
+        ScheduledRunStatus::Claimed => "claimed",
+        ScheduledRunStatus::Completed => "completed",
+        ScheduledRunStatus::Skipped => "skipped",
+        ScheduledRunStatus::Failed => "failed",
+        ScheduledRunStatus::Expired => "expired",
+        ScheduledRunStatus::Cancelled => "cancelled",
+    }
+}
+
+fn postgres_scheduled_run_status_from_str(raw: &str) -> CoreResult<ScheduledRunStatus> {
+    match raw {
+        "claimed" => Ok(ScheduledRunStatus::Claimed),
+        "completed" => Ok(ScheduledRunStatus::Completed),
+        "skipped" => Ok(ScheduledRunStatus::Skipped),
+        "failed" => Ok(ScheduledRunStatus::Failed),
+        "expired" => Ok(ScheduledRunStatus::Expired),
+        "cancelled" => Ok(ScheduledRunStatus::Cancelled),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL scheduled run status {other}"),
+        )),
+    }
+}
+
+fn postgres_scheduled_run_trigger_as_str(trigger: ScheduledRunTrigger) -> &'static str {
+    match trigger {
+        ScheduledRunTrigger::Due => "due",
+        ScheduledRunTrigger::Manual => "manual",
+    }
+}
+
+fn postgres_scheduled_run_trigger_from_str(raw: &str) -> CoreResult<ScheduledRunTrigger> {
+    match raw {
+        "due" => Ok(ScheduledRunTrigger::Due),
+        "manual" => Ok(ScheduledRunTrigger::Manual),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL scheduled run trigger {other}"),
+        )),
+    }
 }
 
 fn runtime_counter_scope_parts(scope: &RuntimeCounterScope) -> (&'static str, String) {
@@ -5025,7 +7557,10 @@ fn row_to_roleplay_lore_provenance_event(row: &Row) -> CoreResult<RoleplayLorePr
     })
 }
 
-fn parse_postgres_json(value: &str, label: &str) -> CoreResult<serde_json::Value> {
+fn parse_postgres_json<T>(value: &str, label: &str) -> CoreResult<T>
+where
+    T: serde::de::DeserializeOwned,
+{
     from_json_text(value).map_err(|error| {
         CoreError::new(
             CoreErrorKind::PersistenceFailure,
@@ -5288,7 +7823,10 @@ mod tests {
         CoordinationStore, MessageBlockWrite, RoleplayLoreCanonStatus, RoleplayLoreVisibility,
         COUNTER_MESSAGES, COUNTER_WAKES,
     };
-    use rusty_crew_core_protocol::{MemoryEvidenceRef, MemoryProposalSource};
+    use rusty_crew_core_protocol::{
+        AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource, ResourceLimits,
+        SessionHandle, ToolCallMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
+    };
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
@@ -5309,6 +7847,119 @@ mod tests {
         fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>>;
         fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord>;
         fn expire_simple_kv(&self, now: &IsoTimestamp) -> CoreResult<u64>;
+    }
+
+    trait SessionEventConformanceStore {
+        fn save_session_with_config(
+            &self,
+            state: &SessionState,
+            config: &SessionConfig,
+        ) -> CoreResult<()>;
+        fn load_sessions(&self) -> CoreResult<Vec<SessionState>>;
+        fn load_session_configs(&self) -> CoreResult<Vec<SessionConfigRecord>>;
+        fn load_session_identities(&self) -> CoreResult<Vec<SessionIdentityRecord>>;
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()>;
+        fn load_event_history(&self) -> CoreResult<Vec<PersistedEvent>>;
+        fn query_events(&self, filter: &RuntimeEventFilter) -> CoreResult<Vec<RuntimeEventRecord>>;
+    }
+
+    trait QueueConformanceStore {
+        fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()>;
+        fn expire_queued_messages_at(
+            &self,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<QueuedMessageRecord>>;
+        fn load_queued_messages(
+            &self,
+            filter: &QueuedMessageFilter,
+        ) -> CoreResult<Vec<QueuedMessageRecord>>;
+        fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary>;
+    }
+
+    trait SchedulerConformanceStore {
+        fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()>;
+        fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>>;
+        fn query_scheduled_jobs(
+            &self,
+            query: &ScheduledJobQuery,
+        ) -> CoreResult<Vec<ScheduledJobRecord>>;
+        fn claim_scheduled_run(
+            &self,
+            run: &ScheduledRunRecord,
+            next_due_at: Option<&IsoTimestamp>,
+        ) -> CoreResult<()>;
+        fn complete_scheduled_run(
+            &self,
+            run_id: &RunId,
+            status: ScheduledRunStatus,
+            completed_at: &IsoTimestamp,
+            output_json: &serde_json::Value,
+            error: Option<&str>,
+        ) -> CoreResult<()>;
+        fn query_scheduled_runs(
+            &self,
+            query: &ScheduledRunQuery,
+        ) -> CoreResult<Vec<ScheduledRunRecord>>;
+        fn expire_stale_scheduled_runs(
+            &self,
+            stale_before: &IsoTimestamp,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<ScheduledRunRecord>>;
+    }
+
+    trait WorkerLifecycleConformanceStore {
+        fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()>;
+        fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>>;
+        fn load_worker_run_by_delegated_session(
+            &self,
+            delegated_session_id: &SessionId,
+        ) -> CoreResult<Option<WorkerRunRecord>>;
+        fn query_worker_runs(&self, query: &WorkerRunQuery) -> CoreResult<Vec<WorkerRunRecord>>;
+        fn update_worker_run_status_by_delegated_session(
+            &self,
+            delegated_session_id: &SessionId,
+            status: WorkerRunStatus,
+            now: IsoTimestamp,
+        ) -> CoreResult<()>;
+        fn update_worker_run_status(
+            &self,
+            run_id: &RunId,
+            status: WorkerRunStatus,
+            now: IsoTimestamp,
+        ) -> CoreResult<()>;
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()>;
+        fn query_completion_packets(
+            &self,
+            query: &CompletionPacketQuery,
+        ) -> CoreResult<Vec<CompletionPacketRecord>>;
+        fn delegated_completions_for_parent(
+            &self,
+            parent_session_id: &SessionId,
+        ) -> CoreResult<Vec<DelegatedCompletion>>;
+    }
+
+    trait TelemetryMaintenanceConformanceStore {
+        fn save_session_with_config(
+            &self,
+            state: &SessionState,
+            config: &SessionConfig,
+        ) -> CoreResult<()>;
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()>;
+        fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary>;
+        fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>>;
+        fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()>;
+        fn load_queued_messages(
+            &self,
+            filter: &QueuedMessageFilter,
+        ) -> CoreResult<Vec<QueuedMessageRecord>>;
+        fn save_provider_wire_state(
+            &self,
+            write: &ProviderWireStateWrite,
+        ) -> CoreResult<ProviderWireStateRecord>;
+        fn run_maintenance(
+            &self,
+            policy: &RuntimeMaintenancePolicy,
+        ) -> CoreResult<RuntimeMaintenanceReport>;
     }
 
     trait ProviderWireStateConformanceStore {
@@ -5499,6 +8150,231 @@ mod tests {
 
         fn expire_simple_kv(&self, now: &IsoTimestamp) -> CoreResult<u64> {
             CoordinationStore::expire_simple_kv(self, now)
+        }
+    }
+
+    impl SessionEventConformanceStore for CoordinationStore {
+        fn save_session_with_config(
+            &self,
+            state: &SessionState,
+            config: &SessionConfig,
+        ) -> CoreResult<()> {
+            CoordinationStore::save_session_with_config(self, state, config)
+        }
+
+        fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
+            CoordinationStore::load_sessions(self)
+        }
+
+        fn load_session_configs(&self) -> CoreResult<Vec<SessionConfigRecord>> {
+            CoordinationStore::load_session_configs(self)
+        }
+
+        fn load_session_identities(&self) -> CoreResult<Vec<SessionIdentityRecord>> {
+            CoordinationStore::load_session_identities(self)
+        }
+
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+            CoordinationStore::save_event(self, sequence, event)
+        }
+
+        fn load_event_history(&self) -> CoreResult<Vec<PersistedEvent>> {
+            CoordinationStore::load_event_history(self)
+        }
+
+        fn query_events(&self, filter: &RuntimeEventFilter) -> CoreResult<Vec<RuntimeEventRecord>> {
+            CoordinationStore::query_events(self, filter)
+        }
+    }
+
+    impl QueueConformanceStore for CoordinationStore {
+        fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+            CoordinationStore::save_queued_message(self, record)
+        }
+
+        fn expire_queued_messages_at(
+            &self,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<QueuedMessageRecord>> {
+            CoordinationStore::expire_queued_messages_at(self, now)
+        }
+
+        fn load_queued_messages(
+            &self,
+            filter: &QueuedMessageFilter,
+        ) -> CoreResult<Vec<QueuedMessageRecord>> {
+            CoordinationStore::load_queued_messages(self, filter)
+        }
+
+        fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+            CoordinationStore::runtime_summary(self, scope)
+        }
+    }
+
+    impl SchedulerConformanceStore for CoordinationStore {
+        fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
+            CoordinationStore::upsert_scheduled_job(self, record)
+        }
+
+        fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
+            CoordinationStore::load_scheduled_job(self, job_id)
+        }
+
+        fn query_scheduled_jobs(
+            &self,
+            query: &ScheduledJobQuery,
+        ) -> CoreResult<Vec<ScheduledJobRecord>> {
+            CoordinationStore::query_scheduled_jobs(self, query)
+        }
+
+        fn claim_scheduled_run(
+            &self,
+            run: &ScheduledRunRecord,
+            next_due_at: Option<&IsoTimestamp>,
+        ) -> CoreResult<()> {
+            CoordinationStore::claim_scheduled_run(self, run, next_due_at)
+        }
+
+        fn complete_scheduled_run(
+            &self,
+            run_id: &RunId,
+            status: ScheduledRunStatus,
+            completed_at: &IsoTimestamp,
+            output_json: &serde_json::Value,
+            error: Option<&str>,
+        ) -> CoreResult<()> {
+            CoordinationStore::complete_scheduled_run(
+                self,
+                run_id,
+                status,
+                completed_at,
+                output_json,
+                error,
+            )
+        }
+
+        fn query_scheduled_runs(
+            &self,
+            query: &ScheduledRunQuery,
+        ) -> CoreResult<Vec<ScheduledRunRecord>> {
+            CoordinationStore::query_scheduled_runs(self, query)
+        }
+
+        fn expire_stale_scheduled_runs(
+            &self,
+            stale_before: &IsoTimestamp,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<ScheduledRunRecord>> {
+            CoordinationStore::expire_stale_scheduled_runs(self, stale_before, now)
+        }
+    }
+
+    impl WorkerLifecycleConformanceStore for CoordinationStore {
+        fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
+            CoordinationStore::save_worker_run_requested(self, record)
+        }
+
+        fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>> {
+            CoordinationStore::load_worker_run(self, run_id)
+        }
+
+        fn load_worker_run_by_delegated_session(
+            &self,
+            delegated_session_id: &SessionId,
+        ) -> CoreResult<Option<WorkerRunRecord>> {
+            CoordinationStore::load_worker_run_by_delegated_session(self, delegated_session_id)
+        }
+
+        fn query_worker_runs(&self, query: &WorkerRunQuery) -> CoreResult<Vec<WorkerRunRecord>> {
+            CoordinationStore::query_worker_runs(self, query)
+        }
+
+        fn update_worker_run_status_by_delegated_session(
+            &self,
+            delegated_session_id: &SessionId,
+            status: WorkerRunStatus,
+            now: IsoTimestamp,
+        ) -> CoreResult<()> {
+            CoordinationStore::update_worker_run_status_by_delegated_session(
+                self,
+                delegated_session_id,
+                status,
+                now,
+            )
+        }
+
+        fn update_worker_run_status(
+            &self,
+            run_id: &RunId,
+            status: WorkerRunStatus,
+            now: IsoTimestamp,
+        ) -> CoreResult<()> {
+            CoordinationStore::update_worker_run_status(self, run_id, status, now)
+        }
+
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+            CoordinationStore::save_event(self, sequence, event)
+        }
+
+        fn query_completion_packets(
+            &self,
+            query: &CompletionPacketQuery,
+        ) -> CoreResult<Vec<CompletionPacketRecord>> {
+            CoordinationStore::query_completion_packets(self, query)
+        }
+
+        fn delegated_completions_for_parent(
+            &self,
+            parent_session_id: &SessionId,
+        ) -> CoreResult<Vec<DelegatedCompletion>> {
+            CoordinationStore::delegated_completions_for_parent(self, parent_session_id)
+        }
+    }
+
+    impl TelemetryMaintenanceConformanceStore for CoordinationStore {
+        fn save_session_with_config(
+            &self,
+            state: &SessionState,
+            config: &SessionConfig,
+        ) -> CoreResult<()> {
+            CoordinationStore::save_session_with_config(self, state, config)
+        }
+
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+            CoordinationStore::save_event(self, sequence, event)
+        }
+
+        fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+            CoordinationStore::runtime_summary(self, scope)
+        }
+
+        fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
+            CoordinationStore::load_tool_call_history(self)
+        }
+
+        fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+            CoordinationStore::save_queued_message(self, record)
+        }
+
+        fn load_queued_messages(
+            &self,
+            filter: &QueuedMessageFilter,
+        ) -> CoreResult<Vec<QueuedMessageRecord>> {
+            CoordinationStore::load_queued_messages(self, filter)
+        }
+
+        fn save_provider_wire_state(
+            &self,
+            write: &ProviderWireStateWrite,
+        ) -> CoreResult<ProviderWireStateRecord> {
+            CoordinationStore::save_provider_wire_state(self, write)
+        }
+
+        fn run_maintenance(
+            &self,
+            policy: &RuntimeMaintenancePolicy,
+        ) -> CoreResult<RuntimeMaintenanceReport> {
+            CoordinationStore::run_maintenance(self, policy)
         }
     }
 
@@ -5799,6 +8675,237 @@ mod tests {
         }
     }
 
+    impl SessionEventConformanceStore for PostgresRuntimeCounterProofStore {
+        fn save_session_with_config(
+            &self,
+            state: &SessionState,
+            config: &SessionConfig,
+        ) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_session_with_config(self, state, config)
+        }
+
+        fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
+            PostgresRuntimeCounterProofStore::load_sessions(self)
+        }
+
+        fn load_session_configs(&self) -> CoreResult<Vec<SessionConfigRecord>> {
+            PostgresRuntimeCounterProofStore::load_session_configs(self)
+        }
+
+        fn load_session_identities(&self) -> CoreResult<Vec<SessionIdentityRecord>> {
+            PostgresRuntimeCounterProofStore::load_session_identities(self)
+        }
+
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_event(self, sequence, event)
+        }
+
+        fn load_event_history(&self) -> CoreResult<Vec<PersistedEvent>> {
+            PostgresRuntimeCounterProofStore::load_event_history(self)
+        }
+
+        fn query_events(&self, filter: &RuntimeEventFilter) -> CoreResult<Vec<RuntimeEventRecord>> {
+            PostgresRuntimeCounterProofStore::query_events(self, filter)
+        }
+    }
+
+    impl QueueConformanceStore for PostgresRuntimeCounterProofStore {
+        fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_queued_message(self, record)
+        }
+
+        fn expire_queued_messages_at(
+            &self,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<QueuedMessageRecord>> {
+            PostgresRuntimeCounterProofStore::expire_queued_messages_at(self, now)
+        }
+
+        fn load_queued_messages(
+            &self,
+            filter: &QueuedMessageFilter,
+        ) -> CoreResult<Vec<QueuedMessageRecord>> {
+            PostgresRuntimeCounterProofStore::load_queued_messages(self, filter)
+        }
+
+        fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+            PostgresRuntimeCounterProofStore::runtime_summary(self, scope)
+        }
+    }
+
+    impl SchedulerConformanceStore for PostgresRuntimeCounterProofStore {
+        fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::upsert_scheduled_job(self, record)
+        }
+
+        fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
+            PostgresRuntimeCounterProofStore::load_scheduled_job(self, job_id)
+        }
+
+        fn query_scheduled_jobs(
+            &self,
+            query: &ScheduledJobQuery,
+        ) -> CoreResult<Vec<ScheduledJobRecord>> {
+            PostgresRuntimeCounterProofStore::query_scheduled_jobs(self, query)
+        }
+
+        fn claim_scheduled_run(
+            &self,
+            run: &ScheduledRunRecord,
+            next_due_at: Option<&IsoTimestamp>,
+        ) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::claim_scheduled_run(self, run, next_due_at)
+        }
+
+        fn complete_scheduled_run(
+            &self,
+            run_id: &RunId,
+            status: ScheduledRunStatus,
+            completed_at: &IsoTimestamp,
+            output_json: &serde_json::Value,
+            error: Option<&str>,
+        ) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::complete_scheduled_run(
+                self,
+                run_id,
+                status,
+                completed_at,
+                output_json,
+                error,
+            )
+        }
+
+        fn query_scheduled_runs(
+            &self,
+            query: &ScheduledRunQuery,
+        ) -> CoreResult<Vec<ScheduledRunRecord>> {
+            PostgresRuntimeCounterProofStore::query_scheduled_runs(self, query)
+        }
+
+        fn expire_stale_scheduled_runs(
+            &self,
+            stale_before: &IsoTimestamp,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<ScheduledRunRecord>> {
+            PostgresRuntimeCounterProofStore::expire_stale_scheduled_runs(self, stale_before, now)
+        }
+    }
+
+    impl WorkerLifecycleConformanceStore for PostgresRuntimeCounterProofStore {
+        fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_worker_run_requested(self, record)
+        }
+
+        fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>> {
+            PostgresRuntimeCounterProofStore::load_worker_run(self, run_id)
+        }
+
+        fn load_worker_run_by_delegated_session(
+            &self,
+            delegated_session_id: &SessionId,
+        ) -> CoreResult<Option<WorkerRunRecord>> {
+            PostgresRuntimeCounterProofStore::load_worker_run_by_delegated_session(
+                self,
+                delegated_session_id,
+            )
+        }
+
+        fn query_worker_runs(&self, query: &WorkerRunQuery) -> CoreResult<Vec<WorkerRunRecord>> {
+            PostgresRuntimeCounterProofStore::query_worker_runs(self, query)
+        }
+
+        fn update_worker_run_status_by_delegated_session(
+            &self,
+            delegated_session_id: &SessionId,
+            status: WorkerRunStatus,
+            now: IsoTimestamp,
+        ) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::update_worker_run_status_by_delegated_session(
+                self,
+                delegated_session_id,
+                status,
+                now,
+            )
+        }
+
+        fn update_worker_run_status(
+            &self,
+            run_id: &RunId,
+            status: WorkerRunStatus,
+            now: IsoTimestamp,
+        ) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::update_worker_run_status(self, run_id, status, now)
+        }
+
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_event(self, sequence, event)
+        }
+
+        fn query_completion_packets(
+            &self,
+            query: &CompletionPacketQuery,
+        ) -> CoreResult<Vec<CompletionPacketRecord>> {
+            PostgresRuntimeCounterProofStore::query_completion_packets(self, query)
+        }
+
+        fn delegated_completions_for_parent(
+            &self,
+            parent_session_id: &SessionId,
+        ) -> CoreResult<Vec<DelegatedCompletion>> {
+            PostgresRuntimeCounterProofStore::delegated_completions_for_parent(
+                self,
+                parent_session_id,
+            )
+        }
+    }
+
+    impl TelemetryMaintenanceConformanceStore for PostgresRuntimeCounterProofStore {
+        fn save_session_with_config(
+            &self,
+            state: &SessionState,
+            config: &SessionConfig,
+        ) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_session_with_config(self, state, config)
+        }
+
+        fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_event(self, sequence, event)
+        }
+
+        fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+            PostgresRuntimeCounterProofStore::runtime_summary(self, scope)
+        }
+
+        fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
+            PostgresRuntimeCounterProofStore::load_tool_call_history(self)
+        }
+
+        fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+            PostgresRuntimeCounterProofStore::save_queued_message(self, record)
+        }
+
+        fn load_queued_messages(
+            &self,
+            filter: &QueuedMessageFilter,
+        ) -> CoreResult<Vec<QueuedMessageRecord>> {
+            PostgresRuntimeCounterProofStore::load_queued_messages(self, filter)
+        }
+
+        fn save_provider_wire_state(
+            &self,
+            write: &ProviderWireStateWrite,
+        ) -> CoreResult<ProviderWireStateRecord> {
+            PostgresRuntimeCounterProofStore::save_provider_wire_state(self, write)
+        }
+
+        fn run_maintenance(
+            &self,
+            policy: &RuntimeMaintenancePolicy,
+        ) -> CoreResult<RuntimeMaintenanceReport> {
+            PostgresRuntimeCounterProofStore::run_maintenance(self, policy)
+        }
+    }
+
     impl ProviderWireStateConformanceStore for PostgresRuntimeCounterProofStore {
         fn save_provider_wire_state(
             &self,
@@ -6086,16 +9193,26 @@ mod tests {
         ));
         assert!(groups
             .iter()
+            .any(|group| group.group_id == "sessions_identities"
+                && group.notes[0].contains("session/config/identity")));
+        assert!(groups
+            .iter()
+            .any(|group| group.group_id == "events_projections"
+                && group.notes[0].contains("event history")));
+        assert!(groups
+            .iter()
             .any(|group| group.group_id == "runtime_counters"
                 && group.notes[0].contains("implemented")));
         assert!(groups
             .iter()
             .any(|group| group.group_id == "queues_messages"
-                && group.notes[0].contains("unsupported")));
+                && group.notes[0].contains("queued-message TTL")));
+        assert!(groups.iter().any(|group| group.group_id == "scheduler_jobs"
+            && group.notes[0].contains("row-level claim conformance")));
         assert!(groups
             .iter()
-            .any(|group| group.group_id == "scheduler_jobs"
-                && group.notes[0].contains("unsupported")));
+            .any(|group| group.group_id == "worker_runs_completions"
+                && group.notes[0].contains("terminal-status conformance")));
         assert!(groups
             .iter()
             .any(|group| group.group_id == "module_schema_registry"
@@ -6112,6 +9229,46 @@ mod tests {
         assert!(groups.iter().any(|group| group.group_id == "profile_memory"
             && group.notes[0].contains("profile_dense")
             && group.notes[0].contains("conformance")));
+    }
+
+    #[test]
+    fn sqlite_session_event_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-session-event-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        session_event_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_queue_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-queue-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        queue_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_scheduler_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-scheduler-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        scheduler_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_worker_lifecycle_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-worker-lifecycle-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        worker_lifecycle_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_telemetry_maintenance_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-telemetry-maintenance-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        telemetry_maintenance_conformance(&store);
+        let _ = fs::remove_file(db_path);
     }
 
     #[test]
@@ -6160,6 +9317,132 @@ mod tests {
         let store = CoordinationStore::open_file(&db_path).unwrap();
         roleplay_lore_conformance(&store);
         let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_session_event_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_session_event_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        session_event_conformance(&store);
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_queue_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_queue_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        queue_conformance(&store);
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_scheduler_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL scheduler proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_scheduler_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        scheduler_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "scheduled_jobs")
+                .map(|count| count.rows),
+            Some(1)
+        );
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "scheduled_job_runs")
+                .map(|count| count.rows),
+            Some(2)
+        );
+        assert!(diagnostics
+            .capabilities
+            .iter()
+            .any(|capability| { capability.name == "row_level_claims" && capability.supported }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_worker_lifecycle_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL worker lifecycle proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_worker_lifecycle_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        worker_lifecycle_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "worker_runs")
+                .map(|count| count.rows),
+            Some(2)
+        );
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "completion_packets")
+                .map(|count| count.rows),
+            Some(1)
+        );
+        assert!(diagnostics.repository_groups.iter().any(|group| {
+            group.group_id == "worker_runs_completions"
+                && group.notes[0].contains("terminal-status conformance")
+        }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_telemetry_maintenance_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!(
+                "skipping PostgreSQL telemetry/maintenance proof; no database URL env is set"
+            );
+            return;
+        };
+        let schema = unique_schema("rusty_crew_telemetry_maintenance_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        telemetry_maintenance_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(diagnostics.backend, "postgres");
+        assert_eq!(diagnostics.schema_version, POSTGRES_PROOF_SCHEMA_VERSION);
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "tool_call_history" && count.rows == 2));
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "queued_messages" && count.rows == 0));
+
+        store.drop_schema_for_test().unwrap();
     }
 
     #[test]
@@ -6547,6 +9830,671 @@ mod tests {
         );
 
         setup.drop_schema_for_test().unwrap();
+    }
+
+    fn session_event_conformance(store: &dyn SessionEventConformanceStore) {
+        let session = proof_session_state();
+        let config = proof_session_config();
+        store.save_session_with_config(&session, &config).unwrap();
+
+        let sessions = store.load_sessions().unwrap();
+        let configs = store.load_session_configs().unwrap();
+        let identities = store.load_session_identities().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, SessionId::new("session-alpha"));
+        assert_eq!(sessions[0].tool_profile.tools[0].name, "apply_patch");
+        assert_eq!(configs.len(), 1);
+        assert_eq!(
+            configs[0].config.resource_limits.max_duration_ms,
+            Some(60_000)
+        );
+        assert_eq!(configs[0].tool_profile.tools[0].name, "apply_patch");
+        assert_eq!(identities.len(), 1);
+        assert_eq!(
+            identities[0].instance_id,
+            AgentInstanceId::new("instance:session-alpha")
+        );
+
+        store
+            .save_event(
+                1,
+                &CoreEvent::SessionCreated {
+                    state: Box::new(session.clone()),
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                2,
+                &CoreEvent::AgentMessageRouted {
+                    message: AgentMessage {
+                        from: AgentId::new("agent-alpha"),
+                        to: AgentId::new("agent-beta"),
+                        body: "projected conformance message".to_string(),
+                        correlation_id: Some("conformance-corr".to_string()),
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                3,
+                &CoreEvent::BrainEventObserved {
+                    session_id: SessionId::new("session-alpha"),
+                    wake_id: Some("wake-conformance".to_string()),
+                    event: BrainEvent::Started,
+                },
+            )
+            .unwrap();
+
+        let history = store.load_event_history().unwrap();
+        assert_eq!(
+            history
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        let all = store
+            .query_events(&RuntimeEventFilter {
+                limit: Some(10),
+                ..RuntimeEventFilter::default()
+            })
+            .unwrap();
+        let by_session = store
+            .query_events(&RuntimeEventFilter {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..RuntimeEventFilter::default()
+            })
+            .unwrap();
+        let by_agent = store
+            .query_events(&RuntimeEventFilter {
+                agent_id: Some(AgentId::new("agent-beta")),
+                ..RuntimeEventFilter::default()
+            })
+            .unwrap();
+        let by_correlation = store
+            .query_events(&RuntimeEventFilter {
+                correlation_id: Some("conformance-corr".to_string()),
+                ..RuntimeEventFilter::default()
+            })
+            .unwrap();
+        let by_wake = store
+            .query_events(&RuntimeEventFilter {
+                source_wake_id: Some("wake-conformance".to_string()),
+                ..RuntimeEventFilter::default()
+            })
+            .unwrap();
+
+        assert_eq!(all.len(), 3);
+        assert_eq!(by_session.len(), 2);
+        assert_eq!(by_agent.len(), 1);
+        assert_eq!(by_agent[0].agent_ids.len(), 2);
+        assert_eq!(by_correlation[0].sequence, 2);
+        assert_eq!(by_wake[0].source_wake_ids, vec!["wake-conformance"]);
+    }
+
+    fn proof_session_state() -> SessionState {
+        SessionState {
+            handle: SessionHandle::new(1),
+            session_id: SessionId::new("session-alpha"),
+            agent_id: AgentId::new("agent-alpha"),
+            profile_id: ProfileId::new("full-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: proof_resource_limits(),
+            tool_profile: proof_tool_profile(),
+            history_window: None,
+            status: SessionStatus::Idle,
+            brain_turn_count: 0,
+            created_at: "2026-06-20T00:00:00Z".to_string(),
+            last_active_at: "2026-06-20T00:00:00Z".to_string(),
+        }
+    }
+
+    fn proof_session_config() -> SessionConfig {
+        SessionConfig {
+            session_id: SessionId::new("session-alpha"),
+            agent_id: AgentId::new("agent-alpha"),
+            profile_id: ProfileId::new("full-profile"),
+            kind: SessionKind::Full,
+            delegation: None,
+            resource_limits: proof_resource_limits(),
+            tool_profile: proof_tool_profile(),
+            history_window: None,
+        }
+    }
+
+    fn proof_resource_limits() -> ResourceLimits {
+        ResourceLimits {
+            workdir: Some("/tmp/rusty-crew-test".to_string()),
+            max_duration_ms: Some(60_000),
+            max_delegation_depth: Some(4),
+        }
+    }
+
+    fn proof_tool_profile() -> ToolProfile {
+        ToolProfile {
+            tools: vec![ToolDescriptor {
+                name: "apply_patch".to_string(),
+                description: "Apply a source patch".to_string(),
+                input_schema: None,
+            }],
+        }
+    }
+
+    fn page() -> QueryPage {
+        QueryPage {
+            limit: Some(100),
+            offset: Some(0),
+        }
+    }
+
+    fn queue_conformance(store: &dyn QueueConformanceStore) {
+        let record = QueuedMessageRecord {
+            message_id: "queue-conformance-1".to_string(),
+            owner_session_id: Some(SessionId::new("session-alpha")),
+            owner_agent_id: AgentId::new("agent-alpha"),
+            message: AgentMessage {
+                from: AgentId::new("operator"),
+                to: AgentId::new("agent-alpha"),
+                body: "ttl bounded conformance queue".to_string(),
+                correlation_id: Some("queue-conformance".to_string()),
+            },
+            source_sequence: Some(42),
+            enqueued_at: "2026-06-20T00:00:00Z".to_string(),
+            expires_at: "2026-06-20T00:00:05Z".to_string(),
+            ttl_ms: 5_000,
+            delivery_attempts: 0,
+            state: QueuedMessageState::Pending,
+            terminal_at: None,
+            state_reason: None,
+        };
+
+        store.save_queued_message(&record).unwrap();
+        assert_eq!(pending_queue_messages(store).len(), 1);
+        assert!(store
+            .expire_queued_messages_at(&"2026-06-20T00:00:04Z".to_string())
+            .unwrap()
+            .is_empty());
+        assert_eq!(pending_queue_messages(store).len(), 1);
+
+        let expired = store
+            .expire_queued_messages_at(&"2026-06-20T00:00:06Z".to_string())
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].state, QueuedMessageState::Expired);
+        assert_eq!(expired[0].state_reason.as_deref(), Some("ttl_expired"));
+        assert!(pending_queue_messages(store).is_empty());
+
+        let expired_query = store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Expired),
+                owner_session_id: Some(SessionId::new("session-alpha")),
+                owner_agent_id: Some(AgentId::new("agent-alpha")),
+                limit: Some(10),
+            })
+            .unwrap();
+        assert_eq!(expired_query.len(), 1);
+        assert!(store
+            .expire_queued_messages_at(&"2026-06-20T00:00:10Z".to_string())
+            .unwrap()
+            .is_empty());
+        assert!(pending_queue_messages(store).is_empty());
+        assert_eq!(
+            store
+                .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                    "session-alpha"
+                )))
+                .unwrap()
+                .queue_expirations,
+            1
+        );
+    }
+
+    fn pending_queue_messages(store: &dyn QueueConformanceStore) -> Vec<QueuedMessageRecord> {
+        store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(SessionId::new("session-alpha")),
+                owner_agent_id: Some(AgentId::new("agent-alpha")),
+                limit: Some(10),
+            })
+            .unwrap()
+    }
+
+    fn scheduler_conformance(store: &dyn SchedulerConformanceStore) {
+        store
+            .upsert_scheduled_job(&ScheduledJobRecord {
+                job_id: "conformance-wake".to_string(),
+                job_kind: "wake".to_string(),
+                target_session_id: Some(SessionId::new("session-alpha")),
+                interval_ms: Some(60_000),
+                next_due_at: Some("2026-06-20T06:00:00Z".to_string()),
+                payload_json: json!({"reason": "conformance"}),
+                status: ScheduledJobStatus::Active,
+                created_at: "2026-06-20T05:59:00Z".to_string(),
+                updated_at: "2026-06-20T05:59:00Z".to_string(),
+                paused_at: None,
+            })
+            .unwrap();
+
+        let due = store
+            .query_scheduled_jobs(&ScheduledJobQuery {
+                status: Some(ScheduledJobStatus::Active),
+                job_kind: Some("wake".to_string()),
+                due_at_or_before: Some("2026-06-20T06:00:00Z".to_string()),
+                page: Some(page()),
+            })
+            .unwrap();
+        assert_eq!(due.len(), 1);
+
+        let claimed = ScheduledRunRecord {
+            run_id: RunId::new("scheduled:conformance-wake:1"),
+            job_id: "conformance-wake".to_string(),
+            job_kind: "wake".to_string(),
+            target_session_id: Some(SessionId::new("session-alpha")),
+            status: ScheduledRunStatus::Claimed,
+            trigger: ScheduledRunTrigger::Due,
+            scheduled_for: Some("2026-06-20T06:00:00Z".to_string()),
+            claimed_at: "2026-06-20T06:00:01Z".to_string(),
+            claim_deadline_at: "2026-06-20T06:01:00Z".to_string(),
+            completed_at: None,
+            error: None,
+            output_json: json!({}),
+            created_at: "2026-06-20T06:00:01Z".to_string(),
+            updated_at: "2026-06-20T06:00:01Z".to_string(),
+        };
+        store
+            .claim_scheduled_run(&claimed, Some(&"2026-06-20T06:05:00Z".to_string()))
+            .unwrap();
+        assert_eq!(
+            store
+                .load_scheduled_job("conformance-wake")
+                .unwrap()
+                .unwrap()
+                .next_due_at,
+            Some("2026-06-20T06:05:00Z".to_string())
+        );
+        store
+            .complete_scheduled_run(
+                &RunId::new("scheduled:conformance-wake:1"),
+                ScheduledRunStatus::Completed,
+                &"2026-06-20T06:00:30Z".to_string(),
+                &json!({"woke": true}),
+                None,
+            )
+            .unwrap();
+        let completed = scheduled_runs(store, Some(ScheduledRunStatus::Completed));
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].output_json, json!({"woke": true}));
+
+        let stale = ScheduledRunRecord {
+            run_id: RunId::new("scheduled:conformance-wake:2"),
+            job_id: "conformance-wake".to_string(),
+            job_kind: "wake".to_string(),
+            target_session_id: Some(SessionId::new("session-alpha")),
+            status: ScheduledRunStatus::Claimed,
+            trigger: ScheduledRunTrigger::Manual,
+            scheduled_for: None,
+            claimed_at: "2026-06-20T06:01:00Z".to_string(),
+            claim_deadline_at: "2026-06-20T06:02:00Z".to_string(),
+            completed_at: None,
+            error: None,
+            output_json: json!({}),
+            created_at: "2026-06-20T06:01:00Z".to_string(),
+            updated_at: "2026-06-20T06:01:00Z".to_string(),
+        };
+        store.claim_scheduled_run(&stale, None).unwrap();
+        let expired = store
+            .expire_stale_scheduled_runs(
+                &"2026-06-20T06:02:01Z".to_string(),
+                &"2026-06-20T06:03:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(
+            expired[0].run_id,
+            RunId::new("scheduled:conformance-wake:2")
+        );
+        assert_eq!(
+            scheduled_runs(store, Some(ScheduledRunStatus::Expired))[0]
+                .error
+                .as_deref(),
+            Some("claim deadline elapsed")
+        );
+        assert!(store
+            .expire_stale_scheduled_runs(
+                &"2026-06-20T06:10:00Z".to_string(),
+                &"2026-06-20T06:11:00Z".to_string(),
+            )
+            .unwrap()
+            .is_empty());
+    }
+
+    fn scheduled_runs(
+        store: &dyn SchedulerConformanceStore,
+        status: Option<ScheduledRunStatus>,
+    ) -> Vec<ScheduledRunRecord> {
+        store
+            .query_scheduled_runs(&ScheduledRunQuery {
+                job_id: Some("conformance-wake".to_string()),
+                status,
+                trigger: None,
+                target_session_id: None,
+                stale_claim_deadline_before: None,
+                page: Some(page()),
+            })
+            .unwrap()
+    }
+
+    fn worker_lifecycle_conformance(store: &dyn WorkerLifecycleConformanceStore) {
+        let parent_session_id = SessionId::new("parent-session");
+        let delegated_session_id = SessionId::new("delegated-alpha");
+        let run_id = RunId::new("worker-run-alpha");
+        let sibling_run_id = RunId::new("worker-run-beta");
+        store
+            .save_worker_run_requested(&WorkerRunRecord {
+                run_id: run_id.clone(),
+                parent_session_id: parent_session_id.clone(),
+                delegated_session_id: Some(delegated_session_id.clone()),
+                parent_agent_id: Some(AgentId::new("agent-parent")),
+                profile_id: ProfileId::new("delegated-profile"),
+                task_id: Some(TaskId::new("task-alpha")),
+                status: WorkerRunStatus::Requested,
+                created_at: "2026-06-20T07:00:00Z".to_string(),
+                last_updated_at: "2026-06-20T07:00:00Z".to_string(),
+                source_wake_id: "wake-alpha".to_string(),
+                source_action_index: 2,
+                delegation_correlation_id: Some("corr-alpha".to_string()),
+                parent_consumption: ParentConsumptionPolicy::AwaitCompletion,
+                fan_out_group_id: Some("group-alpha".to_string()),
+                fan_out_max_concurrency: Some(2),
+                fan_out_failure_policy: FanOutFailurePolicy::FailFast,
+            })
+            .unwrap();
+        store
+            .save_worker_run_requested(&WorkerRunRecord {
+                run_id: sibling_run_id.clone(),
+                parent_session_id: parent_session_id.clone(),
+                delegated_session_id: Some(SessionId::new("delegated-beta")),
+                parent_agent_id: Some(AgentId::new("agent-parent")),
+                profile_id: ProfileId::new("delegated-profile"),
+                task_id: Some(TaskId::new("task-beta")),
+                status: WorkerRunStatus::Running,
+                created_at: "2026-06-20T07:00:01Z".to_string(),
+                last_updated_at: "2026-06-20T07:00:01Z".to_string(),
+                source_wake_id: "wake-alpha".to_string(),
+                source_action_index: 3,
+                delegation_correlation_id: Some("corr-beta".to_string()),
+                parent_consumption: ParentConsumptionPolicy::ObserveOnly,
+                fan_out_group_id: Some("group-alpha".to_string()),
+                fan_out_max_concurrency: Some(2),
+                fan_out_failure_policy: FanOutFailurePolicy::FailSoft,
+            })
+            .unwrap();
+
+        assert_eq!(
+            store.load_worker_run(&run_id).unwrap().unwrap().status,
+            WorkerRunStatus::Requested
+        );
+        store
+            .update_worker_run_status_by_delegated_session(
+                &delegated_session_id,
+                WorkerRunStatus::Running,
+                "2026-06-20T07:00:10Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .load_worker_run_by_delegated_session(&delegated_session_id)
+                .unwrap()
+                .unwrap()
+                .status,
+            WorkerRunStatus::Running
+        );
+        store
+            .update_worker_run_status(
+                &run_id,
+                WorkerRunStatus::Completed,
+                "2026-06-20T07:01:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .query_worker_runs(&WorkerRunQuery {
+                    parent_session_id: Some(parent_session_id.clone()),
+                    terminal: Some(true),
+                    page: Some(page()),
+                    ..WorkerRunQuery::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .query_worker_runs(&WorkerRunQuery {
+                    parent_session_id: Some(parent_session_id.clone()),
+                    terminal: Some(false),
+                    page: Some(page()),
+                    ..WorkerRunQuery::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+
+        store
+            .save_event(
+                10,
+                &CoreEvent::CompletionPacketDelivered {
+                    packet: CompletionPacket {
+                        session_id: delegated_session_id.clone(),
+                        status: CompletionStatus::Completed,
+                        summary: "worker completed".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+        let completions = store
+            .query_completion_packets(&CompletionPacketQuery {
+                session_id: Some(delegated_session_id.clone()),
+                status: Some(CompletionStatus::Completed),
+                page: Some(page()),
+            })
+            .unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].sequence, 10);
+        assert_eq!(completions[0].packet.summary, "worker completed");
+
+        let delegated = store
+            .delegated_completions_for_parent(&parent_session_id)
+            .unwrap();
+        assert_eq!(delegated.len(), 1);
+        assert_eq!(delegated[0].run_id, run_id);
+        assert_eq!(delegated[0].child_session_id, delegated_session_id);
+        assert_eq!(
+            delegated[0].parent_consumption,
+            ParentConsumptionPolicy::AwaitCompletion
+        );
+    }
+
+    fn telemetry_maintenance_conformance(store: &dyn TelemetryMaintenanceConformanceStore) {
+        let session = proof_session_state();
+        let config = proof_session_config();
+        store.save_session_with_config(&session, &config).unwrap();
+
+        let metadata = ToolCallMetadata {
+            source: ToolCallSource::Mcp,
+            adapter_id: None,
+            binding_id: Some("binding-alpha".to_string()),
+            server_names: vec!["den".to_string()],
+            profile_id: Some(ProfileId::new("full-profile")),
+            tool_profile_key: Some("planner".to_string()),
+            source_tool_name: Some("den.get_task".to_string()),
+            catalog_revision: Some("rev-1".to_string()),
+            policy: None,
+        };
+
+        store
+            .save_event(
+                1,
+                &CoreEvent::BrainWakeRequested {
+                    session_id: session.session_id.clone(),
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                2,
+                &CoreEvent::BrainActionsAccepted {
+                    session_id: session.session_id.clone(),
+                    count: 2,
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                3,
+                &CoreEvent::BrainEventObserved {
+                    session_id: session.session_id.clone(),
+                    wake_id: Some("wake-tools".to_string()),
+                    event: BrainEvent::ToolCallStarted {
+                        tool_name: "den.get_task".to_string(),
+                        metadata: Some(metadata.clone()),
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                4,
+                &CoreEvent::BrainEventObserved {
+                    session_id: session.session_id.clone(),
+                    wake_id: Some("wake-tools".to_string()),
+                    event: BrainEvent::ToolCallFinished {
+                        tool_name: "den.get_task".to_string(),
+                        is_error: true,
+                        metadata: Some(metadata),
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                5,
+                &CoreEvent::AgentMessageRouted {
+                    message: AgentMessage {
+                        from: AgentId::new("agent-alpha"),
+                        to: AgentId::new("agent-beta"),
+                        body: "counter message".to_string(),
+                        correlation_id: None,
+                    },
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                6,
+                &CoreEvent::DelegationLifecycleObserved {
+                    lifecycle: rusty_crew_core_protocol::DelegationLifecycleEvent {
+                        parent_session_id: session.session_id.clone(),
+                        delegated_session_id: SessionId::new("delegated-alpha"),
+                        run_id: Some(RunId::new("wake-tools:0")),
+                        phase: rusty_crew_core_protocol::DelegationLifecyclePhase::Created,
+                        detail: None,
+                    },
+                },
+            )
+            .unwrap();
+
+        let tool_calls = store.load_tool_call_history().unwrap();
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0].phase, ToolCallPhase::Started);
+        assert_eq!(tool_calls[1].phase, ToolCallPhase::Finished);
+        assert_eq!(tool_calls[1].is_error, Some(true));
+        assert_eq!(
+            tool_calls[0].metadata.as_ref().unwrap().server_names,
+            vec!["den"]
+        );
+
+        let runtime = store
+            .runtime_summary(&RuntimeCounterScope::Runtime)
+            .unwrap();
+        let session_summary = store
+            .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                "session-alpha",
+            )))
+            .unwrap();
+        let agent_summary = store
+            .runtime_summary(&RuntimeCounterScope::Agent(AgentId::new("agent-beta")))
+            .unwrap();
+        assert_eq!(runtime.wakes, 1);
+        assert_eq!(runtime.brain_turns, 1);
+        assert_eq!(runtime.tool_calls, 1);
+        assert_eq!(runtime.tool_errors, 1);
+        assert_eq!(runtime.messages, 1);
+        assert_eq!(runtime.delegations_created, 1);
+        assert_eq!(session_summary.tool_calls, 1);
+        assert_eq!(agent_summary.messages, 1);
+
+        store
+            .save_queued_message(&QueuedMessageRecord {
+                message_id: "maintenance-queue".to_string(),
+                owner_session_id: Some(SessionId::new("session-alpha")),
+                owner_agent_id: AgentId::new("agent-alpha"),
+                message: AgentMessage {
+                    from: AgentId::new("operator"),
+                    to: AgentId::new("agent-alpha"),
+                    body: "expire me".to_string(),
+                    correlation_id: Some("maintenance".to_string()),
+                },
+                source_sequence: Some(42),
+                enqueued_at: "2026-06-20T08:00:00Z".to_string(),
+                expires_at: "2026-06-20T08:00:05Z".to_string(),
+                ttl_ms: 5_000,
+                delivery_attempts: 0,
+                state: QueuedMessageState::Pending,
+                terminal_at: None,
+                state_reason: None,
+            })
+            .unwrap();
+        store
+            .save_provider_wire_state(&ProviderWireStateWrite {
+                key: provider_wire_state_key("session-alpha", "openai-responses", "replay"),
+                profile_fingerprint: "profile-v1".to_string(),
+                provider_fingerprint: "provider-v1".to_string(),
+                payload_version: "v1".to_string(),
+                payload_json: json!({"response_id": "maintenance"}),
+                now: "2026-06-20T08:00:00Z".to_string(),
+                expires_at: Some("2026-06-20T08:00:05Z".to_string()),
+                last_wake_id: Some("wake-maintenance".to_string()),
+            })
+            .unwrap();
+
+        let report = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                expire_queued_messages_at: Some("2026-06-20T08:00:06Z".to_string()),
+                purge_terminal_queued_messages_before: Some("2026-06-20T08:00:07Z".to_string()),
+                expire_provider_wire_states_at: Some("2026-06-20T08:00:06Z".to_string()),
+                run_wal_checkpoint: true,
+                run_optimize: true,
+                ..RuntimeMaintenancePolicy::default()
+            })
+            .unwrap();
+        assert_eq!(report.expired_queue_messages, 1);
+        assert_eq!(report.purged_terminal_queue_messages, 1);
+        assert_eq!(report.expired_provider_wire_states, 1);
+        assert!(store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Expired),
+                owner_session_id: Some(SessionId::new("session-alpha")),
+                owner_agent_id: Some(AgentId::new("agent-alpha")),
+                limit: Some(10),
+            })
+            .unwrap()
+            .is_empty());
     }
 
     fn simple_kv_conformance(store: &dyn SimpleKvConformanceStore) {

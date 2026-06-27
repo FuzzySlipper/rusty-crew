@@ -49,6 +49,32 @@ try {
     /full-service PostgreSQL backend is not production-ready/,
   );
   assert.equal(initializeCalled, false);
+
+  initializeCalled = false;
+  await assert.rejects(
+    () =>
+      startRustyCrewServiceHost({
+        env: {
+          RUSTY_CREW_DATA_DIR: blockedPostgresRoot,
+          RUSTY_CREW_ADMIN_HOST: "127.0.0.1",
+          RUSTY_CREW_ADMIN_ALLOW_LAN: "false",
+          RUSTY_CREW_ADMIN_PORT: String(blockedPostgresPort),
+          RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+          RUSTY_CREW_STORAGE_BACKEND: "postgres",
+          RUSTY_CREW_POSTGRES_BOOT_MODE: "proof_admin",
+        },
+        bridge: {
+          manifestVersion: 1,
+          operationNames: [],
+          initializeEngine: async () => {
+            initializeCalled = true;
+            throw new Error("initializeEngine should not be called");
+          },
+        } as unknown as NativeBridgeModule,
+      }),
+    /full-service PostgreSQL backend is not production-ready/,
+  );
+  assert.equal(initializeCalled, false);
 } finally {
   rmSync(blockedPostgresRoot, { recursive: true, force: true });
 }
