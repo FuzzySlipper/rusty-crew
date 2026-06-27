@@ -6,7 +6,8 @@
 //! beyond SQLite.
 
 use crate::{
-    counter_value, from_json_text, repositories, to_json_text, validate_provider_wire_state_key,
+    counter_value, from_json_text, profile_memory_target_parts, repositories, to_json_text,
+    validate_profile_memory_key, validate_profile_memory_write, validate_provider_wire_state_key,
     validate_simple_kv_identity, validate_simple_kv_query, validate_simple_kv_write,
     ActiveBranchConflict, ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation,
     AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite, AttachmentQuery,
@@ -20,7 +21,9 @@ use crate::{
     DurableMessageRecord, DurableMessageStatus, DurableMessageWrite, IsoTimestamp,
     MessageBlockRecord, MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord,
     MessageSlotWrite, MessageVariantId, MessageVariantQuery, MessageVariantRecord,
-    MessageVariantSource, MessageVariantStatus, MessageVariantWrite, ProviderStateAbsenceReason,
+    MessageVariantSource, MessageVariantStatus, MessageVariantWrite, ProfileId, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProviderStateAbsenceReason,
     ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
     ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
     ProviderWireStateWrite, QueryPage, RuntimeCounterQuery, RuntimeCounterRecord,
@@ -35,9 +38,17 @@ use crate::{
     COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS, COUNTER_WAKES,
 };
 use postgres::{Client, GenericClient, NoTls, Row, Transaction};
+use rusty_crew_core_protocol::{
+    MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryExportImportPolicy,
+    MemoryFieldType, MemoryGovernanceMode, MemoryIndexingPolicy, MemoryOperation,
+    MemoryOperationPolicy, MemoryPromptPolicy, MemoryProvenancePolicy, MemoryRecordFieldDescriptor,
+    MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRetentionPolicy,
+    MemoryRetrievalStrategy, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
+    MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy,
+};
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 6;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -395,7 +406,7 @@ impl PostgresRuntimeCounterProofStore {
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
             proof_repository:
-                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes"
+                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes,profile_memory"
                     .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
@@ -447,10 +458,184 @@ impl PostgresRuntimeCounterProofStore {
                     table: "data_bank_scopes".to_string(),
                     rows: self.table_rows("data_bank_scopes")?,
                 },
+                RuntimeStorageTableCount {
+                    table: "profile_memories".to_string(),
+                    rows: self.table_rows("profile_memories")?,
+                },
             ],
             capabilities: postgres_proof_capabilities(),
             repository_groups: postgres_proof_repository_groups(),
         })
+    }
+
+    pub fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
+        vec![profile_dense_memory_space_descriptor()]
+    }
+
+    pub fn list_profile_memory(
+        &self,
+        query: &ProfileMemoryQuery,
+    ) -> CoreResult<Vec<ProfileMemoryRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        query_profile_memory(&mut *client, &schema, query)
+    }
+
+    pub fn get_profile_memory(
+        &self,
+        profile_id: &ProfileId,
+        target: &ProfileMemoryTarget,
+        key: &str,
+    ) -> CoreResult<Option<ProfileMemoryRecord>> {
+        validate_profile_memory_key(key, ProfileMemoryCaps::default().max_key_bytes)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_profile_memory(&mut *client, &schema, profile_id, target, key)
+    }
+
+    pub fn add_profile_memory(
+        &self,
+        write: &ProfileMemoryWrite,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        validate_profile_memory_write(write, caps)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start add PostgreSQL profile memory", error))?;
+        let count = count_profile_memory_for_profile(&mut tx, &schema, &write.profile_id)?;
+        if count >= u64::from(caps.max_records_per_profile) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "profile {} already has the maximum {} dense memory records",
+                    write.profile_id, caps.max_records_per_profile
+                ),
+            ));
+        }
+        if get_profile_memory(
+            &mut tx,
+            &schema,
+            &write.profile_id,
+            &write.target,
+            &write.key,
+        )?
+        .is_some()
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "profile memory {} for profile {} already exists",
+                    write.key, write.profile_id
+                ),
+            ));
+        }
+        let record = insert_profile_memory_in_tx(&mut tx, &schema, write)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit add PostgreSQL profile memory", error))?;
+        Ok(record)
+    }
+
+    pub fn replace_profile_memory(
+        &self,
+        replace: &ProfileMemoryReplace,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        validate_profile_memory_write(&replace.write, caps)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start replace PostgreSQL profile memory", error))?;
+        let existing = get_profile_memory(
+            &mut tx,
+            &schema,
+            &replace.write.profile_id,
+            &replace.write.target,
+            &replace.write.key,
+        )?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "profile memory {} for profile {} not found",
+                    replace.write.key, replace.write.profile_id
+                ),
+            )
+        })?;
+        if existing.revision != replace.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "profile memory revision mismatch for {}: expected {}, found {}",
+                    replace.write.key, replace.expected_revision, existing.revision
+                ),
+            ));
+        }
+        let record = update_profile_memory_in_tx(
+            &mut tx,
+            &schema,
+            &replace.write,
+            existing.revision + 1,
+            &existing.created_at,
+        )?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit replace PostgreSQL profile memory", error))?;
+        Ok(record)
+    }
+
+    pub fn remove_profile_memory(
+        &self,
+        delete: &ProfileMemoryDelete,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        validate_profile_memory_key(&delete.key, ProfileMemoryCaps::default().max_key_bytes)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start remove PostgreSQL profile memory", error))?;
+        let existing = get_profile_memory(
+            &mut tx,
+            &schema,
+            &delete.profile_id,
+            &delete.target,
+            &delete.key,
+        )?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "profile memory {} for profile {} not found",
+                    delete.key, delete.profile_id
+                ),
+            )
+        })?;
+        if existing.revision != delete.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "profile memory revision mismatch for {}: expected {}, found {}",
+                    delete.key, delete.expected_revision, existing.revision
+                ),
+            ));
+        }
+        let (target_type, target_id) =
+            profile_memory_target_parts(&delete.profile_id, &delete.target);
+        tx.execute(
+            &format!(
+                "DELETE FROM {schema}.profile_memories
+                 WHERE profile_id = $1
+                   AND target_type = $2
+                   AND target_id = $3
+                   AND memory_key = $4"
+            ),
+            &[&delete.profile_id.0, &target_type, &target_id, &delete.key],
+        )
+        .map_err(|error| postgres_error("remove PostgreSQL profile memory", error))?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit remove PostgreSQL profile memory", error))?;
+        Ok(existing)
     }
 
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
@@ -1749,7 +1934,23 @@ impl PostgresRuntimeCounterProofStore {
                     updated_at TEXT NOT NULL
                  );
                  CREATE INDEX IF NOT EXISTS data_bank_scopes_session_status_idx
-                    ON {schema}.data_bank_scopes(session_id, status, created_at, scope_id);"
+                    ON {schema}.data_bank_scopes(session_id, status, created_at, scope_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.profile_memories (
+                    profile_id TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    memory_key TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    metadata_json JSONB NOT NULL,
+                    revision BIGINT NOT NULL CHECK (revision > 0),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(profile_id, target_type, target_id, memory_key)
+                 );
+                 CREATE INDEX IF NOT EXISTS profile_memories_profile_updated_idx
+                    ON {schema}.profile_memories(profile_id, updated_at DESC);
+                 CREATE INDEX IF NOT EXISTS profile_memories_target_idx
+                    ON {schema}.profile_memories(profile_id, target_type, target_id, memory_key);"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL runtime counter proof", error))
     }
@@ -2007,6 +2208,11 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
                     0,
                     "PostgreSQL proof status: implemented for the conversation transcript proof surface and attachment/data-bank proof surface; not yet wired as the full service backend.".to_string(),
                 );
+            } else if group.group_id == "profile_memory" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for profile_dense descriptor projection and dense profile memory conformance; not yet wired as the full service backend.".to_string(),
+                );
             } else {
                 group.notes.insert(
                     0,
@@ -2113,6 +2319,233 @@ fn row_to_runtime_search_result(row: &Row) -> CoreResult<RuntimeSearchResult> {
         title: row.get(9),
         body: row.get(10),
     })
+}
+
+fn query_profile_memory<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &ProfileMemoryQuery,
+) -> CoreResult<Vec<ProfileMemoryRecord>> {
+    let target_parts = query
+        .target
+        .as_ref()
+        .map(|target| profile_memory_target_parts(&query.profile_id, target));
+    let target_type = target_parts.as_ref().map(|(target_type, _)| *target_type);
+    let target_id = target_parts
+        .as_ref()
+        .map(|(_, target_id)| target_id.as_str());
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT profile_id,
+                        target_type,
+                        target_id,
+                        memory_key,
+                        content,
+                        metadata_json::text,
+                        revision,
+                        created_at,
+                        updated_at
+                 FROM {schema}.profile_memories
+                 WHERE profile_id = $1
+                   AND ($2::text IS NULL OR target_type = $2)
+                   AND ($3::text IS NULL OR target_id = $3)
+                 ORDER BY updated_at DESC, memory_key ASC
+                 LIMIT $4 OFFSET $5"
+            ),
+            &[
+                &query.profile_id.0,
+                &target_type,
+                &target_id,
+                &limit,
+                &offset,
+            ],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL profile memory", error))?;
+    rows.iter().map(row_to_profile_memory).collect()
+}
+
+fn get_profile_memory<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    profile_id: &ProfileId,
+    target: &ProfileMemoryTarget,
+    key: &str,
+) -> CoreResult<Option<ProfileMemoryRecord>> {
+    let (target_type, target_id) = profile_memory_target_parts(profile_id, target);
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT profile_id,
+                        target_type,
+                        target_id,
+                        memory_key,
+                        content,
+                        metadata_json::text,
+                        revision,
+                        created_at,
+                        updated_at
+                 FROM {schema}.profile_memories
+                 WHERE profile_id = $1
+                   AND target_type = $2
+                   AND target_id = $3
+                   AND memory_key = $4"
+            ),
+            &[&profile_id.0, &target_type, &target_id, &key],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL profile memory", error))?;
+    row.as_ref().map(row_to_profile_memory).transpose()
+}
+
+fn insert_profile_memory_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    write: &ProfileMemoryWrite,
+) -> CoreResult<ProfileMemoryRecord> {
+    let (target_type, target_id) = profile_memory_target_parts(&write.profile_id, &write.target);
+    let metadata_json = to_json_text(&write.metadata)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.profile_memories (
+                profile_id,
+                target_type,
+                target_id,
+                memory_key,
+                content,
+                metadata_json,
+                revision,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, 1, $7, $7)"
+        ),
+        &[
+            &write.profile_id.0,
+            &target_type,
+            &target_id,
+            &write.key,
+            &write.content,
+            &metadata_json,
+            &write.now,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL profile memory", error))?;
+    Ok(ProfileMemoryRecord {
+        profile_id: write.profile_id.clone(),
+        target: write.target.clone(),
+        key: write.key.clone(),
+        content: write.content.clone(),
+        metadata: write.metadata.clone(),
+        revision: 1,
+        created_at: write.now.clone(),
+        updated_at: write.now.clone(),
+    })
+}
+
+fn update_profile_memory_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    write: &ProfileMemoryWrite,
+    revision: u64,
+    created_at: &IsoTimestamp,
+) -> CoreResult<ProfileMemoryRecord> {
+    validate_counter_amount(revision)?;
+    let (target_type, target_id) = profile_memory_target_parts(&write.profile_id, &write.target);
+    let metadata_json = to_json_text(&write.metadata)?;
+    tx.execute(
+        &format!(
+            "UPDATE {schema}.profile_memories
+             SET content = $5,
+                 metadata_json = $6::jsonb,
+                 revision = $7,
+                 updated_at = $8
+             WHERE profile_id = $1
+               AND target_type = $2
+               AND target_id = $3
+               AND memory_key = $4"
+        ),
+        &[
+            &write.profile_id.0,
+            &target_type,
+            &target_id,
+            &write.key,
+            &write.content,
+            &metadata_json,
+            &(revision as i64),
+            &write.now,
+        ],
+    )
+    .map_err(|error| postgres_error("update PostgreSQL profile memory", error))?;
+    Ok(ProfileMemoryRecord {
+        profile_id: write.profile_id.clone(),
+        target: write.target.clone(),
+        key: write.key.clone(),
+        content: write.content.clone(),
+        metadata: write.metadata.clone(),
+        revision,
+        created_at: created_at.clone(),
+        updated_at: write.now.clone(),
+    })
+}
+
+fn count_profile_memory_for_profile<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    profile_id: &ProfileId,
+) -> CoreResult<u64> {
+    let row = conn
+        .query_one(
+            &format!("SELECT COUNT(*) FROM {schema}.profile_memories WHERE profile_id = $1"),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("count PostgreSQL profile memory", error))?;
+    let count: i64 = row.get(0);
+    Ok(count as u64)
+}
+
+fn row_to_profile_memory(row: &Row) -> CoreResult<ProfileMemoryRecord> {
+    let profile_id = ProfileId::new(row.get::<_, String>(0));
+    let target_type: String = row.get(1);
+    let target_id: String = row.get(2);
+    let revision: i64 = row.get(6);
+    if revision <= 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid PostgreSQL profile memory revision {revision}"),
+        ));
+    }
+    let metadata_json: String = row.get(5);
+    Ok(ProfileMemoryRecord {
+        profile_id: profile_id.clone(),
+        target: profile_memory_target_from_parts(&profile_id, &target_type, target_id)?,
+        key: row.get(3),
+        content: row.get(4),
+        metadata: parse_postgres_json(&metadata_json, "profile memory metadata_json")?,
+        revision: revision as u64,
+        created_at: row.get(7),
+        updated_at: row.get(8),
+    })
+}
+
+fn profile_memory_target_from_parts(
+    profile_id: &ProfileId,
+    target_type: &str,
+    target_id: String,
+) -> CoreResult<ProfileMemoryTarget> {
+    match target_type {
+        "profile" if target_id == profile_id.0 => Ok(ProfileMemoryTarget::Profile),
+        "user" if !target_id.is_empty() => Ok(ProfileMemoryTarget::User(target_id)),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid profile memory target {other}/{target_id}"),
+        )),
+    }
 }
 
 fn save_attachment_in_tx(
@@ -3773,6 +4206,104 @@ fn parse_postgres_json(value: &str, label: &str) -> CoreResult<serde_json::Value
     })
 }
 
+fn profile_dense_memory_space_descriptor() -> MemorySpaceDescriptor {
+    MemorySpaceDescriptor {
+        space_id: MemorySpaceId::unchecked("profile_dense"),
+        schema_version: 1,
+        module_id: Some("runtime_memory".to_string()),
+        description: "Compact stable Crew profile memory; not Den memory.".to_string(),
+        record_shapes: vec![MemoryRecordShapeDescriptor {
+            shape_id: MemoryRecordShapeId::unchecked("profile_dense_item"),
+            version: 1,
+            description: "Keyed profile or user memory item.".to_string(),
+            fields: vec![
+                memory_field("key", MemoryFieldType::String, true),
+                memory_field("content", MemoryFieldType::Markdown, true),
+                memory_field("metadata_json", MemoryFieldType::Json, false),
+                memory_field("revision", MemoryFieldType::Integer, true),
+                memory_field("created_at", MemoryFieldType::Timestamp, true),
+                memory_field("updated_at", MemoryFieldType::Timestamp, true),
+            ],
+        }],
+        scope_model: MemoryScopeModel {
+            allowed_scopes: vec![MemoryScopeType::Profile, MemoryScopeType::User],
+            primary_scope: MemoryScopeType::Profile,
+        },
+        visibility_model: MemoryVisibilityModel::ProfileLocal,
+        retrieval_strategies: vec![
+            MemoryRetrievalStrategy::DirectLookup,
+            MemoryRetrievalStrategy::QuerySearch,
+        ],
+        indexing: MemoryIndexingPolicy {
+            required_capabilities: vec![
+                "profile_target_key_lookup".to_string(),
+                "expected_revision_conflicts".to_string(),
+            ],
+            optional_capabilities: vec![],
+        },
+        prompt_policy: MemoryPromptPolicy::SummaryContext,
+        write_policy: MemoryWritePolicy {
+            default_mode: MemoryGovernanceMode::Candidate,
+            operation_policies: vec![
+                memory_operation_policy(MemoryOperation::Add, false),
+                memory_operation_policy(MemoryOperation::Replace, true),
+                memory_operation_policy(MemoryOperation::Remove, true),
+                memory_operation_policy(MemoryOperation::CandidateOnly, false),
+            ],
+        },
+        operations: vec![
+            MemoryOperation::Read,
+            MemoryOperation::List,
+            MemoryOperation::Add,
+            MemoryOperation::Replace,
+            MemoryOperation::Remove,
+            MemoryOperation::CandidateOnly,
+        ],
+        provenance_policy: MemoryProvenancePolicy {
+            required_evidence: vec![MemoryEvidenceKind::Wake],
+            source_required: false,
+            rationale_required: false,
+        },
+        retention_policy: MemoryRetentionPolicy::ManualOnly,
+        conflict_policy: MemoryConflictPolicy::ExpectedRevision,
+        diagnostics: MemoryDiagnosticsPolicy {
+            expose_catalog: true,
+            expose_record_counts: true,
+            expose_policy_decisions: true,
+        },
+        export_import: MemoryExportImportPolicy {
+            export_supported: true,
+            import_supported: true,
+            import_governance_mode: MemoryGovernanceMode::ManualReview,
+        },
+    }
+}
+
+fn memory_field(
+    field_name: &str,
+    field_type: MemoryFieldType,
+    required: bool,
+) -> MemoryRecordFieldDescriptor {
+    MemoryRecordFieldDescriptor {
+        field_name: field_name.to_string(),
+        field_type,
+        required,
+        description: format!("profile_dense {field_name} field"),
+    }
+}
+
+fn memory_operation_policy(
+    operation: MemoryOperation,
+    expected_revision_required: bool,
+) -> MemoryOperationPolicy {
+    MemoryOperationPolicy {
+        operation,
+        governance_mode: MemoryGovernanceMode::Candidate,
+        requires_expected_revision: expected_revision_required,
+        min_confidence: None,
+    }
+}
+
 fn attachment_status_as_str(status: AttachmentStatus) -> &'static str {
     match status {
         AttachmentStatus::Active => "active",
@@ -4034,6 +4565,34 @@ mod tests {
         ) -> CoreResult<DataBankScopeRecord>;
     }
 
+    trait ProfileMemoryConformanceStore {
+        fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor>;
+        fn list_profile_memory(
+            &self,
+            query: &ProfileMemoryQuery,
+        ) -> CoreResult<Vec<ProfileMemoryRecord>>;
+        fn get_profile_memory(
+            &self,
+            profile_id: &ProfileId,
+            target: &ProfileMemoryTarget,
+            key: &str,
+        ) -> CoreResult<Option<ProfileMemoryRecord>>;
+        fn add_profile_memory(
+            &self,
+            write: &ProfileMemoryWrite,
+            caps: &ProfileMemoryCaps,
+        ) -> CoreResult<ProfileMemoryRecord>;
+        fn replace_profile_memory(
+            &self,
+            replace: &ProfileMemoryReplace,
+            caps: &ProfileMemoryCaps,
+        ) -> CoreResult<ProfileMemoryRecord>;
+        fn remove_profile_memory(
+            &self,
+            delete: &ProfileMemoryDelete,
+        ) -> CoreResult<ProfileMemoryRecord>;
+    }
+
     impl SimpleKvConformanceStore for CoordinationStore {
         fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
             CoordinationStore::put_simple_kv(self, write)
@@ -4235,6 +4794,51 @@ mod tests {
             updated_at: &IsoTimestamp,
         ) -> CoreResult<DataBankScopeRecord> {
             CoordinationStore::remove_data_bank_scope(self, scope_id, updated_at)
+        }
+    }
+
+    impl ProfileMemoryConformanceStore for CoordinationStore {
+        fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
+            vec![profile_dense_memory_space_descriptor()]
+        }
+
+        fn list_profile_memory(
+            &self,
+            query: &ProfileMemoryQuery,
+        ) -> CoreResult<Vec<ProfileMemoryRecord>> {
+            CoordinationStore::list_profile_memory(self, query)
+        }
+
+        fn get_profile_memory(
+            &self,
+            profile_id: &ProfileId,
+            target: &ProfileMemoryTarget,
+            key: &str,
+        ) -> CoreResult<Option<ProfileMemoryRecord>> {
+            CoordinationStore::get_profile_memory(self, profile_id, target, key)
+        }
+
+        fn add_profile_memory(
+            &self,
+            write: &ProfileMemoryWrite,
+            caps: &ProfileMemoryCaps,
+        ) -> CoreResult<ProfileMemoryRecord> {
+            CoordinationStore::add_profile_memory(self, write, caps)
+        }
+
+        fn replace_profile_memory(
+            &self,
+            replace: &ProfileMemoryReplace,
+            caps: &ProfileMemoryCaps,
+        ) -> CoreResult<ProfileMemoryRecord> {
+            CoordinationStore::replace_profile_memory(self, replace, caps)
+        }
+
+        fn remove_profile_memory(
+            &self,
+            delete: &ProfileMemoryDelete,
+        ) -> CoreResult<ProfileMemoryRecord> {
+            CoordinationStore::remove_profile_memory(self, delete)
         }
     }
 
@@ -4446,6 +5050,51 @@ mod tests {
         }
     }
 
+    impl ProfileMemoryConformanceStore for PostgresRuntimeCounterProofStore {
+        fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
+            PostgresRuntimeCounterProofStore::memory_space_descriptors(self)
+        }
+
+        fn list_profile_memory(
+            &self,
+            query: &ProfileMemoryQuery,
+        ) -> CoreResult<Vec<ProfileMemoryRecord>> {
+            PostgresRuntimeCounterProofStore::list_profile_memory(self, query)
+        }
+
+        fn get_profile_memory(
+            &self,
+            profile_id: &ProfileId,
+            target: &ProfileMemoryTarget,
+            key: &str,
+        ) -> CoreResult<Option<ProfileMemoryRecord>> {
+            PostgresRuntimeCounterProofStore::get_profile_memory(self, profile_id, target, key)
+        }
+
+        fn add_profile_memory(
+            &self,
+            write: &ProfileMemoryWrite,
+            caps: &ProfileMemoryCaps,
+        ) -> CoreResult<ProfileMemoryRecord> {
+            PostgresRuntimeCounterProofStore::add_profile_memory(self, write, caps)
+        }
+
+        fn replace_profile_memory(
+            &self,
+            replace: &ProfileMemoryReplace,
+            caps: &ProfileMemoryCaps,
+        ) -> CoreResult<ProfileMemoryRecord> {
+            PostgresRuntimeCounterProofStore::replace_profile_memory(self, replace, caps)
+        }
+
+        fn remove_profile_memory(
+            &self,
+            delete: &ProfileMemoryDelete,
+        ) -> CoreResult<ProfileMemoryRecord> {
+            PostgresRuntimeCounterProofStore::remove_profile_memory(self, delete)
+        }
+    }
+
     #[test]
     fn validates_schema_identifiers_before_connecting() {
         let error = match PostgresRuntimeCounterProofStore::connect(
@@ -4489,6 +5138,9 @@ mod tests {
             .any(|group| group.group_id == "conversations_attachments"
                 && group.notes[0].contains("conversation transcript")
                 && group.notes[0].contains("attachment/data-bank")));
+        assert!(groups.iter().any(|group| group.group_id == "profile_memory"
+            && group.notes[0].contains("profile_dense")
+            && group.notes[0].contains("conformance")));
     }
 
     #[test]
@@ -4520,6 +5172,14 @@ mod tests {
         let db_path = temp_sqlite_path("sqlite-attachment-data-bank-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         attachment_data_bank_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_profile_memory_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-profile-memory-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        profile_memory_conformance(&store);
         let _ = fs::remove_file(db_path);
     }
 
@@ -4759,6 +5419,35 @@ mod tests {
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "conversations_attachments"
                 && group.notes[0].contains("attachment/data-bank")
+        }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_profile_memory_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL profile memory proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_profile_memory_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        profile_memory_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "profile_memories")
+                .map(|count| count.rows),
+            Some(2)
+        );
+        assert!(diagnostics.repository_groups.iter().any(|group| {
+            group.group_id == "profile_memory"
+                && group.notes[0].contains("profile_dense")
+                && group.notes[0].contains("conformance")
         }));
 
         store.drop_schema_for_test().unwrap();
@@ -5827,6 +6516,249 @@ mod tests {
             })
             .unwrap();
         assert_eq!(all_scopes.len(), 1);
+    }
+
+    fn profile_memory_conformance(store: &dyn ProfileMemoryConformanceStore) {
+        let descriptors = store.memory_space_descriptors();
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| descriptor.space_id.as_str() == "profile_dense")
+            .expect("profile_dense descriptor missing");
+        descriptor.validate().unwrap();
+        assert_eq!(descriptor.schema_version, 1);
+        assert_eq!(
+            descriptor.scope_model.allowed_scopes,
+            vec![MemoryScopeType::Profile, MemoryScopeType::User]
+        );
+        assert_eq!(
+            descriptor.conflict_policy,
+            MemoryConflictPolicy::ExpectedRevision
+        );
+        assert!(descriptor
+            .operations
+            .contains(&MemoryOperation::CandidateOnly));
+
+        let profile = ProfileId::new("profile-memory-proof");
+        let other_profile = ProfileId::new("profile-memory-other");
+        let caps = ProfileMemoryCaps {
+            max_records_per_profile: 2,
+            max_key_bytes: 32,
+            max_content_bytes: 80,
+        };
+        let target = ProfileMemoryTarget::Profile;
+        let user_target = ProfileMemoryTarget::User("user-alpha".to_string());
+
+        let added = store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: profile.clone(),
+                    target: target.clone(),
+                    key: "tone".to_string(),
+                    content: "prefers typed repository checks".to_string(),
+                    metadata: json!({"source": "conformance", "tags": ["profile_dense"]}),
+                    now: "2026-06-26T05:00:00Z".to_string(),
+                },
+                &caps,
+            )
+            .unwrap();
+        assert_eq!(added.revision, 1);
+        assert_eq!(added.target, ProfileMemoryTarget::Profile);
+        assert_eq!(added.metadata["tags"][0], "profile_dense");
+
+        let duplicate = store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: profile.clone(),
+                    target: target.clone(),
+                    key: "tone".to_string(),
+                    content: "duplicate".to_string(),
+                    metadata: json!({}),
+                    now: "2026-06-26T05:00:30Z".to_string(),
+                },
+                &caps,
+            )
+            .unwrap_err();
+        assert_eq!(duplicate.kind, CoreErrorKind::AlreadyExists);
+
+        let replaced = store
+            .replace_profile_memory(
+                &ProfileMemoryReplace {
+                    expected_revision: 1,
+                    write: ProfileMemoryWrite {
+                        profile_id: profile.clone(),
+                        target: target.clone(),
+                        key: "tone".to_string(),
+                        content: "prefers backend-neutral memory contracts".to_string(),
+                        metadata: json!({"source": "replace"}),
+                        now: "2026-06-26T05:01:00Z".to_string(),
+                    },
+                },
+                &caps,
+            )
+            .unwrap();
+        assert_eq!(replaced.revision, 2);
+        assert_eq!(replaced.created_at, "2026-06-26T05:00:00Z");
+        assert_eq!(replaced.updated_at, "2026-06-26T05:01:00Z");
+
+        let stale_replace = store
+            .replace_profile_memory(
+                &ProfileMemoryReplace {
+                    expected_revision: 1,
+                    write: ProfileMemoryWrite {
+                        profile_id: profile.clone(),
+                        target: target.clone(),
+                        key: "tone".to_string(),
+                        content: "stale".to_string(),
+                        metadata: json!({}),
+                        now: "2026-06-26T05:02:00Z".to_string(),
+                    },
+                },
+                &caps,
+            )
+            .unwrap_err();
+        assert_eq!(stale_replace.kind, CoreErrorKind::ActionRejected);
+
+        store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: profile.clone(),
+                    target: user_target.clone(),
+                    key: "salutation".to_string(),
+                    content: "likes direct status updates".to_string(),
+                    metadata: json!({"scope": "user"}),
+                    now: "2026-06-26T05:03:00Z".to_string(),
+                },
+                &caps,
+            )
+            .unwrap();
+
+        let cap_error = store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: profile.clone(),
+                    target: ProfileMemoryTarget::Profile,
+                    key: "third".to_string(),
+                    content: "would exceed cap".to_string(),
+                    metadata: json!({}),
+                    now: "2026-06-26T05:04:00Z".to_string(),
+                },
+                &caps,
+            )
+            .unwrap_err();
+        assert_eq!(cap_error.kind, CoreErrorKind::ActionRejected);
+
+        let too_large = store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: other_profile.clone(),
+                    target: ProfileMemoryTarget::Profile,
+                    key: "large".to_string(),
+                    content: "x".repeat(81),
+                    metadata: json!({}),
+                    now: "2026-06-26T05:05:00Z".to_string(),
+                },
+                &caps,
+            )
+            .unwrap_err();
+        assert_eq!(too_large.kind, CoreErrorKind::ActionRejected);
+
+        store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: other_profile.clone(),
+                    target: ProfileMemoryTarget::Profile,
+                    key: "tone".to_string(),
+                    content: "kept separate".to_string(),
+                    metadata: json!({}),
+                    now: "2026-06-26T05:06:00Z".to_string(),
+                },
+                &caps,
+            )
+            .unwrap();
+
+        let all_profile_rows = store
+            .list_profile_memory(&ProfileMemoryQuery {
+                profile_id: profile.clone(),
+                target: None,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            all_profile_rows
+                .iter()
+                .map(|record| record.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["salutation", "tone"]
+        );
+        assert!(all_profile_rows
+            .iter()
+            .all(|record| record.profile_id == profile));
+
+        let profile_rows = store
+            .list_profile_memory(&ProfileMemoryQuery {
+                profile_id: profile.clone(),
+                target: Some(ProfileMemoryTarget::Profile),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(profile_rows.len(), 1);
+        assert_eq!(profile_rows[0].key, "tone");
+
+        let user_rows = store
+            .list_profile_memory(&ProfileMemoryQuery {
+                profile_id: profile.clone(),
+                target: Some(user_target.clone()),
+                page: Some(QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                }),
+            })
+            .unwrap();
+        assert_eq!(user_rows.len(), 1);
+        assert_eq!(user_rows[0].target, user_target);
+
+        let fetched = store
+            .get_profile_memory(&profile, &target, "tone")
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched.content, "prefers backend-neutral memory contracts");
+        assert_eq!(fetched.revision, 2);
+
+        let stale_delete = store
+            .remove_profile_memory(&ProfileMemoryDelete {
+                profile_id: profile.clone(),
+                target: target.clone(),
+                key: "tone".to_string(),
+                expected_revision: 1,
+            })
+            .unwrap_err();
+        assert_eq!(stale_delete.kind, CoreErrorKind::ActionRejected);
+
+        let removed = store
+            .remove_profile_memory(&ProfileMemoryDelete {
+                profile_id: profile.clone(),
+                target,
+                key: "tone".to_string(),
+                expected_revision: 2,
+            })
+            .unwrap();
+        assert_eq!(removed.key, "tone");
+        assert!(store
+            .get_profile_memory(&profile, &ProfileMemoryTarget::Profile, "tone")
+            .unwrap()
+            .is_none());
+
+        assert_eq!(
+            store
+                .list_profile_memory(&ProfileMemoryQuery {
+                    profile_id: profile,
+                    target: None,
+                    page: None,
+                })
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     fn provider_wire_state_conformance(store: &dyn ProviderWireStateConformanceStore) {
