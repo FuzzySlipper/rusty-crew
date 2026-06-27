@@ -1192,7 +1192,7 @@ function postgresStorageCapabilities(
       name: "runtime_full_text_search",
       supported: false,
       detail:
-        "Runtime search remains SQLite-backed until PostgreSQL search contract coverage lands.",
+        "A PostgreSQL runtime-search proof slice exists, but full service runtime search remains SQLite-backed until repository wiring and readiness gates land.",
     },
     {
       name: "logical_export_import",

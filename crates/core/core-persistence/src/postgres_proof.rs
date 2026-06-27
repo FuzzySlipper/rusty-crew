@@ -9,17 +9,18 @@ use crate::{
     counter_value, from_json_text, repositories, to_json_text, validate_simple_kv_identity,
     validate_simple_kv_query, validate_simple_kv_write, CoreError, CoreErrorKind, CoreResult,
     IsoTimestamp, QueryPage, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
-    RuntimeRepositoryGroupDiagnostic, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageTableCount, SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery,
-    SimpleKvRecord, SimpleKvScope, SimpleKvWrite, COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS,
-    COUNTER_DELEGATIONS_CANCELLED, COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED,
-    COUNTER_DELEGATIONS_FAILED, COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES,
-    COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS, COUNTER_WAKES,
+    RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageTableCount,
+    SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
+    SimpleKvWrite, COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED,
+    COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED,
+    COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS,
+    COUNTER_TOOL_ERRORS, COUNTER_WAKES,
 };
 use postgres::{Client, NoTls, Row};
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 2;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -376,7 +377,8 @@ impl PostgresRuntimeCounterProofStore {
             backend: "postgres".to_string(),
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
-            proof_repository: "runtime_counters,module_simple_kv_entries".to_string(),
+            proof_repository: "runtime_counters,module_simple_kv_entries,runtime_search"
+                .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
                 RuntimeStorageTableCount {
@@ -387,10 +389,134 @@ impl PostgresRuntimeCounterProofStore {
                     table: "module_simple_kv_entries".to_string(),
                     rows: self.simple_kv_rows()?,
                 },
+                RuntimeStorageTableCount {
+                    table: "runtime_search_entries".to_string(),
+                    rows: self.runtime_search_rows()?,
+                },
             ],
             capabilities: postgres_proof_capabilities(),
             repository_groups: postgres_proof_repository_groups(),
         })
+    }
+
+    pub fn upsert_runtime_search_entry(&self, entry: &RuntimeSearchResult) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let row_type = runtime_search_row_type_as_str(entry.row_type);
+        let event_kind = entry.event_kind.as_ref().map(|kind| format!("{kind:?}"));
+        self.client()?
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.runtime_search_entries (
+                        row_type,
+                        row_key,
+                        sequence,
+                        session_id,
+                        agent_id,
+                        instance_id,
+                        task_id,
+                        event_kind,
+                        recorded_at,
+                        title,
+                        body
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                     ON CONFLICT(row_type, row_key) DO UPDATE SET
+                        sequence = EXCLUDED.sequence,
+                        session_id = EXCLUDED.session_id,
+                        agent_id = EXCLUDED.agent_id,
+                        instance_id = EXCLUDED.instance_id,
+                        task_id = EXCLUDED.task_id,
+                        event_kind = EXCLUDED.event_kind,
+                        recorded_at = EXCLUDED.recorded_at,
+                        title = EXCLUDED.title,
+                        body = EXCLUDED.body"
+                ),
+                &[
+                    &row_type,
+                    &entry.row_key,
+                    &entry.sequence.map(|value| value as i64),
+                    &entry.session_id.as_ref().map(|value| value.0.as_str()),
+                    &entry.agent_id.as_ref().map(|value| value.0.as_str()),
+                    &entry.instance_id.as_ref().map(|value| value.0.as_str()),
+                    &entry.task_id.as_ref().map(|value| value.0.as_str()),
+                    &event_kind,
+                    &entry.recorded_at,
+                    &entry.title,
+                    &entry.body,
+                ],
+            )
+            .map_err(|error| postgres_error("upsert PostgreSQL runtime search entry", error))?;
+        Ok(())
+    }
+
+    pub fn search_runtime(
+        &self,
+        filter: &RuntimeSearchFilter,
+    ) -> CoreResult<Vec<RuntimeSearchResult>> {
+        if filter.query.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "runtime search query must be non-empty",
+            ));
+        }
+        let row_type = filter.row_type.map(runtime_search_row_type_as_str);
+        let session_id = filter.session_id.as_ref().map(|value| value.0.as_str());
+        let agent_id = filter.agent_id.as_ref().map(|value| value.0.as_str());
+        let instance_id = filter.instance_id.as_ref().map(|value| value.0.as_str());
+        let task_id = filter.task_id.as_ref().map(|value| value.0.as_str());
+        let event_kind = filter.event_kind.as_ref().map(|kind| format!("{kind:?}"));
+        let recorded_after = filter.recorded_after.as_deref();
+        let recorded_before = filter.recorded_before.as_deref();
+        let limit = filter.limit.unwrap_or(50).clamp(1, 200) as i64;
+        let query = filter.query.trim();
+        let schema = self.quoted_schema();
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT
+                        row_type,
+                        row_key,
+                        sequence,
+                        session_id,
+                        agent_id,
+                        instance_id,
+                        task_id,
+                        event_kind,
+                        recorded_at,
+                        title,
+                        body
+                     FROM {schema}.runtime_search_entries
+                     WHERE search_vector @@ plainto_tsquery('simple', $1)
+                       AND ($2::text IS NULL OR row_type = $2)
+                       AND ($3::text IS NULL OR session_id = $3)
+                       AND ($4::text IS NULL OR agent_id = $4)
+                       AND ($5::text IS NULL OR instance_id = $5)
+                       AND ($6::text IS NULL OR task_id = $6)
+                       AND ($7::text IS NULL OR event_kind = $7)
+                       AND ($8::text IS NULL OR recorded_at >= $8)
+                       AND ($9::text IS NULL OR recorded_at <= $9)
+                     ORDER BY
+                       ts_rank(search_vector, plainto_tsquery('simple', $1)) DESC,
+                       recorded_at ASC,
+                       row_type ASC,
+                       row_key ASC
+                     LIMIT $10"
+                ),
+                &[
+                    &query,
+                    &row_type,
+                    &session_id,
+                    &agent_id,
+                    &instance_id,
+                    &task_id,
+                    &event_kind,
+                    &recorded_after,
+                    &recorded_before,
+                    &limit,
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL runtime search", error))?;
+        rows.iter().map(row_to_runtime_search_result).collect()
     }
 
     #[cfg(test)]
@@ -447,7 +573,36 @@ impl PostgresRuntimeCounterProofStore {
                  CREATE INDEX IF NOT EXISTS module_simple_kv_entries_scope_key_idx
                     ON {schema}.module_simple_kv_entries(scope_type, scope_id, entry_key);
                  CREATE INDEX IF NOT EXISTS module_simple_kv_entries_expires_at_idx
-                    ON {schema}.module_simple_kv_entries(expires_at);"
+                    ON {schema}.module_simple_kv_entries(expires_at);
+                 CREATE TABLE IF NOT EXISTS {schema}.runtime_search_entries (
+                    row_type TEXT NOT NULL,
+                    row_key TEXT NOT NULL,
+                    sequence BIGINT,
+                    session_id TEXT,
+                    agent_id TEXT,
+                    instance_id TEXT,
+                    task_id TEXT,
+                    event_kind TEXT,
+                    recorded_at TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    search_vector TSVECTOR GENERATED ALWAYS AS (
+                        to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(body, ''))
+                    ) STORED,
+                    PRIMARY KEY(row_type, row_key)
+                 );
+                 CREATE INDEX IF NOT EXISTS runtime_search_entries_vector_idx
+                    ON {schema}.runtime_search_entries USING GIN(search_vector);
+                 CREATE INDEX IF NOT EXISTS runtime_search_entries_metadata_idx
+                    ON {schema}.runtime_search_entries(
+                        row_type,
+                        session_id,
+                        agent_id,
+                        instance_id,
+                        task_id,
+                        event_kind,
+                        recorded_at
+                    );"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL runtime counter proof", error))
     }
@@ -581,6 +736,19 @@ impl PostgresRuntimeCounterProofStore {
         Ok(rows as u64)
     }
 
+    fn runtime_search_rows(&self) -> CoreResult<u64> {
+        let schema = self.quoted_schema();
+        let row = self
+            .client()?
+            .query_one(
+                &format!("SELECT COUNT(*) FROM {schema}.runtime_search_entries"),
+                &[],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL runtime search entries", error))?;
+        let rows: i64 = row.get(0);
+        Ok(rows as u64)
+    }
+
     fn quoted_schema(&self) -> String {
         quote_postgres_identifier(&self.schema)
     }
@@ -615,7 +783,7 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
         (
             "estimated_table_size",
             true,
-            "the proof slice exposes runtime counter row counts",
+            "the proof slice exposes row counts for proof-owned tables",
         ),
         (
             "row_level_claims",
@@ -624,8 +792,8 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
         ),
         (
             "runtime_full_text_search",
-            false,
-            "runtime search is intentionally out of scope for this proof slice",
+            true,
+            "PostgreSQL runtime search proof uses tsvector behind the typed RuntimeSearchFilter API",
         ),
         (
             "logical_export_import",
@@ -660,6 +828,11 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
                 group.notes.insert(
                     0,
                     "PostgreSQL proof status: implemented for the runtime-counter proof repository.".to_string(),
+                );
+            } else if group.group_id == "runtime_search" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for runtime search entries through the typed search API; not yet wired as the full service backend.".to_string(),
                 );
             } else {
                 group.notes.insert(
@@ -745,6 +918,67 @@ fn row_to_simple_kv(row: &Row) -> CoreResult<SimpleKvRecord> {
         updated_at: row.get(6),
         expires_at: row.get(7),
     })
+}
+
+fn row_to_runtime_search_result(row: &Row) -> CoreResult<RuntimeSearchResult> {
+    let row_type: String = row.get(0);
+    let sequence: Option<i64> = row.get(2);
+    let event_kind: Option<String> = row.get(7);
+    Ok(RuntimeSearchResult {
+        row_type: runtime_search_row_type_from_str(&row_type)?,
+        row_key: row.get(1),
+        sequence: sequence.map(|value| value as u64),
+        session_id: row.get::<_, Option<String>>(3).map(crate::SessionId),
+        agent_id: row.get::<_, Option<String>>(4).map(crate::AgentId),
+        instance_id: row.get::<_, Option<String>>(5).map(crate::AgentInstanceId),
+        task_id: row.get::<_, Option<String>>(6).map(crate::TaskId),
+        event_kind: event_kind
+            .as_deref()
+            .map(core_event_kind_from_debug_str)
+            .transpose()?,
+        recorded_at: row.get(8),
+        title: row.get(9),
+        body: row.get(10),
+    })
+}
+
+fn runtime_search_row_type_as_str(row_type: RuntimeSearchRowType) -> &'static str {
+    match row_type {
+        RuntimeSearchRowType::Message => "message",
+        RuntimeSearchRowType::QueueMessage => "queue_message",
+        RuntimeSearchRowType::Session => "session",
+    }
+}
+
+fn runtime_search_row_type_from_str(raw: &str) -> CoreResult<RuntimeSearchRowType> {
+    match raw {
+        "message" => Ok(RuntimeSearchRowType::Message),
+        "queue_message" => Ok(RuntimeSearchRowType::QueueMessage),
+        "session" => Ok(RuntimeSearchRowType::Session),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown runtime search row type {other}"),
+        )),
+    }
+}
+
+fn core_event_kind_from_debug_str(raw: &str) -> CoreResult<crate::CoreEventKind> {
+    match raw {
+        "AgentMessageRouted" => Ok(crate::CoreEventKind::AgentMessageRouted),
+        "SessionCreated" => Ok(crate::CoreEventKind::SessionCreated),
+        "SessionArchived" => Ok(crate::CoreEventKind::SessionArchived),
+        "BrainWakeRequested" => Ok(crate::CoreEventKind::BrainWakeRequested),
+        "BrainEventObserved" => Ok(crate::CoreEventKind::BrainEventObserved),
+        "BrainActionsAccepted" => Ok(crate::CoreEventKind::BrainActionsAccepted),
+        "DelegationLifecycleObserved" => Ok(crate::CoreEventKind::DelegationLifecycleObserved),
+        "CompletionPacketDelivered" => Ok(crate::CoreEventKind::CompletionPacketDelivered),
+        "ExternalEventInjected" => Ok(crate::CoreEventKind::ExternalEventInjected),
+        "DenDataUpdated" => Ok(crate::CoreEventKind::DenDataUpdated),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown runtime search event kind {other}"),
+        )),
+    }
 }
 
 fn postgres_like_prefix(prefix: &str) -> String {
@@ -934,6 +1168,8 @@ mod tests {
             .iter()
             .any(|group| group.group_id == "module_schema_registry"
                 && group.notes[0].contains("simple_kv")));
+        assert!(groups.iter().any(|group| group.group_id == "runtime_search"
+            && group.notes[0].contains("runtime search entries")));
     }
 
     #[test]
@@ -1042,6 +1278,36 @@ mod tests {
         );
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "module_schema_registry" && group.notes[0].contains("simple_kv")
+        }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_runtime_search_proof_matches_typed_search_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL runtime search proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_runtime_search_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        runtime_search_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "runtime_search_entries")
+                .map(|count| count.rows),
+            Some(5)
+        );
+        assert!(diagnostics.capabilities.iter().any(|capability| {
+            capability.name == "runtime_full_text_search" && capability.supported
+        }));
+        assert!(diagnostics.repository_groups.iter().any(|group| {
+            group.group_id == "runtime_search" && group.notes[0].contains("implemented")
         }));
 
         store.drop_schema_for_test().unwrap();
@@ -1207,6 +1473,167 @@ mod tests {
             })
             .unwrap()
             .is_empty());
+    }
+
+    fn runtime_search_conformance(store: &PostgresRuntimeCounterProofStore) {
+        for entry in runtime_search_fixture() {
+            store.upsert_runtime_search_entry(&entry).unwrap();
+        }
+
+        let session = store
+            .search_runtime(&RuntimeSearchFilter {
+                query: "tools".to_string(),
+                row_type: Some(RuntimeSearchRowType::Session),
+                session_id: Some(crate::SessionId::new("session-alpha")),
+                agent_id: None,
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(crate::CoreEventKind::SessionCreated),
+                recorded_after: None,
+                recorded_before: None,
+                limit: Some(10),
+            })
+            .unwrap();
+        assert_eq!(session.len(), 1);
+        assert_eq!(session[0].row_type, RuntimeSearchRowType::Session);
+
+        let beta_message = store
+            .search_runtime(&RuntimeSearchFilter {
+                query: "needle".to_string(),
+                row_type: Some(RuntimeSearchRowType::Message),
+                session_id: None,
+                agent_id: Some(crate::AgentId::new("agent-beta")),
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(crate::CoreEventKind::AgentMessageRouted),
+                recorded_after: Some("2026-06-26T00:00:00Z".to_string()),
+                recorded_before: Some("2026-06-26T00:10:00Z".to_string()),
+                limit: Some(10),
+            })
+            .unwrap();
+        assert_eq!(beta_message.len(), 1);
+        assert_eq!(beta_message[0].row_key, "message:1:agent-beta");
+        assert_eq!(beta_message[0].sequence, Some(1));
+
+        let queued = store
+            .search_runtime(&RuntimeSearchFilter {
+                query: "needle".to_string(),
+                row_type: Some(RuntimeSearchRowType::QueueMessage),
+                session_id: Some(crate::SessionId::new("session-alpha")),
+                agent_id: Some(crate::AgentId::new("agent-alpha")),
+                instance_id: None,
+                task_id: None,
+                event_kind: None,
+                recorded_after: None,
+                recorded_before: None,
+                limit: Some(10),
+            })
+            .unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].row_key, "queue-search-conformance");
+
+        let stable_ties = store
+            .search_runtime(&RuntimeSearchFilter {
+                query: "tie".to_string(),
+                row_type: Some(RuntimeSearchRowType::Message),
+                session_id: None,
+                agent_id: Some(crate::AgentId::new("agent-alpha")),
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(crate::CoreEventKind::AgentMessageRouted),
+                recorded_after: None,
+                recorded_before: None,
+                limit: Some(1),
+            })
+            .unwrap();
+        assert_eq!(stable_ties.len(), 1);
+        assert_eq!(stable_ties[0].row_key, "message:2:agent-alpha");
+
+        let empty_query = store
+            .search_runtime(&RuntimeSearchFilter {
+                query: "   ".to_string(),
+                row_type: None,
+                session_id: None,
+                agent_id: None,
+                instance_id: None,
+                task_id: None,
+                event_kind: None,
+                recorded_after: None,
+                recorded_before: None,
+                limit: None,
+            })
+            .unwrap_err();
+        assert_eq!(empty_query.kind, CoreErrorKind::InvalidInput);
+    }
+
+    fn runtime_search_fixture() -> Vec<RuntimeSearchResult> {
+        vec![
+            RuntimeSearchResult {
+                row_type: RuntimeSearchRowType::Session,
+                row_key: "session-alpha".to_string(),
+                sequence: None,
+                session_id: Some(crate::SessionId::new("session-alpha")),
+                agent_id: Some(crate::AgentId::new("agent-alpha")),
+                instance_id: Some(crate::AgentInstanceId::new("instance:session-alpha")),
+                task_id: Some(crate::TaskId::new("task-search")),
+                event_kind: Some(crate::CoreEventKind::SessionCreated),
+                recorded_at: "2026-06-26T00:00:00Z".to_string(),
+                title: "session session-alpha".to_string(),
+                body: "agent agent-alpha profile runner kind full tools shell den".to_string(),
+            },
+            RuntimeSearchResult {
+                row_type: RuntimeSearchRowType::Message,
+                row_key: "message:1:agent-beta".to_string(),
+                sequence: Some(1),
+                session_id: None,
+                agent_id: Some(crate::AgentId::new("agent-beta")),
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(crate::CoreEventKind::AgentMessageRouted),
+                recorded_at: "2026-06-26T00:01:00Z".to_string(),
+                title: "agent message".to_string(),
+                body: "needle event search beta".to_string(),
+            },
+            RuntimeSearchResult {
+                row_type: RuntimeSearchRowType::QueueMessage,
+                row_key: "queue-search-conformance".to_string(),
+                sequence: Some(1),
+                session_id: Some(crate::SessionId::new("session-alpha")),
+                agent_id: Some(crate::AgentId::new("agent-alpha")),
+                instance_id: Some(crate::AgentInstanceId::new("instance:session-alpha")),
+                task_id: None,
+                event_kind: Some(crate::CoreEventKind::AgentMessageRouted),
+                recorded_at: "2026-06-26T00:02:00Z".to_string(),
+                title: "queued message pending".to_string(),
+                body: "needle queue search".to_string(),
+            },
+            RuntimeSearchResult {
+                row_type: RuntimeSearchRowType::Message,
+                row_key: "message:2:agent-alpha".to_string(),
+                sequence: Some(2),
+                session_id: None,
+                agent_id: Some(crate::AgentId::new("agent-alpha")),
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(crate::CoreEventKind::AgentMessageRouted),
+                recorded_at: "2026-06-26T00:03:00Z".to_string(),
+                title: "agent message".to_string(),
+                body: "tie search alpha".to_string(),
+            },
+            RuntimeSearchResult {
+                row_type: RuntimeSearchRowType::Message,
+                row_key: "message:3:agent-alpha".to_string(),
+                sequence: Some(3),
+                session_id: None,
+                agent_id: Some(crate::AgentId::new("agent-alpha")),
+                instance_id: None,
+                task_id: None,
+                event_kind: Some(crate::CoreEventKind::AgentMessageRouted),
+                recorded_at: "2026-06-26T00:04:00Z".to_string(),
+                title: "agent message".to_string(),
+                body: "tie search alpha".to_string(),
+            },
+        ]
     }
 
     fn postgres_test_database_url() -> Option<String> {
