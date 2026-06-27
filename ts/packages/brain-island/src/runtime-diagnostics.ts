@@ -264,20 +264,48 @@ export interface StorageDiagnosticsProjection {
     maxConnections: number;
     statementTimeoutMs: number;
     implementationStatus: "blocked_unimplemented" | "proof_admin_only";
+    productionReadiness: {
+      ready: boolean;
+      status: "blocked_unimplemented" | "proof_admin_only" | "ready";
+      reasonCodes: string[];
+      blockers: {
+        groupId: string;
+        status: "unsupported" | "degraded" | "proof" | "implemented";
+        detail: string;
+      }[];
+      detail: string;
+    };
     capabilities: {
       name: string;
       supported: boolean;
       detail: string;
     }[];
+    search: {
+      backend: "postgres_tsvector";
+      status: "proof" | "unsupported" | "degraded" | "implemented";
+      degraded: boolean;
+      detail: string;
+    };
     repositoryGroups: {
       groupId: string;
       label: string;
       correctnessSensitive: boolean;
+      coverageStatus: "implemented" | "proof" | "unsupported" | "degraded";
       implementationStatus:
         | "proof_admin"
         | "proof_runtime_counter"
         | "proof_simple_kv"
+        | "proof_runtime_search"
+        | "proof_provider_state"
+        | "proof_conversations_attachments"
+        | "proof_profile_memory"
         | "unsupported";
+      detail: string;
+    }[];
+    moduleOwnedStores: {
+      storeId: string;
+      label: string;
+      coverageStatus: "implemented" | "proof" | "unsupported" | "degraded";
       detail: string;
     }[];
   };

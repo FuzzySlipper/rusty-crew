@@ -191,6 +191,22 @@ const storage: StorageDiagnosticsProjection = {
     maxConnections: 10,
     statementTimeoutMs: 30_000,
     implementationStatus: "blocked_unimplemented",
+    productionReadiness: {
+      ready: false,
+      status: "blocked_unimplemented",
+      reasonCodes: [
+        "postgres_full_service_boot_blocked",
+        "postgres_repository_unsupported:queues_messages",
+      ],
+      blockers: [
+        {
+          groupId: "queues_messages",
+          status: "unsupported",
+          detail: "queue repositories are not ported",
+        },
+      ],
+      detail: "PostgreSQL full service boot is blocked",
+    },
     capabilities: [
       {
         name: "row_level_claims",
@@ -198,11 +214,18 @@ const storage: StorageDiagnosticsProjection = {
         detail: "queue and scheduler claim semantics are not implemented",
       },
     ],
+    search: {
+      backend: "postgres_tsvector",
+      status: "unsupported",
+      degraded: true,
+      detail: "PostgreSQL runtime search is unavailable for service boot",
+    },
     repositoryGroups: [
       {
         groupId: "storage_admin",
         label: "Storage Admin",
         correctnessSensitive: false,
+        coverageStatus: "proof",
         implementationStatus: "proof_admin",
         detail: "storage-admin diagnostics are proofed",
       },
@@ -210,6 +233,7 @@ const storage: StorageDiagnosticsProjection = {
         groupId: "runtime_counters",
         label: "Runtime Counters",
         correctnessSensitive: false,
+        coverageStatus: "proof",
         implementationStatus: "proof_runtime_counter",
         detail: "runtime counter proof is implemented",
       },
@@ -217,6 +241,7 @@ const storage: StorageDiagnosticsProjection = {
         groupId: "module_schema_registry",
         label: "Module Schema Registry",
         correctnessSensitive: true,
+        coverageStatus: "degraded",
         implementationStatus: "proof_simple_kv",
         detail: "simple_kv proof table is implemented",
       },
@@ -224,8 +249,17 @@ const storage: StorageDiagnosticsProjection = {
         groupId: "queues_messages",
         label: "Queues And Messages",
         correctnessSensitive: true,
+        coverageStatus: "unsupported",
         implementationStatus: "unsupported",
         detail: "queue repositories are not ported",
+      },
+    ],
+    moduleOwnedStores: [
+      {
+        storeId: "roleplay_lore",
+        label: "Roleplay Lore",
+        coverageStatus: "unsupported",
+        detail: "roleplay lore is not ported",
       },
     ],
   },
@@ -470,10 +504,25 @@ const storageData = okData<{
     databaseUrlEnv: string;
     bootMode: string;
     implementationStatus: string;
+    productionReadiness: {
+      ready: boolean;
+      status: string;
+      reasonCodes: string[];
+    };
     capabilities: Array<{ name: string; supported: boolean }>;
+    search: {
+      backend: string;
+      status: string;
+      degraded: boolean;
+    };
     repositoryGroups: Array<{
       groupId: string;
+      coverageStatus: string;
       implementationStatus: string;
+    }>;
+    moduleOwnedStores: Array<{
+      storeId: string;
+      coverageStatus: string;
     }>;
   };
   capabilities: Array<{ name: string; supported: boolean }>;
@@ -496,17 +545,36 @@ assert.equal(
   storageData.postgres?.implementationStatus,
   "blocked_unimplemented",
 );
+assert.equal(storageData.postgres?.productionReadiness.ready, false);
+assert.equal(
+  storageData.postgres?.productionReadiness.status,
+  "blocked_unimplemented",
+);
+assert.ok(
+  storageData.postgres?.productionReadiness.reasonCodes.some((reason) =>
+    reason.includes("queues_messages"),
+  ),
+);
 assert.equal(
   storageData.postgres?.capabilities.find(
     (capability) => capability.name === "row_level_claims",
   )?.supported,
   false,
 );
+assert.equal(storageData.postgres?.search.backend, "postgres_tsvector");
+assert.equal(storageData.postgres?.search.status, "unsupported");
+assert.equal(storageData.postgres?.search.degraded, true);
 assert.equal(
   storageData.postgres?.repositoryGroups.find(
     (group) => group.groupId === "storage_admin",
   )?.implementationStatus,
   "proof_admin",
+);
+assert.equal(
+  storageData.postgres?.repositoryGroups.find(
+    (group) => group.groupId === "storage_admin",
+  )?.coverageStatus,
+  "proof",
 );
 assert.equal(
   storageData.postgres?.repositoryGroups.find(
@@ -522,8 +590,20 @@ assert.equal(
 );
 assert.equal(
   storageData.postgres?.repositoryGroups.find(
+    (group) => group.groupId === "module_schema_registry",
+  )?.coverageStatus,
+  "degraded",
+);
+assert.equal(
+  storageData.postgres?.repositoryGroups.find(
     (group) => group.groupId === "queues_messages",
   )?.implementationStatus,
+  "unsupported",
+);
+assert.equal(
+  storageData.postgres?.moduleOwnedStores.find(
+    (store) => store.storeId === "roleplay_lore",
+  )?.coverageStatus,
   "unsupported",
 );
 assert.equal(

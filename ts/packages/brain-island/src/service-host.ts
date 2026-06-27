@@ -1150,10 +1150,16 @@ function storageDiagnosticsProjection(
         config.postgres.bootMode === "proof_admin"
           ? "proof_admin_only"
           : "blocked_unimplemented",
+      productionReadiness: postgresProductionReadiness(
+        config.postgres.bootMode,
+        storage.repositoryGroups,
+      ),
       capabilities: postgresStorageCapabilities(config.postgres.bootMode),
+      search: postgresSearchDiagnostics(config.postgres.bootMode),
       repositoryGroups: postgresRepositoryGroupDiagnostics(
         storage.repositoryGroups,
       ),
+      moduleOwnedStores: postgresModuleOwnedStoreDiagnostics(),
     },
   };
 }
@@ -1212,6 +1218,7 @@ function postgresRepositoryGroupDiagnostics(
         groupId: group.groupId,
         label: group.label,
         correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
         implementationStatus: "proof_admin",
         detail:
           "Implemented only for backend selector projection, env-var references, and storage-admin diagnostics.",
@@ -1222,9 +1229,54 @@ function postgresRepositoryGroupDiagnostics(
         groupId: group.groupId,
         label: group.label,
         correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
         implementationStatus: "proof_runtime_counter",
         detail:
           "Implemented in the Rust PostgreSQL proof slice; not wired as the full service coordination backend.",
+      };
+    }
+    if (group.groupId === "runtime_search") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_runtime_search",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice through typed runtime-search APIs; not wired as the full service backend.",
+      };
+    }
+    if (group.groupId === "provider_state") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_provider_state",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice through typed provider wire-state APIs; not wired as the full service backend.",
+      };
+    }
+    if (group.groupId === "conversations_attachments") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_conversations_attachments",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice for conversation transcripts, branches, attachments, and data-bank scopes; not wired as the full service backend.",
+      };
+    }
+    if (group.groupId === "profile_memory") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "proof",
+        implementationStatus: "proof_profile_memory",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice for profile_dense descriptor projection and dense profile memory; generic typed memory spaces and roleplay lore remain unsupported module-owned stores.",
       };
     }
     if (group.groupId === "module_schema_registry") {
@@ -1232,20 +1284,111 @@ function postgresRepositoryGroupDiagnostics(
         groupId: group.groupId,
         label: group.label,
         correctnessSensitive: group.correctnessSensitive,
+        coverageStatus: "degraded",
         implementationStatus: "proof_simple_kv",
         detail:
-          "Implemented only for the simple_kv module-owned data proof table; the full module schema registry is not wired as a PostgreSQL service backend.",
+          "Implemented only for the simple_kv module-owned data proof table; typed memory spaces and roleplay_lore module-owned stores remain unsupported for PostgreSQL service boot.",
       };
     }
     return {
       groupId: group.groupId,
       label: group.label,
       correctnessSensitive: group.correctnessSensitive,
+      coverageStatus: "unsupported",
       implementationStatus: "unsupported",
       detail:
         "Unsupported for PostgreSQL service boot; using this group must fail closed until repository coverage exists.",
     };
   });
+}
+
+function postgresSearchDiagnostics(
+  bootMode: RustyCrewStorageConfig["postgres"]["bootMode"],
+): NonNullable<StorageDiagnosticsProjection["postgres"]>["search"] {
+  if (bootMode === "proof_admin") {
+    return {
+      backend: "postgres_tsvector",
+      status: "proof",
+      degraded: false,
+      detail:
+        "Runtime search has a PostgreSQL proof slice behind typed APIs; backend tsquery syntax is not exposed through admin or tool routes.",
+    };
+  }
+  return {
+    backend: "postgres_tsvector",
+    status: "unsupported",
+    degraded: true,
+    detail:
+      "PostgreSQL runtime search is unavailable for full service boot until the proof repository is wired behind the service backend.",
+  };
+}
+
+function postgresProductionReadiness(
+  bootMode: RustyCrewStorageConfig["postgres"]["bootMode"],
+  groups: StorageDiagnosticsProjection["repositoryGroups"],
+): NonNullable<
+  StorageDiagnosticsProjection["postgres"]
+>["productionReadiness"] {
+  const projectedGroups = postgresRepositoryGroupDiagnostics(groups);
+  const blockers = projectedGroups
+    .filter(
+      (group) =>
+        group.correctnessSensitive && group.coverageStatus !== "implemented",
+    )
+    .map((group) => ({
+      groupId: group.groupId,
+      status: group.coverageStatus,
+      detail: group.detail,
+    }));
+  for (const store of postgresModuleOwnedStoreDiagnostics()) {
+    if (store.coverageStatus !== "implemented") {
+      blockers.push({
+        groupId: store.storeId,
+        status: store.coverageStatus,
+        detail: store.detail,
+      });
+    }
+  }
+  const reasonCodes = [
+    bootMode === "proof_admin"
+      ? "postgres_proof_admin_only"
+      : "postgres_full_service_boot_blocked",
+    ...blockers.map(
+      (blocker) => `postgres_repository_${blocker.status}:${blocker.groupId}`,
+    ),
+  ];
+  return {
+    ready: false,
+    status:
+      bootMode === "proof_admin" ? "proof_admin_only" : "blocked_unimplemented",
+    reasonCodes,
+    blockers,
+    detail:
+      bootMode === "proof_admin"
+        ? "PostgreSQL is available only for bounded proof/admin diagnostics; full service coordination still uses SQLite."
+        : "PostgreSQL full service boot is blocked until required repository groups are implemented or explicitly unsupported for a selected deployment mode.",
+  };
+}
+
+function postgresModuleOwnedStoreDiagnostics(): NonNullable<
+  StorageDiagnosticsProjection["postgres"]
+>["moduleOwnedStores"] {
+  return [
+    {
+      storeId: "typed_memory_spaces",
+      label: "Typed Memory Spaces",
+      coverageStatus: "unsupported",
+      detail:
+        "The profile_dense compatibility path is proofed, but generic typed memory-space repositories are not implemented for PostgreSQL.",
+    },
+    {
+      storeId: "roleplay_lore",
+      label: "Roleplay Lore",
+      coverageStatus: "unsupported",
+      detail:
+        "Roleplay lore is planned as a module-owned typed memory space and has no PostgreSQL repository proof yet.",
+    },
+  ];
 }
 
 function brainModuleDiagnostics(
