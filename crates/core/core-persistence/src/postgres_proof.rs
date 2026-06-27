@@ -6,21 +6,24 @@
 //! beyond SQLite.
 
 use crate::{
-    counter_value, from_json_text, repositories, to_json_text, validate_simple_kv_identity,
-    validate_simple_kv_query, validate_simple_kv_write, CoreError, CoreErrorKind, CoreResult,
-    IsoTimestamp, QueryPage, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
-    RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageTableCount,
-    SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
-    SimpleKvWrite, COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED,
-    COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED,
-    COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS,
-    COUNTER_TOOL_ERRORS, COUNTER_WAKES,
+    counter_value, from_json_text, repositories, to_json_text, validate_provider_wire_state_key,
+    validate_simple_kv_identity, validate_simple_kv_query, validate_simple_kv_write, CoreError,
+    CoreErrorKind, CoreResult, IsoTimestamp, ProviderStateAbsenceReason,
+    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
+    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
+    ProviderWireStateWrite, QueryPage, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
+    RuntimeStorageTableCount, SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery,
+    SimpleKvRecord, SimpleKvScope, SimpleKvWrite, COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS,
+    COUNTER_DELEGATIONS_CANCELLED, COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED,
+    COUNTER_DELEGATIONS_FAILED, COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES,
+    COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS, COUNTER_WAKES,
 };
-use postgres::{Client, NoTls, Row};
+use postgres::{Client, NoTls, Row, Transaction};
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 3;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -377,8 +380,9 @@ impl PostgresRuntimeCounterProofStore {
             backend: "postgres".to_string(),
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
-            proof_repository: "runtime_counters,module_simple_kv_entries,runtime_search"
-                .to_string(),
+            proof_repository:
+                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states"
+                    .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
                 RuntimeStorageTableCount {
@@ -393,10 +397,275 @@ impl PostgresRuntimeCounterProofStore {
                     table: "runtime_search_entries".to_string(),
                     rows: self.runtime_search_rows()?,
                 },
+                RuntimeStorageTableCount {
+                    table: "provider_wire_states".to_string(),
+                    rows: self.provider_wire_state_rows()?,
+                },
             ],
             capabilities: postgres_proof_capabilities(),
             repository_groups: postgres_proof_repository_groups(),
         })
+    }
+
+    pub fn save_provider_wire_state(
+        &self,
+        write: &ProviderWireStateWrite,
+    ) -> CoreResult<ProviderWireStateRecord> {
+        validate_provider_wire_state_key(&write.key)?;
+        let payload_json = to_json_text(&write.payload_json)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL provider wire state", error))?;
+        invalidate_current_provider_wire_state_for_key_in_tx(
+            &mut tx,
+            &schema,
+            &write.key,
+            &write.now,
+            ProviderWireStateInvalidationReason::Superseded,
+        )?;
+        let row = tx
+            .query_one(
+                &format!(
+                    "INSERT INTO {schema}.provider_wire_states (
+                        session_id,
+                        module_id,
+                        strategy_id,
+                        profile_fingerprint,
+                        provider_fingerprint,
+                        payload_version,
+                        payload_json,
+                        payload_encoding,
+                        created_at,
+                        updated_at,
+                        expires_at,
+                        last_wake_id,
+                        invalidated_at,
+                        invalidation_reason
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'json', $8, $8, $9, $10, NULL, NULL)
+                     RETURNING row_id,
+                        session_id,
+                        module_id,
+                        strategy_id,
+                        profile_fingerprint,
+                        provider_fingerprint,
+                        payload_version,
+                        payload_json,
+                        payload_encoding,
+                        created_at,
+                        updated_at,
+                        expires_at,
+                        last_wake_id,
+                        invalidated_at,
+                        invalidation_reason"
+                ),
+                &[
+                    &write.key.session_id.0,
+                    &write.key.module_id,
+                    &write.key.strategy_id,
+                    &write.profile_fingerprint,
+                    &write.provider_fingerprint,
+                    &write.payload_version,
+                    &payload_json,
+                    &write.now,
+                    &write.expires_at,
+                    &write.last_wake_id,
+                ],
+            )
+            .map_err(|error| postgres_error("insert PostgreSQL provider wire state", error))?;
+        let record = row_to_provider_wire_state_record(&row)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL provider wire state", error))?;
+        Ok(record)
+    }
+
+    pub fn load_provider_wire_state_for_wake(
+        &self,
+        lookup: &ProviderWireStateWakeLookup,
+    ) -> CoreResult<ProviderWireStateWakeResult> {
+        validate_provider_wire_state_key(&lookup.key)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start load PostgreSQL provider wire state", error))?;
+        invalidate_provider_wire_states_for_session_except_in_tx(
+            &mut tx,
+            &schema,
+            &lookup.key,
+            &lookup.now,
+        )?;
+        let Some(record) = load_current_provider_wire_state_by_key(&mut tx, &schema, &lookup.key)?
+        else {
+            tx.commit().map_err(|error| {
+                postgres_error(
+                    "commit missing PostgreSQL provider wire state lookup",
+                    error,
+                )
+            })?;
+            return Ok(ProviderWireStateWakeResult {
+                record: None,
+                absence_reason: Some(ProviderStateAbsenceReason::Missing),
+            });
+        };
+        if record
+            .expires_at
+            .as_ref()
+            .is_some_and(|expires| expires <= &lookup.now)
+        {
+            invalidate_provider_wire_state_by_row_in_tx(
+                &mut tx,
+                &schema,
+                record.row_id,
+                &lookup.now,
+                ProviderWireStateInvalidationReason::Expired,
+            )?;
+            tx.commit().map_err(|error| {
+                postgres_error(
+                    "commit expired PostgreSQL provider wire state lookup",
+                    error,
+                )
+            })?;
+            return Ok(ProviderWireStateWakeResult {
+                record: None,
+                absence_reason: Some(ProviderStateAbsenceReason::Expired),
+            });
+        }
+        if record.profile_fingerprint != lookup.profile_fingerprint {
+            invalidate_provider_wire_state_by_row_in_tx(
+                &mut tx,
+                &schema,
+                record.row_id,
+                &lookup.now,
+                ProviderWireStateInvalidationReason::ProfileChanged,
+            )?;
+            tx.commit().map_err(|error| {
+                postgres_error(
+                    "commit profile-invalidated PostgreSQL provider wire state lookup",
+                    error,
+                )
+            })?;
+            return Ok(ProviderWireStateWakeResult {
+                record: None,
+                absence_reason: Some(ProviderStateAbsenceReason::Invalidated),
+            });
+        }
+        if record.provider_fingerprint != lookup.provider_fingerprint {
+            invalidate_provider_wire_state_by_row_in_tx(
+                &mut tx,
+                &schema,
+                record.row_id,
+                &lookup.now,
+                ProviderWireStateInvalidationReason::ProviderChanged,
+            )?;
+            tx.commit().map_err(|error| {
+                postgres_error(
+                    "commit provider-invalidated PostgreSQL provider wire state lookup",
+                    error,
+                )
+            })?;
+            return Ok(ProviderWireStateWakeResult {
+                record: None,
+                absence_reason: Some(ProviderStateAbsenceReason::Invalidated),
+            });
+        }
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL provider wire state lookup", error)
+        })?;
+        Ok(ProviderWireStateWakeResult {
+            record: Some(record),
+            absence_reason: None,
+        })
+    }
+
+    pub fn clear_provider_wire_state(
+        &self,
+        key: &ProviderWireStateKey,
+        now: &IsoTimestamp,
+        reason: ProviderWireStateInvalidationReason,
+    ) -> CoreResult<Option<ProviderWireStateRecord>> {
+        validate_provider_wire_state_key(key)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start clear PostgreSQL provider wire state", error))?;
+        let Some(record) = load_current_provider_wire_state_by_key(&mut tx, &schema, key)? else {
+            tx.commit().map_err(|error| {
+                postgres_error("commit missing PostgreSQL provider wire state clear", error)
+            })?;
+            return Ok(None);
+        };
+        invalidate_provider_wire_state_by_row_in_tx(&mut tx, &schema, record.row_id, now, reason)?;
+        let cleared = load_provider_wire_state_by_row_id(&mut tx, &schema, record.row_id)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit clear PostgreSQL provider wire state", error)
+        })?;
+        Ok(Some(cleared))
+    }
+
+    pub fn expire_provider_wire_states_at(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ProviderWireStateRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start expire PostgreSQL provider wire states", error)
+        })?;
+        let expiring = load_expired_current_provider_wire_states(&mut tx, &schema, now)?;
+        for record in &expiring {
+            invalidate_provider_wire_state_by_row_in_tx(
+                &mut tx,
+                &schema,
+                record.row_id,
+                now,
+                ProviderWireStateInvalidationReason::Expired,
+            )?;
+        }
+        let expired = expiring
+            .iter()
+            .map(|record| load_provider_wire_state_by_row_id(&mut tx, &schema, record.row_id))
+            .collect::<CoreResult<Vec<_>>>()?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit expire PostgreSQL provider wire states", error)
+        })?;
+        Ok(expired)
+    }
+
+    pub fn list_provider_wire_state_diagnostics(
+        &self,
+        limit: u32,
+    ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
+        let schema = self.quoted_schema();
+        let limit = i64::from(limit);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT
+                        session_id,
+                        module_id,
+                        strategy_id,
+                        payload_version,
+                        octet_length(payload_json)::bigint,
+                        created_at,
+                        updated_at,
+                        expires_at,
+                        last_wake_id,
+                        invalidated_at,
+                        invalidation_reason
+                     FROM {schema}.provider_wire_states
+                     ORDER BY updated_at DESC, row_id DESC
+                     LIMIT $1"
+                ),
+                &[&limit],
+            )
+            .map_err(|error| postgres_error("list PostgreSQL provider wire diagnostics", error))?;
+        rows.iter()
+            .map(row_to_provider_wire_state_diagnostic)
+            .collect()
     }
 
     pub fn upsert_runtime_search_entry(&self, entry: &RuntimeSearchResult) -> CoreResult<()> {
@@ -602,7 +871,33 @@ impl PostgresRuntimeCounterProofStore {
                         task_id,
                         event_kind,
                         recorded_at
-                    );"
+                    );
+                 CREATE TABLE IF NOT EXISTS {schema}.provider_wire_states (
+                    row_id BIGSERIAL PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    module_id TEXT NOT NULL,
+                    strategy_id TEXT NOT NULL,
+                    profile_fingerprint TEXT NOT NULL,
+                    provider_fingerprint TEXT NOT NULL,
+                    payload_version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    payload_encoding TEXT NOT NULL DEFAULT 'json',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    last_wake_id TEXT,
+                    invalidated_at TEXT,
+                    invalidation_reason TEXT
+                 );
+                 CREATE UNIQUE INDEX IF NOT EXISTS provider_wire_states_current_idx
+                    ON {schema}.provider_wire_states(session_id, module_id, strategy_id)
+                    WHERE invalidated_at IS NULL;
+                 CREATE INDEX IF NOT EXISTS provider_wire_states_session_current_idx
+                    ON {schema}.provider_wire_states(session_id, invalidated_at);
+                 CREATE INDEX IF NOT EXISTS provider_wire_states_expiry_idx
+                    ON {schema}.provider_wire_states(invalidated_at, expires_at);
+                 CREATE INDEX IF NOT EXISTS provider_wire_states_updated_idx
+                    ON {schema}.provider_wire_states(updated_at DESC, row_id DESC);"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL runtime counter proof", error))
     }
@@ -749,6 +1044,19 @@ impl PostgresRuntimeCounterProofStore {
         Ok(rows as u64)
     }
 
+    fn provider_wire_state_rows(&self) -> CoreResult<u64> {
+        let schema = self.quoted_schema();
+        let row = self
+            .client()?
+            .query_one(
+                &format!("SELECT COUNT(*) FROM {schema}.provider_wire_states"),
+                &[],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL provider wire states", error))?;
+        let rows: i64 = row.get(0);
+        Ok(rows as u64)
+    }
+
     fn quoted_schema(&self) -> String {
         quote_postgres_identifier(&self.schema)
     }
@@ -833,6 +1141,11 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
                 group.notes.insert(
                     0,
                     "PostgreSQL proof status: implemented for runtime search entries through the typed search API; not yet wired as the full service backend.".to_string(),
+                );
+            } else if group.group_id == "provider_state" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for provider wire-state conformance through the typed provider-state API; not yet wired as the full service backend.".to_string(),
                 );
             } else {
                 group.notes.insert(
@@ -940,6 +1253,292 @@ fn row_to_runtime_search_result(row: &Row) -> CoreResult<RuntimeSearchResult> {
         title: row.get(9),
         body: row.get(10),
     })
+}
+
+fn row_to_provider_wire_state_record(row: &Row) -> CoreResult<ProviderWireStateRecord> {
+    let payload_json: String = row.get(7);
+    let invalidation_reason = row
+        .get::<_, Option<String>>(14)
+        .as_deref()
+        .map(provider_wire_state_invalidation_reason_from_str)
+        .transpose()?;
+    Ok(ProviderWireStateRecord {
+        row_id: row.get(0),
+        key: ProviderWireStateKey {
+            session_id: crate::SessionId(row.get(1)),
+            module_id: row.get(2),
+            strategy_id: row.get(3),
+        },
+        profile_fingerprint: row.get(4),
+        provider_fingerprint: row.get(5),
+        payload_version: row.get(6),
+        payload_json: from_json_text(&payload_json).map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("parse PostgreSQL provider wire payload_json: {error}"),
+            )
+        })?,
+        payload_encoding: row.get(8),
+        created_at: row.get(9),
+        updated_at: row.get(10),
+        expires_at: row.get(11),
+        last_wake_id: row.get(12),
+        invalidated_at: row.get(13),
+        invalidation_reason,
+    })
+}
+
+fn row_to_provider_wire_state_diagnostic(row: &Row) -> CoreResult<ProviderWireStateDiagnostic> {
+    let payload_bytes: i64 = row.get(4);
+    if payload_bytes < 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid PostgreSQL provider wire payload byte count {payload_bytes}"),
+        ));
+    }
+    Ok(ProviderWireStateDiagnostic {
+        key: ProviderWireStateKey {
+            session_id: crate::SessionId(row.get(0)),
+            module_id: row.get(1),
+            strategy_id: row.get(2),
+        },
+        payload_version: row.get(3),
+        payload_bytes: payload_bytes as u64,
+        created_at: row.get(5),
+        updated_at: row.get(6),
+        expires_at: row.get(7),
+        last_wake_id: row.get(8),
+        invalidated_at: row.get(9),
+        invalidation_reason: row.get(10),
+    })
+}
+
+fn invalidate_provider_wire_states_for_session_except_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    key: &ProviderWireStateKey,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    tx.execute(
+        &format!(
+            "UPDATE {schema}.provider_wire_states
+             SET invalidated_at = $4,
+                 updated_at = $4,
+                 invalidation_reason = CASE
+                     WHEN module_id != $2 THEN 'module_changed'
+                     ELSE 'strategy_changed'
+                 END
+             WHERE session_id = $1
+               AND invalidated_at IS NULL
+               AND (module_id != $2 OR strategy_id != $3)"
+        ),
+        &[&key.session_id.0, &key.module_id, &key.strategy_id, now],
+    )
+    .map_err(|error| postgres_error("invalidate changed PostgreSQL provider wire states", error))?;
+    Ok(())
+}
+
+fn invalidate_current_provider_wire_state_for_key_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    key: &ProviderWireStateKey,
+    now: &IsoTimestamp,
+    reason: ProviderWireStateInvalidationReason,
+) -> CoreResult<()> {
+    let reason = provider_wire_state_invalidation_reason_as_str(reason);
+    tx.execute(
+        &format!(
+            "UPDATE {schema}.provider_wire_states
+             SET invalidated_at = $4,
+                 updated_at = $4,
+                 invalidation_reason = $5
+             WHERE session_id = $1
+               AND module_id = $2
+               AND strategy_id = $3
+               AND invalidated_at IS NULL"
+        ),
+        &[
+            &key.session_id.0,
+            &key.module_id,
+            &key.strategy_id,
+            now,
+            &reason,
+        ],
+    )
+    .map_err(|error| postgres_error("invalidate current PostgreSQL provider wire state", error))?;
+    Ok(())
+}
+
+fn invalidate_provider_wire_state_by_row_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    row_id: i64,
+    now: &IsoTimestamp,
+    reason: ProviderWireStateInvalidationReason,
+) -> CoreResult<()> {
+    let reason = provider_wire_state_invalidation_reason_as_str(reason);
+    tx.execute(
+        &format!(
+            "UPDATE {schema}.provider_wire_states
+             SET invalidated_at = $2,
+                 updated_at = $2,
+                 invalidation_reason = $3
+             WHERE row_id = $1
+               AND invalidated_at IS NULL"
+        ),
+        &[&row_id, now, &reason],
+    )
+    .map_err(|error| postgres_error("invalidate PostgreSQL provider wire state row", error))?;
+    Ok(())
+}
+
+fn load_current_provider_wire_state_by_key(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    key: &ProviderWireStateKey,
+) -> CoreResult<Option<ProviderWireStateRecord>> {
+    let row = tx
+        .query_opt(
+            &format!(
+                "SELECT
+                    row_id,
+                    session_id,
+                    module_id,
+                    strategy_id,
+                    profile_fingerprint,
+                    provider_fingerprint,
+                    payload_version,
+                    payload_json,
+                    payload_encoding,
+                    created_at,
+                    updated_at,
+                    expires_at,
+                    last_wake_id,
+                    invalidated_at,
+                    invalidation_reason
+                 FROM {schema}.provider_wire_states
+                 WHERE session_id = $1
+                   AND module_id = $2
+                   AND strategy_id = $3
+                   AND invalidated_at IS NULL
+                 LIMIT 1"
+            ),
+            &[&key.session_id.0, &key.module_id, &key.strategy_id],
+        )
+        .map_err(|error| postgres_error("load current PostgreSQL provider wire state", error))?;
+    row.as_ref()
+        .map(row_to_provider_wire_state_record)
+        .transpose()
+}
+
+fn load_provider_wire_state_by_row_id(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    row_id: i64,
+) -> CoreResult<ProviderWireStateRecord> {
+    let row = tx
+        .query_one(
+            &format!(
+                "SELECT
+                    row_id,
+                    session_id,
+                    module_id,
+                    strategy_id,
+                    profile_fingerprint,
+                    provider_fingerprint,
+                    payload_version,
+                    payload_json,
+                    payload_encoding,
+                    created_at,
+                    updated_at,
+                    expires_at,
+                    last_wake_id,
+                    invalidated_at,
+                    invalidation_reason
+                 FROM {schema}.provider_wire_states
+                 WHERE row_id = $1"
+            ),
+            &[&row_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL provider wire state by row id", error))?;
+    row_to_provider_wire_state_record(&row)
+}
+
+fn load_expired_current_provider_wire_states(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    now: &IsoTimestamp,
+) -> CoreResult<Vec<ProviderWireStateRecord>> {
+    let rows = tx
+        .query(
+            &format!(
+                "SELECT
+                    row_id,
+                    session_id,
+                    module_id,
+                    strategy_id,
+                    profile_fingerprint,
+                    provider_fingerprint,
+                    payload_version,
+                    payload_json,
+                    payload_encoding,
+                    created_at,
+                    updated_at,
+                    expires_at,
+                    last_wake_id,
+                    invalidated_at,
+                    invalidation_reason
+                 FROM {schema}.provider_wire_states
+                 WHERE invalidated_at IS NULL
+                   AND expires_at IS NOT NULL
+                   AND expires_at <= $1
+                 ORDER BY expires_at ASC, row_id ASC"
+            ),
+            &[now],
+        )
+        .map_err(|error| {
+            postgres_error(
+                "load expired current PostgreSQL provider wire states",
+                error,
+            )
+        })?;
+    rows.iter().map(row_to_provider_wire_state_record).collect()
+}
+
+fn provider_wire_state_invalidation_reason_as_str(
+    reason: ProviderWireStateInvalidationReason,
+) -> &'static str {
+    match reason {
+        ProviderWireStateInvalidationReason::ProfileChanged => "profile_changed",
+        ProviderWireStateInvalidationReason::ProviderChanged => "provider_changed",
+        ProviderWireStateInvalidationReason::ModuleChanged => "module_changed",
+        ProviderWireStateInvalidationReason::StrategyChanged => "strategy_changed",
+        ProviderWireStateInvalidationReason::Expired => "expired",
+        ProviderWireStateInvalidationReason::BrainRequestedClear => "brain_requested_clear",
+        ProviderWireStateInvalidationReason::OperatorRequestedClear => "operator_requested_clear",
+        ProviderWireStateInvalidationReason::Superseded => "superseded",
+    }
+}
+
+fn provider_wire_state_invalidation_reason_from_str(
+    raw: &str,
+) -> CoreResult<ProviderWireStateInvalidationReason> {
+    match raw {
+        "profile_changed" => Ok(ProviderWireStateInvalidationReason::ProfileChanged),
+        "provider_changed" => Ok(ProviderWireStateInvalidationReason::ProviderChanged),
+        "module_changed" => Ok(ProviderWireStateInvalidationReason::ModuleChanged),
+        "strategy_changed" => Ok(ProviderWireStateInvalidationReason::StrategyChanged),
+        "expired" => Ok(ProviderWireStateInvalidationReason::Expired),
+        "brain_requested_clear" => Ok(ProviderWireStateInvalidationReason::BrainRequestedClear),
+        "operator_requested_clear" => {
+            Ok(ProviderWireStateInvalidationReason::OperatorRequestedClear)
+        }
+        "superseded" => Ok(ProviderWireStateInvalidationReason::Superseded),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown provider wire state invalidation reason {other}"),
+        )),
+    }
 }
 
 fn runtime_search_row_type_as_str(row_type: RuntimeSearchRowType) -> &'static str {
@@ -1066,6 +1665,31 @@ mod tests {
         fn expire_simple_kv(&self, now: &IsoTimestamp) -> CoreResult<u64>;
     }
 
+    trait ProviderWireStateConformanceStore {
+        fn save_provider_wire_state(
+            &self,
+            write: &ProviderWireStateWrite,
+        ) -> CoreResult<ProviderWireStateRecord>;
+        fn load_provider_wire_state_for_wake(
+            &self,
+            lookup: &ProviderWireStateWakeLookup,
+        ) -> CoreResult<ProviderWireStateWakeResult>;
+        fn clear_provider_wire_state(
+            &self,
+            key: &ProviderWireStateKey,
+            now: &IsoTimestamp,
+            reason: ProviderWireStateInvalidationReason,
+        ) -> CoreResult<Option<ProviderWireStateRecord>>;
+        fn expire_provider_wire_states_at(
+            &self,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<ProviderWireStateRecord>>;
+        fn list_provider_wire_state_diagnostics(
+            &self,
+            limit: u32,
+        ) -> CoreResult<Vec<ProviderWireStateDiagnostic>>;
+    }
+
     impl SimpleKvConformanceStore for CoordinationStore {
         fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
             CoordinationStore::put_simple_kv(self, write)
@@ -1100,6 +1724,45 @@ mod tests {
         }
     }
 
+    impl ProviderWireStateConformanceStore for CoordinationStore {
+        fn save_provider_wire_state(
+            &self,
+            write: &ProviderWireStateWrite,
+        ) -> CoreResult<ProviderWireStateRecord> {
+            CoordinationStore::save_provider_wire_state(self, write)
+        }
+
+        fn load_provider_wire_state_for_wake(
+            &self,
+            lookup: &ProviderWireStateWakeLookup,
+        ) -> CoreResult<ProviderWireStateWakeResult> {
+            CoordinationStore::load_provider_wire_state_for_wake(self, lookup)
+        }
+
+        fn clear_provider_wire_state(
+            &self,
+            key: &ProviderWireStateKey,
+            now: &IsoTimestamp,
+            reason: ProviderWireStateInvalidationReason,
+        ) -> CoreResult<Option<ProviderWireStateRecord>> {
+            CoordinationStore::clear_provider_wire_state(self, key, now, reason)
+        }
+
+        fn expire_provider_wire_states_at(
+            &self,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<ProviderWireStateRecord>> {
+            CoordinationStore::expire_provider_wire_states_at(self, now)
+        }
+
+        fn list_provider_wire_state_diagnostics(
+            &self,
+            limit: u32,
+        ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
+            CoordinationStore::list_provider_wire_state_diagnostics(self, limit)
+        }
+    }
+
     impl SimpleKvConformanceStore for PostgresRuntimeCounterProofStore {
         fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
             PostgresRuntimeCounterProofStore::put_simple_kv(self, write)
@@ -1131,6 +1794,45 @@ mod tests {
 
         fn expire_simple_kv(&self, now: &IsoTimestamp) -> CoreResult<u64> {
             PostgresRuntimeCounterProofStore::expire_simple_kv(self, now)
+        }
+    }
+
+    impl ProviderWireStateConformanceStore for PostgresRuntimeCounterProofStore {
+        fn save_provider_wire_state(
+            &self,
+            write: &ProviderWireStateWrite,
+        ) -> CoreResult<ProviderWireStateRecord> {
+            PostgresRuntimeCounterProofStore::save_provider_wire_state(self, write)
+        }
+
+        fn load_provider_wire_state_for_wake(
+            &self,
+            lookup: &ProviderWireStateWakeLookup,
+        ) -> CoreResult<ProviderWireStateWakeResult> {
+            PostgresRuntimeCounterProofStore::load_provider_wire_state_for_wake(self, lookup)
+        }
+
+        fn clear_provider_wire_state(
+            &self,
+            key: &ProviderWireStateKey,
+            now: &IsoTimestamp,
+            reason: ProviderWireStateInvalidationReason,
+        ) -> CoreResult<Option<ProviderWireStateRecord>> {
+            PostgresRuntimeCounterProofStore::clear_provider_wire_state(self, key, now, reason)
+        }
+
+        fn expire_provider_wire_states_at(
+            &self,
+            now: &IsoTimestamp,
+        ) -> CoreResult<Vec<ProviderWireStateRecord>> {
+            PostgresRuntimeCounterProofStore::expire_provider_wire_states_at(self, now)
+        }
+
+        fn list_provider_wire_state_diagnostics(
+            &self,
+            limit: u32,
+        ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
+            PostgresRuntimeCounterProofStore::list_provider_wire_state_diagnostics(self, limit)
         }
     }
 
@@ -1170,6 +1872,8 @@ mod tests {
                 && group.notes[0].contains("simple_kv")));
         assert!(groups.iter().any(|group| group.group_id == "runtime_search"
             && group.notes[0].contains("runtime search entries")));
+        assert!(groups.iter().any(|group| group.group_id == "provider_state"
+            && group.notes[0].contains("provider wire-state conformance")));
     }
 
     #[test]
@@ -1177,6 +1881,14 @@ mod tests {
         let db_path = temp_sqlite_path("sqlite-simple-kv-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         simple_kv_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_provider_wire_state_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-provider-wire-state-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        provider_wire_state_conformance(&store);
         let _ = fs::remove_file(db_path);
     }
 
@@ -1308,6 +2020,33 @@ mod tests {
         }));
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "runtime_search" && group.notes[0].contains("implemented")
+        }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_provider_wire_state_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL provider wire-state proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_provider_state_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        provider_wire_state_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "provider_wire_states")
+                .map(|count| count.rows),
+            Some(9)
+        );
+        assert!(diagnostics.repository_groups.iter().any(|group| {
+            group.group_id == "provider_state" && group.notes[0].contains("implemented")
         }));
 
         store.drop_schema_for_test().unwrap();
@@ -1564,6 +2303,324 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(empty_query.kind, CoreErrorKind::InvalidInput);
+    }
+
+    fn provider_wire_state_conformance(store: &dyn ProviderWireStateConformanceStore) {
+        let key = provider_wire_state_key("session-alpha", "openai-responses", "replay");
+        let first = store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "resp_1"}),
+                now: "2026-06-26T00:00:00Z",
+                expires_at: Some("2026-06-26T01:00:00Z"),
+                last_wake_id: Some("wake-1"),
+            }))
+            .unwrap();
+        assert!(first.is_current());
+        assert_eq!(first.payload_encoding, "json");
+
+        let second = store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v2",
+                payload_json: json!({"response_id": "resp_2", "large": "x".repeat(128)}),
+                now: "2026-06-26T00:01:00Z",
+                expires_at: Some("2026-06-26T01:01:00Z"),
+                last_wake_id: Some("wake-2"),
+            }))
+            .unwrap();
+        assert!(second.row_id > first.row_id);
+
+        let current = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: key.clone(),
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:02:00Z".to_string(),
+            })
+            .unwrap();
+        let record = current.record.unwrap();
+        assert_eq!(current.absence_reason, None);
+        assert_eq!(record.payload_version, "responses:v2");
+        assert_eq!(record.payload_json["response_id"], "resp_2");
+        assert_eq!(record.last_wake_id.as_deref(), Some("wake-2"));
+
+        let diagnostics = store.list_provider_wire_state_diagnostics(10).unwrap();
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].key, key);
+        assert_eq!(diagnostics[0].payload_version, "responses:v2");
+        assert!(diagnostics[0].payload_bytes > 128);
+        assert_eq!(
+            diagnostics[1].invalidation_reason.as_deref(),
+            Some("superseded")
+        );
+
+        let expired_key = provider_wire_state_key("session-expired", "openai-responses", "replay");
+        store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: expired_key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "expired"}),
+                now: "2026-06-26T00:03:00Z",
+                expires_at: Some("2026-06-26T00:04:00Z"),
+                last_wake_id: Some("wake-expired"),
+            }))
+            .unwrap();
+        let expired = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: expired_key.clone(),
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:04:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(expired.record, None);
+        assert_eq!(
+            expired.absence_reason,
+            Some(ProviderStateAbsenceReason::Expired)
+        );
+
+        let profile_key = provider_wire_state_key("session-profile", "openai-responses", "replay");
+        store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: profile_key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "profile_stale"}),
+                now: "2026-06-26T00:05:00Z",
+                expires_at: Some("2026-06-26T01:00:00Z"),
+                last_wake_id: None,
+            }))
+            .unwrap();
+        let profile_stale = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: profile_key,
+                profile_fingerprint: "profile:v2".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:06:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(profile_stale.record, None);
+        assert_eq!(
+            profile_stale.absence_reason,
+            Some(ProviderStateAbsenceReason::Invalidated)
+        );
+
+        let provider_key =
+            provider_wire_state_key("session-provider", "openai-responses", "replay");
+        store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: provider_key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "provider_stale"}),
+                now: "2026-06-26T00:07:00Z",
+                expires_at: Some("2026-06-26T01:00:00Z"),
+                last_wake_id: None,
+            }))
+            .unwrap();
+        let provider_stale = store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: provider_key,
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v2".to_string(),
+                now: "2026-06-26T00:08:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(provider_stale.record, None);
+        assert_eq!(
+            provider_stale.absence_reason,
+            Some(ProviderStateAbsenceReason::Invalidated)
+        );
+
+        let clear_key = provider_wire_state_key("session-clear", "openai-responses", "replay");
+        store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: clear_key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "clear"}),
+                now: "2026-06-26T00:09:00Z",
+                expires_at: Some("2026-06-26T01:00:00Z"),
+                last_wake_id: None,
+            }))
+            .unwrap();
+        let cleared = store
+            .clear_provider_wire_state(
+                &clear_key,
+                &"2026-06-26T00:10:00Z".to_string(),
+                ProviderWireStateInvalidationReason::BrainRequestedClear,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            cleared.invalidation_reason,
+            Some(ProviderWireStateInvalidationReason::BrainRequestedClear)
+        );
+        assert_eq!(
+            store
+                .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                    key: clear_key,
+                    profile_fingerprint: "profile:v1".to_string(),
+                    provider_fingerprint: "provider:v1".to_string(),
+                    now: "2026-06-26T00:11:00Z".to_string(),
+                })
+                .unwrap()
+                .absence_reason,
+            Some(ProviderStateAbsenceReason::Missing)
+        );
+
+        let strategy_key =
+            provider_wire_state_key("session-strategy", "openai-responses", "replay-v1");
+        store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: strategy_key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "strategy"}),
+                now: "2026-06-26T00:12:00Z",
+                expires_at: Some("2026-06-26T01:00:00Z"),
+                last_wake_id: None,
+            }))
+            .unwrap();
+        let changed_strategy =
+            provider_wire_state_key("session-strategy", "openai-responses", "replay-v2");
+        assert_eq!(
+            store
+                .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                    key: changed_strategy,
+                    profile_fingerprint: "profile:v1".to_string(),
+                    provider_fingerprint: "provider:v1".to_string(),
+                    now: "2026-06-26T00:13:00Z".to_string(),
+                })
+                .unwrap()
+                .absence_reason,
+            Some(ProviderStateAbsenceReason::Missing)
+        );
+        assert!(store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: strategy_key,
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:14:00Z".to_string(),
+            })
+            .unwrap()
+            .record
+            .is_none());
+
+        let module_key = provider_wire_state_key("session-module", "openai-responses", "replay");
+        store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: module_key.clone(),
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "module"}),
+                now: "2026-06-26T00:15:00Z",
+                expires_at: Some("2026-06-26T01:00:00Z"),
+                last_wake_id: None,
+            }))
+            .unwrap();
+        let changed_module =
+            provider_wire_state_key("session-module", "anthropic-messages", "replay");
+        assert_eq!(
+            store
+                .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                    key: changed_module,
+                    profile_fingerprint: "profile:v1".to_string(),
+                    provider_fingerprint: "provider:v1".to_string(),
+                    now: "2026-06-26T00:16:00Z".to_string(),
+                })
+                .unwrap()
+                .absence_reason,
+            Some(ProviderStateAbsenceReason::Missing)
+        );
+        assert!(store
+            .load_provider_wire_state_for_wake(&ProviderWireStateWakeLookup {
+                key: module_key,
+                profile_fingerprint: "profile:v1".to_string(),
+                provider_fingerprint: "provider:v1".to_string(),
+                now: "2026-06-26T00:17:00Z".to_string(),
+            })
+            .unwrap()
+            .record
+            .is_none());
+
+        let maintenance_key =
+            provider_wire_state_key("session-maintenance", "openai-responses", "replay");
+        store
+            .save_provider_wire_state(&provider_wire_state_write(ProviderWireStateWriteFixture {
+                key: maintenance_key,
+                profile_fingerprint: "profile:v1",
+                provider_fingerprint: "provider:v1",
+                payload_version: "responses:v1",
+                payload_json: json!({"response_id": "maintenance"}),
+                now: "2026-06-26T00:18:00Z",
+                expires_at: Some("2026-06-26T00:19:00Z"),
+                last_wake_id: Some("wake-maintenance"),
+            }))
+            .unwrap();
+        assert!(store
+            .expire_provider_wire_states_at(&"2026-06-26T00:18:30Z".to_string())
+            .unwrap()
+            .is_empty());
+        let expired = store
+            .expire_provider_wire_states_at(&"2026-06-26T00:19:00Z".to_string())
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(
+            expired[0].invalidation_reason,
+            Some(ProviderWireStateInvalidationReason::Expired)
+        );
+    }
+
+    fn provider_wire_state_key(
+        session_id: &str,
+        module_id: &str,
+        strategy_id: &str,
+    ) -> ProviderWireStateKey {
+        ProviderWireStateKey {
+            session_id: crate::SessionId::new(session_id),
+            module_id: module_id.to_string(),
+            strategy_id: strategy_id.to_string(),
+        }
+    }
+
+    struct ProviderWireStateWriteFixture<'a> {
+        key: ProviderWireStateKey,
+        profile_fingerprint: &'a str,
+        provider_fingerprint: &'a str,
+        payload_version: &'a str,
+        payload_json: serde_json::Value,
+        now: &'a str,
+        expires_at: Option<&'a str>,
+        last_wake_id: Option<&'a str>,
+    }
+
+    fn provider_wire_state_write(
+        input: ProviderWireStateWriteFixture<'_>,
+    ) -> ProviderWireStateWrite {
+        ProviderWireStateWrite {
+            key: input.key,
+            profile_fingerprint: input.profile_fingerprint.to_string(),
+            provider_fingerprint: input.provider_fingerprint.to_string(),
+            payload_version: input.payload_version.to_string(),
+            payload_json: input.payload_json,
+            now: input.now.to_string(),
+            expires_at: input.expires_at.map(ToString::to_string),
+            last_wake_id: input.last_wake_id.map(ToString::to_string),
+        }
     }
 
     fn runtime_search_fixture() -> Vec<RuntimeSearchResult> {
