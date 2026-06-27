@@ -32,7 +32,7 @@ use crate::{
     ModelProviderStatus, ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps,
     ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
     ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
-    ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
     ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
     ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
     ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
@@ -279,6 +279,93 @@ impl PostgresRuntimeCounterProofStore {
                 ],
             )
             .map_err(|error| postgres_error("create PostgreSQL profile registry record", error))?;
+        Ok(record)
+    }
+
+    pub fn update_profile_registry_record(
+        &self,
+        update: &ProfileRegistryUpdate,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        crate::validate_profile_registry_write(&update.write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL profile registry record update", error)
+        })?;
+        let existing = tx
+            .query_opt(
+                &format!(
+                    "SELECT record_json
+                     FROM {schema}.profile_registry
+                     WHERE profile_id = $1"
+                ),
+                &[&update.write.profile_id.0],
+            )
+            .map_err(|error| postgres_error("load PostgreSQL profile registry record", error))?
+            .map(|row| {
+                let record_json: String = row.get(0);
+                parse_postgres_json::<ProfileRegistryRecord>(
+                    &record_json,
+                    "profile registry record_json",
+                )
+            })
+            .transpose()?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "profile registry record {} not found",
+                        update.write.profile_id
+                    ),
+                )
+            })?;
+        if existing.revision != update.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "profile registry record {} revision mismatch: expected {}, found {}",
+                    update.write.profile_id, update.expected_revision, existing.revision
+                ),
+            ));
+        }
+        let record = ProfileRegistryRecord {
+            profile_id: update.write.profile_id.clone(),
+            lifecycle_status: update.write.lifecycle_status,
+            display_name: update.write.display_name.clone(),
+            summary: update.write.summary.clone(),
+            default_session_kind: update.write.default_session_kind.clone(),
+            agent_id: update.write.agent_id.clone(),
+            owner_id: update.write.owner_id.clone(),
+            active_runtime_settings_json: update.write.active_runtime_settings_json.clone(),
+            source_asset_refs: update.write.source_asset_refs.clone(),
+            derived_runtime_refs: update.write.derived_runtime_refs.clone(),
+            import_export: update.write.import_export.clone(),
+            revision: existing.revision + 1,
+            created_at: existing.created_at,
+            updated_at: update.write.now.clone(),
+        };
+        let record_json = to_json_text(&record)?;
+        let lifecycle_status =
+            profile_registry_lifecycle_status_as_str(record.lifecycle_status).to_string();
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.profile_registry
+                 SET lifecycle_status = $2,
+                     record_json = $3,
+                     updated_at = $4
+                 WHERE profile_id = $1"
+            ),
+            &[
+                &record.profile_id.0,
+                &lifecycle_status,
+                &record_json,
+                &record.updated_at,
+            ],
+        )
+        .map_err(|error| postgres_error("update PostgreSQL profile registry record", error))?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL profile registry record update", error)
+        })?;
         Ok(record)
     }
 

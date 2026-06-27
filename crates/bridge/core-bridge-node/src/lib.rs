@@ -50,7 +50,7 @@ use rusty_crew_core_protocol::{
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
     MessageVariantId, ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus,
-    ProfileRegistryWrite,
+    ProfileRegistryUpdate, ProfileRegistryWrite,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -433,6 +433,13 @@ impl NativeBridge {
         write: &ProfileRegistryWrite,
     ) -> CoreResult<rusty_crew_core_bridge_api::ProfileRegistryRecord> {
         self.engine()?.create_profile_registry_record(write)
+    }
+
+    pub fn update_profile_registry_record(
+        &self,
+        update: &ProfileRegistryUpdate,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ProfileRegistryRecord> {
+        self.engine()?.update_profile_registry_record(update)
     }
 
     pub fn get_profile_registry_record(
@@ -2813,6 +2820,16 @@ impl NativeBridgeBinding {
         let write = parse_json::<ProfileRegistryWrite>(&write_json, "profile registry write")?;
         let record = bridge
             .create_profile_registry_record(&write)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "profile registry record")
+    }
+
+    #[napi]
+    pub fn update_profile_registry_record_json(&self, update_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let update = parse_json::<ProfileRegistryUpdate>(&update_json, "profile registry update")?;
+        let record = bridge
+            .update_profile_registry_record(&update)
             .map_err(to_napi_error)?;
         serialize_json(&record, "profile registry record")
     }

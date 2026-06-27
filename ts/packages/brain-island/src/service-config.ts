@@ -1,12 +1,14 @@
 import {
   closeSync,
   existsSync,
+  readFileSync,
   mkdirSync,
   openSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   loadDenSuccessorGatewayConfig,
   type DenSuccessorGatewayConfig,
@@ -325,16 +327,22 @@ export function acquireRustyCrewServiceLock(
   config: RustyCrewServiceConfig,
 ): RustyCrewServiceLock {
   ensureRustyCrewServiceDirectories(config);
+  const ownerToken = randomUUID();
   let fd: number;
   try {
     fd = openSync(config.paths.lockFile, "wx", 0o640);
   } catch (error) {
     if (isNodeError(error) && error.code === "EEXIST") {
-      throw new Error(
-        `rusty-crew service lock already exists at ${config.paths.lockFile}`,
-      );
+      if (clearStaleRustyCrewServiceLock(config.paths.lockFile)) {
+        fd = openSync(config.paths.lockFile, "wx", 0o640);
+      } else {
+        throw new Error(
+          `rusty-crew service lock already exists at ${config.paths.lockFile}`,
+        );
+      }
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   let released = false;
@@ -343,6 +351,7 @@ export function acquireRustyCrewServiceLock(
     JSON.stringify(
       {
         pid: process.pid,
+        ownerToken,
         createdAt: new Date().toISOString(),
       },
       null,
@@ -356,9 +365,89 @@ export function acquireRustyCrewServiceLock(
     release() {
       if (released) return;
       released = true;
-      rmSync(config.paths.lockFile, { force: true });
+      if (lockFileBelongsToCurrentProcess(config.paths.lockFile, ownerToken)) {
+        rmSync(config.paths.lockFile, { force: true });
+      }
     },
   };
+}
+
+function clearStaleRustyCrewServiceLock(lockFile: string): boolean {
+  const lock = readServiceLockFile(lockFile);
+  if (lock === undefined) {
+    rmSync(lockFile, { force: true });
+    return true;
+  }
+  if (lock.pid === process.pid) return false;
+  if (!processIsAlive(lock.pid)) {
+    rmSync(lockFile, { force: true });
+    return true;
+  }
+  if (!processLooksLikeRustyCrewService(lock.pid)) {
+    rmSync(lockFile, { force: true });
+    return true;
+  }
+  return false;
+}
+
+function lockFileBelongsToCurrentProcess(
+  lockFile: string,
+  ownerToken: string,
+): boolean {
+  const lock = readServiceLockFile(lockFile);
+  return lock?.pid === process.pid && lock.ownerToken === ownerToken;
+}
+
+function readServiceLockFile(
+  lockFile: string,
+): { pid: number; ownerToken?: string } | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(lockFile, "utf8")) as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return undefined;
+    }
+    const record = parsed as Record<string, unknown>;
+    const pid = record.pid;
+    if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) {
+      return undefined;
+    }
+    return {
+      pid,
+      ownerToken:
+        typeof record.ownerToken === "string" ? record.ownerToken : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ESRCH") return false;
+    return true;
+  }
+}
+
+function processLooksLikeRustyCrewService(pid: number): boolean {
+  try {
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(
+      /\0/g,
+      " ",
+    );
+    return (
+      cmdline.includes("rusty-crew") &&
+      (cmdline.includes("service-host.ts") || cmdline.includes("service:start"))
+    );
+  } catch {
+    return true;
+  }
 }
 
 function resolvePath(input: string | undefined, fallback: string): string {

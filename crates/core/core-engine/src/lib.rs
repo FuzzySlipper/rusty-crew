@@ -625,6 +625,13 @@ impl CoreEngine {
         self.store.create_profile_registry_record(write)
     }
 
+    pub fn update_profile_registry_record(
+        &self,
+        update: &rusty_crew_core_protocol::ProfileRegistryUpdate,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        self.store.update_profile_registry_record(update)
+    }
+
     pub fn get_profile_registry_record(
         &self,
         profile_id: &ProfileId,

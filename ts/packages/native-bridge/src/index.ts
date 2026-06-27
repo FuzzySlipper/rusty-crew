@@ -377,6 +377,7 @@ interface NativeBridgeBinding {
   storageDiagnostics(): NativeRuntimeStorageDiagnostics;
   storageSchema(): NativeRuntimeModuleSchemaRegistryDiagnostics;
   createProfileRegistryRecordJson(writeJson: string): string;
+  updateProfileRegistryRecordJson(updateJson: string): string;
   listProfileRegistryRecordsJson(queryJson: string): string;
   getProfileRegistryRecordJson(profileId: string): string;
   upsertModelProviderJson(writeJson: string): string;
@@ -1259,6 +1260,11 @@ export interface NativeProfileRegistryWrite {
   now: string;
 }
 
+export interface NativeProfileRegistryUpdate {
+  write: NativeProfileRegistryWrite;
+  expectedRevision: number;
+}
+
 export interface NativeCreateProfileFileAssetAction {
   kind: "write_profile_json";
   profileId: string;
@@ -1475,6 +1481,9 @@ export interface NativeBridgeModule {
   createProfileRegistryRecord(
     write: NativeProfileRegistryWrite,
   ): Promise<NativeProfileRegistryRecord>;
+  updateProfileRegistryRecord(
+    update: NativeProfileRegistryUpdate,
+  ): Promise<NativeProfileRegistryRecord>;
   listProfileRegistryRecords(
     query?: NativeProfileRegistryQuery,
   ): Promise<NativeProfileRegistryRecord[]>;
@@ -1635,6 +1644,8 @@ export const nativeManifestOperationNames = [
   "remove_data_bank_scope",
   "database_size",
   "storage_schema",
+  "create_profile_registry_record",
+  "update_profile_registry_record",
   "list_profile_registry_records",
   "get_profile_registry_record",
   "upsert_model_provider",
@@ -1716,6 +1727,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     storageDiagnostics: unavailable("initialize_engine"),
     storageSchema: unavailable("initialize_engine"),
     createProfileRegistryRecord: unavailable("initialize_engine"),
+    updateProfileRegistryRecord: unavailable("initialize_engine"),
     listProfileRegistryRecords: unavailable("initialize_engine"),
     getProfileRegistryRecord: unavailable("initialize_engine"),
     upsertModelProvider: unavailable("initialize_engine"),
@@ -2439,6 +2451,14 @@ function createNativeBridgeModule(
         JSON.parse(
           binding.createProfileRegistryRecordJson(
             JSON.stringify(toRawProfileRegistryWrite(write)),
+          ),
+        ) as RawProfileRegistryRecord,
+      ),
+    updateProfileRegistryRecord: async (update) =>
+      toNativeProfileRegistryRecord(
+        JSON.parse(
+          binding.updateProfileRegistryRecordJson(
+            JSON.stringify(toRawProfileRegistryUpdate(update)),
           ),
         ) as RawProfileRegistryRecord,
       ),
@@ -3323,6 +3343,15 @@ function toRawProfileRegistryWrite(
   };
 }
 
+function toRawProfileRegistryUpdate(
+  update: NativeProfileRegistryUpdate,
+): RawProfileRegistryUpdate {
+  return {
+    write: toRawProfileRegistryWrite(update.write),
+    expected_revision: update.expectedRevision,
+  };
+}
+
 function toNativeProfileRegistryRecord(
   record: RawProfileRegistryRecord,
 ): NativeProfileRegistryRecord {
@@ -4133,6 +4162,11 @@ interface RawProfileRegistryWrite {
   derived_runtime_refs: RawProfileRegistryDerivedRuntimeRef[];
   import_export: RawProfileRegistryImportExportMetadata;
   now: string;
+}
+
+interface RawProfileRegistryUpdate {
+  write: RawProfileRegistryWrite;
+  expected_revision: number;
 }
 
 interface RawCreateProfileFileAssetAction {

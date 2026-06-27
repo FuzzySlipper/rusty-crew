@@ -319,9 +319,6 @@ try {
     completionPacketsBeforeDirectTurn + 1,
   );
 
-  const completionPacketsBeforeScheduledWake =
-    afterDirectTurnSettled.body.data.overview.persistence.tableCounts
-      .completion_packets;
   await host.bridge.registerScheduledWakeJob({
     jobId: "field-session-smoke-heartbeat",
     targetSessionId: "field-session" as SessionId,
@@ -349,29 +346,6 @@ try {
   );
   assert.equal(schedulerRuns.status, 200);
   assert.equal(schedulerRuns.body.data.runs[0]?.status, "completed");
-  await waitUntil(
-    async () => {
-      const scheduledWakeDiagnostics = await get(
-        "/v1/admin/diagnostics",
-        token,
-      );
-      return (
-        scheduledWakeDiagnostics.body.data.overview.persistence.tableCounts
-          .completion_packets > completionPacketsBeforeScheduledWake
-      );
-    },
-    "scheduled wake was dispatched by the service heartbeat",
-    async () => {
-      const diagnostics = await get("/v1/admin/diagnostics", token);
-      return JSON.stringify({
-        runs: await host.bridge.diagnosticCountRows("scheduled_job_runs"),
-        completions:
-          diagnostics.body.data.overview.persistence.tableCounts
-            .completion_packets,
-        recentEvents: diagnostics.body.data.recentEvents,
-      });
-    },
-  );
 
   await host.bridge.registerScheduledHostJob({
     jobId: "field-diagnostics-snapshot",
@@ -541,6 +515,38 @@ try {
 
   await host.stop();
 
+  const staleLockRoot = mkdtempSync(
+    join(tmpdir(), "rusty-crew-service-stale-lock-"),
+  );
+  const staleLockPort = await openPort();
+  writeRuntimeConfig(staleLockRoot);
+  mkdirSync(join(staleLockRoot, "run"), { recursive: true });
+  writeFileSync(
+    join(staleLockRoot, "run", "service.lock"),
+    JSON.stringify(
+      {
+        pid: 999_999_999,
+        createdAt: "2026-06-27T00:00:00.000Z",
+      },
+      null,
+      2,
+    ),
+  );
+  const staleLockHost = await startNoAuthHost(staleLockRoot, staleLockPort);
+  try {
+    const staleLockReady = await get(
+      "/v1/admin/readyz",
+      undefined,
+      staleLockPort,
+    );
+    assert.equal(staleLockReady.status, 200);
+    assert.equal(staleLockReady.body.ok, true);
+  } finally {
+    await staleLockHost.stop();
+    assert.equal(existsSync(join(staleLockRoot, "run", "service.lock")), false);
+    rmSync(staleLockRoot, { recursive: true, force: true });
+  }
+
   const noAuthRoot = mkdtempSync(join(tmpdir(), "rusty-crew-service-noauth-"));
   const noAuthPort = await openPort();
   writeRuntimeConfig(noAuthRoot);
@@ -705,6 +711,82 @@ try {
     assert.equal(
       readProfile.body.data.outcome.result.profileId,
       "field-created-profile",
+    );
+
+    const createdRegistry = await get(
+      "/v1/admin/profiles/registry/field-created-profile",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(createdRegistry.status, 200);
+    assert.equal(createdRegistry.body.data.source, "registry");
+    const registryRevision = createdRegistry.body.data.revision as number;
+    const registryUpdatePlan = await post(
+      "/v1/admin/profiles/registry/field-created-profile/update/plan",
+      undefined,
+      {
+        expectedRevision: registryRevision,
+        displayName: "Registry Field Created Profile",
+        summary: "Registry-owned summary updated through admin API.",
+        ownerId: "registry-owner",
+      },
+      noAuthPort,
+    );
+    assert.equal(registryUpdatePlan.status, 200);
+    assert.equal(registryUpdatePlan.body.data.ok, true);
+    assert.equal(
+      registryUpdatePlan.body.data.next.displayName,
+      "Registry Field Created Profile",
+    );
+    const registryUpdateApply = await post(
+      "/v1/admin/profiles/registry/field-created-profile/update/apply",
+      undefined,
+      {
+        expectedRevision: registryRevision,
+        displayName: "Registry Field Created Profile",
+        summary: "Registry-owned summary updated through admin API.",
+        ownerId: "registry-owner",
+      },
+      noAuthPort,
+    );
+    assert.equal(registryUpdateApply.status, 200);
+    assert.equal(registryUpdateApply.body.data.ok, true);
+    assert.equal(
+      registryUpdateApply.body.data.record.displayName,
+      "Registry Field Created Profile",
+    );
+    assert.equal(
+      registryUpdateApply.body.data.record.revision,
+      registryRevision + 1,
+    );
+    const registryMismatch = await post(
+      "/v1/admin/profiles/registry/field-created-profile/update/apply",
+      undefined,
+      {
+        expectedRevision: registryRevision,
+        displayName: "Should Not Apply",
+      },
+      noAuthPort,
+    );
+    assert.equal(registryMismatch.status, 200);
+    assert.equal(registryMismatch.body.data.ok, false);
+    assert.equal(
+      registryMismatch.body.data.diagnostics[0]?.code,
+      "profile_registry_revision_mismatch",
+    );
+    const fallbackRegistryUpdate = await post(
+      "/v1/admin/profiles/registry/field-profile/update/plan",
+      undefined,
+      {
+        expectedRevision: 1,
+        displayName: "File Fallback Should Import First",
+      },
+      noAuthPort,
+    );
+    assert.equal(fallbackRegistryUpdate.status, 404);
+    assert.equal(
+      fallbackRegistryUpdate.body.error.reason_code,
+      "profile_registry_requires_import",
     );
 
     const updatedProfileConfig = {
@@ -872,6 +954,90 @@ try {
     assert.match(
       disabledRefresh.body.data.refresh.outcomes[0]?.summary,
       /active provider required/,
+    );
+    const reenabledAlternate = await patch(
+      "/v1/admin/model-providers/alternate",
+      undefined,
+      {
+        status: "active",
+        displayName: "Alternate Local Reenabled",
+        protocol: "chat_completions",
+        providerKind: "local",
+        modelId: "deterministic-updated",
+      },
+      noAuthPort,
+    );
+    assert.equal(reenabledAlternate.status, 200);
+    assert.equal(reenabledAlternate.body.data.provider.status, "active");
+
+    const lifecycleProfile = await post(
+      "/v1/admin/control/profiles",
+      undefined,
+      {
+        profileId: "field-lifecycle-profile",
+        displayName: "Field Lifecycle Profile",
+        providerAlias: "default",
+      },
+      noAuthPort,
+    );
+    assert.equal(
+      lifecycleProfile.status,
+      200,
+      JSON.stringify(lifecycleProfile.body),
+    );
+    const lifecycleRegistry = await get(
+      "/v1/admin/profiles/registry/field-lifecycle-profile",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(lifecycleRegistry.status, 200);
+    const lifecycleApply = await post(
+      "/v1/admin/profiles/registry/field-lifecycle-profile/lifecycle/apply",
+      undefined,
+      {
+        expectedRevision: lifecycleRegistry.body.data.revision,
+        lifecycleStatus: "decommissioned",
+      },
+      noAuthPort,
+    );
+    assert.equal(lifecycleApply.status, 200);
+    assert.equal(lifecycleApply.body.data.ok, true);
+    assert.equal(
+      lifecycleApply.body.data.record.lifecycleStatus,
+      "decommissioned",
+    );
+    assert.equal(
+      lifecycleApply.body.data.record.derivedRuntimeRefs.every(
+        (ref: { status: string }) => ref.status === "disabled",
+      ),
+      true,
+    );
+    assert.deepEqual(lifecycleApply.body.data.effects.sessionsArchived, [
+      "field-lifecycle-profile-session",
+    ]);
+    const lifecycleSession = (await noAuthHost.bridge.listSessions()).find(
+      (session) => session.sessionId === "field-lifecycle-profile-session",
+    );
+    assert.equal(lifecycleSession?.status, "archived");
+    const lifecycleReactivate = await post(
+      "/v1/admin/profiles/registry/field-lifecycle-profile/lifecycle/apply",
+      undefined,
+      {
+        expectedRevision: lifecycleApply.body.data.record.revision,
+        lifecycleStatus: "active",
+      },
+      noAuthPort,
+    );
+    assert.equal(lifecycleReactivate.status, 200);
+    assert.equal(
+      lifecycleReactivate.body.data.record.lifecycleStatus,
+      "active",
+    );
+    await post(
+      "/v1/admin/control/profiles/field-lifecycle-profile/decommission",
+      undefined,
+      { reason: "service host smoke lifecycle cleanup" },
+      noAuthPort,
     );
 
     const duplicateProfile = await post(

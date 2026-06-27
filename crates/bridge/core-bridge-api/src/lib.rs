@@ -78,6 +78,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "database_size",
     "storage_schema",
     "create_profile_registry_record",
+    "update_profile_registry_record",
     "list_profile_registry_records",
     "get_profile_registry_record",
     "upsert_model_provider",

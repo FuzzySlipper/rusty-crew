@@ -45,10 +45,11 @@ use rusty_crew_core_protocol::{
     MessageSlotId, MessageVariantId, ModelProviderCredential, ModelProviderProtocol,
     ModelProviderQuery, ModelProviderRecord, ModelProviderStatus, ModelProviderWrite,
     ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
-    ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryWrite, ProjectId,
-    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
-    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
-    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryUpdate,
+    ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason, ResourceLimits, RunId,
+    SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
+    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
+    ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -552,6 +553,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.create_profile_registry_record(write),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.create_profile_registry_record(write),
+        }
+    }
+
+    pub fn update_profile_registry_record(
+        &self,
+        update: &ProfileRegistryUpdate,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.update_profile_registry_record(update),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.update_profile_registry_record(update),
         }
     }
 
@@ -3382,6 +3394,47 @@ impl CoordinationStore {
         })?;
         tx.commit()
             .map_err(|error| persistence_error("commit create profile registry record", error))?;
+        Ok(record)
+    }
+
+    pub fn update_profile_registry_record(
+        &self,
+        update: &ProfileRegistryUpdate,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        validate_profile_registry_write(&update.write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start update profile registry record", error))?;
+        let existing =
+            get_profile_registry_record(&tx, &update.write.profile_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "profile registry record {} not found",
+                        update.write.profile_id
+                    ),
+                )
+            })?;
+        if existing.revision != update.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "profile registry record {} revision mismatch: expected {}, found {}",
+                    update.write.profile_id, update.expected_revision, existing.revision
+                ),
+            ));
+        }
+        update_profile_registry_record_in_tx(&tx, update, &existing)?;
+        let record =
+            get_profile_registry_record(&tx, &update.write.profile_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "updated profile registry record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit update profile registry record", error))?;
         Ok(record)
     }
 
@@ -13005,6 +13058,48 @@ fn insert_profile_registry_record_in_tx(
         ],
     )
     .map_err(|error| persistence_error("insert profile registry record", error))?;
+    Ok(())
+}
+
+fn update_profile_registry_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    update: &ProfileRegistryUpdate,
+    existing: &ProfileRegistryRecord,
+) -> CoreResult<()> {
+    let write = &update.write;
+    let revision = existing.revision + 1;
+    tx.execute(
+        "UPDATE profile_registry
+         SET lifecycle_status = ?2,
+             display_name = ?3,
+             summary = ?4,
+             default_session_kind = ?5,
+             agent_id = ?6,
+             owner_id = ?7,
+             active_runtime_settings_json = ?8,
+             source_asset_refs_json = ?9,
+             derived_runtime_refs_json = ?10,
+             import_export_json = ?11,
+             revision = ?12,
+             updated_at = ?13
+         WHERE profile_id = ?1",
+        params![
+            write.profile_id.0.as_str(),
+            profile_registry_lifecycle_status_as_str(&write.lifecycle_status),
+            write.display_name.as_deref(),
+            write.summary.as_deref(),
+            write.default_session_kind.as_ref().map(session_kind_as_str),
+            write.agent_id.as_ref().map(|value| value.0.as_str()),
+            write.owner_id.as_deref(),
+            to_json_text(&write.active_runtime_settings_json)?,
+            to_json_text(&write.source_asset_refs)?,
+            to_json_text(&write.derived_runtime_refs)?,
+            to_json_text(&write.import_export)?,
+            revision as i64,
+            write.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("update profile registry record", error))?;
     Ok(())
 }
 

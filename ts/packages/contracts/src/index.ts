@@ -1471,6 +1471,8 @@ export const manifestOperationNames = [
   "storage_schema",
   "list_profile_registry_records",
   "get_profile_registry_record",
+  "create_profile_registry_record",
+  "update_profile_registry_record",
   "upsert_model_provider",
   "list_model_providers",
   "get_model_provider",

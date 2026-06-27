@@ -49,6 +49,9 @@ import {
   type NativeModelProviderQuery,
   type NativeModelProviderStatus,
   type NativeModelProviderWrite,
+  type NativeProfileRegistryLifecycleStatus,
+  type NativeProfileRegistryRecord,
+  type NativeProfileRegistryWrite,
 } from "@rusty-crew/native-bridge";
 import {
   McpSurfaceManager,
@@ -745,6 +748,23 @@ async function handleHttpRequest(
     );
   }
 
+  if (isProfileRegistryWriteRoute(url.pathname)) {
+    const body =
+      (request.method ?? "GET").toUpperCase() === "POST" ||
+      (request.method ?? "GET").toUpperCase() === "PATCH"
+        ? await readJsonBody(request)
+        : undefined;
+    return handleProfileRegistryWriteRequest(
+      {
+        method: request.method ?? "GET",
+        url: url.toString(),
+        body,
+        requestId: requestId(request),
+      },
+      state,
+    );
+  }
+
   if (url.pathname.startsWith("/v1/admin/memory/")) {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST"
@@ -840,6 +860,342 @@ async function handleSchedulerReadRequest(
     message: `unknown scheduler diagnostics route ${url.pathname}`,
     retryable: false,
   });
+}
+
+async function handleProfileRegistryWriteRequest(
+  request: {
+    method: string;
+    url: string;
+    body?: unknown;
+    requestId: string;
+  },
+  state: ServiceState,
+): Promise<AdminRouteResult> {
+  const method = request.method.toUpperCase();
+  if (method !== "POST" && method !== "PATCH") {
+    return failure(405, request.requestId, {
+      code: "method_not_allowed",
+      reason_code: "profile_registry_write_requires_post_or_patch",
+      message: "profile registry write routes support POST or PATCH",
+      retryable: false,
+    });
+  }
+  const route = parseProfileRegistryWriteRoute(new URL(request.url).pathname);
+  if (route === undefined) {
+    return failure(404, request.requestId, {
+      code: "not_found",
+      reason_code: "unknown_profile_registry_write_route",
+      message: "unknown profile registry write route",
+      retryable: false,
+    });
+  }
+  let plan: ProfileRegistryWritePlan;
+  try {
+    plan = await planProfileRegistryWrite(state, route, request.body);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("was not found; import file-backed profiles")
+    ) {
+      return failure(404, request.requestId, {
+        code: "not_found",
+        reason_code: "profile_registry_requires_import",
+        message: error.message,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+  if (route.mode === "plan") return successRoute(request.requestId, plan);
+  if (!plan.ok) return successRoute(request.requestId, plan);
+  const updated = await state.bridge.updateProfileRegistryRecord({
+    write: plan.nextWrite,
+    expectedRevision: plan.expectedRevision,
+  });
+  const effects =
+    route.kind === "lifecycle"
+      ? await applyProfileRegistryLifecycleEffects(state, updated)
+      : undefined;
+  return successRoute(request.requestId, {
+    ...plan,
+    applied: true,
+    record: updated,
+    effects,
+  });
+}
+
+interface ProfileRegistryWriteRoute {
+  profileId: string;
+  kind: "update" | "lifecycle";
+  mode: "plan" | "apply";
+}
+
+interface ProfileRegistryWritePlan {
+  ok: boolean;
+  profileId: string;
+  kind: "update" | "lifecycle";
+  mode: "plan" | "apply";
+  expectedRevision: number;
+  current: NativeProfileRegistryRecord;
+  next: NativeProfileRegistryRecord;
+  nextWrite: NativeProfileRegistryWrite;
+  diagnostics: Array<{
+    severity: "error" | "warning" | "info";
+    code: string;
+    path: string;
+    message: string;
+  }>;
+  implications: {
+    registryRevisionWillIncrement: true;
+    profileFilesUnchanged: true;
+    serviceConfigUnchanged: true;
+    runtimeRebuildRecommended: boolean;
+    lifecycleEffects: "none" | "archive_active_sessions_and_unregister_brain";
+  };
+}
+
+function parseProfileRegistryWriteRoute(
+  pathname: string,
+): ProfileRegistryWriteRoute | undefined {
+  const parts = pathname.split("/").filter(Boolean);
+  if (
+    parts.length !== 7 ||
+    parts[0] !== "v1" ||
+    parts[1] !== "admin" ||
+    parts[2] !== "profiles" ||
+    parts[3] !== "registry"
+  ) {
+    return undefined;
+  }
+  const kind = parts[5];
+  const mode = parts[6];
+  if (
+    (kind !== "update" && kind !== "lifecycle") ||
+    (mode !== "plan" && mode !== "apply")
+  ) {
+    return undefined;
+  }
+  return {
+    profileId: decodeURIComponent(parts[4] ?? ""),
+    kind,
+    mode,
+  };
+}
+
+async function planProfileRegistryWrite(
+  state: ServiceState,
+  route: ProfileRegistryWriteRoute,
+  body: unknown,
+): Promise<ProfileRegistryWritePlan> {
+  if (!isRecord(body)) {
+    throw new Error("profile registry write body must be an object");
+  }
+  const current = await state.bridge.getProfileRegistryRecord(route.profileId);
+  if (current === undefined) {
+    throw new Error(
+      `profile registry record ${route.profileId} was not found; import file-backed profiles before registry mutation`,
+    );
+  }
+  const expectedRevision = requiredRevision(body);
+  const diagnostics: ProfileRegistryWritePlan["diagnostics"] = [];
+  if (expectedRevision !== current.revision) {
+    diagnostics.push({
+      severity: "error",
+      code: "profile_registry_revision_mismatch",
+      path: "expectedRevision",
+      message: `expected revision ${expectedRevision}, found ${current.revision}`,
+    });
+  }
+  const next =
+    route.kind === "lifecycle"
+      ? nextProfileRegistryLifecycleRecord(current, body, state.now())
+      : nextProfileRegistryFieldRecord(current, body, state.now());
+  const nextWrite = profileRegistryRecordToWrite(next, state.now());
+  return {
+    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    profileId: route.profileId,
+    kind: route.kind,
+    mode: route.mode,
+    expectedRevision,
+    current,
+    next,
+    nextWrite,
+    diagnostics,
+    implications: {
+      registryRevisionWillIncrement: true,
+      profileFilesUnchanged: true,
+      serviceConfigUnchanged: true,
+      runtimeRebuildRecommended:
+        route.kind === "lifecycle" ||
+        JSON.stringify(current.activeRuntimeSettingsJson) !==
+          JSON.stringify(next.activeRuntimeSettingsJson) ||
+        current.defaultSessionKind !== next.defaultSessionKind ||
+        current.agentId !== next.agentId,
+      lifecycleEffects:
+        route.kind === "lifecycle" && next.lifecycleStatus !== "active"
+          ? "archive_active_sessions_and_unregister_brain"
+          : "none",
+    },
+  };
+}
+
+function nextProfileRegistryFieldRecord(
+  current: NativeProfileRegistryRecord,
+  body: Record<string, unknown>,
+  now: string,
+): NativeProfileRegistryRecord {
+  return {
+    ...current,
+    displayName: bodyFieldString(body, "displayName", current.displayName),
+    summary: bodyFieldString(body, "summary", current.summary),
+    defaultSessionKind: bodySessionKind(
+      body,
+      "defaultSessionKind",
+      current.defaultSessionKind,
+    ),
+    agentId: bodyFieldString(body, "agentId", current.agentId),
+    ownerId: bodyFieldString(body, "ownerId", current.ownerId),
+    activeRuntimeSettingsJson: Object.hasOwn(body, "activeRuntimeSettingsJson")
+      ? (body.activeRuntimeSettingsJson ?? {})
+      : current.activeRuntimeSettingsJson,
+    updatedAt: now,
+  };
+}
+
+function nextProfileRegistryLifecycleRecord(
+  current: NativeProfileRegistryRecord,
+  body: Record<string, unknown>,
+  now: string,
+): NativeProfileRegistryRecord {
+  const lifecycleStatus = profileRegistryLifecycleStatusFromBody(
+    body.lifecycleStatus ?? body.lifecycle_status,
+  );
+  return {
+    ...current,
+    lifecycleStatus,
+    derivedRuntimeRefs: current.derivedRuntimeRefs.map((ref) => ({
+      ...ref,
+      status: derivedRuntimeRefStatusForLifecycle(lifecycleStatus),
+      updatedAt: now,
+    })),
+    updatedAt: now,
+  };
+}
+
+function profileRegistryRecordToWrite(
+  record: NativeProfileRegistryRecord,
+  now: string,
+): NativeProfileRegistryWrite {
+  return {
+    profileId: record.profileId,
+    lifecycleStatus: record.lifecycleStatus,
+    displayName: record.displayName,
+    summary: record.summary,
+    defaultSessionKind: record.defaultSessionKind,
+    agentId: record.agentId,
+    ownerId: record.ownerId,
+    activeRuntimeSettingsJson: record.activeRuntimeSettingsJson ?? {},
+    sourceAssetRefs: record.sourceAssetRefs,
+    derivedRuntimeRefs: record.derivedRuntimeRefs,
+    importExport: record.importExport,
+    now,
+  };
+}
+
+async function applyProfileRegistryLifecycleEffects(
+  state: ServiceState,
+  record: NativeProfileRegistryRecord,
+): Promise<{
+  sessionsArchived: string[];
+  brainHandle: DecommissionedServiceProfile["brainHandle"];
+}> {
+  if (record.lifecycleStatus === "active") {
+    return { sessionsArchived: [], brainHandle: { action: "already_absent" } };
+  }
+  const sessions = await state.bridge.listSessions();
+  const profileSessions = sessions.filter(
+    (session) =>
+      String(session.profileId) === record.profileId &&
+      session.status !== "archived",
+  );
+  const inFlightSessionIds = profileSessions
+    .map((session) => String(session.sessionId))
+    .filter((sessionId) => state.inFlightWakes.has(sessionId as SessionId));
+  if (inFlightSessionIds.length > 0) {
+    throw new Error(
+      `profile ${record.profileId} lifecycle transition blocked by in-flight wake(s): ${inFlightSessionIds.join(", ")}`,
+    );
+  }
+  const sessionsArchived: string[] = [];
+  for (const session of profileSessions) {
+    await state.bridge.archiveSession(session.sessionId);
+    sessionsArchived.push(String(session.sessionId));
+  }
+  const brainHandle = await unregisterServiceProfileBrain(
+    state,
+    record.profileId,
+  );
+  return { sessionsArchived, brainHandle };
+}
+
+function requiredRevision(body: Record<string, unknown>): number {
+  const value = body.expectedRevision ?? body.expected_revision;
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new Error(
+      "expectedRevision is required and must be a positive integer",
+    );
+  }
+  return Number(value);
+}
+
+function bodyFieldString(
+  body: Record<string, unknown>,
+  key: string,
+  current: string | undefined,
+): string | undefined {
+  if (!Object.hasOwn(body, key)) return current;
+  const value = body[key];
+  if (value === null) return undefined;
+  if (typeof value === "string") return value.trim() ? value.trim() : undefined;
+  throw new Error(`${key} must be a string or null`);
+}
+
+function bodySessionKind(
+  body: Record<string, unknown>,
+  key: string,
+  current: "full" | "worker" | "delegated" | undefined,
+): "full" | "worker" | "delegated" | undefined {
+  if (!Object.hasOwn(body, key)) return current;
+  const value = body[key];
+  if (value === null) return undefined;
+  if (value === "full" || value === "worker" || value === "delegated") {
+    return value;
+  }
+  throw new Error(`${key} must be full, worker, delegated, or null`);
+}
+
+function profileRegistryLifecycleStatusFromBody(
+  value: unknown,
+): NativeProfileRegistryLifecycleStatus {
+  if (
+    value === "active" ||
+    value === "paused" ||
+    value === "decommissioned" ||
+    value === "archived"
+  ) {
+    return value;
+  }
+  throw new Error(
+    "lifecycleStatus must be active, paused, decommissioned, or archived",
+  );
+}
+
+function derivedRuntimeRefStatusForLifecycle(
+  status: NativeProfileRegistryLifecycleStatus,
+): string {
+  if (status === "active") return "active";
+  if (status === "paused") return "paused";
+  return "disabled";
 }
 
 async function handleModelProviderAdminRequest(
@@ -1332,6 +1688,16 @@ function isProfileRegistryAdminRoute(pathname: string): boolean {
     pathname === "/v1/admin/diagnostics/profiles" ||
     pathname === "/v1/admin/profiles/registry" ||
     pathname.startsWith("/v1/admin/profiles/registry/")
+  );
+}
+
+function isProfileRegistryWriteRoute(pathname: string): boolean {
+  return (
+    pathname.startsWith("/v1/admin/profiles/registry/") &&
+    (pathname.endsWith("/update/plan") ||
+      pathname.endsWith("/update/apply") ||
+      pathname.endsWith("/lifecycle/plan") ||
+      pathname.endsWith("/lifecycle/apply"))
   );
 }
 

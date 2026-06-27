@@ -304,6 +304,12 @@ pub struct ProfileRegistryWrite {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryUpdate {
+    pub write: ProfileRegistryWrite,
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileRegistryLifecycleUpdate {
     pub profile_id: ProfileId,
     pub lifecycle_status: ProfileRegistryLifecycleStatus,
