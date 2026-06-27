@@ -35,6 +35,8 @@ export interface AdminProfileRegistryRecord {
   defaultSessionKind?: string;
   agentId?: string;
   ownerId?: string;
+  promptSoulMarkdown?: string;
+  promptMemoryMarkdown?: string;
   revision?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -164,6 +166,8 @@ async function registryAdminRecord(
     defaultSessionKind: record.defaultSessionKind,
     agentId: record.agentId,
     ownerId: record.ownerId,
+    promptSoulMarkdown: record.promptSoulMarkdown,
+    promptMemoryMarkdown: record.promptMemoryMarkdown,
     revision: record.revision,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -198,6 +202,8 @@ async function fallbackAdminRecord(
     defaultSessionKind: plan.registryWrite.defaultSessionKind,
     agentId: plan.registryWrite.agentId,
     ownerId: plan.registryWrite.ownerId,
+    promptSoulMarkdown: plan.registryWrite.promptSoulMarkdown,
+    promptMemoryMarkdown: plan.registryWrite.promptMemoryMarkdown,
     importedFrom: plan.registryWrite.importExport.importedFrom,
     importedAt: plan.registryWrite.importExport.importedAt,
     activeRuntimeRefs: plan.registryWrite.derivedRuntimeRefs,

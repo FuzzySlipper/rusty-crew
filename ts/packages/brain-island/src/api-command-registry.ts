@@ -33,6 +33,7 @@ export type ApiCapabilityScope =
   | "delegation"
   | "mcp"
   | "config"
+  | "prompt"
   | "governance"
   | "maintenance"
   | "memory"
@@ -996,6 +997,22 @@ export const API_CAPABILITIES = [
     "Apply a DB-backed profile lifecycle transition and run safe runtime effects.",
     "admin",
     ["profile", "config"],
+  ),
+  mutationCapability(
+    "admin.profiles.registry.prompt_plan",
+    "POST",
+    "/v1/admin/profiles/registry/{profile_id}/prompt/plan",
+    "Plan DB-backed profile soul and memory prompt text changes.",
+    "admin",
+    ["profile", "config", "prompt"],
+  ),
+  mutationCapability(
+    "admin.profiles.registry.prompt_apply",
+    "POST",
+    "/v1/admin/profiles/registry/{profile_id}/prompt/apply",
+    "Apply DB-backed profile soul and memory prompt text changes with revision checking.",
+    "admin",
+    ["profile", "config", "prompt"],
   ),
   readCapability(
     "admin.storage.query_catalog",

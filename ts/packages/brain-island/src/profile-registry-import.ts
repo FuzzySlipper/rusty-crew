@@ -54,6 +54,8 @@ export interface ProfileRegistryWriteDraft {
   defaultSessionKind?: SessionKind;
   agentId?: string;
   ownerId?: string;
+  promptSoulMarkdown?: string;
+  promptMemoryMarkdown?: string;
   activeRuntimeSettingsJson: Record<string, unknown>;
   sourceAssetRefs: ProfileRegistrySourceAssetRefDraft[];
   derivedRuntimeRefs: ProfileRegistryDerivedRuntimeRefDraft[];
@@ -123,6 +125,8 @@ export async function buildProfileRegistryImportPlan(
       summary: profileImportSummary(source),
       defaultSessionKind: "full",
       ownerId: source.profile.sessionDefaults?.ownerId,
+      promptSoulMarkdown: source.profile.prompt?.soulMarkdown,
+      promptMemoryMarkdown: source.profile.prompt?.memoryMarkdown,
       activeRuntimeSettingsJson: activeRuntimeSettingsJson(source.profile),
       sourceAssetRefs,
       derivedRuntimeRefs:

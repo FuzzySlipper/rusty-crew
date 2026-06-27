@@ -689,6 +689,8 @@ export interface NativeProfileRegistryRecord {
   defaultSessionKind?: "full" | "worker" | "delegated";
   agentId?: string;
   ownerId?: string;
+  promptSoulMarkdown?: string;
+  promptMemoryMarkdown?: string;
   activeRuntimeSettingsJson: unknown;
   sourceAssetRefs: NativeProfileRegistrySourceAssetRef[];
   derivedRuntimeRefs: NativeProfileRegistryDerivedRuntimeRef[];
@@ -1303,6 +1305,8 @@ export interface NativeProfileRegistryWrite {
   defaultSessionKind?: "full" | "worker" | "delegated";
   agentId?: string;
   ownerId?: string;
+  promptSoulMarkdown?: string;
+  promptMemoryMarkdown?: string;
   activeRuntimeSettingsJson: unknown;
   sourceAssetRefs: NativeProfileRegistrySourceAssetRef[];
   derivedRuntimeRefs: NativeProfileRegistryDerivedRuntimeRef[];
@@ -3580,6 +3584,8 @@ function toNativeProfileRegistryWrite(
     defaultSessionKind: write.default_session_kind ?? undefined,
     agentId: write.agent_id ?? undefined,
     ownerId: write.owner_id ?? undefined,
+    promptSoulMarkdown: write.prompt_soul_markdown ?? undefined,
+    promptMemoryMarkdown: write.prompt_memory_markdown ?? undefined,
     activeRuntimeSettingsJson: write.active_runtime_settings_json,
     sourceAssetRefs: write.source_asset_refs.map(
       toNativeProfileRegistryAssetRef,
@@ -3624,6 +3630,8 @@ function toRawProfileRegistryWrite(
     default_session_kind: write.defaultSessionKind,
     agent_id: write.agentId,
     owner_id: write.ownerId,
+    prompt_soul_markdown: write.promptSoulMarkdown,
+    prompt_memory_markdown: write.promptMemoryMarkdown,
     active_runtime_settings_json: write.activeRuntimeSettingsJson,
     source_asset_refs: write.sourceAssetRefs.map(toRawProfileRegistryAssetRef),
     derived_runtime_refs: write.derivedRuntimeRefs.map(
@@ -3654,6 +3662,8 @@ function toNativeProfileRegistryRecord(
     defaultSessionKind: record.default_session_kind ?? undefined,
     agentId: record.agent_id ?? undefined,
     ownerId: record.owner_id ?? undefined,
+    promptSoulMarkdown: record.prompt_soul_markdown ?? undefined,
+    promptMemoryMarkdown: record.prompt_memory_markdown ?? undefined,
     activeRuntimeSettingsJson: record.active_runtime_settings_json,
     sourceAssetRefs: record.source_asset_refs.map(
       toNativeProfileRegistryAssetRef,
@@ -4448,6 +4458,8 @@ interface RawProfileRegistryWrite {
   default_session_kind?: "full" | "worker" | "delegated";
   agent_id?: string;
   owner_id?: string;
+  prompt_soul_markdown?: string;
+  prompt_memory_markdown?: string;
   active_runtime_settings_json: unknown;
   source_asset_refs: RawProfileRegistrySourceAssetRef[];
   derived_runtime_refs: RawProfileRegistryDerivedRuntimeRef[];
@@ -4521,6 +4533,8 @@ interface RawProfileRegistryRecord {
   default_session_kind?: "full" | "worker" | "delegated" | null;
   agent_id?: string | null;
   owner_id?: string | null;
+  prompt_soul_markdown?: string | null;
+  prompt_memory_markdown?: string | null;
   active_runtime_settings_json: unknown;
   source_asset_refs: RawProfileRegistrySourceAssetRef[];
   derived_runtime_refs: RawProfileRegistryDerivedRuntimeRef[];

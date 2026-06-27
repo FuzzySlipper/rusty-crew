@@ -183,6 +183,14 @@ backgroundReview:
     "owner:den-k8plus:rusty-crew-runner",
   );
   assert.equal(
+    runnerPlan.registryWrite.promptSoulMarkdown,
+    "You are Rusty Crew Runner.\n\nHandle implementation work.",
+  );
+  assert.equal(
+    runnerPlan.registryWrite.promptMemoryMarkdown,
+    "Piper is the project lead.",
+  );
+  assert.equal(
     runnerPlan.registryWrite.activeRuntimeSettingsJson.modelConfig &&
       typeof runnerPlan.registryWrite.activeRuntimeSettingsJson.modelConfig,
     "object",

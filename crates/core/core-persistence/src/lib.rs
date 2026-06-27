@@ -60,7 +60,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 26;
+const CURRENT_SCHEMA_VERSION: i64 = 27;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -213,6 +213,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 26,
         description: "add roleplay lore layer and recall scaffolding",
         apply: migrate_v26_add_roleplay_lore_layers,
+    },
+    SchemaMigration {
+        version: 27,
+        description: "add DB-backed profile prompt text",
+        apply: migrate_v27_add_profile_registry_prompt_text,
     },
 ];
 
@@ -8712,6 +8717,8 @@ fn migrate_v22_add_profile_registry(tx: &rusqlite::Transaction<'_>) -> CoreResul
                 default_session_kind TEXT,
                 agent_id TEXT,
                 owner_id TEXT,
+                prompt_soul_markdown TEXT,
+                prompt_memory_markdown TEXT,
                 active_runtime_settings_json TEXT NOT NULL,
                 source_asset_refs_json TEXT NOT NULL,
                 derived_runtime_refs_json TEXT NOT NULL,
@@ -8727,6 +8734,11 @@ fn migrate_v22_add_profile_registry(tx: &rusqlite::Transaction<'_>) -> CoreResul
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 22", error))
+}
+
+fn migrate_v27_add_profile_registry_prompt_text(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    add_missing_column_tx(tx, "profile_registry", "prompt_soul_markdown", "TEXT")?;
+    add_missing_column_tx(tx, "profile_registry", "prompt_memory_markdown", "TEXT")
 }
 
 fn migrate_v23_add_session_memory_records(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -14354,6 +14366,8 @@ fn query_profile_registry_records(
                 default_session_kind,
                 agent_id,
                 owner_id,
+                prompt_soul_markdown,
+                prompt_memory_markdown,
                 active_runtime_settings_json,
                 source_asset_refs_json,
                 derived_runtime_refs_json,
@@ -14390,6 +14404,8 @@ fn get_profile_registry_record(
             default_session_kind,
             agent_id,
             owner_id,
+            prompt_soul_markdown,
+            prompt_memory_markdown,
             active_runtime_settings_json,
             source_asset_refs_json,
             derived_runtime_refs_json,
@@ -14419,6 +14435,8 @@ fn insert_profile_registry_record_in_tx(
             default_session_kind,
             agent_id,
             owner_id,
+            prompt_soul_markdown,
+            prompt_memory_markdown,
             active_runtime_settings_json,
             source_asset_refs_json,
             derived_runtime_refs_json,
@@ -14426,7 +14444,7 @@ fn insert_profile_registry_record_in_tx(
             revision,
             created_at,
             updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?12)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14)",
         params![
             write.profile_id.0.as_str(),
             profile_registry_lifecycle_status_as_str(&write.lifecycle_status),
@@ -14435,6 +14453,8 @@ fn insert_profile_registry_record_in_tx(
             write.default_session_kind.as_ref().map(session_kind_as_str),
             write.agent_id.as_ref().map(|value| value.0.as_str()),
             write.owner_id.as_deref(),
+            write.prompt_soul_markdown.as_deref(),
+            write.prompt_memory_markdown.as_deref(),
             to_json_text(&write.active_runtime_settings_json)?,
             to_json_text(&write.source_asset_refs)?,
             to_json_text(&write.derived_runtime_refs)?,
@@ -14455,18 +14475,20 @@ fn update_profile_registry_record_in_tx(
     let revision = existing.revision + 1;
     tx.execute(
         "UPDATE profile_registry
-         SET lifecycle_status = ?2,
-             display_name = ?3,
-             summary = ?4,
-             default_session_kind = ?5,
-             agent_id = ?6,
-             owner_id = ?7,
-             active_runtime_settings_json = ?8,
-             source_asset_refs_json = ?9,
-             derived_runtime_refs_json = ?10,
-             import_export_json = ?11,
-             revision = ?12,
-             updated_at = ?13
+             SET lifecycle_status = ?2,
+                 display_name = ?3,
+                 summary = ?4,
+                 default_session_kind = ?5,
+                 agent_id = ?6,
+                 owner_id = ?7,
+                 prompt_soul_markdown = ?8,
+                 prompt_memory_markdown = ?9,
+                 active_runtime_settings_json = ?10,
+                 source_asset_refs_json = ?11,
+                 derived_runtime_refs_json = ?12,
+                 import_export_json = ?13,
+                 revision = ?14,
+                 updated_at = ?15
          WHERE profile_id = ?1",
         params![
             write.profile_id.0.as_str(),
@@ -14476,6 +14498,8 @@ fn update_profile_registry_record_in_tx(
             write.default_session_kind.as_ref().map(session_kind_as_str),
             write.agent_id.as_ref().map(|value| value.0.as_str()),
             write.owner_id.as_deref(),
+            write.prompt_soul_markdown.as_deref(),
+            write.prompt_memory_markdown.as_deref(),
             to_json_text(&write.active_runtime_settings_json)?,
             to_json_text(&write.source_asset_refs)?,
             to_json_text(&write.derived_runtime_refs)?,
@@ -14515,10 +14539,10 @@ fn row_to_profile_registry_record(
 ) -> rusqlite::Result<ProfileRegistryRecord> {
     let lifecycle_status: String = row.get(1)?;
     let default_session_kind: Option<String> = row.get(4)?;
-    let active_runtime_settings_json: String = row.get(7)?;
-    let source_asset_refs_json: String = row.get(8)?;
-    let derived_runtime_refs_json: String = row.get(9)?;
-    let import_export_json: String = row.get(10)?;
+    let active_runtime_settings_json: String = row.get(9)?;
+    let source_asset_refs_json: String = row.get(10)?;
+    let derived_runtime_refs_json: String = row.get(11)?;
+    let import_export_json: String = row.get(12)?;
     Ok(ProfileRegistryRecord {
         profile_id: ProfileId::new(row.get::<_, String>(0)?),
         lifecycle_status: profile_registry_lifecycle_status_from_str(&lifecycle_status)?,
@@ -14530,14 +14554,16 @@ fn row_to_profile_registry_record(
             .transpose()?,
         agent_id: row.get::<_, Option<String>>(5)?.map(AgentId::new),
         owner_id: row.get(6)?,
+        prompt_soul_markdown: row.get(7)?,
+        prompt_memory_markdown: row.get(8)?,
         active_runtime_settings_json: from_json_text(&active_runtime_settings_json)
             .map_err(to_sql_error)?,
         source_asset_refs: from_json_text(&source_asset_refs_json).map_err(to_sql_error)?,
         derived_runtime_refs: from_json_text(&derived_runtime_refs_json).map_err(to_sql_error)?,
         import_export: from_json_text(&import_export_json).map_err(to_sql_error)?,
-        revision: row.get::<_, i64>(11)? as u64,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        revision: row.get::<_, i64>(13)? as u64,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
@@ -22573,6 +22599,14 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.source_asset_refs, created.source_asset_refs);
         assert_eq!(loaded.import_export.imported_from.as_deref(), Some("file"));
+        assert_eq!(
+            loaded.prompt_soul_markdown.as_deref(),
+            Some("You are a registry-backed runner.")
+        );
+        assert_eq!(
+            loaded.prompt_memory_markdown.as_deref(),
+            Some("Static deployment-safe memory.")
+        );
 
         let duplicate = store
             .create_profile_registry_record(&profile_registry_write("runner-profile"))
@@ -26324,6 +26358,8 @@ mod tests {
             default_session_kind: Some(SessionKind::Full),
             agent_id: Some(AgentId::new("runner-agent")),
             owner_id: Some("operator".to_string()),
+            prompt_soul_markdown: Some("You are a registry-backed runner.".to_string()),
+            prompt_memory_markdown: Some("Static deployment-safe memory.".to_string()),
             active_runtime_settings_json: json!({
                 "brainModule": "pi_agent_core",
                 "model": "gpt"

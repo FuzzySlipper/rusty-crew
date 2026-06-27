@@ -280,9 +280,10 @@ The official create-profile path should become a Rust-validated plan:
 4. TS writes the profile file/directory and runtime config atomically.
 5. TS triggers runtime reload/apply.
 
-Rust should not write `soul.md` or `memory.md`; future frontends should edit
-those through profile-file APIs. Rust should validate only the runtime-plumbing
-parts that must stay consistent.
+Rust should not write active `soul.md` or `memory.md` files. Frontends should
+edit active profile soul/memory text through DB-backed registry prompt APIs;
+file prompt assets are import/export compatibility material. Rust should
+validate only the runtime-plumbing parts that must stay consistent.
 
 ## Validation Rules
 

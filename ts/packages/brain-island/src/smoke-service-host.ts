@@ -759,6 +759,26 @@ try {
       registryUpdateApply.body.data.record.revision,
       registryRevision + 1,
     );
+    const registryPromptApply = await post(
+      "/v1/admin/profiles/registry/field-created-profile/prompt/apply",
+      undefined,
+      {
+        expectedRevision: registryRevision + 1,
+        soulMarkdown: "Registry DB soul edited through Rusty View.",
+        memoryMarkdown: "Registry DB memory edited through Rusty View.",
+      },
+      noAuthPort,
+    );
+    assert.equal(registryPromptApply.status, 200);
+    assert.equal(registryPromptApply.body.data.ok, true);
+    assert.equal(
+      registryPromptApply.body.data.record.promptSoulMarkdown,
+      "Registry DB soul edited through Rusty View.",
+    );
+    assert.equal(
+      registryPromptApply.body.data.record.promptMemoryMarkdown,
+      "Registry DB memory edited through Rusty View.",
+    );
     const registryMismatch = await post(
       "/v1/admin/profiles/registry/field-created-profile/update/apply",
       undefined,

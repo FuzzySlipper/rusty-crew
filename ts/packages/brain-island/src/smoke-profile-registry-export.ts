@@ -51,6 +51,8 @@ modelConfig:
       displayName: "Registered",
       defaultSessionKind: "full",
       agentId: "registered",
+      promptSoulMarkdown: "Registered DB soul text.",
+      promptMemoryMarkdown: "Registered DB memory text.",
       activeRuntimeSettingsJson: {
         modelConfig: { provider: "den-router" },
         apiKey: "must-not-export",
@@ -114,18 +116,19 @@ modelConfig:
   assert.equal(registryPlan.bundleRootName, "registered-profile-bundle");
   assert(registryPlan.activeDbStateEntries.includes("registry.json"));
   assert(registryPlan.activeDbStateEntries.includes("runtime-plan.json"));
-  assert(registryPlan.fileAssetEntries.includes("soul.md"));
+  assert(registryPlan.activeDbStateEntries.includes("soul.md"));
+  assert(!registryPlan.fileAssetEntries.includes("soul.md"));
   assert(
     registryPlan.optionalEntries.includes("memory-spaces/profile_dense.json"),
   );
   assert.equal(
     registryPlan.entries.find((entry) => entry.targetPath === "soul.md")
-      ?.originPath,
-    registeredSoulPath,
+      ?.contentText,
+    "Registered DB soul text.",
   );
   assert.equal(
-    JSON.stringify(registryPlan).includes("Registered hidden soul text"),
-    false,
+    JSON.stringify(registryPlan).includes("Registered DB soul text."),
+    true,
   );
   assert.equal(JSON.stringify(registryPlan).includes("must-not-export"), false);
 

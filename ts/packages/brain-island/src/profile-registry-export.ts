@@ -13,6 +13,7 @@ export type ProfileBundleExportSource =
 
 export type ProfileBundleExportEntryKind =
   | "generated_profile_yaml"
+  | "generated_prompt_markdown"
   | "copy_file_asset"
   | "generated_registry_json"
   | "generated_runtime_plan_json"
@@ -29,6 +30,7 @@ export interface ProfileBundleExportEntry {
   currentContentHash?: string;
   assetStatus?: string;
   contentJson?: unknown;
+  contentText?: string;
   notes: string[];
 }
 
@@ -67,6 +69,7 @@ export function buildProfileBundleExportPlan(
 
   const entries = [
     generatedProfileYaml(record),
+    ...generatedPromptMarkdownEntries(record),
     ...fileAssetEntries(record),
     generatedRegistryJson(record),
     generatedRuntimePlanJson(record),
@@ -131,28 +134,60 @@ function generatedProfileYaml(
     }),
     notes: [
       record.source === "registry"
-        ? "generated from DB-backed registry state; prompt assets remain separate file entries"
+        ? "generated from DB-backed registry state; prompt text is DB-backed and exported as markdown entries"
         : "generated from file-backed fallback projection; import into registry before treating this as active DB state",
     ],
   };
 }
 
+function generatedPromptMarkdownEntries(
+  record: AdminProfileRegistryRecord,
+): ProfileBundleExportEntry[] {
+  if (record.source !== "registry") return [];
+  const entries: ProfileBundleExportEntry[] = [];
+  if (record.promptSoulMarkdown !== undefined) {
+    entries.push({
+      targetPath: "soul.md",
+      kind: "generated_prompt_markdown",
+      source: "registry_active_state",
+      contentText: record.promptSoulMarkdown,
+      notes: ["generated from DB-backed profile registry prompt soul text"],
+    });
+  }
+  if (record.promptMemoryMarkdown !== undefined) {
+    entries.push({
+      targetPath: "memory.md",
+      kind: "generated_prompt_markdown",
+      source: "registry_active_state",
+      contentText: record.promptMemoryMarkdown,
+      notes: ["generated from DB-backed profile registry prompt memory text"],
+    });
+  }
+  return entries;
+}
+
 function fileAssetEntries(
   record: AdminProfileRegistryRecord,
 ): ProfileBundleExportEntry[] {
-  return record.sourceAssetStatuses.map((asset) => ({
-    targetPath: bundleAssetTargetPath(asset.assetKind, asset.path),
-    kind: "copy_file_asset",
-    source: "file_asset",
-    originPath: asset.path,
-    originAssetKind: asset.assetKind,
-    contentHash: asset.contentHash,
-    currentContentHash: asset.currentContentHash,
-    assetStatus: asset.status,
-    notes: [
-      "planned as a file copy; raw file content is not embedded in the export plan",
-    ],
-  }));
+  return record.sourceAssetStatuses
+    .filter(
+      (asset) =>
+        record.source !== "registry" ||
+        (asset.assetKind !== "soul_md" && asset.assetKind !== "memory_md"),
+    )
+    .map((asset) => ({
+      targetPath: bundleAssetTargetPath(asset.assetKind, asset.path),
+      kind: "copy_file_asset",
+      source: "file_asset",
+      originPath: asset.path,
+      originAssetKind: asset.assetKind,
+      contentHash: asset.contentHash,
+      currentContentHash: asset.currentContentHash,
+      assetStatus: asset.status,
+      notes: [
+        "planned as a file copy; raw file content is not embedded in the export plan",
+      ],
+    }));
 }
 
 function generatedRegistryJson(
@@ -174,6 +209,10 @@ function generatedRegistryJson(
       defaultSessionKind: record.defaultSessionKind,
       agentId: record.agentId,
       ownerId: record.ownerId,
+      promptSoulMarkdown:
+        record.source === "registry" ? record.promptSoulMarkdown : undefined,
+      promptMemoryMarkdown:
+        record.source === "registry" ? record.promptMemoryMarkdown : undefined,
       revision: record.revision,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -183,7 +222,7 @@ function generatedRegistryJson(
       sourceAssetRefs: record.sourceAssetRefs,
     }),
     notes: [
-      "contains safe registry metadata and asset references, not raw prompt text or secret-bearing runtime settings",
+      "contains registry metadata, prompt text, and asset references; secret-bearing runtime settings are excluded",
     ],
   };
 }

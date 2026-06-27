@@ -926,14 +926,14 @@ async function handleProfileRegistryWriteRequest(
 
 interface ProfileRegistryWriteRoute {
   profileId: string;
-  kind: "update" | "lifecycle";
+  kind: "update" | "lifecycle" | "prompt";
   mode: "plan" | "apply";
 }
 
 interface ProfileRegistryWritePlan {
   ok: boolean;
   profileId: string;
-  kind: "update" | "lifecycle";
+  kind: "update" | "lifecycle" | "prompt";
   mode: "plan" | "apply";
   expectedRevision: number;
   current: NativeProfileRegistryRecord;
@@ -970,7 +970,7 @@ function parseProfileRegistryWriteRoute(
   const kind = parts[5];
   const mode = parts[6];
   if (
-    (kind !== "update" && kind !== "lifecycle") ||
+    (kind !== "update" && kind !== "lifecycle" && kind !== "prompt") ||
     (mode !== "plan" && mode !== "apply")
   ) {
     return undefined;
@@ -1009,7 +1009,9 @@ async function planProfileRegistryWrite(
   const next =
     route.kind === "lifecycle"
       ? nextProfileRegistryLifecycleRecord(current, body, state.now())
-      : nextProfileRegistryFieldRecord(current, body, state.now());
+      : route.kind === "prompt"
+        ? nextProfileRegistryPromptRecord(current, body, state.now())
+        : nextProfileRegistryFieldRecord(current, body, state.now());
   const nextWrite = profileRegistryRecordToWrite(next, state.now());
   return {
     ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
@@ -1030,7 +1032,9 @@ async function planProfileRegistryWrite(
         JSON.stringify(current.activeRuntimeSettingsJson) !==
           JSON.stringify(next.activeRuntimeSettingsJson) ||
         current.defaultSessionKind !== next.defaultSessionKind ||
-        current.agentId !== next.agentId,
+        current.agentId !== next.agentId ||
+        current.promptSoulMarkdown !== next.promptSoulMarkdown ||
+        current.promptMemoryMarkdown !== next.promptMemoryMarkdown,
       lifecycleEffects:
         route.kind === "lifecycle" && next.lifecycleStatus !== "active"
           ? "archive_active_sessions_and_unregister_brain"
@@ -1058,6 +1062,29 @@ function nextProfileRegistryFieldRecord(
     activeRuntimeSettingsJson: Object.hasOwn(body, "activeRuntimeSettingsJson")
       ? (body.activeRuntimeSettingsJson ?? {})
       : current.activeRuntimeSettingsJson,
+    updatedAt: now,
+  };
+}
+
+function nextProfileRegistryPromptRecord(
+  current: NativeProfileRegistryRecord,
+  body: Record<string, unknown>,
+  now: string,
+): NativeProfileRegistryRecord {
+  return {
+    ...current,
+    promptSoulMarkdown: bodyMarkdownField(
+      body,
+      "soulMarkdown",
+      "promptSoulMarkdown",
+      current.promptSoulMarkdown,
+    ),
+    promptMemoryMarkdown: bodyMarkdownField(
+      body,
+      "memoryMarkdown",
+      "promptMemoryMarkdown",
+      current.promptMemoryMarkdown,
+    ),
     updatedAt: now,
   };
 }
@@ -1094,6 +1121,8 @@ function profileRegistryRecordToWrite(
     defaultSessionKind: record.defaultSessionKind,
     agentId: record.agentId,
     ownerId: record.ownerId,
+    promptSoulMarkdown: record.promptSoulMarkdown,
+    promptMemoryMarkdown: record.promptMemoryMarkdown,
     activeRuntimeSettingsJson: record.activeRuntimeSettingsJson ?? {},
     sourceAssetRefs: record.sourceAssetRefs,
     derivedRuntimeRefs: record.derivedRuntimeRefs,
@@ -1158,6 +1187,24 @@ function bodyFieldString(
   if (value === null) return undefined;
   if (typeof value === "string") return value.trim() ? value.trim() : undefined;
   throw new Error(`${key} must be a string or null`);
+}
+
+function bodyMarkdownField(
+  body: Record<string, unknown>,
+  camelKey: string,
+  registryKey: string,
+  current: string | undefined,
+): string | undefined {
+  const key = Object.hasOwn(body, camelKey)
+    ? camelKey
+    : Object.hasOwn(body, registryKey)
+      ? registryKey
+      : undefined;
+  if (key === undefined) return current;
+  const value = body[key];
+  if (value === null) return undefined;
+  if (typeof value === "string") return value;
+  throw new Error(`${camelKey} must be a string or null`);
 }
 
 function bodySessionKind(
@@ -1697,7 +1744,9 @@ function isProfileRegistryWriteRoute(pathname: string): boolean {
     (pathname.endsWith("/update/plan") ||
       pathname.endsWith("/update/apply") ||
       pathname.endsWith("/lifecycle/plan") ||
-      pathname.endsWith("/lifecycle/apply"))
+      pathname.endsWith("/lifecycle/apply") ||
+      pathname.endsWith("/prompt/plan") ||
+      pathname.endsWith("/prompt/apply"))
   );
 }
 
@@ -3801,11 +3850,31 @@ async function loadRuntimeConfigProfiles(
   }
   const profiles: ProfileConfig[] = [];
   for (const profileId of profileIds) {
-    profiles.push(
-      await loadProfileConfig(state.runtimeConfig.profilesDir, profileId),
-    );
+    profiles.push(await loadProfileConfigWithRegistryPrompt(state, profileId));
   }
   return profiles;
+}
+
+async function loadProfileConfigWithRegistryPrompt(
+  state: ServiceState,
+  profileId: ProfileId,
+): Promise<ProfileConfig> {
+  const profile = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
+  const record = await state.bridge
+    .getProfileRegistryRecord(String(profileId))
+    .catch(() => undefined);
+  if (record === undefined) return profile;
+  return {
+    ...profile,
+    prompt: {
+      ...(profile.prompt ?? {}),
+      soulMarkdown: record.promptSoulMarkdown,
+      memoryMarkdown: record.promptMemoryMarkdown,
+    },
+  };
 }
 
 function safeProfileConfigPath(
@@ -4056,7 +4125,7 @@ async function loadRuntimeConfigProfilesReplacing(
       continue;
     }
     profiles.push(
-      await loadProfileConfig(state.runtimeConfig.profilesDir, candidateId),
+      await loadProfileConfigWithRegistryPrompt(state, candidateId),
     );
   }
   return profiles;

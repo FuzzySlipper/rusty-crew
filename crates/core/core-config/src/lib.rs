@@ -800,6 +800,8 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         default_session_kind: Some(runtime_session.kind.clone()),
         agent_id: Some(runtime_session.agent_id.clone()),
         owner_id: runtime_session.owner_id.clone(),
+        prompt_soul_markdown: None,
+        prompt_memory_markdown: None,
         active_runtime_settings_json: create_profile_runtime_settings_json(
             &provider_alias,
             &brain,

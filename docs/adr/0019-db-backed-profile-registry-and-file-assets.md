@@ -24,11 +24,14 @@ inspect and export prompts, skills, and profile templates.
 ## Decision
 
 Rusty Crew will move toward a DB-backed active profile registry while keeping
-file-backed profile assets.
+file-backed profile assets as import/export provenance and compatibility
+material.
 
-The DB-backed registry is authoritative for active runtime profile state. File
-assets remain authoritative for human-authored prompt material and reusable
-templates unless explicitly imported into the registry.
+The DB-backed registry is authoritative for active runtime profile state,
+including human-authored static prompt material (`soul.md` and `memory.md`).
+File assets remain useful as starter/import material, backups, and reusable
+templates, but active deployments should not depend on a mixed file/DB prompt
+source.
 
 The service must provide import/export paths in both directions:
 
@@ -51,7 +54,8 @@ Current file-backed profile config owns or implies:
 - runtime turn/resource defaults;
 - tool policy;
 - prompt fragments;
-- `soul.md` and `memory.md` static prompt text;
+- `soul.md` and `memory.md` static prompt text, imported into DB-backed prompt
+  fields for active profiles;
 - skill selection and profile skill roots;
 - MCP config defaults;
 - background review config;
@@ -164,16 +168,10 @@ skills/               # optional profile-local skills
 README.md             # optional human notes
 ```
 
-The DB registry may reference an asset bundle by path or content fingerprint.
-When a GUI edits prompt text, the API should make clear whether the change is:
-
-- updating a DB-managed prompt override;
-- updating the referenced file asset;
-- creating a new exported asset snapshot.
-
-V1 should prefer preserving file assets and storing only references plus
-runtime state in DB. If later UI editing needs DB prompt overrides, add them as
-explicit override fields with export support.
+The DB registry may reference an asset bundle by path or content fingerprint for
+provenance. When a GUI edits prompt text, it updates DB-managed prompt fields
+through explicit registry prompt APIs. Exports materialize those fields back to
+`soul.md` and `memory.md` entries for backup and review.
 
 ## Import Model
 
@@ -198,7 +196,7 @@ Export materializes registry state and assets for backup/review.
 Export should produce:
 
 - `profile.yaml` with stable registry/runtime fields;
-- `soul.md` and `memory.md` from referenced assets or explicit DB overrides;
+- `soul.md` and `memory.md` generated from DB-backed registry prompt fields;
 - skill refs or bundled profile-local skills;
 - `registry.json` for fields that are not natural prompt/template config;
 - optional `runtime-plan.json` showing derived brain/session/binding records;
@@ -243,7 +241,7 @@ Rusty View should use official APIs:
 - list profiles from the registry;
 - create profile with required identity plus optional template/source bundle;
 - edit registry-owned fields through plan/apply endpoints;
-- edit prompt assets through explicit asset APIs;
+- edit profile soul/memory prompt text through explicit registry prompt APIs;
 - preview runtime graph impact before applying changes;
 - trigger config/runtime refresh/rebuild through existing guarded controls;
 - export profile bundles for backup/review.
@@ -302,7 +300,8 @@ Positive:
 - GUI-created profiles stop depending on fragile file/service-config
   choreography.
 - Active runtime state gets revision checks and diagnostics.
-- Humans keep transparent prompt assets and exportable profile bundles.
+- Humans keep transparent exported prompt assets without requiring active
+  deployments to read profile files.
 - Future multi-agent/multi-frontend profile management has one official path.
 
 Costs:
@@ -315,7 +314,7 @@ Costs:
 
 ## Deferred Decisions
 
-- Whether DB-managed prompt overrides are needed in addition to file assets.
+- Whether prompt text should move to a dedicated registry asset table later.
 - Exact bundle format for exported skills and memory-space data.
 - Whether profile registry tables live in core persistence directly or in a
   module schema bundle.
