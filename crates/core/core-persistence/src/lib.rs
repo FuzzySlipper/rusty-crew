@@ -798,8 +798,13 @@ pub struct AttachmentLinkWrite {
 pub struct AttachmentQuery {
     pub session_id: Option<SessionId>,
     pub message_id: Option<MessageId>,
+    pub block_id: Option<MessageBlockId>,
     pub scope_id: Option<DataBankScopeId>,
+    pub status: Option<AttachmentStatus>,
     pub include_removed: bool,
+    pub include_expired: bool,
+    pub expired_only: bool,
+    pub now: Option<IsoTimestamp>,
     pub page: Option<QueryPage>,
 }
 
@@ -857,6 +862,7 @@ pub struct DataBankScopeWrite {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DataBankScopeQuery {
     pub session_id: Option<SessionId>,
+    pub status: Option<DataBankScopeStatus>,
     pub include_removed: bool,
     pub page: Option<QueryPage>,
 }
@@ -8566,7 +8572,9 @@ fn query_attachments(
 ) -> CoreResult<Vec<AttachmentRecord>> {
     let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
     let message_id = query.message_id.as_ref().map(|value| value.0.as_str());
+    let block_id = query.block_id.as_ref().map(|value| value.0.as_str());
     let scope_id = query.scope_id.as_ref().map(|value| value.0.as_str());
+    let status = query.status.map(AttachmentStatus::as_str);
     let (limit, offset) = query
         .page
         .unwrap_or(QueryPage {
@@ -8583,8 +8591,15 @@ fn query_attachments(
                AND (?2 OR a.status <> 'removed')
                AND (?3 IS NULL OR l.message_id = ?3)
                AND (?4 IS NULL OR l.scope_id = ?4)
+               AND (?5 IS NULL OR l.block_id = ?5)
+               AND (?6 IS NULL OR a.status = ?6)
+               AND (
+                    (?7 AND a.expires_at IS NOT NULL AND ?8 IS NOT NULL AND a.expires_at <= ?8)
+                    OR
+                    (NOT ?7 AND (?9 OR a.expires_at IS NULL OR ?8 IS NULL OR a.expires_at > ?8))
+               )
              ORDER BY a.created_at ASC, a.attachment_id ASC
-             LIMIT ?5 OFFSET ?6",
+             LIMIT ?10 OFFSET ?11",
         )
         .map_err(|error| persistence_error("prepare query attachments", error))?;
     let attachment_ids = stmt
@@ -8594,6 +8609,11 @@ fn query_attachments(
                 query.include_removed,
                 message_id,
                 scope_id,
+                block_id,
+                status,
+                query.expired_only,
+                query.now,
+                query.include_expired,
                 limit,
                 offset,
             ],
@@ -8818,6 +8838,7 @@ fn query_data_bank_scopes(
     query: &DataBankScopeQuery,
 ) -> CoreResult<Vec<DataBankScopeRecord>> {
     let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let status = query.status.map(DataBankScopeStatus::as_str);
     let (limit, offset) = query
         .page
         .unwrap_or(QueryPage {
@@ -8831,13 +8852,14 @@ fn query_data_bank_scopes(
              FROM data_bank_scopes
              WHERE (?1 IS NULL OR session_id = ?1)
                AND (?2 OR status <> 'removed')
+               AND (?3 IS NULL OR status = ?3)
              ORDER BY created_at ASC, scope_id ASC
-             LIMIT ?3 OFFSET ?4",
+             LIMIT ?4 OFFSET ?5",
         )
         .map_err(|error| persistence_error("prepare query data-bank scopes", error))?;
     let scope_ids = stmt
         .query_map(
-            params![session_id, query.include_removed, limit, offset],
+            params![session_id, query.include_removed, status, limit, offset],
             |row| Ok(DataBankScopeId::new(row.get::<_, String>(0)?)),
         )
         .map_err(|error| persistence_error("query data-bank scopes", error))?
@@ -19717,7 +19739,7 @@ mod tests {
                 message_id: Some(message_id),
                 scope_id: None,
                 include_removed: false,
-                page: None,
+                ..AttachmentQuery::default()
             })
             .unwrap();
         assert_eq!(by_message.len(), 1);
@@ -19730,7 +19752,7 @@ mod tests {
                 message_id: None,
                 scope_id: Some(scope_id.clone()),
                 include_removed: false,
-                page: None,
+                ..AttachmentQuery::default()
             })
             .unwrap();
         assert_eq!(by_scope.len(), 1);
@@ -19739,7 +19761,7 @@ mod tests {
             .query_data_bank_scopes(&DataBankScopeQuery {
                 session_id: Some(session_id.clone()),
                 include_removed: false,
-                page: None,
+                ..DataBankScopeQuery::default()
             })
             .unwrap();
         assert_eq!(scopes.len(), 1);
@@ -19777,7 +19799,7 @@ mod tests {
             .query_data_bank_scopes(&DataBankScopeQuery {
                 session_id: Some(session_id),
                 include_removed: true,
-                page: None,
+                ..DataBankScopeQuery::default()
             })
             .unwrap();
         assert_eq!(removed_scopes.len(), 1);

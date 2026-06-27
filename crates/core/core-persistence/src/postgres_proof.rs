@@ -9,11 +9,14 @@ use crate::{
     counter_value, from_json_text, repositories, to_json_text, validate_provider_wire_state_key,
     validate_simple_kv_identity, validate_simple_kv_query, validate_simple_kv_write,
     ActiveBranchConflict, ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation,
-    BranchHeadConflict, BranchHeadExpectation, ConversationBranchId, ConversationBranchQuery,
-    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
-    ConversationJumpRequest, ConversationJumpResult, ConversationJumpTarget,
-    ConversationSnapshotId, ConversationSnapshotQuery, ConversationSnapshotRecord,
-    ConversationSnapshotSource, ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreResult,
+    AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite, AttachmentQuery,
+    AttachmentRecord, AttachmentStatus, AttachmentWrite, BranchHeadConflict, BranchHeadExpectation,
+    ConversationBranchId, ConversationBranchQuery, ConversationBranchRecord,
+    ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
+    ConversationJumpResult, ConversationJumpTarget, ConversationSnapshotId,
+    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotSource,
+    ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreResult, DataBankScopeId,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite,
     DurableMessageRecord, DurableMessageStatus, DurableMessageWrite, IsoTimestamp,
     MessageBlockRecord, MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord,
     MessageSlotWrite, MessageVariantId, MessageVariantQuery, MessageVariantRecord,
@@ -34,7 +37,7 @@ use crate::{
 use postgres::{Client, GenericClient, NoTls, Row, Transaction};
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 5;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -392,7 +395,7 @@ impl PostgresRuntimeCounterProofStore {
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
             proof_repository:
-                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states"
+                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes"
                     .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
@@ -432,10 +435,118 @@ impl PostgresRuntimeCounterProofStore {
                     table: "conversation_snapshots".to_string(),
                     rows: self.table_rows("conversation_snapshots")?,
                 },
+                RuntimeStorageTableCount {
+                    table: "attachments".to_string(),
+                    rows: self.table_rows("attachments")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "attachment_links".to_string(),
+                    rows: self.table_rows("attachment_links")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "data_bank_scopes".to_string(),
+                    rows: self.table_rows("data_bank_scopes")?,
+                },
             ],
             capabilities: postgres_proof_capabilities(),
             repository_groups: postgres_proof_repository_groups(),
         })
+    }
+
+    pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL attachment", error))?;
+        save_attachment_in_tx(&mut tx, &schema, attachment)?;
+        let record = load_attachment(&mut tx, &schema, &attachment.attachment_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL attachment", error))?;
+        Ok(record)
+    }
+
+    pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        query_attachments(&mut *client, &schema, query)
+    }
+
+    pub fn remove_attachment(
+        &self,
+        attachment_id: &AttachmentId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<AttachmentRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start remove PostgreSQL attachment", error))?;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.attachments
+                 SET status = 'removed',
+                     updated_at = $2
+                 WHERE attachment_id = $1"
+            ),
+            &[&attachment_id.0, updated_at],
+        )
+        .map_err(|error| postgres_error("remove PostgreSQL attachment", error))?;
+        let record = load_attachment(&mut tx, &schema, attachment_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit remove PostgreSQL attachment", error))?;
+        Ok(record)
+    }
+
+    pub fn save_data_bank_scope(
+        &self,
+        scope: &DataBankScopeWrite,
+    ) -> CoreResult<DataBankScopeRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL data-bank scope", error))?;
+        save_data_bank_scope_in_tx(&mut tx, &schema, scope)?;
+        let record = load_data_bank_scope(&mut tx, &schema, &scope.scope_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL data-bank scope", error))?;
+        Ok(record)
+    }
+
+    pub fn query_data_bank_scopes(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<Vec<DataBankScopeRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        query_data_bank_scopes(&mut *client, &schema, query)
+    }
+
+    pub fn remove_data_bank_scope(
+        &self,
+        scope_id: &DataBankScopeId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<DataBankScopeRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start remove PostgreSQL data-bank scope", error))?;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.data_bank_scopes
+                 SET status = 'removed',
+                     updated_at = $2
+                 WHERE scope_id = $1"
+            ),
+            &[&scope_id.0, updated_at],
+        )
+        .map_err(|error| postgres_error("remove PostgreSQL data-bank scope", error))?;
+        let record = load_data_bank_scope(&mut tx, &schema, scope_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit remove PostgreSQL data-bank scope", error))?;
+        Ok(record)
     }
 
     pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
@@ -1587,7 +1698,58 @@ impl PostgresRuntimeCounterProofStore {
                  CREATE INDEX IF NOT EXISTS conversation_snapshots_session_branch_idx
                     ON {schema}.conversation_snapshots(session_id, branch_id, created_at);
                  CREATE INDEX IF NOT EXISTS conversation_snapshots_session_created_idx
-                    ON {schema}.conversation_snapshots(session_id, created_at, snapshot_id);"
+                    ON {schema}.conversation_snapshots(session_id, created_at, snapshot_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.attachments (
+                    attachment_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    byte_size BIGINT NOT NULL,
+                    storage_url TEXT,
+                    download_url TEXT,
+                    thumbnail_url TEXT,
+                    extracted_text TEXT,
+                    extracted_text_truncated BOOLEAN NOT NULL DEFAULT FALSE,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS attachments_session_status_idx
+                    ON {schema}.attachments(session_id, status, created_at, attachment_id);
+                 CREATE INDEX IF NOT EXISTS attachments_expiry_idx
+                    ON {schema}.attachments(expires_at);
+                 CREATE TABLE IF NOT EXISTS {schema}.attachment_links (
+                    link_id TEXT PRIMARY KEY,
+                    attachment_id TEXT NOT NULL REFERENCES {schema}.attachments(attachment_id),
+                    session_id TEXT NOT NULL,
+                    message_id TEXT,
+                    block_id TEXT,
+                    scope_id TEXT,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS attachment_links_attachment_idx
+                    ON {schema}.attachment_links(attachment_id, created_at, link_id);
+                 CREATE INDEX IF NOT EXISTS attachment_links_session_message_idx
+                    ON {schema}.attachment_links(session_id, message_id);
+                 CREATE INDEX IF NOT EXISTS attachment_links_session_block_idx
+                    ON {schema}.attachment_links(session_id, block_id);
+                 CREATE INDEX IF NOT EXISTS attachment_links_session_scope_idx
+                    ON {schema}.attachment_links(session_id, scope_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.data_bank_scopes (
+                    scope_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    label TEXT,
+                    description TEXT,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS data_bank_scopes_session_status_idx
+                    ON {schema}.data_bank_scopes(session_id, status, created_at, scope_id);"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL runtime counter proof", error))
     }
@@ -1843,7 +2005,7 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
             } else if group.group_id == "conversations_attachments" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: partially implemented for conversation branches, messages, variants, snapshots, and jumps; attachments and data-bank scopes remain unsupported.".to_string(),
+                    "PostgreSQL proof status: implemented for the conversation transcript proof surface and attachment/data-bank proof surface; not yet wired as the full service backend.".to_string(),
                 );
             } else {
                 group.notes.insert(
@@ -1950,6 +2112,419 @@ fn row_to_runtime_search_result(row: &Row) -> CoreResult<RuntimeSearchResult> {
         recorded_at: row.get(8),
         title: row.get(9),
         body: row.get(10),
+    })
+}
+
+fn save_attachment_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    attachment: &AttachmentWrite,
+) -> CoreResult<()> {
+    let metadata_json = to_json_text(&attachment.metadata_json)?;
+    let status = attachment_status_as_str(attachment.status);
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.attachments (
+                attachment_id,
+                session_id,
+                status,
+                filename,
+                mime_type,
+                byte_size,
+                storage_url,
+                download_url,
+                thumbnail_url,
+                extracted_text,
+                extracted_text_truncated,
+                metadata_json,
+                created_at,
+                updated_at,
+                expires_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+             ON CONFLICT(attachment_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                status = EXCLUDED.status,
+                filename = EXCLUDED.filename,
+                mime_type = EXCLUDED.mime_type,
+                byte_size = EXCLUDED.byte_size,
+                storage_url = EXCLUDED.storage_url,
+                download_url = EXCLUDED.download_url,
+                thumbnail_url = EXCLUDED.thumbnail_url,
+                extracted_text = EXCLUDED.extracted_text,
+                extracted_text_truncated = EXCLUDED.extracted_text_truncated,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = EXCLUDED.updated_at,
+                expires_at = EXCLUDED.expires_at"
+        ),
+        &[
+            &attachment.attachment_id.0,
+            &attachment.session_id.0,
+            &status,
+            &attachment.filename,
+            &attachment.mime_type,
+            &(attachment.byte_size as i64),
+            &attachment.storage_url,
+            &attachment.download_url,
+            &attachment.thumbnail_url,
+            &attachment.extracted_text,
+            &attachment.extracted_text_truncated,
+            &metadata_json,
+            &attachment.created_at,
+            &attachment.updated_at,
+            &attachment.expires_at,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL attachment", error))?;
+    if let Some(link) = &attachment.link {
+        save_attachment_link_in_tx(tx, schema, link)?;
+    }
+    Ok(())
+}
+
+fn save_attachment_link_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    link: &AttachmentLinkWrite,
+) -> CoreResult<()> {
+    let metadata_json = to_json_text(&link.metadata_json)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.attachment_links (
+                link_id,
+                attachment_id,
+                session_id,
+                message_id,
+                block_id,
+                scope_id,
+                metadata_json,
+                created_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT(link_id) DO UPDATE SET
+                attachment_id = EXCLUDED.attachment_id,
+                session_id = EXCLUDED.session_id,
+                message_id = EXCLUDED.message_id,
+                block_id = EXCLUDED.block_id,
+                scope_id = EXCLUDED.scope_id,
+                metadata_json = EXCLUDED.metadata_json"
+        ),
+        &[
+            &link.link_id.0,
+            &link.attachment_id.0,
+            &link.session_id.0,
+            &link.message_id.as_ref().map(|value| value.0.as_str()),
+            &link.block_id.as_ref().map(|value| value.0.as_str()),
+            &link.scope_id.as_ref().map(|value| value.0.as_str()),
+            &metadata_json,
+            &link.created_at,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL attachment link", error))?;
+    Ok(())
+}
+
+fn query_attachments<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &AttachmentQuery,
+) -> CoreResult<Vec<AttachmentRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let message_id = query.message_id.as_ref().map(|value| value.0.as_str());
+    let block_id = query.block_id.as_ref().map(|value| value.0.as_str());
+    let scope_id = query.scope_id.as_ref().map(|value| value.0.as_str());
+    let status = query.status.map(attachment_status_as_str);
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT DISTINCT a.attachment_id
+                 FROM {schema}.attachments a
+                 LEFT JOIN {schema}.attachment_links l ON l.attachment_id = a.attachment_id
+                 WHERE ($1::text IS NULL OR a.session_id = $1)
+                   AND ($2 OR a.status <> 'removed')
+                   AND ($3::text IS NULL OR l.message_id = $3)
+                   AND ($4::text IS NULL OR l.scope_id = $4)
+                   AND ($5::text IS NULL OR l.block_id = $5)
+                   AND ($6::text IS NULL OR a.status = $6)
+                   AND (
+                        ($7 AND a.expires_at IS NOT NULL AND $8::text IS NOT NULL AND a.expires_at <= $8)
+                        OR
+                        (NOT $7 AND ($9 OR a.expires_at IS NULL OR $8::text IS NULL OR a.expires_at > $8))
+                   )
+                 ORDER BY a.created_at ASC, a.attachment_id ASC
+                 LIMIT $10 OFFSET $11"
+            ),
+            &[
+                &session_id,
+                &query.include_removed,
+                &message_id,
+                &scope_id,
+                &block_id,
+                &status,
+                &query.expired_only,
+                &query.now,
+                &query.include_expired,
+                &limit,
+                &offset,
+            ],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL attachments", error))?;
+    rows.iter()
+        .map(|row| AttachmentId::new(row.get::<_, String>(0)))
+        .map(|attachment_id| load_attachment(conn, schema, &attachment_id))
+        .collect()
+}
+
+fn load_attachment<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    attachment_id: &AttachmentId,
+) -> CoreResult<AttachmentRecord> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT session_id,
+                        status,
+                        filename,
+                        mime_type,
+                        byte_size,
+                        storage_url,
+                        download_url,
+                        thumbnail_url,
+                        extracted_text,
+                        extracted_text_truncated,
+                        metadata_json,
+                        created_at,
+                        updated_at,
+                        expires_at
+                 FROM {schema}.attachments
+                 WHERE attachment_id = $1"
+            ),
+            &[&attachment_id.0],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL attachment", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("attachment {attachment_id} not found"),
+            )
+        })?;
+    row_to_attachment(conn, schema, attachment_id, &row)
+}
+
+fn row_to_attachment<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    attachment_id: &AttachmentId,
+    row: &Row,
+) -> CoreResult<AttachmentRecord> {
+    let status: String = row.get(1);
+    let byte_size: i64 = row.get(4);
+    if byte_size < 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid PostgreSQL attachment byte_size {byte_size}"),
+        ));
+    }
+    let metadata_json: String = row.get(10);
+    Ok(AttachmentRecord {
+        attachment_id: attachment_id.clone(),
+        session_id: SessionId::new(row.get::<_, String>(0)),
+        status: attachment_status_from_str(&status)?,
+        filename: row.get(2),
+        mime_type: row.get(3),
+        byte_size: byte_size as u64,
+        storage_url: row.get(5),
+        download_url: row.get(6),
+        thumbnail_url: row.get(7),
+        extracted_text: row.get(8),
+        extracted_text_truncated: row.get(9),
+        metadata_json: parse_postgres_json(&metadata_json, "attachment metadata_json")?,
+        created_at: row.get(11),
+        updated_at: row.get(12),
+        expires_at: row.get(13),
+        links: load_attachment_links(conn, schema, attachment_id)?,
+    })
+}
+
+fn load_attachment_links<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    attachment_id: &AttachmentId,
+) -> CoreResult<Vec<AttachmentLinkRecord>> {
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT link_id,
+                        session_id,
+                        message_id,
+                        block_id,
+                        scope_id,
+                        metadata_json,
+                        created_at
+                 FROM {schema}.attachment_links
+                 WHERE attachment_id = $1
+                 ORDER BY created_at ASC, link_id ASC"
+            ),
+            &[&attachment_id.0],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL attachment links", error))?;
+    rows.iter()
+        .map(|row| row_to_attachment_link(row, attachment_id))
+        .collect()
+}
+
+fn row_to_attachment_link(
+    row: &Row,
+    attachment_id: &AttachmentId,
+) -> CoreResult<AttachmentLinkRecord> {
+    let metadata_json: String = row.get(5);
+    Ok(AttachmentLinkRecord {
+        link_id: AttachmentLinkId::new(row.get::<_, String>(0)),
+        attachment_id: attachment_id.clone(),
+        session_id: SessionId::new(row.get::<_, String>(1)),
+        message_id: row.get::<_, Option<String>>(2).map(MessageId::new),
+        block_id: row
+            .get::<_, Option<String>>(3)
+            .map(crate::MessageBlockId::new),
+        scope_id: row.get::<_, Option<String>>(4).map(DataBankScopeId::new),
+        metadata_json: parse_postgres_json(&metadata_json, "attachment link metadata_json")?,
+        created_at: row.get(6),
+    })
+}
+
+fn save_data_bank_scope_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    scope: &DataBankScopeWrite,
+) -> CoreResult<()> {
+    let metadata_json = to_json_text(&scope.metadata_json)?;
+    let status = data_bank_scope_status_as_str(scope.status);
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.data_bank_scopes (
+                scope_id,
+                session_id,
+                status,
+                label,
+                description,
+                metadata_json,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT(scope_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                status = EXCLUDED.status,
+                label = EXCLUDED.label,
+                description = EXCLUDED.description,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = EXCLUDED.updated_at"
+        ),
+        &[
+            &scope.scope_id.0,
+            &scope.session_id.0,
+            &status,
+            &scope.label,
+            &scope.description,
+            &metadata_json,
+            &scope.created_at,
+            &scope.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL data-bank scope", error))?;
+    Ok(())
+}
+
+fn query_data_bank_scopes<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &DataBankScopeQuery,
+) -> CoreResult<Vec<DataBankScopeRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let status = query.status.map(data_bank_scope_status_as_str);
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT scope_id
+                 FROM {schema}.data_bank_scopes
+                 WHERE ($1::text IS NULL OR session_id = $1)
+                   AND ($2 OR status <> 'removed')
+                   AND ($3::text IS NULL OR status = $3)
+                 ORDER BY created_at ASC, scope_id ASC
+                 LIMIT $4 OFFSET $5"
+            ),
+            &[
+                &session_id,
+                &query.include_removed,
+                &status,
+                &limit,
+                &offset,
+            ],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL data-bank scopes", error))?;
+    rows.iter()
+        .map(|row| DataBankScopeId::new(row.get::<_, String>(0)))
+        .map(|scope_id| load_data_bank_scope(conn, schema, &scope_id))
+        .collect()
+}
+
+fn load_data_bank_scope<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    scope_id: &DataBankScopeId,
+) -> CoreResult<DataBankScopeRecord> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT session_id,
+                        status,
+                        label,
+                        description,
+                        metadata_json,
+                        created_at,
+                        updated_at
+                 FROM {schema}.data_bank_scopes
+                 WHERE scope_id = $1"
+            ),
+            &[&scope_id.0],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL data-bank scope", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("data-bank scope {scope_id} not found"),
+            )
+        })?;
+    row_to_data_bank_scope(scope_id, &row)
+}
+
+fn row_to_data_bank_scope(
+    scope_id: &DataBankScopeId,
+    row: &Row,
+) -> CoreResult<DataBankScopeRecord> {
+    let status: String = row.get(1);
+    let metadata_json: String = row.get(4);
+    Ok(DataBankScopeRecord {
+        scope_id: scope_id.clone(),
+        session_id: SessionId::new(row.get::<_, String>(0)),
+        status: data_bank_scope_status_from_str(&status)?,
+        label: row.get(2),
+        description: row.get(3),
+        metadata_json: parse_postgres_json(&metadata_json, "data-bank scope metadata_json")?,
+        created_at: row.get(5),
+        updated_at: row.get(6),
     })
 }
 
@@ -3198,6 +3773,42 @@ fn parse_postgres_json(value: &str, label: &str) -> CoreResult<serde_json::Value
     })
 }
 
+fn attachment_status_as_str(status: AttachmentStatus) -> &'static str {
+    match status {
+        AttachmentStatus::Active => "active",
+        AttachmentStatus::Removed => "removed",
+    }
+}
+
+fn attachment_status_from_str(raw: &str) -> CoreResult<AttachmentStatus> {
+    match raw {
+        "active" => Ok(AttachmentStatus::Active),
+        "removed" => Ok(AttachmentStatus::Removed),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown attachment status {other}"),
+        )),
+    }
+}
+
+fn data_bank_scope_status_as_str(status: DataBankScopeStatus) -> &'static str {
+    match status {
+        DataBankScopeStatus::Active => "active",
+        DataBankScopeStatus::Removed => "removed",
+    }
+}
+
+fn data_bank_scope_status_from_str(raw: &str) -> CoreResult<DataBankScopeStatus> {
+    match raw {
+        "active" => Ok(DataBankScopeStatus::Active),
+        "removed" => Ok(DataBankScopeStatus::Removed),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown data-bank scope status {other}"),
+        )),
+    }
+}
+
 fn runtime_search_row_type_as_str(row_type: RuntimeSearchRowType) -> &'static str {
     match row_type {
         RuntimeSearchRowType::Message => "message",
@@ -3400,6 +4011,29 @@ mod tests {
         ) -> CoreResult<ConversationJumpResult>;
     }
 
+    trait AttachmentDataBankConformanceStore {
+        fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord>;
+        fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>>;
+        fn remove_attachment(
+            &self,
+            attachment_id: &AttachmentId,
+            updated_at: &IsoTimestamp,
+        ) -> CoreResult<AttachmentRecord>;
+        fn save_data_bank_scope(
+            &self,
+            scope: &DataBankScopeWrite,
+        ) -> CoreResult<DataBankScopeRecord>;
+        fn query_data_bank_scopes(
+            &self,
+            query: &DataBankScopeQuery,
+        ) -> CoreResult<Vec<DataBankScopeRecord>>;
+        fn remove_data_bank_scope(
+            &self,
+            scope_id: &DataBankScopeId,
+            updated_at: &IsoTimestamp,
+        ) -> CoreResult<DataBankScopeRecord>;
+    }
+
     impl SimpleKvConformanceStore for CoordinationStore {
         fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
             CoordinationStore::put_simple_kv(self, write)
@@ -3561,6 +4195,46 @@ mod tests {
             request: &ConversationJumpRequest,
         ) -> CoreResult<ConversationJumpResult> {
             CoordinationStore::resolve_conversation_jump(self, request)
+        }
+    }
+
+    impl AttachmentDataBankConformanceStore for CoordinationStore {
+        fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+            CoordinationStore::save_attachment(self, attachment)
+        }
+
+        fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+            CoordinationStore::query_attachments(self, query)
+        }
+
+        fn remove_attachment(
+            &self,
+            attachment_id: &AttachmentId,
+            updated_at: &IsoTimestamp,
+        ) -> CoreResult<AttachmentRecord> {
+            CoordinationStore::remove_attachment(self, attachment_id, updated_at)
+        }
+
+        fn save_data_bank_scope(
+            &self,
+            scope: &DataBankScopeWrite,
+        ) -> CoreResult<DataBankScopeRecord> {
+            CoordinationStore::save_data_bank_scope(self, scope)
+        }
+
+        fn query_data_bank_scopes(
+            &self,
+            query: &DataBankScopeQuery,
+        ) -> CoreResult<Vec<DataBankScopeRecord>> {
+            CoordinationStore::query_data_bank_scopes(self, query)
+        }
+
+        fn remove_data_bank_scope(
+            &self,
+            scope_id: &DataBankScopeId,
+            updated_at: &IsoTimestamp,
+        ) -> CoreResult<DataBankScopeRecord> {
+            CoordinationStore::remove_data_bank_scope(self, scope_id, updated_at)
         }
     }
 
@@ -3732,6 +4406,46 @@ mod tests {
         }
     }
 
+    impl AttachmentDataBankConformanceStore for PostgresRuntimeCounterProofStore {
+        fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+            PostgresRuntimeCounterProofStore::save_attachment(self, attachment)
+        }
+
+        fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+            PostgresRuntimeCounterProofStore::query_attachments(self, query)
+        }
+
+        fn remove_attachment(
+            &self,
+            attachment_id: &AttachmentId,
+            updated_at: &IsoTimestamp,
+        ) -> CoreResult<AttachmentRecord> {
+            PostgresRuntimeCounterProofStore::remove_attachment(self, attachment_id, updated_at)
+        }
+
+        fn save_data_bank_scope(
+            &self,
+            scope: &DataBankScopeWrite,
+        ) -> CoreResult<DataBankScopeRecord> {
+            PostgresRuntimeCounterProofStore::save_data_bank_scope(self, scope)
+        }
+
+        fn query_data_bank_scopes(
+            &self,
+            query: &DataBankScopeQuery,
+        ) -> CoreResult<Vec<DataBankScopeRecord>> {
+            PostgresRuntimeCounterProofStore::query_data_bank_scopes(self, query)
+        }
+
+        fn remove_data_bank_scope(
+            &self,
+            scope_id: &DataBankScopeId,
+            updated_at: &IsoTimestamp,
+        ) -> CoreResult<DataBankScopeRecord> {
+            PostgresRuntimeCounterProofStore::remove_data_bank_scope(self, scope_id, updated_at)
+        }
+    }
+
     #[test]
     fn validates_schema_identifiers_before_connecting() {
         let error = match PostgresRuntimeCounterProofStore::connect(
@@ -3773,8 +4487,8 @@ mod tests {
         assert!(groups
             .iter()
             .any(|group| group.group_id == "conversations_attachments"
-                && group.notes[0].contains("partially implemented")
-                && group.notes[0].contains("attachments")));
+                && group.notes[0].contains("conversation transcript")
+                && group.notes[0].contains("attachment/data-bank")));
     }
 
     #[test]
@@ -3798,6 +4512,14 @@ mod tests {
         let db_path = temp_sqlite_path("sqlite-conversation-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         conversation_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_attachment_data_bank_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-attachment-data-bank-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        attachment_data_bank_conformance(&store);
         let _ = fs::remove_file(db_path);
     }
 
@@ -3991,8 +4713,52 @@ mod tests {
         );
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "conversations_attachments"
-                && group.notes[0].contains("partially implemented")
-                && group.notes[0].contains("attachments")
+                && group.notes[0].contains("conversation transcript")
+                && group.notes[0].contains("attachment/data-bank")
+        }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_attachment_data_bank_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL attachment/data-bank proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_attachment_data_bank_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        attachment_data_bank_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "attachments")
+                .map(|count| count.rows),
+            Some(3)
+        );
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "attachment_links")
+                .map(|count| count.rows),
+            Some(3)
+        );
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "data_bank_scopes")
+                .map(|count| count.rows),
+            Some(2)
+        );
+        assert!(diagnostics.repository_groups.iter().any(|group| {
+            group.group_id == "conversations_attachments"
+                && group.notes[0].contains("attachment/data-bank")
         }));
 
         store.drop_schema_for_test().unwrap();
@@ -4763,6 +5529,304 @@ mod tests {
             created_at: "2026-06-26T02:00:00Z".to_string(),
             updated_at: "2026-06-26T02:00:00Z".to_string(),
         }
+    }
+
+    fn attachment_data_bank_conformance(store: &dyn AttachmentDataBankConformanceStore) {
+        let session = SessionId::new("session-attachments");
+        let other_session = SessionId::new("session-attachments-other");
+        let scope = DataBankScopeId::new("scope-reference");
+        let removed_scope = DataBankScopeId::new("scope-removed");
+        let message = MessageId::new("message-reference");
+        let block = crate::MessageBlockId::new("block-reference");
+
+        store
+            .save_data_bank_scope(&DataBankScopeWrite {
+                scope_id: scope.clone(),
+                session_id: session.clone(),
+                status: DataBankScopeStatus::Active,
+                label: Some("Reference".to_string()),
+                description: Some("Reusable reference files".to_string()),
+                metadata_json: json!({"kind": "reference"}),
+                created_at: "2026-06-26T04:00:00Z".to_string(),
+                updated_at: "2026-06-26T04:00:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .save_data_bank_scope(&DataBankScopeWrite {
+                scope_id: removed_scope.clone(),
+                session_id: session.clone(),
+                status: DataBankScopeStatus::Active,
+                label: Some("Removed".to_string()),
+                description: None,
+                metadata_json: json!({"kind": "temporary"}),
+                created_at: "2026-06-26T04:00:01Z".to_string(),
+                updated_at: "2026-06-26T04:00:01Z".to_string(),
+            })
+            .unwrap();
+
+        let saved = store
+            .save_attachment(&AttachmentWrite {
+                attachment_id: AttachmentId::new("attachment-reference"),
+                session_id: session.clone(),
+                status: AttachmentStatus::Active,
+                filename: "reference.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                byte_size: 42,
+                storage_url: Some("file:///store/reference.txt".to_string()),
+                download_url: Some("/attachments/reference".to_string()),
+                thumbnail_url: None,
+                extracted_text: Some("bounded reference text".to_string()),
+                extracted_text_truncated: true,
+                metadata_json: json!({"source": "conformance"}),
+                created_at: "2026-06-26T04:01:00Z".to_string(),
+                updated_at: "2026-06-26T04:01:00Z".to_string(),
+                expires_at: Some("2026-06-26T05:00:00Z".to_string()),
+                link: Some(AttachmentLinkWrite {
+                    link_id: AttachmentLinkId::new("attachment-link-reference"),
+                    attachment_id: AttachmentId::new("attachment-reference"),
+                    session_id: session.clone(),
+                    message_id: Some(message.clone()),
+                    block_id: Some(block.clone()),
+                    scope_id: Some(scope.clone()),
+                    metadata_json: json!({"linked_by": "conformance"}),
+                    created_at: "2026-06-26T04:01:00Z".to_string(),
+                }),
+            })
+            .unwrap();
+        assert_eq!(saved.links.len(), 1);
+        assert_eq!(saved.links[0].message_id, Some(message.clone()));
+        assert_eq!(saved.links[0].block_id, Some(block.clone()));
+        assert_eq!(saved.links[0].scope_id, Some(scope.clone()));
+        assert!(saved.extracted_text_truncated);
+
+        store
+            .save_attachment(&AttachmentWrite {
+                attachment_id: AttachmentId::new("attachment-expired"),
+                session_id: session.clone(),
+                status: AttachmentStatus::Active,
+                filename: "expired.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                byte_size: 7,
+                storage_url: None,
+                download_url: None,
+                thumbnail_url: None,
+                extracted_text: Some("expired".to_string()),
+                extracted_text_truncated: false,
+                metadata_json: json!({"source": "expired"}),
+                created_at: "2026-06-26T04:02:00Z".to_string(),
+                updated_at: "2026-06-26T04:02:00Z".to_string(),
+                expires_at: Some("2026-06-26T04:30:00Z".to_string()),
+                link: Some(AttachmentLinkWrite {
+                    link_id: AttachmentLinkId::new("attachment-link-expired"),
+                    attachment_id: AttachmentId::new("attachment-expired"),
+                    session_id: session.clone(),
+                    message_id: None,
+                    block_id: None,
+                    scope_id: Some(scope.clone()),
+                    metadata_json: json!({"linked_by": "expiry"}),
+                    created_at: "2026-06-26T04:02:00Z".to_string(),
+                }),
+            })
+            .unwrap();
+
+        store
+            .save_attachment(&AttachmentWrite {
+                attachment_id: AttachmentId::new("attachment-other-session"),
+                session_id: other_session,
+                status: AttachmentStatus::Active,
+                filename: "other.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                byte_size: 3,
+                storage_url: None,
+                download_url: None,
+                thumbnail_url: None,
+                extracted_text: None,
+                extracted_text_truncated: false,
+                metadata_json: json!({}),
+                created_at: "2026-06-26T04:03:00Z".to_string(),
+                updated_at: "2026-06-26T04:03:00Z".to_string(),
+                expires_at: None,
+                link: Some(AttachmentLinkWrite {
+                    link_id: AttachmentLinkId::new("attachment-link-other-session"),
+                    attachment_id: AttachmentId::new("attachment-other-session"),
+                    session_id: SessionId::new("session-attachments-other"),
+                    message_id: None,
+                    block_id: None,
+                    scope_id: None,
+                    metadata_json: json!({}),
+                    created_at: "2026-06-26T04:03:00Z".to_string(),
+                }),
+            })
+            .unwrap();
+
+        let by_message = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                message_id: Some(message.clone()),
+                now: Some("2026-06-26T04:10:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(by_message.len(), 1);
+        assert_eq!(
+            by_message[0].attachment_id,
+            AttachmentId::new("attachment-reference")
+        );
+
+        let by_block = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                block_id: Some(block),
+                now: Some("2026-06-26T04:10:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(by_block.len(), 1);
+        assert_eq!(
+            by_block[0].links[0].metadata_json["linked_by"],
+            "conformance"
+        );
+
+        let by_scope_before_expiry = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                scope_id: Some(scope.clone()),
+                now: Some("2026-06-26T04:10:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(
+            by_scope_before_expiry
+                .iter()
+                .map(|record| record.attachment_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["attachment-reference", "attachment-expired"]
+        );
+
+        let by_scope_after_expiry = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                scope_id: Some(scope.clone()),
+                now: Some("2026-06-26T04:31:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(
+            by_scope_after_expiry
+                .iter()
+                .map(|record| record.attachment_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["attachment-reference"]
+        );
+
+        let expired_only = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                scope_id: Some(scope.clone()),
+                expired_only: true,
+                now: Some("2026-06-26T04:31:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(expired_only.len(), 1);
+        assert_eq!(
+            expired_only[0].attachment_id,
+            AttachmentId::new("attachment-expired")
+        );
+
+        let include_expired = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                scope_id: Some(scope),
+                include_expired: true,
+                now: Some("2026-06-26T04:31:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(include_expired.len(), 2);
+
+        let removed_attachment = store
+            .remove_attachment(
+                &AttachmentId::new("attachment-reference"),
+                &"2026-06-26T04:40:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(removed_attachment.status, AttachmentStatus::Removed);
+        assert_eq!(removed_attachment.links.len(), 1);
+
+        let active_after_remove = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                include_expired: true,
+                now: Some("2026-06-26T04:41:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(
+            active_after_remove
+                .iter()
+                .map(|record| record.attachment_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["attachment-expired"]
+        );
+
+        let with_removed = store
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                status: Some(AttachmentStatus::Removed),
+                include_removed: true,
+                include_expired: true,
+                now: Some("2026-06-26T04:41:00Z".to_string()),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(with_removed.len(), 1);
+        assert_eq!(
+            with_removed[0].attachment_id,
+            AttachmentId::new("attachment-reference")
+        );
+
+        let scopes = store
+            .query_data_bank_scopes(&DataBankScopeQuery {
+                session_id: Some(session.clone()),
+                status: Some(DataBankScopeStatus::Active),
+                include_removed: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            scopes
+                .iter()
+                .map(|scope| scope.scope_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["scope-reference", "scope-removed"]
+        );
+        let removed = store
+            .remove_data_bank_scope(&removed_scope, &"2026-06-26T04:45:00Z".to_string())
+            .unwrap();
+        assert_eq!(removed.status, DataBankScopeStatus::Removed);
+        let active_scopes = store
+            .query_data_bank_scopes(&DataBankScopeQuery {
+                session_id: Some(session.clone()),
+                status: Some(DataBankScopeStatus::Active),
+                include_removed: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(active_scopes.len(), 1);
+        assert_eq!(
+            active_scopes[0].scope_id,
+            DataBankScopeId::new("scope-reference")
+        );
+        let all_scopes = store
+            .query_data_bank_scopes(&DataBankScopeQuery {
+                session_id: Some(session),
+                status: Some(DataBankScopeStatus::Removed),
+                include_removed: true,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(all_scopes.len(), 1);
     }
 
     fn provider_wire_state_conformance(store: &dyn ProviderWireStateConformanceStore) {
