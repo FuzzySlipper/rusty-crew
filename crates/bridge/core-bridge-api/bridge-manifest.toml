@@ -540,6 +540,242 @@ output = "core_persistence::DataBankScopeRecord"
 errors = "core_protocol::CoreError"
 summary = "Mark a reusable file scope removed."
 
+# Roleplay lore: persistence and recall surfaces for frontend/adaptor modules.
+
+[[operation]]
+name = "create_lore_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreLayerWrite"
+output = "core_persistence::RoleplayLoreLayerRecord"
+errors = "core_protocol::CoreError"
+summary = "Create a roleplay lore layer for a profile."
+
+[[operation]]
+name = "get_lore_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "layer_id"
+output = "Option<core_persistence::RoleplayLoreLayerRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read a roleplay lore layer by id."
+
+[[operation]]
+name = "list_lore_layers"
+surface = "stable"
+direction = "ts_to_rust"
+input = "profile_id"
+output = "Vec<core_persistence::RoleplayLoreLayerRecord>"
+errors = "core_protocol::CoreError"
+summary = "List roleplay lore layers for a profile."
+
+[[operation]]
+name = "update_lore_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreLayerUpdate"
+output = "core_persistence::RoleplayLoreLayerRecord"
+errors = "core_protocol::CoreError"
+summary = "Update mutable metadata and policy on a roleplay lore layer."
+
+[[operation]]
+name = "archive_lore_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreLayerArchive"
+output = "core_persistence::RoleplayLoreLayerRecord"
+errors = "core_protocol::CoreError"
+summary = "Archive a roleplay lore layer."
+
+[[operation]]
+name = "set_chat_layers"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayChatLayersWrite"
+output = "()"
+errors = "core_protocol::CoreError"
+summary = "Replace the ordered lore-layer set for a chat."
+
+[[operation]]
+name = "get_chat_layers"
+surface = "stable"
+direction = "ts_to_rust"
+input = "chat_id"
+output = "Vec<core_persistence::RoleplayChatLayerRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read the ordered lore-layer set for a chat."
+
+[[operation]]
+name = "toggle_chat_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ chat_id, layer_id, enabled }"
+output = "()"
+errors = "core_protocol::CoreError"
+summary = "Enable or disable one lore layer for a chat."
+
+[[operation]]
+name = "reorder_chat_layers"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ chat_id, layer_ids }"
+output = "()"
+errors = "core_protocol::CoreError"
+summary = "Reorder a chat's lore layers without changing membership."
+
+[[operation]]
+name = "add_lore_entry"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreWrite"
+output = "core_persistence::RoleplayLoreRecord"
+errors = "core_protocol::CoreError"
+summary = "Add a roleplay lore entry."
+
+[[operation]]
+name = "replace_lore_entry"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreReplace"
+output = "core_persistence::RoleplayLoreRecord"
+errors = "core_protocol::CoreError"
+summary = "Replace mutable roleplay lore entry fields."
+
+[[operation]]
+name = "supersede_lore_entry"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreSupersede"
+output = "(core_persistence::RoleplayLoreRecord, core_persistence::RoleplayLoreRecord)"
+errors = "core_protocol::CoreError"
+summary = "Supersede one lore entry with a new entry."
+
+[[operation]]
+name = "tombstone_lore_entry"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreTombstone"
+output = "core_persistence::RoleplayLoreRecord"
+errors = "core_protocol::CoreError"
+summary = "Mark a roleplay lore entry tombstoned."
+
+[[operation]]
+name = "query_lore_entries"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreQuery"
+output = "Vec<core_persistence::RoleplayLoreRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query roleplay lore entries by world, subject, scope, status, or text."
+
+[[operation]]
+name = "lore_entry_provenance_events"
+surface = "stable"
+direction = "ts_to_rust"
+input = "record_id"
+output = "Vec<core_persistence::RoleplayLoreProvenanceEvent>"
+errors = "core_protocol::CoreError"
+summary = "List provenance events for a roleplay lore entry."
+
+[[operation]]
+name = "add_entry_to_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreLayerEntryLink"
+output = "()"
+errors = "core_protocol::CoreError"
+summary = "Link a lore entry into a lore layer."
+
+[[operation]]
+name = "remove_entry_from_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ layer_id, record_id }"
+output = "()"
+errors = "core_protocol::CoreError"
+summary = "Remove a lore entry from a lore layer."
+
+[[operation]]
+name = "set_entry_constant"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ layer_id, record_id, is_constant }"
+output = "()"
+errors = "core_protocol::CoreError"
+summary = "Set the constant flag for a lore entry in a layer."
+
+[[operation]]
+name = "list_entries_by_layer"
+surface = "stable"
+direction = "ts_to_rust"
+input = "layer_id"
+output = "Vec<core_persistence::RoleplayLoreLayerEntryJoin>"
+errors = "core_protocol::CoreError"
+summary = "List lore entries linked to a layer."
+
+[[operation]]
+name = "recall_lore"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::LoreRecallQuery"
+output = "core_persistence::LoreRecallResult"
+errors = "core_protocol::CoreError"
+summary = "Recall lore for a chat from active layers and optional query context."
+
+[[operation]]
+name = "capture_lore_fact"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreFactCapture"
+output = "core_persistence::RoleplayLoreLayerEntryJoin"
+errors = "core_protocol::CoreError"
+summary = "Capture a new lore fact into an automatic layer."
+
+[[operation]]
+name = "promote_lore_entry"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreEntryPromotion"
+output = "core_persistence::RoleplayLoreLayerEntryJoin"
+errors = "core_protocol::CoreError"
+summary = "Promote a captured lore entry into a target layer."
+
+[[operation]]
+name = "get_lore_layer_config"
+surface = "stable"
+direction = "ts_to_rust"
+input = "layer_id"
+output = "Option<core_persistence::RoleplayLoreLayerConfigRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read recall and capture configuration for a lore layer."
+
+[[operation]]
+name = "set_lore_layer_config"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RoleplayLoreLayerConfigWrite"
+output = "core_persistence::RoleplayLoreLayerConfigRecord"
+errors = "core_protocol::CoreError"
+summary = "Set recall and capture configuration for a lore layer."
+
+[[operation]]
+name = "list_recall_traces"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::LoreRecallTraceQuery"
+output = "Vec<core_persistence::LoreRecallTraceRecord>"
+errors = "core_protocol::CoreError"
+summary = "List recorded lore recall traces for diagnostics."
+
+[[operation]]
+name = "get_recall_trace"
+surface = "stable"
+direction = "ts_to_rust"
+input = "trace_id"
+output = "Option<core_persistence::LoreRecallTraceRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read a recorded lore recall trace by id."
+
 [[operation]]
 name = "database_size"
 surface = "stable"

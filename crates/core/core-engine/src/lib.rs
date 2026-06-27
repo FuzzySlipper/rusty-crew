@@ -13,17 +13,24 @@ use rusty_crew_core_persistence::{
     ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
     ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
     CoreCoordinationStore, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
+    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
     MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
     ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
     ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueryPage,
-    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
-    RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
-    ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
+    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord,
+    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
+    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
+    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
+    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeStateSummary, RuntimeStorageDiagnostics, ScheduledJobQuery, ScheduledJobRecord,
+    ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus,
+    ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
     SelectActiveVariantRequest, SelectActiveVariantResult, SessionMemoryPromptContext,
     SessionMemoryQuery, SessionMemoryRecord, SimpleKvQuery, SimpleKvRecord,
     UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
@@ -659,6 +666,169 @@ impl CoreEngine {
         query: &ModelProviderQuery,
     ) -> CoreResult<Vec<ModelProviderRecord>> {
         self.store.list_model_providers(query)
+    }
+
+    pub fn add_roleplay_lore_record(
+        &self,
+        write: &RoleplayLoreWrite,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        self.store.add_roleplay_lore_record(write)
+    }
+
+    pub fn replace_roleplay_lore_record(
+        &self,
+        replace: &RoleplayLoreReplace,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        self.store.replace_roleplay_lore_record(replace)
+    }
+
+    pub fn supersede_roleplay_lore_record(
+        &self,
+        supersede: &RoleplayLoreSupersede,
+    ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)> {
+        self.store.supersede_roleplay_lore_record(supersede)
+    }
+
+    pub fn tombstone_roleplay_lore_record(
+        &self,
+        tombstone: &RoleplayLoreTombstone,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        self.store.tombstone_roleplay_lore_record(tombstone)
+    }
+
+    pub fn query_roleplay_lore_records(
+        &self,
+        query: &RoleplayLoreQuery,
+    ) -> CoreResult<Vec<RoleplayLoreRecord>> {
+        self.store.query_roleplay_lore_records(query)
+    }
+
+    pub fn roleplay_lore_provenance_events(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
+        self.store.roleplay_lore_provenance_events(record_id)
+    }
+
+    pub fn create_lore_layer(
+        &self,
+        write: &RoleplayLoreLayerWrite,
+    ) -> CoreResult<RoleplayLoreLayerRecord> {
+        self.store.create_lore_layer(write)
+    }
+
+    pub fn get_lore_layer(&self, layer_id: &str) -> CoreResult<Option<RoleplayLoreLayerRecord>> {
+        self.store.get_lore_layer(layer_id)
+    }
+
+    pub fn list_lore_layers_by_profile(
+        &self,
+        profile_id: &str,
+    ) -> CoreResult<Vec<RoleplayLoreLayerRecord>> {
+        self.store.list_lore_layers_by_profile(profile_id)
+    }
+
+    pub fn update_lore_layer(
+        &self,
+        update: &RoleplayLoreLayerUpdate,
+    ) -> CoreResult<RoleplayLoreLayerRecord> {
+        self.store.update_lore_layer(update)
+    }
+
+    pub fn archive_lore_layer(
+        &self,
+        archive: &RoleplayLoreLayerArchive,
+    ) -> CoreResult<RoleplayLoreLayerRecord> {
+        self.store.archive_lore_layer(archive)
+    }
+
+    pub fn get_lore_layer_config(
+        &self,
+        layer_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreLayerConfigRecord>> {
+        self.store.get_lore_layer_config(layer_id)
+    }
+
+    pub fn set_lore_layer_config(
+        &self,
+        write: &RoleplayLoreLayerConfigWrite,
+    ) -> CoreResult<RoleplayLoreLayerConfigRecord> {
+        self.store.set_lore_layer_config(write)
+    }
+
+    pub fn add_entry_to_layer(&self, link: &RoleplayLoreLayerEntryLink) -> CoreResult<()> {
+        self.store.add_entry_to_layer(link)
+    }
+
+    pub fn capture_lore_fact(
+        &self,
+        capture: &RoleplayLoreFactCapture,
+    ) -> CoreResult<RoleplayLoreLayerEntryJoin> {
+        self.store.capture_lore_fact(capture)
+    }
+
+    pub fn promote_lore_entry(
+        &self,
+        promotion: &RoleplayLoreEntryPromotion,
+    ) -> CoreResult<RoleplayLoreLayerEntryJoin> {
+        self.store.promote_lore_entry(promotion)
+    }
+
+    pub fn remove_entry_from_layer(&self, layer_id: &str, record_id: &str) -> CoreResult<()> {
+        self.store.remove_entry_from_layer(layer_id, record_id)
+    }
+
+    pub fn set_entry_constant(
+        &self,
+        layer_id: &str,
+        record_id: &str,
+        is_constant: bool,
+    ) -> CoreResult<()> {
+        self.store
+            .set_entry_constant(layer_id, record_id, is_constant)
+    }
+
+    pub fn list_entries_by_layer(
+        &self,
+        layer_id: &str,
+    ) -> CoreResult<Vec<RoleplayLoreLayerEntryJoin>> {
+        self.store.list_entries_by_layer(layer_id)
+    }
+
+    pub fn set_chat_layers(&self, write: &RoleplayChatLayersWrite) -> CoreResult<()> {
+        self.store.set_chat_layers(write)
+    }
+
+    pub fn get_chat_layers(&self, chat_id: &str) -> CoreResult<Vec<RoleplayChatLayerRecord>> {
+        self.store.get_chat_layers(chat_id)
+    }
+
+    pub fn toggle_chat_layer(
+        &self,
+        chat_id: &str,
+        layer_id: &str,
+        enabled: bool,
+    ) -> CoreResult<()> {
+        self.store.toggle_chat_layer(chat_id, layer_id, enabled)
+    }
+
+    pub fn reorder_chat_layers(&self, chat_id: &str, layer_ids: &[String]) -> CoreResult<()> {
+        self.store.reorder_chat_layers(chat_id, layer_ids)
+    }
+
+    pub fn recall_lore(&self, query: &LoreRecallQuery) -> CoreResult<LoreRecallResult> {
+        self.store.recall_lore(query)
+    }
+
+    pub fn list_recall_traces(
+        &self,
+        query: &LoreRecallTraceQuery,
+    ) -> CoreResult<Vec<LoreRecallTraceRecord>> {
+        self.store.list_recall_traces(query)
+    }
+
+    pub fn get_recall_trace(&self, trace_id: &str) -> CoreResult<Option<LoreRecallTraceRecord>> {
+        self.store.get_recall_trace(trace_id)
     }
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
@@ -2336,13 +2506,15 @@ mod tests {
         RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
         ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
     };
+    #[cfg(feature = "postgres")]
+    use rusty_crew_core_protocol::EngineStorageConfig;
     use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
-        DelegationLifecyclePhase, EngineStorageConfig, ExternalEventPayload, ProfileId, ProjectId,
-        ResourceLimits, SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
-        ToolDescriptor, ToolProfile,
+        DelegationLifecyclePhase, ExternalEventPayload, ProfileId, ProjectId, ResourceLimits,
+        SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor,
+        ToolProfile,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};

@@ -184,6 +184,32 @@ interface NativeBridgeBinding {
   saveDataBankScopeJson(inputJson: string): string;
   queryDataBankScopesJson(inputJson: string): string;
   removeDataBankScopeJson(inputJson: string): string;
+  addLoreEntryJson(inputJson: string): string;
+  replaceLoreEntryJson(inputJson: string): string;
+  supersedeLoreEntryJson(inputJson: string): string;
+  tombstoneLoreEntryJson(inputJson: string): string;
+  queryLoreEntriesJson(inputJson: string): string;
+  loreEntryProvenanceEventsJson(recordId: string): string;
+  createLoreLayerJson(inputJson: string): string;
+  getLoreLayerJson(layerId: string): string;
+  listLoreLayersJson(profileId: string): string;
+  updateLoreLayerJson(inputJson: string): string;
+  archiveLoreLayerJson(inputJson: string): string;
+  getLoreLayerConfigJson(layerId: string): string;
+  setLoreLayerConfigJson(inputJson: string): string;
+  addEntryToLayerJson(inputJson: string): void;
+  removeEntryFromLayerJson(inputJson: string): void;
+  setEntryConstantJson(inputJson: string): void;
+  listEntriesByLayerJson(layerId: string): string;
+  captureLoreFactJson(inputJson: string): string;
+  promoteLoreEntryJson(inputJson: string): string;
+  setChatLayersJson(inputJson: string): void;
+  getChatLayersJson(chatId: string): string;
+  toggleChatLayerJson(inputJson: string): void;
+  reorderChatLayersJson(inputJson: string): void;
+  recallLoreJson(inputJson: string): string;
+  listRecallTracesJson(inputJson: string): string;
+  getRecallTraceJson(traceId: string): string;
   registerPlatformAdapter(registration: {
     adapterId: string;
     kind: string;
@@ -735,6 +761,30 @@ export interface NativeModelProviderQuery {
   limit?: number;
   offset?: number;
 }
+
+export type NativeRoleplayLoreRecord = Record<string, unknown>;
+export type NativeRoleplayLoreWrite = Record<string, unknown>;
+export type NativeRoleplayLoreReplace = Record<string, unknown>;
+export type NativeRoleplayLoreSupersede = Record<string, unknown>;
+export type NativeRoleplayLoreTombstone = Record<string, unknown>;
+export type NativeRoleplayLoreQuery = Record<string, unknown>;
+export type NativeRoleplayLoreProvenanceEvent = Record<string, unknown>;
+export type NativeRoleplayLoreLayerRecord = Record<string, unknown>;
+export type NativeRoleplayLoreLayerWrite = Record<string, unknown>;
+export type NativeRoleplayLoreLayerUpdate = Record<string, unknown>;
+export type NativeRoleplayLoreLayerArchive = Record<string, unknown>;
+export type NativeRoleplayLoreLayerConfigRecord = Record<string, unknown>;
+export type NativeRoleplayLoreLayerConfigWrite = Record<string, unknown>;
+export type NativeRoleplayLoreLayerEntryLink = Record<string, unknown>;
+export type NativeRoleplayLoreLayerEntryJoin = Record<string, unknown>;
+export type NativeRoleplayLoreFactCapture = Record<string, unknown>;
+export type NativeRoleplayLoreEntryPromotion = Record<string, unknown>;
+export type NativeRoleplayChatLayersWrite = Record<string, unknown>;
+export type NativeRoleplayChatLayerRecord = Record<string, unknown>;
+export type NativeLoreRecallQuery = Record<string, unknown>;
+export type NativeLoreRecallResult = Record<string, unknown>;
+export type NativeLoreRecallTraceQuery = Record<string, unknown>;
+export type NativeLoreRecallTraceRecord = Record<string, unknown>;
 
 export interface NativeProfileMemoryQuery {
   profileId: string;
@@ -1500,6 +1550,80 @@ export interface NativeBridgeModule {
     alias: string,
   ): Promise<NativeModelProviderRecord | undefined>;
   getModelProviderSecret(alias: string): Promise<string | undefined>;
+  createLoreLayer(
+    write: NativeRoleplayLoreLayerWrite,
+  ): Promise<NativeRoleplayLoreLayerRecord>;
+  getLoreLayer(
+    layerId: string,
+  ): Promise<NativeRoleplayLoreLayerRecord | undefined>;
+  listLoreLayers(profileId: string): Promise<NativeRoleplayLoreLayerRecord[]>;
+  updateLoreLayer(
+    update: NativeRoleplayLoreLayerUpdate,
+  ): Promise<NativeRoleplayLoreLayerRecord>;
+  archiveLoreLayer(
+    archive: NativeRoleplayLoreLayerArchive,
+  ): Promise<NativeRoleplayLoreLayerRecord>;
+  setChatLayers(write: NativeRoleplayChatLayersWrite): Promise<void>;
+  getChatLayers(chatId: string): Promise<NativeRoleplayChatLayerRecord[]>;
+  toggleChatLayer(input: {
+    chatId: string;
+    layerId: string;
+    enabled: boolean;
+  }): Promise<void>;
+  reorderChatLayers(input: {
+    chatId: string;
+    layerIds: string[];
+  }): Promise<void>;
+  addLoreEntry(
+    write: NativeRoleplayLoreWrite,
+  ): Promise<NativeRoleplayLoreRecord>;
+  replaceLoreEntry(
+    replace: NativeRoleplayLoreReplace,
+  ): Promise<NativeRoleplayLoreRecord>;
+  supersedeLoreEntry(
+    supersede: NativeRoleplayLoreSupersede,
+  ): Promise<[NativeRoleplayLoreRecord, NativeRoleplayLoreRecord]>;
+  tombstoneLoreEntry(
+    tombstone: NativeRoleplayLoreTombstone,
+  ): Promise<NativeRoleplayLoreRecord>;
+  queryLoreEntries(
+    query: NativeRoleplayLoreQuery,
+  ): Promise<NativeRoleplayLoreRecord[]>;
+  loreEntryProvenanceEvents(
+    recordId: string,
+  ): Promise<NativeRoleplayLoreProvenanceEvent[]>;
+  addEntryToLayer(link: NativeRoleplayLoreLayerEntryLink): Promise<void>;
+  removeEntryFromLayer(input: {
+    layerId: string;
+    recordId: string;
+  }): Promise<void>;
+  setEntryConstant(input: {
+    layerId: string;
+    recordId: string;
+    isConstant: boolean;
+  }): Promise<void>;
+  listEntriesByLayer(
+    layerId: string,
+  ): Promise<NativeRoleplayLoreLayerEntryJoin[]>;
+  recallLore(query: NativeLoreRecallQuery): Promise<NativeLoreRecallResult>;
+  captureLoreFact(
+    capture: NativeRoleplayLoreFactCapture,
+  ): Promise<NativeRoleplayLoreLayerEntryJoin>;
+  promoteLoreEntry(
+    promotion: NativeRoleplayLoreEntryPromotion,
+  ): Promise<NativeRoleplayLoreLayerEntryJoin>;
+  getLoreLayerConfig(
+    layerId: string,
+  ): Promise<NativeRoleplayLoreLayerConfigRecord | undefined>;
+  setLoreLayerConfig(
+    write: NativeRoleplayLoreLayerConfigWrite,
+  ): Promise<NativeRoleplayLoreLayerConfigRecord>;
+  listRecallTraces(
+    query: NativeLoreRecallTraceQuery,
+  ): Promise<NativeLoreRecallTraceRecord[]>;
+  getRecallTrace(
+    traceId: string,
+  ): Promise<NativeLoreRecallTraceRecord | undefined>;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
@@ -1652,6 +1776,32 @@ export const nativeManifestOperationNames = [
   "list_model_providers",
   "get_model_provider",
   "get_model_provider_secret",
+  "create_lore_layer",
+  "get_lore_layer",
+  "list_lore_layers",
+  "update_lore_layer",
+  "archive_lore_layer",
+  "set_chat_layers",
+  "get_chat_layers",
+  "toggle_chat_layer",
+  "reorder_chat_layers",
+  "add_lore_entry",
+  "replace_lore_entry",
+  "supersede_lore_entry",
+  "tombstone_lore_entry",
+  "query_lore_entries",
+  "lore_entry_provenance_events",
+  "add_entry_to_layer",
+  "remove_entry_from_layer",
+  "set_entry_constant",
+  "list_entries_by_layer",
+  "recall_lore",
+  "capture_lore_fact",
+  "promote_lore_entry",
+  "get_lore_layer_config",
+  "set_lore_layer_config",
+  "list_recall_traces",
+  "get_recall_trace",
   "list_simple_kv",
   "storage_diagnostics",
   "run_maintenance",
@@ -1734,6 +1884,32 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listModelProviders: unavailable("initialize_engine"),
     getModelProvider: unavailable("initialize_engine"),
     getModelProviderSecret: unavailable("initialize_engine"),
+    createLoreLayer: unavailable("initialize_engine"),
+    getLoreLayer: unavailable("initialize_engine"),
+    listLoreLayers: unavailable("initialize_engine"),
+    updateLoreLayer: unavailable("initialize_engine"),
+    archiveLoreLayer: unavailable("initialize_engine"),
+    setChatLayers: unavailable("initialize_engine"),
+    getChatLayers: unavailable("initialize_engine"),
+    toggleChatLayer: unavailable("initialize_engine"),
+    reorderChatLayers: unavailable("initialize_engine"),
+    addLoreEntry: unavailable("initialize_engine"),
+    replaceLoreEntry: unavailable("initialize_engine"),
+    supersedeLoreEntry: unavailable("initialize_engine"),
+    tombstoneLoreEntry: unavailable("initialize_engine"),
+    queryLoreEntries: unavailable("initialize_engine"),
+    loreEntryProvenanceEvents: unavailable("initialize_engine"),
+    addEntryToLayer: unavailable("initialize_engine"),
+    removeEntryFromLayer: unavailable("initialize_engine"),
+    setEntryConstant: unavailable("initialize_engine"),
+    listEntriesByLayer: unavailable("initialize_engine"),
+    recallLore: unavailable("initialize_engine"),
+    captureLoreFact: unavailable("initialize_engine"),
+    promoteLoreEntry: unavailable("initialize_engine"),
+    getLoreLayerConfig: unavailable("initialize_engine"),
+    setLoreLayerConfig: unavailable("initialize_engine"),
+    listRecallTraces: unavailable("initialize_engine"),
+    getRecallTrace: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
     listMemorySpaceDescriptors: unavailable("initialize_engine"),
     querySessionMemoryRecords: unavailable("initialize_engine"),
@@ -2502,6 +2678,121 @@ function createNativeBridgeModule(
       (JSON.parse(binding.getModelProviderSecretJson(alias)) as
         | string
         | null) ?? undefined,
+    createLoreLayer: async (write) =>
+      JSON.parse(
+        binding.createLoreLayerJson(JSON.stringify(write)),
+      ) as NativeRoleplayLoreLayerRecord,
+    getLoreLayer: async (layerId) =>
+      (JSON.parse(
+        binding.getLoreLayerJson(layerId),
+      ) as NativeRoleplayLoreLayerRecord | null) ?? undefined,
+    listLoreLayers: async (profileId) =>
+      JSON.parse(
+        binding.listLoreLayersJson(profileId),
+      ) as NativeRoleplayLoreLayerRecord[],
+    updateLoreLayer: async (update) =>
+      JSON.parse(
+        binding.updateLoreLayerJson(JSON.stringify(update)),
+      ) as NativeRoleplayLoreLayerRecord,
+    archiveLoreLayer: async (archive) =>
+      JSON.parse(
+        binding.archiveLoreLayerJson(JSON.stringify(archive)),
+      ) as NativeRoleplayLoreLayerRecord,
+    setChatLayers: async (write) =>
+      binding.setChatLayersJson(JSON.stringify(write)),
+    getChatLayers: async (chatId) =>
+      JSON.parse(
+        binding.getChatLayersJson(chatId),
+      ) as NativeRoleplayChatLayerRecord[],
+    toggleChatLayer: async (input) =>
+      binding.toggleChatLayerJson(
+        JSON.stringify({
+          chat_id: input.chatId,
+          layer_id: input.layerId,
+          enabled: input.enabled,
+        }),
+      ),
+    reorderChatLayers: async (input) =>
+      binding.reorderChatLayersJson(
+        JSON.stringify({
+          chat_id: input.chatId,
+          layer_ids: input.layerIds,
+        }),
+      ),
+    addLoreEntry: async (write) =>
+      JSON.parse(
+        binding.addLoreEntryJson(JSON.stringify(write)),
+      ) as NativeRoleplayLoreRecord,
+    replaceLoreEntry: async (replace) =>
+      JSON.parse(
+        binding.replaceLoreEntryJson(JSON.stringify(replace)),
+      ) as NativeRoleplayLoreRecord,
+    supersedeLoreEntry: async (supersede) =>
+      JSON.parse(binding.supersedeLoreEntryJson(JSON.stringify(supersede))) as [
+        NativeRoleplayLoreRecord,
+        NativeRoleplayLoreRecord,
+      ],
+    tombstoneLoreEntry: async (tombstone) =>
+      JSON.parse(
+        binding.tombstoneLoreEntryJson(JSON.stringify(tombstone)),
+      ) as NativeRoleplayLoreRecord,
+    queryLoreEntries: async (query) =>
+      JSON.parse(
+        binding.queryLoreEntriesJson(JSON.stringify(query)),
+      ) as NativeRoleplayLoreRecord[],
+    loreEntryProvenanceEvents: async (recordId) =>
+      JSON.parse(
+        binding.loreEntryProvenanceEventsJson(recordId),
+      ) as NativeRoleplayLoreProvenanceEvent[],
+    addEntryToLayer: async (link) =>
+      binding.addEntryToLayerJson(JSON.stringify(link)),
+    removeEntryFromLayer: async (input) =>
+      binding.removeEntryFromLayerJson(
+        JSON.stringify({
+          layer_id: input.layerId,
+          record_id: input.recordId,
+        }),
+      ),
+    setEntryConstant: async (input) =>
+      binding.setEntryConstantJson(
+        JSON.stringify({
+          layer_id: input.layerId,
+          record_id: input.recordId,
+          is_constant: input.isConstant,
+        }),
+      ),
+    listEntriesByLayer: async (layerId) =>
+      JSON.parse(
+        binding.listEntriesByLayerJson(layerId),
+      ) as NativeRoleplayLoreLayerEntryJoin[],
+    recallLore: async (query) =>
+      JSON.parse(
+        binding.recallLoreJson(JSON.stringify(query)),
+      ) as NativeLoreRecallResult,
+    captureLoreFact: async (capture) =>
+      JSON.parse(
+        binding.captureLoreFactJson(JSON.stringify(capture)),
+      ) as NativeRoleplayLoreLayerEntryJoin,
+    promoteLoreEntry: async (promotion) =>
+      JSON.parse(
+        binding.promoteLoreEntryJson(JSON.stringify(promotion)),
+      ) as NativeRoleplayLoreLayerEntryJoin,
+    getLoreLayerConfig: async (layerId) =>
+      (JSON.parse(
+        binding.getLoreLayerConfigJson(layerId),
+      ) as NativeRoleplayLoreLayerConfigRecord | null) ?? undefined,
+    setLoreLayerConfig: async (write) =>
+      JSON.parse(
+        binding.setLoreLayerConfigJson(JSON.stringify(write)),
+      ) as NativeRoleplayLoreLayerConfigRecord,
+    listRecallTraces: async (query) =>
+      JSON.parse(
+        binding.listRecallTracesJson(JSON.stringify(query)),
+      ) as NativeLoreRecallTraceRecord[],
+    getRecallTrace: async (traceId) =>
+      (JSON.parse(
+        binding.getRecallTraceJson(traceId),
+      ) as NativeLoreRecallTraceRecord | null) ?? undefined,
     runMaintenance: async (policy) => binding.runMaintenance(policy),
     listMemorySpaceDescriptors: async () =>
       JSON.parse(
