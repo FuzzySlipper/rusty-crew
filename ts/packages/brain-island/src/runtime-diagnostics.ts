@@ -189,6 +189,23 @@ export interface RuntimeBrainModuleDiagnostics {
   moduleId: string;
   strategy?: string;
   effectiveStrategy?: string;
+  providerAlias?: string;
+  modelProvider?: {
+    providerKind: string;
+    protocol: "responses" | "chat_completions" | string;
+    modelId: string;
+    status?: string;
+    baseUrl?: string;
+    contextWindowTokens?: number;
+    maxOutputTokens?: number;
+    temperatureMilli?: number;
+    reasoningEffort?: string;
+    reasoningFormat?: string;
+    credential?: {
+      hasSecret: boolean;
+      secretRef?: string;
+    };
+  };
   providerStateMode?: string;
   providerStateRebuild?: BrainModuleProviderStateRebuildPolicy;
   providerState?: RuntimeProviderStateDiagnostics;

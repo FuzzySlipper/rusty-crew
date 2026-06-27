@@ -103,6 +103,7 @@ export interface ProfileConfig {
   profileDir?: string;
   profileSkillsDir?: string;
   displayName?: string;
+  providerAlias?: string;
   modelConfig: BrainModelConfig;
   brain?: ProfileBrainConfig;
   runtime?: ProfileRuntimeConfig;
@@ -152,13 +153,27 @@ export interface LoadProfileContextInput {
   session?: SessionToolConstraints;
   catalogId?: string;
   extraRequestedToolsets?: readonly string[];
+  modelProviderResolver?: (alias: string) => Promise<BrainModelConfig>;
 }
 
 export async function loadProfileContext(
   input: LoadProfileContextInput,
 ): Promise<LoadedProfileContext> {
   const registry = input.registry ?? defaultToolRegistry;
-  const profile = await loadProfileConfig(input.profilesDir, input.profileId);
+  let profile = await loadProfileConfig(input.profilesDir, input.profileId);
+  if (profile.providerAlias !== undefined) {
+    if (input.modelProviderResolver === undefined) {
+      throw invalidProfile(
+        input.profileId,
+        input.profileId,
+        `providerAlias ${profile.providerAlias} requires a model provider resolver`,
+      );
+    }
+    profile = {
+      ...profile,
+      modelConfig: await input.modelProviderResolver(profile.providerAlias),
+    };
+  }
   const skills = await loadProfileSkills(
     profile,
     input.skillsDir ?? join(input.profilesDir, "skills"),
@@ -529,15 +544,17 @@ function validateProfileConfig(
       `profileId ${rawProfileId} does not match requested ${profileId}`,
     );
   }
+  const providerAlias = optionalString(parsed.providerAlias);
   const modelConfig = parsed.modelConfig;
-  if (!isRecord(modelConfig)) {
-    throw invalidProfile(profileId, profilePath, "modelConfig is required");
+  if (!isRecord(modelConfig) && providerAlias === undefined) {
+    throw invalidProfile(profileId, profilePath, "providerAlias is required");
   }
-  const provider = requiredString(modelConfig.provider);
-  const modelName = requiredString(modelConfig.modelName ?? modelConfig.model);
-  const temperatureMilli =
-    optionalNumber(modelConfig.temperatureMilli) ??
-    temperatureToMilli(optionalNumber(modelConfig.temperature));
+  const resolvedModelConfig = isRecord(modelConfig)
+    ? modelConfigFromProfileObject(modelConfig)
+    : {
+        provider: "unresolved-provider-alias",
+        modelName: providerAlias!,
+      };
   const runtimeConfig = isRecord(parsed.runtimeConfig)
     ? parsed.runtimeConfig
     : undefined;
@@ -550,17 +567,8 @@ function validateProfileConfig(
         ? undefined
         : join(fragments.profileDir, "skills"),
     displayName: optionalString(parsed.displayName),
-    modelConfig: {
-      provider,
-      modelName,
-      baseUrl: optionalString(modelConfig.baseUrl),
-      api: optionalString(modelConfig.api),
-      apiKeyEnv: optionalString(modelConfig.apiKeyEnv),
-      temperatureMilli,
-      maxOutputTokens:
-        optionalNumber(modelConfig.maxOutputTokens) ??
-        optionalNumber(modelConfig.maxTokens),
-    },
+    providerAlias,
+    modelConfig: resolvedModelConfig,
     brain: isRecord(parsed.brain)
       ? {
           module: brainModuleId(parsed.brain.module, profileId, profilePath),
@@ -805,6 +813,27 @@ function withExtraRequestedToolsets(
 function temperatureToMilli(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
   return Math.round(value * 1_000);
+}
+
+function modelConfigFromProfileObject(
+  modelConfig: Record<string, unknown>,
+): BrainModelConfig {
+  const provider = requiredString(modelConfig.provider);
+  const modelName = requiredString(modelConfig.modelName ?? modelConfig.model);
+  const temperatureMilli =
+    optionalNumber(modelConfig.temperatureMilli) ??
+    temperatureToMilli(optionalNumber(modelConfig.temperature));
+  return {
+    provider,
+    modelName,
+    baseUrl: optionalString(modelConfig.baseUrl),
+    api: optionalString(modelConfig.api),
+    apiKeyEnv: optionalString(modelConfig.apiKeyEnv),
+    temperatureMilli,
+    maxOutputTokens:
+      optionalNumber(modelConfig.maxOutputTokens) ??
+      optionalNumber(modelConfig.maxTokens),
+  };
 }
 
 function parseMarkdownFrontmatter(

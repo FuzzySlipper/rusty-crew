@@ -379,6 +379,10 @@ interface NativeBridgeBinding {
   createProfileRegistryRecordJson(writeJson: string): string;
   listProfileRegistryRecordsJson(queryJson: string): string;
   getProfileRegistryRecordJson(profileId: string): string;
+  upsertModelProviderJson(writeJson: string): string;
+  listModelProvidersJson(queryJson: string): string;
+  getModelProviderJson(alias: string): string;
+  getModelProviderSecretJson(alias: string): string;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
@@ -669,6 +673,64 @@ export interface NativeProfileRegistryRecord {
 
 export interface NativeProfileRegistryQuery {
   lifecycleStatus?: NativeProfileRegistryLifecycleStatus;
+  limit?: number;
+  offset?: number;
+}
+
+export type NativeModelProviderStatus = "active" | "disabled" | "archived";
+export type NativeModelProviderProtocol = "responses" | "chat_completions";
+
+export interface NativeModelProviderCredential {
+  hasSecret: boolean;
+  secretRef?: string;
+  updatedAt?: string;
+}
+
+export interface NativeModelProviderRecord {
+  alias: string;
+  status: NativeModelProviderStatus;
+  protocol: NativeModelProviderProtocol;
+  providerKind: string;
+  displayName?: string;
+  description?: string;
+  baseUrl?: string;
+  modelId: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  temperatureMilli?: number;
+  reasoningEffort?: string;
+  reasoningFormat?: string;
+  credential: NativeModelProviderCredential;
+  metadataJson: unknown;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NativeModelProviderWrite {
+  alias: string;
+  status: NativeModelProviderStatus;
+  protocol: NativeModelProviderProtocol;
+  providerKind: string;
+  displayName?: string;
+  description?: string;
+  baseUrl?: string;
+  modelId: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  temperatureMilli?: number;
+  reasoningEffort?: string;
+  reasoningFormat?: string;
+  secret?: string;
+  clearSecret?: boolean;
+  metadataJson?: unknown;
+  expectedRevision?: number;
+  now: string;
+}
+
+export interface NativeModelProviderQuery {
+  status?: NativeModelProviderStatus;
+  aliasPrefix?: string;
   limit?: number;
   offset?: number;
 }
@@ -1137,6 +1199,7 @@ export interface NativeCreateProfileRequest {
   sessionId?: string;
   implementationId?: string;
   kind?: "full" | "worker" | "delegated";
+  providerAlias?: string;
   modelConfig?: NativeProfileModelConfigSeed;
   brain?: {
     module?: string;
@@ -1215,6 +1278,7 @@ export interface NativeCreateProfileDerivedRuntimeAction {
 export interface NativeCreateProfileSeedMetadata {
   profileId: string;
   displayName?: string;
+  providerAlias: string;
   modelConfig: NativeProfileModelConfigSeed;
   brain: {
     module?: string;
@@ -1417,6 +1481,16 @@ export interface NativeBridgeModule {
   getProfileRegistryRecord(
     profileId: string,
   ): Promise<NativeProfileRegistryRecord | undefined>;
+  upsertModelProvider(
+    write: NativeModelProviderWrite,
+  ): Promise<NativeModelProviderRecord>;
+  listModelProviders(
+    query?: NativeModelProviderQuery,
+  ): Promise<NativeModelProviderRecord[]>;
+  getModelProvider(
+    alias: string,
+  ): Promise<NativeModelProviderRecord | undefined>;
+  getModelProviderSecret(alias: string): Promise<string | undefined>;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): Promise<NativeRuntimeMaintenanceReport>;
@@ -1563,6 +1637,10 @@ export const nativeManifestOperationNames = [
   "storage_schema",
   "list_profile_registry_records",
   "get_profile_registry_record",
+  "upsert_model_provider",
+  "list_model_providers",
+  "get_model_provider",
+  "get_model_provider_secret",
   "list_simple_kv",
   "storage_diagnostics",
   "run_maintenance",
@@ -1640,6 +1718,10 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     createProfileRegistryRecord: unavailable("initialize_engine"),
     listProfileRegistryRecords: unavailable("initialize_engine"),
     getProfileRegistryRecord: unavailable("initialize_engine"),
+    upsertModelProvider: unavailable("initialize_engine"),
+    listModelProviders: unavailable("initialize_engine"),
+    getModelProvider: unavailable("initialize_engine"),
+    getModelProviderSecret: unavailable("initialize_engine"),
     runMaintenance: unavailable("initialize_engine"),
     listMemorySpaceDescriptors: unavailable("initialize_engine"),
     querySessionMemoryRecords: unavailable("initialize_engine"),
@@ -2374,6 +2456,32 @@ function createNativeBridgeModule(
       ) as RawProfileRegistryRecord | null;
       return raw ? toNativeProfileRegistryRecord(raw) : undefined;
     },
+    upsertModelProvider: async (write) =>
+      toNativeModelProviderRecord(
+        JSON.parse(
+          binding.upsertModelProviderJson(
+            JSON.stringify(toRawModelProviderWrite(write)),
+          ),
+        ) as RawModelProviderRecord,
+      ),
+    listModelProviders: async (query = {}) =>
+      (
+        JSON.parse(
+          binding.listModelProvidersJson(
+            JSON.stringify(toRawModelProviderQuery(query)),
+          ),
+        ) as RawModelProviderRecord[]
+      ).map(toNativeModelProviderRecord),
+    getModelProvider: async (alias) => {
+      const raw = JSON.parse(
+        binding.getModelProviderJson(alias),
+      ) as RawModelProviderRecord | null;
+      return raw ? toNativeModelProviderRecord(raw) : undefined;
+    },
+    getModelProviderSecret: async (alias) =>
+      (JSON.parse(binding.getModelProviderSecretJson(alias)) as
+        | string
+        | null) ?? undefined,
     runMaintenance: async (policy) => binding.runMaintenance(policy),
     listMemorySpaceDescriptors: async () =>
       JSON.parse(
@@ -3031,6 +3139,7 @@ function toNativeCreateProfilePlanInput(
       session_id: input.request.sessionId,
       implementation_id: input.request.implementationId,
       kind: input.request.kind,
+      provider_alias: input.request.providerAlias,
       model_config: input.request.modelConfig
         ? {
             provider: input.request.modelConfig.provider,
@@ -3101,6 +3210,7 @@ function toNativeCreateProfilePlan(
       ? {
           profileId: plan.profile_seed.profile_id,
           displayName: plan.profile_seed.display_name ?? undefined,
+          providerAlias: plan.profile_seed.provider_alias,
           modelConfig: toProfileModelConfigSeed(plan.profile_seed.model_config),
           brain: {
             module: plan.profile_seed.brain.module ?? undefined,
@@ -3232,6 +3342,71 @@ function toNativeProfileRegistryRecord(
       toNativeProfileRegistryRuntimeRef,
     ),
     importExport: toNativeProfileRegistryImportExport(record.import_export),
+    revision: record.revision,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
+  };
+}
+
+function toRawModelProviderQuery(
+  query: NativeModelProviderQuery,
+): RawModelProviderQuery {
+  return {
+    status: query.status,
+    alias_prefix: query.aliasPrefix,
+    limit: query.limit,
+    offset: query.offset,
+  };
+}
+
+function toRawModelProviderWrite(
+  write: NativeModelProviderWrite,
+): RawModelProviderWrite {
+  return {
+    alias: write.alias,
+    status: write.status,
+    protocol: write.protocol,
+    provider_kind: write.providerKind,
+    display_name: write.displayName,
+    description: write.description,
+    base_url: write.baseUrl,
+    model_id: write.modelId,
+    context_window_tokens: write.contextWindowTokens,
+    max_output_tokens: write.maxOutputTokens,
+    temperature_milli: write.temperatureMilli,
+    reasoning_effort: write.reasoningEffort,
+    reasoning_format: write.reasoningFormat,
+    secret: write.secret,
+    clear_secret: write.clearSecret ?? false,
+    metadata_json: write.metadataJson ?? {},
+    expected_revision: write.expectedRevision,
+    now: write.now,
+  };
+}
+
+function toNativeModelProviderRecord(
+  record: RawModelProviderRecord,
+): NativeModelProviderRecord {
+  return {
+    alias: record.alias,
+    status: record.status,
+    protocol: record.protocol,
+    providerKind: record.provider_kind,
+    displayName: record.display_name ?? undefined,
+    description: record.description ?? undefined,
+    baseUrl: record.base_url ?? undefined,
+    modelId: record.model_id,
+    contextWindowTokens: record.context_window_tokens ?? undefined,
+    maxOutputTokens: record.max_output_tokens ?? undefined,
+    temperatureMilli: record.temperature_milli ?? undefined,
+    reasoningEffort: record.reasoning_effort ?? undefined,
+    reasoningFormat: record.reasoning_format ?? undefined,
+    credential: {
+      hasSecret: record.credential.has_secret,
+      secretRef: record.credential.secret_ref ?? undefined,
+      updatedAt: record.credential.updated_at ?? undefined,
+    },
+    metadataJson: record.metadata_json,
     revision: record.revision,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
@@ -3911,6 +4086,7 @@ interface RawCreateProfilePlan {
   profile_seed?: {
     profile_id: string;
     display_name?: string;
+    provider_alias: string;
     model_config: RawProfileModelConfigSeed;
     brain: {
       module?: string;
@@ -4027,6 +4203,61 @@ interface RawProfileRegistryRecord {
   revision: number;
   created_at: string;
   updated_at: string;
+}
+
+interface RawModelProviderCredential {
+  has_secret: boolean;
+  secret_ref?: string | null;
+  updated_at?: string | null;
+}
+
+interface RawModelProviderRecord {
+  alias: string;
+  status: NativeModelProviderStatus;
+  protocol: NativeModelProviderProtocol;
+  provider_kind: string;
+  display_name?: string | null;
+  description?: string | null;
+  base_url?: string | null;
+  model_id: string;
+  context_window_tokens?: number | null;
+  max_output_tokens?: number | null;
+  temperature_milli?: number | null;
+  reasoning_effort?: string | null;
+  reasoning_format?: string | null;
+  credential: RawModelProviderCredential;
+  metadata_json: unknown;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawModelProviderWrite {
+  alias: string;
+  status: NativeModelProviderStatus;
+  protocol: NativeModelProviderProtocol;
+  provider_kind: string;
+  display_name?: string;
+  description?: string;
+  base_url?: string;
+  model_id: string;
+  context_window_tokens?: number;
+  max_output_tokens?: number;
+  temperature_milli?: number;
+  reasoning_effort?: string;
+  reasoning_format?: string;
+  secret?: string;
+  clear_secret: boolean;
+  metadata_json: unknown;
+  expected_revision?: number;
+  now: string;
+}
+
+interface RawModelProviderQuery {
+  status?: NativeModelProviderStatus;
+  alias_prefix?: string;
+  limit?: number;
+  offset?: number;
 }
 
 interface RawRuntimeConfigDraft {

@@ -63,6 +63,7 @@ pub struct CreateProfileRequest {
     pub session_id: Option<String>,
     pub implementation_id: Option<String>,
     pub kind: Option<SessionKind>,
+    pub provider_alias: Option<String>,
     pub model_config: Option<ProfileModelConfigSeed>,
     pub brain: Option<ProfileBrainMetadata>,
     pub mcp_tool_profile: Option<String>,
@@ -124,6 +125,7 @@ impl CreateProfilePlan {
 pub struct CreateProfileSeedMetadata {
     pub profile_id: ProfileId,
     pub display_name: Option<String>,
+    pub provider_alias: String,
     pub model_config: ProfileModelConfigSeed,
     pub brain: ProfileBrainMetadata,
     pub skills_mode: String,
@@ -571,6 +573,14 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("{profile_id}-brain"));
     let kind = input.request.kind.clone().unwrap_or(SessionKind::Full);
+    let provider_alias = input
+        .request
+        .provider_alias
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("default")
+        .to_string();
     let model_config = input
         .request
         .model_config
@@ -619,6 +629,12 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         "invalid_tool_profile_key",
         "request.mcpToolProfile",
         &mcp_tool_profile,
+    );
+    collect_non_empty_diagnostic(
+        &mut diagnostics,
+        "invalid_provider_alias",
+        "request.providerAlias",
+        &provider_alias,
     );
     collect_non_empty_diagnostic(
         &mut diagnostics,
@@ -785,7 +801,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         agent_id: Some(runtime_session.agent_id.clone()),
         owner_id: runtime_session.owner_id.clone(),
         active_runtime_settings_json: create_profile_runtime_settings_json(
-            &model_config,
+            &provider_alias,
             &brain,
             &profile_mcp_config,
             input.request.source.as_ref(),
@@ -899,6 +915,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         profile_seed: Some(CreateProfileSeedMetadata {
             profile_id,
             display_name: input.request.display_name.clone(),
+            provider_alias,
             model_config,
             brain,
             skills_mode: "all".to_string(),
@@ -910,13 +927,13 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
 }
 
 fn create_profile_runtime_settings_json(
-    model_config: &ProfileModelConfigSeed,
+    provider_alias: &str,
     brain: &ProfileBrainMetadata,
     mcp_config: &ProfileMcpConfig,
     source: Option<&CreateProfileSourceRequest>,
 ) -> Value {
     json!({
-        "model_config": model_config,
+        "provider_alias": provider_alias,
         "brain": brain,
         "skills_mode": "all",
         "mcp_config": mcp_config,

@@ -40,10 +40,10 @@ use rusty_crew_core_protocol::{
     FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ParentConsumptionPolicy, ProfileId, ProfileRegistryRecord, ProfileRegistryWrite,
-    ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId,
-    SessionConfig, SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary,
-    ToolProfile,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderWrite, ParentConsumptionPolicy,
+    ProfileId, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId,
+    SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -630,6 +630,28 @@ impl CoreEngine {
         profile_id: &ProfileId,
     ) -> CoreResult<Option<ProfileRegistryRecord>> {
         self.store.get_profile_registry_record(profile_id)
+    }
+
+    pub fn upsert_model_provider(
+        &self,
+        write: &ModelProviderWrite,
+    ) -> CoreResult<ModelProviderRecord> {
+        self.store.upsert_model_provider(write)
+    }
+
+    pub fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+        self.store.get_model_provider(alias)
+    }
+
+    pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+        self.store.get_model_provider_secret(alias)
+    }
+
+    pub fn list_model_providers(
+        &self,
+        query: &ModelProviderQuery,
+    ) -> CoreResult<Vec<ModelProviderRecord>> {
+        self.store.list_model_providers(query)
     }
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {

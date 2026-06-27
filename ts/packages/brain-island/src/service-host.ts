@@ -44,6 +44,11 @@ import {
   type NativeProfileMemoryRecord,
   type NativeBridgeModule,
   type NativeCreateProfilePlan,
+  type NativeModelProviderRecord,
+  type NativeModelProviderProtocol,
+  type NativeModelProviderQuery,
+  type NativeModelProviderStatus,
+  type NativeModelProviderWrite,
 } from "@rusty-crew/native-bridge";
 import {
   McpSurfaceManager,
@@ -524,7 +529,10 @@ function assertServiceStorageBootAllowed(
   storage: RustyCrewStorageConfig,
   context: string,
 ): void {
-  if (storage.backend === "postgres" && storage.postgres.bootMode !== "active") {
+  if (
+    storage.backend === "postgres" &&
+    storage.postgres.bootMode !== "active"
+  ) {
     throw new Error(
       `${context}: storage.backend=postgres requires storage.postgres.bootMode=active for full service startup; current mode is ${storage.postgres.bootMode}. This fails closed so the service cannot silently fall back to SQLite.`,
     );
@@ -720,6 +728,23 @@ async function handleHttpRequest(
     );
   }
 
+  if (url.pathname.startsWith("/v1/admin/model-providers")) {
+    const body =
+      (request.method ?? "GET").toUpperCase() === "POST" ||
+      (request.method ?? "GET").toUpperCase() === "PATCH"
+        ? await readJsonBody(request)
+        : undefined;
+    return handleModelProviderAdminRequest(
+      {
+        method: request.method ?? "GET",
+        url: url.toString(),
+        body,
+        requestId: requestId(request),
+      },
+      state,
+    );
+  }
+
   if (url.pathname.startsWith("/v1/admin/memory/")) {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST"
@@ -815,6 +840,233 @@ async function handleSchedulerReadRequest(
     message: `unknown scheduler diagnostics route ${url.pathname}`,
     retryable: false,
   });
+}
+
+async function handleModelProviderAdminRequest(
+  request: {
+    method: string;
+    url: string;
+    body?: unknown;
+    requestId: string;
+  },
+  state: ServiceState,
+): Promise<AdminRouteResult> {
+  const url = new URL(request.url);
+  const method = request.method.toUpperCase();
+  const alias = decodeURIComponent(
+    url.pathname.replace(/^\/v1\/admin\/model-providers\/?/, ""),
+  ).trim();
+
+  if (method === "GET" && !alias) {
+    const status = modelProviderStatusParam(url.searchParams.get("status"));
+    if (status === "invalid") {
+      return failure(400, request.requestId, {
+        code: "invalid_input",
+        reason_code: "invalid_model_provider_status",
+        message: "invalid model provider status filter",
+        retryable: false,
+      });
+    }
+    const query: NativeModelProviderQuery = {
+      status,
+      aliasPrefix: stringParam(url, "aliasPrefix"),
+      limit: numberParam(url, "limit"),
+      offset: numberParam(url, "offset"),
+    };
+    const items = await state.bridge.listModelProviders(query);
+    return successRoute(request.requestId, {
+      items,
+      total: items.length,
+      limit: query.limit ?? 100,
+      offset: query.offset ?? 0,
+    });
+  }
+
+  if (method === "GET" && alias) {
+    const provider = await state.bridge.getModelProvider(alias);
+    if (!provider) {
+      return failure(404, request.requestId, {
+        code: "not_found",
+        reason_code: "model_provider_not_found",
+        message: `model provider ${alias} was not found`,
+        retryable: false,
+      });
+    }
+    return successRoute(request.requestId, provider);
+  }
+
+  if ((method === "POST" && !alias) || (method === "PATCH" && alias)) {
+    const write = modelProviderWriteFromBody(
+      request.body,
+      alias || undefined,
+      state.now(),
+    );
+    const provider = await state.bridge.upsertModelProvider(write);
+    const refresh = await modelProviderRefreshAfterWrite({
+      state,
+      requestId: request.requestId,
+      provider,
+      refreshMode: modelProviderRefreshMode(url, request.body),
+    });
+    return successRoute(request.requestId, {
+      provider,
+      ...refresh,
+    });
+  }
+
+  return failure(405, request.requestId, {
+    code: "method_not_allowed",
+    reason_code: "model_provider_method_not_allowed",
+    message:
+      "model provider routes support GET list/get, POST create/upsert, and PATCH update",
+    retryable: false,
+  });
+}
+
+type ModelProviderRefreshMode = "none" | "plan" | "apply";
+
+interface ModelProviderWriteRefreshResult {
+  refresh: {
+    mode: ModelProviderRefreshMode;
+    affectedProfiles: Array<{
+      profileId: string;
+      sessionIds: string[];
+      configuredSessionIds: string[];
+      activeSessionIds: string[];
+    }>;
+    outcomes: Array<{
+      profileId: string;
+      status: "planned" | "applied" | "blocked" | "failed";
+      summary: string;
+      reasonCode?: string;
+      result?: unknown;
+    }>;
+  };
+}
+
+async function modelProviderRefreshAfterWrite(input: {
+  state: ServiceState;
+  requestId: string;
+  provider: NativeModelProviderRecord;
+  refreshMode: ModelProviderRefreshMode;
+}): Promise<ModelProviderWriteRefreshResult> {
+  const affectedProfiles = await modelProviderAffectedProfiles(
+    input.state,
+    input.provider.alias,
+  );
+  const outcomes: ModelProviderWriteRefreshResult["refresh"]["outcomes"] = [];
+  if (input.refreshMode !== "none") {
+    for (const affected of affectedProfiles) {
+      const command: AdminControlCommand = {
+        name:
+          input.refreshMode === "apply"
+            ? "apply_runtime_rebuild"
+            : "plan_runtime_rebuild",
+        target: { scope: "profile", profileId: affected.profileId },
+        actor: { operatorId: "model-provider-admin" },
+        requestId: input.requestId,
+        reason: `model provider ${input.provider.alias} updated`,
+        body: {},
+      };
+      try {
+        const outcome =
+          input.refreshMode === "apply"
+            ? await applyServiceRuntimeRebuild(input.state, command)
+            : await planServiceRuntimeRebuild(input.state, command);
+        const applyOutcome =
+          input.refreshMode === "apply"
+            ? (outcome as ServiceRuntimeRebuildApplyResult)
+            : undefined;
+        const applyStatus = applyOutcome?.apply.status;
+        outcomes.push({
+          profileId: affected.profileId,
+          status:
+            input.refreshMode === "plan"
+              ? "planned"
+              : applyStatus === "completed"
+                ? "applied"
+                : "blocked",
+          summary:
+            input.refreshMode === "plan"
+              ? `runtime rebuild plan prepared for profile ${affected.profileId}`
+              : applyStatus === "completed"
+                ? `runtime rebuild applied for profile ${affected.profileId}`
+                : `runtime rebuild blocked for profile ${affected.profileId}`,
+          reasonCode:
+            applyOutcome?.apply.status === "blocked"
+              ? applyOutcome.apply.reasonCode
+              : undefined,
+          result: outcome,
+        });
+      } catch (error) {
+        outcomes.push({
+          profileId: affected.profileId,
+          status: "failed",
+          summary: errorMessage(
+            error,
+            `runtime rebuild failed for profile ${affected.profileId}`,
+          ),
+          reasonCode: "model_provider_refresh_failed",
+        });
+      }
+    }
+  }
+
+  return {
+    refresh: {
+      mode: input.refreshMode,
+      affectedProfiles,
+      outcomes,
+    },
+  };
+}
+
+async function modelProviderAffectedProfiles(
+  state: ServiceState,
+  alias: string,
+): Promise<ModelProviderWriteRefreshResult["refresh"]["affectedProfiles"]> {
+  const profileIds = new Set<ProfileId>();
+  for (const brain of state.runtimeConfig.brains)
+    profileIds.add(brain.profileId);
+  for (const session of state.runtimeConfig.sessions)
+    profileIds.add(session.profileId);
+  const activeSessions = await state.bridge.listSessions().catch(() => []);
+  for (const session of activeSessions) profileIds.add(session.profileId);
+
+  const affected: ModelProviderWriteRefreshResult["refresh"]["affectedProfiles"] =
+    [];
+  for (const profileId of [...profileIds].sort()) {
+    const profile = await loadProfileConfig(
+      state.runtimeConfig.profilesDir,
+      profileId,
+    ).catch(() => undefined);
+    if (profile?.providerAlias !== alias) continue;
+    const configuredSessionIds = state.runtimeConfig.sessions
+      .filter((session) => session.profileId === profileId)
+      .map((session) => String(session.sessionId));
+    const activeSessionIds = activeSessions
+      .filter((session) => session.profileId === profileId)
+      .map((session) => String(session.sessionId));
+    affected.push({
+      profileId: String(profileId),
+      sessionIds: [...new Set([...configuredSessionIds, ...activeSessionIds])],
+      configuredSessionIds,
+      activeSessionIds,
+    });
+  }
+  return affected;
+}
+
+function modelProviderRefreshMode(
+  url: URL,
+  body: unknown,
+): ModelProviderRefreshMode {
+  const raw =
+    url.searchParams.get("refresh") ??
+    (isRecord(body) ? optionalString(body.refresh) : undefined) ??
+    "none";
+  if (raw === "none" || raw === "plan" || raw === "apply") return raw;
+  throw new Error("model provider refresh must be none, plan, or apply");
 }
 
 async function handleDirectDebugRequest(
@@ -1439,21 +1691,19 @@ function postgresProductionReadiness(
       ];
   return {
     ready,
-    status:
-      ready
-        ? "ready"
-        : bootMode === "active"
-          ? "degraded"
+    status: ready
+      ? "ready"
+      : bootMode === "active"
+        ? "degraded"
         : bootMode === "proof_admin"
           ? "proof_admin_only"
           : "blocked_unimplemented",
     reasonCodes,
     blockers,
-    detail:
-      ready
-        ? "PostgreSQL is the active coordination backend and every correctness-sensitive repository group is implemented for this deployment mode."
-        : bootMode === "active"
-          ? "PostgreSQL is the active coordination backend, but readiness remains fail-closed until every correctness-sensitive repository group is implemented."
+    detail: ready
+      ? "PostgreSQL is the active coordination backend and every correctness-sensitive repository group is implemented for this deployment mode."
+      : bootMode === "active"
+        ? "PostgreSQL is the active coordination backend, but readiness remains fail-closed until every correctness-sensitive repository group is implemented."
         : bootMode === "proof_admin"
           ? "PostgreSQL is available only for bounded proof/admin diagnostics; full service startup requires active mode."
           : "PostgreSQL full service boot is blocked until active mode is selected and required repository groups are implemented or explicitly unsupported for a selected deployment mode.",
@@ -1856,6 +2106,8 @@ async function scanServiceCuratorCandidates(
     profilesDir: input.runtimeConfig.profilesDir,
     skillsDir: input.runtimeConfig.skillsDir,
     profileId,
+    modelProviderResolver: (alias) =>
+      resolveModelProviderForBrain(input.bridge, alias),
   });
   const denseProfileMemory = await input.bridge
     .listProfileMemory({ profileId })
@@ -3071,6 +3323,17 @@ async function createServiceProfile(
 ): Promise<CreatedServiceProfile> {
   const profileId = requiredBodyString(command, "profileId");
   const displayName = optionalBodyString(command, "displayName");
+  const providerAlias =
+    optionalBodyString(command, "providerAlias") ?? "default";
+  const modelProvider = await state.bridge.getModelProvider(providerAlias);
+  if (modelProvider === undefined) {
+    throw new Error(`model provider alias ${providerAlias} was not found`);
+  }
+  if (modelProvider.status !== "active") {
+    throw new Error(
+      `model provider alias ${providerAlias} is ${modelProvider.status}; active provider required`,
+    );
+  }
   const profilePath = safeProfileConfigPath(
     state.runtimeConfig.profilesDir,
     profileId,
@@ -3088,7 +3351,7 @@ async function createServiceProfile(
       sessionId: optionalBodyString(command, "sessionId"),
       implementationId: optionalBodyString(command, "implementationId"),
       kind: createProfileKind(command),
-      modelConfig: modelConfigFromBody(command.body.modelConfig),
+      providerAlias,
       brain: profileBrainFromBody(
         command.body.brain ?? command.body.brainSelection,
       ),
@@ -3127,7 +3390,7 @@ async function createServiceProfile(
     ...(profileSeed.displayName === undefined
       ? {}
       : { displayName: profileSeed.displayName }),
-    modelConfig: profileSeed.modelConfig,
+    providerAlias: profileSeed.providerAlias,
     brain: profileSeed.brain,
     mcpConfig: profileMcpConfig,
     skills: profileSeed.skillsMode,
@@ -3252,26 +3515,6 @@ function assertCreateProfilePlan(plan: NativeCreateProfilePlan): void {
       `${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`,
     );
   }
-}
-
-function modelConfigFromBody(input: unknown): BrainModelConfig | undefined {
-  if (input === undefined) {
-    return undefined;
-  }
-  if (!isRecord(input)) {
-    throw new Error("modelConfig must be an object when provided");
-  }
-  const provider = optionalString(input.provider) ?? "local";
-  const modelName = optionalString(input.modelName) ?? "deterministic";
-  return compactRecord({
-    provider,
-    modelName,
-    baseUrl: optionalString(input.baseUrl),
-    api: optionalString(input.api),
-    apiKeyEnv: optionalString(input.apiKeyEnv),
-    temperatureMilli: optionalNumber(input.temperatureMilli),
-    maxOutputTokens: optionalNumber(input.maxOutputTokens),
-  }) as unknown as BrainModelConfig;
 }
 
 interface RuntimeConfigFileForMutation {
@@ -3501,6 +3744,7 @@ function profileRuntimeBrainChanged(
 ): boolean {
   if (before === undefined || after === undefined) return false;
   return (
+    before.providerAlias !== after.providerAlias ||
     JSON.stringify(before.modelConfig) !== JSON.stringify(after.modelConfig) ||
     JSON.stringify(before.brain ?? {}) !== JSON.stringify(after.brain ?? {})
   );
@@ -3544,6 +3788,8 @@ async function buildDirectDebugContext(
             profilesDir: state.runtimeConfig.profilesDir,
             skillsDir: state.runtimeConfig.skillsDir,
             profileId: session.profileId,
+            modelProviderResolver: (alias) =>
+              resolveModelProviderForBrain(state.bridge, alias),
           });
           return {
             session: {
@@ -5113,6 +5359,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function requiredString(value: unknown, fieldName: string): string {
+  const text = optionalString(value);
+  if (!text) throw new Error(`${fieldName} is required`);
+  return text;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function optionalNumber(value: unknown): number | undefined {
@@ -7202,6 +7458,8 @@ async function runServiceBackgroundReview(
       profilesDir: state.runtimeConfig.profilesDir,
       skillsDir: state.runtimeConfig.skillsDir,
       profileId: profileId as ProfileId,
+      modelProviderResolver: (alias) =>
+        resolveModelProviderForBrain(state.bridge, alias),
     });
     const sessions = await state.bridge.listSessions().catch(() => []);
     const session =
@@ -7548,6 +7806,8 @@ async function dispatchWake(
       profilesDir: state.runtimeConfig.profilesDir,
       skillsDir: state.runtimeConfig.skillsDir,
       profileId: session.profileId,
+      modelProviderResolver: (alias) =>
+        resolveModelProviderForBrain(state.bridge, alias),
     });
     const configured = configuredSessionForRuntimeSession(
       state.runtimeConfig,
@@ -8911,6 +9171,125 @@ function scheduledRunTriggerParam(
 function stringParam(url: URL, key: string): string | undefined {
   const value = url.searchParams.get(key);
   return value === null || value.trim() === "" ? undefined : value;
+}
+
+function numberParam(url: URL, key: string): number | undefined {
+  const value = stringParam(url, key);
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function modelProviderStatusParam(
+  value: string | null,
+): NativeModelProviderStatus | "invalid" | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  return value === "active" || value === "disabled" || value === "archived"
+    ? value
+    : "invalid";
+}
+
+function modelProviderProtocolFromBody(
+  value: unknown,
+): NativeModelProviderProtocol {
+  const protocol = optionalString(value) ?? "chat_completions";
+  if (protocol === "responses" || protocol === "chat_completions") {
+    return protocol;
+  }
+  throw new Error(
+    "model provider protocol must be responses or chat_completions",
+  );
+}
+
+function modelProviderWriteFromBody(
+  body: unknown,
+  pathAlias: string | undefined,
+  now: string,
+): NativeModelProviderWrite {
+  if (!isRecord(body)) {
+    throw new Error("model provider request body must be an object");
+  }
+  const alias = pathAlias ?? requiredString(body.alias, "model provider alias");
+  const status = modelProviderStatusParam(optionalString(body.status) ?? null);
+  if (status === "invalid") {
+    throw new Error(
+      "model provider status must be active, disabled, or archived",
+    );
+  }
+  return {
+    alias,
+    status: status ?? "active",
+    protocol: modelProviderProtocolFromBody(body.protocol),
+    providerKind: optionalString(body.providerKind) ?? "custom",
+    displayName: optionalString(body.displayName),
+    description: optionalString(body.description),
+    baseUrl: optionalString(body.baseUrl),
+    modelId: requiredString(
+      body.modelId ?? body.model,
+      "model provider modelId",
+    ),
+    contextWindowTokens: optionalNumber(body.contextWindowTokens),
+    maxOutputTokens: optionalNumber(body.maxOutputTokens),
+    temperatureMilli: optionalNumber(body.temperatureMilli),
+    reasoningEffort: optionalString(body.reasoningEffort),
+    reasoningFormat: optionalString(body.reasoningFormat),
+    secret: optionalString(body.secret ?? body.apiKey),
+    clearSecret: optionalBoolean(body.clearSecret),
+    metadataJson: isRecord(body.metadataJson) ? body.metadataJson : {},
+    expectedRevision: optionalNumber(body.expectedRevision),
+    now,
+  };
+}
+
+async function resolveModelProviderForBrain(
+  bridge: NativeBridgeModule,
+  alias: string,
+): Promise<BrainModelConfig> {
+  const provider = await bridge.getModelProvider(alias);
+  if (provider === undefined) {
+    throw new Error(`model provider alias ${alias} was not found`);
+  }
+  if (provider.status !== "active") {
+    throw new Error(
+      `model provider alias ${alias} is ${provider.status}; active provider required`,
+    );
+  }
+  const secret = provider.credential.hasSecret
+    ? await bridge.getModelProviderSecret(alias)
+    : undefined;
+  return modelProviderToBrainModelConfig(provider, secret);
+}
+
+function modelProviderToBrainModelConfig(
+  provider: NativeModelProviderRecord,
+  secret: string | undefined,
+): BrainModelConfig {
+  const apiKeyEnv =
+    secret === undefined
+      ? undefined
+      : modelProviderSecretEnvName(provider.alias);
+  if (apiKeyEnv !== undefined) {
+    process.env[apiKeyEnv] = secret;
+  }
+  return {
+    provider: provider.providerKind,
+    modelName: provider.modelId,
+    baseUrl: provider.baseUrl,
+    api:
+      provider.protocol === "responses"
+        ? "openai-responses"
+        : "openai-completions",
+    apiKeyEnv,
+    temperatureMilli: provider.temperatureMilli,
+    maxOutputTokens: provider.maxOutputTokens,
+  };
+}
+
+function modelProviderSecretEnvName(alias: string): string {
+  return `RUSTY_CREW_MODEL_PROVIDER_SECRET_${alias
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")}`;
 }
 
 function pageParams(url: URL): { limit?: number; offset?: number } {

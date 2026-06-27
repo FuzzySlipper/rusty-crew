@@ -558,6 +558,63 @@ try {
     assert.equal(noAuthReady.status, 200);
     assert.equal(noAuthReady.body.ok, true);
 
+    const defaultProvider = await post(
+      "/v1/admin/model-providers",
+      undefined,
+      {
+        alias: "default",
+        displayName: "Default Local",
+        protocol: "chat_completions",
+        providerKind: "local",
+        modelId: "deterministic",
+        contextWindowTokens: 8192,
+        maxOutputTokens: 512,
+        temperatureMilli: 0,
+      },
+      noAuthPort,
+    );
+    assert.equal(defaultProvider.status, 200);
+    assert.equal(defaultProvider.body.data.provider.alias, "default");
+    assert.equal(
+      defaultProvider.body.data.provider.credential.hasSecret,
+      false,
+    );
+    assert.equal(defaultProvider.body.data.refresh.mode, "none");
+
+    const alternateProvider = await post(
+      "/v1/admin/model-providers",
+      undefined,
+      {
+        alias: "alternate",
+        displayName: "Alternate Local",
+        protocol: "chat_completions",
+        providerKind: "local",
+        modelId: "deterministic",
+        apiKey: "alternate-secret-smoke",
+      },
+      noAuthPort,
+    );
+    assert.equal(alternateProvider.status, 200);
+    assert.equal(alternateProvider.body.data.provider.alias, "alternate");
+    assert.equal(
+      alternateProvider.body.data.provider.credential.hasSecret,
+      true,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(alternateProvider.body),
+      /alternate-secret-smoke/,
+    );
+
+    const providers = await get(
+      "/v1/admin/model-providers",
+      undefined,
+      noAuthPort,
+    );
+    assert.deepEqual(
+      providers.body.data.items.map((item: { alias: string }) => item.alias),
+      ["alternate", "default"],
+    );
+
     const invalidProfile = await post(
       "/v1/admin/control/profiles",
       undefined,
@@ -577,6 +634,7 @@ try {
       {
         profileId: "field-created-profile",
         displayName: "Field Created Profile",
+        providerAlias: "alternate",
       },
       noAuthPort,
     );
@@ -626,8 +684,12 @@ try {
       brain?: { module?: string };
       mcpConfig?: { toolProfile?: string };
       displayName?: string;
+      providerAlias?: string;
+      modelConfig?: unknown;
     };
     assert.equal(createdProfileConfig.displayName, "Field Created Profile");
+    assert.equal(createdProfileConfig.providerAlias, "alternate");
+    assert.equal(createdProfileConfig.modelConfig, undefined);
     assert.equal(createdProfileConfig.brain?.module, "local");
     assert.equal(
       createdProfileConfig.mcpConfig?.toolProfile,
@@ -742,8 +804,74 @@ try {
       ],
     );
     assert.equal(
+      noAuthAfterProfile.body.data.overview.runtime.brainModules.find(
+        (module: { profileId: string }) =>
+          module.profileId === "field-created-profile",
+      )?.providerAlias,
+      "alternate",
+    );
+    assert.equal(
+      noAuthAfterProfile.body.data.overview.runtime.brainModules.find(
+        (module: { profileId: string }) =>
+          module.profileId === "field-created-profile",
+      )?.modelProvider.modelId,
+      "deterministic",
+    );
+    assert.equal(
+      process.env.RUSTY_CREW_MODEL_PROVIDER_SECRET_ALTERNATE,
+      "alternate-secret-smoke",
+    );
+    assert.equal(
       noAuthAfterProfile.body.data.overview.adapters.mcp.totalSurfaces,
       2,
+    );
+
+    const refreshPlan = await patch(
+      "/v1/admin/model-providers/alternate?refresh=plan",
+      undefined,
+      {
+        displayName: "Alternate Local Updated",
+        protocol: "chat_completions",
+        providerKind: "local",
+        modelId: "deterministic-updated",
+      },
+      noAuthPort,
+    );
+    assert.equal(refreshPlan.status, 200);
+    assert.equal(refreshPlan.body.data.refresh.mode, "plan");
+    assert.deepEqual(
+      refreshPlan.body.data.refresh.affectedProfiles.map(
+        (profile: { profileId: string }) => profile.profileId,
+      ),
+      ["field-created-profile"],
+    );
+    assert.equal(refreshPlan.body.data.refresh.outcomes[0]?.status, "planned");
+
+    const disabledRefresh = await patch(
+      "/v1/admin/model-providers/alternate?refresh=apply",
+      undefined,
+      {
+        status: "disabled",
+        displayName: "Alternate Local Disabled",
+        protocol: "chat_completions",
+        providerKind: "local",
+        modelId: "deterministic-updated",
+      },
+      noAuthPort,
+    );
+    assert.equal(disabledRefresh.status, 200);
+    assert.equal(disabledRefresh.body.data.provider.status, "disabled");
+    assert.equal(
+      disabledRefresh.body.data.refresh.affectedProfiles[0]?.profileId,
+      "field-created-profile",
+    );
+    assert.equal(
+      disabledRefresh.body.data.refresh.outcomes[0]?.status,
+      "failed",
+    );
+    assert.match(
+      disabledRefresh.body.data.refresh.outcomes[0]?.summary,
+      /active provider required/,
     );
 
     const duplicateProfile = await post(
@@ -879,6 +1007,26 @@ async function post(
 ) {
   const response = await fetch(`http://127.0.0.1:${requestPort}${path}`, {
     method: "POST",
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: (await response.json()) as any,
+  };
+}
+
+async function patch(
+  path: string,
+  bearer: string | undefined,
+  body: unknown,
+  requestPort = port,
+) {
+  const response = await fetch(`http://127.0.0.1:${requestPort}${path}`, {
+    method: "PATCH",
     headers: {
       ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
       "content-type": "application/json",

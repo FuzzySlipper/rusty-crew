@@ -49,7 +49,8 @@ use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
-    MessageVariantId, ProfileRegistryLifecycleStatus, ProfileRegistryWrite,
+    MessageVariantId, ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus,
+    ProfileRegistryWrite,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -439,6 +440,31 @@ impl NativeBridge {
         profile_id: &rusty_crew_core_bridge_api::ProfileId,
     ) -> CoreResult<Option<rusty_crew_core_bridge_api::ProfileRegistryRecord>> {
         self.engine()?.get_profile_registry_record(profile_id)
+    }
+
+    pub fn upsert_model_provider(
+        &self,
+        write: &ModelProviderWrite,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ModelProviderRecord> {
+        self.engine()?.upsert_model_provider(write)
+    }
+
+    pub fn get_model_provider(
+        &self,
+        alias: &str,
+    ) -> CoreResult<Option<rusty_crew_core_bridge_api::ModelProviderRecord>> {
+        self.engine()?.get_model_provider(alias)
+    }
+
+    pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+        self.engine()?.get_model_provider_secret(alias)
+    }
+
+    pub fn list_model_providers(
+        &self,
+        query: &ModelProviderQuery,
+    ) -> CoreResult<Vec<rusty_crew_core_bridge_api::ModelProviderRecord>> {
+        self.engine()?.list_model_providers(query)
     }
 
     pub fn run_maintenance(
@@ -2808,6 +2834,40 @@ impl NativeBridgeBinding {
             .get_profile_registry_record(&rusty_crew_core_bridge_api::ProfileId::new(profile_id))
             .map_err(to_napi_error)?;
         serialize_json(&record, "profile registry record")
+    }
+
+    #[napi]
+    pub fn upsert_model_provider_json(&self, write_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let write = parse_json::<ModelProviderWrite>(&write_json, "model provider write")?;
+        let record = bridge
+            .upsert_model_provider(&write)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "model provider record")
+    }
+
+    #[napi]
+    pub fn list_model_providers_json(&self, query_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<ModelProviderQuery>(&query_json, "model provider query")?;
+        let records = bridge.list_model_providers(&query).map_err(to_napi_error)?;
+        serialize_json(&records, "model provider records")
+    }
+
+    #[napi]
+    pub fn get_model_provider_json(&self, alias: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let record = bridge.get_model_provider(&alias).map_err(to_napi_error)?;
+        serialize_json(&record, "model provider record")
+    }
+
+    #[napi]
+    pub fn get_model_provider_secret_json(&self, alias: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let secret = bridge
+            .get_model_provider_secret(&alias)
+            .map_err(to_napi_error)?;
+        serialize_json(&secret, "model provider secret")
     }
 
     #[napi]

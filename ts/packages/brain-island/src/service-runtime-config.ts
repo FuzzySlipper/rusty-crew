@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type {
   AgentId,
+  BrainModelConfig,
   BrainAction,
   BrainEventEnvelope,
   BrainImplementationHandle,
@@ -28,6 +29,7 @@ import type {
   NativeRuntimeConfigDiagnostic,
   NativeRuntimeConfigDraft,
   NativeRuntimeConfigPlan,
+  NativeModelProviderRecord,
   NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
@@ -690,6 +692,8 @@ export async function applyRustyCrewRuntimeConfig(input: {
       profilesDir: runtimeConfig.profilesDir,
       skillsDir: runtimeConfig.skillsDir,
       profileId,
+      modelProviderResolver: (alias) =>
+        resolveModelProviderForBrain(input.bridge, alias),
       registry: mcpToolCatalog.registryForProfile(profileId),
       extraRequestedToolsets: mcpToolCatalog.toolsetsForProfile(profileId),
       catalogId:
@@ -812,6 +816,57 @@ export async function applyRustyCrewRuntimeConfig(input: {
   return result;
 }
 
+async function resolveModelProviderForBrain(
+  bridge: NativeBridgeModule,
+  alias: string,
+): Promise<BrainModelConfig> {
+  const provider = await bridge.getModelProvider(alias);
+  if (provider === undefined) {
+    throw new Error(`model provider alias ${alias} was not found`);
+  }
+  if (provider.status !== "active") {
+    throw new Error(
+      `model provider alias ${alias} is ${provider.status}; active provider required`,
+    );
+  }
+  const secret = provider.credential.hasSecret
+    ? await bridge.getModelProviderSecret(alias)
+    : undefined;
+  return modelProviderToBrainModelConfig(provider, secret);
+}
+
+function modelProviderToBrainModelConfig(
+  provider: NativeModelProviderRecord,
+  secret: string | undefined,
+): BrainModelConfig {
+  const apiKeyEnv =
+    secret === undefined
+      ? undefined
+      : modelProviderSecretEnvName(provider.alias);
+  if (apiKeyEnv !== undefined) {
+    process.env[apiKeyEnv] = secret;
+  }
+  return {
+    provider: provider.providerKind,
+    modelName: provider.modelId,
+    baseUrl: provider.baseUrl,
+    api:
+      provider.protocol === "responses"
+        ? "openai-responses"
+        : "openai-completions",
+    apiKeyEnv,
+    temperatureMilli: provider.temperatureMilli,
+    maxOutputTokens: provider.maxOutputTokens,
+  };
+}
+
+function modelProviderSecretEnvName(alias: string): string {
+  return `RUSTY_CREW_MODEL_PROVIDER_SECRET_${alias
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")}`;
+}
+
 export async function rebuildConfiguredBrainRuntime(input: {
   serviceConfig: RustyCrewServiceConfig;
   runtimeConfig: RustyCrewRuntimeConfig;
@@ -845,6 +900,8 @@ export async function rebuildConfiguredBrainRuntime(input: {
     profilesDir: runtimeConfig.profilesDir,
     skillsDir: runtimeConfig.skillsDir,
     profileId: input.profileId,
+    modelProviderResolver: (alias) =>
+      resolveModelProviderForBrain(input.bridge, alias),
     registry: mcpToolCatalog.registryForProfile(input.profileId),
     extraRequestedToolsets: mcpToolCatalog.toolsetsForProfile(input.profileId),
     catalogId:
@@ -1094,6 +1151,39 @@ function brainModuleDiagnostics(input: {
       ? {}
       : { strategy: input.selection.strategy }),
     effectiveStrategy: input.strategy.strategyId,
+    ...(input.profile.profile.providerAlias === undefined
+      ? {}
+      : { providerAlias: input.profile.profile.providerAlias }),
+    modelProvider: {
+      providerKind: input.profile.profile.modelConfig.provider,
+      protocol:
+        input.profile.profile.modelConfig.api === "openai-responses"
+          ? "responses"
+          : "chat_completions",
+      modelId: input.profile.profile.modelConfig.modelName,
+      ...(input.profile.profile.modelConfig.baseUrl === undefined
+        ? {}
+        : { baseUrl: input.profile.profile.modelConfig.baseUrl }),
+      ...(input.profile.profile.modelConfig.maxOutputTokens === undefined
+        ? {}
+        : {
+            maxOutputTokens: input.profile.profile.modelConfig.maxOutputTokens,
+          }),
+      ...(input.profile.profile.modelConfig.temperatureMilli === undefined
+        ? {}
+        : {
+            temperatureMilli:
+              input.profile.profile.modelConfig.temperatureMilli,
+          }),
+      ...(input.profile.profile.modelConfig.apiKeyEnv === undefined
+        ? { credential: { hasSecret: false } }
+        : {
+            credential: {
+              hasSecret: true,
+              secretRef: input.profile.profile.modelConfig.apiKeyEnv,
+            },
+          }),
+    },
     providerStateMode: input.strategy.providerState.mode,
     providerStateRebuild: providerStateRebuildPolicyForModuleStrategy(
       input.moduleStrategy,

@@ -990,6 +990,80 @@ pub struct BrainModelConfig {
     pub max_output_tokens: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderStatus {
+    Active,
+    Disabled,
+    Archived,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderProtocol {
+    Responses,
+    ChatCompletions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderCredential {
+    pub has_secret: bool,
+    pub secret_ref: Option<String>,
+    pub updated_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderRecord {
+    pub alias: String,
+    pub status: ModelProviderStatus,
+    pub protocol: ModelProviderProtocol,
+    pub provider_kind: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub base_url: Option<String>,
+    pub model_id: String,
+    pub context_window_tokens: Option<u32>,
+    pub max_output_tokens: Option<u32>,
+    pub temperature_milli: Option<u32>,
+    pub reasoning_effort: Option<String>,
+    pub reasoning_format: Option<String>,
+    pub credential: ModelProviderCredential,
+    pub metadata_json: serde_json::Value,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderWrite {
+    pub alias: String,
+    pub status: ModelProviderStatus,
+    pub protocol: ModelProviderProtocol,
+    pub provider_kind: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub base_url: Option<String>,
+    pub model_id: String,
+    pub context_window_tokens: Option<u32>,
+    pub max_output_tokens: Option<u32>,
+    pub temperature_milli: Option<u32>,
+    pub reasoning_effort: Option<String>,
+    pub reasoning_format: Option<String>,
+    pub secret: Option<String>,
+    pub clear_secret: bool,
+    pub metadata_json: serde_json::Value,
+    pub expected_revision: Option<u64>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ModelProviderQuery {
+    pub status: Option<ModelProviderStatus>,
+    pub alias_prefix: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformAdapterRegistration {
     pub adapter_id: AdapterId,

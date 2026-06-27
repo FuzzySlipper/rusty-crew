@@ -28,26 +28,28 @@ use crate::{
     IsoTimestamp, McpBindingQuery, McpBindingRecord, MessageBlockRecord, MessageId, MessageSlotId,
     MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
     MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
-    PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
-    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
-    ProfileRegistryLifecycleStatus, ProfileRegistryQuery, ProfileRegistryRecord,
-    ProfileRegistryWrite, ProviderStateAbsenceReason, ProviderWireStateDiagnostic,
-    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateRecord,
-    ProviderWireStateWakeLookup, ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage,
-    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RoleplayLoreProvenanceEvent,
-    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
-    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
-    RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageTableCount,
-    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SessionConfig,
-    SessionConfigRecord, SessionId, SessionIdentityRecord, SessionKind, SessionMemoryArchive,
-    SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
-    SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
-    SessionMemoryRecord, SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
+    ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
+    ModelProviderStatus, ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
+    ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
+    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
+    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+    QueuedMessageState, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
+    RoleplayLoreRecordStatus, RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone,
+    RoleplayLoreWrite, RunId, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
+    RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord, RuntimeMaintenancePolicy,
+    RuntimeMaintenanceReport, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
+    RuntimeStorageTableCount, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
+    ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, SessionConfig, SessionConfigRecord, SessionId,
+    SessionIdentityRecord, SessionKind, SessionMemoryArchive, SessionMemoryCompactionReport,
+    SessionMemoryPromptContext, SessionMemoryPromptContextPolicy, SessionMemoryPromptDiagnostics,
+    SessionMemoryPromptExcludedCounts, SessionMemoryQuery, SessionMemoryRecord,
+    SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionState, SessionStatus,
     SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
     SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
@@ -72,7 +74,7 @@ use rusty_crew_core_protocol::{
 };
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 12;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 13;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -339,6 +341,87 @@ impl PostgresRuntimeCounterProofStore {
                 parse_postgres_json(&record_json, "profile registry record_json")
             })
             .collect()
+    }
+
+    pub fn upsert_model_provider(
+        &self,
+        write: &ModelProviderWrite,
+    ) -> CoreResult<ModelProviderRecord> {
+        crate::validate_model_provider_write(write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL model provider upsert", error))?;
+        let existing = get_model_provider_in_tx(&mut tx, &schema, &write.alias)?;
+        if let (Some(expected), Some(record)) = (write.expected_revision, existing.as_ref()) {
+            if record.revision != expected {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    format!(
+                        "model provider {} revision mismatch: expected {}, found {}",
+                        write.alias, expected, record.revision
+                    ),
+                ));
+            }
+        }
+        upsert_model_provider_in_tx(&mut tx, &schema, write, existing.as_ref())?;
+        let record =
+            get_model_provider_in_tx(&mut tx, &schema, &write.alias)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "upserted PostgreSQL model provider was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL model provider upsert", error))?;
+        Ok(record)
+    }
+
+    pub fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+        crate::validate_model_provider_alias(alias)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_model_provider_in_client(&mut *client, &schema, alias)
+    }
+
+    pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+        crate::validate_model_provider_alias(alias)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_model_provider_secret_in_client(&mut *client, &schema, alias)
+    }
+
+    pub fn list_model_providers(
+        &self,
+        query: &ModelProviderQuery,
+    ) -> CoreResult<Vec<ModelProviderRecord>> {
+        let schema = self.quoted_schema();
+        let status = query
+            .status
+            .map(model_provider_status_as_str)
+            .map(str::to_string);
+        let alias_prefix = query
+            .alias_prefix
+            .as_deref()
+            .map(|value| format!("{value}%"));
+        let limit = query.limit.unwrap_or(100).clamp(1, 1_000) as i64;
+        let offset = query.offset.unwrap_or(0) as i64;
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT provider_json, secret_ciphertext, secret_updated_at
+                     FROM {schema}.model_providers
+                     WHERE ($1::TEXT IS NULL OR status = $1)
+                       AND ($2::TEXT IS NULL OR alias LIKE $2)
+                     ORDER BY updated_at DESC, alias ASC
+                     LIMIT $3 OFFSET $4"
+                ),
+                &[&status, &alias_prefix, &limit, &offset],
+            )
+            .map_err(|error| postgres_error("list PostgreSQL model providers", error))?;
+        rows.iter().map(row_to_model_provider).collect()
     }
 
     pub fn save_channel_binding(&self, record: &ChannelBindingRecord) -> CoreResult<()> {
@@ -1744,7 +1827,7 @@ impl PostgresRuntimeCounterProofStore {
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
             proof_repository:
-                "sessions,events,queued_messages,scheduled_jobs,worker_runs,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore"
+                "sessions,events,queued_messages,scheduled_jobs,worker_runs,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore"
                     .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
@@ -1847,6 +1930,10 @@ impl PostgresRuntimeCounterProofStore {
                 RuntimeStorageTableCount {
                     table: "profile_registry".to_string(),
                     rows: self.table_rows("profile_registry")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "model_providers".to_string(),
+                    rows: self.table_rows("model_providers")?,
                 },
                 RuntimeStorageTableCount {
                     table: "channel_bindings".to_string(),
@@ -3849,6 +3936,21 @@ impl PostgresRuntimeCounterProofStore {
                  );
                  CREATE INDEX IF NOT EXISTS profile_registry_status_idx
                     ON {schema}.profile_registry(lifecycle_status, profile_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.model_providers (
+                    alias TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    provider_json TEXT NOT NULL,
+                    secret_ciphertext TEXT,
+                    secret_updated_at TEXT,
+                    revision BIGINT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS model_providers_status_idx
+                    ON {schema}.model_providers(status, updated_at DESC, alias);
+                 CREATE INDEX IF NOT EXISTS model_providers_protocol_idx
+                    ON {schema}.model_providers(protocol, alias);
                  CREATE TABLE IF NOT EXISTS {schema}.channel_bindings (
                     binding_id TEXT PRIMARY KEY,
                     adapter_id TEXT NOT NULL,
@@ -8929,6 +9031,182 @@ fn profile_registry_lifecycle_status_as_str(
         ProfileRegistryLifecycleStatus::Paused => "paused",
         ProfileRegistryLifecycleStatus::Decommissioned => "decommissioned",
         ProfileRegistryLifecycleStatus::Archived => "archived",
+    }
+}
+
+fn get_model_provider_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    alias: &str,
+) -> CoreResult<Option<ModelProviderRecord>> {
+    get_model_provider_in_client(tx, schema, alias)
+}
+
+fn get_model_provider_in_client<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    alias: &str,
+) -> CoreResult<Option<ModelProviderRecord>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "SELECT provider_json, secret_ciphertext, secret_updated_at
+                 FROM {schema}.model_providers
+                 WHERE alias = $1"
+            ),
+            &[&alias],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL model provider", error))?;
+    row.as_ref().map(row_to_model_provider).transpose()
+}
+
+fn get_model_provider_secret_in_client<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    alias: &str,
+) -> CoreResult<Option<String>> {
+    client
+        .query_opt(
+            &format!(
+                "SELECT secret_ciphertext
+                 FROM {schema}.model_providers
+                 WHERE alias = $1"
+            ),
+            &[&alias],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL model provider secret", error))
+        .map(|row| row.and_then(|row| row.get(0)))
+}
+
+fn upsert_model_provider_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    write: &ModelProviderWrite,
+    existing: Option<&ModelProviderRecord>,
+) -> CoreResult<()> {
+    let revision = existing.map_or(1, |record| record.revision + 1);
+    let created_at = existing
+        .map(|record| record.created_at.clone())
+        .unwrap_or_else(|| write.now.clone());
+    let current_secret: Option<String> = if write.clear_secret || write.secret.is_some() {
+        None
+    } else {
+        tx.query_opt(
+            &format!(
+                "SELECT secret_ciphertext
+                 FROM {schema}.model_providers
+                 WHERE alias = $1"
+            ),
+            &[&write.alias],
+        )
+        .map_err(|error| postgres_error("load preserved PostgreSQL model provider secret", error))?
+        .and_then(|row| row.get(0))
+    };
+    let secret_ciphertext = if write.clear_secret {
+        None
+    } else {
+        write.secret.clone().or(current_secret)
+    };
+    let secret_updated_at = if write.clear_secret {
+        None
+    } else if write.secret.is_some() {
+        Some(write.now.clone())
+    } else {
+        existing.and_then(|record| record.credential.updated_at.clone())
+    };
+    let record = ModelProviderRecord {
+        alias: write.alias.clone(),
+        status: write.status,
+        protocol: write.protocol,
+        provider_kind: write.provider_kind.clone(),
+        display_name: write.display_name.clone(),
+        description: write.description.clone(),
+        base_url: write.base_url.clone(),
+        model_id: write.model_id.clone(),
+        context_window_tokens: write.context_window_tokens,
+        max_output_tokens: write.max_output_tokens,
+        temperature_milli: write.temperature_milli,
+        reasoning_effort: write.reasoning_effort.clone(),
+        reasoning_format: write.reasoning_format.clone(),
+        credential: ModelProviderCredential {
+            has_secret: secret_ciphertext.is_some(),
+            secret_ref: secret_ciphertext
+                .as_ref()
+                .map(|_| format!("db://model_providers/{}/secret", write.alias)),
+            updated_at: secret_updated_at.clone(),
+        },
+        metadata_json: write.metadata_json.clone(),
+        revision,
+        created_at,
+        updated_at: write.now.clone(),
+    };
+    let provider_json = to_json_text(&record)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.model_providers (
+                alias,
+                status,
+                protocol,
+                provider_json,
+                secret_ciphertext,
+                secret_updated_at,
+                revision,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT(alias) DO UPDATE SET
+                status = excluded.status,
+                protocol = excluded.protocol,
+                provider_json = excluded.provider_json,
+                secret_ciphertext = excluded.secret_ciphertext,
+                secret_updated_at = excluded.secret_updated_at,
+                revision = excluded.revision,
+                updated_at = excluded.updated_at"
+        ),
+        &[
+            &record.alias,
+            &model_provider_status_as_str(record.status).to_string(),
+            &model_provider_protocol_as_str(record.protocol).to_string(),
+            &provider_json,
+            &secret_ciphertext,
+            &secret_updated_at,
+            &(record.revision as i64),
+            &record.created_at,
+            &record.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("upsert PostgreSQL model provider", error))?;
+    Ok(())
+}
+
+fn row_to_model_provider(row: &Row) -> CoreResult<ModelProviderRecord> {
+    let provider_json: String = row.get(0);
+    let secret_ciphertext: Option<String> = row.get(1);
+    let secret_updated_at: Option<String> = row.get(2);
+    let mut record: ModelProviderRecord =
+        parse_postgres_json(&provider_json, "model provider provider_json")?;
+    record.credential = ModelProviderCredential {
+        has_secret: secret_ciphertext.is_some(),
+        secret_ref: secret_ciphertext
+            .as_ref()
+            .map(|_| format!("db://model_providers/{}/secret", record.alias)),
+        updated_at: secret_updated_at,
+    };
+    Ok(record)
+}
+
+fn model_provider_status_as_str(status: ModelProviderStatus) -> &'static str {
+    match status {
+        ModelProviderStatus::Active => "active",
+        ModelProviderStatus::Disabled => "disabled",
+        ModelProviderStatus::Archived => "archived",
+    }
+}
+
+fn model_provider_protocol_as_str(protocol: ModelProviderProtocol) -> &'static str {
+    match protocol {
+        ModelProviderProtocol::Responses => "responses",
+        ModelProviderProtocol::ChatCompletions => "chat_completions",
     }
 }
 

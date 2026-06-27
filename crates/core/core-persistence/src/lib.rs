@@ -42,12 +42,13 @@ use rusty_crew_core_protocol::{
     MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy,
     MemoryRetrievalStrategy, MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
     MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, MessageBlockId, MessageId,
-    MessageSlotId, MessageVariantId, ParentConsumptionPolicy, ProfileId,
-    ProfileRegistryLifecycleStatus, ProfileRegistryLifecycleUpdate, ProfileRegistryRecord,
-    ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason, ResourceLimits, RunId,
-    SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
-    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
-    ToolProfile,
+    MessageSlotId, MessageVariantId, ModelProviderCredential, ModelProviderProtocol,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderStatus, ModelProviderWrite,
+    ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
+    ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryWrite, ProjectId,
+    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
+    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
+    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -58,7 +59,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 24;
+const CURRENT_SCHEMA_VERSION: i64 = 25;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -201,6 +202,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 24,
         description: "add roleplay lore typed memory-space persistence",
         apply: migrate_v24_add_roleplay_lore_records,
+    },
+    SchemaMigration {
+        version: 25,
+        description: "add service-level model provider registry",
+        apply: migrate_v25_add_model_provider_registry,
     },
 ];
 
@@ -557,6 +563,44 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.get_profile_registry_record(profile_id),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.get_profile_registry_record(profile_id),
+        }
+    }
+
+    pub fn upsert_model_provider(
+        &self,
+        write: &ModelProviderWrite,
+    ) -> CoreResult<ModelProviderRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.upsert_model_provider(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.upsert_model_provider(write),
+        }
+    }
+
+    pub fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_model_provider(alias),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_model_provider(alias),
+        }
+    }
+
+    pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_model_provider_secret(alias),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_model_provider_secret(alias),
+        }
+    }
+
+    pub fn list_model_providers(
+        &self,
+        query: &ModelProviderQuery,
+    ) -> CoreResult<Vec<ModelProviderRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_model_providers(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_model_providers(query),
         }
     }
 
@@ -2988,6 +3032,7 @@ pub enum DiagnosticTable {
     RuntimeImportBatches,
     LegacyIdMappings,
     ProfileRegistry,
+    ModelProviders,
     ProfileMemories,
     SessionMemoryRecords,
     MemoryProposals,
@@ -3032,6 +3077,7 @@ impl DiagnosticTable {
         Self::RuntimeImportBatches,
         Self::LegacyIdMappings,
         Self::ProfileRegistry,
+        Self::ModelProviders,
         Self::ProfileMemories,
         Self::SessionMemoryRecords,
         Self::MemoryProposals,
@@ -3076,6 +3122,7 @@ impl DiagnosticTable {
             "runtime_import_batches" => Ok(Self::RuntimeImportBatches),
             "legacy_id_mappings" => Ok(Self::LegacyIdMappings),
             "profile_registry" => Ok(Self::ProfileRegistry),
+            "model_providers" => Ok(Self::ModelProviders),
             "profile_memories" => Ok(Self::ProfileMemories),
             "session_memory_records" => Ok(Self::SessionMemoryRecords),
             "memory_proposals" => Ok(Self::MemoryProposals),
@@ -3125,6 +3172,7 @@ impl DiagnosticTable {
             Self::RuntimeImportBatches => "runtime_import_batches",
             Self::LegacyIdMappings => "legacy_id_mappings",
             Self::ProfileRegistry => "profile_registry",
+            Self::ModelProviders => "model_providers",
             Self::ProfileMemories => "profile_memories",
             Self::SessionMemoryRecords => "session_memory_records",
             Self::MemoryProposals => "memory_proposals",
@@ -3352,6 +3400,59 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<ProfileRegistryRecord>> {
         let conn = self.conn()?;
         query_profile_registry_records(&conn, query)
+    }
+
+    pub fn upsert_model_provider(
+        &self,
+        write: &ModelProviderWrite,
+    ) -> CoreResult<ModelProviderRecord> {
+        validate_model_provider_write(write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start upsert model provider", error))?;
+        let existing = get_model_provider(&tx, &write.alias)?;
+        if let (Some(expected), Some(record)) = (write.expected_revision, existing.as_ref()) {
+            if record.revision != expected {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    format!(
+                        "model provider {} revision mismatch: expected {}, found {}",
+                        write.alias, expected, record.revision
+                    ),
+                ));
+            }
+        }
+        upsert_model_provider_in_tx(&tx, write, existing.as_ref())?;
+        let record = get_model_provider(&tx, &write.alias)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "upserted model provider was not readable",
+            )
+        })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit upsert model provider", error))?;
+        Ok(record)
+    }
+
+    pub fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+        validate_model_provider_alias(alias)?;
+        let conn = self.conn()?;
+        get_model_provider(&conn, alias)
+    }
+
+    pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+        validate_model_provider_alias(alias)?;
+        let conn = self.conn()?;
+        get_model_provider_secret(&conn, alias)
+    }
+
+    pub fn list_model_providers(
+        &self,
+        query: &ModelProviderQuery,
+    ) -> CoreResult<Vec<ModelProviderRecord>> {
+        let conn = self.conn()?;
+        query_model_providers(&conn, query)
     }
 
     pub fn update_profile_registry_lifecycle(
@@ -7417,6 +7518,39 @@ fn migrate_v24_add_roleplay_lore_records(tx: &rusqlite::Transaction<'_>) -> Core
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 24", error))
+}
+
+fn migrate_v25_add_model_provider_registry(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS model_providers (
+                alias TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                display_name TEXT,
+                description TEXT,
+                base_url TEXT,
+                model_id TEXT NOT NULL,
+                context_window_tokens INTEGER,
+                max_output_tokens INTEGER,
+                temperature_milli INTEGER,
+                reasoning_effort TEXT,
+                reasoning_format TEXT,
+                secret_ciphertext TEXT,
+                secret_updated_at TEXT,
+                metadata_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_model_providers_status
+                ON model_providers(status, updated_at DESC, alias);
+            CREATE INDEX IF NOT EXISTS idx_model_providers_protocol
+                ON model_providers(protocol, provider_kind, alias);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 25", error))
 }
 
 fn apply_module_schema_migration_in_tx(
@@ -12985,6 +13119,331 @@ fn validate_profile_registry_write(write: &ProfileRegistryWrite) -> CoreResult<(
                 "profile registry derived runtime ref id must be non-empty",
             ));
         }
+    }
+    Ok(())
+}
+
+fn query_model_providers(
+    conn: &Connection,
+    query: &ModelProviderQuery,
+) -> CoreResult<Vec<ModelProviderRecord>> {
+    let status = query.status.as_ref().map(model_provider_status_as_str);
+    let alias_prefix = query
+        .alias_prefix
+        .as_deref()
+        .map(|value| format!("{value}%"));
+    let limit = query.limit.unwrap_or(100).clamp(1, 1_000) as i64;
+    let offset = query.offset.unwrap_or(0) as i64;
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                alias,
+                status,
+                protocol,
+                provider_kind,
+                display_name,
+                description,
+                base_url,
+                model_id,
+                context_window_tokens,
+                max_output_tokens,
+                temperature_milli,
+                reasoning_effort,
+                reasoning_format,
+                secret_ciphertext,
+                secret_updated_at,
+                metadata_json,
+                revision,
+                created_at,
+                updated_at
+             FROM model_providers
+             WHERE (?1 IS NULL OR status = ?1)
+               AND (?2 IS NULL OR alias LIKE ?2)
+             ORDER BY updated_at DESC, alias ASC
+             LIMIT ?3 OFFSET ?4",
+        )
+        .map_err(|error| persistence_error("prepare query model providers", error))?;
+    let rows = stmt
+        .query_map(
+            params![status, alias_prefix, limit, offset],
+            row_to_model_provider,
+        )
+        .map_err(|error| persistence_error("query model providers", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load model provider records", error))
+}
+
+fn get_model_provider(conn: &Connection, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+    conn.query_row(
+        "SELECT
+            alias,
+            status,
+            protocol,
+            provider_kind,
+            display_name,
+            description,
+            base_url,
+            model_id,
+            context_window_tokens,
+            max_output_tokens,
+            temperature_milli,
+            reasoning_effort,
+            reasoning_format,
+            secret_ciphertext,
+            secret_updated_at,
+            metadata_json,
+            revision,
+            created_at,
+            updated_at
+         FROM model_providers
+         WHERE alias = ?1",
+        params![alias],
+        row_to_model_provider,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get model provider", error))
+}
+
+fn get_model_provider_secret(conn: &Connection, alias: &str) -> CoreResult<Option<String>> {
+    conn.query_row(
+        "SELECT secret_ciphertext
+         FROM model_providers
+         WHERE alias = ?1",
+        params![alias],
+        |row| row.get(0),
+    )
+    .optional()
+    .map(|value: Option<Option<String>>| value.flatten())
+    .map_err(|error| persistence_error("get model provider secret", error))
+}
+
+fn upsert_model_provider_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &ModelProviderWrite,
+    existing: Option<&ModelProviderRecord>,
+) -> CoreResult<()> {
+    let revision = existing.map_or(1, |record| record.revision + 1);
+    let created_at = existing
+        .map(|record| record.created_at.clone())
+        .unwrap_or_else(|| write.now.clone());
+    let secret_ciphertext = if write.clear_secret {
+        None
+    } else {
+        write.secret.clone().or_else(|| {
+            existing.and_then(|record| {
+                record
+                    .credential
+                    .has_secret
+                    .then(|| "__preserved__".to_string())
+            })
+        })
+    };
+    let secret_updated_at = if write.clear_secret {
+        None
+    } else if write.secret.is_some() {
+        Some(write.now.clone())
+    } else {
+        existing.and_then(|record| record.credential.updated_at.clone())
+    };
+    let secret_for_storage = match secret_ciphertext.as_deref() {
+        Some("__preserved__") => {
+            let current: Option<String> = tx
+                .query_row(
+                    "SELECT secret_ciphertext FROM model_providers WHERE alias = ?1",
+                    params![write.alias.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| persistence_error("load preserved model provider secret", error))?
+                .flatten();
+            current
+        }
+        _ => secret_ciphertext,
+    };
+    tx.execute(
+        "INSERT INTO model_providers (
+            alias,
+            status,
+            protocol,
+            provider_kind,
+            display_name,
+            description,
+            base_url,
+            model_id,
+            context_window_tokens,
+            max_output_tokens,
+            temperature_milli,
+            reasoning_effort,
+            reasoning_format,
+            secret_ciphertext,
+            secret_updated_at,
+            metadata_json,
+            revision,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+        ON CONFLICT(alias) DO UPDATE SET
+            status = excluded.status,
+            protocol = excluded.protocol,
+            provider_kind = excluded.provider_kind,
+            display_name = excluded.display_name,
+            description = excluded.description,
+            base_url = excluded.base_url,
+            model_id = excluded.model_id,
+            context_window_tokens = excluded.context_window_tokens,
+            max_output_tokens = excluded.max_output_tokens,
+            temperature_milli = excluded.temperature_milli,
+            reasoning_effort = excluded.reasoning_effort,
+            reasoning_format = excluded.reasoning_format,
+            secret_ciphertext = excluded.secret_ciphertext,
+            secret_updated_at = excluded.secret_updated_at,
+            metadata_json = excluded.metadata_json,
+            revision = excluded.revision,
+            updated_at = excluded.updated_at",
+        params![
+            write.alias.as_str(),
+            model_provider_status_as_str(&write.status),
+            model_provider_protocol_as_str(&write.protocol),
+            write.provider_kind.as_str(),
+            write.display_name.as_deref(),
+            write.description.as_deref(),
+            write.base_url.as_deref(),
+            write.model_id.as_str(),
+            write.context_window_tokens.map(|value| value as i64),
+            write.max_output_tokens.map(|value| value as i64),
+            write.temperature_milli.map(|value| value as i64),
+            write.reasoning_effort.as_deref(),
+            write.reasoning_format.as_deref(),
+            secret_for_storage.as_deref(),
+            secret_updated_at.as_deref(),
+            to_json_text(&write.metadata_json)?,
+            revision as i64,
+            created_at.as_str(),
+            write.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("upsert model provider", error))?;
+    Ok(())
+}
+
+fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProviderRecord> {
+    let status: String = row.get(1)?;
+    let protocol: String = row.get(2)?;
+    let secret_ciphertext: Option<String> = row.get(13)?;
+    let metadata_json: String = row.get(15)?;
+    Ok(ModelProviderRecord {
+        alias: row.get(0)?,
+        status: model_provider_status_from_str(&status)?,
+        protocol: model_provider_protocol_from_str(&protocol)?,
+        provider_kind: row.get(3)?,
+        display_name: row.get(4)?,
+        description: row.get(5)?,
+        base_url: row.get(6)?,
+        model_id: row.get(7)?,
+        context_window_tokens: row.get::<_, Option<i64>>(8)?.map(|value| value as u32),
+        max_output_tokens: row.get::<_, Option<i64>>(9)?.map(|value| value as u32),
+        temperature_milli: row.get::<_, Option<i64>>(10)?.map(|value| value as u32),
+        reasoning_effort: row.get(11)?,
+        reasoning_format: row.get(12)?,
+        credential: ModelProviderCredential {
+            has_secret: secret_ciphertext.is_some(),
+            secret_ref: secret_ciphertext.as_ref().map(|_| {
+                format!(
+                    "db://model_providers/{}/secret",
+                    row.get::<_, String>(0).unwrap_or_default()
+                )
+            }),
+            updated_at: row.get(14)?,
+        },
+        metadata_json: from_json_text(&metadata_json).map_err(to_sql_error)?,
+        revision: row.get::<_, i64>(16)? as u64,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
+    })
+}
+
+fn model_provider_status_as_str(status: &ModelProviderStatus) -> &'static str {
+    match status {
+        ModelProviderStatus::Active => "active",
+        ModelProviderStatus::Disabled => "disabled",
+        ModelProviderStatus::Archived => "archived",
+    }
+}
+
+fn model_provider_status_from_str(raw: &str) -> rusqlite::Result<ModelProviderStatus> {
+    match raw {
+        "active" => Ok(ModelProviderStatus::Active),
+        "disabled" => Ok(ModelProviderStatus::Disabled),
+        "archived" => Ok(ModelProviderStatus::Archived),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            1,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown model provider status {other}"),
+            )),
+        )),
+    }
+}
+
+fn model_provider_protocol_as_str(protocol: &ModelProviderProtocol) -> &'static str {
+    match protocol {
+        ModelProviderProtocol::Responses => "responses",
+        ModelProviderProtocol::ChatCompletions => "chat_completions",
+    }
+}
+
+fn model_provider_protocol_from_str(raw: &str) -> rusqlite::Result<ModelProviderProtocol> {
+    match raw {
+        "responses" => Ok(ModelProviderProtocol::Responses),
+        "chat_completions" => Ok(ModelProviderProtocol::ChatCompletions),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            2,
+            rusqlite::types::Type::Text,
+            Box::new(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("unknown model provider protocol {other}"),
+            )),
+        )),
+    }
+}
+
+fn validate_model_provider_write(write: &ModelProviderWrite) -> CoreResult<()> {
+    validate_model_provider_alias(&write.alias)?;
+    validate_registry_id_text("model provider provider_kind", &write.provider_kind)?;
+    collect_required_text("model provider model_id", &write.model_id)?;
+    validate_optional_short_text("model provider display_name", write.display_name.as_deref())?;
+    validate_optional_short_text("model provider description", write.description.as_deref())?;
+    validate_optional_short_text(
+        "model provider reasoning_effort",
+        write.reasoning_effort.as_deref(),
+    )?;
+    validate_optional_short_text(
+        "model provider reasoning_format",
+        write.reasoning_format.as_deref(),
+    )?;
+    if let Some(base_url) = write.base_url.as_deref() {
+        collect_required_text("model provider base_url", base_url)?;
+    }
+    if write.clear_secret && write.secret.is_some() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model provider write cannot set and clear secret in one request",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_model_provider_alias(alias: &str) -> CoreResult<()> {
+    validate_registry_id_text("model provider alias", alias)
+}
+
+fn collect_required_text(context: &str, value: &str) -> CoreResult<()> {
+    if value.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{context} must be non-empty"),
+        ));
     }
     Ok(())
 }
