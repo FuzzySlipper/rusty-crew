@@ -299,6 +299,21 @@ export interface StorageDiagnosticsProjection {
       correctnessSensitive: boolean;
       coverageStatus: "implemented" | "proof" | "unsupported" | "degraded";
       implementationStatus:
+        | "active_storage_admin"
+        | "active_sessions_identities"
+        | "active_events_projections"
+        | "active_queues_messages"
+        | "active_scheduler_jobs"
+        | "active_worker_runs_completions"
+        | "active_runtime_counter"
+        | "active_module_schema_registry"
+        | "active_runtime_search"
+        | "active_provider_state"
+        | "active_conversations_attachments"
+        | "active_profile_memory"
+        | "active_bindings"
+        | "active_profile_registry"
+        | "active_import_export_fresh_deployment"
         | "proof_admin"
         | "proof_sessions_identities"
         | "proof_events_projections"

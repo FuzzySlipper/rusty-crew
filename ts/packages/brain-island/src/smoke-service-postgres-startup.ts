@@ -60,10 +60,10 @@ try {
   assert.equal(envelope.data?.implementationStatus, "active");
   assert.equal(envelope.data?.postgres?.bootMode, "active");
   assert.equal(envelope.data?.postgres?.implementationStatus, "active");
-  assert.equal(envelope.data?.postgres?.productionReadiness?.ready, false);
+  assert.equal(envelope.data?.postgres?.productionReadiness?.ready, true);
   assert.equal(
     envelope.data?.postgres?.productionReadiness?.status,
-    "degraded",
+    "ready",
   );
   console.log("service postgres startup smoke passed");
 } finally {

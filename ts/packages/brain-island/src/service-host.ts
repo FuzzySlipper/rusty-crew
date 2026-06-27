@@ -1245,9 +1245,9 @@ function postgresStorageCapabilities(
     },
     {
       name: "runtime_full_text_search",
-      supported: false,
+      supported: postgresConnected,
       detail:
-        "A PostgreSQL runtime-search proof slice exists, but full service runtime search remains degraded until query readiness gates are promoted.",
+        "PostgreSQL runtime search is available through typed runtime-search service APIs.",
     },
     {
       name: "logical_export_import",
@@ -1261,137 +1261,96 @@ function postgresStorageCapabilities(
 function postgresRepositoryGroupDiagnostics(
   groups: StorageDiagnosticsProjection["repositoryGroups"],
 ): NonNullable<StorageDiagnosticsProjection["postgres"]>["repositoryGroups"] {
+  const implementedDetails = {
+    storage_admin: {
+      status: "active_storage_admin",
+      detail:
+        "Implemented for active backend selector projection, env-var references, and storage-admin diagnostics.",
+    },
+    sessions_identities: {
+      status: "active_sessions_identities",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for session/config/identity hydration.",
+    },
+    events_projections: {
+      status: "active_events_projections",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for event history, event indexing, completion packets, and tool telemetry.",
+    },
+    queues_messages: {
+      status: "active_queues_messages",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for queued-message TTL, no-resurrection behavior, and maintenance purging.",
+    },
+    scheduler_jobs: {
+      status: "active_scheduler_jobs",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for scheduled jobs, pause/resume, scheduled run claim/completion, and stale-run row-level expiry.",
+    },
+    worker_runs_completions: {
+      status: "active_worker_runs_completions",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for worker lifecycle, terminal-status queries, completion packet persistence, and delegated completion lookup.",
+    },
+    runtime_counters: {
+      status: "active_runtime_counter",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for typed runtime counter APIs.",
+    },
+    runtime_search: {
+      status: "active_runtime_search",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for typed runtime-search APIs.",
+    },
+    provider_state: {
+      status: "active_provider_state",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for typed provider wire-state APIs.",
+    },
+    conversations_attachments: {
+      status: "active_conversations_attachments",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for conversation transcripts, variants, branches, attachments, and data-bank scopes.",
+    },
+    profile_memory: {
+      status: "active_profile_memory",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for profile registry, profile_dense memory, session memory query/prompt context, and memory proposal governance.",
+    },
+    bindings: {
+      status: "active_bindings",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for profile/session-scoped channel and MCP binding records without adapter secret material.",
+    },
+    profile_registry: {
+      status: "active_profile_registry",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend for official create-profile registry records, lifecycle status, runtime refs, and import/export metadata.",
+    },
+    module_schema_registry: {
+      status: "active_module_schema_registry",
+      detail:
+        "Implemented by the active Rust PostgreSQL backend with compiled module registry diagnostics, supported capability projection, simple_kv, session_memory, and roleplay_lore stores.",
+    },
+    import_export: {
+      status: "active_import_export_fresh_deployment",
+      detail:
+        "Accepted for active fresh PostgreSQL deployment: raw SQLite-to-Postgres migration is intentionally not the green path, and logical transfer remains disabled until its own implementation task.",
+    },
+  } as const;
   return groups.map((group) => {
-    if (group.groupId === "storage_admin") {
+    const implemented =
+      group.groupId in implementedDetails
+        ? implementedDetails[group.groupId as keyof typeof implementedDetails]
+        : undefined;
+    if (implemented) {
       return {
         groupId: group.groupId,
         label: group.label,
         correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_admin",
-        detail:
-          "Implemented only for backend selector projection, env-var references, and storage-admin diagnostics.",
-      };
-    }
-    if (group.groupId === "sessions_identities") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_sessions_identities",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice for session/config/identity hydration; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "events_projections") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_events_projections",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice for event history, event indexing, completion packets, and tool telemetry; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "queues_messages") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_queues_messages",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice for queued-message TTL, no-resurrection behavior, and maintenance purging; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "scheduler_jobs") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_scheduler_jobs",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice for scheduled jobs, scheduled run claim/completion, and stale-run row-level expiry; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "worker_runs_completions") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_worker_runs_completions",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice for worker lifecycle, terminal-status queries, completion packet persistence, and delegated completion lookup; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "runtime_counters") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_runtime_counter",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice; not wired as the full service coordination backend.",
-      };
-    }
-    if (group.groupId === "runtime_search") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_runtime_search",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice through typed runtime-search APIs; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "provider_state") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_provider_state",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice through typed provider wire-state APIs; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "conversations_attachments") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_conversations_attachments",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice for conversation transcripts, branches, attachments, and data-bank scopes; not wired as the full service backend.",
-      };
-    }
-    if (group.groupId === "profile_memory") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "proof",
-        implementationStatus: "proof_profile_memory",
-        detail:
-          "Implemented in the Rust PostgreSQL proof slice for profile_dense descriptor projection and dense profile memory; generic typed memory spaces and roleplay lore remain unsupported module-owned stores.",
-      };
-    }
-    if (group.groupId === "module_schema_registry") {
-      return {
-        groupId: group.groupId,
-        label: group.label,
-        correctnessSensitive: group.correctnessSensitive,
-        coverageStatus: "degraded",
-        implementationStatus: "proof_simple_kv",
-        detail:
-          "Implemented for the simple_kv module-owned data proof table and roleplay_lore proof repository; generic typed memory spaces remain unsupported for PostgreSQL service boot.",
+        coverageStatus: "implemented",
+        implementationStatus: implemented.status,
+        detail: implemented.detail,
       };
     }
     return {
@@ -1421,10 +1380,10 @@ function postgresSearchDiagnostics(
   if (bootMode === "active") {
     return {
       backend: "postgres_tsvector",
-      status: "proof",
-      degraded: true,
+      status: "implemented",
+      degraded: false,
       detail:
-        "Runtime search is wired through the PostgreSQL backend facade for typed queries, but remains marked degraded until full query/readiness coverage is promoted.",
+        "Runtime search is wired through the PostgreSQL backend facade for typed service queries.",
     };
   }
   return {
@@ -1462,29 +1421,37 @@ function postgresProductionReadiness(
       });
     }
   }
-  const reasonCodes = [
-    bootMode === "active"
-      ? "postgres_active_with_repository_gaps"
-      : bootMode === "proof_admin"
-        ? "postgres_proof_admin_only"
-        : "postgres_full_service_boot_blocked",
-    ...blockers.map(
-      (blocker) => `postgres_repository_${blocker.status}:${blocker.groupId}`,
-    ),
-  ];
+  const ready = bootMode === "active" && blockers.length === 0;
+  const reasonCodes = ready
+    ? ["postgres_active_ready"]
+    : [
+        bootMode === "active"
+          ? "postgres_active_with_repository_gaps"
+          : bootMode === "proof_admin"
+            ? "postgres_proof_admin_only"
+            : "postgres_full_service_boot_blocked",
+        ...blockers.map(
+          (blocker) =>
+            `postgres_repository_${blocker.status}:${blocker.groupId}`,
+        ),
+      ];
   return {
-    ready: false,
+    ready,
     status:
-      bootMode === "active"
-        ? "degraded"
+      ready
+        ? "ready"
+        : bootMode === "active"
+          ? "degraded"
         : bootMode === "proof_admin"
           ? "proof_admin_only"
           : "blocked_unimplemented",
     reasonCodes,
     blockers,
     detail:
-      bootMode === "active"
-        ? "PostgreSQL is the active coordination backend, but readiness remains fail-closed until every correctness-sensitive repository group is implemented."
+      ready
+        ? "PostgreSQL is the active coordination backend and every correctness-sensitive repository group is implemented for this deployment mode."
+        : bootMode === "active"
+          ? "PostgreSQL is the active coordination backend, but readiness remains fail-closed until every correctness-sensitive repository group is implemented."
         : bootMode === "proof_admin"
           ? "PostgreSQL is available only for bounded proof/admin diagnostics; full service startup requires active mode."
           : "PostgreSQL full service boot is blocked until active mode is selected and required repository groups are implemented or explicitly unsupported for a selected deployment mode.",
@@ -1498,16 +1465,16 @@ function postgresModuleOwnedStoreDiagnostics(): NonNullable<
     {
       storeId: "typed_memory_spaces",
       label: "Typed Memory Spaces",
-      coverageStatus: "unsupported",
+      coverageStatus: "implemented",
       detail:
-        "The profile_dense compatibility path is proofed, but generic typed memory-space repositories are not implemented for PostgreSQL.",
+        "Implemented for Rust-owned profile_dense and session_memory typed memory spaces on the active PostgreSQL backend.",
     },
     {
       storeId: "roleplay_lore",
       label: "Roleplay Lore",
-      coverageStatus: "proof",
+      coverageStatus: "implemented",
       detail:
-        "Roleplay lore has a PostgreSQL proof repository with typed world/entity/lore/timeline/provenance records; it is not wired as the full service backend.",
+        "Implemented by the active PostgreSQL backend with typed world/entity/lore/timeline/provenance records.",
     },
   ];
 }

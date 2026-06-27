@@ -12,10 +12,11 @@ use crate::{
     validate_profile_memory_key, validate_profile_memory_write, validate_provider_wire_state_key,
     validate_roleplay_lore_record_id, validate_roleplay_lore_write, validate_simple_kv_identity,
     validate_simple_kv_query, validate_simple_kv_write, ActiveBranchConflict,
-    ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation, AgentId,
+    ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation, AdapterId, AgentId,
     AgentInstanceId, AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite,
-    AttachmentQuery, AttachmentRecord, AttachmentStatus, AttachmentWrite, BranchHeadConflict,
-    BranchHeadExpectation, CompletionPacketQuery, CompletionPacketRecord, ConversationBranchId,
+    AttachmentQuery, AttachmentRecord, AttachmentStatus, AttachmentWrite,
+    BranchAwareSessionMemoryQuery, BranchHeadConflict, BranchHeadExpectation, ChannelBindingQuery,
+    ChannelBindingRecord, CompletionPacketQuery, CompletionPacketRecord, ConversationBranchId,
     ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
     ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
     ConversationJumpTarget, ConversationSnapshotId, ConversationSnapshotQuery,
@@ -23,26 +24,31 @@ use crate::{
     CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DataBankScopeId, DataBankScopeQuery,
     DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite, DelegatedCompletion,
     DenRuntimeReference, DurableAgentKind, DurableAgentRecord, DurableIdentityStatus,
-    DurableMessageRecord, DurableMessageStatus, DurableMessageWrite, IsoTimestamp,
-    MessageBlockRecord, MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord,
-    MessageSlotWrite, MessageVariantId, MessageVariantQuery, MessageVariantRecord,
-    MessageVariantSource, MessageVariantStatus, MessageVariantWrite, PersistedEvent, ProfileId,
-    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProviderStateAbsenceReason,
-    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
-    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
-    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-    QueuedMessageState, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
-    RoleplayLoreRecordStatus, RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone,
-    RoleplayLoreWrite, RunId, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
-    RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord, RuntimeMaintenancePolicy,
-    RuntimeMaintenanceReport, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
-    RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageTableCount, ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus,
-    ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
-    SelectActiveVariantResult, SessionConfig, SessionConfigRecord, SessionId,
-    SessionIdentityRecord, SessionKind, SessionMemoryCompactionReport, SessionState, SessionStatus,
+    DurableMessageRecord, DurableMessageStatus, DurableMessageWrite, ExternalBindingStatus,
+    IsoTimestamp, McpBindingQuery, McpBindingRecord, MessageBlockRecord, MessageId, MessageSlotId,
+    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
+    PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
+    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
+    ProfileRegistryLifecycleStatus, ProfileRegistryQuery, ProfileRegistryRecord,
+    ProfileRegistryWrite, ProviderStateAbsenceReason, ProviderWireStateDiagnostic,
+    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateRecord,
+    ProviderWireStateWakeLookup, ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage,
+    QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
+    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
+    RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageTableCount,
+    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SessionConfig,
+    SessionConfigRecord, SessionId, SessionIdentityRecord, SessionKind, SessionMemoryArchive,
+    SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
+    SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
+    SessionMemoryRecord, SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
+    SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionState, SessionStatus,
     SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
     SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
     UpdateBranchHeadResult, WorkerRunQuery, WorkerRunRecord, WorkerRunStatus, COUNTER_BRAIN_TURNS,
@@ -53,17 +59,20 @@ use crate::{
 };
 use postgres::{Client, GenericClient, NoTls, Row, Transaction};
 use rusty_crew_core_protocol::{
-    BrainEvent, CompletionPacket, CompletionStatus, FanOutFailurePolicy, MemoryConflictPolicy,
-    MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryExportImportPolicy, MemoryFieldType,
-    MemoryGovernanceMode, MemoryIndexingPolicy, MemoryOperation, MemoryOperationPolicy,
-    MemoryPromptPolicy, MemoryProvenancePolicy, MemoryRecordFieldDescriptor,
-    MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy,
-    MemoryRetrievalStrategy, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
-    MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, ParentConsumptionPolicy,
+    session_memory_space_descriptor, BrainEvent, CompletionPacket, CompletionStatus,
+    FanOutFailurePolicy, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
+    MemoryEvidenceRef, MemoryExportImportPolicy, MemoryFieldType, MemoryGovernanceDecisionInput,
+    MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord, MemoryGovernanceMode,
+    MemoryIndexingPolicy, MemoryOperation, MemoryOperationPolicy, MemoryPromptPolicy,
+    MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus,
+    MemoryProvenancePolicy, MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor,
+    MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy,
+    MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor, MemorySpaceId,
+    MemoryVisibilityModel, MemoryWritePolicy, ParentConsumptionPolicy,
 };
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 11;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -221,6 +230,393 @@ impl PostgresRuntimeCounterProofStore {
                 })
             })
             .collect()
+    }
+
+    pub fn create_profile_registry_record(
+        &self,
+        write: &ProfileRegistryWrite,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        crate::validate_profile_registry_write(write)?;
+        let schema = self.quoted_schema();
+        let record = ProfileRegistryRecord {
+            profile_id: write.profile_id.clone(),
+            lifecycle_status: write.lifecycle_status,
+            display_name: write.display_name.clone(),
+            summary: write.summary.clone(),
+            default_session_kind: write.default_session_kind.clone(),
+            agent_id: write.agent_id.clone(),
+            owner_id: write.owner_id.clone(),
+            active_runtime_settings_json: write.active_runtime_settings_json.clone(),
+            source_asset_refs: write.source_asset_refs.clone(),
+            derived_runtime_refs: write.derived_runtime_refs.clone(),
+            import_export: write.import_export.clone(),
+            revision: 1,
+            created_at: write.now.clone(),
+            updated_at: write.now.clone(),
+        };
+        let record_json = to_json_text(&record)?;
+        let lifecycle_status =
+            profile_registry_lifecycle_status_as_str(record.lifecycle_status).to_string();
+        self.client()?
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.profile_registry (
+                        profile_id,
+                        lifecycle_status,
+                        record_json,
+                        created_at,
+                        updated_at
+                     ) VALUES ($1, $2, $3, $4, $5)"
+                ),
+                &[
+                    &record.profile_id.0,
+                    &lifecycle_status,
+                    &record_json,
+                    &record.created_at,
+                    &record.updated_at,
+                ],
+            )
+            .map_err(|error| postgres_error("create PostgreSQL profile registry record", error))?;
+        Ok(record)
+    }
+
+    pub fn get_profile_registry_record(
+        &self,
+        profile_id: &ProfileId,
+    ) -> CoreResult<Option<ProfileRegistryRecord>> {
+        crate::validate_profile_registry_id(profile_id)?;
+        let schema = self.quoted_schema();
+        let row = self
+            .client()?
+            .query_opt(
+                &format!(
+                    "SELECT record_json
+                     FROM {schema}.profile_registry
+                     WHERE profile_id = $1"
+                ),
+                &[&profile_id.0],
+            )
+            .map_err(|error| postgres_error("get PostgreSQL profile registry record", error))?;
+        row.map(|row| {
+            let record_json: String = row.get(0);
+            parse_postgres_json(&record_json, "profile registry record_json")
+        })
+        .transpose()
+    }
+
+    pub fn list_profile_registry_records(
+        &self,
+        query: &ProfileRegistryQuery,
+    ) -> CoreResult<Vec<ProfileRegistryRecord>> {
+        let schema = self.quoted_schema();
+        let lifecycle_status = query
+            .lifecycle_status
+            .map(profile_registry_lifecycle_status_as_str)
+            .map(str::to_string);
+        let (limit, offset) = query
+            .page
+            .unwrap_or(QueryPage {
+                limit: None,
+                offset: None,
+            })
+            .bounded(100, 1_000);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT record_json
+                     FROM {schema}.profile_registry
+                     WHERE ($1::TEXT IS NULL OR lifecycle_status = $1)
+                     ORDER BY profile_id ASC
+                     LIMIT $2 OFFSET $3"
+                ),
+                &[&lifecycle_status, &limit, &offset],
+            )
+            .map_err(|error| postgres_error("list PostgreSQL profile registry records", error))?;
+        rows.iter()
+            .map(|row| {
+                let record_json: String = row.get(0);
+                parse_postgres_json(&record_json, "profile registry record_json")
+            })
+            .collect()
+    }
+
+    pub fn save_channel_binding(&self, record: &ChannelBindingRecord) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let status = external_binding_status_as_str(record.status).to_string();
+        let provenance_json = to_json_text(&record.provenance)?;
+        self.client()?
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.channel_bindings (
+                        binding_id,
+                        adapter_id,
+                        provider,
+                        agent_id,
+                        instance_id,
+                        session_id,
+                        profile_id,
+                        external_channel_id,
+                        external_thread_id,
+                        external_user_id,
+                        provider_subscription_id,
+                        cursor,
+                        membership_state,
+                        presence_state,
+                        status,
+                        degraded_reason,
+                        provenance_json,
+                        created_at,
+                        updated_at
+                     ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                        $11, $12, $13, $14, $15, $16, $17, $18, $19
+                     )
+                     ON CONFLICT(binding_id) DO UPDATE SET
+                        adapter_id = EXCLUDED.adapter_id,
+                        provider = EXCLUDED.provider,
+                        agent_id = EXCLUDED.agent_id,
+                        instance_id = EXCLUDED.instance_id,
+                        session_id = EXCLUDED.session_id,
+                        profile_id = EXCLUDED.profile_id,
+                        external_channel_id = EXCLUDED.external_channel_id,
+                        external_thread_id = EXCLUDED.external_thread_id,
+                        external_user_id = EXCLUDED.external_user_id,
+                        provider_subscription_id = EXCLUDED.provider_subscription_id,
+                        cursor = EXCLUDED.cursor,
+                        membership_state = EXCLUDED.membership_state,
+                        presence_state = EXCLUDED.presence_state,
+                        status = EXCLUDED.status,
+                        degraded_reason = EXCLUDED.degraded_reason,
+                        provenance_json = EXCLUDED.provenance_json,
+                        updated_at = EXCLUDED.updated_at"
+                ),
+                &[
+                    &record.binding_id,
+                    &record.adapter_id.0,
+                    &record.provider,
+                    &record.agent_id.0,
+                    &record.instance_id.as_ref().map(|value| value.0.as_str()),
+                    &record.session_id.as_ref().map(|value| value.0.as_str()),
+                    &record.profile_id.0,
+                    &record.external_channel_id,
+                    &record.external_thread_id,
+                    &record.external_user_id,
+                    &record.provider_subscription_id,
+                    &record.cursor,
+                    &record.membership_state,
+                    &record.presence_state,
+                    &status,
+                    &record.degraded_reason,
+                    &provenance_json,
+                    &record.created_at,
+                    &record.updated_at,
+                ],
+            )
+            .map_err(|error| postgres_error("save PostgreSQL channel binding", error))?;
+        Ok(())
+    }
+
+    pub fn query_channel_bindings(
+        &self,
+        query: &ChannelBindingQuery,
+    ) -> CoreResult<Vec<ChannelBindingRecord>> {
+        let schema = self.quoted_schema();
+        let agent_id = query.agent_id.as_ref().map(|value| value.0.as_str());
+        let instance_id = query.instance_id.as_ref().map(|value| value.0.as_str());
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+        let adapter_id = query.adapter_id.as_ref().map(|value| value.0.as_str());
+        let provider = query.provider.as_deref();
+        let external_channel_id = query.external_channel_id.as_deref();
+        let status = query.status.map(external_binding_status_as_str);
+        let (limit, offset) = query
+            .page
+            .unwrap_or(QueryPage {
+                limit: None,
+                offset: None,
+            })
+            .bounded(100, 1_000);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT
+                        binding_id,
+                        adapter_id,
+                        provider,
+                        agent_id,
+                        instance_id,
+                        session_id,
+                        profile_id,
+                        external_channel_id,
+                        external_thread_id,
+                        external_user_id,
+                        provider_subscription_id,
+                        cursor,
+                        membership_state,
+                        presence_state,
+                        status,
+                        degraded_reason,
+                        provenance_json,
+                        created_at,
+                        updated_at
+                     FROM {schema}.channel_bindings
+                     WHERE ($1::TEXT IS NULL OR agent_id = $1)
+                       AND ($2::TEXT IS NULL OR instance_id = $2)
+                       AND ($3::TEXT IS NULL OR session_id = $3)
+                       AND ($4::TEXT IS NULL OR profile_id = $4)
+                       AND ($5::TEXT IS NULL OR adapter_id = $5)
+                       AND ($6::TEXT IS NULL OR provider = $6)
+                       AND ($7::TEXT IS NULL OR external_channel_id = $7)
+                       AND ($8::TEXT IS NULL OR status = $8)
+                     ORDER BY provider ASC, external_channel_id ASC, binding_id ASC
+                     LIMIT $9 OFFSET $10"
+                ),
+                &[
+                    &agent_id,
+                    &instance_id,
+                    &session_id,
+                    &profile_id,
+                    &adapter_id,
+                    &provider,
+                    &external_channel_id,
+                    &status,
+                    &limit,
+                    &offset,
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL channel bindings", error))?;
+        rows.iter().map(row_to_channel_binding_record).collect()
+    }
+
+    pub fn save_mcp_binding(&self, record: &McpBindingRecord) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        let server_names_json = to_json_text(&record.server_names)?;
+        let diagnostics_json = to_json_text(&record.diagnostics)?;
+        let status = external_binding_status_as_str(record.status).to_string();
+        self.client()?
+            .execute(
+                &format!(
+                    "INSERT INTO {schema}.mcp_bindings (
+                        binding_id,
+                        adapter_id,
+                        agent_id,
+                        instance_id,
+                        session_id,
+                        profile_id,
+                        server_names_json,
+                        endpoint_ref,
+                        transport,
+                        tool_profile_key,
+                        discovered_tool_revision,
+                        status,
+                        degraded_reason,
+                        diagnostics_json,
+                        created_at,
+                        updated_at
+                     ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8,
+                        $9, $10, $11, $12, $13, $14, $15, $16
+                     )
+                     ON CONFLICT(binding_id) DO UPDATE SET
+                        adapter_id = EXCLUDED.adapter_id,
+                        agent_id = EXCLUDED.agent_id,
+                        instance_id = EXCLUDED.instance_id,
+                        session_id = EXCLUDED.session_id,
+                        profile_id = EXCLUDED.profile_id,
+                        server_names_json = EXCLUDED.server_names_json,
+                        endpoint_ref = EXCLUDED.endpoint_ref,
+                        transport = EXCLUDED.transport,
+                        tool_profile_key = EXCLUDED.tool_profile_key,
+                        discovered_tool_revision = EXCLUDED.discovered_tool_revision,
+                        status = EXCLUDED.status,
+                        degraded_reason = EXCLUDED.degraded_reason,
+                        diagnostics_json = EXCLUDED.diagnostics_json,
+                        updated_at = EXCLUDED.updated_at"
+                ),
+                &[
+                    &record.binding_id,
+                    &record.adapter_id.0,
+                    &record.agent_id.0,
+                    &record.instance_id.as_ref().map(|value| value.0.as_str()),
+                    &record.session_id.as_ref().map(|value| value.0.as_str()),
+                    &record.profile_id.0,
+                    &server_names_json,
+                    &record.endpoint_ref,
+                    &record.transport,
+                    &record.tool_profile_key,
+                    &record.discovered_tool_revision,
+                    &status,
+                    &record.degraded_reason,
+                    &diagnostics_json,
+                    &record.created_at,
+                    &record.updated_at,
+                ],
+            )
+            .map_err(|error| postgres_error("save PostgreSQL MCP binding", error))?;
+        Ok(())
+    }
+
+    pub fn query_mcp_bindings(&self, query: &McpBindingQuery) -> CoreResult<Vec<McpBindingRecord>> {
+        let schema = self.quoted_schema();
+        let agent_id = query.agent_id.as_ref().map(|value| value.0.as_str());
+        let instance_id = query.instance_id.as_ref().map(|value| value.0.as_str());
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+        let adapter_id = query.adapter_id.as_ref().map(|value| value.0.as_str());
+        let status = query.status.map(external_binding_status_as_str);
+        let (limit, offset) = query
+            .page
+            .unwrap_or(QueryPage {
+                limit: None,
+                offset: None,
+            })
+            .bounded(100, 1_000);
+        let rows = self
+            .client()?
+            .query(
+                &format!(
+                    "SELECT
+                        binding_id,
+                        adapter_id,
+                        agent_id,
+                        instance_id,
+                        session_id,
+                        profile_id,
+                        server_names_json,
+                        endpoint_ref,
+                        transport,
+                        tool_profile_key,
+                        discovered_tool_revision,
+                        status,
+                        degraded_reason,
+                        diagnostics_json,
+                        created_at,
+                        updated_at
+                     FROM {schema}.mcp_bindings
+                     WHERE ($1::TEXT IS NULL OR agent_id = $1)
+                       AND ($2::TEXT IS NULL OR instance_id = $2)
+                       AND ($3::TEXT IS NULL OR session_id = $3)
+                       AND ($4::TEXT IS NULL OR profile_id = $4)
+                       AND ($5::TEXT IS NULL OR adapter_id = $5)
+                       AND ($6::TEXT IS NULL OR status = $6)
+                     ORDER BY agent_id ASC, profile_id ASC, binding_id ASC
+                     LIMIT $7 OFFSET $8"
+                ),
+                &[
+                    &agent_id,
+                    &instance_id,
+                    &session_id,
+                    &profile_id,
+                    &adapter_id,
+                    &status,
+                    &limit,
+                    &offset,
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL MCP bindings", error))?;
+        rows.iter().map(row_to_mcp_binding_record).collect()
     }
 
     pub fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
@@ -549,6 +945,48 @@ impl PostgresRuntimeCounterProofStore {
             )
             .map_err(|error| postgres_error("query PostgreSQL scheduled jobs", error))?;
         rows.iter().map(row_to_scheduled_job).collect()
+    }
+
+    pub fn pause_scheduled_job(&self, job_id: &str, now: &IsoTimestamp) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        self.client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.scheduled_jobs
+                     SET status = 'paused',
+                         paused_at = $2,
+                         updated_at = $2
+                     WHERE job_id = $1
+                       AND status <> 'archived'"
+                ),
+                &[&job_id, now],
+            )
+            .map_err(|error| postgres_error("pause PostgreSQL scheduled job", error))?;
+        Ok(())
+    }
+
+    pub fn resume_scheduled_job(
+        &self,
+        job_id: &str,
+        next_due_at: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        self.client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.scheduled_jobs
+                     SET status = 'active',
+                         next_due_at = $2,
+                         paused_at = NULL,
+                         updated_at = $3
+                     WHERE job_id = $1
+                       AND status <> 'archived'"
+                ),
+                &[&job_id, next_due_at, now],
+            )
+            .map_err(|error| postgres_error("resume PostgreSQL scheduled job", error))?;
+        Ok(())
     }
 
     pub fn claim_scheduled_run(
@@ -1407,6 +1845,30 @@ impl PostgresRuntimeCounterProofStore {
                     rows: self.table_rows("profile_memories")?,
                 },
                 RuntimeStorageTableCount {
+                    table: "profile_registry".to_string(),
+                    rows: self.table_rows("profile_registry")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "channel_bindings".to_string(),
+                    rows: self.table_rows("channel_bindings")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "mcp_bindings".to_string(),
+                    rows: self.table_rows("mcp_bindings")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "session_memory_records".to_string(),
+                    rows: self.table_rows("session_memory_records")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "memory_proposals".to_string(),
+                    rows: self.table_rows("memory_proposals")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "memory_governance_decisions".to_string(),
+                    rows: self.table_rows("memory_governance_decisions")?,
+                },
+                RuntimeStorageTableCount {
                     table: "module_roleplay_lore_records".to_string(),
                     rows: self.table_rows("module_roleplay_lore_records")?,
                 },
@@ -1591,6 +2053,347 @@ impl PostgresRuntimeCounterProofStore {
         tx.commit()
             .map_err(|error| postgres_error("commit remove PostgreSQL profile memory", error))?;
         Ok(existing)
+    }
+
+    pub fn add_session_memory_record(
+        &self,
+        write: &SessionMemoryRecordWrite,
+    ) -> CoreResult<SessionMemoryRecord> {
+        crate::validate_session_memory_write(write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start add PostgreSQL session memory record", error))?;
+        validate_postgres_session_memory_scope(
+            &mut tx,
+            &schema,
+            &write.session_id,
+            &write.scope,
+            &write.branch_id,
+        )?;
+        if get_session_memory_record_in_tx(&mut tx, &schema, &write.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("session memory record {} already exists", write.record_id),
+            ));
+        }
+        insert_session_memory_record_in_tx(&mut tx, &schema, write)?;
+        let record = get_session_memory_record_in_tx(&mut tx, &schema, &write.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "created PostgreSQL session memory record was not readable",
+                )
+            })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit add PostgreSQL session memory record", error)
+        })?;
+        Ok(record)
+    }
+
+    pub fn replace_session_memory_record(
+        &self,
+        replace: &SessionMemoryReplace,
+    ) -> CoreResult<SessionMemoryRecord> {
+        validate_postgres_session_memory_revision_input(
+            &replace.record_id,
+            replace.expected_revision,
+            &replace.evidence_refs,
+            replace.confidence,
+            &replace.durability_rationale,
+        )?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start replace PostgreSQL session memory record", error)
+        })?;
+        let existing = active_session_memory_record_for_update(
+            &mut tx,
+            &schema,
+            &replace.record_id,
+            replace.expected_revision,
+        )?;
+        crate::validate_session_memory_content(&existing.shape, &replace.content)?;
+        update_session_memory_record_content_in_tx(
+            &mut tx,
+            &schema,
+            replace,
+            existing.revision + 1,
+        )?;
+        let record = get_session_memory_record_in_tx(&mut tx, &schema, &replace.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "replaced PostgreSQL session memory record was not readable",
+                )
+            })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit replace PostgreSQL session memory record", error)
+        })?;
+        Ok(record)
+    }
+
+    pub fn supersede_session_memory_record(
+        &self,
+        supersede: &SessionMemorySupersede,
+    ) -> CoreResult<(SessionMemoryRecord, SessionMemoryRecord)> {
+        crate::validate_session_memory_write(&supersede.replacement)?;
+        if supersede.replacement.supersedes_record_id.as_deref()
+            != Some(supersede.record_id.as_str())
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory replacement must reference the superseded record",
+            ));
+        }
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start supersede PostgreSQL session memory record", error)
+        })?;
+        let existing = active_session_memory_record_for_update(
+            &mut tx,
+            &schema,
+            &supersede.record_id,
+            supersede.expected_revision,
+        )?;
+        validate_postgres_session_memory_scope(
+            &mut tx,
+            &schema,
+            &supersede.replacement.session_id,
+            &supersede.replacement.scope,
+            &supersede.replacement.branch_id,
+        )?;
+        if existing.session_id != supersede.replacement.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory replacement must stay in the same session",
+            ));
+        }
+        if get_session_memory_record_in_tx(&mut tx, &schema, &supersede.replacement.record_id)?
+            .is_some()
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "session memory replacement {} already exists",
+                    supersede.replacement.record_id
+                ),
+            ));
+        }
+        insert_session_memory_record_in_tx(&mut tx, &schema, &supersede.replacement)?;
+        mark_session_memory_superseded_in_tx(
+            &mut tx,
+            &schema,
+            &existing.record_id,
+            &supersede.replacement.record_id,
+            existing.revision + 1,
+            &supersede.replacement.now,
+        )?;
+        let old_record = get_session_memory_record_in_tx(&mut tx, &schema, &existing.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "superseded PostgreSQL session memory record was not readable",
+                )
+            })?;
+        let new_record =
+            get_session_memory_record_in_tx(&mut tx, &schema, &supersede.replacement.record_id)?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        "replacement PostgreSQL session memory record was not readable",
+                    )
+                })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit supersede PostgreSQL session memory record", error)
+        })?;
+        Ok((old_record, new_record))
+    }
+
+    pub fn archive_session_memory_record(
+        &self,
+        archive: &SessionMemoryArchive,
+    ) -> CoreResult<SessionMemoryRecord> {
+        crate::validate_session_memory_record_id(&archive.record_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start archive PostgreSQL session memory record", error)
+        })?;
+        let existing = active_session_memory_record_for_update(
+            &mut tx,
+            &schema,
+            &archive.record_id,
+            archive.expected_revision,
+        )?;
+        archive_session_memory_record_in_tx(&mut tx, &schema, archive, existing.revision + 1)?;
+        let record = get_session_memory_record_in_tx(&mut tx, &schema, &archive.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "archived PostgreSQL session memory record was not readable",
+                )
+            })?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit archive PostgreSQL session memory record", error)
+        })?;
+        Ok(record)
+    }
+
+    pub fn query_session_memory_records(
+        &self,
+        query: &SessionMemoryQuery,
+    ) -> CoreResult<Vec<SessionMemoryRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        query_session_memory_records(&mut *client, &schema, query)
+    }
+
+    pub fn build_session_memory_prompt_context(
+        &self,
+        query: &BranchAwareSessionMemoryQuery,
+    ) -> CoreResult<SessionMemoryPromptContext> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        select_branch_aware_session_memory(&mut *client, &schema, query)
+    }
+
+    pub fn save_memory_proposal(
+        &self,
+        proposal: &MemoryProposalEnvelope,
+        descriptor: &MemorySpaceDescriptor,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryProposalRecord> {
+        crate::validate_memory_proposal(proposal, descriptor)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start save PostgreSQL memory proposal", error))?;
+        if let Some(dedupe_key) = proposal
+            .dedupe_key
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            if let Some(existing) =
+                get_memory_proposal_by_dedupe(&mut tx, &schema, &proposal.space_id.0, dedupe_key)?
+            {
+                tx.commit().map_err(|error| {
+                    postgres_error("commit PostgreSQL duplicate memory proposal", error)
+                })?;
+                return Ok(existing);
+            }
+        }
+        if get_memory_proposal_by_id(&mut tx, &schema, &proposal.proposal_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("memory proposal {} already exists", proposal.proposal_id),
+            ));
+        }
+        let record = MemoryProposalRecord {
+            proposal: proposal.clone(),
+            status: MemoryProposalReviewStatus::PendingReview,
+            selected_governance_mode: selected_governance_mode(proposal.governance_mode),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            decided_at: None,
+            applied_at: None,
+            resulting_revision: None,
+            duplicate_of: None,
+        };
+        insert_memory_proposal_record_in_tx(&mut tx, &schema, &record)?;
+        insert_memory_governance_decision_in_tx(
+            &mut tx,
+            &schema,
+            &MemoryGovernanceDecisionRecord {
+                decision_id: format!("{}_routed", proposal.proposal_id),
+                proposal_id: proposal.proposal_id.clone(),
+                decision: MemoryGovernanceDecisionKind::RoutedToReview,
+                actor: "rusty_crew_governance".to_string(),
+                source: proposal.source,
+                evidence_refs: proposal.evidence_refs.clone(),
+                policy_mode: record.selected_governance_mode,
+                confidence: Some(proposal.confidence),
+                message: Some("typed memory proposals start in curator/manual review".to_string()),
+                resulting_revision: None,
+                decided_at: now.clone(),
+            },
+        )?;
+        let saved = get_memory_proposal_by_id(&mut tx, &schema, &proposal.proposal_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "saved PostgreSQL memory proposal was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit save PostgreSQL memory proposal", error))?;
+        Ok(saved)
+    }
+
+    pub fn list_memory_proposals(
+        &self,
+        query: &MemoryProposalQuery,
+    ) -> CoreResult<Vec<MemoryProposalRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        list_memory_proposals(&mut *client, &schema, query)
+    }
+
+    pub fn record_memory_governance_decision(
+        &self,
+        decision: &MemoryGovernanceDecisionInput,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryGovernanceDecisionRecord> {
+        validate_postgres_memory_governance_decision(decision)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL memory governance decision", error)
+        })?;
+        let mut proposal = get_memory_proposal_by_id(&mut tx, &schema, &decision.proposal_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("memory proposal {} not found", decision.proposal_id),
+                )
+            })?;
+        validate_postgres_memory_governance_transition(proposal.status, decision.decision)?;
+        let resulting_revision = if decision.decision == MemoryGovernanceDecisionKind::Applied
+            && proposal.proposal.space_id.as_str() == "session_memory"
+        {
+            Some(apply_session_memory_proposal_in_tx(
+                &mut tx,
+                &schema,
+                &proposal.proposal,
+                now,
+            )?)
+        } else {
+            decision.resulting_revision
+        };
+        let decided_at = decision.decided_at.clone().unwrap_or_else(|| now.clone());
+        let record = MemoryGovernanceDecisionRecord {
+            decision_id: decision.decision_id.clone(),
+            proposal_id: decision.proposal_id.clone(),
+            decision: decision.decision,
+            actor: decision.actor.clone(),
+            source: decision.source,
+            evidence_refs: decision.evidence_refs.clone(),
+            policy_mode: decision.policy_mode,
+            confidence: decision.confidence,
+            message: decision.message.clone(),
+            resulting_revision,
+            decided_at,
+        };
+        insert_memory_governance_decision_in_tx(&mut tx, &schema, &record)?;
+        update_memory_proposal_review_state(&mut proposal, &record);
+        update_memory_proposal_record_in_tx(&mut tx, &schema, &proposal)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL memory governance decision", error)
+        })?;
+        Ok(record)
     }
 
     pub fn add_roleplay_lore_record(
@@ -2093,6 +2896,119 @@ impl PostgresRuntimeCounterProofStore {
             slot,
             conflict: None,
         })
+    }
+
+    pub fn delete_message_variant(
+        &self,
+        slot_id: &MessageSlotId,
+        variant_id: &MessageVariantId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<MessageSlotRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start delete PostgreSQL message variant", error))?;
+        ensure_variant_belongs_to_slot_in_tx(&mut tx, &schema, slot_id, variant_id)?;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.message_variants
+                 SET status = 'deleted',
+                     updated_at = $3
+                 WHERE slot_id = $1
+                   AND variant_id = $2
+                   AND source <> 'primary'"
+            ),
+            &[&slot_id.0, &variant_id.0, updated_at],
+        )
+        .map_err(|error| postgres_error("delete PostgreSQL message variant", error))?;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.message_slots
+                 SET active_variant_id = CASE
+                        WHEN active_variant_id = $2 THEN NULL
+                        ELSE active_variant_id
+                     END,
+                     updated_at = $3,
+                     version = version + 1
+                 WHERE slot_id = $1"
+            ),
+            &[&slot_id.0, &variant_id.0, updated_at],
+        )
+        .map_err(|error| postgres_error("clear PostgreSQL deleted active variant", error))?;
+        let slot = load_message_slot_in_tx(&mut tx, &schema, slot_id, true)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit delete PostgreSQL message variant", error))?;
+        Ok(slot)
+    }
+
+    pub fn reorder_message_variants(
+        &self,
+        slot_id: &MessageSlotId,
+        ordered_variant_ids: &[MessageVariantId],
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start reorder PostgreSQL message variants", error))?;
+        for (index, variant_id) in ordered_variant_ids.iter().enumerate() {
+            ensure_variant_belongs_to_slot_in_tx(&mut tx, &schema, slot_id, variant_id)?;
+            tx.execute(
+                &format!(
+                    "UPDATE {schema}.message_variants
+                     SET ordinal = $3,
+                         updated_at = $4
+                     WHERE slot_id = $1
+                       AND variant_id = $2
+                       AND source <> 'primary'"
+                ),
+                &[
+                    &slot_id.0,
+                    &variant_id.0,
+                    &(-((index + 1) as i64)),
+                    updated_at,
+                ],
+            )
+            .map_err(|error| postgres_error("stage PostgreSQL message variant reorder", error))?;
+        }
+        for (index, variant_id) in ordered_variant_ids.iter().enumerate() {
+            tx.execute(
+                &format!(
+                    "UPDATE {schema}.message_variants
+                     SET ordinal = $3,
+                         updated_at = $4
+                     WHERE slot_id = $1
+                       AND variant_id = $2
+                       AND source <> 'primary'"
+                ),
+                &[&slot_id.0, &variant_id.0, &((index + 1) as i64), updated_at],
+            )
+            .map_err(|error| postgres_error("reorder PostgreSQL message variant", error))?;
+        }
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.message_slots
+                 SET updated_at = $2,
+                     version = version + 1
+                 WHERE slot_id = $1"
+            ),
+            &[&slot_id.0, updated_at],
+        )
+        .map_err(|error| postgres_error("touch PostgreSQL reordered message slot", error))?;
+        let variants = query_message_variants(
+            &mut tx,
+            &schema,
+            &MessageVariantQuery {
+                slot_id: Some(slot_id.clone()),
+                include_deleted: false,
+                page: None,
+            },
+        )?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit reorder PostgreSQL message variants", error))?;
+        Ok(variants)
     }
 
     pub fn save_conversation_branch(
@@ -2924,6 +3840,68 @@ impl PostgresRuntimeCounterProofStore {
                     record_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                  );
+                 CREATE TABLE IF NOT EXISTS {schema}.profile_registry (
+                    profile_id TEXT PRIMARY KEY,
+                    lifecycle_status TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS profile_registry_status_idx
+                    ON {schema}.profile_registry(lifecycle_status, profile_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.channel_bindings (
+                    binding_id TEXT PRIMARY KEY,
+                    adapter_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    instance_id TEXT,
+                    session_id TEXT,
+                    profile_id TEXT NOT NULL,
+                    external_channel_id TEXT NOT NULL,
+                    external_thread_id TEXT,
+                    external_user_id TEXT,
+                    provider_subscription_id TEXT,
+                    cursor TEXT,
+                    membership_state TEXT,
+                    presence_state TEXT,
+                    status TEXT NOT NULL,
+                    degraded_reason TEXT,
+                    provenance_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS channel_bindings_agent_provider_idx
+                    ON {schema}.channel_bindings(agent_id, provider, status);
+                 CREATE INDEX IF NOT EXISTS channel_bindings_profile_agent_idx
+                    ON {schema}.channel_bindings(profile_id, agent_id, status);
+                 CREATE INDEX IF NOT EXISTS channel_bindings_session_idx
+                    ON {schema}.channel_bindings(session_id, status);
+                 CREATE INDEX IF NOT EXISTS channel_bindings_external_idx
+                    ON {schema}.channel_bindings(provider, external_channel_id, external_thread_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.mcp_bindings (
+                    binding_id TEXT PRIMARY KEY,
+                    adapter_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    instance_id TEXT,
+                    session_id TEXT,
+                    profile_id TEXT NOT NULL,
+                    server_names_json TEXT NOT NULL,
+                    endpoint_ref TEXT NOT NULL,
+                    transport TEXT NOT NULL,
+                    tool_profile_key TEXT NOT NULL,
+                    discovered_tool_revision TEXT,
+                    status TEXT NOT NULL,
+                    degraded_reason TEXT,
+                    diagnostics_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS mcp_bindings_agent_profile_idx
+                    ON {schema}.mcp_bindings(agent_id, profile_id, status);
+                 CREATE INDEX IF NOT EXISTS mcp_bindings_session_idx
+                    ON {schema}.mcp_bindings(session_id, status);
+                 CREATE INDEX IF NOT EXISTS mcp_bindings_adapter_idx
+                    ON {schema}.mcp_bindings(adapter_id, status);
                  CREATE TABLE IF NOT EXISTS {schema}.agent_identities (
                     agent_id TEXT PRIMARY KEY,
                     profile_id TEXT NOT NULL,
@@ -3096,6 +4074,48 @@ impl PostgresRuntimeCounterProofStore {
                     ON {schema}.module_simple_kv_entries(scope_type, scope_id, entry_key);
                  CREATE INDEX IF NOT EXISTS module_simple_kv_entries_expires_at_idx
                     ON {schema}.module_simple_kv_entries(expires_at);
+                 CREATE TABLE IF NOT EXISTS {schema}.session_memory_records (
+                    record_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    scope_type TEXT NOT NULL,
+                    scope_id TEXT NOT NULL,
+                    branch_id TEXT,
+                    shape_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    revision BIGINT NOT NULL CHECK (revision > 0),
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS session_memory_session_scope_idx
+                    ON {schema}.session_memory_records(session_id, scope_type, scope_id, status, updated_at DESC);
+                 CREATE INDEX IF NOT EXISTS session_memory_branch_idx
+                    ON {schema}.session_memory_records(branch_id, status, updated_at DESC);
+                 CREATE INDEX IF NOT EXISTS session_memory_shape_idx
+                    ON {schema}.session_memory_records(shape_id, status, updated_at DESC);
+                 CREATE TABLE IF NOT EXISTS {schema}.memory_proposals (
+                    proposal_id TEXT PRIMARY KEY,
+                    space_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    dedupe_key TEXT,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE UNIQUE INDEX IF NOT EXISTS memory_proposals_dedupe_idx
+                    ON {schema}.memory_proposals(space_id, dedupe_key)
+                    WHERE dedupe_key IS NOT NULL;
+                 CREATE INDEX IF NOT EXISTS memory_proposals_status_idx
+                    ON {schema}.memory_proposals(space_id, status, updated_at DESC, proposal_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.memory_governance_decisions (
+                    decision_id TEXT PRIMARY KEY,
+                    proposal_id TEXT NOT NULL REFERENCES {schema}.memory_proposals(proposal_id),
+                    decision TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    decided_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS memory_governance_decisions_proposal_idx
+                    ON {schema}.memory_governance_decisions(proposal_id, decided_at, decision_id);
                  CREATE TABLE IF NOT EXISTS {schema}.runtime_search_entries (
                     row_type TEXT NOT NULL,
                     row_key TEXT NOT NULL,
@@ -6684,6 +7704,1306 @@ fn ensure_variant_belongs_to_slot_in_tx(
     }
 }
 
+fn insert_session_memory_record_in_tx<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    write: &SessionMemoryRecordWrite,
+) -> CoreResult<()> {
+    let record = SessionMemoryRecord {
+        record_id: write.record_id.clone(),
+        session_id: write.session_id.clone(),
+        scope: write.scope.clone(),
+        branch_id: write.branch_id.clone(),
+        shape: write.shape.clone(),
+        status: SessionMemoryRecordStatus::Active,
+        revision: 1,
+        content: write.content.clone(),
+        evidence_refs: write.evidence_refs.clone(),
+        source: write.source,
+        confidence: write.confidence,
+        durability_rationale: write.durability_rationale.clone(),
+        supersedes_record_id: write.supersedes_record_id.clone(),
+        superseded_by_record_id: None,
+        archived_at: None,
+        archive_reason: None,
+        created_at: write.now.clone(),
+        updated_at: write.now.clone(),
+    };
+    upsert_session_memory_record_in_tx(conn, schema, &record)
+}
+
+fn upsert_session_memory_record_in_tx<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record: &SessionMemoryRecord,
+) -> CoreResult<()> {
+    let record_json = to_json_text(record)?;
+    let scope_type = memory_scope_type_as_str(record.scope.scope_type).to_string();
+    let status = session_memory_status_as_str(record.status).to_string();
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.session_memory_records (
+                record_id,
+                session_id,
+                scope_type,
+                scope_id,
+                branch_id,
+                shape_id,
+                status,
+                revision,
+                record_json,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             ON CONFLICT(record_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                scope_type = EXCLUDED.scope_type,
+                scope_id = EXCLUDED.scope_id,
+                branch_id = EXCLUDED.branch_id,
+                shape_id = EXCLUDED.shape_id,
+                status = EXCLUDED.status,
+                revision = EXCLUDED.revision,
+                record_json = EXCLUDED.record_json,
+                updated_at = EXCLUDED.updated_at"
+        ),
+        &[
+            &record.record_id,
+            &record.session_id.0,
+            &scope_type,
+            &record.scope.scope_id,
+            &record.branch_id.as_ref().map(|value| value.0.as_str()),
+            &record.shape.shape_id.0,
+            &status,
+            &(record.revision as i64),
+            &record_json,
+            &record.created_at,
+            &record.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("upsert PostgreSQL session memory record", error))?;
+    Ok(())
+}
+
+fn get_session_memory_record_in_tx<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record_id: &str,
+) -> CoreResult<Option<SessionMemoryRecord>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.session_memory_records
+                 WHERE record_id = $1"
+            ),
+            &[&record_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL session memory record", error))?;
+    row.map(|row| {
+        let record_json: String = row.get(0);
+        parse_postgres_json(&record_json, "session memory record_json")
+    })
+    .transpose()
+}
+
+fn active_session_memory_record_for_update(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    record_id: &str,
+    expected_revision: u64,
+) -> CoreResult<SessionMemoryRecord> {
+    crate::validate_session_memory_record_id(record_id)?;
+    if expected_revision == 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory expected_revision must be greater than zero",
+        ));
+    }
+    let row = tx
+        .query_opt(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.session_memory_records
+                 WHERE record_id = $1
+                 FOR UPDATE"
+            ),
+            &[&record_id],
+        )
+        .map_err(|error| postgres_error("lock PostgreSQL session memory record", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("session memory record {record_id} not found"),
+            )
+        })?;
+    let record_json: String = row.get(0);
+    let record: SessionMemoryRecord =
+        parse_postgres_json(&record_json, "session memory record_json")?;
+    if record.status != SessionMemoryRecordStatus::Active {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!("session memory record {record_id} is not active"),
+        ));
+    }
+    if record.revision != expected_revision {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "session memory revision mismatch for {record_id}: expected {expected_revision}, found {}",
+                record.revision
+            ),
+        ));
+    }
+    Ok(record)
+}
+
+fn update_session_memory_record_content_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    replace: &SessionMemoryReplace,
+    revision: u64,
+) -> CoreResult<()> {
+    let mut record =
+        get_session_memory_record_in_tx(tx, schema, &replace.record_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("session memory record {} not found", replace.record_id),
+            )
+        })?;
+    record.content = replace.content.clone();
+    record.evidence_refs = replace.evidence_refs.clone();
+    record.source = replace.source;
+    record.confidence = replace.confidence;
+    record.durability_rationale = replace.durability_rationale.clone();
+    record.revision = revision;
+    record.updated_at = replace.now.clone();
+    upsert_session_memory_record_in_tx(tx, schema, &record)
+}
+
+fn mark_session_memory_superseded_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    record_id: &str,
+    replacement_record_id: &str,
+    revision: u64,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    let mut record = get_session_memory_record_in_tx(tx, schema, record_id)?.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("session memory record {record_id} not found"),
+        )
+    })?;
+    record.status = SessionMemoryRecordStatus::Superseded;
+    record.superseded_by_record_id = Some(replacement_record_id.to_string());
+    record.revision = revision;
+    record.updated_at = now.clone();
+    upsert_session_memory_record_in_tx(tx, schema, &record)
+}
+
+fn archive_session_memory_record_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    archive: &SessionMemoryArchive,
+    revision: u64,
+) -> CoreResult<()> {
+    let mut record =
+        get_session_memory_record_in_tx(tx, schema, &archive.record_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("session memory record {} not found", archive.record_id),
+            )
+        })?;
+    record.status = SessionMemoryRecordStatus::Archived;
+    record.archived_at = Some(archive.now.clone());
+    record.archive_reason = archive.reason.clone();
+    record.revision = revision;
+    record.updated_at = archive.now.clone();
+    upsert_session_memory_record_in_tx(tx, schema, &record)
+}
+
+fn query_session_memory_records<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &SessionMemoryQuery,
+) -> CoreResult<Vec<SessionMemoryRecord>> {
+    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+    let branch_id = query.branch_id.as_ref().map(|value| value.0.as_str());
+    let scope_type = query
+        .scope_type
+        .map(memory_scope_type_as_str)
+        .map(str::to_string);
+    let shape_id = query.shape_id.as_deref();
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.session_memory_records
+                 WHERE ($1::TEXT IS NULL OR session_id = $1)
+                   AND ($2::TEXT IS NULL OR branch_id = $2)
+                   AND ($3::TEXT IS NULL OR scope_type = $3)
+                   AND ($4::TEXT IS NULL OR shape_id = $4)
+                   AND ($5 OR status <> 'superseded')
+                   AND ($6 OR status <> 'archived')
+                 ORDER BY updated_at DESC, record_id ASC
+                 LIMIT $7 OFFSET $8"
+            ),
+            &[
+                &session_id,
+                &branch_id,
+                &scope_type,
+                &shape_id,
+                &query.include_superseded,
+                &query.include_archived,
+                &limit,
+                &offset,
+            ],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL session memory records", error))?;
+    rows.iter()
+        .map(|row| {
+            let record_json: String = row.get(0);
+            parse_postgres_json(&record_json, "session memory record_json")
+        })
+        .collect()
+}
+
+fn select_branch_aware_session_memory<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &BranchAwareSessionMemoryQuery,
+) -> CoreResult<SessionMemoryPromptContext> {
+    let descriptor = session_memory_space_descriptor();
+    let ancestor_distances =
+        load_branch_ancestor_distances(conn, schema, &query.session_id, &query.active_branch_id)?;
+    let mut records = query_session_memory_records(
+        conn,
+        schema,
+        &SessionMemoryQuery {
+            session_id: Some(query.session_id.clone()),
+            shape_id: query.shape_id.clone(),
+            include_superseded: true,
+            include_archived: true,
+            page: None,
+            ..SessionMemoryQuery::default()
+        },
+    )?;
+    records.sort_by(|left, right| {
+        let left_key = session_memory_sort_key(left, query, &ancestor_distances);
+        let right_key = session_memory_sort_key(right, query, &ancestor_distances);
+        left_key
+            .cmp(&right_key)
+            .then_with(|| right.updated_at.cmp(&left.updated_at))
+            .then_with(|| left.record_id.cmp(&right.record_id))
+    });
+
+    let mut excluded_counts = SessionMemoryPromptExcludedCounts::default();
+    let mut candidates = Vec::new();
+    for record in records {
+        if let Some(reason) = session_memory_exclusion_reason(&record, query, &ancestor_distances) {
+            increment_session_memory_excluded_count(&mut excluded_counts, reason);
+            continue;
+        }
+        candidates.push(record);
+    }
+
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let selected = candidates
+        .iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .cloned()
+        .collect::<Vec<_>>();
+    excluded_counts.limit_exceeded = candidates.len().saturating_sub(selected.len()) as u64;
+    let character_estimate = selected
+        .iter()
+        .map(session_memory_record_character_estimate)
+        .sum::<u64>();
+    let token_estimate = character_estimate.div_ceil(4);
+    let selected_records = selected
+        .iter()
+        .map(|record| SessionMemorySelectedRecordDiagnostic {
+            record_id: record.record_id.clone(),
+            shape_id: record.shape.shape_id.0.clone(),
+        })
+        .collect();
+    Ok(SessionMemoryPromptContext {
+        records: selected,
+        diagnostics: SessionMemoryPromptDiagnostics {
+            descriptor_id: descriptor.space_id.0,
+            descriptor_schema_version: descriptor.schema_version,
+            session_id: query.session_id.clone(),
+            active_branch_id: query.active_branch_id.clone(),
+            selected_records,
+            excluded_counts,
+            character_estimate,
+            token_estimate,
+            context_policy: if query.prompt_context_only {
+                SessionMemoryPromptContextPolicy::SummaryContext
+            } else {
+                SessionMemoryPromptContextPolicy::ToolOnly
+            },
+        },
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionMemoryPromptExclusionReason {
+    WrongBranch,
+    SiblingBranch,
+    ToolOnly,
+    Archived,
+    Superseded,
+    PolicyDisabled,
+}
+
+fn session_memory_exclusion_reason(
+    record: &SessionMemoryRecord,
+    query: &BranchAwareSessionMemoryQuery,
+    ancestor_distances: &[(ConversationBranchId, u32)],
+) -> Option<SessionMemoryPromptExclusionReason> {
+    match record.scope.scope_type {
+        MemoryScopeType::Session => {}
+        MemoryScopeType::ConversationBranch => {
+            let Some(record_branch_id) = &record.branch_id else {
+                return Some(SessionMemoryPromptExclusionReason::WrongBranch);
+            };
+            if query.active_branch_id.as_ref() == Some(record_branch_id) {
+            } else if ancestor_distances
+                .iter()
+                .any(|(branch_id, _)| branch_id == record_branch_id)
+            {
+                if !query.include_ancestors {
+                    return Some(SessionMemoryPromptExclusionReason::WrongBranch);
+                }
+            } else if query.include_siblings {
+            } else if query.active_branch_id.is_some() {
+                return Some(SessionMemoryPromptExclusionReason::SiblingBranch);
+            } else {
+                return Some(SessionMemoryPromptExclusionReason::WrongBranch);
+            }
+        }
+        _ => return Some(SessionMemoryPromptExclusionReason::WrongBranch),
+    }
+    if query.prompt_context_only {
+        match record.status {
+            SessionMemoryRecordStatus::Archived => {
+                return Some(SessionMemoryPromptExclusionReason::Archived);
+            }
+            SessionMemoryRecordStatus::Superseded => {
+                return Some(SessionMemoryPromptExclusionReason::Superseded);
+            }
+            SessionMemoryRecordStatus::Active => {}
+        }
+        if session_memory_policy_disabled(record) {
+            return Some(SessionMemoryPromptExclusionReason::PolicyDisabled);
+        }
+        if session_memory_tool_only(record) {
+            return Some(SessionMemoryPromptExclusionReason::ToolOnly);
+        }
+    }
+    None
+}
+
+fn increment_session_memory_excluded_count(
+    counts: &mut SessionMemoryPromptExcludedCounts,
+    reason: SessionMemoryPromptExclusionReason,
+) {
+    match reason {
+        SessionMemoryPromptExclusionReason::WrongBranch => counts.wrong_branch += 1,
+        SessionMemoryPromptExclusionReason::SiblingBranch => counts.sibling_branch += 1,
+        SessionMemoryPromptExclusionReason::ToolOnly => counts.tool_only += 1,
+        SessionMemoryPromptExclusionReason::Archived => counts.archived += 1,
+        SessionMemoryPromptExclusionReason::Superseded => counts.superseded += 1,
+        SessionMemoryPromptExclusionReason::PolicyDisabled => counts.policy_disabled += 1,
+    }
+}
+
+fn session_memory_sort_key(
+    record: &SessionMemoryRecord,
+    query: &BranchAwareSessionMemoryQuery,
+    ancestor_distances: &[(ConversationBranchId, u32)],
+) -> (u8, u32, u8) {
+    let shape_priority = session_memory_shape_prompt_priority(record.shape.shape_id.as_str());
+    match record.scope.scope_type {
+        MemoryScopeType::ConversationBranch => {
+            if query.active_branch_id.as_ref() == record.branch_id.as_ref() {
+                (0, 0, shape_priority)
+            } else if let Some((_, distance)) =
+                record.branch_id.as_ref().and_then(|record_branch| {
+                    ancestor_distances
+                        .iter()
+                        .find(|(branch_id, _)| branch_id == record_branch)
+                })
+            {
+                (1, *distance, shape_priority)
+            } else {
+                (3, u32::MAX, shape_priority)
+            }
+        }
+        MemoryScopeType::Session => (2, 0, shape_priority),
+        _ => (4, u32::MAX, shape_priority),
+    }
+}
+
+fn session_memory_shape_prompt_priority(shape_id: &str) -> u8 {
+    match shape_id {
+        "branch_summary" | "session_summary" => 0,
+        "user_choice" => 1,
+        "session_fact" => 2,
+        _ => 3,
+    }
+}
+
+fn load_branch_ancestor_distances<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    session_id: &SessionId,
+    active_branch_id: &Option<ConversationBranchId>,
+) -> CoreResult<Vec<(ConversationBranchId, u32)>> {
+    let Some(active_branch_id) = active_branch_id else {
+        return Ok(Vec::new());
+    };
+    let active_branch = load_conversation_branch(conn, schema, active_branch_id)?;
+    if active_branch.session_id != *session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "active_branch_id does not belong to session_id",
+        ));
+    }
+    let mut ancestors = Vec::new();
+    let mut parent = active_branch.parent_branch_id;
+    let mut distance = 1;
+    while let Some(parent_branch_id) = parent {
+        let branch = load_conversation_branch(conn, schema, &parent_branch_id)?;
+        if branch.session_id != *session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "conversation branch ancestry crosses session boundary",
+            ));
+        }
+        parent = branch.parent_branch_id.clone();
+        ancestors.push((branch.branch_id, distance));
+        distance += 1;
+    }
+    Ok(ancestors)
+}
+
+fn session_memory_tool_only(record: &SessionMemoryRecord) -> bool {
+    session_memory_json_policy_flag(&record.content, "tool_only")
+        || session_memory_json_policy_eq(&record.content, "prompt_policy", "tool_only")
+        || record
+            .content
+            .get("metadata_json")
+            .map(|metadata| {
+                session_memory_json_policy_flag(metadata, "tool_only")
+                    || session_memory_json_policy_eq(metadata, "prompt_policy", "tool_only")
+            })
+            .unwrap_or(false)
+}
+
+fn session_memory_policy_disabled(record: &SessionMemoryRecord) -> bool {
+    session_memory_json_policy_flag(&record.content, "prompt_disabled")
+        || session_memory_json_policy_eq(&record.content, "prompt_policy", "never_prompt")
+        || record
+            .content
+            .get("metadata_json")
+            .map(|metadata| {
+                session_memory_json_policy_flag(metadata, "prompt_disabled")
+                    || session_memory_json_policy_eq(metadata, "prompt_policy", "never_prompt")
+            })
+            .unwrap_or(false)
+}
+
+fn session_memory_json_policy_flag(value: &serde_json::Value, key: &str) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn session_memory_json_policy_eq(value: &serde_json::Value, key: &str, expected: &str) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(|actual| actual == expected)
+        .unwrap_or(false)
+}
+
+fn session_memory_record_character_estimate(record: &SessionMemoryRecord) -> u64 {
+    to_json_text(&record.content)
+        .map(|value| value.len() as u64)
+        .unwrap_or(0)
+}
+
+fn validate_postgres_session_memory_revision_input(
+    record_id: &str,
+    expected_revision: u64,
+    evidence_refs: &[MemoryEvidenceRef],
+    confidence: f32,
+    durability_rationale: &str,
+) -> CoreResult<()> {
+    crate::validate_session_memory_record_id(record_id)?;
+    if expected_revision == 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory expected_revision must be greater than zero",
+        ));
+    }
+    if evidence_refs.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory evidence_refs must not be empty",
+        ));
+    }
+    if !(0.0..=1.0).contains(&confidence) || confidence.is_nan() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory confidence must be between 0 and 1",
+        ));
+    }
+    if durability_rationale.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory durability_rationale must not be empty",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_postgres_session_memory_scope<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    session_id: &SessionId,
+    scope: &MemoryScope,
+    branch_id: &Option<ConversationBranchId>,
+) -> CoreResult<()> {
+    match scope.scope_type {
+        MemoryScopeType::Session => {
+            if scope.scope_id != session_id.0 {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "session memory session scope_id must match session_id",
+                ));
+            }
+            if branch_id.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "session-scoped memory must not set branch_id",
+                ));
+            }
+        }
+        MemoryScopeType::ConversationBranch => {
+            let Some(branch_id) = branch_id else {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "conversation_branch memory requires branch_id",
+                ));
+            };
+            if branch_id.0 != scope.scope_id {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "conversation_branch memory scope_id must match branch_id",
+                ));
+            }
+            ensure_branch_belongs_to_session_generic(conn, schema, session_id, branch_id)?;
+        }
+        _ => {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory scope must be session or conversation_branch",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_branch_belongs_to_session_generic<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    session_id: &SessionId,
+    branch_id: &ConversationBranchId,
+) -> CoreResult<()> {
+    let row = conn
+        .query_one(
+            &format!(
+                "SELECT EXISTS(
+                    SELECT 1 FROM {schema}.conversation_branches
+                    WHERE session_id = $1 AND branch_id = $2
+                )"
+            ),
+            &[&session_id.0, &branch_id.0],
+        )
+        .map_err(|error| postgres_error("check PostgreSQL branch session ownership", error))?;
+    if row.get::<_, bool>(0) {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("conversation branch {branch_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn get_memory_proposal_by_id<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    proposal_id: &str,
+) -> CoreResult<Option<MemoryProposalRecord>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.memory_proposals
+                 WHERE proposal_id = $1"
+            ),
+            &[&proposal_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL memory proposal", error))?;
+    row.map(|row| {
+        let record_json: String = row.get(0);
+        parse_postgres_json(&record_json, "memory proposal record_json")
+    })
+    .transpose()
+}
+
+fn get_memory_proposal_by_dedupe<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    space_id: &str,
+    dedupe_key: &str,
+) -> CoreResult<Option<MemoryProposalRecord>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.memory_proposals
+                 WHERE space_id = $1 AND dedupe_key = $2"
+            ),
+            &[&space_id, &dedupe_key],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL memory proposal by dedupe", error))?;
+    row.map(|row| {
+        let record_json: String = row.get(0);
+        parse_postgres_json(&record_json, "memory proposal record_json")
+    })
+    .transpose()
+}
+
+fn insert_memory_proposal_record_in_tx<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record: &MemoryProposalRecord,
+) -> CoreResult<()> {
+    let record_json = to_json_text(record)?;
+    let status = memory_proposal_status_as_str(record.status).to_string();
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.memory_proposals (
+                proposal_id,
+                space_id,
+                status,
+                dedupe_key,
+                record_json,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+        ),
+        &[
+            &record.proposal.proposal_id,
+            &record.proposal.space_id.0,
+            &status,
+            &record.proposal.dedupe_key,
+            &record_json,
+            &record.created_at,
+            &record.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL memory proposal", error))?;
+    Ok(())
+}
+
+fn update_memory_proposal_record_in_tx<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record: &MemoryProposalRecord,
+) -> CoreResult<()> {
+    let record_json = to_json_text(record)?;
+    let status = memory_proposal_status_as_str(record.status).to_string();
+    conn.execute(
+        &format!(
+            "UPDATE {schema}.memory_proposals
+             SET status = $2,
+                 record_json = $3,
+                 updated_at = $4
+             WHERE proposal_id = $1"
+        ),
+        &[
+            &record.proposal.proposal_id,
+            &status,
+            &record_json,
+            &record.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("update PostgreSQL memory proposal", error))?;
+    Ok(())
+}
+
+fn list_memory_proposals<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &MemoryProposalQuery,
+) -> CoreResult<Vec<MemoryProposalRecord>> {
+    let space_id = query.space_id.as_ref().map(|space_id| space_id.0.as_str());
+    let status = query
+        .status
+        .map(memory_proposal_status_as_str)
+        .map(str::to_string);
+    let dedupe_key = query.dedupe_key.as_deref();
+    let (limit, offset) = QueryPage {
+        limit: query.limit,
+        offset: query.offset,
+    }
+    .bounded(100, 1_000);
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.memory_proposals
+                 WHERE ($1::TEXT IS NULL OR space_id = $1)
+                   AND ($2::TEXT IS NULL OR status = $2)
+                   AND ($3::TEXT IS NULL OR dedupe_key = $3)
+                 ORDER BY updated_at DESC, proposal_id ASC
+                 LIMIT $4 OFFSET $5"
+            ),
+            &[&space_id, &status, &dedupe_key, &limit, &offset],
+        )
+        .map_err(|error| postgres_error("list PostgreSQL memory proposals", error))?;
+    rows.iter()
+        .map(|row| {
+            let record_json: String = row.get(0);
+            parse_postgres_json(&record_json, "memory proposal record_json")
+        })
+        .collect()
+}
+
+fn insert_memory_governance_decision_in_tx<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record: &MemoryGovernanceDecisionRecord,
+) -> CoreResult<()> {
+    let record_json = to_json_text(record)?;
+    let decision = memory_governance_decision_as_str(record.decision).to_string();
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.memory_governance_decisions (
+                decision_id,
+                proposal_id,
+                decision,
+                record_json,
+                decided_at
+             ) VALUES ($1, $2, $3, $4, $5)"
+        ),
+        &[
+            &record.decision_id,
+            &record.proposal_id,
+            &decision,
+            &record_json,
+            &record.decided_at,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL memory governance decision", error))?;
+    Ok(())
+}
+
+fn update_memory_proposal_review_state(
+    proposal: &mut MemoryProposalRecord,
+    decision: &MemoryGovernanceDecisionRecord,
+) {
+    proposal.status = match decision.decision {
+        MemoryGovernanceDecisionKind::RoutedToReview => MemoryProposalReviewStatus::PendingReview,
+        MemoryGovernanceDecisionKind::Approved => MemoryProposalReviewStatus::Approved,
+        MemoryGovernanceDecisionKind::Rejected => MemoryProposalReviewStatus::Rejected,
+        MemoryGovernanceDecisionKind::Applied => MemoryProposalReviewStatus::Applied,
+    };
+    proposal.updated_at = decision.decided_at.clone();
+    if matches!(
+        decision.decision,
+        MemoryGovernanceDecisionKind::Approved | MemoryGovernanceDecisionKind::Rejected
+    ) {
+        proposal.decided_at = Some(decision.decided_at.clone());
+    }
+    if decision.decision == MemoryGovernanceDecisionKind::Applied {
+        proposal.applied_at = Some(decision.decided_at.clone());
+    }
+    if decision.resulting_revision.is_some() {
+        proposal.resulting_revision = decision.resulting_revision;
+    }
+}
+
+fn apply_session_memory_proposal_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    proposal: &MemoryProposalEnvelope,
+    now: &IsoTimestamp,
+) -> CoreResult<u64> {
+    if proposal.space_id.as_str() != "session_memory" {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "only session_memory proposals can be applied to session memory records",
+        ));
+    }
+    match proposal.operation {
+        MemoryOperation::Add => {
+            let write = session_memory_write_from_proposal(tx, schema, proposal, now)?;
+            crate::validate_session_memory_write(&write)?;
+            validate_postgres_session_memory_scope(
+                tx,
+                schema,
+                &write.session_id,
+                &write.scope,
+                &write.branch_id,
+            )?;
+            if get_session_memory_record_in_tx(tx, schema, &write.record_id)?.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::AlreadyExists,
+                    format!("session memory record {} already exists", write.record_id),
+                ));
+            }
+            insert_session_memory_record_in_tx(tx, schema, &write)?;
+            Ok(1)
+        }
+        MemoryOperation::Replace | MemoryOperation::Merge => {
+            let record_id = session_memory_proposal_record_id(proposal)?;
+            let expected_revision = session_memory_proposal_expected_revision(proposal)?;
+            let durability_rationale = session_memory_proposal_rationale(proposal)?;
+            validate_postgres_session_memory_revision_input(
+                &record_id,
+                expected_revision,
+                &proposal.evidence_refs,
+                proposal.confidence,
+                durability_rationale,
+            )?;
+            let existing =
+                active_session_memory_record_for_update(tx, schema, &record_id, expected_revision)?;
+            crate::validate_session_memory_shape(&proposal.shape)?;
+            crate::validate_session_memory_content(&proposal.shape, &proposal.content)?;
+            validate_postgres_session_memory_scope(
+                tx,
+                schema,
+                &existing.session_id,
+                &proposal.scope,
+                &existing.branch_id,
+            )?;
+            let next_revision = existing.revision + 1;
+            update_session_memory_record_content_in_tx(
+                tx,
+                schema,
+                &SessionMemoryReplace {
+                    record_id,
+                    expected_revision,
+                    content: proposal.content.clone(),
+                    evidence_refs: proposal.evidence_refs.clone(),
+                    source: proposal.source,
+                    confidence: proposal.confidence,
+                    durability_rationale: durability_rationale.to_string(),
+                    now: now.clone(),
+                },
+                next_revision,
+            )?;
+            Ok(next_revision)
+        }
+        MemoryOperation::Supersede => {
+            let record_id = session_memory_proposal_supersedes_record_id(proposal)?;
+            let expected_revision = session_memory_proposal_expected_revision(proposal)?;
+            let replacement = session_memory_write_from_proposal(tx, schema, proposal, now)?;
+            if replacement.supersedes_record_id.as_deref() != Some(record_id.as_str()) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "session memory supersede proposal must set content.supersedes_record_id",
+                ));
+            }
+            crate::validate_session_memory_write(&replacement)?;
+            validate_postgres_session_memory_scope(
+                tx,
+                schema,
+                &replacement.session_id,
+                &replacement.scope,
+                &replacement.branch_id,
+            )?;
+            let existing =
+                active_session_memory_record_for_update(tx, schema, &record_id, expected_revision)?;
+            validate_postgres_session_memory_scope(
+                tx,
+                schema,
+                &existing.session_id,
+                &existing.scope,
+                &existing.branch_id,
+            )?;
+            if get_session_memory_record_in_tx(tx, schema, &replacement.record_id)?.is_some() {
+                return Err(CoreError::new(
+                    CoreErrorKind::AlreadyExists,
+                    format!(
+                        "session memory replacement record {} already exists",
+                        replacement.record_id
+                    ),
+                ));
+            }
+            insert_session_memory_record_in_tx(tx, schema, &replacement)?;
+            mark_session_memory_superseded_in_tx(
+                tx,
+                schema,
+                &existing.record_id,
+                &replacement.record_id,
+                existing.revision + 1,
+                now,
+            )?;
+            Ok(1)
+        }
+        MemoryOperation::Archive => {
+            let record_id = session_memory_proposal_record_id(proposal)?;
+            let expected_revision = session_memory_proposal_expected_revision(proposal)?;
+            let existing =
+                active_session_memory_record_for_update(tx, schema, &record_id, expected_revision)?;
+            validate_postgres_session_memory_scope(
+                tx,
+                schema,
+                &existing.session_id,
+                &proposal.scope,
+                &existing.branch_id,
+            )?;
+            let next_revision = existing.revision + 1;
+            archive_session_memory_record_in_tx(
+                tx,
+                schema,
+                &SessionMemoryArchive {
+                    record_id,
+                    expected_revision,
+                    reason: session_memory_proposal_archive_reason(proposal),
+                    now: now.clone(),
+                },
+                next_revision,
+            )?;
+            Ok(next_revision)
+        }
+        _ => Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "session memory proposal operation {:?} cannot be applied",
+                proposal.operation
+            ),
+        )),
+    }
+}
+
+fn session_memory_write_from_proposal(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    proposal: &MemoryProposalEnvelope,
+    now: &IsoTimestamp,
+) -> CoreResult<SessionMemoryRecordWrite> {
+    let record_id = session_memory_proposal_record_id(proposal)?;
+    let session_id = session_id_for_session_memory_proposal(tx, schema, proposal)?;
+    let branch_id = match proposal.scope.scope_type {
+        MemoryScopeType::Session => None,
+        MemoryScopeType::ConversationBranch => {
+            Some(ConversationBranchId::new(proposal.scope.scope_id.clone()))
+        }
+        _ => {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal scope must be session or conversation_branch",
+            ));
+        }
+    };
+    Ok(SessionMemoryRecordWrite {
+        record_id,
+        session_id,
+        scope: proposal.scope.clone(),
+        branch_id,
+        shape: proposal.shape.clone(),
+        content: proposal.content.clone(),
+        evidence_refs: proposal.evidence_refs.clone(),
+        source: proposal.source,
+        confidence: proposal.confidence,
+        durability_rationale: session_memory_proposal_rationale(proposal)?.to_string(),
+        supersedes_record_id: session_memory_proposal_supersedes_record_id(proposal).ok(),
+        now: now.clone(),
+    })
+}
+
+fn session_id_for_session_memory_proposal(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    proposal: &MemoryProposalEnvelope,
+) -> CoreResult<SessionId> {
+    match proposal.scope.scope_type {
+        MemoryScopeType::Session => Ok(SessionId::new(proposal.scope.scope_id.clone())),
+        MemoryScopeType::ConversationBranch => {
+            let branch_id = ConversationBranchId::new(proposal.scope.scope_id.clone());
+            Ok(load_conversation_branch(tx, schema, &branch_id)?.session_id)
+        }
+        _ => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory proposal scope must be session or conversation_branch",
+        )),
+    }
+}
+
+fn validate_postgres_memory_governance_decision(
+    decision: &MemoryGovernanceDecisionInput,
+) -> CoreResult<()> {
+    validate_postgres_identifier("memory governance decision id", &decision.decision_id)?;
+    validate_postgres_identifier("memory governance proposal id", &decision.proposal_id)?;
+    if decision.actor.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "memory governance actor must not be empty",
+        ));
+    }
+    if let Some(confidence) = decision.confidence {
+        if !(0.0..=1.0).contains(&confidence) || confidence.is_nan() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "memory governance confidence must be between 0 and 1",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_postgres_memory_governance_transition(
+    current: MemoryProposalReviewStatus,
+    decision: MemoryGovernanceDecisionKind,
+) -> CoreResult<()> {
+    let allowed = match (current, decision) {
+        (_, MemoryGovernanceDecisionKind::RoutedToReview) => false,
+        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Approved) => true,
+        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Rejected) => true,
+        (MemoryProposalReviewStatus::Approved, MemoryGovernanceDecisionKind::Applied) => true,
+        _ => false,
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "memory governance decision {:?} is not allowed from {:?}",
+                decision, current
+            ),
+        ))
+    }
+}
+
+fn session_memory_proposal_record_id(proposal: &MemoryProposalEnvelope) -> CoreResult<String> {
+    let record_id = proposal
+        .content
+        .get("record_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal content.record_id is required",
+            )
+        })?;
+    crate::validate_session_memory_record_id(record_id)?;
+    Ok(record_id.to_string())
+}
+
+fn session_memory_proposal_expected_revision(proposal: &MemoryProposalEnvelope) -> CoreResult<u64> {
+    proposal
+        .content
+        .get("expected_revision")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|revision| *revision > 0)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal content.expected_revision must be greater than zero",
+            )
+        })
+}
+
+fn session_memory_proposal_supersedes_record_id(
+    proposal: &MemoryProposalEnvelope,
+) -> CoreResult<String> {
+    let record_id = proposal
+        .content
+        .get("supersedes_record_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory supersede proposal requires content.supersedes_record_id",
+            )
+        })?;
+    crate::validate_session_memory_record_id(record_id)?;
+    Ok(record_id.to_string())
+}
+
+fn session_memory_proposal_archive_reason(proposal: &MemoryProposalEnvelope) -> Option<String> {
+    proposal
+        .content
+        .get("archive_reason")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn session_memory_proposal_rationale(proposal: &MemoryProposalEnvelope) -> CoreResult<&str> {
+    proposal
+        .durability_rationale
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "session memory proposal durability_rationale is required",
+            )
+        })
+}
+
+fn selected_governance_mode(requested: MemoryGovernanceMode) -> MemoryGovernanceMode {
+    requested
+}
+
+fn memory_proposal_status_as_str(status: MemoryProposalReviewStatus) -> &'static str {
+    match status {
+        MemoryProposalReviewStatus::PendingReview => "pending_review",
+        MemoryProposalReviewStatus::Approved => "approved",
+        MemoryProposalReviewStatus::Rejected => "rejected",
+        MemoryProposalReviewStatus::Applied => "applied",
+    }
+}
+
+fn memory_governance_decision_as_str(decision: MemoryGovernanceDecisionKind) -> &'static str {
+    match decision {
+        MemoryGovernanceDecisionKind::RoutedToReview => "routed_to_review",
+        MemoryGovernanceDecisionKind::Approved => "approved",
+        MemoryGovernanceDecisionKind::Rejected => "rejected",
+        MemoryGovernanceDecisionKind::Applied => "applied",
+    }
+}
+
+fn memory_scope_type_as_str(scope_type: MemoryScopeType) -> &'static str {
+    match scope_type {
+        MemoryScopeType::Profile => "profile",
+        MemoryScopeType::User => "user",
+        MemoryScopeType::Session => "session",
+        MemoryScopeType::ConversationBranch => "conversation_branch",
+        MemoryScopeType::World => "world",
+        MemoryScopeType::Entity => "entity",
+        MemoryScopeType::Project => "project",
+    }
+}
+
+fn session_memory_status_as_str(status: SessionMemoryRecordStatus) -> &'static str {
+    match status {
+        SessionMemoryRecordStatus::Active => "active",
+        SessionMemoryRecordStatus::Superseded => "superseded",
+        SessionMemoryRecordStatus::Archived => "archived",
+    }
+}
+
+fn profile_registry_lifecycle_status_as_str(
+    status: ProfileRegistryLifecycleStatus,
+) -> &'static str {
+    match status {
+        ProfileRegistryLifecycleStatus::Active => "active",
+        ProfileRegistryLifecycleStatus::Paused => "paused",
+        ProfileRegistryLifecycleStatus::Decommissioned => "decommissioned",
+        ProfileRegistryLifecycleStatus::Archived => "archived",
+    }
+}
+
+fn row_to_channel_binding_record(row: &Row) -> CoreResult<ChannelBindingRecord> {
+    let status: String = row.get(14);
+    let provenance_json: String = row.get(16);
+    Ok(ChannelBindingRecord {
+        binding_id: row.get(0),
+        adapter_id: AdapterId(row.get(1)),
+        provider: row.get(2),
+        agent_id: AgentId(row.get(3)),
+        instance_id: row.get::<_, Option<String>>(4).map(AgentInstanceId),
+        session_id: row.get::<_, Option<String>>(5).map(SessionId),
+        profile_id: ProfileId(row.get(6)),
+        external_channel_id: row.get(7),
+        external_thread_id: row.get(8),
+        external_user_id: row.get(9),
+        provider_subscription_id: row.get(10),
+        cursor: row.get(11),
+        membership_state: row.get(12),
+        presence_state: row.get(13),
+        status: external_binding_status_from_str(&status)?,
+        degraded_reason: row.get(15),
+        provenance: parse_postgres_json(&provenance_json, "channel binding provenance_json")?,
+        created_at: row.get(17),
+        updated_at: row.get(18),
+    })
+}
+
+fn row_to_mcp_binding_record(row: &Row) -> CoreResult<McpBindingRecord> {
+    let server_names_json: String = row.get(6);
+    let status: String = row.get(11);
+    let diagnostics_json: String = row.get(13);
+    Ok(McpBindingRecord {
+        binding_id: row.get(0),
+        adapter_id: AdapterId(row.get(1)),
+        agent_id: AgentId(row.get(2)),
+        instance_id: row.get::<_, Option<String>>(3).map(AgentInstanceId),
+        session_id: row.get::<_, Option<String>>(4).map(SessionId),
+        profile_id: ProfileId(row.get(5)),
+        server_names: parse_postgres_json(&server_names_json, "MCP binding server_names_json")?,
+        endpoint_ref: row.get(7),
+        transport: row.get(8),
+        tool_profile_key: row.get(9),
+        discovered_tool_revision: row.get(10),
+        status: external_binding_status_from_str(&status)?,
+        degraded_reason: row.get(12),
+        diagnostics: parse_postgres_json(&diagnostics_json, "MCP binding diagnostics_json")?,
+        created_at: row.get(14),
+        updated_at: row.get(15),
+    })
+}
+
+fn external_binding_status_as_str(status: ExternalBindingStatus) -> &'static str {
+    match status {
+        ExternalBindingStatus::Active => "active",
+        ExternalBindingStatus::Degraded => "degraded",
+        ExternalBindingStatus::Disconnected => "disconnected",
+        ExternalBindingStatus::Archived => "archived",
+    }
+}
+
+fn external_binding_status_from_str(raw: &str) -> CoreResult<ExternalBindingStatus> {
+    match raw {
+        "active" => Ok(ExternalBindingStatus::Active),
+        "degraded" => Ok(ExternalBindingStatus::Degraded),
+        "disconnected" => Ok(ExternalBindingStatus::Disconnected),
+        "archived" => Ok(ExternalBindingStatus::Archived),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown external binding status {other}"),
+        )),
+    }
+}
+
 fn row_to_provider_wire_state_record(row: &Row) -> CoreResult<ProviderWireStateRecord> {
     let payload_json: String = row.get(7);
     let invalidation_reason = row
@@ -7829,12 +10149,13 @@ fn postgres_error(context: &str, error: postgres::Error) -> CoreError {
 mod tests {
     use super::*;
     use crate::{
-        CoordinationStore, MessageBlockWrite, RoleplayLoreCanonStatus, RoleplayLoreVisibility,
-        COUNTER_MESSAGES, COUNTER_WAKES,
+        CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
+        RoleplayLoreCanonStatus, RoleplayLoreVisibility, COUNTER_MESSAGES, COUNTER_WAKES,
     };
     use rusty_crew_core_protocol::{
-        AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource, ResourceLimits,
-        SessionHandle, ToolCallMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
+        AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource,
+        ProfileRegistryImportExportMetadata, ResourceLimits, SessionHandle, ToolCallMetadata,
+        ToolCallSource, ToolDescriptor, ToolProfile,
     };
     use serde_json::json;
     use std::fs;
@@ -9386,6 +11707,403 @@ mod tests {
             .capabilities
             .iter()
             .any(|capability| { capability.name == "row_level_claims" && capability.supported }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_profile_registry_and_session_memory_governance_are_implemented() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL memory proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_profile_memory_governance_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+
+        let created = store
+            .create_profile_registry_record(&ProfileRegistryWrite {
+                profile_id: ProfileId::new("runner_profile"),
+                lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+                display_name: Some("Runner Profile".to_string()),
+                summary: Some("PostgreSQL proof profile".to_string()),
+                default_session_kind: Some(SessionKind::Full),
+                agent_id: Some(AgentId::new("runner_agent")),
+                owner_id: Some("patch".to_string()),
+                active_runtime_settings_json: json!({"model": "gpt"}),
+                source_asset_refs: Vec::new(),
+                derived_runtime_refs: Vec::new(),
+                import_export: ProfileRegistryImportExportMetadata {
+                    imported_from: None,
+                    imported_at: None,
+                    exported_to: None,
+                    exported_at: None,
+                    metadata_json: json!({}),
+                },
+                now: "2026-06-27T01:00:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(created.revision, 1);
+        assert_eq!(
+            store
+                .list_profile_registry_records(&ProfileRegistryQuery {
+                    lifecycle_status: Some(ProfileRegistryLifecycleStatus::Active),
+                    page: None,
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .get_profile_registry_record(&ProfileId::new("runner_profile"))
+                .unwrap()
+                .unwrap()
+                .agent_id,
+            Some(AgentId::new("runner_agent"))
+        );
+
+        let descriptor = session_memory_space_descriptor();
+        let proposal = MemoryProposalEnvelope {
+            proposal_id: "session_memory_add_proposal".to_string(),
+            space_id: descriptor.space_id.clone(),
+            operation: MemoryOperation::Add,
+            scope: MemoryScope {
+                scope_type: MemoryScopeType::Session,
+                scope_id: "session-memory-proof".to_string(),
+            },
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked("session_fact"),
+                version: 1,
+            },
+            content: json!({
+                "record_id": "session_fact_one",
+                "content": "Postgres memory proposals can apply.",
+                "fact_kind": "proof",
+                "confidence": 0.91,
+                "source_summary": "ignored proof test",
+                "created_at": "2026-06-27T01:01:00Z",
+                "updated_at": "2026-06-27T01:01:00Z"
+            }),
+            evidence_refs: vec![MemoryEvidenceRef {
+                evidence_type: MemoryEvidenceKind::Wake,
+                ref_id: "wake-proof".to_string(),
+                label: Some("wake proof".to_string()),
+            }],
+            confidence: 0.91,
+            durability_rationale: Some(
+                "The user explicitly asked to preserve this proof fact.".to_string(),
+            ),
+            governance_mode: MemoryGovernanceMode::ManualReview,
+            source: MemoryProposalSource::Human,
+            dedupe_key: Some("session_fact_one".to_string()),
+            created_at: Some("2026-06-27T01:01:00Z".to_string()),
+        };
+        let saved = store
+            .save_memory_proposal(&proposal, &descriptor, &"2026-06-27T01:01:00Z".to_string())
+            .unwrap();
+        assert_eq!(saved.status, MemoryProposalReviewStatus::PendingReview);
+        store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "approve_session_memory_add".to_string(),
+                    proposal_id: proposal.proposal_id.clone(),
+                    decision: MemoryGovernanceDecisionKind::Approved,
+                    actor: "curator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: proposal.evidence_refs.clone(),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.95),
+                    message: Some("approve proof add".to_string()),
+                    resulting_revision: None,
+                    decided_at: None,
+                },
+                &"2026-06-27T01:02:00Z".to_string(),
+            )
+            .unwrap();
+        let applied = store
+            .record_memory_governance_decision(
+                &MemoryGovernanceDecisionInput {
+                    decision_id: "apply_session_memory_add".to_string(),
+                    proposal_id: proposal.proposal_id.clone(),
+                    decision: MemoryGovernanceDecisionKind::Applied,
+                    actor: "curator".to_string(),
+                    source: MemoryProposalSource::Human,
+                    evidence_refs: proposal.evidence_refs.clone(),
+                    policy_mode: MemoryGovernanceMode::ManualReview,
+                    confidence: Some(0.95),
+                    message: Some("apply proof add".to_string()),
+                    resulting_revision: None,
+                    decided_at: None,
+                },
+                &"2026-06-27T01:03:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(applied.resulting_revision, Some(1));
+
+        let records = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(SessionId::new("session-memory-proof")),
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        let context = store
+            .build_session_memory_prompt_context(&BranchAwareSessionMemoryQuery {
+                session_id: SessionId::new("session-memory-proof"),
+                active_branch_id: None,
+                include_ancestors: true,
+                include_siblings: false,
+                shape_id: None,
+                prompt_context_only: true,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(context.records.len(), 1);
+        assert_eq!(
+            context.diagnostics.token_estimate,
+            context.diagnostics.character_estimate.div_ceil(4)
+        );
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "profile_registry" && count.rows == 1));
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "memory_proposals" && count.rows == 1));
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "session_memory_records" && count.rows == 1));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_external_bindings_are_scoped_per_agent_without_secret_material() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL bindings proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_bindings_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+
+        let base_provenance = ExternalBindingProvenance {
+            source_system: Some("den-channels".to_string()),
+            source_ref: Some("den-channel:crew-room".to_string()),
+            externally_owned: true,
+            notes: Some("provider secret remains in adapter config".to_string()),
+        };
+        let alpha_channel = ChannelBindingRecord {
+            binding_id: "channel-alpha".to_string(),
+            adapter_id: AdapterId::new("den-channels-main"),
+            provider: "den_channels".to_string(),
+            agent_id: AgentId::new("agent-alpha"),
+            instance_id: Some(AgentInstanceId::new("instance-alpha")),
+            session_id: Some(SessionId::new("session-alpha")),
+            profile_id: ProfileId::new("prime-profile"),
+            external_channel_id: "crew-room".to_string(),
+            external_thread_id: Some("thread-42".to_string()),
+            external_user_id: Some("den-user-alpha".to_string()),
+            provider_subscription_id: Some("sub-alpha".to_string()),
+            cursor: Some("cursor-alpha".to_string()),
+            membership_state: Some("joined".to_string()),
+            presence_state: Some("online".to_string()),
+            status: ExternalBindingStatus::Active,
+            degraded_reason: None,
+            provenance: base_provenance.clone(),
+            created_at: "2026-06-27T03:00:00Z".to_string(),
+            updated_at: "2026-06-27T03:01:00Z".to_string(),
+        };
+        let beta_channel = ChannelBindingRecord {
+            binding_id: "channel-beta".to_string(),
+            agent_id: AgentId::new("agent-beta"),
+            instance_id: Some(AgentInstanceId::new("instance-beta")),
+            session_id: Some(SessionId::new("session-beta")),
+            profile_id: ProfileId::new("review-profile"),
+            provider_subscription_id: Some("sub-beta".to_string()),
+            cursor: Some("cursor-beta".to_string()),
+            presence_state: Some("idle".to_string()),
+            updated_at: "2026-06-27T03:02:00Z".to_string(),
+            ..alpha_channel.clone()
+        };
+
+        store.save_channel_binding(&alpha_channel).unwrap();
+        store.save_channel_binding(&beta_channel).unwrap();
+
+        let shared_channel = store
+            .query_channel_bindings(&ChannelBindingQuery {
+                provider: Some("den_channels".to_string()),
+                external_channel_id: Some("crew-room".to_string()),
+                ..ChannelBindingQuery::default()
+            })
+            .unwrap();
+        let alpha_only = store
+            .query_channel_bindings(&ChannelBindingQuery {
+                agent_id: Some(AgentId::new("agent-alpha")),
+                status: Some(ExternalBindingStatus::Active),
+                ..ChannelBindingQuery::default()
+            })
+            .unwrap();
+        assert_eq!(shared_channel.len(), 2);
+        assert_eq!(alpha_only.len(), 1);
+        assert_eq!(
+            alpha_only[0].provider_subscription_id.as_deref(),
+            Some("sub-alpha")
+        );
+        assert!(!alpha_only[0]
+            .provenance
+            .notes
+            .as_deref()
+            .unwrap_or_default()
+            .contains("token"));
+
+        store
+            .save_mcp_binding(&McpBindingRecord {
+                binding_id: "mcp-alpha".to_string(),
+                adapter_id: AdapterId::new("mcp-ts-main"),
+                agent_id: AgentId::new("agent-alpha"),
+                instance_id: Some(AgentInstanceId::new("instance-alpha")),
+                session_id: Some(SessionId::new("session-alpha")),
+                profile_id: ProfileId::new("prime-profile"),
+                server_names: vec!["den".to_string(), "filesystem".to_string()],
+                endpoint_ref: "config://mcp/alpha".to_string(),
+                transport: "stdio".to_string(),
+                tool_profile_key: "tool-profile-alpha".to_string(),
+                discovered_tool_revision: Some("rev-alpha".to_string()),
+                status: ExternalBindingStatus::Active,
+                degraded_reason: None,
+                diagnostics: McpBindingDiagnostics {
+                    last_error: None,
+                    last_checked_at: Some("2026-06-27T03:05:00Z".to_string()),
+                    notes: Some("no secret fields".to_string()),
+                },
+                created_at: "2026-06-27T03:00:00Z".to_string(),
+                updated_at: "2026-06-27T03:05:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .save_mcp_binding(&McpBindingRecord {
+                binding_id: "mcp-beta".to_string(),
+                adapter_id: AdapterId::new("mcp-ts-main"),
+                agent_id: AgentId::new("agent-beta"),
+                instance_id: Some(AgentInstanceId::new("instance-beta")),
+                session_id: Some(SessionId::new("session-beta")),
+                profile_id: ProfileId::new("review-profile"),
+                server_names: vec!["den".to_string()],
+                endpoint_ref: "config://mcp/beta".to_string(),
+                transport: "stdio".to_string(),
+                tool_profile_key: "tool-profile-beta".to_string(),
+                discovered_tool_revision: Some("rev-beta".to_string()),
+                status: ExternalBindingStatus::Degraded,
+                degraded_reason: Some("tool discovery stale".to_string()),
+                diagnostics: McpBindingDiagnostics {
+                    last_error: Some("catalog revision mismatch".to_string()),
+                    last_checked_at: Some("2026-06-27T03:06:00Z".to_string()),
+                    notes: None,
+                },
+                created_at: "2026-06-27T03:00:00Z".to_string(),
+                updated_at: "2026-06-27T03:06:00Z".to_string(),
+            })
+            .unwrap();
+
+        let alpha_mcp = store
+            .query_mcp_bindings(&McpBindingQuery {
+                session_id: Some(SessionId::new("session-alpha")),
+                ..McpBindingQuery::default()
+            })
+            .unwrap();
+        let degraded = store
+            .query_mcp_bindings(&McpBindingQuery {
+                status: Some(ExternalBindingStatus::Degraded),
+                ..McpBindingQuery::default()
+            })
+            .unwrap();
+
+        assert_eq!(alpha_mcp.len(), 1);
+        assert_eq!(
+            alpha_mcp[0].server_names,
+            vec!["den".to_string(), "filesystem".to_string()]
+        );
+        assert!(!alpha_mcp[0].endpoint_ref.contains("secret"));
+        assert_eq!(degraded.len(), 1);
+        assert_eq!(degraded[0].agent_id, AgentId::new("agent-beta"));
+        assert_eq!(
+            degraded[0].diagnostics.last_error.as_deref(),
+            Some("catalog revision mismatch")
+        );
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "channel_bindings" && count.rows == 2));
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "mcp_bindings" && count.rows == 2));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_message_variant_reorder_and_delete_are_implemented() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL message variant proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_variant_mutation_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        seed_conversation_base_fixture(&store, "session-conversation", "slot-conversation");
+
+        let reordered = store
+            .reorder_message_variants(
+                &MessageSlotId::new("slot-conversation"),
+                &[
+                    MessageVariantId::new("variant-conversation-b"),
+                    MessageVariantId::new("variant-conversation-a"),
+                ],
+                &"2026-06-27T02:00:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            reordered
+                .iter()
+                .map(|variant| variant.variant_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "variant-conversation-primary",
+                "variant-conversation-b",
+                "variant-conversation-a"
+            ]
+        );
+
+        store
+            .select_active_message_variant(&SelectActiveVariantRequest {
+                slot_id: MessageSlotId::new("slot-conversation"),
+                active_variant_id: Some(MessageVariantId::new("variant-conversation-a")),
+                expected: ActiveVariantExpectation::Primary,
+                updated_at: "2026-06-27T02:01:00Z".to_string(),
+            })
+            .unwrap();
+        let slot = store
+            .delete_message_variant(
+                &MessageSlotId::new("slot-conversation"),
+                &MessageVariantId::new("variant-conversation-a"),
+                &"2026-06-27T02:02:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(slot.active_variant_id, None);
+        assert_eq!(slot.alternates.len(), 1);
+        assert_eq!(
+            slot.alternates[0].variant_id,
+            MessageVariantId::new("variant-conversation-b")
+        );
 
         store.drop_schema_for_test().unwrap();
     }

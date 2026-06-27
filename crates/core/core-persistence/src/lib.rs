@@ -504,7 +504,25 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.storage_schema(),
             #[cfg(feature = "postgres")]
             Self::Postgres(_) => {
-                module_schema_registry_diagnostics(&compiled_module_schema_registry(), &[], &[])
+                let registry = compiled_module_schema_registry();
+                let installed = registry
+                    .bundles()
+                    .iter()
+                    .map(|bundle| {
+                        Ok(InstalledModuleSchemaRecord {
+                            module_id: bundle.module_id.clone(),
+                            installed_version: bundle.schema_version,
+                            descriptor_fingerprint: bundle.descriptor_fingerprint()?,
+                            installed_at: "postgres_active_migration".to_string(),
+                            updated_at: "postgres_active_migration".to_string(),
+                        })
+                    })
+                    .collect::<CoreResult<Vec<_>>>()?;
+                module_schema_registry_diagnostics(
+                    &registry,
+                    &installed,
+                    &postgres_module_schema_capabilities(),
+                )
             }
         }
     }
@@ -516,7 +534,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.list_profile_registry_records(query),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("profile registry list"),
+            Self::Postgres(postgres) => postgres.list_profile_registry_records(query),
         }
     }
 
@@ -527,7 +545,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.get_profile_registry_record(profile_id),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("profile registry get"),
+            Self::Postgres(postgres) => postgres.get_profile_registry_record(profile_id),
         }
     }
 
@@ -611,7 +629,9 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.delete_message_variant(slot_id, variant_id, updated_at),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("delete message variant"),
+            Self::Postgres(postgres) => {
+                postgres.delete_message_variant(slot_id, variant_id, updated_at)
+            }
         }
     }
 
@@ -626,7 +646,9 @@ impl CoreCoordinationStore {
                 sqlite.reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
             }
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("reorder message variants"),
+            Self::Postgres(postgres) => {
+                postgres.reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
+            }
         }
     }
 
@@ -851,7 +873,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.query_session_memory_records(query),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("session memory query"),
+            Self::Postgres(postgres) => postgres.query_session_memory_records(query),
         }
     }
 
@@ -862,7 +884,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.build_session_memory_prompt_context(query),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("session memory prompt context"),
+            Self::Postgres(postgres) => postgres.build_session_memory_prompt_context(query),
         }
     }
 
@@ -873,7 +895,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.list_memory_proposals(query),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("memory proposals list"),
+            Self::Postgres(postgres) => postgres.list_memory_proposals(query),
         }
     }
 
@@ -886,7 +908,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.save_memory_proposal(proposal, descriptor, now),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("memory proposal save"),
+            Self::Postgres(postgres) => postgres.save_memory_proposal(proposal, descriptor, now),
         }
     }
 
@@ -898,7 +920,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.record_memory_governance_decision(decision, now),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("memory governance decision"),
+            Self::Postgres(postgres) => postgres.record_memory_governance_decision(decision, now),
         }
     }
 
@@ -975,7 +997,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.pause_scheduled_job(job_id, now),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("pause scheduled job"),
+            Self::Postgres(postgres) => postgres.pause_scheduled_job(job_id, now),
         }
     }
 
@@ -988,7 +1010,7 @@ impl CoreCoordinationStore {
         match self {
             Self::Sqlite(sqlite) => sqlite.resume_scheduled_job(job_id, next_due_at, now),
             #[cfg(feature = "postgres")]
-            Self::Postgres(_) => postgres_unsupported("resume scheduled job"),
+            Self::Postgres(postgres) => postgres.resume_scheduled_job(job_id, next_due_at, now),
         }
     }
 
@@ -1131,14 +1153,6 @@ impl CoreCoordinationStore {
                 .collect()),
         }
     }
-}
-
-#[cfg(feature = "postgres")]
-fn postgres_unsupported<T>(operation: &str) -> CoreResult<T> {
-    Err(CoreError::new(
-        CoreErrorKind::AdapterUnavailable,
-        format!("PostgreSQL coordination backend does not yet support {operation}"),
-    ))
 }
 
 #[cfg(test)]
@@ -6247,6 +6261,15 @@ fn sqlite_storage_capabilities() -> Vec<RuntimeStorageCapability> {
 }
 
 fn sqlite_module_schema_capabilities() -> Vec<ModuleSchemaCapability> {
+    vec![
+        ModuleSchemaCapability::Transactions,
+        ModuleSchemaCapability::FullTextSearch,
+        ModuleSchemaCapability::JsonDocuments,
+    ]
+}
+
+#[cfg(feature = "postgres")]
+fn postgres_module_schema_capabilities() -> Vec<ModuleSchemaCapability> {
     vec![
         ModuleSchemaCapability::Transactions,
         ModuleSchemaCapability::FullTextSearch,
