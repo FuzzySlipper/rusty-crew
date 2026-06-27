@@ -33,16 +33,21 @@ use rusty_crew_core_protocol::{
     CoreEventKind, CoreResult, DataBankScopeId, DelegatedCompletion, DelegatedFanOutGroup,
     DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
     DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp,
-    MemoryEvidenceKind, MemoryEvidenceRef, MemoryGovernanceDecisionInput,
+    MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryEvidenceRef,
+    MemoryExportImportPolicy, MemoryFieldType, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord, MemoryGovernanceMode,
-    MemoryOperation, MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord,
-    MemoryProposalReviewStatus, MemoryProposalSource, MemoryRecordShapeId, MemoryRecordShapeRef,
-    MemoryScope, MemoryScopeType, MemorySpaceDescriptor, MessageBlockId, MessageId, MessageSlotId,
-    MessageVariantId, ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
-    ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryWrite, ProjectId,
-    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionConfig, SessionHandle,
-    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
-    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    MemoryIndexingPolicy, MemoryOperation, MemoryOperationPolicy, MemoryPromptPolicy,
+    MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus,
+    MemoryProposalSource, MemoryProvenancePolicy, MemoryRecordFieldDescriptor,
+    MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy,
+    MemoryRetrievalStrategy, MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
+    MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, MessageBlockId, MessageId,
+    MessageSlotId, MessageVariantId, ParentConsumptionPolicy, ProfileId,
+    ProfileRegistryLifecycleStatus, ProfileRegistryLifecycleUpdate, ProfileRegistryRecord,
+    ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason, ResourceLimits, RunId,
+    SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
+    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
+    ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -53,7 +58,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 23;
+const CURRENT_SCHEMA_VERSION: i64 = 24;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -191,6 +196,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 23,
         description: "add session memory record persistence",
         apply: migrate_v23_add_session_memory_records,
+    },
+    SchemaMigration {
+        version: 24,
+        description: "add roleplay lore typed memory-space persistence",
+        apply: migrate_v24_add_roleplay_lore_records,
     },
 ];
 
@@ -1100,6 +1110,127 @@ pub struct SessionMemoryPromptExcludedCounts {
 pub enum SessionMemoryPromptContextPolicy {
     SummaryContext,
     ToolOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayLoreRecordStatus {
+    Active,
+    Superseded,
+    Tombstoned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayLoreCanonStatus {
+    Canon,
+    Draft,
+    Contested,
+    Deprecated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleplayLoreVisibility {
+    Public,
+    Private,
+    GmOnly,
+    ToolOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleplayLoreRecord {
+    pub record_id: String,
+    pub world_id: String,
+    pub entity_id: Option<String>,
+    pub session_id: Option<SessionId>,
+    pub branch_id: Option<ConversationBranchId>,
+    pub shape: MemoryRecordShapeRef,
+    pub canon_status: RoleplayLoreCanonStatus,
+    pub visibility: RoleplayLoreVisibility,
+    pub status: RoleplayLoreRecordStatus,
+    pub revision: u64,
+    pub title: String,
+    pub body: String,
+    pub content: JsonValue,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub source: MemoryProposalSource,
+    pub confidence: f32,
+    pub durability_rationale: String,
+    pub supersedes_record_id: Option<String>,
+    pub superseded_by_record_id: Option<String>,
+    pub tombstoned_at: Option<IsoTimestamp>,
+    pub tombstone_reason: Option<String>,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleplayLoreWrite {
+    pub record_id: String,
+    pub world_id: String,
+    pub entity_id: Option<String>,
+    pub session_id: Option<SessionId>,
+    pub branch_id: Option<ConversationBranchId>,
+    pub shape: MemoryRecordShapeRef,
+    pub canon_status: RoleplayLoreCanonStatus,
+    pub visibility: RoleplayLoreVisibility,
+    pub title: String,
+    pub body: String,
+    pub content: JsonValue,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub source: MemoryProposalSource,
+    pub confidence: f32,
+    pub durability_rationale: String,
+    pub supersedes_record_id: Option<String>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleplayLoreReplace {
+    pub write: RoleplayLoreWrite,
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleplayLoreSupersede {
+    pub record_id: String,
+    pub expected_revision: u64,
+    pub replacement: RoleplayLoreWrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayLoreTombstone {
+    pub record_id: String,
+    pub expected_revision: u64,
+    pub reason: Option<String>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RoleplayLoreQuery {
+    pub world_id: Option<String>,
+    pub entity_id: Option<String>,
+    pub canon_status: Option<RoleplayLoreCanonStatus>,
+    pub visibility: Option<RoleplayLoreVisibility>,
+    pub shape_id: Option<String>,
+    pub provenance_ref_id: Option<String>,
+    pub query: Option<String>,
+    pub include_superseded: bool,
+    pub include_tombstoned: bool,
+    pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayLoreProvenanceEvent {
+    pub event_id: String,
+    pub record_id: String,
+    pub world_id: String,
+    pub evidence_refs: Vec<MemoryEvidenceRef>,
+    pub source: MemoryProposalSource,
+    pub actor: String,
+    pub note: Option<String>,
+    pub created_at: IsoTimestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2629,6 +2760,235 @@ impl CoordinationStore {
     ) -> CoreResult<SessionMemoryPromptContext> {
         let conn = self.conn()?;
         select_branch_aware_session_memory(&conn, query)
+    }
+
+    pub fn roleplay_lore_memory_space_descriptor(&self) -> MemorySpaceDescriptor {
+        roleplay_lore_memory_space_descriptor()
+    }
+
+    pub fn add_roleplay_lore_record(
+        &self,
+        write: &RoleplayLoreWrite,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        validate_roleplay_lore_write(write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start add roleplay lore record", error))?;
+        if get_roleplay_lore_record_in_tx(&tx, &write.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("roleplay lore record {} already exists", write.record_id),
+            ));
+        }
+        insert_roleplay_lore_record_in_tx(&tx, write)?;
+        insert_roleplay_lore_provenance_event_in_tx(
+            &tx,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!("{}:created", write.record_id),
+                record_id: write.record_id.clone(),
+                world_id: write.world_id.clone(),
+                evidence_refs: write.evidence_refs.clone(),
+                source: write.source,
+                actor: memory_proposal_source_as_str(write.source).to_string(),
+                note: Some("created roleplay lore record".to_string()),
+                created_at: write.now.clone(),
+            },
+        )?;
+        let record = get_roleplay_lore_record_in_tx(&tx, &write.record_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "created roleplay lore record was not readable",
+            )
+        })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit add roleplay lore record", error))?;
+        Ok(record)
+    }
+
+    pub fn replace_roleplay_lore_record(
+        &self,
+        replace: &RoleplayLoreReplace,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        validate_roleplay_lore_write(&replace.write)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start replace roleplay lore record", error))?;
+        let existing = active_roleplay_lore_record_for_update(
+            &tx,
+            &replace.write.record_id,
+            replace.expected_revision,
+        )?;
+        update_roleplay_lore_record_content_in_tx(&tx, replace, existing.revision + 1)?;
+        insert_roleplay_lore_provenance_event_in_tx(
+            &tx,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!(
+                    "{}:revision:{}",
+                    replace.write.record_id,
+                    existing.revision + 1
+                ),
+                record_id: replace.write.record_id.clone(),
+                world_id: replace.write.world_id.clone(),
+                evidence_refs: replace.write.evidence_refs.clone(),
+                source: replace.write.source,
+                actor: memory_proposal_source_as_str(replace.write.source).to_string(),
+                note: Some("replaced roleplay lore record".to_string()),
+                created_at: replace.write.now.clone(),
+            },
+        )?;
+        let record =
+            get_roleplay_lore_record_in_tx(&tx, &replace.write.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "replaced roleplay lore record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit replace roleplay lore record", error))?;
+        Ok(record)
+    }
+
+    pub fn supersede_roleplay_lore_record(
+        &self,
+        supersede: &RoleplayLoreSupersede,
+    ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)> {
+        validate_roleplay_lore_write(&supersede.replacement)?;
+        if supersede.replacement.supersedes_record_id.as_deref()
+            != Some(supersede.record_id.as_str())
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "roleplay lore replacement must reference the superseded record",
+            ));
+        }
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start supersede roleplay lore record", error))?;
+        let existing = active_roleplay_lore_record_for_update(
+            &tx,
+            &supersede.record_id,
+            supersede.expected_revision,
+        )?;
+        if existing.world_id != supersede.replacement.world_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "roleplay lore replacement must stay in the same world",
+            ));
+        }
+        if get_roleplay_lore_record_in_tx(&tx, &supersede.replacement.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "roleplay lore replacement {} already exists",
+                    supersede.replacement.record_id
+                ),
+            ));
+        }
+        insert_roleplay_lore_record_in_tx(&tx, &supersede.replacement)?;
+        mark_roleplay_lore_superseded_in_tx(
+            &tx,
+            &existing.record_id,
+            &supersede.replacement.record_id,
+            existing.revision + 1,
+            &supersede.replacement.now,
+        )?;
+        insert_roleplay_lore_provenance_event_in_tx(
+            &tx,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!(
+                    "{}:superseded_by:{}",
+                    existing.record_id, supersede.replacement.record_id
+                ),
+                record_id: existing.record_id.clone(),
+                world_id: existing.world_id.clone(),
+                evidence_refs: supersede.replacement.evidence_refs.clone(),
+                source: supersede.replacement.source,
+                actor: memory_proposal_source_as_str(supersede.replacement.source).to_string(),
+                note: Some(format!("superseded by {}", supersede.replacement.record_id)),
+                created_at: supersede.replacement.now.clone(),
+            },
+        )?;
+        let old_record =
+            get_roleplay_lore_record_in_tx(&tx, &existing.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "superseded roleplay lore record was not readable",
+                )
+            })?;
+        let new_record = get_roleplay_lore_record_in_tx(&tx, &supersede.replacement.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "replacement roleplay lore record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit supersede roleplay lore record", error))?;
+        Ok((old_record, new_record))
+    }
+
+    pub fn tombstone_roleplay_lore_record(
+        &self,
+        tombstone: &RoleplayLoreTombstone,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        validate_roleplay_lore_record_id(&tombstone.record_id)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start tombstone roleplay lore record", error))?;
+        let existing = active_roleplay_lore_record_for_update(
+            &tx,
+            &tombstone.record_id,
+            tombstone.expected_revision,
+        )?;
+        tombstone_roleplay_lore_record_in_tx(&tx, tombstone, existing.revision + 1)?;
+        insert_roleplay_lore_provenance_event_in_tx(
+            &tx,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!(
+                    "{}:tombstoned:{}",
+                    tombstone.record_id,
+                    existing.revision + 1
+                ),
+                record_id: tombstone.record_id.clone(),
+                world_id: existing.world_id,
+                evidence_refs: existing.evidence_refs,
+                source: existing.source,
+                actor: "rusty_crew_storage".to_string(),
+                note: tombstone.reason.clone(),
+                created_at: tombstone.now.clone(),
+            },
+        )?;
+        let record =
+            get_roleplay_lore_record_in_tx(&tx, &tombstone.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "tombstoned roleplay lore record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit tombstone roleplay lore record", error))?;
+        Ok(record)
+    }
+
+    pub fn query_roleplay_lore_records(
+        &self,
+        query: &RoleplayLoreQuery,
+    ) -> CoreResult<Vec<RoleplayLoreRecord>> {
+        let conn = self.conn()?;
+        query_roleplay_lore_records(&conn, query)
+    }
+
+    pub fn roleplay_lore_provenance_events(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
+        validate_roleplay_lore_record_id(record_id)?;
+        let conn = self.conn()?;
+        roleplay_lore_provenance_events(&conn, record_id)
     }
 
     pub fn save_memory_proposal(
@@ -6022,6 +6382,66 @@ fn migrate_v23_add_session_memory_records(tx: &rusqlite::Transaction<'_>) -> Cor
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 23", error))
+}
+
+fn migrate_v24_add_roleplay_lore_records(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS module_roleplay_lore_records (
+                record_id TEXT PRIMARY KEY,
+                world_id TEXT NOT NULL,
+                entity_id TEXT,
+                session_id TEXT,
+                branch_id TEXT,
+                shape_id TEXT NOT NULL,
+                shape_version INTEGER NOT NULL,
+                canon_status TEXT NOT NULL,
+                visibility TEXT NOT NULL,
+                status TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                content_json TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                source TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                durability_rationale TEXT NOT NULL,
+                supersedes_record_id TEXT,
+                superseded_by_record_id TEXT,
+                tombstoned_at TEXT,
+                tombstone_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_roleplay_lore_world_status_updated
+                ON module_roleplay_lore_records(world_id, status, updated_at DESC, record_id);
+            CREATE INDEX IF NOT EXISTS idx_roleplay_lore_entity
+                ON module_roleplay_lore_records(world_id, entity_id, canon_status, visibility, updated_at DESC, record_id)
+                WHERE entity_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_roleplay_lore_shape
+                ON module_roleplay_lore_records(shape_id, shape_version, updated_at DESC, record_id);
+            CREATE INDEX IF NOT EXISTS idx_roleplay_lore_supersedes
+                ON module_roleplay_lore_records(supersedes_record_id)
+                WHERE supersedes_record_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS module_roleplay_lore_provenance_events (
+                event_id TEXT PRIMARY KEY,
+                record_id TEXT NOT NULL,
+                world_id TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                source TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                note TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (record_id) REFERENCES module_roleplay_lore_records(record_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_roleplay_lore_provenance_record
+                ON module_roleplay_lore_provenance_events(record_id, created_at, event_id);
+            CREATE INDEX IF NOT EXISTS idx_roleplay_lore_provenance_world
+                ON module_roleplay_lore_provenance_events(world_id, created_at, event_id);
+            ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 24", error))
 }
 
 fn apply_module_schema_migration_in_tx(
@@ -13049,6 +13469,829 @@ fn validate_memory_confidence(value: f32) -> CoreResult<()> {
         ));
     }
     Ok(())
+}
+
+fn roleplay_lore_memory_space_descriptor() -> MemorySpaceDescriptor {
+    MemorySpaceDescriptor {
+        space_id: MemorySpaceId::unchecked("roleplay_lore"),
+        schema_version: 1,
+        module_id: Some("roleplay_lore".to_string()),
+        description: "Crew-owned roleplay lore with canon-aware governance.".to_string(),
+        record_shapes: vec![
+            roleplay_lore_shape(
+                "world",
+                "Roleplay world or campaign record.",
+                &[
+                    ("world_id", MemoryFieldType::String, true),
+                    ("title", MemoryFieldType::String, true),
+                    ("body", MemoryFieldType::Markdown, true),
+                    ("visibility", MemoryFieldType::String, true),
+                    ("metadata_json", MemoryFieldType::Json, false),
+                ],
+            ),
+            roleplay_lore_shape(
+                "entity",
+                "Roleplay character, faction, place, object, or concept.",
+                &[
+                    ("world_id", MemoryFieldType::String, true),
+                    ("entity_id", MemoryFieldType::String, true),
+                    ("title", MemoryFieldType::String, true),
+                    ("body", MemoryFieldType::Markdown, true),
+                    ("entity_kind", MemoryFieldType::String, false),
+                    ("metadata_json", MemoryFieldType::Json, false),
+                ],
+            ),
+            roleplay_lore_shape(
+                "lore_entry",
+                "World or entity lore entry.",
+                &[
+                    ("world_id", MemoryFieldType::String, true),
+                    ("entity_id", MemoryFieldType::String, false),
+                    ("title", MemoryFieldType::String, true),
+                    ("body", MemoryFieldType::Markdown, true),
+                    ("canon_status", MemoryFieldType::String, true),
+                    ("visibility", MemoryFieldType::String, true),
+                    ("metadata_json", MemoryFieldType::Json, false),
+                ],
+            ),
+            roleplay_lore_shape(
+                "relationship",
+                "Relationship between roleplay entities.",
+                &[
+                    ("world_id", MemoryFieldType::String, true),
+                    ("entity_id", MemoryFieldType::String, true),
+                    ("target_entity_id", MemoryFieldType::String, true),
+                    ("relationship_kind", MemoryFieldType::String, true),
+                    ("body", MemoryFieldType::Markdown, true),
+                    ("metadata_json", MemoryFieldType::Json, false),
+                ],
+            ),
+            roleplay_lore_shape(
+                "timeline_event",
+                "Canon or draft timeline event.",
+                &[
+                    ("world_id", MemoryFieldType::String, true),
+                    ("event_time", MemoryFieldType::String, false),
+                    ("title", MemoryFieldType::String, true),
+                    ("body", MemoryFieldType::Markdown, true),
+                    ("metadata_json", MemoryFieldType::Json, false),
+                ],
+            ),
+            roleplay_lore_shape(
+                "provenance_event",
+                "Stored provenance event projection.",
+                &[
+                    ("world_id", MemoryFieldType::String, true),
+                    ("record_id", MemoryFieldType::String, true),
+                    ("body", MemoryFieldType::Markdown, false),
+                    ("metadata_json", MemoryFieldType::Json, false),
+                ],
+            ),
+        ],
+        scope_model: MemoryScopeModel {
+            allowed_scopes: vec![
+                MemoryScopeType::World,
+                MemoryScopeType::Entity,
+                MemoryScopeType::Session,
+                MemoryScopeType::ConversationBranch,
+            ],
+            primary_scope: MemoryScopeType::World,
+        },
+        visibility_model: MemoryVisibilityModel::WorldScoped,
+        retrieval_strategies: vec![
+            MemoryRetrievalStrategy::DirectLookup,
+            MemoryRetrievalStrategy::QuerySearch,
+            MemoryRetrievalStrategy::Relevance,
+            MemoryRetrievalStrategy::DomainSpecific,
+        ],
+        indexing: MemoryIndexingPolicy {
+            required_capabilities: vec![
+                "world_lookup".to_string(),
+                "entity_lookup".to_string(),
+                "canon_visibility_filters".to_string(),
+                "expected_revision_conflicts".to_string(),
+            ],
+            optional_capabilities: vec!["full_text_search".to_string()],
+        },
+        prompt_policy: MemoryPromptPolicy::ExplicitUserContext,
+        write_policy: MemoryWritePolicy {
+            default_mode: MemoryGovernanceMode::ManualReview,
+            operation_policies: vec![
+                roleplay_lore_operation_policy(MemoryOperation::Add, false),
+                roleplay_lore_operation_policy(MemoryOperation::Replace, true),
+                roleplay_lore_operation_policy(MemoryOperation::Supersede, true),
+                roleplay_lore_operation_policy(MemoryOperation::Remove, true),
+                roleplay_lore_operation_policy(MemoryOperation::Archive, true),
+                roleplay_lore_operation_policy(MemoryOperation::CandidateOnly, false),
+            ],
+        },
+        operations: vec![
+            MemoryOperation::Read,
+            MemoryOperation::List,
+            MemoryOperation::Add,
+            MemoryOperation::Replace,
+            MemoryOperation::Supersede,
+            MemoryOperation::Remove,
+            MemoryOperation::Archive,
+            MemoryOperation::CandidateOnly,
+        ],
+        provenance_policy: MemoryProvenancePolicy {
+            required_evidence: vec![MemoryEvidenceKind::Wake],
+            source_required: true,
+            rationale_required: true,
+        },
+        retention_policy: MemoryRetentionPolicy::DomainSpecific,
+        conflict_policy: MemoryConflictPolicy::ExpectedRevision,
+        diagnostics: MemoryDiagnosticsPolicy {
+            expose_catalog: true,
+            expose_record_counts: true,
+            expose_policy_decisions: true,
+        },
+        export_import: MemoryExportImportPolicy {
+            export_supported: true,
+            import_supported: true,
+            import_governance_mode: MemoryGovernanceMode::ManualReview,
+        },
+    }
+}
+
+fn roleplay_lore_shape(
+    shape_id: &str,
+    description: &str,
+    fields: &[(&str, MemoryFieldType, bool)],
+) -> MemoryRecordShapeDescriptor {
+    MemoryRecordShapeDescriptor {
+        shape_id: MemoryRecordShapeId::unchecked(shape_id),
+        version: 1,
+        description: description.to_string(),
+        fields: fields
+            .iter()
+            .map(
+                |(field_name, field_type, required)| MemoryRecordFieldDescriptor {
+                    field_name: (*field_name).to_string(),
+                    field_type: *field_type,
+                    required: *required,
+                    description: format!("{field_name} field"),
+                },
+            )
+            .collect(),
+    }
+}
+
+fn roleplay_lore_operation_policy(
+    operation: MemoryOperation,
+    requires_expected_revision: bool,
+) -> MemoryOperationPolicy {
+    MemoryOperationPolicy {
+        operation,
+        governance_mode: MemoryGovernanceMode::ManualReview,
+        requires_expected_revision,
+        min_confidence: None,
+    }
+}
+
+fn validate_roleplay_lore_write(write: &RoleplayLoreWrite) -> CoreResult<()> {
+    validate_roleplay_lore_record_id(&write.record_id)?;
+    validate_roleplay_lore_identifier("roleplay lore world_id", &write.world_id)?;
+    if let Some(entity_id) = &write.entity_id {
+        validate_roleplay_lore_identifier("roleplay lore entity_id", entity_id)?;
+    }
+    if write.title.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore title must not be empty",
+        ));
+    }
+    if write.body.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore body must not be empty",
+        ));
+    }
+    validate_memory_confidence(write.confidence)?;
+    if write.durability_rationale.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore durability_rationale is required",
+        ));
+    }
+    if write.evidence_refs.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore evidence_refs must not be empty",
+        ));
+    }
+    validate_roleplay_lore_shape(&write.shape)?;
+    validate_roleplay_lore_content(&write.shape, &write.content)?;
+    Ok(())
+}
+
+fn validate_roleplay_lore_shape(shape: &MemoryRecordShapeRef) -> CoreResult<()> {
+    let descriptor = roleplay_lore_memory_space_descriptor();
+    descriptor.validate()?;
+    if !descriptor.has_shape(shape) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore shape is not declared by descriptor",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_roleplay_lore_content(
+    shape_ref: &MemoryRecordShapeRef,
+    content: &JsonValue,
+) -> CoreResult<()> {
+    let descriptor = roleplay_lore_memory_space_descriptor();
+    let shape = descriptor
+        .record_shapes
+        .iter()
+        .find(|shape| shape.shape_id == shape_ref.shape_id && shape.version == shape_ref.version)
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "roleplay lore shape is not declared by descriptor",
+            )
+        })?;
+    let object = content.as_object().ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore content must be a JSON object",
+        )
+    })?;
+    for field in shape.fields.iter().filter(|field| field.required) {
+        if !object
+            .get(&field.field_name)
+            .map(|value| !value.is_null())
+            .unwrap_or(false)
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "roleplay lore content missing required field {}",
+                    field.field_name
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_roleplay_lore_record_id(record_id: &str) -> CoreResult<()> {
+    validate_roleplay_lore_identifier("roleplay lore record_id", record_id)
+}
+
+fn validate_roleplay_lore_identifier(label: &str, value: &str) -> CoreResult<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must not be empty"),
+        ));
+    }
+    if trimmed.len() > 256 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be at most 256 characters"),
+        ));
+    }
+    if trimmed.contains('\0') {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must not contain NUL"),
+        ));
+    }
+    Ok(())
+}
+
+fn insert_roleplay_lore_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &RoleplayLoreWrite,
+) -> CoreResult<()> {
+    let content_json = to_json_text(&write.content)?;
+    let evidence_refs_json = to_json_text(&write.evidence_refs)?;
+    tx.execute(
+        "INSERT INTO module_roleplay_lore_records (
+            record_id,
+            world_id,
+            entity_id,
+            session_id,
+            branch_id,
+            shape_id,
+            shape_version,
+            canon_status,
+            visibility,
+            status,
+            revision,
+            title,
+            body,
+            content_json,
+            evidence_refs_json,
+            source,
+            confidence,
+            durability_rationale,
+            supersedes_record_id,
+            superseded_by_record_id,
+            tombstoned_at,
+            tombstone_reason,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL, NULL, NULL, ?19, ?19)",
+        params![
+            write.record_id.as_str(),
+            write.world_id.as_str(),
+            write.entity_id.as_deref(),
+            write.session_id.as_ref().map(|value| value.0.as_str()),
+            write.branch_id.as_ref().map(|value| value.0.as_str()),
+            write.shape.shape_id.0.as_str(),
+            write.shape.version as i64,
+            roleplay_lore_canon_status_as_str(write.canon_status),
+            roleplay_lore_visibility_as_str(write.visibility),
+            roleplay_lore_record_status_as_str(RoleplayLoreRecordStatus::Active),
+            write.title.as_str(),
+            write.body.as_str(),
+            content_json,
+            evidence_refs_json,
+            memory_proposal_source_as_str(write.source),
+            write.confidence as f64,
+            write.durability_rationale.as_str(),
+            write.supersedes_record_id.as_deref(),
+            write.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert roleplay lore record", error))?;
+    Ok(())
+}
+
+fn update_roleplay_lore_record_content_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    replace: &RoleplayLoreReplace,
+    next_revision: u64,
+) -> CoreResult<()> {
+    let content_json = to_json_text(&replace.write.content)?;
+    let evidence_refs_json = to_json_text(&replace.write.evidence_refs)?;
+    tx.execute(
+        "UPDATE module_roleplay_lore_records
+         SET world_id = ?2,
+             entity_id = ?3,
+             session_id = ?4,
+             branch_id = ?5,
+             shape_id = ?6,
+             shape_version = ?7,
+             canon_status = ?8,
+             visibility = ?9,
+             revision = ?10,
+             title = ?11,
+             body = ?12,
+             content_json = ?13,
+             evidence_refs_json = ?14,
+             source = ?15,
+             confidence = ?16,
+             durability_rationale = ?17,
+             updated_at = ?18
+         WHERE record_id = ?1",
+        params![
+            replace.write.record_id.as_str(),
+            replace.write.world_id.as_str(),
+            replace.write.entity_id.as_deref(),
+            replace
+                .write
+                .session_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            replace
+                .write
+                .branch_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            replace.write.shape.shape_id.0.as_str(),
+            replace.write.shape.version as i64,
+            roleplay_lore_canon_status_as_str(replace.write.canon_status),
+            roleplay_lore_visibility_as_str(replace.write.visibility),
+            next_revision as i64,
+            replace.write.title.as_str(),
+            replace.write.body.as_str(),
+            content_json,
+            evidence_refs_json,
+            memory_proposal_source_as_str(replace.write.source),
+            replace.write.confidence as f64,
+            replace.write.durability_rationale.as_str(),
+            replace.write.now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("update roleplay lore record", error))?;
+    Ok(())
+}
+
+fn mark_roleplay_lore_superseded_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: &str,
+    replacement_record_id: &str,
+    next_revision: u64,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE module_roleplay_lore_records
+         SET status = ?2,
+             revision = ?3,
+             superseded_by_record_id = ?4,
+             updated_at = ?5
+         WHERE record_id = ?1",
+        params![
+            record_id,
+            roleplay_lore_record_status_as_str(RoleplayLoreRecordStatus::Superseded),
+            next_revision as i64,
+            replacement_record_id,
+            now.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("mark roleplay lore superseded", error))?;
+    Ok(())
+}
+
+fn tombstone_roleplay_lore_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    tombstone: &RoleplayLoreTombstone,
+    next_revision: u64,
+) -> CoreResult<()> {
+    tx.execute(
+        "UPDATE module_roleplay_lore_records
+         SET status = ?2,
+             revision = ?3,
+             tombstoned_at = ?4,
+             tombstone_reason = ?5,
+             updated_at = ?4
+         WHERE record_id = ?1",
+        params![
+            tombstone.record_id.as_str(),
+            roleplay_lore_record_status_as_str(RoleplayLoreRecordStatus::Tombstoned),
+            next_revision as i64,
+            tombstone.now.as_str(),
+            tombstone.reason.as_deref(),
+        ],
+    )
+    .map_err(|error| persistence_error("tombstone roleplay lore record", error))?;
+    Ok(())
+}
+
+fn active_roleplay_lore_record_for_update(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: &str,
+    expected_revision: u64,
+) -> CoreResult<RoleplayLoreRecord> {
+    validate_roleplay_lore_record_id(record_id)?;
+    if expected_revision == 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore expected_revision must be greater than zero",
+        ));
+    }
+    let existing = get_roleplay_lore_record_in_tx(tx, record_id)?.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("roleplay lore record {record_id} not found"),
+        )
+    })?;
+    if existing.status != RoleplayLoreRecordStatus::Active {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!("roleplay lore record {record_id} is not active"),
+        ));
+    }
+    if existing.revision != expected_revision {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "roleplay lore revision mismatch for {record_id}: expected {}, found {}",
+                expected_revision, existing.revision
+            ),
+        ));
+    }
+    Ok(existing)
+}
+
+fn get_roleplay_lore_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: &str,
+) -> CoreResult<Option<RoleplayLoreRecord>> {
+    tx.query_row(
+        "SELECT record_id,
+                world_id,
+                entity_id,
+                session_id,
+                branch_id,
+                shape_id,
+                shape_version,
+                canon_status,
+                visibility,
+                status,
+                revision,
+                title,
+                body,
+                content_json,
+                evidence_refs_json,
+                source,
+                confidence,
+                durability_rationale,
+                supersedes_record_id,
+                superseded_by_record_id,
+                tombstoned_at,
+                tombstone_reason,
+                created_at,
+                updated_at
+         FROM module_roleplay_lore_records
+         WHERE record_id = ?1",
+        params![record_id],
+        row_to_roleplay_lore_record,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get roleplay lore record", error))
+}
+
+fn query_roleplay_lore_records(
+    conn: &Connection,
+    query: &RoleplayLoreQuery,
+) -> CoreResult<Vec<RoleplayLoreRecord>> {
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let canon_status = query.canon_status.map(roleplay_lore_canon_status_as_str);
+    let visibility = query.visibility.map(roleplay_lore_visibility_as_str);
+    let include_superseded = query.include_superseded;
+    let include_tombstoned = query.include_tombstoned;
+    let query_like = query
+        .query
+        .as_ref()
+        .map(|value| sqlite_like_contains(value));
+    let mut stmt = conn
+        .prepare(
+            "SELECT record_id,
+                    world_id,
+                    entity_id,
+                    session_id,
+                    branch_id,
+                    shape_id,
+                    shape_version,
+                    canon_status,
+                    visibility,
+                    status,
+                    revision,
+                    title,
+                    body,
+                    content_json,
+                    evidence_refs_json,
+                    source,
+                    confidence,
+                    durability_rationale,
+                    supersedes_record_id,
+                    superseded_by_record_id,
+                    tombstoned_at,
+                    tombstone_reason,
+                    created_at,
+                    updated_at
+             FROM module_roleplay_lore_records
+             WHERE (?1 IS NULL OR world_id = ?1)
+               AND (?2 IS NULL OR entity_id = ?2)
+               AND (?3 IS NULL OR canon_status = ?3)
+               AND (?4 IS NULL OR visibility = ?4)
+               AND (?5 IS NULL OR shape_id = ?5)
+               AND (?6 OR status != 'superseded')
+               AND (?7 OR status != 'tombstoned')
+               AND (?8 IS NULL OR title LIKE ?8 ESCAPE '\\' OR body LIKE ?8 ESCAPE '\\')
+               AND (
+                    ?9 IS NULL OR EXISTS (
+                        SELECT 1
+                        FROM module_roleplay_lore_provenance_events p
+                        WHERE p.record_id = module_roleplay_lore_records.record_id
+                          AND p.evidence_refs_json LIKE ?10 ESCAPE '\\'
+                    )
+               )
+             ORDER BY updated_at DESC, record_id ASC
+             LIMIT ?11 OFFSET ?12",
+        )
+        .map_err(|error| persistence_error("prepare query roleplay lore records", error))?;
+    let provenance_like = query
+        .provenance_ref_id
+        .as_ref()
+        .map(|value| sqlite_like_contains(value));
+    let rows = stmt
+        .query_map(
+            params![
+                query.world_id.as_deref(),
+                query.entity_id.as_deref(),
+                canon_status,
+                visibility,
+                query.shape_id.as_deref(),
+                include_superseded,
+                include_tombstoned,
+                query_like.as_deref(),
+                query.provenance_ref_id.as_deref(),
+                provenance_like.as_deref(),
+                limit,
+                offset,
+            ],
+            row_to_roleplay_lore_record,
+        )
+        .map_err(|error| persistence_error("query roleplay lore records", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load roleplay lore records", error))
+}
+
+fn insert_roleplay_lore_provenance_event_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    event: &RoleplayLoreProvenanceEvent,
+) -> CoreResult<()> {
+    validate_roleplay_lore_identifier("roleplay lore provenance event_id", &event.event_id)?;
+    validate_roleplay_lore_record_id(&event.record_id)?;
+    validate_roleplay_lore_identifier("roleplay lore provenance world_id", &event.world_id)?;
+    let evidence_refs_json = to_json_text(&event.evidence_refs)?;
+    tx.execute(
+        "INSERT INTO module_roleplay_lore_provenance_events (
+            event_id,
+            record_id,
+            world_id,
+            evidence_refs_json,
+            source,
+            actor,
+            note,
+            created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            event.event_id.as_str(),
+            event.record_id.as_str(),
+            event.world_id.as_str(),
+            evidence_refs_json,
+            memory_proposal_source_as_str(event.source),
+            event.actor.as_str(),
+            event.note.as_deref(),
+            event.created_at.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert roleplay lore provenance event", error))?;
+    Ok(())
+}
+
+fn roleplay_lore_provenance_events(
+    conn: &Connection,
+    record_id: &str,
+) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT event_id,
+                    record_id,
+                    world_id,
+                    evidence_refs_json,
+                    source,
+                    actor,
+                    note,
+                    created_at
+             FROM module_roleplay_lore_provenance_events
+             WHERE record_id = ?1
+             ORDER BY created_at ASC, event_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare roleplay lore provenance events", error))?;
+    let rows = stmt
+        .query_map(params![record_id], row_to_roleplay_lore_provenance_event)
+        .map_err(|error| persistence_error("query roleplay lore provenance events", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load roleplay lore provenance events", error))
+}
+
+fn row_to_roleplay_lore_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RoleplayLoreRecord> {
+    let shape_id: String = row.get(5)?;
+    let canon_status: String = row.get(7)?;
+    let visibility: String = row.get(8)?;
+    let status: String = row.get(9)?;
+    let revision: i64 = row.get(10)?;
+    let content_json: String = row.get(13)?;
+    let evidence_refs_json: String = row.get(14)?;
+    let source: String = row.get(15)?;
+    Ok(RoleplayLoreRecord {
+        record_id: row.get(0)?,
+        world_id: row.get(1)?,
+        entity_id: row.get(2)?,
+        session_id: row.get::<_, Option<String>>(3)?.map(SessionId::new),
+        branch_id: row
+            .get::<_, Option<String>>(4)?
+            .map(ConversationBranchId::new),
+        shape: MemoryRecordShapeRef {
+            shape_id: MemoryRecordShapeId::new(shape_id).map_err(to_sql_core_error)?,
+            version: row.get::<_, i64>(6)? as u32,
+        },
+        canon_status: parse_roleplay_lore_canon_status(&canon_status).map_err(to_sql_core_error)?,
+        visibility: parse_roleplay_lore_visibility(&visibility).map_err(to_sql_core_error)?,
+        status: parse_roleplay_lore_record_status(&status).map_err(to_sql_core_error)?,
+        revision: revision as u64,
+        title: row.get(11)?,
+        body: row.get(12)?,
+        content: from_json_text(&content_json).map_err(to_sql_error)?,
+        evidence_refs: from_json_text(&evidence_refs_json).map_err(to_sql_error)?,
+        source: parse_memory_proposal_source(&source).map_err(to_sql_core_error)?,
+        confidence: row.get::<_, f64>(16)? as f32,
+        durability_rationale: row.get(17)?,
+        supersedes_record_id: row.get(18)?,
+        superseded_by_record_id: row.get(19)?,
+        tombstoned_at: row.get(20)?,
+        tombstone_reason: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
+    })
+}
+
+fn row_to_roleplay_lore_provenance_event(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<RoleplayLoreProvenanceEvent> {
+    let evidence_refs_json: String = row.get(3)?;
+    let source: String = row.get(4)?;
+    Ok(RoleplayLoreProvenanceEvent {
+        event_id: row.get(0)?,
+        record_id: row.get(1)?,
+        world_id: row.get(2)?,
+        evidence_refs: from_json_text(&evidence_refs_json).map_err(to_sql_error)?,
+        source: parse_memory_proposal_source(&source).map_err(to_sql_core_error)?,
+        actor: row.get(5)?,
+        note: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+fn roleplay_lore_record_status_as_str(status: RoleplayLoreRecordStatus) -> &'static str {
+    match status {
+        RoleplayLoreRecordStatus::Active => "active",
+        RoleplayLoreRecordStatus::Superseded => "superseded",
+        RoleplayLoreRecordStatus::Tombstoned => "tombstoned",
+    }
+}
+
+fn parse_roleplay_lore_record_status(raw: &str) -> CoreResult<RoleplayLoreRecordStatus> {
+    match raw {
+        "active" => Ok(RoleplayLoreRecordStatus::Active),
+        "superseded" => Ok(RoleplayLoreRecordStatus::Superseded),
+        "tombstoned" => Ok(RoleplayLoreRecordStatus::Tombstoned),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid roleplay lore record status {other}"),
+        )),
+    }
+}
+
+fn roleplay_lore_canon_status_as_str(status: RoleplayLoreCanonStatus) -> &'static str {
+    match status {
+        RoleplayLoreCanonStatus::Canon => "canon",
+        RoleplayLoreCanonStatus::Draft => "draft",
+        RoleplayLoreCanonStatus::Contested => "contested",
+        RoleplayLoreCanonStatus::Deprecated => "deprecated",
+    }
+}
+
+fn parse_roleplay_lore_canon_status(raw: &str) -> CoreResult<RoleplayLoreCanonStatus> {
+    match raw {
+        "canon" => Ok(RoleplayLoreCanonStatus::Canon),
+        "draft" => Ok(RoleplayLoreCanonStatus::Draft),
+        "contested" => Ok(RoleplayLoreCanonStatus::Contested),
+        "deprecated" => Ok(RoleplayLoreCanonStatus::Deprecated),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid roleplay lore canon status {other}"),
+        )),
+    }
+}
+
+fn roleplay_lore_visibility_as_str(visibility: RoleplayLoreVisibility) -> &'static str {
+    match visibility {
+        RoleplayLoreVisibility::Public => "public",
+        RoleplayLoreVisibility::Private => "private",
+        RoleplayLoreVisibility::GmOnly => "gm_only",
+        RoleplayLoreVisibility::ToolOnly => "tool_only",
+    }
+}
+
+fn parse_roleplay_lore_visibility(raw: &str) -> CoreResult<RoleplayLoreVisibility> {
+    match raw {
+        "public" => Ok(RoleplayLoreVisibility::Public),
+        "private" => Ok(RoleplayLoreVisibility::Private),
+        "gm_only" => Ok(RoleplayLoreVisibility::GmOnly),
+        "tool_only" => Ok(RoleplayLoreVisibility::ToolOnly),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("invalid roleplay lore visibility {other}"),
+        )),
+    }
+}
+
+fn sqlite_like_contains(value: &str) -> String {
+    format!("%{}%", escape_sqlite_like(value))
+}
+
+fn escape_sqlite_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn validate_memory_proposal(

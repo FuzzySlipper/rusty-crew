@@ -1287,7 +1287,7 @@ function postgresRepositoryGroupDiagnostics(
         coverageStatus: "degraded",
         implementationStatus: "proof_simple_kv",
         detail:
-          "Implemented only for the simple_kv module-owned data proof table; typed memory spaces and roleplay_lore module-owned stores remain unsupported for PostgreSQL service boot.",
+          "Implemented for the simple_kv module-owned data proof table and roleplay_lore proof repository; generic typed memory spaces remain unsupported for PostgreSQL service boot.",
       };
     }
     return {
@@ -1384,9 +1384,9 @@ function postgresModuleOwnedStoreDiagnostics(): NonNullable<
     {
       storeId: "roleplay_lore",
       label: "Roleplay Lore",
-      coverageStatus: "unsupported",
+      coverageStatus: "proof",
       detail:
-        "Roleplay lore is planned as a module-owned typed memory space and has no PostgreSQL repository proof yet.",
+        "Roleplay lore has a PostgreSQL proof repository with typed world/entity/lore/timeline/provenance records; it is not wired as the full service backend.",
     },
   ];
 }

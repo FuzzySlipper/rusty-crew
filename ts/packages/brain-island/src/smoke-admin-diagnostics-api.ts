@@ -258,8 +258,8 @@ const storage: StorageDiagnosticsProjection = {
       {
         storeId: "roleplay_lore",
         label: "Roleplay Lore",
-        coverageStatus: "unsupported",
-        detail: "roleplay lore is not ported",
+        coverageStatus: "proof",
+        detail: "roleplay lore proof repository is implemented",
       },
     ],
   },
@@ -604,7 +604,7 @@ assert.equal(
   storageData.postgres?.moduleOwnedStores.find(
     (store) => store.storeId === "roleplay_lore",
   )?.coverageStatus,
-  "unsupported",
+  "proof",
 );
 assert.equal(
   storageData.capabilities.find(

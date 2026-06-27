@@ -57,6 +57,7 @@ Proof coverage exists for:
 - conversation transcript/tree records;
 - attachments and data-bank scopes;
 - dense profile memory / `profile_dense` compatibility.
+- roleplay lore typed module/memory-space records.
 
 Unsupported or degraded coverage remains visible for:
 
@@ -68,12 +69,12 @@ Unsupported or degraded coverage remains visible for:
 - bindings;
 - profile registry;
 - import/export;
-- generic typed memory spaces;
-- `roleplay_lore` module-owned store.
+- generic typed memory spaces beyond the proofed `profile_dense` and
+  `roleplay_lore` shapes.
 
 `profile_dense` being proofed does not imply generic typed memory spaces are
-implemented. `roleplay_lore` is planned as a module-owned typed memory space and
-continues to report unsupported.
+implemented. `roleplay_lore` is proofed as a module-owned typed memory space,
+but still does not make PostgreSQL a production service backend.
 
 ## Search Diagnostics
 

@@ -6,12 +6,15 @@
 //! beyond SQLite.
 
 use crate::{
-    counter_value, from_json_text, profile_memory_target_parts, repositories, to_json_text,
+    counter_value, from_json_text, profile_memory_target_parts, repositories,
+    roleplay_lore_canon_status_as_str, roleplay_lore_memory_space_descriptor,
+    roleplay_lore_record_status_as_str, roleplay_lore_visibility_as_str, to_json_text,
     validate_profile_memory_key, validate_profile_memory_write, validate_provider_wire_state_key,
-    validate_simple_kv_identity, validate_simple_kv_query, validate_simple_kv_write,
-    ActiveBranchConflict, ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation,
-    AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite, AttachmentQuery,
-    AttachmentRecord, AttachmentStatus, AttachmentWrite, BranchHeadConflict, BranchHeadExpectation,
+    validate_roleplay_lore_record_id, validate_roleplay_lore_write, validate_simple_kv_identity,
+    validate_simple_kv_query, validate_simple_kv_write, ActiveBranchConflict,
+    ActiveBranchExpectation, ActiveVariantConflict, ActiveVariantExpectation, AttachmentId,
+    AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite, AttachmentQuery, AttachmentRecord,
+    AttachmentStatus, AttachmentWrite, BranchHeadConflict, BranchHeadExpectation,
     ConversationBranchId, ConversationBranchQuery, ConversationBranchRecord,
     ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
     ConversationJumpResult, ConversationJumpTarget, ConversationSnapshotId,
@@ -26,7 +29,9 @@ use crate::{
     ProfileMemoryTarget, ProfileMemoryWrite, ProviderStateAbsenceReason,
     ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
     ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
-    ProviderWireStateWrite, QueryPage, RuntimeCounterQuery, RuntimeCounterRecord,
+    ProviderWireStateWrite, QueryPage, RoleplayLoreProvenanceEvent, RoleplayLoreQuery,
+    RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace, RoleplayLoreSupersede,
+    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
     RuntimeCounterScope, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
     RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
     RuntimeStorageTableCount, SelectActiveBranchRequest, SelectActiveBranchResult,
@@ -42,13 +47,13 @@ use rusty_crew_core_protocol::{
     MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryExportImportPolicy,
     MemoryFieldType, MemoryGovernanceMode, MemoryIndexingPolicy, MemoryOperation,
     MemoryOperationPolicy, MemoryPromptPolicy, MemoryProvenancePolicy, MemoryRecordFieldDescriptor,
-    MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRetentionPolicy,
+    MemoryRecordShapeDescriptor, MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy,
     MemoryRetrievalStrategy, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
     MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy,
 };
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 7;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -406,7 +411,7 @@ impl PostgresRuntimeCounterProofStore {
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
             proof_repository:
-                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes,profile_memory"
+                "runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore"
                     .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
@@ -462,6 +467,14 @@ impl PostgresRuntimeCounterProofStore {
                     table: "profile_memories".to_string(),
                     rows: self.table_rows("profile_memories")?,
                 },
+                RuntimeStorageTableCount {
+                    table: "module_roleplay_lore_records".to_string(),
+                    rows: self.table_rows("module_roleplay_lore_records")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "module_roleplay_lore_provenance_events".to_string(),
+                    rows: self.table_rows("module_roleplay_lore_provenance_events")?,
+                },
             ],
             capabilities: postgres_proof_capabilities(),
             repository_groups: postgres_proof_repository_groups(),
@@ -469,7 +482,10 @@ impl PostgresRuntimeCounterProofStore {
     }
 
     pub fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
-        vec![profile_dense_memory_space_descriptor()]
+        vec![
+            profile_dense_memory_space_descriptor(),
+            roleplay_lore_memory_space_descriptor(),
+        ]
     }
 
     pub fn list_profile_memory(
@@ -636,6 +652,248 @@ impl PostgresRuntimeCounterProofStore {
         tx.commit()
             .map_err(|error| postgres_error("commit remove PostgreSQL profile memory", error))?;
         Ok(existing)
+    }
+
+    pub fn add_roleplay_lore_record(
+        &self,
+        write: &RoleplayLoreWrite,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        validate_roleplay_lore_write(write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start add PostgreSQL roleplay lore", error))?;
+        if get_roleplay_lore_record(&mut tx, &schema, &write.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!("roleplay lore record {} already exists", write.record_id),
+            ));
+        }
+        insert_roleplay_lore_record(&mut tx, &schema, write)?;
+        insert_roleplay_lore_provenance_event(
+            &mut tx,
+            &schema,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!("{}:created", write.record_id),
+                record_id: write.record_id.clone(),
+                world_id: write.world_id.clone(),
+                evidence_refs: write.evidence_refs.clone(),
+                source: write.source,
+                actor: crate::memory_proposal_source_as_str(write.source).to_string(),
+                note: Some("created roleplay lore record".to_string()),
+                created_at: write.now.clone(),
+            },
+        )?;
+        let record =
+            get_roleplay_lore_record(&mut tx, &schema, &write.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "created PostgreSQL roleplay lore record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit add PostgreSQL roleplay lore", error))?;
+        Ok(record)
+    }
+
+    pub fn replace_roleplay_lore_record(
+        &self,
+        replace: &RoleplayLoreReplace,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        validate_roleplay_lore_write(&replace.write)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start replace PostgreSQL roleplay lore", error))?;
+        let existing = active_roleplay_lore_record_for_update(
+            &mut tx,
+            &schema,
+            &replace.write.record_id,
+            replace.expected_revision,
+        )?;
+        update_roleplay_lore_record(&mut tx, &schema, replace, existing.revision + 1)?;
+        insert_roleplay_lore_provenance_event(
+            &mut tx,
+            &schema,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!(
+                    "{}:revision:{}",
+                    replace.write.record_id,
+                    existing.revision + 1
+                ),
+                record_id: replace.write.record_id.clone(),
+                world_id: replace.write.world_id.clone(),
+                evidence_refs: replace.write.evidence_refs.clone(),
+                source: replace.write.source,
+                actor: crate::memory_proposal_source_as_str(replace.write.source).to_string(),
+                note: Some("replaced roleplay lore record".to_string()),
+                created_at: replace.write.now.clone(),
+            },
+        )?;
+        let record = get_roleplay_lore_record(&mut tx, &schema, &replace.write.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "replaced PostgreSQL roleplay lore record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit replace PostgreSQL roleplay lore", error))?;
+        Ok(record)
+    }
+
+    pub fn supersede_roleplay_lore_record(
+        &self,
+        supersede: &RoleplayLoreSupersede,
+    ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)> {
+        validate_roleplay_lore_write(&supersede.replacement)?;
+        if supersede.replacement.supersedes_record_id.as_deref()
+            != Some(supersede.record_id.as_str())
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "roleplay lore replacement must reference the superseded record",
+            ));
+        }
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start supersede PostgreSQL roleplay lore", error))?;
+        let existing = active_roleplay_lore_record_for_update(
+            &mut tx,
+            &schema,
+            &supersede.record_id,
+            supersede.expected_revision,
+        )?;
+        if existing.world_id != supersede.replacement.world_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "roleplay lore replacement must stay in the same world",
+            ));
+        }
+        if get_roleplay_lore_record(&mut tx, &schema, &supersede.replacement.record_id)?.is_some() {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "roleplay lore replacement {} already exists",
+                    supersede.replacement.record_id
+                ),
+            ));
+        }
+        insert_roleplay_lore_record(&mut tx, &schema, &supersede.replacement)?;
+        mark_roleplay_lore_superseded(
+            &mut tx,
+            &schema,
+            &existing.record_id,
+            &supersede.replacement.record_id,
+            existing.revision + 1,
+            &supersede.replacement.now,
+        )?;
+        insert_roleplay_lore_provenance_event(
+            &mut tx,
+            &schema,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!(
+                    "{}:superseded_by:{}",
+                    existing.record_id, supersede.replacement.record_id
+                ),
+                record_id: existing.record_id.clone(),
+                world_id: existing.world_id.clone(),
+                evidence_refs: supersede.replacement.evidence_refs.clone(),
+                source: supersede.replacement.source,
+                actor: crate::memory_proposal_source_as_str(supersede.replacement.source)
+                    .to_string(),
+                note: Some(format!("superseded by {}", supersede.replacement.record_id)),
+                created_at: supersede.replacement.now.clone(),
+            },
+        )?;
+        let old_record = get_roleplay_lore_record(&mut tx, &schema, &existing.record_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "superseded PostgreSQL roleplay lore record was not readable",
+                )
+            })?;
+        let new_record =
+            get_roleplay_lore_record(&mut tx, &schema, &supersede.replacement.record_id)?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        "replacement PostgreSQL roleplay lore record was not readable",
+                    )
+                })?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit supersede PostgreSQL roleplay lore", error))?;
+        Ok((old_record, new_record))
+    }
+
+    pub fn tombstone_roleplay_lore_record(
+        &self,
+        tombstone: &RoleplayLoreTombstone,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        validate_roleplay_lore_record_id(&tombstone.record_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start tombstone PostgreSQL roleplay lore", error))?;
+        let existing = active_roleplay_lore_record_for_update(
+            &mut tx,
+            &schema,
+            &tombstone.record_id,
+            tombstone.expected_revision,
+        )?;
+        tombstone_roleplay_lore_record(&mut tx, &schema, tombstone, existing.revision + 1)?;
+        insert_roleplay_lore_provenance_event(
+            &mut tx,
+            &schema,
+            &RoleplayLoreProvenanceEvent {
+                event_id: format!(
+                    "{}:tombstoned:{}",
+                    tombstone.record_id,
+                    existing.revision + 1
+                ),
+                record_id: tombstone.record_id.clone(),
+                world_id: existing.world_id,
+                evidence_refs: existing.evidence_refs,
+                source: existing.source,
+                actor: "rusty_crew_storage".to_string(),
+                note: tombstone.reason.clone(),
+                created_at: tombstone.now.clone(),
+            },
+        )?;
+        let record =
+            get_roleplay_lore_record(&mut tx, &schema, &tombstone.record_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "tombstoned PostgreSQL roleplay lore record was not readable",
+                )
+            })?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit tombstone PostgreSQL roleplay lore", error))?;
+        Ok(record)
+    }
+
+    pub fn query_roleplay_lore_records(
+        &self,
+        query: &RoleplayLoreQuery,
+    ) -> CoreResult<Vec<RoleplayLoreRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        query_roleplay_lore_records(&mut *client, &schema, query)
+    }
+
+    pub fn roleplay_lore_provenance_events(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
+        validate_roleplay_lore_record_id(record_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        roleplay_lore_provenance_events(&mut *client, &schema, record_id)
     }
 
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
@@ -1950,7 +2208,61 @@ impl PostgresRuntimeCounterProofStore {
                  CREATE INDEX IF NOT EXISTS profile_memories_profile_updated_idx
                     ON {schema}.profile_memories(profile_id, updated_at DESC);
                  CREATE INDEX IF NOT EXISTS profile_memories_target_idx
-                    ON {schema}.profile_memories(profile_id, target_type, target_id, memory_key);"
+                    ON {schema}.profile_memories(profile_id, target_type, target_id, memory_key);
+                 CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_records (
+                    record_id TEXT PRIMARY KEY,
+                    world_id TEXT NOT NULL,
+                    entity_id TEXT,
+                    session_id TEXT,
+                    branch_id TEXT,
+                    shape_id TEXT NOT NULL,
+                    shape_version BIGINT NOT NULL,
+                    canon_status TEXT NOT NULL,
+                    visibility TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    revision BIGINT NOT NULL CHECK (revision > 0),
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    content_json JSONB NOT NULL,
+                    evidence_refs_json JSONB NOT NULL,
+                    source TEXT NOT NULL,
+                    confidence DOUBLE PRECISION NOT NULL,
+                    durability_rationale TEXT NOT NULL,
+                    supersedes_record_id TEXT,
+                    superseded_by_record_id TEXT,
+                    tombstoned_at TEXT,
+                    tombstone_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    search_vector TSVECTOR GENERATED ALWAYS AS (
+                        to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(body, ''))
+                    ) STORED
+                 );
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_world_status_updated_idx
+                    ON {schema}.module_roleplay_lore_records(world_id, status, updated_at DESC, record_id);
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_entity_idx
+                    ON {schema}.module_roleplay_lore_records(world_id, entity_id, canon_status, visibility, updated_at DESC, record_id);
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_shape_idx
+                    ON {schema}.module_roleplay_lore_records(shape_id, shape_version, updated_at DESC, record_id);
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_supersedes_idx
+                    ON {schema}.module_roleplay_lore_records(supersedes_record_id)
+                    WHERE supersedes_record_id IS NOT NULL;
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_search_vector_idx
+                    ON {schema}.module_roleplay_lore_records USING GIN(search_vector);
+                 CREATE TABLE IF NOT EXISTS {schema}.module_roleplay_lore_provenance_events (
+                    event_id TEXT PRIMARY KEY,
+                    record_id TEXT NOT NULL REFERENCES {schema}.module_roleplay_lore_records(record_id),
+                    world_id TEXT NOT NULL,
+                    evidence_refs_json JSONB NOT NULL,
+                    source TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    note TEXT,
+                    created_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_provenance_record_idx
+                    ON {schema}.module_roleplay_lore_provenance_events(record_id, created_at, event_id);
+                 CREATE INDEX IF NOT EXISTS roleplay_lore_provenance_world_idx
+                    ON {schema}.module_roleplay_lore_provenance_events(world_id, created_at, event_id);"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL runtime counter proof", error))
     }
@@ -2423,7 +2735,7 @@ fn insert_profile_memory_in_tx(
                 revision,
                 created_at,
                 updated_at
-             ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, 1, $7, $7)"
+             ) VALUES ($1, $2, $3, $4, $5, ($6::text)::jsonb, 1, $7, $7)"
         ),
         &[
             &write.profile_id.0,
@@ -2462,7 +2774,7 @@ fn update_profile_memory_in_tx(
         &format!(
             "UPDATE {schema}.profile_memories
              SET content = $5,
-                 metadata_json = $6::jsonb,
+                 metadata_json = ($6::text)::jsonb,
                  revision = $7,
                  updated_at = $8
              WHERE profile_id = $1
@@ -4197,6 +4509,522 @@ fn conversation_snapshot_source_from_str(raw: &str) -> CoreResult<ConversationSn
     }
 }
 
+fn insert_roleplay_lore_record<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    write: &RoleplayLoreWrite,
+) -> CoreResult<()> {
+    let content_json = to_json_text(&write.content)?;
+    let evidence_refs_json = to_json_text(&write.evidence_refs)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.module_roleplay_lore_records (
+                record_id,
+                world_id,
+                entity_id,
+                session_id,
+                branch_id,
+                shape_id,
+                shape_version,
+                canon_status,
+                visibility,
+                status,
+                revision,
+                title,
+                body,
+                content_json,
+                evidence_refs_json,
+                source,
+                confidence,
+                durability_rationale,
+                supersedes_record_id,
+                superseded_by_record_id,
+                tombstoned_at,
+                tombstone_reason,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, $11, $12, ($13::text)::jsonb, ($14::text)::jsonb, $15, $16, $17, $18, NULL, NULL, NULL, $19, $19)"
+        ),
+        &[
+            &write.record_id,
+            &write.world_id,
+            &write.entity_id,
+            &write.session_id.as_ref().map(|value| value.0.as_str()),
+            &write.branch_id.as_ref().map(|value| value.0.as_str()),
+            &write.shape.shape_id.0,
+            &(write.shape.version as i64),
+            &roleplay_lore_canon_status_as_str(write.canon_status),
+            &roleplay_lore_visibility_as_str(write.visibility),
+            &roleplay_lore_record_status_as_str(RoleplayLoreRecordStatus::Active),
+            &write.title,
+            &write.body,
+            &content_json,
+            &evidence_refs_json,
+            &crate::memory_proposal_source_as_str(write.source),
+            &(write.confidence as f64),
+            &write.durability_rationale,
+            &write.supersedes_record_id,
+            &write.now,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL roleplay lore record", error))?;
+    Ok(())
+}
+
+fn update_roleplay_lore_record<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    replace: &RoleplayLoreReplace,
+    next_revision: u64,
+) -> CoreResult<()> {
+    let content_json = to_json_text(&replace.write.content)?;
+    let evidence_refs_json = to_json_text(&replace.write.evidence_refs)?;
+    conn.execute(
+        &format!(
+            "UPDATE {schema}.module_roleplay_lore_records
+             SET world_id = $2,
+                 entity_id = $3,
+                 session_id = $4,
+                 branch_id = $5,
+                 shape_id = $6,
+                 shape_version = $7,
+                 canon_status = $8,
+                 visibility = $9,
+                 revision = $10,
+                 title = $11,
+                 body = $12,
+                 content_json = ($13::text)::jsonb,
+                 evidence_refs_json = ($14::text)::jsonb,
+                 source = $15,
+                 confidence = $16,
+                 durability_rationale = $17,
+                 updated_at = $18
+             WHERE record_id = $1"
+        ),
+        &[
+            &replace.write.record_id,
+            &replace.write.world_id,
+            &replace.write.entity_id,
+            &replace
+                .write
+                .session_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            &replace
+                .write
+                .branch_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            &replace.write.shape.shape_id.0,
+            &(replace.write.shape.version as i64),
+            &roleplay_lore_canon_status_as_str(replace.write.canon_status),
+            &roleplay_lore_visibility_as_str(replace.write.visibility),
+            &(next_revision as i64),
+            &replace.write.title,
+            &replace.write.body,
+            &content_json,
+            &evidence_refs_json,
+            &crate::memory_proposal_source_as_str(replace.write.source),
+            &(replace.write.confidence as f64),
+            &replace.write.durability_rationale,
+            &replace.write.now,
+        ],
+    )
+    .map_err(|error| postgres_error("update PostgreSQL roleplay lore record", error))?;
+    Ok(())
+}
+
+fn mark_roleplay_lore_superseded<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record_id: &str,
+    replacement_record_id: &str,
+    next_revision: u64,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    conn.execute(
+        &format!(
+            "UPDATE {schema}.module_roleplay_lore_records
+             SET status = $2,
+                 revision = $3,
+                 superseded_by_record_id = $4,
+                 updated_at = $5
+             WHERE record_id = $1"
+        ),
+        &[
+            &record_id,
+            &roleplay_lore_record_status_as_str(RoleplayLoreRecordStatus::Superseded),
+            &(next_revision as i64),
+            &replacement_record_id,
+            &now,
+        ],
+    )
+    .map_err(|error| postgres_error("mark PostgreSQL roleplay lore superseded", error))?;
+    Ok(())
+}
+
+fn tombstone_roleplay_lore_record<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    tombstone: &RoleplayLoreTombstone,
+    next_revision: u64,
+) -> CoreResult<()> {
+    conn.execute(
+        &format!(
+            "UPDATE {schema}.module_roleplay_lore_records
+             SET status = $2,
+                 revision = $3,
+                 tombstoned_at = $4,
+                 tombstone_reason = $5,
+                 updated_at = $4
+             WHERE record_id = $1"
+        ),
+        &[
+            &tombstone.record_id,
+            &roleplay_lore_record_status_as_str(RoleplayLoreRecordStatus::Tombstoned),
+            &(next_revision as i64),
+            &tombstone.now,
+            &tombstone.reason,
+        ],
+    )
+    .map_err(|error| postgres_error("tombstone PostgreSQL roleplay lore record", error))?;
+    Ok(())
+}
+
+fn active_roleplay_lore_record_for_update(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    record_id: &str,
+    expected_revision: u64,
+) -> CoreResult<RoleplayLoreRecord> {
+    validate_roleplay_lore_record_id(record_id)?;
+    if expected_revision == 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "roleplay lore expected_revision must be greater than zero",
+        ));
+    }
+    let record = get_roleplay_lore_record_for_update(tx, schema, record_id)?.ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("roleplay lore record {record_id} not found"),
+        )
+    })?;
+    if record.status != RoleplayLoreRecordStatus::Active {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!("roleplay lore record {record_id} is not active"),
+        ));
+    }
+    if record.revision != expected_revision {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "roleplay lore revision mismatch for {record_id}: expected {}, found {}",
+                expected_revision, record.revision
+            ),
+        ));
+    }
+    Ok(record)
+}
+
+fn get_roleplay_lore_record_for_update(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    record_id: &str,
+) -> CoreResult<Option<RoleplayLoreRecord>> {
+    let row = tx
+        .query_opt(
+            &format!(
+                "SELECT record_id,
+                        world_id,
+                        entity_id,
+                        session_id,
+                        branch_id,
+                        shape_id,
+                        shape_version,
+                        canon_status,
+                        visibility,
+                        status,
+                        revision,
+                        title,
+                        body,
+                        content_json::text,
+                        evidence_refs_json::text,
+                        source,
+                        confidence,
+                        durability_rationale,
+                        supersedes_record_id,
+                        superseded_by_record_id,
+                        tombstoned_at,
+                        tombstone_reason,
+                        created_at,
+                        updated_at
+                 FROM {schema}.module_roleplay_lore_records
+                 WHERE record_id = $1
+                 FOR UPDATE"
+            ),
+            &[&record_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL roleplay lore record", error))?;
+    row.as_ref().map(row_to_roleplay_lore_record).transpose()
+}
+
+fn get_roleplay_lore_record<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record_id: &str,
+) -> CoreResult<Option<RoleplayLoreRecord>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT record_id,
+                        world_id,
+                        entity_id,
+                        session_id,
+                        branch_id,
+                        shape_id,
+                        shape_version,
+                        canon_status,
+                        visibility,
+                        status,
+                        revision,
+                        title,
+                        body,
+                        content_json::text,
+                        evidence_refs_json::text,
+                        source,
+                        confidence,
+                        durability_rationale,
+                        supersedes_record_id,
+                        superseded_by_record_id,
+                        tombstoned_at,
+                        tombstone_reason,
+                        created_at,
+                        updated_at
+                 FROM {schema}.module_roleplay_lore_records
+                 WHERE record_id = $1"
+            ),
+            &[&record_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL roleplay lore record", error))?;
+    row.as_ref().map(row_to_roleplay_lore_record).transpose()
+}
+
+fn query_roleplay_lore_records<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &RoleplayLoreQuery,
+) -> CoreResult<Vec<RoleplayLoreRecord>> {
+    let (limit, offset) = query
+        .page
+        .unwrap_or(QueryPage {
+            limit: None,
+            offset: None,
+        })
+        .bounded(100, 1_000);
+    let canon_status = query.canon_status.map(roleplay_lore_canon_status_as_str);
+    let visibility = query.visibility.map(roleplay_lore_visibility_as_str);
+    let provenance_like = query
+        .provenance_ref_id
+        .as_ref()
+        .map(|value| postgres_like_contains(value));
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT record_id,
+                        world_id,
+                        entity_id,
+                        session_id,
+                        branch_id,
+                        shape_id,
+                        shape_version,
+                        canon_status,
+                        visibility,
+                        status,
+                        revision,
+                        title,
+                        body,
+                        content_json::text,
+                        evidence_refs_json::text,
+                        source,
+                        confidence,
+                        durability_rationale,
+                        supersedes_record_id,
+                        superseded_by_record_id,
+                        tombstoned_at,
+                        tombstone_reason,
+                        created_at,
+                        updated_at
+                 FROM {schema}.module_roleplay_lore_records
+                 WHERE ($1::text IS NULL OR world_id = $1)
+                   AND ($2::text IS NULL OR entity_id = $2)
+                   AND ($3::text IS NULL OR canon_status = $3)
+                   AND ($4::text IS NULL OR visibility = $4)
+                   AND ($5::text IS NULL OR shape_id = $5)
+                   AND ($6::boolean OR status != 'superseded')
+                   AND ($7::boolean OR status != 'tombstoned')
+                   AND ($8::text IS NULL OR search_vector @@ plainto_tsquery('simple', $8))
+                   AND (
+                        $9::text IS NULL OR EXISTS (
+                            SELECT 1
+                            FROM {schema}.module_roleplay_lore_provenance_events p
+                            WHERE p.record_id = module_roleplay_lore_records.record_id
+                              AND p.evidence_refs_json::text LIKE $10 ESCAPE '\\'
+                        )
+                   )
+                 ORDER BY updated_at DESC, record_id ASC
+                 LIMIT $11 OFFSET $12"
+            ),
+            &[
+                &query.world_id,
+                &query.entity_id,
+                &canon_status,
+                &visibility,
+                &query.shape_id,
+                &query.include_superseded,
+                &query.include_tombstoned,
+                &query.query,
+                &query.provenance_ref_id,
+                &provenance_like,
+                &limit,
+                &offset,
+            ],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL roleplay lore records", error))?;
+    rows.iter().map(row_to_roleplay_lore_record).collect()
+}
+
+fn insert_roleplay_lore_provenance_event<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    event: &RoleplayLoreProvenanceEvent,
+) -> CoreResult<()> {
+    let evidence_refs_json = to_json_text(&event.evidence_refs)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.module_roleplay_lore_provenance_events (
+                event_id,
+                record_id,
+                world_id,
+                evidence_refs_json,
+                source,
+                actor,
+                note,
+                created_at
+             ) VALUES ($1, $2, $3, ($4::text)::jsonb, $5, $6, $7, $8)"
+        ),
+        &[
+            &event.event_id,
+            &event.record_id,
+            &event.world_id,
+            &evidence_refs_json,
+            &crate::memory_proposal_source_as_str(event.source),
+            &event.actor,
+            &event.note,
+            &event.created_at,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL roleplay lore provenance event", error))?;
+    Ok(())
+}
+
+fn roleplay_lore_provenance_events<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    record_id: &str,
+) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT event_id,
+                        record_id,
+                        world_id,
+                        evidence_refs_json::text,
+                        source,
+                        actor,
+                        note,
+                        created_at
+                 FROM {schema}.module_roleplay_lore_provenance_events
+                 WHERE record_id = $1
+                 ORDER BY created_at ASC, event_id ASC"
+            ),
+            &[&record_id],
+        )
+        .map_err(|error| {
+            postgres_error("query PostgreSQL roleplay lore provenance events", error)
+        })?;
+    rows.iter()
+        .map(row_to_roleplay_lore_provenance_event)
+        .collect()
+}
+
+fn row_to_roleplay_lore_record(row: &Row) -> CoreResult<RoleplayLoreRecord> {
+    let shape_version: i64 = row.get(6);
+    let revision: i64 = row.get(10);
+    let content_json: String = row.get(13);
+    let evidence_refs_json: String = row.get(14);
+    let source: String = row.get(15);
+    let canon_status: String = row.get(7);
+    let visibility: String = row.get(8);
+    let status: String = row.get(9);
+    Ok(RoleplayLoreRecord {
+        record_id: row.get(0),
+        world_id: row.get(1),
+        entity_id: row.get(2),
+        session_id: row.get::<_, Option<String>>(3).map(SessionId::new),
+        branch_id: row
+            .get::<_, Option<String>>(4)
+            .map(ConversationBranchId::new),
+        shape: MemoryRecordShapeRef {
+            shape_id: MemoryRecordShapeId::new(row.get::<_, String>(5))?,
+            version: shape_version as u32,
+        },
+        canon_status: crate::parse_roleplay_lore_canon_status(&canon_status)?,
+        visibility: crate::parse_roleplay_lore_visibility(&visibility)?,
+        status: crate::parse_roleplay_lore_record_status(&status)?,
+        revision: revision as u64,
+        title: row.get(11),
+        body: row.get(12),
+        content: parse_postgres_json(&content_json, "roleplay lore content_json")?,
+        evidence_refs: from_json_text(&evidence_refs_json).map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("parse PostgreSQL roleplay lore evidence_refs_json: {error}"),
+            )
+        })?,
+        source: crate::parse_memory_proposal_source(&source)?,
+        confidence: row.get::<_, f64>(16) as f32,
+        durability_rationale: row.get(17),
+        supersedes_record_id: row.get(18),
+        superseded_by_record_id: row.get(19),
+        tombstoned_at: row.get(20),
+        tombstone_reason: row.get(21),
+        created_at: row.get(22),
+        updated_at: row.get(23),
+    })
+}
+
+fn row_to_roleplay_lore_provenance_event(row: &Row) -> CoreResult<RoleplayLoreProvenanceEvent> {
+    let evidence_refs_json: String = row.get(3);
+    let source: String = row.get(4);
+    Ok(RoleplayLoreProvenanceEvent {
+        event_id: row.get(0),
+        record_id: row.get(1),
+        world_id: row.get(2),
+        evidence_refs: from_json_text(&evidence_refs_json).map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("parse PostgreSQL roleplay lore provenance evidence_refs_json: {error}"),
+            )
+        })?,
+        source: crate::parse_memory_proposal_source(&source)?,
+        actor: row.get(5),
+        note: row.get(6),
+        created_at: row.get(7),
+    })
+}
+
 fn parse_postgres_json(value: &str, label: &str) -> CoreResult<serde_json::Value> {
     from_json_text(value).map_err(|error| {
         CoreError::new(
@@ -4394,6 +5222,21 @@ fn postgres_like_prefix(prefix: &str) -> String {
     escaped
 }
 
+fn postgres_like_contains(value: &str) -> String {
+    let mut escaped = String::from("%");
+    for character in value.chars() {
+        match character {
+            '%' | '_' | '\\' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped.push('%');
+    escaped
+}
+
 fn validate_counter_amount(amount: u64) -> CoreResult<()> {
     if amount > i64::MAX as u64 {
         return Err(CoreError::new(
@@ -4441,7 +5284,11 @@ fn postgres_error(context: &str, error: postgres::Error) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CoordinationStore, MessageBlockWrite, COUNTER_MESSAGES, COUNTER_WAKES};
+    use crate::{
+        CoordinationStore, MessageBlockWrite, RoleplayLoreCanonStatus, RoleplayLoreVisibility,
+        COUNTER_MESSAGES, COUNTER_WAKES,
+    };
+    use rusty_crew_core_protocol::{MemoryEvidenceRef, MemoryProposalSource};
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
@@ -4591,6 +5438,34 @@ mod tests {
             &self,
             delete: &ProfileMemoryDelete,
         ) -> CoreResult<ProfileMemoryRecord>;
+    }
+
+    trait RoleplayLoreConformanceStore {
+        fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor>;
+        fn add_roleplay_lore_record(
+            &self,
+            write: &RoleplayLoreWrite,
+        ) -> CoreResult<RoleplayLoreRecord>;
+        fn replace_roleplay_lore_record(
+            &self,
+            replace: &RoleplayLoreReplace,
+        ) -> CoreResult<RoleplayLoreRecord>;
+        fn supersede_roleplay_lore_record(
+            &self,
+            supersede: &RoleplayLoreSupersede,
+        ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)>;
+        fn tombstone_roleplay_lore_record(
+            &self,
+            tombstone: &RoleplayLoreTombstone,
+        ) -> CoreResult<RoleplayLoreRecord>;
+        fn query_roleplay_lore_records(
+            &self,
+            query: &RoleplayLoreQuery,
+        ) -> CoreResult<Vec<RoleplayLoreRecord>>;
+        fn roleplay_lore_provenance_events(
+            &self,
+            record_id: &str,
+        ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>>;
     }
 
     impl SimpleKvConformanceStore for CoordinationStore {
@@ -4839,6 +5714,54 @@ mod tests {
             delete: &ProfileMemoryDelete,
         ) -> CoreResult<ProfileMemoryRecord> {
             CoordinationStore::remove_profile_memory(self, delete)
+        }
+    }
+
+    impl RoleplayLoreConformanceStore for CoordinationStore {
+        fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
+            vec![roleplay_lore_memory_space_descriptor()]
+        }
+
+        fn add_roleplay_lore_record(
+            &self,
+            write: &RoleplayLoreWrite,
+        ) -> CoreResult<RoleplayLoreRecord> {
+            CoordinationStore::add_roleplay_lore_record(self, write)
+        }
+
+        fn replace_roleplay_lore_record(
+            &self,
+            replace: &RoleplayLoreReplace,
+        ) -> CoreResult<RoleplayLoreRecord> {
+            CoordinationStore::replace_roleplay_lore_record(self, replace)
+        }
+
+        fn supersede_roleplay_lore_record(
+            &self,
+            supersede: &RoleplayLoreSupersede,
+        ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)> {
+            CoordinationStore::supersede_roleplay_lore_record(self, supersede)
+        }
+
+        fn tombstone_roleplay_lore_record(
+            &self,
+            tombstone: &RoleplayLoreTombstone,
+        ) -> CoreResult<RoleplayLoreRecord> {
+            CoordinationStore::tombstone_roleplay_lore_record(self, tombstone)
+        }
+
+        fn query_roleplay_lore_records(
+            &self,
+            query: &RoleplayLoreQuery,
+        ) -> CoreResult<Vec<RoleplayLoreRecord>> {
+            CoordinationStore::query_roleplay_lore_records(self, query)
+        }
+
+        fn roleplay_lore_provenance_events(
+            &self,
+            record_id: &str,
+        ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
+            CoordinationStore::roleplay_lore_provenance_events(self, record_id)
         }
     }
 
@@ -5095,6 +6018,54 @@ mod tests {
         }
     }
 
+    impl RoleplayLoreConformanceStore for PostgresRuntimeCounterProofStore {
+        fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
+            PostgresRuntimeCounterProofStore::memory_space_descriptors(self)
+        }
+
+        fn add_roleplay_lore_record(
+            &self,
+            write: &RoleplayLoreWrite,
+        ) -> CoreResult<RoleplayLoreRecord> {
+            PostgresRuntimeCounterProofStore::add_roleplay_lore_record(self, write)
+        }
+
+        fn replace_roleplay_lore_record(
+            &self,
+            replace: &RoleplayLoreReplace,
+        ) -> CoreResult<RoleplayLoreRecord> {
+            PostgresRuntimeCounterProofStore::replace_roleplay_lore_record(self, replace)
+        }
+
+        fn supersede_roleplay_lore_record(
+            &self,
+            supersede: &RoleplayLoreSupersede,
+        ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)> {
+            PostgresRuntimeCounterProofStore::supersede_roleplay_lore_record(self, supersede)
+        }
+
+        fn tombstone_roleplay_lore_record(
+            &self,
+            tombstone: &RoleplayLoreTombstone,
+        ) -> CoreResult<RoleplayLoreRecord> {
+            PostgresRuntimeCounterProofStore::tombstone_roleplay_lore_record(self, tombstone)
+        }
+
+        fn query_roleplay_lore_records(
+            &self,
+            query: &RoleplayLoreQuery,
+        ) -> CoreResult<Vec<RoleplayLoreRecord>> {
+            PostgresRuntimeCounterProofStore::query_roleplay_lore_records(self, query)
+        }
+
+        fn roleplay_lore_provenance_events(
+            &self,
+            record_id: &str,
+        ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
+            PostgresRuntimeCounterProofStore::roleplay_lore_provenance_events(self, record_id)
+        }
+    }
+
     #[test]
     fn validates_schema_identifiers_before_connecting() {
         let error = match PostgresRuntimeCounterProofStore::connect(
@@ -5180,6 +6151,14 @@ mod tests {
         let db_path = temp_sqlite_path("sqlite-profile-memory-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         profile_memory_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_roleplay_lore_conformance_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-roleplay-lore-conformance");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        roleplay_lore_conformance(&store);
         let _ = fs::remove_file(db_path);
     }
 
@@ -5449,6 +6428,38 @@ mod tests {
                 && group.notes[0].contains("profile_dense")
                 && group.notes[0].contains("conformance")
         }));
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_roleplay_lore_proof_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL roleplay lore proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_roleplay_lore_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        roleplay_lore_conformance(&store);
+
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "module_roleplay_lore_records")
+                .map(|count| count.rows),
+            Some(5)
+        );
+        assert_eq!(
+            diagnostics
+                .table_counts
+                .iter()
+                .find(|count| count.table == "module_roleplay_lore_provenance_events")
+                .map(|count| count.rows),
+            Some(7)
+        );
 
         store.drop_schema_for_test().unwrap();
     }
@@ -6761,6 +7772,273 @@ mod tests {
         );
     }
 
+    fn roleplay_lore_conformance(store: &dyn RoleplayLoreConformanceStore) {
+        let descriptors = store.memory_space_descriptors();
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| descriptor.space_id.as_str() == "roleplay_lore")
+            .expect("roleplay_lore descriptor missing");
+        descriptor.validate().unwrap();
+        assert_eq!(descriptor.module_id.as_deref(), Some("roleplay_lore"));
+        assert_eq!(descriptor.scope_model.primary_scope, MemoryScopeType::World);
+        assert!(descriptor
+            .record_shapes
+            .iter()
+            .any(|shape| shape.shape_id.as_str() == "world"));
+        assert!(descriptor
+            .record_shapes
+            .iter()
+            .any(|shape| shape.shape_id.as_str() == "entity"));
+        assert!(descriptor
+            .record_shapes
+            .iter()
+            .any(|shape| shape.shape_id.as_str() == "lore_entry"));
+        assert!(descriptor
+            .record_shapes
+            .iter()
+            .any(|shape| shape.shape_id.as_str() == "relationship"));
+        assert!(descriptor
+            .record_shapes
+            .iter()
+            .any(|shape| shape.shape_id.as_str() == "timeline_event"));
+
+        let world = roleplay_lore_write(RoleplayLoreWriteFixture {
+            record_id: "world-moonlit",
+            world_id: "world-moonlit",
+            entity_id: None,
+            shape_id: "world",
+            title: "Moonlit Expanse",
+            body: "A foggy port world with a secret tide calendar.",
+            canon_status: RoleplayLoreCanonStatus::Canon,
+            visibility: RoleplayLoreVisibility::Public,
+            evidence_ref_id: "wake-world",
+            now: "2026-06-26T07:00:00Z",
+            supersedes_record_id: None,
+        });
+        let world = store.add_roleplay_lore_record(&world).unwrap();
+        assert_eq!(world.revision, 1);
+        assert_eq!(world.shape.shape_id.as_str(), "world");
+
+        let entity = store
+            .add_roleplay_lore_record(&roleplay_lore_write(RoleplayLoreWriteFixture {
+                record_id: "entity-clockmaker",
+                world_id: "world-moonlit",
+                entity_id: Some("entity-clockmaker"),
+                shape_id: "entity",
+                title: "The Clockmaker",
+                body: "A public canon entity who repairs brass moons.",
+                canon_status: RoleplayLoreCanonStatus::Canon,
+                visibility: RoleplayLoreVisibility::Public,
+                evidence_ref_id: "wake-entity",
+                now: "2026-06-26T07:01:00Z",
+                supersedes_record_id: None,
+            }))
+            .unwrap();
+        assert_eq!(entity.entity_id.as_deref(), Some("entity-clockmaker"));
+
+        let lore = store
+            .add_roleplay_lore_record(&roleplay_lore_write(RoleplayLoreWriteFixture {
+                record_id: "lore-tide-calendar",
+                world_id: "world-moonlit",
+                entity_id: Some("entity-clockmaker"),
+                shape_id: "lore_entry",
+                title: "Tide Calendar",
+                body: "The tide calendar needle unlocks the observatory door.",
+                canon_status: RoleplayLoreCanonStatus::Canon,
+                visibility: RoleplayLoreVisibility::Public,
+                evidence_ref_id: "wake-lore",
+                now: "2026-06-26T07:02:00Z",
+                supersedes_record_id: None,
+            }))
+            .unwrap();
+        assert_eq!(lore.revision, 1);
+
+        store
+            .add_roleplay_lore_record(&roleplay_lore_write(RoleplayLoreWriteFixture {
+                record_id: "relationship-apprentice",
+                world_id: "world-moonlit",
+                entity_id: Some("entity-clockmaker"),
+                shape_id: "relationship",
+                title: "Apprentice Bond",
+                body: "The Clockmaker protects a private apprentice.",
+                canon_status: RoleplayLoreCanonStatus::Draft,
+                visibility: RoleplayLoreVisibility::Private,
+                evidence_ref_id: "wake-relationship",
+                now: "2026-06-26T07:03:00Z",
+                supersedes_record_id: None,
+            }))
+            .unwrap();
+
+        let world_canon = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                world_id: Some("world-moonlit".to_string()),
+                canon_status: Some(RoleplayLoreCanonStatus::Canon),
+                visibility: Some(RoleplayLoreVisibility::Public),
+                page: Some(QueryPage {
+                    limit: Some(10),
+                    offset: Some(0),
+                }),
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert_eq!(
+            world_canon
+                .iter()
+                .map(|record| record.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["lore-tide-calendar", "entity-clockmaker", "world-moonlit"]
+        );
+
+        let entity_lore = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                world_id: Some("world-moonlit".to_string()),
+                entity_id: Some("entity-clockmaker".to_string()),
+                shape_id: Some("lore_entry".to_string()),
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert_eq!(entity_lore.len(), 1);
+        assert_eq!(entity_lore[0].record_id, "lore-tide-calendar");
+
+        let searched = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                query: Some("observatory".to_string()),
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert_eq!(searched.len(), 1);
+        assert_eq!(searched[0].record_id, "lore-tide-calendar");
+
+        let provenance = store
+            .roleplay_lore_provenance_events("lore-tide-calendar")
+            .unwrap();
+        assert_eq!(provenance.len(), 1);
+        assert_eq!(provenance[0].evidence_refs[0].ref_id, "wake-lore");
+        let by_provenance = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                provenance_ref_id: Some("wake-lore".to_string()),
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert_eq!(by_provenance.len(), 1);
+        assert_eq!(by_provenance[0].record_id, "lore-tide-calendar");
+
+        let stale_replace = store
+            .replace_roleplay_lore_record(&RoleplayLoreReplace {
+                expected_revision: 2,
+                write: roleplay_lore_write(RoleplayLoreWriteFixture {
+                    record_id: "lore-tide-calendar",
+                    world_id: "world-moonlit",
+                    entity_id: Some("entity-clockmaker"),
+                    shape_id: "lore_entry",
+                    title: "Tide Calendar",
+                    body: "stale",
+                    canon_status: RoleplayLoreCanonStatus::Canon,
+                    visibility: RoleplayLoreVisibility::Public,
+                    evidence_ref_id: "wake-stale",
+                    now: "2026-06-26T07:04:00Z",
+                    supersedes_record_id: None,
+                }),
+            })
+            .unwrap_err();
+        assert_eq!(stale_replace.kind, CoreErrorKind::ActionRejected);
+
+        let replaced = store
+            .replace_roleplay_lore_record(&RoleplayLoreReplace {
+                expected_revision: 1,
+                write: roleplay_lore_write(RoleplayLoreWriteFixture {
+                    record_id: "lore-tide-calendar",
+                    world_id: "world-moonlit",
+                    entity_id: Some("entity-clockmaker"),
+                    shape_id: "lore_entry",
+                    title: "Tide Calendar",
+                    body: "The tide calendar needle unlocks the observatory and the moon gate.",
+                    canon_status: RoleplayLoreCanonStatus::Canon,
+                    visibility: RoleplayLoreVisibility::Public,
+                    evidence_ref_id: "wake-replace",
+                    now: "2026-06-26T07:04:00Z",
+                    supersedes_record_id: None,
+                }),
+            })
+            .unwrap();
+        assert_eq!(replaced.revision, 2);
+        assert!(replaced.body.contains("moon gate"));
+
+        let (old_lore, new_lore) = store
+            .supersede_roleplay_lore_record(&RoleplayLoreSupersede {
+                record_id: "lore-tide-calendar".to_string(),
+                expected_revision: 2,
+                replacement: roleplay_lore_write(RoleplayLoreWriteFixture {
+                    record_id: "lore-tide-calendar-v2",
+                    world_id: "world-moonlit",
+                    entity_id: Some("entity-clockmaker"),
+                    shape_id: "lore_entry",
+                    title: "Tide Calendar Revised",
+                    body: "The revised calendar opens the moon gate only during eclipse tide.",
+                    canon_status: RoleplayLoreCanonStatus::Canon,
+                    visibility: RoleplayLoreVisibility::Public,
+                    evidence_ref_id: "wake-supersede",
+                    now: "2026-06-26T07:05:00Z",
+                    supersedes_record_id: Some("lore-tide-calendar"),
+                }),
+            })
+            .unwrap();
+        assert_eq!(old_lore.status, RoleplayLoreRecordStatus::Superseded);
+        assert_eq!(
+            old_lore.superseded_by_record_id.as_deref(),
+            Some("lore-tide-calendar-v2")
+        );
+        assert_eq!(
+            new_lore.supersedes_record_id.as_deref(),
+            Some("lore-tide-calendar")
+        );
+
+        let active_after_supersede = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                query: Some("eclipse".to_string()),
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert_eq!(active_after_supersede.len(), 1);
+        assert_eq!(active_after_supersede[0].record_id, "lore-tide-calendar-v2");
+        let with_superseded = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                query: Some("moon gate".to_string()),
+                include_superseded: true,
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert_eq!(with_superseded.len(), 2);
+
+        let tombstoned = store
+            .tombstone_roleplay_lore_record(&RoleplayLoreTombstone {
+                record_id: "lore-tide-calendar-v2".to_string(),
+                expected_revision: 1,
+                reason: Some("merged into world bible".to_string()),
+                now: "2026-06-26T07:06:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(tombstoned.status, RoleplayLoreRecordStatus::Tombstoned);
+        assert_eq!(tombstoned.revision, 2);
+
+        let active_after_tombstone = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                query: Some("eclipse".to_string()),
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert!(active_after_tombstone.is_empty());
+        let with_tombstoned = store
+            .query_roleplay_lore_records(&RoleplayLoreQuery {
+                query: Some("moon gate".to_string()),
+                include_superseded: true,
+                include_tombstoned: true,
+                ..RoleplayLoreQuery::default()
+            })
+            .unwrap();
+        assert_eq!(with_tombstoned.len(), 2);
+    }
+
     fn provider_wire_state_conformance(store: &dyn ProviderWireStateConformanceStore) {
         let key = provider_wire_state_key("session-alpha", "openai-responses", "replay");
         let first = store
@@ -7050,6 +8328,62 @@ mod tests {
             session_id: crate::SessionId::new(session_id),
             module_id: module_id.to_string(),
             strategy_id: strategy_id.to_string(),
+        }
+    }
+
+    struct RoleplayLoreWriteFixture<'a> {
+        record_id: &'a str,
+        world_id: &'a str,
+        entity_id: Option<&'a str>,
+        shape_id: &'a str,
+        title: &'a str,
+        body: &'a str,
+        canon_status: RoleplayLoreCanonStatus,
+        visibility: RoleplayLoreVisibility,
+        evidence_ref_id: &'a str,
+        now: &'a str,
+        supersedes_record_id: Option<&'a str>,
+    }
+
+    fn roleplay_lore_write(input: RoleplayLoreWriteFixture<'_>) -> RoleplayLoreWrite {
+        RoleplayLoreWrite {
+            record_id: input.record_id.to_string(),
+            world_id: input.world_id.to_string(),
+            entity_id: input.entity_id.map(ToString::to_string),
+            session_id: Some(SessionId::new("session-roleplay")),
+            branch_id: Some(ConversationBranchId::new("branch-roleplay-main")),
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked(input.shape_id),
+                version: 1,
+            },
+            canon_status: input.canon_status,
+            visibility: input.visibility,
+            title: input.title.to_string(),
+            body: input.body.to_string(),
+            content: json!({
+                "record_id": input.record_id,
+                "world_id": input.world_id,
+                "entity_id": input.entity_id,
+                "title": input.title,
+                "body": input.body,
+                "canon_status": roleplay_lore_canon_status_as_str(input.canon_status),
+                "visibility": roleplay_lore_visibility_as_str(input.visibility),
+                "relationship_kind": "protects",
+                "target_entity_id": "entity-apprentice",
+                "event_time": "third moon",
+                "metadata_json": {"fixture": "roleplay_lore"}
+            }),
+            evidence_refs: vec![MemoryEvidenceRef {
+                evidence_type: MemoryEvidenceKind::Wake,
+                ref_id: input.evidence_ref_id.to_string(),
+                label: Some("roleplay lore evidence".to_string()),
+            }],
+            source: MemoryProposalSource::Human,
+            confidence: 0.91,
+            durability_rationale: "roleplay lore conformance fact should survive restarts"
+                .to_string(),
+            supersedes_record_id: input.supersedes_record_id.map(ToString::to_string),
+            now: input.now.to_string(),
         }
     }
 
