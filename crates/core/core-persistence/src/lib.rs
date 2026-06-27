@@ -32,10 +32,11 @@ use rusty_crew_core_protocol::{
     ConversationBranchId, ConversationSnapshotId, CoreError, CoreErrorKind, CoreEvent,
     CoreEventKind, CoreResult, DataBankScopeId, DelegatedCompletion, DelegatedFanOutGroup,
     DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
-    DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp, MemoryEvidenceRef,
-    MemoryGovernanceDecisionInput, MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord,
-    MemoryGovernanceMode, MemoryOperation, MemoryProposalEnvelope, MemoryProposalQuery,
-    MemoryProposalRecord, MemoryProposalReviewStatus, MemoryProposalSource, MemoryRecordShapeRef,
+    DurableIdentityStatus, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp,
+    MemoryEvidenceKind, MemoryEvidenceRef, MemoryGovernanceDecisionInput,
+    MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord, MemoryGovernanceMode,
+    MemoryOperation, MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord,
+    MemoryProposalReviewStatus, MemoryProposalSource, MemoryRecordShapeId, MemoryRecordShapeRef,
     MemoryScope, MemoryScopeType, MemorySpaceDescriptor, MessageBlockId, MessageId, MessageSlotId,
     MessageVariantId, ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
     ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryWrite, ProjectId,
@@ -1405,8 +1406,24 @@ pub struct RuntimeMaintenancePolicy {
     pub expire_queued_messages_at: Option<IsoTimestamp>,
     pub purge_terminal_queued_messages_before: Option<IsoTimestamp>,
     pub expire_provider_wire_states_at: Option<IsoTimestamp>,
+    pub compact_session_memory_at: Option<IsoTimestamp>,
+    pub session_memory_max_active_records_per_scope: Option<u32>,
+    pub session_memory_archive_batch_size: Option<u32>,
     pub run_wal_checkpoint: bool,
     pub run_optimize: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SessionMemoryCompactionReport {
+    pub enabled: bool,
+    pub scopes_inspected: u64,
+    pub retention_pressure_scopes: u64,
+    pub scopes_compacted: u64,
+    pub session_summaries_created: u64,
+    pub branch_summaries_created: u64,
+    pub records_archived: u64,
+    pub records_superseded: u64,
+    pub skipped_scopes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1467,6 +1484,7 @@ pub struct RuntimeMaintenanceReport {
     pub expired_queue_messages: u64,
     pub purged_terminal_queue_messages: u64,
     pub expired_provider_wire_states: u64,
+    pub session_memory_compaction: SessionMemoryCompactionReport,
     pub wal_checkpoint_ran: bool,
     pub optimize_ran: bool,
 }
@@ -2986,6 +3004,7 @@ impl CoordinationStore {
         let mut expired_queue_messages = 0;
         let mut purged_terminal_queue_messages = 0;
         let mut expired_provider_wire_states = 0;
+        let mut session_memory_compaction = SessionMemoryCompactionReport::default();
         {
             let mut conn = self.conn()?;
             let tx = conn
@@ -3000,6 +3019,9 @@ impl CoordinationStore {
             if let Some(now) = &policy.expire_provider_wire_states_at {
                 expired_provider_wire_states =
                     expire_provider_wire_states_in_tx(&tx, now)?.len() as u64;
+            }
+            if let Some(now) = &policy.compact_session_memory_at {
+                session_memory_compaction = compact_session_memory_records_in_tx(&tx, policy, now)?;
             }
             tx.commit()
                 .map_err(|error| persistence_error("commit runtime maintenance", error))?;
@@ -3021,6 +3043,7 @@ impl CoordinationStore {
             expired_queue_messages,
             purged_terminal_queue_messages,
             expired_provider_wire_states,
+            session_memory_compaction,
             wal_checkpoint_ran: policy.run_wal_checkpoint,
             optimize_ran: policy.run_optimize,
         })
@@ -11559,6 +11582,345 @@ fn archive_session_memory_record_in_tx(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct SessionMemoryCompactionScope {
+    session_id: SessionId,
+    scope_type: MemoryScopeType,
+    scope_id: String,
+    active_records: u64,
+}
+
+fn compact_session_memory_records_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    policy: &RuntimeMaintenancePolicy,
+    now: &IsoTimestamp,
+) -> CoreResult<SessionMemoryCompactionReport> {
+    let max_active_records = policy
+        .session_memory_max_active_records_per_scope
+        .unwrap_or(64)
+        .max(1) as u64;
+    let archive_batch_size = policy
+        .session_memory_archive_batch_size
+        .unwrap_or(32)
+        .clamp(1, 256) as u64;
+    let mut report = SessionMemoryCompactionReport {
+        enabled: true,
+        ..SessionMemoryCompactionReport::default()
+    };
+    let scopes = session_memory_compaction_scopes(tx)?;
+    report.scopes_inspected = scopes.len() as u64;
+    for scope in scopes {
+        if scope.active_records <= max_active_records {
+            continue;
+        }
+        report.retention_pressure_scopes += 1;
+        let archive_count = (scope.active_records - max_active_records).min(archive_batch_size);
+        if archive_count == 0 {
+            report.skipped_scopes += 1;
+            continue;
+        }
+        let summary_shape = session_memory_summary_shape(scope.scope_type);
+        let candidates =
+            session_memory_compaction_candidates(tx, &scope, summary_shape, archive_count)?;
+        if candidates.is_empty() {
+            report.skipped_scopes += 1;
+            continue;
+        }
+        let summary = match build_session_memory_compaction_summary(tx, &scope, &candidates, now) {
+            Ok(summary) => summary,
+            Err(error) if error.kind == CoreErrorKind::NotFound => {
+                report.skipped_scopes += 1;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        validate_session_memory_write(&summary)?;
+        validate_session_memory_scope_in_tx(
+            tx,
+            &summary.session_id,
+            &summary.scope,
+            &summary.branch_id,
+        )?;
+        insert_session_memory_record_in_tx(tx, &summary)?;
+        for record in candidates {
+            archive_session_memory_record_in_tx(
+                tx,
+                &SessionMemoryArchive {
+                    record_id: record.record_id.clone(),
+                    expected_revision: record.revision,
+                    reason: Some(format!(
+                        "Compacted into session_memory summary {}",
+                        summary.record_id
+                    )),
+                    now: now.clone(),
+                },
+                record.revision + 1,
+            )?;
+            report.records_archived += 1;
+        }
+        report.scopes_compacted += 1;
+        match scope.scope_type {
+            MemoryScopeType::ConversationBranch => report.branch_summaries_created += 1,
+            _ => report.session_summaries_created += 1,
+        }
+    }
+    Ok(report)
+}
+
+fn session_memory_compaction_scopes(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<Vec<SessionMemoryCompactionScope>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT session_id, scope_type, scope_id, COUNT(*)
+             FROM session_memory_records
+             WHERE status = 'active'
+               AND (
+                    (scope_type = 'session' AND shape_id != 'session_summary')
+                    OR (scope_type = 'conversation_branch' AND shape_id != 'branch_summary')
+               )
+             GROUP BY session_id, scope_type, scope_id
+             ORDER BY session_id ASC, scope_type ASC, scope_id ASC",
+        )
+        .map_err(|error| persistence_error("prepare session memory compaction scopes", error))?;
+    let rows = stmt
+        .query_map([], |row| {
+            let scope_type_raw: String = row.get(1)?;
+            let scope_type = parse_memory_scope_type(&scope_type_raw).map_err(to_sql_core_error)?;
+            Ok(SessionMemoryCompactionScope {
+                session_id: SessionId::new(row.get::<_, String>(0)?),
+                scope_type,
+                scope_id: row.get(2)?,
+                active_records: row.get::<_, i64>(3)? as u64,
+            })
+        })
+        .map_err(|error| persistence_error("query session memory compaction scopes", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load session memory compaction scopes", error))
+}
+
+fn session_memory_compaction_candidates(
+    tx: &rusqlite::Transaction<'_>,
+    scope: &SessionMemoryCompactionScope,
+    summary_shape: &str,
+    limit: u64,
+) -> CoreResult<Vec<SessionMemoryRecord>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT record_id, session_id, scope_type, scope_id, branch_id, shape_id,
+                    shape_version, status, revision, content_json, evidence_refs_json,
+                    source, confidence, durability_rationale, supersedes_record_id,
+                    superseded_by_record_id, archived_at, archive_reason, created_at, updated_at
+             FROM session_memory_records
+             WHERE session_id = ?1
+               AND scope_type = ?2
+               AND scope_id = ?3
+               AND status = 'active'
+               AND shape_id != ?4
+             ORDER BY updated_at ASC, record_id ASC
+             LIMIT ?5",
+        )
+        .map_err(|error| {
+            persistence_error("prepare session memory compaction candidates", error)
+        })?;
+    let rows = stmt
+        .query_map(
+            params![
+                scope.session_id.0.as_str(),
+                memory_scope_type_as_str(scope.scope_type),
+                scope.scope_id.as_str(),
+                summary_shape,
+                limit as i64,
+            ],
+            row_to_session_memory_record,
+        )
+        .map_err(|error| persistence_error("query session memory compaction candidates", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load session memory compaction candidates", error))
+}
+
+fn build_session_memory_compaction_summary(
+    tx: &rusqlite::Transaction<'_>,
+    scope: &SessionMemoryCompactionScope,
+    candidates: &[SessionMemoryRecord],
+    now: &IsoTimestamp,
+) -> CoreResult<SessionMemoryRecordWrite> {
+    let record_id = unique_session_memory_summary_record_id(tx, scope, now)?;
+    let source_record_ids: Vec<String> = candidates
+        .iter()
+        .map(|record| record.record_id.clone())
+        .collect();
+    let coverage_start = candidates
+        .first()
+        .map(|record| record.record_id.clone())
+        .unwrap_or_else(|| "none".to_string());
+    let coverage_end = candidates
+        .last()
+        .map(|record| record.record_id.clone())
+        .unwrap_or_else(|| "none".to_string());
+    let summary = format!(
+        "Compacted {} session_memory records for {} scope {}: {}.",
+        candidates.len(),
+        memory_scope_type_as_str(scope.scope_type),
+        scope.scope_id,
+        source_record_ids.join(", ")
+    );
+    let evidence_refs = session_memory_compaction_evidence_refs(candidates)?;
+    let (shape_id, branch_id, content) = match scope.scope_type {
+        MemoryScopeType::ConversationBranch => {
+            let head_message_id = branch_head_message_id_in_tx(tx, &scope.scope_id)?;
+            (
+                "branch_summary",
+                Some(ConversationBranchId::new(scope.scope_id.clone())),
+                serde_json::json!({
+                    "record_id": record_id.clone(),
+                    "summary": summary.clone(),
+                    "branch_id": scope.scope_id.as_str(),
+                    "head_message_id": head_message_id,
+                    "coverage_start": coverage_start.clone(),
+                    "coverage_end": coverage_end.clone(),
+                    "created_at": now,
+                    "updated_at": now,
+                    "source_record_ids": source_record_ids.clone(),
+                    "metadata_json": {
+                        "generated_by": "runtime_maintenance",
+                        "compaction_kind": "retention",
+                        "compacted_record_count": candidates.len()
+                    }
+                }),
+            )
+        }
+        _ => (
+            "session_summary",
+            None,
+            serde_json::json!({
+                "record_id": record_id.clone(),
+                "summary": summary.clone(),
+                "coverage_start": coverage_start.clone(),
+                "coverage_end": coverage_end.clone(),
+                "summary_kind": "rolling_retention",
+                "created_at": now,
+                "updated_at": now,
+                "source_record_ids": source_record_ids.clone(),
+                "metadata_json": {
+                    "generated_by": "runtime_maintenance",
+                    "compaction_kind": "retention",
+                    "compacted_record_count": candidates.len()
+                }
+            }),
+        ),
+    };
+    Ok(SessionMemoryRecordWrite {
+        record_id,
+        session_id: scope.session_id.clone(),
+        scope: MemoryScope {
+            scope_type: scope.scope_type,
+            scope_id: scope.scope_id.clone(),
+        },
+        branch_id,
+        shape: MemoryRecordShapeRef {
+            shape_id: MemoryRecordShapeId::unchecked(shape_id),
+            version: 1,
+        },
+        content,
+        evidence_refs,
+        source: MemoryProposalSource::Migration,
+        confidence: 0.75,
+        durability_rationale:
+            "Runtime maintenance compacted older session_memory records while preserving raw transcript history."
+                .to_string(),
+        supersedes_record_id: None,
+        now: now.clone(),
+    })
+}
+
+fn unique_session_memory_summary_record_id(
+    tx: &rusqlite::Transaction<'_>,
+    scope: &SessionMemoryCompactionScope,
+    now: &IsoTimestamp,
+) -> CoreResult<String> {
+    let shape = session_memory_summary_shape(scope.scope_type);
+    let timestamp = sanitize_session_memory_record_id_segment(now);
+    let scope_id = sanitize_session_memory_record_id_segment(&scope.scope_id);
+    let base = format!("{shape}-{scope_id}-{timestamp}");
+    let mut candidate = base.clone();
+    let mut suffix = 1;
+    while get_session_memory_record_in_tx(tx, &candidate)?.is_some() {
+        suffix += 1;
+        candidate = format!("{base}-{suffix}");
+    }
+    Ok(candidate)
+}
+
+fn sanitize_session_memory_record_id_segment(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .collect();
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn session_memory_summary_shape(scope_type: MemoryScopeType) -> &'static str {
+    match scope_type {
+        MemoryScopeType::ConversationBranch => "branch_summary",
+        _ => "session_summary",
+    }
+}
+
+fn session_memory_compaction_evidence_refs(
+    candidates: &[SessionMemoryRecord],
+) -> CoreResult<Vec<MemoryEvidenceRef>> {
+    let mut evidence_refs = Vec::new();
+    for record in candidates {
+        for evidence in &record.evidence_refs {
+            if evidence.evidence_type != MemoryEvidenceKind::Wake {
+                continue;
+            }
+            if !evidence_refs
+                .iter()
+                .any(|existing: &MemoryEvidenceRef| existing.ref_id == evidence.ref_id)
+            {
+                evidence_refs.push(evidence.clone());
+            }
+            if evidence_refs.len() >= 16 {
+                return Ok(evidence_refs);
+            }
+        }
+    }
+    if evidence_refs.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "session memory compaction candidates have no wake evidence",
+        ));
+    }
+    Ok(evidence_refs)
+}
+
+fn branch_head_message_id_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    branch_id: &str,
+) -> CoreResult<String> {
+    tx.query_row(
+        "SELECT COALESCE(head_message_id, origin_message_id, branch_id)
+         FROM conversation_branches
+         WHERE branch_id = ?1",
+        params![branch_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|error| persistence_error("load branch head for session memory compaction", error))?
+    .ok_or_else(|| {
+        CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("branch {branch_id} not found for session memory compaction"),
+        )
+    })
+}
+
 fn get_session_memory_record_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record_id: &str,
@@ -16396,6 +16758,161 @@ mod tests {
     }
 
     #[test]
+    fn session_memory_compaction_archives_records_without_touching_message_history() {
+        let db_path = temp_db_path("session-memory-compaction");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+        let session_id = SessionId::new("session-alpha");
+        let slot_id = MessageSlotId::new("slot-compaction");
+        let variant_id = MessageVariantId::new("variant-compaction");
+        store
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: session_id.clone(),
+                primary_variant_id: variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({"fixture": "compaction"}),
+                created_at: "2026-06-26T01:00:00Z".to_string(),
+                updated_at: "2026-06-26T01:00:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .save_message_variant(&variant_write(
+                &slot_id,
+                &variant_id,
+                MessageVariantSource::Primary,
+                0,
+                "message-compaction",
+                "raw message history must survive compaction",
+            ))
+            .unwrap();
+
+        for index in 0..4 {
+            store
+                .add_session_memory_record(&session_fact_memory_write(
+                    &format!("session-fact-{index}"),
+                    &session_id,
+                    &format!("2026-06-26T01:0{index}:00Z"),
+                ))
+                .unwrap();
+        }
+        let slots_before = store.count_rows("message_slots").unwrap();
+        let variants_before = store.count_rows("message_variants").unwrap();
+
+        let report = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                compact_session_memory_at: Some("2026-06-26T02:00:00Z".to_string()),
+                session_memory_max_active_records_per_scope: Some(2),
+                session_memory_archive_batch_size: Some(2),
+                ..RuntimeMaintenancePolicy::default()
+            })
+            .unwrap();
+
+        assert!(report.session_memory_compaction.enabled);
+        assert_eq!(report.session_memory_compaction.scopes_inspected, 1);
+        assert_eq!(
+            report.session_memory_compaction.retention_pressure_scopes,
+            1
+        );
+        assert_eq!(report.session_memory_compaction.scopes_compacted, 1);
+        assert_eq!(
+            report.session_memory_compaction.session_summaries_created,
+            1
+        );
+        assert_eq!(report.session_memory_compaction.records_archived, 2);
+        assert_eq!(report.session_memory_compaction.records_superseded, 0);
+        assert_eq!(store.count_rows("message_slots").unwrap(), slots_before);
+        assert_eq!(
+            store.count_rows("message_variants").unwrap(),
+            variants_before
+        );
+
+        let rows = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(session_id),
+                include_archived: true,
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        let summary = rows
+            .iter()
+            .find(|record| record.shape.shape_id.as_str() == "session_summary")
+            .expect("summary record");
+        assert_eq!(summary.status, SessionMemoryRecordStatus::Active);
+        assert_eq!(
+            summary.content["metadata_json"]["generated_by"],
+            "runtime_maintenance"
+        );
+        let archived: Vec<_> = rows
+            .iter()
+            .filter(|record| record.status == SessionMemoryRecordStatus::Archived)
+            .collect();
+        assert_eq!(archived.len(), 2);
+        assert!(archived.iter().all(|record| record
+            .archive_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains(summary.record_id.as_str())));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn session_memory_compaction_writes_branch_summary_for_branch_scopes() {
+        let db_path = temp_db_path("session-memory-branch-compaction");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        store.save_session(&sample_session_state()).unwrap();
+        save_branch_tree(&store);
+        let session_id = SessionId::new("session-alpha");
+        let branch_id = ConversationBranchId::new("branch-active");
+
+        for index in 0..3 {
+            store
+                .add_session_memory_record(&branch_user_choice_memory_write(
+                    &format!("branch-choice-{index}"),
+                    &session_id,
+                    &branch_id,
+                    &format!("2026-06-26T01:1{index}:00Z"),
+                ))
+                .unwrap();
+        }
+
+        let report = store
+            .run_maintenance(&RuntimeMaintenancePolicy {
+                compact_session_memory_at: Some("2026-06-26T02:10:00Z".to_string()),
+                session_memory_max_active_records_per_scope: Some(1),
+                session_memory_archive_batch_size: Some(2),
+                ..RuntimeMaintenancePolicy::default()
+            })
+            .unwrap();
+
+        assert_eq!(report.session_memory_compaction.scopes_compacted, 1);
+        assert_eq!(report.session_memory_compaction.branch_summaries_created, 1);
+        assert_eq!(report.session_memory_compaction.records_archived, 2);
+        let rows = store
+            .query_session_memory_records(&SessionMemoryQuery {
+                session_id: Some(session_id),
+                branch_id: Some(branch_id.clone()),
+                include_archived: true,
+                ..SessionMemoryQuery::default()
+            })
+            .unwrap();
+        let summary = rows
+            .iter()
+            .find(|record| record.shape.shape_id.as_str() == "branch_summary")
+            .expect("branch summary");
+        assert_eq!(
+            summary.scope.scope_type,
+            MemoryScopeType::ConversationBranch
+        );
+        assert_eq!(summary.branch_id, Some(branch_id.clone()));
+        assert_eq!(summary.content["branch_id"], branch_id.0);
+        assert_eq!(summary.content["head_message_id"], "branch-active:head");
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
     fn branch_aware_session_memory_orders_active_ancestor_then_session() {
         let db_path = temp_db_path("session-memory-branch-aware-order");
         let store = CoordinationStore::open_file(&db_path).unwrap();
@@ -18844,6 +19361,7 @@ mod tests {
                 expire_provider_wire_states_at: None,
                 run_wal_checkpoint: true,
                 run_optimize: true,
+                ..RuntimeMaintenancePolicy::default()
             })
             .unwrap();
 
@@ -19294,6 +19812,42 @@ mod tests {
             source: MemoryProposalSource::CaptureProducer,
             confidence: 0.87,
             durability_rationale: "Branch summary should survive branch navigation.".to_string(),
+            supersedes_record_id: None,
+            now: now.to_string(),
+        }
+    }
+
+    fn branch_user_choice_memory_write(
+        record_id: &str,
+        session_id: &SessionId,
+        branch_id: &ConversationBranchId,
+        now: &str,
+    ) -> SessionMemoryRecordWrite {
+        SessionMemoryRecordWrite {
+            record_id: record_id.to_string(),
+            session_id: session_id.clone(),
+            scope: MemoryScope {
+                scope_type: MemoryScopeType::ConversationBranch,
+                scope_id: branch_id.0.clone(),
+            },
+            branch_id: Some(branch_id.clone()),
+            shape: MemoryRecordShapeRef {
+                shape_id: MemoryRecordShapeId::unchecked("user_choice"),
+                version: 1,
+            },
+            content: json!({
+                "record_id": record_id,
+                "choice": "The user kept the active branch.",
+                "choice_kind": "branch_direction",
+                "chosen_at": now,
+                "status": "active",
+                "created_at": now,
+                "updated_at": now
+            }),
+            evidence_refs: session_memory_evidence("wake-branch-choice"),
+            source: MemoryProposalSource::CaptureProducer,
+            confidence: 0.84,
+            durability_rationale: "Branch choice should survive branch navigation.".to_string(),
             supersedes_record_id: None,
             now: now.to_string(),
         }

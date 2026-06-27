@@ -4172,6 +4172,7 @@ mod tests {
                 expire_provider_wire_states_at: None,
                 run_wal_checkpoint: true,
                 run_optimize: true,
+                ..RuntimeMaintenancePolicy::default()
             })
             .unwrap();
         assert_eq!(maintenance.expired_queue_messages, 1);

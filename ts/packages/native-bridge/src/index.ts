@@ -952,8 +952,23 @@ export interface NativeRuntimeMaintenancePolicy {
   expireQueuedMessagesAt?: string;
   purgeTerminalQueuedMessagesBefore?: string;
   expireProviderWireStatesAt?: string;
+  compactSessionMemoryAt?: string;
+  sessionMemoryMaxActiveRecordsPerScope?: number;
+  sessionMemoryArchiveBatchSize?: number;
   runWalCheckpoint?: boolean;
   runOptimize?: boolean;
+}
+
+export interface NativeSessionMemoryCompactionReport {
+  enabled: boolean;
+  scopesInspected: number;
+  retentionPressureScopes: number;
+  scopesCompacted: number;
+  sessionSummariesCreated: number;
+  branchSummariesCreated: number;
+  recordsArchived: number;
+  recordsSuperseded: number;
+  skippedScopes: number;
 }
 
 export interface NativeRuntimeMaintenanceReport {
@@ -962,6 +977,7 @@ export interface NativeRuntimeMaintenanceReport {
   expiredQueueMessages: number;
   purgedTerminalQueueMessages: number;
   expiredProviderWireStates: number;
+  sessionMemoryCompaction: NativeSessionMemoryCompactionReport;
   walCheckpointRan: boolean;
   optimizeRan: boolean;
 }

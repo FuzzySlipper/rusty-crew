@@ -41,8 +41,9 @@ use rusty_crew_core_persistence::{
     RuntimeStoragePressureSignal, RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus,
     ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord,
     SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
-    SelectActiveVariantResult, SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord,
-    SimpleKvQuery, SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest, UpdateBranchHeadResult,
+    SelectActiveVariantResult, SessionMemoryCompactionReport, SessionMemoryPromptContext,
+    SessionMemoryQuery, SessionMemoryRecord, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
@@ -1725,8 +1726,24 @@ pub struct JsRuntimeMaintenancePolicy {
     pub expire_queued_messages_at: Option<String>,
     pub purge_terminal_queued_messages_before: Option<String>,
     pub expire_provider_wire_states_at: Option<String>,
+    pub compact_session_memory_at: Option<String>,
+    pub session_memory_max_active_records_per_scope: Option<u32>,
+    pub session_memory_archive_batch_size: Option<u32>,
     pub run_wal_checkpoint: Option<bool>,
     pub run_optimize: Option<bool>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSessionMemoryCompactionReport {
+    pub enabled: bool,
+    pub scopes_inspected: f64,
+    pub retention_pressure_scopes: f64,
+    pub scopes_compacted: f64,
+    pub session_summaries_created: f64,
+    pub branch_summaries_created: f64,
+    pub records_archived: f64,
+    pub records_superseded: f64,
+    pub skipped_scopes: f64,
 }
 
 #[napi_derive::napi(object)]
@@ -1736,6 +1753,7 @@ pub struct JsRuntimeMaintenanceReport {
     pub expired_queue_messages: f64,
     pub purged_terminal_queue_messages: f64,
     pub expired_provider_wire_states: f64,
+    pub session_memory_compaction: JsSessionMemoryCompactionReport,
     pub wal_checkpoint_ran: bool,
     pub optimize_ran: bool,
 }
@@ -2742,6 +2760,10 @@ impl NativeBridgeBinding {
                 expire_queued_messages_at: policy.expire_queued_messages_at,
                 purge_terminal_queued_messages_before: policy.purge_terminal_queued_messages_before,
                 expire_provider_wire_states_at: policy.expire_provider_wire_states_at,
+                compact_session_memory_at: policy.compact_session_memory_at,
+                session_memory_max_active_records_per_scope: policy
+                    .session_memory_max_active_records_per_scope,
+                session_memory_archive_batch_size: policy.session_memory_archive_batch_size,
                 run_wal_checkpoint: policy.run_wal_checkpoint.unwrap_or(false),
                 run_optimize: policy.run_optimize.unwrap_or(false),
             })
@@ -4034,8 +4056,27 @@ fn to_js_runtime_maintenance_report(
         expired_queue_messages: report.expired_queue_messages as f64,
         purged_terminal_queue_messages: report.purged_terminal_queue_messages as f64,
         expired_provider_wire_states: report.expired_provider_wire_states as f64,
+        session_memory_compaction: to_js_session_memory_compaction_report(
+            report.session_memory_compaction,
+        ),
         wal_checkpoint_ran: report.wal_checkpoint_ran,
         optimize_ran: report.optimize_ran,
+    }
+}
+
+fn to_js_session_memory_compaction_report(
+    report: SessionMemoryCompactionReport,
+) -> JsSessionMemoryCompactionReport {
+    JsSessionMemoryCompactionReport {
+        enabled: report.enabled,
+        scopes_inspected: report.scopes_inspected as f64,
+        retention_pressure_scopes: report.retention_pressure_scopes as f64,
+        scopes_compacted: report.scopes_compacted as f64,
+        session_summaries_created: report.session_summaries_created as f64,
+        branch_summaries_created: report.branch_summaries_created as f64,
+        records_archived: report.records_archived as f64,
+        records_superseded: report.records_superseded as f64,
+        skipped_scopes: report.skipped_scopes as f64,
     }
 }
 

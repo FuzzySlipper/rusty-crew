@@ -3659,6 +3659,20 @@ function createServiceControlExecutor(
           command,
           "purgeTerminalQueuedMessagesBefore",
         ),
+        expireProviderWireStatesAt: optionalBodyString(
+          command,
+          "expireProviderWireStatesAt",
+        ),
+        compactSessionMemoryAt: optionalBodyString(
+          command,
+          "compactSessionMemoryAt",
+        ),
+        sessionMemoryMaxActiveRecordsPerScope: optionalNumber(
+          command.body.sessionMemoryMaxActiveRecordsPerScope,
+        ),
+        sessionMemoryArchiveBatchSize: optionalNumber(
+          command.body.sessionMemoryArchiveBatchSize,
+        ),
         runWalCheckpoint: optionalBodyBoolean(command, "runWalCheckpoint"),
         runOptimize: optionalBodyBoolean(command, "runOptimize"),
       });
