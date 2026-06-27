@@ -1514,11 +1514,6 @@ function validateRuntimeStorageConfig(config: RustyCrewStorageConfig): void {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.schema)) {
     throw new Error("storage.postgres.schema must be a PostgreSQL identifier");
   }
-  if (config.backend === "postgres" && config.postgres.bootMode === "blocked") {
-    throw new Error(
-      "storage.backend=postgres is parsed but not implemented for full service boot; set storage.postgres.bootMode=proof_admin only for bounded storage-admin diagnostics smoke mode",
-    );
-  }
 }
 
 function configuredScheduledJob(

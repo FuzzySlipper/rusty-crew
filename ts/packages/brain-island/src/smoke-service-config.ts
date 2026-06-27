@@ -217,9 +217,15 @@ try {
     config.paths.serviceConfigFile,
     JSON.stringify({ storage: { backend: "postgres" } }),
   );
-  await assert.rejects(
-    () => loadRustyCrewRuntimeConfig(config),
-    /not implemented for full service boot/,
+  const blockedPostgresRuntimeConfig = await loadRustyCrewRuntimeConfig(config);
+  assert.equal(blockedPostgresRuntimeConfig.storage?.backend, "postgres");
+  assert.equal(
+    blockedPostgresRuntimeConfig.storage?.implementationStatus,
+    "blocked_unimplemented",
+  );
+  assert.equal(
+    blockedPostgresRuntimeConfig.storage?.postgres.bootMode,
+    "blocked",
   );
 
   writeFileSync(
@@ -375,15 +381,20 @@ try {
     /STORAGE_BACKEND/,
   );
 
-  assert.throws(
-    () =>
-      loadRustyCrewServiceConfig({
-        RUSTY_CREW_DATA_DIR: root,
-        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
-        RUSTY_CREW_STORAGE_BACKEND: "postgres",
-        RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
-      }),
-    /not implemented for full service boot/,
+  const blockedPostgresServiceConfig = loadRustyCrewServiceConfig({
+    RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+    RUSTY_CREW_STORAGE_BACKEND: "postgres",
+    RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
+  });
+  assert.equal(blockedPostgresServiceConfig.storage.backend, "postgres");
+  assert.equal(
+    blockedPostgresServiceConfig.storage.implementationStatus,
+    "blocked_unimplemented",
+  );
+  assert.equal(
+    blockedPostgresServiceConfig.storage.postgres.bootMode,
+    "blocked",
   );
 
   const proofAdminServiceConfig = loadRustyCrewServiceConfig({

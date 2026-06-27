@@ -407,13 +407,17 @@ export async function startRustyCrewServiceHost(
   let server: Server | undefined;
 
   try {
+    const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
+    assertServiceStorageBootAllowed(
+      runtimeConfig.storage ?? config.storage,
+      "service startup",
+    );
     engine = await bridge.initializeEngine({
       engineDataDir: config.paths.engineDataDir,
       clock: "system",
       defaultTurnBudget: 16,
       defaultIdleTimeoutMs: 30_000,
     });
-    const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
     const profileChannelWakePolicies =
       await loadProfileChannelWakePolicies(runtimeConfig);
     const mcpManager = await createServiceMcpManager(runtimeConfig);
@@ -513,6 +517,20 @@ export async function startRustyCrewServiceHost(
     }
     lock.release();
     throw error;
+  }
+}
+
+function assertServiceStorageBootAllowed(
+  storage: RustyCrewStorageConfig,
+  context: string,
+): void {
+  if (
+    storage.backend === "postgres" &&
+    storage.postgres.bootMode !== "proof_admin"
+  ) {
+    throw new Error(
+      `${context}: storage.backend=postgres is selected, but the full-service PostgreSQL backend is not production-ready yet. This fails closed before opening the coordination engine so the service cannot silently fall back to SQLite. Set storage.postgres.bootMode=proof_admin only for bounded storage-admin diagnostics smoke mode.`,
+    );
   }
 }
 
@@ -2520,6 +2538,10 @@ async function applyServiceRuntimeConfigFromDisk(
   },
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
   const nextRuntimeConfig = await loadRustyCrewRuntimeConfig(state.config);
+  assertServiceStorageBootAllowed(
+    nextRuntimeConfig.storage ?? state.config.storage,
+    "runtime config reload",
+  );
   const nextProfileChannelWakePolicies =
     await loadProfileChannelWakePolicies(nextRuntimeConfig);
   const nextMcpManager = await createServiceMcpManager(nextRuntimeConfig);

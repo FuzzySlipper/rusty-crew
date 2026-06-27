@@ -16,8 +16,42 @@ import type {
   ProfileId,
   SessionId,
 } from "@rusty-crew/contracts";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { createDebugApiClient } from "./debug-api-client.js";
 import { startRustyCrewServiceHost } from "./service-host.js";
+
+const blockedPostgresRoot = mkdtempSync(
+  join(tmpdir(), "rusty-crew-service-host-postgres-blocked-"),
+);
+try {
+  let initializeCalled = false;
+  const blockedPostgresPort = await openPort();
+  await assert.rejects(
+    () =>
+      startRustyCrewServiceHost({
+        env: {
+          RUSTY_CREW_DATA_DIR: blockedPostgresRoot,
+          RUSTY_CREW_ADMIN_HOST: "127.0.0.1",
+          RUSTY_CREW_ADMIN_ALLOW_LAN: "false",
+          RUSTY_CREW_ADMIN_PORT: String(blockedPostgresPort),
+          RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+          RUSTY_CREW_STORAGE_BACKEND: "postgres",
+        },
+        bridge: {
+          manifestVersion: 1,
+          operationNames: [],
+          initializeEngine: async () => {
+            initializeCalled = true;
+            throw new Error("initializeEngine should not be called");
+          },
+        } as unknown as NativeBridgeModule,
+      }),
+    /full-service PostgreSQL backend is not production-ready/,
+  );
+  assert.equal(initializeCalled, false);
+} finally {
+  rmSync(blockedPostgresRoot, { recursive: true, force: true });
+}
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-host-"));
 const port = await openPort();

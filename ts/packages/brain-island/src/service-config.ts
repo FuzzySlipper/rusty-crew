@@ -554,11 +554,6 @@ function validateStorageConfig(config: RustyCrewStorageConfig): void {
       "RUSTY_CREW_POSTGRES_SCHEMA must be a PostgreSQL identifier",
     );
   }
-  if (config.backend === "postgres" && config.postgres.bootMode === "blocked") {
-    throw new Error(
-      "RUSTY_CREW_STORAGE_BACKEND=postgres is parsed but not implemented for full service boot; set RUSTY_CREW_POSTGRES_BOOT_MODE=proof_admin only for bounded storage-admin diagnostics smoke mode",
-    );
-  }
 }
 
 function loadRustyCrewDenMemoryConfig(
