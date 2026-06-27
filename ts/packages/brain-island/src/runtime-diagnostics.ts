@@ -243,7 +243,12 @@ export interface StorageDiagnosticsProjection {
   backend: string;
   backendLabel: string;
   configuredBackend?: string;
-  implementationStatus?: "active" | "configured_unimplemented";
+  activeCoordinationBackend?: string;
+  selectorStatus?: "active" | "blocked" | "proof_admin_only";
+  implementationStatus?:
+    | "active"
+    | "blocked_unimplemented"
+    | "proof_admin_only";
   sqlite?: {
     path: string;
     effectivePath: string;
@@ -255,9 +260,25 @@ export interface StorageDiagnosticsProjection {
   postgres?: {
     databaseUrlEnv: string;
     schema: string;
+    bootMode: "blocked" | "proof_admin";
     maxConnections: number;
     statementTimeoutMs: number;
-    implementationStatus: "placeholder_unimplemented";
+    implementationStatus: "blocked_unimplemented" | "proof_admin_only";
+    capabilities: {
+      name: string;
+      supported: boolean;
+      detail: string;
+    }[];
+    repositoryGroups: {
+      groupId: string;
+      label: string;
+      correctnessSensitive: boolean;
+      implementationStatus:
+        | "proof_admin"
+        | "proof_runtime_counter"
+        | "unsupported";
+      detail: string;
+    }[];
   };
   schemaVersion: number;
   supportedSchemaVersion: number;

@@ -210,10 +210,7 @@ impl PostgresRuntimeCounterProofStore {
                 rows: self.runtime_counter_rows()?,
             }],
             capabilities: postgres_proof_capabilities(),
-            repository_groups: repositories::core_repository_group_diagnostics()
-                .into_iter()
-                .filter(|group| group.group_id == "runtime_counters")
-                .collect(),
+            repository_groups: postgres_proof_repository_groups(),
         })
     }
 
@@ -357,6 +354,31 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
     .collect()
 }
 
+fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
+    repositories::core_repository_group_diagnostics()
+        .into_iter()
+        .map(|mut group| {
+            if group.group_id == "storage_admin" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for proof-owned migrations and storage diagnostics only.".to_string(),
+                );
+            } else if group.group_id == "runtime_counters" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: implemented for the runtime-counter proof repository.".to_string(),
+                );
+            } else {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL proof status: unsupported; full service boot must fail closed before using this repository group.".to_string(),
+                );
+            }
+            group
+        })
+        .collect()
+}
+
 fn runtime_counter_scope_parts(scope: &RuntimeCounterScope) -> (&'static str, String) {
     match scope {
         RuntimeCounterScope::Runtime => ("runtime", "_global".to_string()),
@@ -464,6 +486,26 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn postgres_proof_repository_groups_mark_unsupported_service_repositories() {
+        let groups = postgres_proof_repository_groups();
+        assert!(groups.iter().any(
+            |group| group.group_id == "storage_admin" && group.notes[0].contains("implemented")
+        ));
+        assert!(groups
+            .iter()
+            .any(|group| group.group_id == "runtime_counters"
+                && group.notes[0].contains("implemented")));
+        assert!(groups
+            .iter()
+            .any(|group| group.group_id == "queues_messages"
+                && group.notes[0].contains("unsupported")));
+        assert!(groups
+            .iter()
+            .any(|group| group.group_id == "scheduler_jobs"
+                && group.notes[0].contains("unsupported")));
     }
 
     #[test]

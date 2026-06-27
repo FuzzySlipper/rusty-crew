@@ -60,6 +60,7 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_SQLITE_BUSY_TIMEOUT_MS?: string;
   RUSTY_CREW_POSTGRES_DATABASE_URL_ENV?: string;
   RUSTY_CREW_POSTGRES_SCHEMA?: string;
+  RUSTY_CREW_POSTGRES_BOOT_MODE?: string;
   RUSTY_CREW_POSTGRES_MAX_CONNECTIONS?: string;
   RUSTY_CREW_POSTGRES_STATEMENT_TIMEOUT_MS?: string;
 }
@@ -128,6 +129,7 @@ export interface RustyCrewSqliteStorageConfig {
 export interface RustyCrewPostgresStorageConfig {
   databaseUrlEnv: string;
   schema: string;
+  bootMode: "blocked" | "proof_admin";
   maxConnections: number;
   statementTimeoutMs: number;
 }
@@ -136,7 +138,7 @@ export interface RustyCrewStorageConfig {
   backend: RustyCrewStorageBackend;
   sqlite: RustyCrewSqliteStorageConfig;
   postgres: RustyCrewPostgresStorageConfig;
-  implementationStatus: "active" | "configured_unimplemented";
+  implementationStatus: "active" | "blocked_unimplemented" | "proof_admin_only";
 }
 
 export interface RustyCrewServiceConfig {
@@ -462,6 +464,17 @@ function parseStorageBackend(
   throw new Error("RUSTY_CREW_STORAGE_BACKEND must be sqlite or postgres");
 }
 
+function parsePostgresBootMode(
+  input: string | undefined,
+): "blocked" | "proof_admin" {
+  const value = normalizeOptional(input);
+  if (value === undefined || value === "blocked") return "blocked";
+  if (value === "proof_admin" || value === "proof-admin") return "proof_admin";
+  throw new Error(
+    "RUSTY_CREW_POSTGRES_BOOT_MODE must be blocked or proof_admin",
+  );
+}
+
 function normalizeOptional(input: string | undefined): string | undefined {
   const value = input?.trim();
   return value ? value : undefined;
@@ -474,6 +487,9 @@ function loadRustyCrewStorageConfig(
   const sqlitePath =
     normalizeOptional(env.RUSTY_CREW_SQLITE_PATH) ?? "coordination.sqlite3";
   const backend = parseStorageBackend(env.RUSTY_CREW_STORAGE_BACKEND);
+  const postgresBootMode = parsePostgresBootMode(
+    env.RUSTY_CREW_POSTGRES_BOOT_MODE,
+  );
   return {
     backend,
     sqlite: {
@@ -497,6 +513,7 @@ function loadRustyCrewStorageConfig(
         normalizeOptional(env.RUSTY_CREW_POSTGRES_DATABASE_URL_ENV) ??
         "RUSTY_CREW_DATABASE_URL",
       schema: normalizeOptional(env.RUSTY_CREW_POSTGRES_SCHEMA) ?? "rusty_crew",
+      bootMode: postgresBootMode,
       maxConnections: parsePositiveInteger(
         env.RUSTY_CREW_POSTGRES_MAX_CONNECTIONS,
         10,
@@ -509,7 +526,11 @@ function loadRustyCrewStorageConfig(
       ),
     },
     implementationStatus:
-      backend === "sqlite" ? "active" : "configured_unimplemented",
+      backend === "sqlite"
+        ? "active"
+        : postgresBootMode === "proof_admin"
+          ? "proof_admin_only"
+          : "blocked_unimplemented",
   };
 }
 
@@ -533,9 +554,9 @@ function validateStorageConfig(config: RustyCrewStorageConfig): void {
       "RUSTY_CREW_POSTGRES_SCHEMA must be a PostgreSQL identifier",
     );
   }
-  if (config.backend === "postgres") {
+  if (config.backend === "postgres" && config.postgres.bootMode === "blocked") {
     throw new Error(
-      "RUSTY_CREW_STORAGE_BACKEND=postgres is parsed but not implemented yet; keep backend=sqlite and configure postgres placeholders for future readiness",
+      "RUSTY_CREW_STORAGE_BACKEND=postgres is parsed but not implemented for full service boot; set RUSTY_CREW_POSTGRES_BOOT_MODE=proof_admin only for bounded storage-admin diagnostics smoke mode",
     );
   }
 }

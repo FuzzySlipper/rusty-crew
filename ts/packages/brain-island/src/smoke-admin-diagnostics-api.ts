@@ -173,6 +173,8 @@ const storage: StorageDiagnosticsProjection = {
   backend: "sqlite",
   backendLabel: "SQLite WAL",
   configuredBackend: "sqlite",
+  activeCoordinationBackend: "sqlite",
+  selectorStatus: "active",
   implementationStatus: "active",
   sqlite: {
     path: "coordination.sqlite3",
@@ -185,9 +187,40 @@ const storage: StorageDiagnosticsProjection = {
   postgres: {
     databaseUrlEnv: "RUSTY_CREW_DATABASE_URL",
     schema: "rusty_crew",
+    bootMode: "blocked",
     maxConnections: 10,
     statementTimeoutMs: 30_000,
-    implementationStatus: "placeholder_unimplemented",
+    implementationStatus: "blocked_unimplemented",
+    capabilities: [
+      {
+        name: "row_level_claims",
+        supported: false,
+        detail: "queue and scheduler claim semantics are not implemented",
+      },
+    ],
+    repositoryGroups: [
+      {
+        groupId: "storage_admin",
+        label: "Storage Admin",
+        correctnessSensitive: false,
+        implementationStatus: "proof_admin",
+        detail: "storage-admin diagnostics are proofed",
+      },
+      {
+        groupId: "runtime_counters",
+        label: "Runtime Counters",
+        correctnessSensitive: false,
+        implementationStatus: "proof_runtime_counter",
+        detail: "runtime counter proof is implemented",
+      },
+      {
+        groupId: "queues_messages",
+        label: "Queues And Messages",
+        correctnessSensitive: true,
+        implementationStatus: "unsupported",
+        detail: "queue repositories are not ported",
+      },
+    ],
   },
   schemaVersion: 19,
   supportedSchemaVersion: 19,
@@ -228,6 +261,32 @@ const storage: StorageDiagnosticsProjection = {
     },
   ],
   repositoryGroups: [
+    {
+      groupId: "storage_admin",
+      label: "Storage Admin",
+      correctnessSensitive: false,
+      backendRequirements: [
+        {
+          capability: "transactions",
+          required: true,
+          detail: "repository writes must be atomic",
+        },
+      ],
+      notes: ["Storage-admin diagnostics are available."],
+    },
+    {
+      groupId: "runtime_counters",
+      label: "Runtime Counters",
+      correctnessSensitive: false,
+      backendRequirements: [
+        {
+          capability: "transactions",
+          required: true,
+          detail: "counter increments must be atomic",
+        },
+      ],
+      notes: ["Runtime counter proof is available."],
+    },
     {
       groupId: "queues_messages",
       label: "Queues And Messages",
@@ -383,9 +442,20 @@ assert.equal(storageRoute.status, 200);
 const storageData = okData<{
   backend: string;
   configuredBackend?: string;
+  activeCoordinationBackend?: string;
+  selectorStatus?: string;
   implementationStatus?: string;
   sqlite?: { singleServiceWriter: boolean };
-  postgres?: { databaseUrlEnv: string; implementationStatus: string };
+  postgres?: {
+    databaseUrlEnv: string;
+    bootMode: string;
+    implementationStatus: string;
+    capabilities: Array<{ name: string; supported: boolean }>;
+    repositoryGroups: Array<{
+      groupId: string;
+      implementationStatus: string;
+    }>;
+  };
   capabilities: Array<{ name: string; supported: boolean }>;
   repositoryGroups: Array<{
     groupId: string;
@@ -396,12 +466,39 @@ const storageData = okData<{
 }>(storageRoute);
 assert.equal(storageData.backend, "sqlite");
 assert.equal(storageData.configuredBackend, "sqlite");
+assert.equal(storageData.activeCoordinationBackend, "sqlite");
+assert.equal(storageData.selectorStatus, "active");
 assert.equal(storageData.implementationStatus, "active");
 assert.equal(storageData.sqlite?.singleServiceWriter, true);
 assert.equal(storageData.postgres?.databaseUrlEnv, "RUSTY_CREW_DATABASE_URL");
+assert.equal(storageData.postgres?.bootMode, "blocked");
 assert.equal(
   storageData.postgres?.implementationStatus,
-  "placeholder_unimplemented",
+  "blocked_unimplemented",
+);
+assert.equal(
+  storageData.postgres?.capabilities.find(
+    (capability) => capability.name === "row_level_claims",
+  )?.supported,
+  false,
+);
+assert.equal(
+  storageData.postgres?.repositoryGroups.find(
+    (group) => group.groupId === "storage_admin",
+  )?.implementationStatus,
+  "proof_admin",
+);
+assert.equal(
+  storageData.postgres?.repositoryGroups.find(
+    (group) => group.groupId === "runtime_counters",
+  )?.implementationStatus,
+  "proof_runtime_counter",
+);
+assert.equal(
+  storageData.postgres?.repositoryGroups.find(
+    (group) => group.groupId === "queues_messages",
+  )?.implementationStatus,
+  "unsupported",
 );
 assert.equal(
   storageData.capabilities.find(

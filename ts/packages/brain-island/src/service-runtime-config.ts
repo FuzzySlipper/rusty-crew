@@ -1440,6 +1440,9 @@ function runtimeStorageConfig(
     serviceConfig.storage.postgres.databaseUrlEnv;
   const postgresSchema =
     optionalString(postgres.schema) ?? serviceConfig.storage.postgres.schema;
+  const postgresBootMode =
+    runtimePostgresBootMode(postgres.bootMode) ??
+    serviceConfig.storage.postgres.bootMode;
   const config: RustyCrewStorageConfig = {
     backend,
     sqlite: {
@@ -1459,6 +1462,7 @@ function runtimeStorageConfig(
     postgres: {
       databaseUrlEnv: postgresDatabaseUrlEnv,
       schema: postgresSchema,
+      bootMode: postgresBootMode,
       maxConnections:
         optionalPositiveInteger(
           postgres.maxConnections,
@@ -1471,7 +1475,11 @@ function runtimeStorageConfig(
         ) ?? serviceConfig.storage.postgres.statementTimeoutMs,
     },
     implementationStatus:
-      backend === "sqlite" ? "active" : "configured_unimplemented",
+      backend === "sqlite"
+        ? "active"
+        : postgresBootMode === "proof_admin"
+          ? "proof_admin_only"
+          : "blocked_unimplemented",
   };
   validateRuntimeStorageConfig(config);
   return config;
@@ -1482,6 +1490,16 @@ function runtimeStorageBackend(input: unknown): RustyCrewStorageBackend {
   if (value === undefined || value === "sqlite") return "sqlite";
   if (value === "postgres" || value === "postgresql") return "postgres";
   throw new Error("storage.backend must be sqlite or postgres");
+}
+
+function runtimePostgresBootMode(
+  input: unknown,
+): "blocked" | "proof_admin" | undefined {
+  const value = optionalString(input);
+  if (value === undefined) return undefined;
+  if (value === "blocked") return "blocked";
+  if (value === "proof_admin" || value === "proof-admin") return "proof_admin";
+  throw new Error("storage.postgres.bootMode must be blocked or proof_admin");
 }
 
 function validateRuntimeStorageConfig(config: RustyCrewStorageConfig): void {
@@ -1496,9 +1514,9 @@ function validateRuntimeStorageConfig(config: RustyCrewStorageConfig): void {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.schema)) {
     throw new Error("storage.postgres.schema must be a PostgreSQL identifier");
   }
-  if (config.backend === "postgres") {
+  if (config.backend === "postgres" && config.postgres.bootMode === "blocked") {
     throw new Error(
-      "storage.backend=postgres is parsed but not implemented yet; use sqlite until the PostgreSQL backend module lands",
+      "storage.backend=postgres is parsed but not implemented for full service boot; set storage.postgres.bootMode=proof_admin only for bounded storage-admin diagnostics smoke mode",
     );
   }
 }

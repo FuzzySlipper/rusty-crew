@@ -62,6 +62,7 @@ assert.equal(
   "RUSTY_CREW_DATABASE_URL",
 );
 assert.equal(defaultConfig.storage.postgres.schema, "rusty_crew");
+assert.equal(defaultConfig.storage.postgres.bootMode, "blocked");
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
@@ -201,6 +202,7 @@ try {
     "RUSTY_CREW_RUNTIME_DATABASE_URL",
   );
   assert.equal(runtimeConfig.storage.postgres.schema, "rusty_runtime");
+  assert.equal(runtimeConfig.storage.postgres.bootMode, "blocked");
 
   writeFileSync(
     config.paths.serviceConfigFile,
@@ -217,7 +219,27 @@ try {
   );
   await assert.rejects(
     () => loadRustyCrewRuntimeConfig(config),
-    /not implemented yet/,
+    /not implemented for full service boot/,
+  );
+
+  writeFileSync(
+    config.paths.serviceConfigFile,
+    JSON.stringify({
+      storage: {
+        backend: "postgres",
+        postgres: { bootMode: "proof_admin" },
+      },
+    }),
+  );
+  const proofAdminRuntimeConfig = await loadRustyCrewRuntimeConfig(config);
+  assert.equal(proofAdminRuntimeConfig.storage?.backend, "postgres");
+  assert.equal(
+    proofAdminRuntimeConfig.storage?.implementationStatus,
+    "proof_admin_only",
+  );
+  assert.equal(
+    proofAdminRuntimeConfig.storage?.postgres.bootMode,
+    "proof_admin",
   );
 
   for (const path of [
@@ -361,7 +383,24 @@ try {
         RUSTY_CREW_STORAGE_BACKEND: "postgres",
         RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
       }),
-    /not implemented yet/,
+    /not implemented for full service boot/,
+  );
+
+  const proofAdminServiceConfig = loadRustyCrewServiceConfig({
+    RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+    RUSTY_CREW_STORAGE_BACKEND: "postgres",
+    RUSTY_CREW_POSTGRES_BOOT_MODE: "proof_admin",
+    RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
+  });
+  assert.equal(proofAdminServiceConfig.storage.backend, "postgres");
+  assert.equal(
+    proofAdminServiceConfig.storage.implementationStatus,
+    "proof_admin_only",
+  );
+  assert.equal(
+    proofAdminServiceConfig.storage.postgres.bootMode,
+    "proof_admin",
   );
 
   assert.throws(

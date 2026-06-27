@@ -1124,6 +1124,13 @@ function storageDiagnosticsProjection(
   return {
     ...storage,
     configuredBackend: config.backend,
+    activeCoordinationBackend: storage.backend,
+    selectorStatus:
+      config.backend === "sqlite"
+        ? "active"
+        : config.postgres.bootMode === "proof_admin"
+          ? "proof_admin_only"
+          : "blocked",
     implementationStatus: config.implementationStatus,
     sqlite: {
       path: config.sqlite.path,
@@ -1136,11 +1143,99 @@ function storageDiagnosticsProjection(
     postgres: {
       databaseUrlEnv: config.postgres.databaseUrlEnv,
       schema: config.postgres.schema,
+      bootMode: config.postgres.bootMode,
       maxConnections: config.postgres.maxConnections,
       statementTimeoutMs: config.postgres.statementTimeoutMs,
-      implementationStatus: "placeholder_unimplemented",
+      implementationStatus:
+        config.postgres.bootMode === "proof_admin"
+          ? "proof_admin_only"
+          : "blocked_unimplemented",
+      capabilities: postgresStorageCapabilities(config.postgres.bootMode),
+      repositoryGroups: postgresRepositoryGroupDiagnostics(
+        storage.repositoryGroups,
+      ),
     },
   };
+}
+
+function postgresStorageCapabilities(
+  bootMode: RustyCrewStorageConfig["postgres"]["bootMode"],
+): NonNullable<StorageDiagnosticsProjection["postgres"]>["capabilities"] {
+  const proofAdmin = bootMode === "proof_admin";
+  return [
+    {
+      name: "transactions",
+      supported: proofAdmin,
+      detail: proofAdmin
+        ? "PostgreSQL transactions are available for bounded proof/admin diagnostics."
+        : "PostgreSQL full service boot is blocked until repository coverage exists.",
+    },
+    {
+      name: "json_metadata",
+      supported: proofAdmin,
+      detail:
+        "PostgreSQL can support JSON metadata; only proof/admin paths may rely on it today.",
+    },
+    {
+      name: "concurrent_writers",
+      supported: proofAdmin,
+      detail:
+        "PostgreSQL supports concurrent writers, but Rusty Crew has not ported correctness-sensitive repositories yet.",
+    },
+    {
+      name: "row_level_claims",
+      supported: false,
+      detail:
+        "Queue and scheduler claim semantics are not implemented for the PostgreSQL backend.",
+    },
+    {
+      name: "runtime_full_text_search",
+      supported: false,
+      detail:
+        "Runtime search remains SQLite-backed until PostgreSQL search contract coverage lands.",
+    },
+    {
+      name: "logical_export_import",
+      supported: false,
+      detail:
+        "Logical cross-backend export/import remains future work; raw migration is not the green path.",
+    },
+  ];
+}
+
+function postgresRepositoryGroupDiagnostics(
+  groups: StorageDiagnosticsProjection["repositoryGroups"],
+): NonNullable<StorageDiagnosticsProjection["postgres"]>["repositoryGroups"] {
+  return groups.map((group) => {
+    if (group.groupId === "storage_admin") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        implementationStatus: "proof_admin",
+        detail:
+          "Implemented only for backend selector projection, env-var references, and storage-admin diagnostics.",
+      };
+    }
+    if (group.groupId === "runtime_counters") {
+      return {
+        groupId: group.groupId,
+        label: group.label,
+        correctnessSensitive: group.correctnessSensitive,
+        implementationStatus: "proof_runtime_counter",
+        detail:
+          "Implemented in the Rust PostgreSQL proof slice; not wired as the full service coordination backend.",
+      };
+    }
+    return {
+      groupId: group.groupId,
+      label: group.label,
+      correctnessSensitive: group.correctnessSensitive,
+      implementationStatus: "unsupported",
+      detail:
+        "Unsupported for PostgreSQL service boot; using this group must fail closed until repository coverage exists.",
+    };
+  });
 }
 
 function brainModuleDiagnostics(
