@@ -46,6 +46,7 @@ use rusty_crew_core_protocol::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1214,7 +1215,8 @@ pub struct RuntimeSearchResult {
     pub body: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QueuedMessageState {
     Pending,
     Delivered,
@@ -1506,7 +1508,8 @@ pub struct RuntimeImportBatchRecord {
     pub imported_at: IsoTimestamp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RuntimeObjectKind {
     Agent,
     AgentInstance,
@@ -1548,6 +1551,159 @@ pub struct LegacyIdMappingQuery {
     pub rusty_kind: Option<RuntimeObjectKind>,
     pub rusty_id: Option<String>,
     pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageExportBundle {
+    pub bundle_version: u32,
+    pub export_id: String,
+    pub exported_at: IsoTimestamp,
+    pub service_version: Option<String>,
+    pub source: LogicalStorageExportSource,
+    pub schema_version: i64,
+    pub module_versions: Vec<LogicalStorageModuleVersion>,
+    pub capability_snapshot: Vec<LogicalStorageCapabilitySnapshot>,
+    pub repositories: Vec<LogicalStorageRepositoryBundle>,
+    pub legacy_id_mappings: Vec<LogicalStorageLegacyIdMapping>,
+    pub profile_asset_refs: Vec<LogicalStorageProfileAssetRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageExportSource {
+    pub backend: String,
+    pub backend_label: String,
+    pub source_instance_id: Option<String>,
+    pub snapshot_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageModuleVersion {
+    pub module_id: String,
+    pub schema_version: u32,
+    pub descriptor_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageCapabilitySnapshot {
+    pub name: String,
+    pub supported: bool,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageRepositoryBundle {
+    pub repository_id: String,
+    pub schema_version: u32,
+    pub required_capabilities: Vec<String>,
+    pub exported_count: u64,
+    pub checksum: Option<String>,
+    pub records: Vec<LogicalStorageRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageRecord {
+    pub stable_id: String,
+    pub record_version: u32,
+    pub exported_at: IsoTimestamp,
+    pub payload: LogicalStorageRecordPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "record", rename_all = "snake_case")]
+pub enum LogicalStorageRecordPayload {
+    QueueMessage(Box<LogicalQueuedMessageExportRecord>),
+    TypedJson {
+        object_kind: String,
+        payload_json: JsonValue,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalQueuedMessageExportRecord {
+    pub message_id: String,
+    pub owner_session_id: Option<SessionId>,
+    pub owner_agent_id: AgentId,
+    pub message: AgentMessage,
+    pub source_sequence: Option<u64>,
+    pub enqueued_at: IsoTimestamp,
+    pub expires_at: IsoTimestamp,
+    pub ttl_ms: u32,
+    pub delivery_attempts: u32,
+    pub state: QueuedMessageState,
+    pub terminal_at: Option<IsoTimestamp>,
+    pub state_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageLegacyIdMapping {
+    pub source_system: String,
+    pub legacy_kind: RuntimeObjectKind,
+    pub legacy_id: String,
+    pub rusty_kind: RuntimeObjectKind,
+    pub rusty_id: String,
+    pub provenance: RuntimeImportProvenance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicalStorageProfileAssetRef {
+    pub profile_id: ProfileId,
+    pub asset_kind: String,
+    pub asset_ref: String,
+    pub checksum: Option<String>,
+    pub bundled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalStorageImportDryRun {
+    pub import_batch_id: String,
+    pub target_backend: String,
+    pub validation_time: IsoTimestamp,
+    pub supported_capabilities: Vec<String>,
+    pub supported_repositories: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalStorageImportValidationReport {
+    pub import_batch_id: String,
+    pub dry_run: bool,
+    pub source_backend: String,
+    pub target_backend: String,
+    pub repository_count: u64,
+    pub record_count: u64,
+    pub accepted_records: u64,
+    pub unsupported_records: u64,
+    pub refused_records: u64,
+    pub already_imported: bool,
+    pub issues: Vec<LogicalStorageImportIssue>,
+}
+
+impl LogicalStorageImportValidationReport {
+    pub fn can_apply(&self) -> bool {
+        self.dry_run
+            && !self.already_imported
+            && self.unsupported_records == 0
+            && self.refused_records == 0
+            && self
+                .issues
+                .iter()
+                .all(|issue| issue.severity != LogicalStorageImportIssueSeverity::Error)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalStorageImportIssue {
+    pub severity: LogicalStorageImportIssueSeverity,
+    pub code: String,
+    pub repository_id: Option<String>,
+    pub record_id: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicalStorageImportIssueSeverity {
+    Info,
+    Warning,
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3896,6 +4052,15 @@ impl CoordinationStore {
         query_legacy_id_mappings(&conn, query)
     }
 
+    pub fn validate_logical_storage_import(
+        &self,
+        bundle: &LogicalStorageExportBundle,
+        dry_run: &LogicalStorageImportDryRun,
+    ) -> CoreResult<LogicalStorageImportValidationReport> {
+        let conn = self.conn()?;
+        validate_logical_storage_import(&conn, bundle, dry_run)
+    }
+
     pub fn save_channel_binding(&self, record: &ChannelBindingRecord) -> CoreResult<()> {
         let conn = self.conn()?;
         save_channel_binding(&conn, record)
@@ -4761,8 +4926,8 @@ fn sqlite_storage_capabilities() -> Vec<RuntimeStorageCapability> {
         ),
         (
             "logical_export_import",
-            false,
-            "logical cross-backend export/import records are planned but not implemented",
+            true,
+            "logical export/import bundle contracts and dry-run validation are available; applying records remains repository-gated",
         ),
     ]
     .into_iter()
@@ -9555,6 +9720,266 @@ fn query_legacy_id_mappings(
         .map_err(|error| persistence_error("query legacy id mappings", error))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| persistence_error("load legacy id mappings", error))
+}
+
+fn validate_logical_storage_import(
+    conn: &Connection,
+    bundle: &LogicalStorageExportBundle,
+    dry_run: &LogicalStorageImportDryRun,
+) -> CoreResult<LogicalStorageImportValidationReport> {
+    if dry_run.import_batch_id.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "logical import dry-run requires an import_batch_id",
+        ));
+    }
+    if dry_run.target_backend.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "logical import dry-run requires a target_backend",
+        ));
+    }
+
+    let mut issues = Vec::new();
+    let mut accepted_records = 0_u64;
+    let mut unsupported_records = 0_u64;
+    let mut refused_records = 0_u64;
+    let record_count = bundle
+        .repositories
+        .iter()
+        .map(|repository| repository.records.len() as u64)
+        .sum();
+    let supported_capabilities = if dry_run.supported_capabilities.is_empty() {
+        sqlite_storage_capabilities()
+            .into_iter()
+            .filter(|capability| capability.supported)
+            .map(|capability| capability.name)
+            .collect::<BTreeSet<_>>()
+    } else {
+        dry_run
+            .supported_capabilities
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    };
+    let supported_repositories = dry_run
+        .supported_repositories
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    if bundle.bundle_version != 1 {
+        issues.push(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Error,
+            "unsupported_bundle_version",
+            None,
+            None,
+            format!(
+                "logical storage bundle version {} is not supported",
+                bundle.bundle_version
+            ),
+        ));
+    }
+    if bundle.export_id.trim().is_empty() {
+        issues.push(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Error,
+            "missing_export_id",
+            None,
+            None,
+            "logical storage bundle requires an export_id",
+        ));
+    }
+
+    let already_imported = import_batch_exists(conn, &dry_run.import_batch_id)?;
+    if already_imported {
+        issues.push(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Info,
+            "import_batch_already_recorded",
+            None,
+            None,
+            format!(
+                "import batch {} is already recorded; validation is idempotent and will not apply records",
+                dry_run.import_batch_id
+            ),
+        ));
+    }
+
+    for repository in &bundle.repositories {
+        let repository_supported = supported_repositories.is_empty()
+            || supported_repositories.contains(&repository.repository_id);
+        let missing_capabilities = repository
+            .required_capabilities
+            .iter()
+            .filter(|capability| !supported_capabilities.contains(*capability))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !repository_supported {
+            unsupported_records += repository.records.len() as u64;
+            issues.push(logical_import_issue(
+                LogicalStorageImportIssueSeverity::Error,
+                "unsupported_repository",
+                Some(repository.repository_id.clone()),
+                None,
+                format!(
+                    "target backend {} does not declare support for repository {}",
+                    dry_run.target_backend, repository.repository_id
+                ),
+            ));
+            continue;
+        }
+
+        if !missing_capabilities.is_empty() {
+            unsupported_records += repository.records.len() as u64;
+            issues.push(logical_import_issue(
+                LogicalStorageImportIssueSeverity::Error,
+                "missing_storage_capability",
+                Some(repository.repository_id.clone()),
+                None,
+                format!(
+                    "target backend {} is missing required capabilities: {}",
+                    dry_run.target_backend,
+                    missing_capabilities.join(", ")
+                ),
+            ));
+            continue;
+        }
+
+        if repository.exported_count != repository.records.len() as u64 {
+            issues.push(logical_import_issue(
+                LogicalStorageImportIssueSeverity::Warning,
+                "repository_count_mismatch",
+                Some(repository.repository_id.clone()),
+                None,
+                format!(
+                    "repository {} declared {} records but contains {} records",
+                    repository.repository_id,
+                    repository.exported_count,
+                    repository.records.len()
+                ),
+            ));
+        }
+
+        for record in &repository.records {
+            match validate_logical_storage_record(repository, record, &dry_run.validation_time) {
+                Ok(()) => accepted_records += 1,
+                Err(issue) => {
+                    refused_records += 1;
+                    issues.push(issue);
+                }
+            }
+        }
+    }
+
+    Ok(LogicalStorageImportValidationReport {
+        import_batch_id: dry_run.import_batch_id.clone(),
+        dry_run: true,
+        source_backend: bundle.source.backend.clone(),
+        target_backend: dry_run.target_backend.clone(),
+        repository_count: bundle.repositories.len() as u64,
+        record_count,
+        accepted_records,
+        unsupported_records,
+        refused_records,
+        already_imported,
+        issues,
+    })
+}
+
+fn validate_logical_storage_record(
+    repository: &LogicalStorageRepositoryBundle,
+    record: &LogicalStorageRecord,
+    now: &IsoTimestamp,
+) -> Result<(), LogicalStorageImportIssue> {
+    if record.stable_id.trim().is_empty() {
+        return Err(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Error,
+            "missing_stable_id",
+            Some(repository.repository_id.clone()),
+            None,
+            "logical import record requires a stable_id",
+        ));
+    }
+
+    match &record.payload {
+        LogicalStorageRecordPayload::QueueMessage(message) => {
+            validate_logical_queue_message(repository, record, message.as_ref(), now)
+        }
+        LogicalStorageRecordPayload::TypedJson { .. } => Ok(()),
+    }
+}
+
+fn validate_logical_queue_message(
+    repository: &LogicalStorageRepositoryBundle,
+    record: &LogicalStorageRecord,
+    message: &LogicalQueuedMessageExportRecord,
+    now: &IsoTimestamp,
+) -> Result<(), LogicalStorageImportIssue> {
+    if repository.repository_id != "queues_messages" {
+        return Err(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Error,
+            "queue_record_in_wrong_repository",
+            Some(repository.repository_id.clone()),
+            Some(record.stable_id.clone()),
+            "queue message records must be grouped under queues_messages",
+        ));
+    }
+    if message.state == QueuedMessageState::Pending && message.expires_at <= *now {
+        return Err(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Error,
+            "queue_pending_expired_would_resurrect",
+            Some(repository.repository_id.clone()),
+            Some(record.stable_id.clone()),
+            "pending queue message is already expired at validation time and must not be imported as deliverable work",
+        ));
+    }
+    if message.state == QueuedMessageState::Pending && message.terminal_at.is_some() {
+        return Err(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Error,
+            "queue_pending_has_terminal_at",
+            Some(repository.repository_id.clone()),
+            Some(record.stable_id.clone()),
+            "pending queue message cannot carry terminal_at",
+        ));
+    }
+    if message.state != QueuedMessageState::Pending && message.terminal_at.is_none() {
+        return Err(logical_import_issue(
+            LogicalStorageImportIssueSeverity::Error,
+            "queue_terminal_missing_terminal_at",
+            Some(repository.repository_id.clone()),
+            Some(record.stable_id.clone()),
+            "terminal queue message must preserve terminal_at so it cannot be resurrected",
+        ));
+    }
+    Ok(())
+}
+
+fn import_batch_exists(conn: &Connection, import_batch_id: &str) -> CoreResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM runtime_import_batches WHERE import_batch_id = ?1
+        )",
+        params![import_batch_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|value| value != 0)
+    .map_err(|error| persistence_error("check runtime import batch", error))
+}
+
+fn logical_import_issue(
+    severity: LogicalStorageImportIssueSeverity,
+    code: impl Into<String>,
+    repository_id: Option<String>,
+    record_id: Option<String>,
+    message: impl Into<String>,
+) -> LogicalStorageImportIssue {
+    LogicalStorageImportIssue {
+        severity,
+        code: code.into(),
+        repository_id,
+        record_id,
+        message: message.into(),
+    }
 }
 
 fn save_channel_binding(conn: &Connection, record: &ChannelBindingRecord) -> CoreResult<()> {
@@ -16085,6 +16510,135 @@ mod tests {
     }
 
     #[test]
+    fn logical_storage_import_dry_run_validates_capabilities_and_idempotency_without_writes() {
+        let db_path = temp_db_path("logical-import-dry-run");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let bundle = logical_import_bundle(vec![LogicalStorageRepositoryBundle {
+            repository_id: "runtime_counters".to_string(),
+            schema_version: 1,
+            required_capabilities: vec!["transactions".to_string()],
+            exported_count: 1,
+            checksum: Some("sha256:runtime-counters".to_string()),
+            records: vec![LogicalStorageRecord {
+                stable_id: "runtime-counter:brain_turns".to_string(),
+                record_version: 1,
+                exported_at: "2026-06-26T10:00:00Z".to_string(),
+                payload: LogicalStorageRecordPayload::TypedJson {
+                    object_kind: "runtime_counter".to_string(),
+                    payload_json: json!({
+                        "scope_type": "runtime",
+                        "counter_name": "brain_turns",
+                        "value": 7
+                    }),
+                },
+            }],
+        }]);
+        let dry_run = LogicalStorageImportDryRun {
+            import_batch_id: "dry-run-batch-1".to_string(),
+            target_backend: "sqlite".to_string(),
+            validation_time: "2026-06-26T10:01:00Z".to_string(),
+            supported_capabilities: vec!["transactions".to_string()],
+            supported_repositories: vec!["runtime_counters".to_string()],
+        };
+
+        let report = store
+            .validate_logical_storage_import(&bundle, &dry_run)
+            .unwrap();
+        assert_eq!(report.record_count, 1);
+        assert_eq!(report.accepted_records, 1);
+        assert_eq!(report.unsupported_records, 0);
+        assert_eq!(report.refused_records, 0);
+        assert!(report.can_apply());
+        assert_eq!(store.count_rows("runtime_import_batches").unwrap(), 0);
+
+        store
+            .save_import_batch(&RuntimeImportBatchRecord {
+                import_batch_id: "dry-run-batch-1".to_string(),
+                source_system: "logical-export".to_string(),
+                source_label: "already imported".to_string(),
+                source_snapshot_ref: Some("logical://bundle/export-1".to_string()),
+                notes: None,
+                imported_at: "2026-06-26T10:02:00Z".to_string(),
+            })
+            .unwrap();
+        let idempotent = store
+            .validate_logical_storage_import(&bundle, &dry_run)
+            .unwrap();
+        assert!(idempotent.already_imported);
+        assert!(!idempotent.can_apply());
+        assert!(idempotent
+            .issues
+            .iter()
+            .any(|issue| issue.code == "import_batch_already_recorded"));
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn logical_storage_import_dry_run_refuses_queue_resurrection_risks() {
+        let db_path = temp_db_path("logical-import-queue-safety");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let bundle = logical_import_bundle(vec![LogicalStorageRepositoryBundle {
+            repository_id: "queues_messages".to_string(),
+            schema_version: 1,
+            required_capabilities: vec!["transactions".to_string()],
+            exported_count: 2,
+            checksum: None,
+            records: vec![
+                LogicalStorageRecord {
+                    stable_id: "queue:fresh".to_string(),
+                    record_version: 1,
+                    exported_at: "2026-06-26T10:00:00Z".to_string(),
+                    payload: LogicalStorageRecordPayload::QueueMessage(Box::new(
+                        logical_queue_message(
+                            "queue-fresh",
+                            QueuedMessageState::Pending,
+                            "2026-06-26T10:05:00Z",
+                            None,
+                        ),
+                    )),
+                },
+                LogicalStorageRecord {
+                    stable_id: "queue:stale".to_string(),
+                    record_version: 1,
+                    exported_at: "2026-06-26T10:00:00Z".to_string(),
+                    payload: LogicalStorageRecordPayload::QueueMessage(Box::new(
+                        logical_queue_message(
+                            "queue-stale",
+                            QueuedMessageState::Pending,
+                            "2026-06-26T09:59:00Z",
+                            None,
+                        ),
+                    )),
+                },
+            ],
+        }]);
+        let report = store
+            .validate_logical_storage_import(
+                &bundle,
+                &LogicalStorageImportDryRun {
+                    import_batch_id: "queue-dry-run".to_string(),
+                    target_backend: "postgres".to_string(),
+                    validation_time: "2026-06-26T10:01:00Z".to_string(),
+                    supported_capabilities: vec!["transactions".to_string()],
+                    supported_repositories: vec!["queues_messages".to_string()],
+                },
+            )
+            .unwrap();
+
+        assert_eq!(report.accepted_records, 1);
+        assert_eq!(report.refused_records, 1);
+        assert!(!report.can_apply());
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "queue_pending_expired_would_resurrect"
+                && issue.record_id.as_deref() == Some("queue:stale")
+        }));
+        assert_eq!(store.count_rows("queued_messages").unwrap(), 0);
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
     fn external_bindings_are_scoped_per_agent_without_secret_material() {
         let db_path = temp_db_path("external-bindings");
         let store = CoordinationStore::open_file(&db_path).unwrap();
@@ -19549,6 +20103,77 @@ mod tests {
 
     fn remove_temp_dir(path: &Path) {
         let _ = fs::remove_dir_all(path);
+    }
+
+    fn logical_import_bundle(
+        repositories: Vec<LogicalStorageRepositoryBundle>,
+    ) -> LogicalStorageExportBundle {
+        LogicalStorageExportBundle {
+            bundle_version: 1,
+            export_id: "export-1".to_string(),
+            exported_at: "2026-06-26T10:00:00Z".to_string(),
+            service_version: Some("test".to_string()),
+            source: LogicalStorageExportSource {
+                backend: "sqlite".to_string(),
+                backend_label: "SQLite".to_string(),
+                source_instance_id: Some("test-instance".to_string()),
+                snapshot_ref: Some("logical://export-1".to_string()),
+            },
+            schema_version: CURRENT_SCHEMA_VERSION,
+            module_versions: vec![LogicalStorageModuleVersion {
+                module_id: "simple_kv".to_string(),
+                schema_version: 1,
+                descriptor_fingerprint: Some("test-fingerprint".to_string()),
+            }],
+            capability_snapshot: vec![LogicalStorageCapabilitySnapshot {
+                name: "transactions".to_string(),
+                supported: true,
+                detail: Some("test capability".to_string()),
+            }],
+            repositories,
+            legacy_id_mappings: vec![LogicalStorageLegacyIdMapping {
+                source_system: "legacy-test".to_string(),
+                legacy_kind: RuntimeObjectKind::ExternalArtifact,
+                legacy_id: "legacy-1".to_string(),
+                rusty_kind: RuntimeObjectKind::ExternalArtifact,
+                rusty_id: "rusty-1".to_string(),
+                provenance: RuntimeImportProvenance::default(),
+            }],
+            profile_asset_refs: vec![LogicalStorageProfileAssetRef {
+                profile_id: ProfileId::new("rusty-crew-runner"),
+                asset_kind: "soul".to_string(),
+                asset_ref: "profiles/rusty-crew-runner/soul.md".to_string(),
+                checksum: None,
+                bundled: false,
+            }],
+        }
+    }
+
+    fn logical_queue_message(
+        message_id: &str,
+        state: QueuedMessageState,
+        expires_at: &str,
+        terminal_at: Option<&str>,
+    ) -> LogicalQueuedMessageExportRecord {
+        LogicalQueuedMessageExportRecord {
+            message_id: message_id.to_string(),
+            owner_session_id: Some(SessionId::new("session-alpha")),
+            owner_agent_id: AgentId::new("agent-alpha"),
+            message: AgentMessage {
+                from: AgentId::new("operator"),
+                to: AgentId::new("agent-alpha"),
+                body: format!("logical import queue {message_id}"),
+                correlation_id: Some("logical-import-queue".to_string()),
+            },
+            source_sequence: Some(7),
+            enqueued_at: "2026-06-26T09:58:00Z".to_string(),
+            expires_at: expires_at.to_string(),
+            ttl_ms: 5_000,
+            delivery_attempts: 0,
+            state,
+            terminal_at: terminal_at.map(str::to_string),
+            state_reason: None,
+        }
     }
 
     fn assert_active_storage_signal(diagnostics: &RuntimeStorageDiagnostics, signal_name: &str) {
