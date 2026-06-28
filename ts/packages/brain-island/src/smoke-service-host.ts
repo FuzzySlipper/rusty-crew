@@ -212,6 +212,32 @@ try {
   assert.equal(mcp.body.data.total, 1);
   assert.equal(mcp.body.data.items[0]?.bindingId, "field-mcp");
   assert.equal(mcp.body.data.items[0]?.status, "active");
+  const mcpCatalog = await get("/v1/admin/mcp/servers", token);
+  assert.equal(mcpCatalog.status, 200);
+  assert.equal(mcpCatalog.body.ok, true);
+  assert.deepEqual(
+    mcpCatalog.body.data.servers.map(
+      (server: {
+        id: string;
+        baseUrl: string;
+        configuredBindingCount: number;
+      }) => ({
+        id: server.id,
+        baseUrl: server.baseUrl,
+        configuredBindingCount: server.configuredBindingCount,
+      }),
+    ),
+    [
+      {
+        id: "field",
+        baseUrl: "http://mcp.local/mcp",
+        configuredBindingCount: 1,
+      },
+    ],
+  );
+  assert.deepEqual(mcpCatalog.body.data.toolProfiles, ["field-profile-mcp"]);
+  assert.equal(mcpCatalog.body.data.bindings[0]?.endpointServerId, "field");
+  assert.equal(mcpCatalog.body.data.bindings[0]?.resolvedServerId, "field");
 
   const recentEvents = await get("/v1/admin/events/recent", token);
   assert.match(
@@ -627,7 +653,7 @@ try {
       { profileId: "../bad" },
       noAuthPort,
     );
-    assert.equal(invalidProfile.status, 500);
+    assert.equal(invalidProfile.status, 200);
     assert.equal(invalidProfile.body.data.outcome.status, "failed");
     assert.match(
       invalidProfile.body.data.outcome.summary,
@@ -641,6 +667,19 @@ try {
         profileId: "field-created-profile",
         displayName: "Field Created Profile",
         providerAlias: "alternate",
+        mcpBindings: [
+          {
+            serverId: "field",
+            toolProfileKey: "field-created-profile",
+          },
+          {
+            serverId: "field-extra",
+            bindingId: "field-created-profile-extra-mcp",
+            adapterId: "mcp-ts-extra",
+            serverNames: ["field-extra"],
+            toolProfileKey: "field-created-profile-extra",
+          },
+        ],
       },
       noAuthPort,
     );
@@ -672,7 +711,8 @@ try {
       [
         ["brain", "field-created-profile-brain"],
         ["session", "field-created-profile-session"],
-        ["profile_mcp_config", "field-created-profile-mcp"],
+        ["mcp_binding", "field-created-profile-mcp-1"],
+        ["mcp_binding", "field-created-profile-extra-mcp"],
       ],
     );
     assert.equal(
@@ -697,9 +737,38 @@ try {
     assert.equal(createdProfileConfig.providerAlias, "alternate");
     assert.equal(createdProfileConfig.modelConfig, undefined);
     assert.equal(createdProfileConfig.brain?.module, "local");
-    assert.equal(
-      createdProfileConfig.mcpConfig?.toolProfile,
-      "field-created-profile",
+    assert.equal(createdProfileConfig.mcpConfig, undefined);
+    const runtimeConfigAfterProfileCreate = JSON.parse(
+      readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
+    ) as {
+      mcpBindings?: Array<{
+        bindingId: string;
+        endpointRef: string;
+        toolProfileKey: string;
+      }>;
+    };
+    assert.deepEqual(
+      runtimeConfigAfterProfileCreate.mcpBindings
+        ?.filter((binding) =>
+          binding.bindingId.startsWith("field-created-profile"),
+        )
+        .map((binding) => ({
+          bindingId: binding.bindingId,
+          endpointRef: binding.endpointRef,
+          toolProfileKey: binding.toolProfileKey,
+        })),
+      [
+        {
+          bindingId: "field-created-profile-mcp-1",
+          endpointRef: "config://mcp/field",
+          toolProfileKey: "field-created-profile",
+        },
+        {
+          bindingId: "field-created-profile-extra-mcp",
+          endpointRef: "config://mcp/field-extra",
+          toolProfileKey: "field-created-profile-extra",
+        },
+      ],
     );
     const readProfile = await post(
       "/v1/admin/control/profiles/field-created-profile/read",
@@ -925,7 +994,7 @@ try {
     );
     assert.equal(
       noAuthAfterProfile.body.data.overview.adapters.mcp.totalSurfaces,
-      2,
+      3,
     );
 
     const refreshPlan = await patch(
@@ -1066,7 +1135,7 @@ try {
       { profileId: "field-created-profile" },
       noAuthPort,
     );
-    assert.equal(duplicateProfile.status, 500);
+    assert.equal(duplicateProfile.status, 200);
     assert.equal(duplicateProfile.body.data.outcome.status, "failed");
     assert.match(duplicateProfile.body.data.outcome.summary, /already exists/);
 
@@ -1341,6 +1410,14 @@ function writeRuntimeConfig(
         externalThreadId: "field-thread",
         externalUserId: "field-agent-external",
         status: "active",
+      },
+    ],
+    mcpServers: [
+      {
+        id: "field",
+        label: "Field MCP",
+        baseUrl: "http://mcp.local/mcp",
+        transport: "streamable_http",
       },
     ],
     mcpBindings: [] as McpBindingRecord[],

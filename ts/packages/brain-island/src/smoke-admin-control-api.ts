@@ -398,7 +398,7 @@ const reloadFailure = await handleAdminControlRequest(
   },
   context,
 );
-assert.equal(reloadFailure.status, 500);
+assert.equal(reloadFailure.status, 200);
 const reloadFailureData = okData<AdminControlResponse>(reloadFailure);
 assert.equal(reloadFailureData.outcome.status, "failed");
 assert.equal(reloadFailureData.outcome.reasonCode, "control_executor_failed");

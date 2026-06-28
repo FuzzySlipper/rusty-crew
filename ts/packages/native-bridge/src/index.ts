@@ -1262,10 +1262,20 @@ export interface NativeCreateProfileRequest {
     module?: string;
     strategy?: string;
   };
+  mcpBindings?: NativeCreateProfileMcpBindingRequest[];
   mcpToolProfile?: string;
   source?: NativeCreateProfileSourceRequest;
   now?: string;
   profileFileExists?: boolean;
+}
+
+export interface NativeCreateProfileMcpBindingRequest {
+  serverId: string;
+  bindingId?: string;
+  adapterId?: string;
+  serverNames?: string[];
+  transport?: string;
+  toolProfileKey?: string;
 }
 
 export interface NativeProfileRegistryRuntimeMetadata {
@@ -1299,6 +1309,7 @@ export interface NativeCreateProfilePlan {
   runtimeBrain?: NativeBrainConfigDraft;
   runtimeSession?: NativeSessionConfigDraft;
   profileMcpConfig?: NativeProfileRuntimeMetadata["mcpConfig"];
+  runtimeMcpBindings: NativeMcpBindingConfigDraft[];
 }
 
 export interface NativeProfileRegistryWrite {
@@ -1332,7 +1343,11 @@ export interface NativeCreateProfileFileAssetAction {
 }
 
 export interface NativeCreateProfileDerivedRuntimeAction {
-  kind: "add_brain" | "add_session" | "add_profile_mcp_config";
+  kind:
+    | "add_brain"
+    | "add_session"
+    | "add_profile_mcp_config"
+    | "add_mcp_binding";
   refKind: string;
   refId: string;
   applyPhase: string;
@@ -3492,6 +3507,14 @@ function toNativeCreateProfilePlanInput(
             strategy: input.request.brain.strategy,
           }
         : undefined,
+      mcp_bindings: input.request.mcpBindings?.map((binding) => ({
+        server_id: binding.serverId,
+        binding_id: binding.bindingId,
+        adapter_id: binding.adapterId,
+        server_names: binding.serverNames,
+        transport: binding.transport,
+        tool_profile_key: binding.toolProfileKey,
+      })),
       mcp_tool_profile: input.request.mcpToolProfile,
       source: input.request.source
         ? {
@@ -3590,6 +3613,9 @@ function toNativeCreateProfilePlan(
           toolProfile: plan.profile_mcp_config.tool_profile ?? undefined,
         }
       : undefined,
+    runtimeMcpBindings: (plan.runtime_mcp_bindings ?? []).map(
+      toMcpBindingDraft,
+    ),
   };
 }
 
@@ -4468,6 +4494,7 @@ interface RawCreateProfilePlan {
     transport?: string;
     tool_profile?: string;
   };
+  runtime_mcp_bindings?: RawMcpBindingConfigDraft[];
 }
 
 interface RawProfileRegistryWrite {
@@ -4501,7 +4528,11 @@ interface RawCreateProfileFileAssetAction {
 }
 
 interface RawCreateProfileDerivedRuntimeAction {
-  kind: "add_brain" | "add_session" | "add_profile_mcp_config";
+  kind:
+    | "add_brain"
+    | "add_session"
+    | "add_profile_mcp_config"
+    | "add_mcp_binding";
   ref_kind: string;
   ref_id: string;
   apply_phase: string;

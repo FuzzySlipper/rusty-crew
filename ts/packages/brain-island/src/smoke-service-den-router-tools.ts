@@ -250,7 +250,6 @@ try {
     RUSTY_CREW_DEN_MEMORY_BASE_URL: "http://den-memory.local",
     RUSTY_CREW_DEN_MEMORY_TOKEN: "memory-token",
     RUSTY_CREW_DEN_MEMORY_RECALL_PATH: "/memory/recall",
-    RUSTY_CREW_MCP_BASE_URL: "http://mcp.local/mcp",
     RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS: "10000",
   });
   const runtimeConfig = await loadRustyCrewRuntimeConfig(serviceConfig);
@@ -503,6 +502,15 @@ function writeRuntimeConfig(targetRoot: string): void {
           },
         ],
         channelBindings: [],
+        mcpServers: [
+          {
+            id: "field",
+            label: "Field MCP",
+            baseUrl: "http://mcp.local/mcp",
+            transport: "streamable_http",
+            requestTimeoutMs: 10000,
+          },
+        ],
         mcpBindings: [
           {
             bindingId: "field-mcp",

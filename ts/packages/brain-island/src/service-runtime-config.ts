@@ -83,12 +83,14 @@ import {
 } from "./profile-loading.js";
 import {
   buildServiceMcpToolCatalog,
+  buildServiceMcpEndpointConfig,
   createServiceMcpToolResolver,
   type ServiceMcpToolCatalog,
   type ServiceMcpToolDiscoveryClientFactory,
   type ServiceMcpToolExecutorFactory,
 } from "./service-mcp-tools.js";
 import type {
+  RustyCrewMcpServerConfig,
   RustyCrewServiceConfig,
   RustyCrewStorageBackend,
   RustyCrewStorageConfig,
@@ -155,6 +157,7 @@ export interface RustyCrewRuntimeConfig {
   sessions: RustyCrewConfiguredSession[];
   scheduledJobs: RustyCrewScheduledJob[];
   channelBindings: ChannelBindingRecord[];
+  mcpServers?: RustyCrewMcpServerConfig[];
   mcpBindings: McpBindingRecord[];
 }
 
@@ -631,6 +634,7 @@ function runtimeConfigFromNativeDraft(
       providerSubscriptionId: binding.providerSubscriptionId,
       status: binding.status,
     })),
+    mcpServers: original.mcpServers ?? [],
     mcpBindings: draft.mcpBindings.map((binding) => ({
       ...originalMcpBindings.get(binding.bindingId),
       bindingId: binding.bindingId,
@@ -1266,7 +1270,10 @@ function createServiceToolResolver(
       ? createServiceMcpToolResolver({
           catalog: options.mcpToolCatalog,
           bridge: options.bridge,
-          mcpConfig: options.serviceConfig?.mcp,
+          mcpConfig: buildServiceMcpEndpointConfig({
+            mcpConfig: options.serviceConfig?.mcp,
+            mcpServers: options.runtimeConfig?.mcpServers,
+          }),
           executorFactory: options.mcpToolExecutorFactory,
         })
       : () => [],
@@ -1491,6 +1498,7 @@ function emptyRuntimeConfig(
     sessions: [],
     scheduledJobs: [],
     channelBindings: [],
+    mcpServers: serviceConfig.mcp.servers,
     mcpBindings: [],
   };
 }
@@ -1524,6 +1532,10 @@ function validateRuntimeConfig(
     channelBindings: arrayValue(parsed.channelBindings).map((item, index) =>
       configuredChannelBinding(item, index),
     ),
+    mcpServers: optionalArrayValue(
+      parsed.mcpServers,
+      serviceConfig.mcp.servers,
+    ).map((item, index) => configuredMcpServer(item, index)),
     mcpBindings: arrayValue(parsed.mcpBindings).map((item, index) =>
       configuredMcpBinding(item, index),
     ),
@@ -1836,11 +1848,64 @@ function configuredMcpBinding(
   };
 }
 
+function configuredMcpServer(
+  parsed: unknown,
+  index: number,
+): RustyCrewMcpServerConfig {
+  if (!isRecord(parsed)) {
+    throw new Error(`configured MCP server ${index} must be an object`);
+  }
+  const id = requiredString(parsed.id, `mcpServers[${index}].id`);
+  if (!/^[A-Za-z0-9_.:-]+$/.test(id)) {
+    throw new Error(
+      `mcpServers[${index}].id may only contain letters, numbers, dot, underscore, colon, or dash`,
+    );
+  }
+  const baseUrl = requiredString(
+    parsed.baseUrl,
+    `mcpServers[${index}].baseUrl`,
+  );
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("protocol must be http or https");
+    }
+  } catch (error) {
+    throw new Error(
+      `mcpServers[${index}].baseUrl must be a valid HTTP(S) URL`,
+      { cause: error },
+    );
+  }
+  const requestTimeoutMs =
+    parsed.requestTimeoutMs === undefined
+      ? undefined
+      : optionalPositiveInteger(
+          parsed.requestTimeoutMs,
+          `mcpServers[${index}].requestTimeoutMs`,
+        );
+  return {
+    id,
+    label: optionalString(parsed.label),
+    baseUrl,
+    transport: optionalString(parsed.transport) ?? "streamable_http",
+    requestTimeoutMs,
+    source: optionalString(parsed.source) === "env" ? "env" : "runtime",
+  };
+}
+
 function arrayValue(input: unknown): unknown[] {
   if (input === undefined) return [];
   if (!Array.isArray(input))
     throw new Error("runtime config arrays must be arrays");
   return input;
+}
+
+function optionalArrayValue(
+  input: unknown,
+  fallback: readonly unknown[],
+): unknown[] {
+  if (input === undefined) return [...fallback];
+  return arrayValue(input);
 }
 
 function stringList(input: unknown, name: string): string[] {

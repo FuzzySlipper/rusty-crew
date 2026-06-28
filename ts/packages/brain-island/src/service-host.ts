@@ -247,6 +247,7 @@ import {
   acquireRustyCrewServiceLock,
   ensureRustyCrewServiceDirectories,
   loadRustyCrewServiceConfig,
+  type RustyCrewMcpServerConfig,
   type RustyCrewServiceConfig,
   type RustyCrewServiceEnv,
   type RustyCrewServiceLock,
@@ -720,6 +721,13 @@ async function handleHttpRequest(
     return handleSchedulerReadRequest(request, url, state);
   }
 
+  if (
+    url.pathname === "/v1/admin/mcp/servers" ||
+    url.pathname === "/v1/admin/mcp/catalog"
+  ) {
+    return handleAdminMcpCatalogRequest(request, state);
+  }
+
   if (url.pathname.startsWith("/v1/admin/storage/")) {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST"
@@ -864,6 +872,78 @@ async function handleSchedulerReadRequest(
     reason_code: "unknown_scheduler_diagnostics_route",
     message: `unknown scheduler diagnostics route ${url.pathname}`,
     retryable: false,
+  });
+}
+
+async function handleAdminMcpCatalogRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  if ((request.method ?? "GET").toUpperCase() !== "GET") {
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "mcp_catalog_read_only",
+      message: "MCP catalog routes only support GET",
+      retryable: false,
+    });
+  }
+
+  const serverCatalog = mcpServerCatalogEntries(state);
+  const serverIds = new Set(serverCatalog.map((server) => server.id));
+  const compatibilityServerId = state.config.mcp.baseUrl
+    ? state.config.mcp.servers[0]?.id
+    : undefined;
+  const bindings = state.runtimeConfig.mcpBindings.map((binding) => {
+    const endpointServerId = mcpServerIdFromEndpointRef(binding.endpointRef);
+    const resolvedServerId =
+      endpointServerId && serverIds.has(endpointServerId)
+        ? endpointServerId
+        : endpointServerId && compatibilityServerId
+          ? compatibilityServerId
+          : undefined;
+    return {
+      bindingId: binding.bindingId,
+      adapterId: binding.adapterId,
+      agentId: binding.agentId,
+      sessionId: binding.sessionId,
+      profileId: binding.profileId,
+      endpointRef: binding.endpointRef,
+      endpointServerId,
+      resolvedServerId,
+      transport: binding.transport,
+      toolProfileKey: binding.toolProfileKey,
+      serverNames: binding.serverNames,
+      status: binding.status,
+      degradedReason: binding.degradedReason,
+    };
+  });
+  const bindingCounts = new Map<string, number>();
+  for (const binding of bindings) {
+    if (!binding.resolvedServerId) continue;
+    bindingCounts.set(
+      binding.resolvedServerId,
+      (bindingCounts.get(binding.resolvedServerId) ?? 0) + 1,
+    );
+  }
+  const servers = serverCatalog.map((server) => ({
+    id: server.id,
+    label: server.label,
+    baseUrl: server.baseUrl,
+    transport: server.transport,
+    requestTimeoutMs: server.requestTimeoutMs,
+    source: server.source,
+    configuredBindingCount: bindingCounts.get(server.id) ?? 0,
+  }));
+  const toolProfiles = [
+    ...new Set(bindings.map((binding) => binding.toolProfileKey)),
+  ].sort();
+  return successRoute(requestIdValue, {
+    schemaVersion: 1,
+    compatibilityBaseUrlConfigured: Boolean(state.config.mcp.baseUrl),
+    servers,
+    toolProfiles,
+    bindings,
   });
 }
 
@@ -2404,6 +2484,34 @@ async function createServiceMcpManager(
   return manager;
 }
 
+function mcpServerCatalogEntries(
+  state: ServiceState,
+): RustyCrewMcpServerConfig[] {
+  const byId = new Map<string, RustyCrewMcpServerConfig>();
+  for (const server of state.config.mcp.servers) {
+    byId.set(server.id, server);
+  }
+  for (const server of state.runtimeConfig.mcpServers ?? []) {
+    byId.set(server.id, server);
+  }
+  return [...byId.values()].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+}
+
+function mcpServerIdFromEndpointRef(endpointRef: string): string | undefined {
+  try {
+    const url = new URL(endpointRef);
+    if (url.protocol !== "config:" || url.hostname !== "mcp") {
+      return undefined;
+    }
+    const serverId = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+    return serverId.length > 0 ? serverId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function loadProfileChannelWakePolicies(
   runtimeConfig: RustyCrewRuntimeConfig,
 ): Promise<Map<string, ChannelWakePolicy>> {
@@ -3779,6 +3887,7 @@ async function createServiceProfile(
       brain: profileBrainFromBody(
         command.body.brain ?? command.body.brainSelection,
       ),
+      mcpBindings: createProfileMcpBindingsFromBody(command.body.mcpBindings),
       mcpToolProfile: optionalBodyString(command, "mcpToolProfile"),
       source: profileCreateSourceFromBody(command.body.source),
       now: state.now(),
@@ -3792,7 +3901,7 @@ async function createServiceProfile(
   const runtimeBrain = plan.runtimeBrain;
   const runtimeSession = plan.runtimeSession;
   const profileMcpConfig = plan.profileMcpConfig;
-  if (!profileSeed || !runtimeBrain || !runtimeSession || !profileMcpConfig) {
+  if (!profileSeed || !runtimeBrain || !runtimeSession) {
     throw new Error(
       "create-profile plan did not include required profile/runtime entries",
     );
@@ -3816,12 +3925,13 @@ async function createServiceProfile(
       : { displayName: profileSeed.displayName }),
     providerAlias: profileSeed.providerAlias,
     brain: profileSeed.brain,
-    mcpConfig: profileMcpConfig,
+    ...(profileMcpConfig === undefined ? {} : { mcpConfig: profileMcpConfig }),
     skills: profileSeed.skillsMode,
   });
 
   runtimeConfigFile.array("brains").push(runtimeBrain);
   runtimeConfigFile.array("sessions").push(runtimeSession);
+  runtimeConfigFile.array("mcpBindings").push(...plan.runtimeMcpBindings);
   await writeJsonFileAtomic(
     state.config.paths.serviceConfigFile,
     runtimeConfigFile.value,
@@ -3920,6 +4030,50 @@ function profileBrainFromBody(
     module: optionalString(brain.module),
     strategy: optionalString(brain.strategy),
   }) as { module?: string; strategy?: string };
+}
+
+function createProfileMcpBindingsFromBody(input: unknown):
+  | Array<{
+      serverId: string;
+      bindingId?: string;
+      adapterId?: string;
+      serverNames?: string[];
+      transport?: string;
+      toolProfileKey?: string;
+    }>
+  | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (!Array.isArray(input)) {
+    throw new Error("mcpBindings must be an array when provided");
+  }
+  return input.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(`mcpBindings[${index}] must be an object`);
+    }
+    const serverId = optionalString(item.serverId);
+    if (serverId === undefined) {
+      throw new Error(`mcpBindings[${index}].serverId is required`);
+    }
+    return compactRecord({
+      serverId,
+      bindingId: optionalString(item.bindingId),
+      adapterId: optionalString(item.adapterId),
+      serverNames:
+        item.serverNames === undefined
+          ? undefined
+          : stringArray(item.serverNames, `mcpBindings[${index}].serverNames`),
+      transport: optionalString(item.transport),
+      toolProfileKey:
+        optionalString(item.toolProfileKey) ?? optionalString(item.toolProfile),
+    }) as {
+      serverId: string;
+      bindingId?: string;
+      adapterId?: string;
+      serverNames?: string[];
+      transport?: string;
+      toolProfileKey?: string;
+    };
+  });
 }
 
 function profileCreateSourceFromBody(input: unknown):
@@ -5803,6 +5957,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array`);
+  }
+  return value.map((item, index) => {
+    const text = optionalString(item);
+    if (text === undefined) {
+      throw new Error(`${fieldName}[${index}] must be a non-empty string`);
+    }
+    return text;
+  });
 }
 
 function requiredString(value: unknown, fieldName: string): string {

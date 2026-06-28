@@ -333,8 +333,7 @@ export async function handleAdminControlRequest(
     adminControlResultRef(parsed.command, outcome),
   );
 
-  const status = outcome.status === "completed" ? 200 : 500;
-  return success(requestId, status, {
+  return success(requestId, 200, {
     command: publicCommand(parsed.command),
     outcome,
     audit: { started: true, terminal: true },

@@ -831,6 +831,14 @@ export const API_CAPABILITIES = [
     ["diagnostics", "service"],
   ),
   readCapability(
+    "admin.mcp.servers",
+    "GET",
+    "/v1/admin/mcp/servers",
+    "List configured MCP servers, tool profiles, and runtime bindings.",
+    "admin",
+    ["mcp", "config", "profile"],
+  ),
+  readCapability(
     "admin.healthz",
     "GET",
     "/v1/admin/healthz",

@@ -104,9 +104,19 @@ export interface RustyCrewDenMemoryConfig {
   paths: Partial<DenMemoryClientPaths>;
 }
 
+export interface RustyCrewMcpServerConfig {
+  id: string;
+  label?: string;
+  baseUrl: string;
+  transport: "streamable_http" | "websocket" | string;
+  requestTimeoutMs?: number;
+  source?: "env" | "runtime";
+}
+
 export interface RustyCrewMcpConfig {
   baseUrl?: string;
   requestTimeoutMs: number;
+  servers: RustyCrewMcpServerConfig[];
 }
 
 export interface RustyCrewTelegramConfig {
@@ -708,27 +718,53 @@ function hasDenMemorySettings(config: RustyCrewDenMemoryConfig): boolean {
 }
 
 function loadRustyCrewMcpConfig(env: RustyCrewServiceEnv): RustyCrewMcpConfig {
+  const baseUrl = normalizeOptional(env.RUSTY_CREW_MCP_BASE_URL);
+  const requestTimeoutMs = parsePositiveInteger(
+    env.RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS,
+    30_000,
+    "RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS",
+  );
   return {
-    baseUrl: normalizeOptional(env.RUSTY_CREW_MCP_BASE_URL),
-    requestTimeoutMs: parsePositiveInteger(
-      env.RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS,
-      30_000,
-      "RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS",
-    ),
+    baseUrl,
+    requestTimeoutMs,
+    servers: baseUrl
+      ? [
+          {
+            id: "env-default",
+            label: "Environment MCP server",
+            baseUrl,
+            transport: "streamable_http",
+            requestTimeoutMs,
+            source: "env",
+          },
+        ]
+      : [],
   };
 }
 
 function validateMcpConfig(config: RustyCrewMcpConfig): void {
-  if (!config.baseUrl) return;
+  const urls = [
+    ...(config.baseUrl
+      ? [{ label: "RUSTY_CREW_MCP_BASE_URL", value: config.baseUrl }]
+      : []),
+    ...config.servers.map((server) => ({
+      label: `MCP server ${server.id}`,
+      value: server.baseUrl,
+    })),
+  ];
+  for (const item of urls) {
+    validateHttpUrl(item.value, `${item.label} must be a valid HTTP(S) URL`);
+  }
+}
+
+function validateHttpUrl(value: string, message: string): void {
   try {
-    const url = new URL(config.baseUrl);
+    const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       throw new Error("protocol must be http or https");
     }
   } catch (error) {
-    throw new Error("RUSTY_CREW_MCP_BASE_URL must be a valid HTTP(S) URL", {
-      cause: error,
-    });
+    throw new Error(message, { cause: error });
   }
 }
 

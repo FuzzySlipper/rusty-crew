@@ -66,11 +66,23 @@ pub struct CreateProfileRequest {
     pub provider_alias: Option<String>,
     pub model_config: Option<ProfileModelConfigSeed>,
     pub brain: Option<ProfileBrainMetadata>,
+    #[serde(default)]
+    pub mcp_bindings: Vec<CreateProfileMcpBindingRequest>,
     pub mcp_tool_profile: Option<String>,
     pub source: Option<CreateProfileSourceRequest>,
     pub now: Option<String>,
     #[serde(default)]
     pub profile_file_exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProfileMcpBindingRequest {
+    pub server_id: String,
+    pub binding_id: Option<String>,
+    pub adapter_id: Option<String>,
+    pub server_names: Option<Vec<String>>,
+    pub transport: Option<String>,
+    pub tool_profile_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +122,8 @@ pub struct CreateProfilePlan {
     pub runtime_brain: Option<BrainConfigDraft>,
     pub runtime_session: Option<SessionConfigDraft>,
     pub profile_mcp_config: Option<ProfileMcpConfig>,
+    #[serde(default)]
+    pub runtime_mcp_bindings: Vec<McpBindingConfigDraft>,
 }
 
 impl CreateProfilePlan {
@@ -152,6 +166,7 @@ pub enum CreateProfileDerivedRuntimeActionKind {
     AddBrain,
     AddSession,
     AddProfileMcpConfig,
+    AddMcpBinding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -590,15 +605,6 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         module: Some("local".to_string()),
         strategy: None,
     });
-    let mcp_tool_profile = input
-        .request
-        .mcp_tool_profile
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(profile_id)
-        .to_string();
-
     let mut diagnostics = Vec::new();
     collect_id_diagnostic(
         &mut diagnostics,
@@ -624,12 +630,77 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         "request.implementationId",
         &implementation_id,
     );
-    collect_id_diagnostic(
-        &mut diagnostics,
-        "invalid_tool_profile_key",
-        "request.mcpToolProfile",
-        &mcp_tool_profile,
-    );
+    if let Some(mcp_tool_profile) = input
+        .request
+        .mcp_tool_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        collect_id_diagnostic(
+            &mut diagnostics,
+            "invalid_tool_profile_key",
+            "request.mcpToolProfile",
+            mcp_tool_profile,
+        );
+    }
+    for (index, binding) in input.request.mcp_bindings.iter().enumerate() {
+        collect_id_diagnostic(
+            &mut diagnostics,
+            "invalid_mcp_server_id",
+            &format!("request.mcpBindings[{index}].serverId"),
+            &binding.server_id,
+        );
+        if let Some(binding_id) = binding.binding_id.as_deref() {
+            collect_id_diagnostic(
+                &mut diagnostics,
+                "invalid_mcp_binding_id",
+                &format!("request.mcpBindings[{index}].bindingId"),
+                binding_id,
+            );
+        }
+        if let Some(adapter_id) = binding.adapter_id.as_deref() {
+            collect_id_diagnostic(
+                &mut diagnostics,
+                "invalid_mcp_adapter_id",
+                &format!("request.mcpBindings[{index}].adapterId"),
+                adapter_id,
+            );
+        }
+        if let Some(transport) = binding.transport.as_deref() {
+            collect_non_empty_diagnostic(
+                &mut diagnostics,
+                "invalid_mcp_transport",
+                &format!("request.mcpBindings[{index}].transport"),
+                transport,
+            );
+        }
+        if let Some(tool_profile_key) = binding.tool_profile_key.as_deref() {
+            collect_id_diagnostic(
+                &mut diagnostics,
+                "invalid_tool_profile_key",
+                &format!("request.mcpBindings[{index}].toolProfileKey"),
+                tool_profile_key,
+            );
+        }
+        if let Some(server_names) = binding.server_names.as_ref() {
+            if server_names.is_empty() {
+                diagnostics.push(RuntimeConfigDiagnostic::error(
+                    "mcp_binding_missing_server_names",
+                    format!("request.mcpBindings[{index}].serverNames"),
+                    "MCP bindings require at least one server name",
+                ));
+            }
+            for (server_index, server_name) in server_names.iter().enumerate() {
+                collect_non_empty_diagnostic(
+                    &mut diagnostics,
+                    "invalid_server_name",
+                    &format!("request.mcpBindings[{index}].serverNames[{server_index}]"),
+                    server_name,
+                );
+            }
+        }
+    }
     collect_non_empty_diagnostic(
         &mut diagnostics,
         "invalid_provider_alias",
@@ -748,6 +819,35 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             format!("runtime config already has agent {agent_id}"),
         ));
     }
+    let mut requested_mcp_binding_ids = HashSet::new();
+    for (index, binding) in input.request.mcp_bindings.iter().enumerate() {
+        let binding_id = binding
+            .binding_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{agent_id}-mcp-{}", index + 1));
+        if !requested_mcp_binding_ids.insert(binding_id.clone()) {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "duplicate_mcp_binding_id",
+                format!("request.mcpBindings[{index}].bindingId"),
+                format!("duplicate requested MCP binding {binding_id}"),
+            ));
+        }
+        if input
+            .runtime_config
+            .mcp_bindings
+            .iter()
+            .any(|existing| existing.binding_id == binding_id)
+        {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "duplicate_mcp_binding_id",
+                format!("request.mcpBindings[{index}].bindingId"),
+                format!("runtime config already has MCP binding {binding_id}"),
+            ));
+        }
+    }
 
     if diagnostics
         .iter()
@@ -762,6 +862,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             runtime_brain: None,
             runtime_session: None,
             profile_mcp_config: None,
+            runtime_mcp_bindings: Vec::new(),
         };
     }
 
@@ -780,13 +881,72 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         max_history_messages: None,
         turn_timeout_ms: None,
     };
-    let profile_mcp_config = ProfileMcpConfig {
-        binding_id: Some(format!("{agent_id}-mcp")),
-        endpoint_ref: Some(format!("config://mcp/{agent_id}")),
-        server_names: vec![agent_id.to_string()],
-        transport: None,
-        tool_profile: Some(mcp_tool_profile),
-    };
+    let profile_mcp_config = input
+        .request
+        .mcp_tool_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|mcp_tool_profile| ProfileMcpConfig {
+            binding_id: Some(format!("{agent_id}-mcp")),
+            endpoint_ref: Some(format!("config://mcp/{agent_id}")),
+            server_names: vec![agent_id.to_string()],
+            transport: None,
+            tool_profile: Some(mcp_tool_profile.to_string()),
+        });
+    let runtime_mcp_bindings = input
+        .request
+        .mcp_bindings
+        .iter()
+        .enumerate()
+        .map(|(index, binding)| {
+            let server_id = binding.server_id.trim();
+            let binding_id = binding
+                .binding_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{agent_id}-mcp-{}", index + 1));
+            let tool_profile_key = binding
+                .tool_profile_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| profile_id.to_string());
+            McpBindingConfigDraft {
+                binding_id,
+                adapter_id: AdapterId::new(
+                    binding
+                        .adapter_id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or("mcp-ts-main")
+                        .to_string(),
+                ),
+                agent_id: agent_id.clone(),
+                instance_id: None,
+                session_id: Some(session_id.clone()),
+                profile_id: profile_id.clone(),
+                server_names: binding
+                    .server_names
+                    .clone()
+                    .unwrap_or_else(|| vec![server_id.to_string()]),
+                endpoint_ref: format!("config://mcp/{server_id}"),
+                transport: binding
+                    .transport
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("streamable_http")
+                    .to_string(),
+                tool_profile_key,
+                status: ExternalBindingStatusDraft::Active,
+            }
+        })
+        .collect::<Vec<_>>();
     let now = input
         .request
         .now
@@ -805,7 +965,8 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         active_runtime_settings_json: create_profile_runtime_settings_json(
             &provider_alias,
             &brain,
-            &profile_mcp_config,
+            profile_mcp_config.as_ref(),
+            &runtime_mcp_bindings,
             input.request.source.as_ref(),
         ),
         source_asset_refs: vec![ProfileRegistrySourceAssetRef {
@@ -818,40 +979,58 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
                 "compatibility_export": true,
             }),
         }],
-        derived_runtime_refs: vec![
-            ProfileRegistryDerivedRuntimeRef {
-                ref_kind: "brain".to_string(),
-                ref_id: runtime_brain.implementation_id.to_string(),
-                status: "planned".to_string(),
-                updated_at: None,
-                metadata_json: json!({
-                    "profile_id": runtime_brain.profile_id,
-                }),
-            },
-            ProfileRegistryDerivedRuntimeRef {
-                ref_kind: "session".to_string(),
-                ref_id: runtime_session.session_id.to_string(),
-                status: "planned".to_string(),
-                updated_at: None,
-                metadata_json: json!({
-                    "agent_id": runtime_session.agent_id,
-                    "profile_id": runtime_session.profile_id,
-                    "kind": runtime_session.kind,
-                }),
-            },
-            ProfileRegistryDerivedRuntimeRef {
-                ref_kind: "profile_mcp_config".to_string(),
-                ref_id: profile_mcp_config
-                    .binding_id
-                    .clone()
-                    .unwrap_or_else(|| format!("{agent_id}-mcp")),
-                status: "planned".to_string(),
-                updated_at: None,
-                metadata_json: json!({
-                    "tool_profile": profile_mcp_config.tool_profile,
-                }),
-            },
-        ],
+        derived_runtime_refs: {
+            let mut refs = vec![
+                ProfileRegistryDerivedRuntimeRef {
+                    ref_kind: "brain".to_string(),
+                    ref_id: runtime_brain.implementation_id.to_string(),
+                    status: "planned".to_string(),
+                    updated_at: None,
+                    metadata_json: json!({
+                        "profile_id": runtime_brain.profile_id,
+                    }),
+                },
+                ProfileRegistryDerivedRuntimeRef {
+                    ref_kind: "session".to_string(),
+                    ref_id: runtime_session.session_id.to_string(),
+                    status: "planned".to_string(),
+                    updated_at: None,
+                    metadata_json: json!({
+                        "agent_id": runtime_session.agent_id,
+                        "profile_id": runtime_session.profile_id,
+                        "kind": runtime_session.kind,
+                    }),
+                },
+            ];
+            if let Some(profile_mcp_config) = profile_mcp_config.as_ref() {
+                refs.push(ProfileRegistryDerivedRuntimeRef {
+                    ref_kind: "profile_mcp_config".to_string(),
+                    ref_id: profile_mcp_config
+                        .binding_id
+                        .clone()
+                        .unwrap_or_else(|| format!("{agent_id}-mcp")),
+                    status: "planned".to_string(),
+                    updated_at: None,
+                    metadata_json: json!({
+                        "tool_profile": profile_mcp_config.tool_profile,
+                    }),
+                });
+            }
+            refs.extend(runtime_mcp_bindings.iter().map(|binding| {
+                ProfileRegistryDerivedRuntimeRef {
+                    ref_kind: "mcp_binding".to_string(),
+                    ref_id: binding.binding_id.clone(),
+                    status: "planned".to_string(),
+                    updated_at: None,
+                    metadata_json: json!({
+                        "server_names": binding.server_names,
+                        "endpoint_ref": binding.endpoint_ref,
+                        "tool_profile_key": binding.tool_profile_key,
+                    }),
+                }
+            }));
+            refs
+        },
         import_export: ProfileRegistryImportExportMetadata {
             imported_from: create_profile_import_source(input.request.source.as_ref()),
             imported_at: input.request.source.as_ref().map(|_| now.clone()),
@@ -874,7 +1053,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             "registry_first": true,
         }),
     }];
-    let derived_runtime_actions = vec![
+    let mut derived_runtime_actions = vec![
         CreateProfileDerivedRuntimeAction {
             kind: CreateProfileDerivedRuntimeActionKind::AddBrain,
             ref_kind: "brain".to_string(),
@@ -895,7 +1074,9 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
                 "kind": runtime_session.kind,
             }),
         },
-        CreateProfileDerivedRuntimeAction {
+    ];
+    if let Some(profile_mcp_config) = profile_mcp_config.as_ref() {
+        derived_runtime_actions.push(CreateProfileDerivedRuntimeAction {
             kind: CreateProfileDerivedRuntimeActionKind::AddProfileMcpConfig,
             ref_kind: "profile_mcp_config".to_string(),
             ref_id: profile_mcp_config
@@ -906,8 +1087,21 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             metadata_json: json!({
                 "tool_profile": profile_mcp_config.tool_profile,
             }),
-        },
-    ];
+        });
+    }
+    derived_runtime_actions.extend(runtime_mcp_bindings.iter().map(|binding| {
+        CreateProfileDerivedRuntimeAction {
+            kind: CreateProfileDerivedRuntimeActionKind::AddMcpBinding,
+            ref_kind: "mcp_binding".to_string(),
+            ref_id: binding.binding_id.clone(),
+            apply_phase: "compatibility_runtime_config".to_string(),
+            metadata_json: json!({
+                "server_names": binding.server_names,
+                "endpoint_ref": binding.endpoint_ref,
+                "tool_profile_key": binding.tool_profile_key,
+            }),
+        }
+    }));
 
     CreateProfilePlan {
         diagnostics,
@@ -924,14 +1118,16 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         }),
         runtime_brain: Some(runtime_brain),
         runtime_session: Some(runtime_session),
-        profile_mcp_config: Some(profile_mcp_config),
+        profile_mcp_config,
+        runtime_mcp_bindings,
     }
 }
 
 fn create_profile_runtime_settings_json(
     provider_alias: &str,
     brain: &ProfileBrainMetadata,
-    mcp_config: &ProfileMcpConfig,
+    mcp_config: Option<&ProfileMcpConfig>,
+    mcp_bindings: &[McpBindingConfigDraft],
     source: Option<&CreateProfileSourceRequest>,
 ) -> Value {
     json!({
@@ -939,6 +1135,7 @@ fn create_profile_runtime_settings_json(
         "brain": brain,
         "skills_mode": "all",
         "mcp_config": mcp_config,
+        "mcp_bindings": mcp_bindings,
         "source": source,
     })
 }
@@ -1866,6 +2063,7 @@ mod tests {
                 provider_alias: None,
                 model_config: None,
                 brain: None,
+                mcp_bindings: Vec::new(),
                 mcp_tool_profile: None,
                 source: Some(CreateProfileSourceRequest {
                     template_id: Some("starter".to_string()),
@@ -1908,16 +2106,8 @@ mod tests {
                 turn_timeout_ms: None,
             }
         );
-        let mcp = plan
-            .profile_mcp_config
-            .expect("profile MCP config should be planned");
-        assert_eq!(mcp.binding_id.as_deref(), Some("field-created-profile-mcp"));
-        assert_eq!(
-            mcp.endpoint_ref.as_deref(),
-            Some("config://mcp/field-created-profile")
-        );
-        assert_eq!(mcp.server_names, vec!["field-created-profile"]);
-        assert_eq!(mcp.tool_profile.as_deref(), Some("field-created-profile"));
+        assert_eq!(plan.profile_mcp_config, None);
+        assert!(plan.runtime_mcp_bindings.is_empty());
         let registry_write = plan
             .registry_write
             .expect("registry write should be planned first");
@@ -1933,7 +2123,7 @@ mod tests {
             registry_write.import_export.imported_from.as_deref(),
             Some("template:starter")
         );
-        assert_eq!(registry_write.derived_runtime_refs.len(), 3);
+        assert_eq!(registry_write.derived_runtime_refs.len(), 2);
         assert!(registry_write
             .derived_runtime_refs
             .iter()
@@ -1949,13 +2139,90 @@ mod tests {
             "field-created-profile.json"
         );
         assert!(!plan.file_asset_actions[0].overwrite);
-        assert_eq!(plan.derived_runtime_actions.len(), 3);
+        assert_eq!(plan.derived_runtime_actions.len(), 2);
         assert_eq!(
             plan.derived_runtime_actions
                 .iter()
                 .map(|action| action.ref_kind.as_str())
                 .collect::<Vec<_>>(),
-            vec!["brain", "session", "profile_mcp_config"]
+            vec!["brain", "session"]
+        );
+    }
+
+    #[test]
+    fn plans_create_profile_with_explicit_runtime_mcp_bindings() {
+        let input = CreateProfilePlanInput {
+            runtime_config: valid_draft(),
+            profiles: vec![profile("runner")],
+            profile_registry: Vec::new(),
+            request: CreateProfileRequest {
+                profile_id: "field-created-profile".to_string(),
+                display_name: None,
+                agent_id: None,
+                session_id: None,
+                implementation_id: None,
+                kind: None,
+                provider_alias: None,
+                model_config: None,
+                brain: None,
+                mcp_bindings: vec![
+                    CreateProfileMcpBindingRequest {
+                        server_id: "den".to_string(),
+                        binding_id: None,
+                        adapter_id: None,
+                        server_names: None,
+                        transport: None,
+                        tool_profile_key: Some("planner".to_string()),
+                    },
+                    CreateProfileMcpBindingRequest {
+                        server_id: "filesystem".to_string(),
+                        binding_id: Some("field-files-mcp".to_string()),
+                        adapter_id: Some("mcp-ts-files".to_string()),
+                        server_names: Some(vec!["files".to_string()]),
+                        transport: Some("streamable_http".to_string()),
+                        tool_profile_key: Some("files".to_string()),
+                    },
+                ],
+                mcp_tool_profile: None,
+                source: None,
+                now: None,
+                profile_file_exists: false,
+            },
+        };
+
+        let plan = plan_create_profile(&input);
+        assert!(plan.ok(), "{:?}", plan.diagnostics);
+        assert_eq!(plan.profile_mcp_config, None);
+        assert_eq!(plan.runtime_mcp_bindings.len(), 2);
+        assert_eq!(
+            plan.runtime_mcp_bindings[0],
+            McpBindingConfigDraft {
+                binding_id: "field-created-profile-mcp-1".to_string(),
+                adapter_id: AdapterId::new("mcp-ts-main"),
+                agent_id: AgentId::new("field-created-profile"),
+                instance_id: None,
+                session_id: Some(SessionId::new("field-created-profile-session")),
+                profile_id: ProfileId::new("field-created-profile"),
+                server_names: vec!["den".to_string()],
+                endpoint_ref: "config://mcp/den".to_string(),
+                transport: "streamable_http".to_string(),
+                tool_profile_key: "planner".to_string(),
+                status: ExternalBindingStatusDraft::Active,
+            }
+        );
+        assert_eq!(plan.runtime_mcp_bindings[1].binding_id, "field-files-mcp");
+        assert_eq!(
+            plan.runtime_mcp_bindings[1].endpoint_ref,
+            "config://mcp/filesystem"
+        );
+        assert_eq!(
+            plan.registry_write
+                .expect("registry write should be planned")
+                .derived_runtime_refs
+                .iter()
+                .map(|runtime_ref| runtime_ref.ref_kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["brain", "session", "mcp_binding", "mcp_binding"]
         );
     }
 
@@ -1979,6 +2246,7 @@ mod tests {
                 provider_alias: None,
                 model_config: None,
                 brain: None,
+                mcp_bindings: Vec::new(),
                 mcp_tool_profile: None,
                 source: None,
                 now: None,
@@ -2030,6 +2298,7 @@ mod tests {
                     max_output_tokens: None,
                 }),
                 brain: None,
+                mcp_bindings: Vec::new(),
                 mcp_tool_profile: Some("bad tool".to_string()),
                 source: None,
                 now: None,

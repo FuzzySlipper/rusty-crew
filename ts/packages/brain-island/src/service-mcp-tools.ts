@@ -43,10 +43,18 @@ export type ServiceMcpToolExecutorFactory = (
 export interface ServiceMcpEndpointConfig {
   baseUrl?: string;
   requestTimeoutMs?: number;
+  servers?: readonly ServiceMcpServerEndpointConfig[];
+}
+
+export interface ServiceMcpServerEndpointConfig {
+  id: string;
+  baseUrl: string;
+  requestTimeoutMs?: number;
 }
 
 export interface ServiceMcpToolCatalogInput {
   runtimeConfig: {
+    mcpServers?: readonly ServiceMcpServerEndpointConfig[];
     mcpBindings: readonly McpBindingRecord[];
   };
   mcpConfig?: ServiceMcpEndpointConfig;
@@ -110,7 +118,13 @@ export async function buildServiceMcpToolCatalog(
 
     const discoveryClient = await (
       input.discoveryClientFactory ?? createDefaultMcpDiscoveryClient
-    )(binding, input.mcpConfig);
+    )(
+      binding,
+      buildServiceMcpEndpointConfig({
+        mcpConfig: input.mcpConfig,
+        mcpServers: input.runtimeConfig.mcpServers,
+      }),
+    );
     if (!discoveryClient) {
       profile.unavailableBindings.push(binding.bindingId);
       continue;
@@ -333,7 +347,7 @@ function endpointForBinding(
   }
   const configured = configuredMcpEndpoint(binding, config);
   if (configured) {
-    return { url: configured, timeoutMs: config?.requestTimeoutMs };
+    return configured;
   }
   return undefined;
 }
@@ -352,19 +366,54 @@ function httpEndpoint(endpointRef: string): URL | undefined {
 function configuredMcpEndpoint(
   binding: McpBindingRecord,
   config: ServiceMcpEndpointConfig | undefined,
-): URL | undefined {
-  if (!config?.baseUrl) return undefined;
+): { url: URL; timeoutMs: number | undefined } | undefined {
   try {
     const endpointRef = new URL(binding.endpointRef);
     if (endpointRef.protocol !== "config:" || endpointRef.hostname !== "mcp") {
       return undefined;
     }
-    const url = new URL(config.baseUrl);
+    const serverId = decodeURIComponent(
+      endpointRef.pathname.replace(/^\/+/, ""),
+    );
+    const server = config?.servers?.find((candidate) => {
+      return candidate.id === serverId;
+    });
+    const baseUrl = server?.baseUrl ?? config?.baseUrl;
+    if (!baseUrl) return undefined;
+    const url = new URL(baseUrl);
     url.searchParams.set("tool_profile", binding.toolProfileKey);
-    return url;
+    return {
+      url,
+      timeoutMs: server?.requestTimeoutMs ?? config?.requestTimeoutMs,
+    };
   } catch {
     return undefined;
   }
+}
+
+export function buildServiceMcpEndpointConfig(input: {
+  mcpConfig?: ServiceMcpEndpointConfig;
+  mcpServers?: readonly ServiceMcpServerEndpointConfig[];
+}): ServiceMcpEndpointConfig | undefined {
+  const servers = [
+    ...(input.mcpConfig?.servers ?? []),
+    ...(input.mcpServers ?? []),
+  ];
+  if (!input.mcpConfig && servers.length === 0) return undefined;
+  return {
+    ...input.mcpConfig,
+    servers: dedupeMcpServers(servers),
+  };
+}
+
+function dedupeMcpServers(
+  servers: readonly ServiceMcpServerEndpointConfig[],
+): ServiceMcpServerEndpointConfig[] {
+  const byId = new Map<string, ServiceMcpServerEndpointConfig>();
+  for (const server of servers) {
+    byId.set(server.id, server);
+  }
+  return [...byId.values()];
 }
 
 class DefaultMcpHttpClient {
