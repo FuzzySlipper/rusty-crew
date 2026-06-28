@@ -550,6 +550,8 @@ function backgroundReviewScheduledJob(
       maxFindings: review?.maxFindings,
       maxCandidates: review?.maxCandidates,
       llmReviewEnabled: review?.llmReviewEnabled ?? false,
+      captureProviderAlias: review?.captureProviderAlias,
+      captureMaxProposals: review?.captureMaxProposals,
       dryRun: review?.dryRun ?? true,
       reason: `profile ${profileId} backgroundReview`,
     },

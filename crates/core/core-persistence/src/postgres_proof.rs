@@ -83,12 +83,13 @@ use rusty_crew_core_protocol::{
     MemoryProvenancePolicy, MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor,
     MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy,
     MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor, MemorySpaceId,
-    MemoryVisibilityModel, MemoryWritePolicy, ParentConsumptionPolicy,
+    MemoryVisibilityModel, MemoryWritePolicy, ParentConsumptionPolicy, SessionActivityDigest,
+    SessionActivityDigestQuery,
 };
 use std::collections::BTreeSet;
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 15;
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -2053,6 +2054,10 @@ impl PostgresRuntimeCounterProofStore {
                     rows: self.table_rows("session_memory_records")?,
                 },
                 RuntimeStorageTableCount {
+                    table: "session_activity_digests".to_string(),
+                    rows: self.table_rows("session_activity_digests")?,
+                },
+                RuntimeStorageTableCount {
                     table: "memory_proposals".to_string(),
                     rows: self.table_rows("memory_proposals")?,
                 },
@@ -2552,6 +2557,33 @@ impl PostgresRuntimeCounterProofStore {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         list_memory_proposals(&mut *client, &schema, query)
+    }
+
+    pub fn save_session_activity_digest(
+        &self,
+        digest: &SessionActivityDigest,
+    ) -> CoreResult<SessionActivityDigest> {
+        digest.validate()?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        insert_or_replace_session_activity_digest(&mut *client, &schema, digest)?;
+        get_session_activity_digest_by_id(&mut *client, &schema, &digest.digest_id)?.ok_or_else(
+            || {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "saved PostgreSQL session activity digest was not readable",
+                )
+            },
+        )
+    }
+
+    pub fn list_session_activity_digests(
+        &self,
+        query: &SessionActivityDigestQuery,
+    ) -> CoreResult<Vec<SessionActivityDigest>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        list_session_activity_digests(&mut *client, &schema, query)
     }
 
     pub fn record_memory_governance_decision(
@@ -5125,6 +5157,22 @@ impl PostgresRuntimeCounterProofStore {
                     ON {schema}.session_memory_records(branch_id, status, updated_at DESC);
                  CREATE INDEX IF NOT EXISTS session_memory_shape_idx
                     ON {schema}.session_memory_records(shape_id, status, updated_at DESC);
+                 CREATE TABLE IF NOT EXISTS {schema}.session_activity_digests (
+                    digest_id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    wake_id TEXT NOT NULL,
+                    reviewed_at TEXT,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    retention_until TEXT
+                 );
+                 CREATE UNIQUE INDEX IF NOT EXISTS session_activity_digests_wake_idx
+                    ON {schema}.session_activity_digests(profile_id, session_id, wake_id);
+                 CREATE INDEX IF NOT EXISTS session_activity_digests_profile_review_idx
+                    ON {schema}.session_activity_digests(profile_id, reviewed_at, created_at DESC, digest_id);
+                 CREATE INDEX IF NOT EXISTS session_activity_digests_session_idx
+                    ON {schema}.session_activity_digests(session_id, created_at DESC, digest_id);
                  CREATE TABLE IF NOT EXISTS {schema}.memory_proposals (
                     proposal_id TEXT PRIMARY KEY,
                     space_id TEXT NOT NULL,
@@ -9594,6 +9642,111 @@ fn list_memory_proposals<C: GenericClient>(
         .map(|row| {
             let record_json: String = row.get(0);
             parse_postgres_json(&record_json, "memory proposal record_json")
+        })
+        .collect()
+}
+
+fn insert_or_replace_session_activity_digest<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    digest: &SessionActivityDigest,
+) -> CoreResult<()> {
+    digest.validate()?;
+    let record_json = to_json_text(digest)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.session_activity_digests (
+                digest_id,
+                profile_id,
+                session_id,
+                wake_id,
+                reviewed_at,
+                record_json,
+                created_at,
+                retention_until
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (digest_id) DO UPDATE SET
+                reviewed_at = COALESCE(session_activity_digests.reviewed_at, EXCLUDED.reviewed_at),
+                record_json = EXCLUDED.record_json,
+                created_at = EXCLUDED.created_at,
+                retention_until = EXCLUDED.retention_until"
+        ),
+        &[
+            &digest.digest_id,
+            &digest.profile_id.0,
+            &digest.session_id.0,
+            &digest.wake_id,
+            &digest.reviewed_at,
+            &record_json,
+            &digest.created_at,
+            &digest.retention_until,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL session activity digest", error))?;
+    Ok(())
+}
+
+fn get_session_activity_digest_by_id<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    digest_id: &str,
+) -> CoreResult<Option<SessionActivityDigest>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.session_activity_digests
+                 WHERE digest_id = $1"
+            ),
+            &[&digest_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL session activity digest", error))?;
+    row.map(|row| {
+        let record_json: String = row.get(0);
+        parse_postgres_json(&record_json, "session activity digest record_json")
+    })
+    .transpose()
+}
+
+fn list_session_activity_digests<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &SessionActivityDigestQuery,
+) -> CoreResult<Vec<SessionActivityDigest>> {
+    let profile_id = query.profile_id.as_ref().map(|id| id.0.as_str());
+    let session_id = query.session_id.as_ref().map(|id| id.0.as_str());
+    let wake_id = query.wake_id.as_deref();
+    let (limit, offset) = QueryPage {
+        limit: query.limit,
+        offset: query.offset,
+    }
+    .bounded(100, 1_000);
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.session_activity_digests
+                 WHERE ($1::TEXT IS NULL OR profile_id = $1)
+                   AND ($2::TEXT IS NULL OR session_id = $2)
+                   AND ($3::TEXT IS NULL OR wake_id = $3)
+                   AND ($4::BOOLEAN OR reviewed_at IS NULL)
+                 ORDER BY created_at DESC, digest_id ASC
+                 LIMIT $5 OFFSET $6"
+            ),
+            &[
+                &profile_id,
+                &session_id,
+                &wake_id,
+                &query.include_reviewed,
+                &limit,
+                &offset,
+            ],
+        )
+        .map_err(|error| postgres_error("list PostgreSQL session activity digests", error))?;
+    rows.iter()
+        .map(|row| {
+            let record_json: String = row.get(0);
+            parse_postgres_json(&record_json, "session activity digest record_json")
         })
         .collect()
 }

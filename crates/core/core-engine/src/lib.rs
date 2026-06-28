@@ -49,8 +49,9 @@ use rusty_crew_core_protocol::{
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
     ModelProviderQuery, ModelProviderRecord, ModelProviderWrite, ParentConsumptionPolicy,
     ProfileId, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionConfig, SessionId,
-    SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionActivityDigest,
+    SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
+    ShutdownSummary, ToolProfile,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -1036,6 +1037,20 @@ impl CoreEngine {
         query: &MemoryProposalQuery,
     ) -> CoreResult<Vec<MemoryProposalRecord>> {
         self.store.list_memory_proposals(query)
+    }
+
+    pub fn save_session_activity_digest(
+        &self,
+        digest: &SessionActivityDigest,
+    ) -> CoreResult<SessionActivityDigest> {
+        self.store.save_session_activity_digest(digest)
+    }
+
+    pub fn list_session_activity_digests(
+        &self,
+        query: &SessionActivityDigestQuery,
+    ) -> CoreResult<Vec<SessionActivityDigest>> {
+        self.store.list_session_activity_digests(query)
     }
 
     pub fn record_memory_governance_decision(

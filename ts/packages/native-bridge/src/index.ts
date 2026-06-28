@@ -37,6 +37,8 @@ import type {
   MemoryProposalQuery,
   MemoryProposalRecord,
   MemorySpaceDescriptor,
+  SessionActivityDigest,
+  SessionActivityDigestQuery,
   PlatformAdapterHandle,
   PlatformAdapterRegistration,
   ProfileId,
@@ -418,6 +420,8 @@ interface NativeBridgeBinding {
   buildSessionMemoryPromptContextJson(inputJson: string): string;
   saveMemoryProposalJson(inputJson: string): string;
   listMemoryProposalsJson(inputJson: string): string;
+  saveSessionActivityDigestJson(inputJson: string): string;
+  listSessionActivityDigestsJson(inputJson: string): string;
   recordMemoryGovernanceDecisionJson(inputJson: string): string;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
@@ -1644,6 +1648,12 @@ export interface NativeBridgeModule {
   listMemoryProposals(
     query: MemoryProposalQuery,
   ): Promise<MemoryProposalRecord[]>;
+  saveSessionActivityDigest(
+    digest: SessionActivityDigest,
+  ): Promise<SessionActivityDigest>;
+  listSessionActivityDigests(
+    query: SessionActivityDigestQuery,
+  ): Promise<SessionActivityDigest[]>;
   recordMemoryGovernanceDecision(
     decision: MemoryGovernanceDecisionInput,
   ): Promise<MemoryGovernanceDecisionRecord>;
@@ -1920,6 +1930,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     buildSessionMemoryPromptContext: unavailable("initialize_engine"),
     saveMemoryProposal: unavailable("initialize_engine"),
     listMemoryProposals: unavailable("initialize_engine"),
+    saveSessionActivityDigest: unavailable("initialize_engine"),
+    listSessionActivityDigests: unavailable("initialize_engine"),
     recordMemoryGovernanceDecision: unavailable("initialize_engine"),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
@@ -2818,6 +2830,14 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.listMemoryProposalsJson(JSON.stringify(query)),
       ) as MemoryProposalRecord[],
+    saveSessionActivityDigest: async (digest) =>
+      JSON.parse(
+        binding.saveSessionActivityDigestJson(JSON.stringify(digest)),
+      ) as SessionActivityDigest,
+    listSessionActivityDigests: async (query) =>
+      JSON.parse(
+        binding.listSessionActivityDigestsJson(JSON.stringify(query)),
+      ) as SessionActivityDigest[],
     recordMemoryGovernanceDecision: async (decision) =>
       JSON.parse(
         binding.recordMemoryGovernanceDecisionJson(JSON.stringify(decision)),

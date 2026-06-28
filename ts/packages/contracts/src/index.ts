@@ -1201,6 +1201,40 @@ export interface MemoryProposalQuery {
   offset?: number;
 }
 
+/**
+ * Bounded per-wake activity digest used by the post-wake capture producer.
+ *
+ * This is not a raw transcript. The service builds it from warm post-wake
+ * events, then Rust persists it for scheduled background review. The first
+ * capture target is `profile_dense`; `session_memory` and `roleplay_lore`
+ * remain gated expansion spaces.
+ */
+export interface SessionActivityDigest {
+  digest_id: string;
+  profile_id: ProfileId;
+  session_id: SessionId;
+  wake_id: string;
+  source: string;
+  summary_text: string;
+  event_counts_json: Record<string, number>;
+  tool_calls_json: unknown[];
+  signals_json: unknown[];
+  completion_summary?: string;
+  allowed_capture_spaces: MemorySpaceId[];
+  created_at: string;
+  retention_until?: string;
+  reviewed_at?: string;
+}
+
+export interface SessionActivityDigestQuery {
+  profile_id?: ProfileId;
+  session_id?: SessionId;
+  wake_id?: string;
+  include_reviewed: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 export type MemoryGovernanceDecisionKind =
   | "routed_to_review"
   | "approved"
@@ -1362,6 +1396,37 @@ export function validateMemoryProposalEnvelope(
     errors.push("memory proposal durability_rationale is required");
   }
   return errors;
+}
+
+export function validateSessionActivityDigest(
+  digest: SessionActivityDigest,
+): string[] {
+  const errors: string[] = [];
+  validateIdentifier("session activity digest id", digest.digest_id, errors);
+  validateScopeId(digest.wake_id, errors);
+  if (digest.source.trim().length === 0) {
+    errors.push("session activity digest source must not be empty");
+  }
+  if (digest.summary_text.trim().length === 0) {
+    errors.push("session activity digest summary_text must not be empty");
+  }
+  for (const space of digest.allowed_capture_spaces) {
+    validateIdentifier(
+      "session activity digest allowed capture space",
+      space,
+      errors,
+    );
+  }
+  return errors;
+}
+
+export function assertValidSessionActivityDigest(
+  digest: SessionActivityDigest,
+): void {
+  const errors = validateSessionActivityDigest(digest);
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
 }
 
 export function assertValidMemoryProposalEnvelope(

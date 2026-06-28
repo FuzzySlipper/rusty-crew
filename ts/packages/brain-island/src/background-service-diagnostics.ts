@@ -24,6 +24,9 @@ export interface CuratorBackgroundDiagnostics {
 export interface BackgroundReviewDiagnostics {
   enabled: boolean;
   recentFindings: number;
+  lastCaptureProposalCount?: number;
+  lastPersistedCaptureProposalCount?: number;
+  lastSkippedReasons?: readonly string[];
   lastRunAt?: string;
   lastError?: string;
 }

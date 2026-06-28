@@ -175,6 +175,12 @@ function backgroundReviewPayload(input: unknown): BackgroundReviewPayload {
     maxCandidates:
       numberValue(raw.maxCandidates) ?? numberValue(raw.max_candidates),
     maxTokens: numberValue(raw.maxTokens) ?? numberValue(raw.max_tokens),
+    captureProviderAlias:
+      stringValue(raw.captureProviderAlias) ??
+      stringValue(raw.capture_provider_alias),
+    captureMaxProposals:
+      numberValue(raw.captureMaxProposals) ??
+      numberValue(raw.capture_max_proposals),
     memoryNudgeInterval:
       numberValue(raw.memoryNudgeInterval) ??
       numberValue(raw.memory_nudge_interval),

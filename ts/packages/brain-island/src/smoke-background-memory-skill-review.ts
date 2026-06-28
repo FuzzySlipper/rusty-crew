@@ -118,7 +118,7 @@ assert.equal(result.resultRef.kind, "review_finding_batch");
 assert.equal(result.resultRef.findingIds.length, result.findingCount);
 assert.equal(result.findingFingerprints.length, result.findingCount);
 assert.equal(
-  result.skippedReasons.includes("llm_review_requires_provider_path"),
+  result.skippedReasons.includes("llm_review_no_session_activity_digests"),
   true,
 );
 assert.equal(observationSink.events.length, 1);

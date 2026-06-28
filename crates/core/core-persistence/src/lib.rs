@@ -47,9 +47,9 @@ use rusty_crew_core_protocol::{
     ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
     ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryUpdate,
     ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason, ResourceLimits, RunId,
-    SessionConfig, SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord,
-    SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata,
-    ToolProfile,
+    SessionActivityDigest, SessionActivityDigestQuery, SessionConfig, SessionHandle,
+    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
+    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -60,7 +60,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 27;
+const CURRENT_SCHEMA_VERSION: i64 = 28;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -218,6 +218,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 27,
         description: "add DB-backed profile prompt text",
         apply: migrate_v27_add_profile_registry_prompt_text,
+    },
+    SchemaMigration {
+        version: 28,
+        description: "add session activity digest persistence",
+        apply: migrate_v28_add_session_activity_digests,
     },
 ];
 
@@ -1241,6 +1246,28 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.list_memory_proposals(query),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.list_memory_proposals(query),
+        }
+    }
+
+    pub fn save_session_activity_digest(
+        &self,
+        digest: &SessionActivityDigest,
+    ) -> CoreResult<SessionActivityDigest> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_session_activity_digest(digest),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_session_activity_digest(digest),
+        }
+    }
+
+    pub fn list_session_activity_digests(
+        &self,
+        query: &SessionActivityDigestQuery,
+    ) -> CoreResult<Vec<SessionActivityDigest>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_session_activity_digests(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_session_activity_digests(query),
         }
     }
 
@@ -3534,6 +3561,7 @@ pub enum DiagnosticTable {
     ModelProviders,
     ProfileMemories,
     SessionMemoryRecords,
+    SessionActivityDigests,
     RoleplayLoreRecords,
     RoleplayLoreProvenanceEvents,
     RoleplayLoreLayers,
@@ -3586,6 +3614,7 @@ impl DiagnosticTable {
         Self::ModelProviders,
         Self::ProfileMemories,
         Self::SessionMemoryRecords,
+        Self::SessionActivityDigests,
         Self::RoleplayLoreRecords,
         Self::RoleplayLoreProvenanceEvents,
         Self::RoleplayLoreLayers,
@@ -3638,6 +3667,7 @@ impl DiagnosticTable {
             "model_providers" => Ok(Self::ModelProviders),
             "profile_memories" => Ok(Self::ProfileMemories),
             "session_memory_records" => Ok(Self::SessionMemoryRecords),
+            "session_activity_digests" => Ok(Self::SessionActivityDigests),
             "module_roleplay_lore_records" => Ok(Self::RoleplayLoreRecords),
             "module_roleplay_lore_provenance_events" => Ok(Self::RoleplayLoreProvenanceEvents),
             "module_roleplay_lore_layers" => Ok(Self::RoleplayLoreLayers),
@@ -3695,6 +3725,7 @@ impl DiagnosticTable {
             Self::ModelProviders => "model_providers",
             Self::ProfileMemories => "profile_memories",
             Self::SessionMemoryRecords => "session_memory_records",
+            Self::SessionActivityDigests => "session_activity_digests",
             Self::RoleplayLoreRecords => "module_roleplay_lore_records",
             Self::RoleplayLoreProvenanceEvents => "module_roleplay_lore_provenance_events",
             Self::RoleplayLoreLayers => "module_roleplay_lore_layers",
@@ -5437,6 +5468,29 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<MemoryProposalRecord>> {
         let conn = self.conn()?;
         list_memory_proposals(&conn, query)
+    }
+
+    pub fn save_session_activity_digest(
+        &self,
+        digest: &SessionActivityDigest,
+    ) -> CoreResult<SessionActivityDigest> {
+        digest.validate()?;
+        let conn = self.conn()?;
+        insert_or_replace_session_activity_digest(&conn, digest)?;
+        get_session_activity_digest_by_id(&conn, &digest.digest_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "saved session activity digest was not readable",
+            )
+        })
+    }
+
+    pub fn list_session_activity_digests(
+        &self,
+        query: &SessionActivityDigestQuery,
+    ) -> CoreResult<Vec<SessionActivityDigest>> {
+        let conn = self.conn()?;
+        list_session_activity_digests(&conn, query)
     }
 
     pub fn record_memory_governance_decision(
@@ -8739,6 +8793,36 @@ fn migrate_v22_add_profile_registry(tx: &rusqlite::Transaction<'_>) -> CoreResul
 fn migrate_v27_add_profile_registry_prompt_text(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     add_missing_column_tx(tx, "profile_registry", "prompt_soul_markdown", "TEXT")?;
     add_missing_column_tx(tx, "profile_registry", "prompt_memory_markdown", "TEXT")
+}
+
+fn migrate_v28_add_session_activity_digests(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS session_activity_digests (
+                digest_id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                wake_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                summary_text TEXT NOT NULL,
+                event_counts_json TEXT NOT NULL,
+                tool_calls_json TEXT NOT NULL,
+                signals_json TEXT NOT NULL,
+                completion_summary TEXT,
+                allowed_capture_spaces_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                retention_until TEXT,
+                reviewed_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_activity_digests_wake
+                ON session_activity_digests(profile_id, session_id, wake_id);
+            CREATE INDEX IF NOT EXISTS idx_session_activity_digests_profile_review
+                ON session_activity_digests(profile_id, reviewed_at, created_at DESC, digest_id);
+            CREATE INDEX IF NOT EXISTS idx_session_activity_digests_session
+                ON session_activity_digests(session_id, created_at DESC, digest_id);
+        ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 28", error))
 }
 
 fn migrate_v23_add_session_memory_records(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -18520,6 +18604,165 @@ fn list_memory_proposals(
         .map_err(|error| persistence_error("load memory proposals", error))
 }
 
+fn insert_or_replace_session_activity_digest(
+    conn: &Connection,
+    digest: &SessionActivityDigest,
+) -> CoreResult<()> {
+    digest.validate()?;
+    conn.execute(
+        "INSERT INTO session_activity_digests (
+            digest_id,
+            profile_id,
+            session_id,
+            wake_id,
+            source,
+            summary_text,
+            event_counts_json,
+            tool_calls_json,
+            signals_json,
+            completion_summary,
+            allowed_capture_spaces_json,
+            created_at,
+            retention_until,
+            reviewed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        ON CONFLICT(digest_id) DO UPDATE SET
+            source = excluded.source,
+            summary_text = excluded.summary_text,
+            event_counts_json = excluded.event_counts_json,
+            tool_calls_json = excluded.tool_calls_json,
+            signals_json = excluded.signals_json,
+            completion_summary = excluded.completion_summary,
+            allowed_capture_spaces_json = excluded.allowed_capture_spaces_json,
+            created_at = excluded.created_at,
+            retention_until = excluded.retention_until,
+            reviewed_at = COALESCE(session_activity_digests.reviewed_at, excluded.reviewed_at)",
+        params![
+            digest.digest_id.as_str(),
+            digest.profile_id.0.as_str(),
+            digest.session_id.0.as_str(),
+            digest.wake_id.as_str(),
+            digest.source.as_str(),
+            digest.summary_text.as_str(),
+            to_json_text(&digest.event_counts_json)?,
+            to_json_text(&digest.tool_calls_json)?,
+            to_json_text(&digest.signals_json)?,
+            digest.completion_summary.as_deref(),
+            to_json_text(&digest.allowed_capture_spaces)?,
+            digest.created_at.as_str(),
+            digest.retention_until.as_deref(),
+            digest.reviewed_at.as_deref(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert session activity digest", error))?;
+    Ok(())
+}
+
+fn get_session_activity_digest_by_id(
+    conn: &Connection,
+    digest_id: &str,
+) -> CoreResult<Option<SessionActivityDigest>> {
+    conn.query_row(
+        "SELECT digest_id,
+                profile_id,
+                session_id,
+                wake_id,
+                source,
+                summary_text,
+                event_counts_json,
+                tool_calls_json,
+                signals_json,
+                completion_summary,
+                allowed_capture_spaces_json,
+                created_at,
+                retention_until,
+                reviewed_at
+         FROM session_activity_digests
+         WHERE digest_id = ?1",
+        params![digest_id],
+        row_to_session_activity_digest,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get session activity digest", error))
+}
+
+fn list_session_activity_digests(
+    conn: &Connection,
+    query: &SessionActivityDigestQuery,
+) -> CoreResult<Vec<SessionActivityDigest>> {
+    let (limit, offset) = QueryPage {
+        limit: query.limit,
+        offset: query.offset,
+    }
+    .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT digest_id,
+                    profile_id,
+                    session_id,
+                    wake_id,
+                    source,
+                    summary_text,
+                    event_counts_json,
+                    tool_calls_json,
+                    signals_json,
+                    completion_summary,
+                    allowed_capture_spaces_json,
+                    created_at,
+                    retention_until,
+                    reviewed_at
+             FROM session_activity_digests
+             WHERE (?1 IS NULL OR profile_id = ?1)
+               AND (?2 IS NULL OR session_id = ?2)
+               AND (?3 IS NULL OR wake_id = ?3)
+               AND (?4 OR reviewed_at IS NULL)
+             ORDER BY created_at DESC, digest_id ASC
+             LIMIT ?5 OFFSET ?6",
+        )
+        .map_err(|error| persistence_error("prepare list session activity digests", error))?;
+    let rows = stmt
+        .query_map(
+            params![
+                query.profile_id.as_ref().map(|id| id.0.as_str()),
+                query.session_id.as_ref().map(|id| id.0.as_str()),
+                query.wake_id.as_deref(),
+                query.include_reviewed,
+                limit,
+                offset,
+            ],
+            row_to_session_activity_digest,
+        )
+        .map_err(|error| persistence_error("query session activity digests", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load session activity digests", error))
+}
+
+fn row_to_session_activity_digest(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<SessionActivityDigest> {
+    let event_counts_json: String = row.get(6)?;
+    let tool_calls_json: String = row.get(7)?;
+    let signals_json: String = row.get(8)?;
+    let allowed_capture_spaces_json: String = row.get(10)?;
+    Ok(SessionActivityDigest {
+        digest_id: row.get(0)?,
+        profile_id: ProfileId(row.get(1)?),
+        session_id: SessionId(row.get(2)?),
+        wake_id: row.get(3)?,
+        source: row.get(4)?,
+        summary_text: row.get(5)?,
+        event_counts_json: from_json_text(&event_counts_json).map_err(to_sql_error)?,
+        tool_calls_json: from_json_text(&tool_calls_json).map_err(to_sql_error)?,
+        signals_json: from_json_text(&signals_json).map_err(to_sql_error)?,
+        completion_summary: row.get(9)?,
+        allowed_capture_spaces: from_json_text(&allowed_capture_spaces_json)
+            .map_err(to_sql_error)?,
+        created_at: row.get(11)?,
+        retention_until: row.get(12)?,
+        reviewed_at: row.get(13)?,
+    })
+}
+
 fn row_to_memory_proposal(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryProposalRecord> {
     let envelope_json: String = row.get(0)?;
     let status: String = row.get(1)?;
@@ -23696,6 +23939,74 @@ mod tests {
             )
             .unwrap()
             .is_none());
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn session_activity_digests_save_and_list_by_profile_session_and_wake() {
+        let db_path = temp_db_path("session-activity-digests");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let digest = SessionActivityDigest {
+            digest_id: "sad_alpha".to_string(),
+            profile_id: ProfileId::new("prime-profile"),
+            session_id: SessionId::new("session-alpha"),
+            wake_id: "wake-alpha".to_string(),
+            source: "direct_debug".to_string(),
+            summary_text: "Wake wake-alpha from direct_debug.".to_string(),
+            event_counts_json: json!({"brain_event_observed.text_delta": 1}),
+            tool_calls_json: json!([{"tool_name": "shell", "status": "failed"}]),
+            signals_json: json!([{"signal_type": "tool_failure"}]),
+            completion_summary: Some("wake completed".to_string()),
+            allowed_capture_spaces: vec![MemorySpaceId::unchecked("profile_dense")],
+            created_at: "2026-06-27T12:00:00Z".to_string(),
+            retention_until: Some("2026-07-04T12:00:00Z".to_string()),
+            reviewed_at: None,
+        };
+
+        let saved = store.save_session_activity_digest(&digest).unwrap();
+        assert_eq!(saved.digest_id, "sad_alpha");
+        assert_eq!(store.count_rows("session_activity_digests").unwrap(), 1);
+
+        let duplicate = SessionActivityDigest {
+            summary_text: "Updated deterministic digest.".to_string(),
+            ..digest.clone()
+        };
+        let saved_duplicate = store.save_session_activity_digest(&duplicate).unwrap();
+        assert_eq!(
+            saved_duplicate.summary_text,
+            "Updated deterministic digest."
+        );
+        assert_eq!(store.count_rows("session_activity_digests").unwrap(), 1);
+
+        let by_profile = store
+            .list_session_activity_digests(&SessionActivityDigestQuery {
+                profile_id: Some(ProfileId::new("prime-profile")),
+                session_id: None,
+                wake_id: None,
+                include_reviewed: false,
+                limit: None,
+                offset: None,
+            })
+            .unwrap();
+        assert_eq!(by_profile.len(), 1);
+        assert_eq!(by_profile[0].wake_id, "wake-alpha");
+
+        let by_session_wake = store
+            .list_session_activity_digests(&SessionActivityDigestQuery {
+                profile_id: None,
+                session_id: Some(SessionId::new("session-alpha")),
+                wake_id: Some("wake-alpha".to_string()),
+                include_reviewed: false,
+                limit: Some(10),
+                offset: Some(0),
+            })
+            .unwrap();
+        assert_eq!(by_session_wake.len(), 1);
+        assert_eq!(
+            by_session_wake[0].allowed_capture_spaces[0].as_str(),
+            "profile_dense"
+        );
 
         remove_temp_db(&db_path);
     }

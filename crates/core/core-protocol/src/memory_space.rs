@@ -1,4 +1,4 @@
-use crate::{CoreError, CoreErrorKind, CoreResult, IsoTimestamp};
+use crate::{CoreError, CoreErrorKind, CoreResult, IsoTimestamp, ProfileId, SessionId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -693,6 +693,59 @@ pub struct MemoryProposalQuery {
     pub space_id: Option<MemorySpaceId>,
     pub status: Option<MemoryProposalReviewStatus>,
     pub dedupe_key: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+/// Bounded per-wake activity digest used by the post-wake capture producer.
+///
+/// The digest is intentionally not a raw transcript. TypeScript builds it from
+/// the warm post-wake event stream, then Rust persists it for scheduled
+/// background review. Capture Phase 1 validates `profile_dense` proposals first;
+/// `session_memory` and `roleplay_lore` remain gated expansion targets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionActivityDigest {
+    pub digest_id: String,
+    pub profile_id: ProfileId,
+    pub session_id: SessionId,
+    pub wake_id: String,
+    pub source: String,
+    pub summary_text: String,
+    pub event_counts_json: Value,
+    pub tool_calls_json: Value,
+    pub signals_json: Value,
+    pub completion_summary: Option<String>,
+    pub allowed_capture_spaces: Vec<MemorySpaceId>,
+    pub created_at: IsoTimestamp,
+    pub retention_until: Option<IsoTimestamp>,
+    pub reviewed_at: Option<IsoTimestamp>,
+}
+
+impl SessionActivityDigest {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_identifier("session activity digest id", &self.digest_id)?;
+        if self.wake_id.trim().is_empty() {
+            return invalid("session activity digest wake_id must not be empty");
+        }
+        if self.source.trim().is_empty() {
+            return invalid("session activity digest source must not be empty");
+        }
+        if self.summary_text.trim().is_empty() {
+            return invalid("session activity digest summary_text must not be empty");
+        }
+        for space in &self.allowed_capture_spaces {
+            space.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionActivityDigestQuery {
+    pub profile_id: Option<ProfileId>,
+    pub session_id: Option<SessionId>,
+    pub wake_id: Option<String>,
+    pub include_reviewed: bool,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }

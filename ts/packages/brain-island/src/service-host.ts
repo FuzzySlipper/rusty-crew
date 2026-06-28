@@ -226,6 +226,8 @@ import {
   runCuratorLifecycleTransitions,
   type CuratorLifecycleReport,
 } from "./curator-lifecycle.js";
+import { runStructuredCaptureProvider } from "./capture-producer-provider.js";
+import { buildSessionActivityDigest } from "./session-activity-digest.js";
 import {
   listCuratorArchivedSkills,
   listCuratorPinnedSkills,
@@ -350,6 +352,9 @@ interface DenConversationChannelResolution {
 interface ServiceBackgroundReviewRuntime {
   enabled: boolean;
   recentFindings: number;
+  lastCaptureProposalCount?: number;
+  lastPersistedCaptureProposalCount?: number;
+  lastSkippedReasons?: readonly string[];
   lastRunAt?: string;
   lastError?: string;
 }
@@ -2339,6 +2344,10 @@ async function buildServiceBackgroundDiagnostics(
     backgroundReview: {
       enabled: state.backgroundReview.enabled || reviewJobs.length > 0,
       recentFindings: state.backgroundReview.recentFindings,
+      lastCaptureProposalCount: state.backgroundReview.lastCaptureProposalCount,
+      lastPersistedCaptureProposalCount:
+        state.backgroundReview.lastPersistedCaptureProposalCount,
+      lastSkippedReasons: state.backgroundReview.lastSkippedReasons,
       lastRunAt: state.backgroundReview.lastRunAt,
       lastError: state.backgroundReview.lastError,
     },
@@ -7912,6 +7921,14 @@ async function runServiceBackgroundReview(
               limit: payload.maxCandidates ?? 100,
             })
             .catch(() => []);
+    const sessionActivityDigests = await state.bridge
+      .listSessionActivityDigests({
+        profile_id: profileId as ProfileId,
+        include_reviewed: false,
+        limit: payload.maxCandidates ?? 100,
+        offset: 0,
+      })
+      .catch(() => []);
     const role = buildProfileRoleAssembly(profileContext, {
       includeSkillBodies: false,
     });
@@ -7974,14 +7991,28 @@ async function runServiceBackgroundReview(
       diagnostics,
       skills: profileContext.skills,
       denseProfileMemory: denseProfileMemory.map(toBackgroundMemoryRecord),
+      sessionActivityDigests,
+      captureProvider: (captureInput) =>
+        runStructuredCaptureProvider({
+          ...captureInput,
+          bridge: state.bridge,
+        }),
     });
+    const persistedCaptureProposalCount =
+      await persistBackgroundReviewProposals(state, result);
     state.backgroundReview.lastRunAt = result.finishedAt;
     state.backgroundReview.lastError = undefined;
     state.backgroundReview.recentFindings = result.findingCount;
+    state.backgroundReview.lastCaptureProposalCount = result.findings.filter(
+      (finding) => finding.memoryProposal !== undefined,
+    ).length;
+    state.backgroundReview.lastPersistedCaptureProposalCount =
+      persistedCaptureProposalCount;
+    state.backgroundReview.lastSkippedReasons = result.skippedReasons;
     recordServiceEvent(state, {
       source: "background-review",
       eventType: "memory_skills_review_completed",
-      summary: `Background ${result.reviewType} review for ${result.profileId} produced ${result.findingCount} finding(s).`,
+      summary: `Background ${result.reviewType} review for ${result.profileId} produced ${result.findingCount} finding(s) and persisted ${persistedCaptureProposalCount} capture proposal(s).`,
     });
     return result;
   } catch (error) {
@@ -7996,6 +8027,63 @@ async function runServiceBackgroundReview(
       severity: "warning",
     });
     throw error;
+  }
+}
+
+async function persistBackgroundReviewProposals(
+  state: ServiceState,
+  result: BackgroundReviewResult,
+): Promise<number> {
+  if (result.dryRun) return 0;
+  let persisted = 0;
+  for (const finding of result.findings) {
+    if (finding.memoryProposal === undefined) continue;
+    try {
+      await state.bridge.saveMemoryProposal(finding.memoryProposal);
+      persisted += 1;
+    } catch (error) {
+      recordServiceEvent(state, {
+        source: "background-review",
+        eventType: "capture_proposal_persist_failed",
+        severity: "warning",
+        summary: errorMessage(error, "capture proposal persist failed"),
+      });
+    }
+  }
+  return persisted;
+}
+
+async function persistSessionActivityDigest(input: {
+  state: ServiceState;
+  session: SessionState;
+  wakeId: string;
+  source: ServiceWakeSource;
+  observedEvents: readonly CoreEvent[];
+  completionSummary?: string;
+}): Promise<void> {
+  try {
+    const digest = buildSessionActivityDigest({
+      profileId: input.session.profileId,
+      sessionId: input.session.sessionId,
+      wakeId: input.wakeId,
+      source: input.source,
+      events: input.observedEvents,
+      completionSummary: input.completionSummary,
+      now: input.state.now(),
+    });
+    await input.state.bridge.saveSessionActivityDigest(digest);
+    recordServiceEvent(input.state, {
+      source: "session-activity-digest",
+      eventType: "session_activity_digest_saved",
+      summary: `Saved activity digest ${digest.digest_id} for wake ${input.wakeId}.`,
+    });
+  } catch (error) {
+    recordServiceEvent(input.state, {
+      source: "session-activity-digest",
+      eventType: "session_activity_digest_save_failed",
+      severity: "warning",
+      summary: errorMessage(error, "session activity digest save failed"),
+    });
   }
 }
 
@@ -8322,6 +8410,14 @@ async function dispatchWake(
         state,
         session,
         profileContext,
+        wakeId,
+        source,
+        observedEvents: observed.events,
+        completionSummary: report.summary,
+      });
+      await persistSessionActivityDigest({
+        state,
+        session,
         wakeId,
         source,
         observedEvents: observed.events,

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ProfileId } from "@rusty-crew/contracts";
+import type {
+  MemorySpaceId,
+  ProfileId,
+  SessionActivityDigest,
+} from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   captureProposalToMemoryProposal,
@@ -131,7 +135,48 @@ try {
   assert.equal(captureFinding.memoryProposal?.space_id, "profile_dense");
   assert.equal(captureFinding.memoryProposal?.operation, "add");
   assert.equal(
-    review.skippedReasons.includes("llm_review_requires_provider_path"),
+    review.skippedReasons.includes("capture_provider_alias_missing"),
+    true,
+  );
+
+  const digest: SessionActivityDigest = {
+    digest_id: "sad_alpha",
+    profile_id: profileId,
+    session_id: "session-alpha" as never,
+    wake_id: "wake-alpha",
+    source: "direct_debug",
+    summary_text: "User corrected review output style.",
+    event_counts_json: {},
+    tool_calls_json: [],
+    signals_json: [],
+    allowed_capture_spaces: ["profile_dense" as MemorySpaceId],
+    created_at: "2026-06-26T01:00:00.000Z",
+  };
+  const providerReview = await runBackgroundMemorySkillReview({
+    runId: "capture-run-provider",
+    now: "2026-06-26T01:00:00.000Z",
+    payload: {
+      reviewType: "memory",
+      profileId,
+      llmReviewEnabled: true,
+      captureProviderAlias: "capture",
+      maxFindings: 10,
+      dryRun: true,
+    },
+    sessionActivityDigests: [digest],
+    captureProvider: async (input) => {
+      assert.equal(input.providerAlias, "capture");
+      assert.equal(input.sessionActivityDigests.length, 1);
+      return { proposals: [sessionProposal], skippedReasons: [] };
+    },
+  });
+  assert.equal(providerReview.skippedReasons.length, 0);
+  assert.equal(
+    providerReview.findings.some(
+      (finding) =>
+        finding.candidateKind === "llm_review" &&
+        finding.memoryProposal?.space_id === "session_memory",
+    ),
     true,
   );
 

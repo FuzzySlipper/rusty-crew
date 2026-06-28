@@ -626,6 +626,24 @@ export type {
   LegacyDenseMemoryCaptureProposal,
   TypedCaptureMemoryProposal,
 } from "./capture-memory-proposals.js";
+export {
+  buildSessionActivityDigest,
+  sessionActivityDigestId,
+} from "./session-activity-digest.js";
+export type {
+  BuildSessionActivityDigestInput,
+  SessionActivitySignalDigest,
+  SessionActivityToolCallDigest,
+} from "./session-activity-digest.js";
+export {
+  normalizeCaptureProviderOutput,
+  runStructuredCaptureProvider,
+} from "./capture-producer-provider.js";
+export type {
+  CaptureProducerProviderInput,
+  CaptureProducerProviderResult,
+  CaptureProviderJsonTransport,
+} from "./capture-producer-provider.js";
 export type {
   TextSurfaceSummary,
   ToolContextAdapterSummary,

@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { MemoryProposalEnvelope, ProfileId } from "@rusty-crew/contracts";
+import type {
+  MemoryProposalEnvelope,
+  ProfileId,
+  SessionActivityDigest,
+} from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
   type AgentActivityObservationEvent,
@@ -44,6 +48,8 @@ export interface BackgroundReviewPayload {
   maxFindings?: number;
   maxCandidates?: number;
   maxTokens?: number;
+  captureProviderAlias?: string;
+  captureMaxProposals?: number;
   memoryNudgeInterval?: number;
   skillNudgeInterval?: number;
   includeDenseProfileMemory?: boolean;
@@ -60,15 +66,34 @@ export interface BackgroundReviewRunnerInput {
   diagnostics?: ToolContextDiagnosticsReport;
   skills?: readonly LoadedSkill[];
   denseProfileMemory?: readonly BackgroundReviewDenseMemoryRecord[];
+  sessionActivityDigests?: readonly SessionActivityDigest[];
   captureProposals?: readonly (
     | TypedCaptureMemoryProposal
     | LegacyDenseMemoryCaptureProposal
   )[];
+  captureProvider?: (
+    input: BackgroundReviewCaptureProviderInput,
+  ) => Promise<BackgroundReviewCaptureProviderResult>;
   observation?: {
     identity: AgentObservationIdentity;
     sink?: AgentActivityObservationSink;
     required?: boolean;
   };
+}
+
+export interface BackgroundReviewCaptureProviderInput {
+  runId: string;
+  profileId: ProfileId | string;
+  providerAlias: string;
+  sessionActivityDigests: readonly SessionActivityDigest[];
+  denseProfileMemory?: readonly BackgroundReviewDenseMemoryRecord[];
+  skills?: readonly LoadedSkill[];
+  maxProposals?: number;
+}
+
+export interface BackgroundReviewCaptureProviderResult {
+  proposals: readonly TypedCaptureMemoryProposal[];
+  skippedReasons: readonly string[];
 }
 
 export interface BackgroundReviewSourceRef {
@@ -139,16 +164,41 @@ export async function runBackgroundMemorySkillReview(
     DEFAULT_MAX_CANDIDATES,
     500,
   );
+  const captureProposals: (
+    | TypedCaptureMemoryProposal
+    | LegacyDenseMemoryCaptureProposal
+  )[] = [...(input.captureProposals ?? [])];
   const skippedReasons: string[] = [];
   if (input.payload.llmReviewEnabled) {
-    skippedReasons.push("llm_review_requires_provider_path");
+    if (
+      (input.sessionActivityDigests?.length ?? 0) === 0 &&
+      captureProposals.length === 0
+    ) {
+      skippedReasons.push("llm_review_no_session_activity_digests");
+    } else if (!input.payload.captureProviderAlias?.trim()) {
+      skippedReasons.push("capture_provider_alias_missing");
+    } else if (!input.captureProvider) {
+      skippedReasons.push("llm_review_requires_provider_path");
+    } else {
+      const capture = await input.captureProvider({
+        runId: input.runId,
+        profileId: input.payload.profileId,
+        providerAlias: input.payload.captureProviderAlias,
+        sessionActivityDigests: input.sessionActivityDigests ?? [],
+        denseProfileMemory: input.denseProfileMemory,
+        skills: input.skills,
+        maxProposals: input.payload.captureMaxProposals,
+      });
+      skippedReasons.push(...capture.skippedReasons);
+      captureProposals.push(...capture.proposals);
+    }
   }
 
   const candidates = [
     ...diagnosticCandidates(input),
     ...skillCandidates(input),
     ...denseMemoryCandidates(input),
-    ...captureProposalCandidates(input),
+    ...captureProposalCandidates(input, captureProposals),
     ...roleAssemblyCandidates(input),
   ].slice(0, maxCandidates);
   const findings = candidates
@@ -303,8 +353,12 @@ function denseMemoryCandidates(
 
 function captureProposalCandidates(
   input: BackgroundReviewRunnerInput,
+  proposals: readonly (
+    | TypedCaptureMemoryProposal
+    | LegacyDenseMemoryCaptureProposal
+  )[],
 ): Candidate[] {
-  return (input.captureProposals ?? []).map((proposal) => {
+  return proposals.map((proposal) => {
     const memoryProposal = captureProposalToMemoryProposal({
       runId: input.runId,
       profileId: input.payload.profileId,

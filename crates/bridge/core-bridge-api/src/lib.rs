@@ -114,6 +114,8 @@ pub const OPERATION_NAMES: &[&str] = &[
     "list_simple_kv",
     "storage_diagnostics",
     "run_maintenance",
+    "save_session_activity_digest",
+    "list_session_activity_digests",
     "subscribe_events",
     "unsubscribe_events",
     "get_buffer",

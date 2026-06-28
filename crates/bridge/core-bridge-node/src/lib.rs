@@ -57,7 +57,7 @@ use rusty_crew_core_protocol::{
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
     MessageVariantId, ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus,
-    ProfileRegistryUpdate, ProfileRegistryWrite,
+    ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -836,6 +836,20 @@ impl NativeBridge {
         query: &MemoryProposalQuery,
     ) -> CoreResult<Vec<MemoryProposalRecord>> {
         self.engine()?.list_memory_proposals(query)
+    }
+
+    pub fn save_session_activity_digest(
+        &self,
+        digest: &SessionActivityDigest,
+    ) -> CoreResult<SessionActivityDigest> {
+        self.engine()?.save_session_activity_digest(digest)
+    }
+
+    pub fn list_session_activity_digests(
+        &self,
+        query: &SessionActivityDigestQuery,
+    ) -> CoreResult<Vec<SessionActivityDigest>> {
+        self.engine()?.list_session_activity_digests(query)
     }
 
     pub fn record_memory_governance_decision(
@@ -3655,6 +3669,27 @@ impl NativeBridgeBinding {
             .list_memory_proposals(&query)
             .map_err(to_napi_error)?;
         serialize_json(&records, "memory proposal records")
+    }
+
+    #[napi]
+    pub fn save_session_activity_digest_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let digest = parse_json::<SessionActivityDigest>(&input_json, "session activity digest")?;
+        let record = bridge
+            .save_session_activity_digest(&digest)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "session activity digest")
+    }
+
+    #[napi]
+    pub fn list_session_activity_digests_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query =
+            parse_json::<SessionActivityDigestQuery>(&input_json, "session activity digest query")?;
+        let records = bridge
+            .list_session_activity_digests(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "session activity digests")
     }
 
     #[napi]

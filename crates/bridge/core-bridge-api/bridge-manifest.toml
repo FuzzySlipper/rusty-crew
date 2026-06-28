@@ -830,6 +830,24 @@ output = "core_persistence::RuntimeMaintenanceReport"
 errors = "core_protocol::CoreError"
 summary = "Run explicit runtime maintenance such as queue expiry, queue purge, optimize, and WAL checkpoint."
 
+[[operation]]
+name = "save_session_activity_digest"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionActivityDigest"
+output = "core_protocol::SessionActivityDigest"
+errors = "core_protocol::CoreError"
+summary = "Persist a bounded per-wake activity digest for scheduled capture review."
+
+[[operation]]
+name = "list_session_activity_digests"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionActivityDigestQuery"
+output = "Vec<core_protocol::SessionActivityDigest>"
+errors = "core_protocol::CoreError"
+summary = "List bounded per-wake activity digests for capture decision producer review."
+
 # Observability/event projection.
 
 [[operation]]

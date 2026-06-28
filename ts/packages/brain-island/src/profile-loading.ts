@@ -65,6 +65,8 @@ export interface ProfileBackgroundReviewConfig {
   maxFindings?: number;
   maxCandidates?: number;
   llmReviewEnabled?: boolean;
+  captureProviderAlias?: string;
+  captureMaxProposals?: number;
   dryRun?: boolean;
 }
 
@@ -729,6 +731,8 @@ function profileBackgroundReviewConfig(
       typeof raw.llmReviewEnabled === "boolean"
         ? raw.llmReviewEnabled
         : undefined,
+    captureProviderAlias: optionalString(raw.captureProviderAlias),
+    captureMaxProposals: optionalNumber(raw.captureMaxProposals),
     dryRun: typeof raw.dryRun === "boolean" ? raw.dryRun : undefined,
   };
 }
