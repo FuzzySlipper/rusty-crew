@@ -1501,7 +1501,7 @@ async function handleModelProviderAdminRequest(
     };
     const items = await state.bridge.listModelProviders(query);
     return successRoute(request.requestId, {
-      items,
+      items: items.map(modelProviderApiRecord),
       total: items.length,
       limit: query.limit ?? 100,
       offset: query.offset ?? 0,
@@ -1518,7 +1518,7 @@ async function handleModelProviderAdminRequest(
         retryable: false,
       });
     }
-    return successRoute(request.requestId, provider);
+    return successRoute(request.requestId, modelProviderApiRecord(provider));
   }
 
   if ((method === "POST" && !alias) || (method === "PATCH" && alias)) {
@@ -1551,7 +1551,7 @@ async function handleModelProviderAdminRequest(
       refreshMode: modelProviderRefreshMode(url, request.body),
     });
     return successRoute(request.requestId, {
-      provider,
+      provider: modelProviderApiRecord(provider),
       ...refresh,
     });
   }
@@ -1608,12 +1608,27 @@ function modelProviderRevisionConflictRoute(
         retryable: false,
       },
       data: {
-        provider: currentProvider,
+        provider:
+          currentProvider === undefined
+            ? undefined
+            : modelProviderApiRecord(currentProvider),
         expectedRevision: mismatch.expected,
         currentRevision: mismatch.found,
       },
       meta: { request_id: requestIdValue, schema_version: 1 },
     } as AdminRouteResult["body"],
+  };
+}
+
+function modelProviderApiRecord(
+  provider: NativeModelProviderRecord,
+): NativeModelProviderRecord & { temperature?: number } {
+  if (provider.temperatureMilli === undefined) {
+    return provider;
+  }
+  return {
+    ...provider,
+    temperature: provider.temperatureMilli / 1_000,
   };
 }
 
@@ -4090,9 +4105,10 @@ async function createServiceProfile(
       implementationId: optionalBodyString(command, "implementationId"),
       kind: createProfileKind(command),
       providerAlias,
-      brain: profileBrainFromBody(
-        command.body.brain ?? command.body.brainSelection,
-      ),
+      brain:
+        profileBrainFromBody(
+          command.body.brain ?? command.body.brainSelection,
+        ) ?? defaultProfileBrainForModelProvider(modelProvider),
       mcpBindings: createProfileMcpBindingsFromBody(command.body.mcpBindings),
       mcpToolProfile: optionalBodyString(command, "mcpToolProfile"),
       source: profileCreateSourceFromBody(command.body.source),
@@ -4251,6 +4267,18 @@ function profileBrainFromBody(
     module: optionalString(brain.module),
     strategy: optionalString(brain.strategy),
   }) as { module?: string; strategy?: string };
+}
+
+function defaultProfileBrainForModelProvider(
+  provider: NativeModelProviderRecord,
+): { module?: string; strategy?: string } {
+  if (provider.protocol === "responses") {
+    return { module: "openai-responses" };
+  }
+  if (provider.providerKind === "local") {
+    return { module: "local" };
+  }
+  return { module: "pi-agent-core" };
 }
 
 function createProfileMcpBindingsFromBody(input: unknown):

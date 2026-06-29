@@ -641,6 +641,7 @@ try {
     assert.equal(defaultProvider.status, 200);
     assert.equal(defaultProvider.body.data.provider.alias, "default");
     assert.equal(defaultProvider.body.data.provider.temperatureMilli, 500);
+    assert.equal(defaultProvider.body.data.provider.temperature, 0.5);
     assert.equal(
       defaultProvider.body.data.provider.credential.hasSecret,
       false,
@@ -664,6 +665,7 @@ try {
     assert.equal(alternateProvider.status, 200);
     assert.equal(alternateProvider.body.data.provider.alias, "alternate");
     assert.equal(alternateProvider.body.data.provider.temperatureMilli, 500);
+    assert.equal(alternateProvider.body.data.provider.temperature, 0.5);
     assert.equal(
       alternateProvider.body.data.provider.credential.hasSecret,
       true,
@@ -692,6 +694,25 @@ try {
       updatedAlternateProvider.body.data.provider.revision,
       alternateRevision + 1,
     );
+    assert.equal(
+      updatedAlternateProvider.body.data.provider.temperatureMilli,
+      750,
+    );
+    assert.equal(updatedAlternateProvider.body.data.provider.temperature, 0.75);
+
+    const customChatProvider = await post(
+      "/v1/admin/model-providers",
+      undefined,
+      {
+        alias: "custom-chat",
+        displayName: "Custom Chat",
+        protocol: "chat_completions",
+        providerKind: "custom",
+        modelId: "deterministic",
+      },
+      noAuthPort,
+    );
+    assert.equal(customChatProvider.status, 200);
 
     const staleAlternateProvider = await patch(
       "/v1/admin/model-providers/alternate",
@@ -726,7 +747,7 @@ try {
     );
     assert.deepEqual(
       providers.body.data.items.map((item: { alias: string }) => item.alias),
-      ["alternate", "default"],
+      ["custom-chat", "alternate", "default"],
     );
 
     const localToolProfiles = await get(
@@ -906,6 +927,42 @@ try {
       "local_code_read",
     ]);
     assert.deepEqual(createdProfileConfig.toolPolicy?.requestedTools, []);
+
+    const customChatProfile = await post(
+      "/v1/admin/control/profiles",
+      undefined,
+      {
+        profileId: "field-custom-chat-profile",
+        displayName: "Field Custom Chat Profile",
+        providerAlias: "custom-chat",
+      },
+      noAuthPort,
+    );
+    assert.equal(customChatProfile.status, 200);
+    const customChatProfileConfig = JSON.parse(
+      readFileSync(
+        join(
+          noAuthRoot,
+          "config",
+          "profiles",
+          "field-custom-chat-profile.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      brain?: { module?: string };
+      providerAlias?: string;
+    };
+    assert.equal(customChatProfileConfig.providerAlias, "custom-chat");
+    assert.equal(customChatProfileConfig.brain?.module, "pi-agent-core");
+    const decommissionCustomChatProfile = await post(
+      "/v1/admin/control/profiles/field-custom-chat-profile/decommission",
+      undefined,
+      { reason: "service host smoke custom chat cleanup" },
+      noAuthPort,
+    );
+    assert.equal(decommissionCustomChatProfile.status, 200);
+    assert.equal(decommissionCustomChatProfile.body.ok, true);
     const runtimeConfigAfterProfileCreate = JSON.parse(
       readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
     ) as {
@@ -1077,7 +1134,11 @@ try {
       noAuthPort,
     );
     assert.equal(profileUpdateApply.status, 200);
-    assert.equal(profileUpdateApply.body.data.outcome.result.ok, true);
+    assert.equal(
+      profileUpdateApply.body.data.outcome.result?.ok,
+      true,
+      JSON.stringify(profileUpdateApply.body),
+    );
     const profileAfterUpdate = JSON.parse(
       readFileSync(
         join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
