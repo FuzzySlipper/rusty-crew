@@ -88,6 +88,11 @@ import {
   type DeliveryIntentWakeDecision,
 } from "./channel-wake-policy.js";
 import {
+  isCorrelatedReply,
+  replyFromEvent,
+  type CoordinationToolRuntime,
+} from "./coordination-tools.js";
+import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
   type AdminControlExecutor,
@@ -97,6 +102,11 @@ import {
 import { createNewSessionLifecycleExecutor } from "./new-session-lifecycle.js";
 import { createReloadMcpControlExecutor } from "./reload-mcp-control.js";
 import { createDefaultMcpDiscoveryClient } from "./service-mcp-tools.js";
+import {
+  createLocalToolProfileStore,
+  LocalToolProfileError,
+  type LocalToolProfileWrite,
+} from "./local-tool-profiles.js";
 import {
   handleAdminDiagnosticsRequest,
   type AdminDiagnosticsContext,
@@ -279,6 +289,7 @@ import {
   WakeDispatchTimeoutError,
   withWakeTimeout,
 } from "./wake-timeout.js";
+import { buildBuiltInToolCatalog } from "./tool-registry.js";
 
 export interface RustyCrewServiceHostOptions {
   env?: RustyCrewServiceEnv;
@@ -441,12 +452,14 @@ export async function startRustyCrewServiceHost(
       bridge,
       now: options.now ?? (() => new Date().toISOString()),
     });
+    let liveState: ServiceState | undefined;
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,
       bridge,
       curatorExecutor: curator.executor,
       mcpSurfaceDiagnostics: mcpManager.diagnostics(),
+      coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
     });
     const wakeSubscription = await bridge.subscribeEvents({
       eventKinds: ["brain_wake_requested"],
@@ -490,6 +503,7 @@ export async function startRustyCrewServiceHost(
       nextWakeSequence: 0,
       stopping: false,
     };
+    liveState = state;
     state.denGatewayStartupReport = await connectDenSuccessorGateway(state);
     await ensureDenConversationChannels(state);
     await startTelegramConnector(state);
@@ -728,6 +742,20 @@ async function handleHttpRequest(
     return handleAdminMcpCatalogRequest(request, state);
   }
 
+  if (
+    url.pathname === "/v1/admin/tools/catalog" ||
+    url.pathname === "/v1/admin/tool-policy/catalog"
+  ) {
+    return handleAdminToolsCatalogRequest(request);
+  }
+
+  if (
+    url.pathname === "/v1/admin/local-tool-profiles" ||
+    url.pathname.startsWith("/v1/admin/local-tool-profiles/")
+  ) {
+    return handleAdminLocalToolProfilesRequest(request, state, url);
+  }
+
   if (url.pathname.startsWith("/v1/admin/storage/")) {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST"
@@ -945,6 +973,116 @@ async function handleAdminMcpCatalogRequest(
     toolProfiles,
     bindings,
   });
+}
+
+async function handleAdminToolsCatalogRequest(
+  request: IncomingMessage,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  if ((request.method ?? "GET").toUpperCase() !== "GET") {
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "tool_catalog_read_only",
+      message: "built-in tool catalog routes only support GET",
+      retryable: false,
+    });
+  }
+
+  return successRoute(requestIdValue, buildBuiltInToolCatalog());
+}
+
+async function handleAdminLocalToolProfilesRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  const store = createLocalToolProfileStore({
+    bridge: state.bridge,
+    now: state.now,
+  });
+  const profileId = localToolProfileIdFromPath(url.pathname);
+  try {
+    if (url.pathname === "/v1/admin/local-tool-profiles") {
+      if (method === "GET") {
+        return successRoute(requestIdValue, await store.list());
+      }
+      if (method === "POST") {
+        const body = (await readJsonBody(request)) as LocalToolProfileWrite;
+        return successRoute(requestIdValue, {
+          profile: await store.create(body),
+        });
+      }
+      return failure(405, requestIdValue, {
+        code: "method_not_allowed",
+        reason_code: "local_tool_profiles_method_not_allowed",
+        message: "local tool profile collection supports GET and POST",
+        retryable: false,
+      });
+    }
+
+    if (profileId === undefined) {
+      return failure(404, requestIdValue, {
+        code: "not_found",
+        reason_code: "unknown_local_tool_profile_route",
+        message: `unknown local tool profile route ${url.pathname}`,
+        retryable: false,
+      });
+    }
+
+    if (method === "GET") {
+      const profile = await store.get(profileId);
+      if (profile === undefined) {
+        return failure(404, requestIdValue, {
+          code: "not_found",
+          reason_code: "local_tool_profile_not_found",
+          message: `local tool profile ${profileId} was not found`,
+          retryable: false,
+        });
+      }
+      return successRoute(requestIdValue, { profile });
+    }
+
+    if (method === "PATCH") {
+      const body = (await readJsonBody(request)) as LocalToolProfileWrite;
+      return successRoute(requestIdValue, {
+        profile: await store.update(profileId, body),
+      });
+    }
+
+    if (method === "DELETE") {
+      return successRoute(requestIdValue, {
+        profile: await store.delete(profileId),
+        deleted: true,
+      });
+    }
+
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "local_tool_profile_method_not_allowed",
+      message: "local tool profile item routes support GET, PATCH, and DELETE",
+      retryable: false,
+    });
+  } catch (error) {
+    if (error instanceof LocalToolProfileError) {
+      return failure(error.statusCode, requestIdValue, {
+        code: error.statusCode === 404 ? "not_found" : "invalid_input",
+        reason_code: error.reasonCode,
+        message: error.message,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+}
+
+function localToolProfileIdFromPath(pathname: string): string | undefined {
+  const prefix = "/v1/admin/local-tool-profiles/";
+  if (!pathname.startsWith(prefix)) return undefined;
+  const rest = pathname.slice(prefix.length);
+  if (!rest || rest.includes("/")) return undefined;
+  return decodeURIComponent(rest);
 }
 
 async function handleProfileRegistryWriteRequest(
@@ -1389,7 +1527,23 @@ async function handleModelProviderAdminRequest(
       alias || undefined,
       state.now(),
     );
-    const provider = await state.bridge.upsertModelProvider(write);
+    let provider: NativeModelProviderRecord;
+    try {
+      provider = await state.bridge.upsertModelProvider(write);
+    } catch (error) {
+      const mismatch = modelProviderRevisionMismatch(error);
+      if (mismatch !== undefined && mismatch.alias === write.alias) {
+        const currentProvider = await state.bridge.getModelProvider(
+          write.alias,
+        );
+        return modelProviderRevisionConflictRoute(
+          request.requestId,
+          mismatch,
+          currentProvider,
+        );
+      }
+      throw error;
+    }
     const refresh = await modelProviderRefreshAfterWrite({
       state,
       requestId: request.requestId,
@@ -1412,6 +1566,56 @@ async function handleModelProviderAdminRequest(
 }
 
 type ModelProviderRefreshMode = "none" | "plan" | "apply";
+
+interface ModelProviderRevisionMismatch {
+  alias: string;
+  expected: number;
+  found: number;
+}
+
+function modelProviderRevisionMismatch(
+  error: unknown,
+): ModelProviderRevisionMismatch | undefined {
+  const message = errorMessage(error, "");
+  const match =
+    /model provider ([^ ]+) revision mismatch: expected (\d+), found (\d+)/.exec(
+      message,
+    );
+  if (match === null) {
+    return undefined;
+  }
+  return {
+    alias: match[1] ?? "",
+    expected: Number(match[2]),
+    found: Number(match[3]),
+  };
+}
+
+function modelProviderRevisionConflictRoute(
+  requestIdValue: string,
+  mismatch: ModelProviderRevisionMismatch,
+  currentProvider: NativeModelProviderRecord | undefined,
+): AdminRouteResult {
+  return {
+    status: 409,
+    headers: { "content-type": "application/json" },
+    body: {
+      ok: false,
+      error: {
+        code: "conflict",
+        reason_code: "model_provider_revision_mismatch",
+        message: `model provider ${mismatch.alias} revision mismatch: expected ${mismatch.expected}, found ${mismatch.found}`,
+        retryable: false,
+      },
+      data: {
+        provider: currentProvider,
+        expectedRevision: mismatch.expected,
+        currentRevision: mismatch.found,
+      },
+      meta: { request_id: requestIdValue, schema_version: 1 },
+    } as AdminRouteResult["body"],
+  };
+}
 
 interface ModelProviderWriteRefreshResult {
   refresh: {
@@ -3410,6 +3614,7 @@ async function applyServiceRuntimeConfigFromDisk(
     createMissingSessions: options.createMissingSessions,
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: nextMcpManager.diagnostics(),
+    coordinationRuntime: createServiceCoordinationRuntime(() => state),
   });
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
@@ -3442,6 +3647,7 @@ interface CreatedServiceProfile {
   registryRecord?: Awaited<
     ReturnType<ServiceState["bridge"]["createProfileRegistryRecord"]>
   >;
+  localToolProfileId?: string;
   fileAssetActions: NativeCreateProfilePlan["fileAssetActions"];
   derivedRuntimeActions: NativeCreateProfilePlan["derivedRuntimeActions"];
   applyResult: RustyCrewRuntimeConfigApplyResult;
@@ -3913,6 +4119,14 @@ async function createServiceProfile(
     state.runtimeConfig.profilesDir,
     profileFileAction?.relativePath ?? `${profileSeed.profileId}.json`,
   );
+  const localToolProfileId = optionalBodyString(command, "localToolProfileId");
+  const localToolProfile =
+    localToolProfileId === undefined
+      ? undefined
+      : await createLocalToolProfileStore({
+          bridge: state.bridge,
+          now: state.now,
+        }).resolve(localToolProfileId);
   const registryRecord = plan.registryWrite
     ? await state.bridge.createProfileRegistryRecord(plan.registryWrite)
     : undefined;
@@ -3926,6 +4140,12 @@ async function createServiceProfile(
     providerAlias: profileSeed.providerAlias,
     brain: profileSeed.brain,
     ...(profileMcpConfig === undefined ? {} : { mcpConfig: profileMcpConfig }),
+    ...(localToolProfile === undefined
+      ? {}
+      : {
+          localToolProfileId: localToolProfile.id,
+          toolPolicy: localToolProfile.toolPolicy,
+        }),
     skills: profileSeed.skillsMode,
   });
 
@@ -3954,6 +4174,7 @@ async function createServiceProfile(
     runtimeConfigPath: state.config.paths.serviceConfigFile,
     registryWrite: plan.registryWrite,
     registryRecord,
+    localToolProfileId: localToolProfile?.id,
     fileAssetActions: plan.fileAssetActions,
     derivedRuntimeActions: plan.derivedRuntimeActions,
     applyResult,
@@ -5573,6 +5794,7 @@ async function applyServiceRuntimeRebuild(
     bridge: state.bridge,
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
+    coordinationRuntime: createServiceCoordinationRuntime(() => state),
   });
   state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId] =
     rebuild.handle;
@@ -5678,6 +5900,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     bridge: state.bridge,
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
+    coordinationRuntime: createServiceCoordinationRuntime(() => state),
   });
   state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId] =
     rebuild.handle;
@@ -5986,6 +6209,32 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? value
     : undefined;
+}
+
+function optionalTemperatureMilli(
+  body: Record<string, unknown>,
+): number | undefined {
+  const temperatureMilli = optionalNumber(body.temperatureMilli);
+  if (temperatureMilli !== undefined) {
+    if (Number.isInteger(temperatureMilli)) {
+      return temperatureMilli;
+    }
+    if (temperatureMilli >= 0 && temperatureMilli <= 10) {
+      return Math.round(temperatureMilli * 1_000);
+    }
+    throw new Error(
+      "model provider temperatureMilli must be an integer millivalue; use temperature for decimal temperatures",
+    );
+  }
+
+  const temperature = optionalNumber(body.temperature);
+  if (temperature === undefined) {
+    return undefined;
+  }
+  if (temperature < 0) {
+    throw new Error("model provider temperature must be non-negative");
+  }
+  return Math.round(temperature * 1_000);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
@@ -7826,6 +8075,123 @@ async function submitServiceTurn(
   } finally {
     state.directDispatchSessions.delete(input.sessionId);
   }
+}
+
+function createServiceCoordinationRuntime(
+  getState: () => ServiceState | undefined,
+): CoordinationToolRuntime {
+  const runtime: CoordinationToolRuntime = {
+    async routeMessage(input) {
+      const state = getState();
+      if (state === undefined) {
+        throw new Error("service coordination runtime is not ready");
+      }
+      const receipt = await state.bridge.routeAgentMessage(
+        input.fromAgentId,
+        input.toAgentId,
+        input.body,
+        input.correlationId,
+      );
+      const targetSession = (await state.bridge.listSessions()).find(
+        (candidate) => candidate.agentId === input.toAgentId,
+      );
+      if (targetSession === undefined) {
+        return {
+          accepted: receipt.accepted,
+          sequence: receipt.sequence,
+          wake: {
+            status: "skipped",
+            summary: `message routed to ${input.toAgentId}; no target session found to wake`,
+            reasonCode: "target_session_missing",
+          },
+        };
+      }
+      if (input.requireWake === false) {
+        return {
+          accepted: receipt.accepted,
+          sequence: receipt.sequence,
+          wake: {
+            status: "skipped",
+            summary: `message routed to ${input.toAgentId}; wake not requested`,
+            reasonCode: "wake_not_requested",
+          },
+        };
+      }
+      const pause = runtimePauseForSession(state, targetSession);
+      if (pause !== undefined) {
+        return {
+          accepted: receipt.accepted,
+          sequence: receipt.sequence,
+          wake: runtimePauseWakeReport(state, targetSession.sessionId, pause),
+        };
+      }
+      state.directDispatchSessions.add(targetSession.sessionId);
+      try {
+        const wake = await dispatchWake(
+          state,
+          {
+            type: "brain_wake_requested",
+            sessionId: targetSession.sessionId,
+          },
+          "direct_debug",
+        );
+        suppressNextWakeEvent(state, targetSession.sessionId);
+        await drainAndDispatchWakes(state, "direct_debug");
+        return {
+          accepted: receipt.accepted,
+          sequence: receipt.sequence,
+          wake,
+        };
+      } finally {
+        state.directDispatchSessions.delete(targetSession.sessionId);
+      }
+    },
+    async roundTrip(input) {
+      const state = getState();
+      if (state === undefined) {
+        throw new Error("service coordination runtime is not ready");
+      }
+      const subscription = await state.bridge.subscribeEvents({
+        eventKinds: ["agent_message_routed"],
+      });
+      try {
+        const routed = await runtime.routeMessage({
+          fromAgentId: input.fromAgentId,
+          toAgentId: input.toAgentId,
+          body: input.body,
+          correlationId: input.correlationId,
+          requireWake: true,
+        });
+        const deadline = Date.now() + input.timeoutMs;
+        while (Date.now() < deadline) {
+          const events = await state.bridge.drainSubscriptionEvents(
+            subscription,
+            32,
+          );
+          const replyEvent = events.find((event) =>
+            isCorrelatedReply(event, input),
+          );
+          if (replyEvent !== undefined) {
+            return {
+              ...routed,
+              reply: replyFromEvent(replyEvent),
+            };
+          }
+          await drainAndDispatchWakes(state, "direct_debug");
+          await delay(25);
+        }
+        return {
+          ...routed,
+          timedOut: true,
+        };
+      } finally {
+        await state.bridge
+          .unsubscribeEvents(subscription)
+          .catch(() => undefined);
+      }
+    },
+  };
+  return runtime;
 }
 
 function configuredSessionForDeliveryIntent(
@@ -9928,7 +10294,7 @@ function modelProviderWriteFromBody(
     ),
     contextWindowTokens: optionalNumber(body.contextWindowTokens),
     maxOutputTokens: optionalNumber(body.maxOutputTokens),
-    temperatureMilli: optionalNumber(body.temperatureMilli),
+    temperatureMilli: optionalTemperatureMilli(body),
     reasoningEffort: optionalString(body.reasoningEffort),
     reasoningFormat: optionalString(body.reasoningFormat),
     secret: optionalString(body.secret ?? body.apiKey),

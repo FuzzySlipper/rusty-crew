@@ -10,6 +10,7 @@ export type ToolCategory =
   | "skills"
   | "mcp"
   | "delegation"
+  | "coordination"
   | "planning"
   | "storage"
   | "diagnostics";
@@ -124,6 +125,38 @@ export interface ToolInventory {
   selectedBindings: ToolExecutableBinding[];
   selectedDescriptors: ToolDescriptor[];
   items: ToolInventoryItem[];
+}
+
+export interface BuiltInToolCatalogToolset {
+  id: string;
+  label: string;
+  description: string;
+  category: ToolCategory | "mixed";
+  toolCount: number;
+  tools: string[];
+}
+
+export interface BuiltInToolCatalogTool {
+  name: string;
+  label: string;
+  description: string;
+  category: ToolCategory;
+  toolsets: string[];
+  surfaces: ToolSurface[];
+  safety: ToolSafetyFlag[];
+  outputShape: string;
+  version: string;
+  aliases: string[];
+  deprecated?: ToolDeprecation;
+  replacement?: string;
+  coexistenceNote?: string;
+}
+
+export interface BuiltInToolCatalog {
+  schemaVersion: 1;
+  catalogId: "default-local-tools";
+  toolsets: BuiltInToolCatalogToolset[];
+  tools: BuiltInToolCatalogTool[];
 }
 
 export class ToolRegistry {
@@ -337,6 +370,32 @@ const defaultToolRegistryDefinitions = [
     outputShape: "delegation.find_relevant_paths_result.v1",
     version: "0.1.0",
     inventoryTest: "smoke:delegation-tools",
+  },
+  {
+    name: "send_agent_message",
+    description:
+      "Route a Rusty Crew internal message to another agent and request a wake.",
+    category: "coordination",
+    toolsets: ["agent_coordination", "full_agent"],
+    implementationModule: "./coordination-tools.js#sendAgentMessageTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "coordination.send_agent_message_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:coordination-tools",
+  },
+  {
+    name: "agent_round",
+    description:
+      "Send a Rusty Crew internal message to another agent, wake it, and wait for one correlated reply.",
+    category: "coordination",
+    toolsets: ["agent_coordination", "full_agent"],
+    implementationModule: "./coordination-tools.js#agentRoundTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "coordination.agent_round_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:coordination-tools",
   },
   {
     name: "web_search",
@@ -1168,6 +1227,104 @@ export function toToolDescriptor(entry: ToolRegistryEntry): ToolDescriptor {
     name: entry.name,
     description: entry.description,
   };
+}
+
+export function buildBuiltInToolCatalog(
+  registry: ToolRegistry = defaultToolRegistry,
+): BuiltInToolCatalog {
+  const tools = registry.entries
+    .filter((entry) => entry.surfaces.includes("brain"))
+    .map<BuiltInToolCatalogTool>((entry) => ({
+      name: entry.name,
+      label: humanizeIdentifier(entry.name),
+      description: entry.description,
+      category: entry.category,
+      toolsets: entry.toolsets.filter(
+        (toolset) => !isDynamicMcpToolset(toolset),
+      ),
+      surfaces: [...entry.surfaces],
+      safety: [...entry.safety],
+      outputShape: entry.outputShape,
+      version: entry.version,
+      aliases: [...(entry.aliases ?? [])],
+      deprecated: entry.deprecated,
+      replacement: entry.replacement,
+      coexistenceNote: entry.coexistenceNote,
+    }))
+    .filter((tool) => tool.toolsets.length > 0)
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  const toolsetsById = new Map<
+    string,
+    { categories: ToolCategory[]; tools: string[] }
+  >();
+  for (const tool of tools) {
+    for (const toolset of tool.toolsets) {
+      const aggregate = toolsetsById.get(toolset) ?? {
+        categories: [],
+        tools: [],
+      };
+      aggregate.categories.push(tool.category);
+      aggregate.tools.push(tool.name);
+      toolsetsById.set(toolset, aggregate);
+    }
+  }
+
+  const toolsets = [...toolsetsById.entries()]
+    .map<BuiltInToolCatalogToolset>(([id, aggregate]) => {
+      const toolsForSet = [...new Set(aggregate.tools)].sort();
+      const category = dominantCategory(aggregate.categories);
+      return {
+        id,
+        label: humanizeIdentifier(id),
+        description: toolsetDescription(id, category, toolsForSet.length),
+        category,
+        toolCount: toolsForSet.length,
+        tools: toolsForSet,
+      };
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+
+  return {
+    schemaVersion: 1,
+    catalogId: "default-local-tools",
+    toolsets,
+    tools,
+  };
+}
+
+function isDynamicMcpToolset(toolset: string): boolean {
+  return toolset.startsWith("mcp:");
+}
+
+function humanizeIdentifier(identifier: string): string {
+  return identifier
+    .split(/[_:-]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function dominantCategory(
+  categories: readonly ToolCategory[],
+): ToolCategory | "mixed" {
+  const unique = [...new Set(categories)];
+  if (unique.length === 1) {
+    return unique[0]!;
+  }
+  return "mixed";
+}
+
+function toolsetDescription(
+  id: string,
+  category: ToolCategory | "mixed",
+  toolCount: number,
+): string {
+  const noun = toolCount === 1 ? "tool" : "tools";
+  if (category === "mixed") {
+    return `${humanizeIdentifier(id)} built-in tool policy set with ${toolCount} ${noun}.`;
+  }
+  return `${humanizeIdentifier(id)} built-in ${category} tool policy set with ${toolCount} ${noun}.`;
 }
 
 function validateEntryMetadata(

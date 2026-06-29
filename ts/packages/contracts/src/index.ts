@@ -1569,6 +1569,8 @@ export const manifestOperationNames = [
   "list_recall_traces",
   "get_recall_trace",
   "list_simple_kv",
+  "put_simple_kv",
+  "delete_simple_kv",
   "storage_diagnostics",
   "run_maintenance",
   "subscribe_events",

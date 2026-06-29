@@ -822,6 +822,24 @@ errors = "core_protocol::CoreError"
 summary = "List simple_kv module entries through the Rust repository/query surface."
 
 [[operation]]
+name = "put_simple_kv"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::SimpleKvWrite"
+output = "core_persistence::SimpleKvRecord"
+errors = "core_protocol::CoreError"
+summary = "Create or update a simple_kv module entry through the Rust repository surface."
+
+[[operation]]
+name = "delete_simple_kv"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::SimpleKvDelete"
+output = "core_persistence::SimpleKvRecord"
+errors = "core_protocol::CoreError"
+summary = "Delete a simple_kv module entry through the Rust repository surface."
+
+[[operation]]
 name = "run_maintenance"
 surface = "stable"
 direction = "ts_to_rust"

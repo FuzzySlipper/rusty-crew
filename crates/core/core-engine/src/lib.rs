@@ -32,8 +32,9 @@ use rusty_crew_core_persistence::{
     ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord, ScheduledRunStatus,
     ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
     SelectActiveVariantRequest, SelectActiveVariantResult, SessionMemoryPromptContext,
-    SessionMemoryQuery, SessionMemoryRecord, SimpleKvQuery, SimpleKvRecord,
-    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord, WorkerRunStatus,
+    SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord,
+    SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord,
+    WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     session_memory_space_descriptor, ActionBatchReceipt, ActionRejection, AgentId, AgentMessage,
@@ -834,6 +835,14 @@ impl CoreEngine {
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
         self.store.list_simple_kv(query)
+    }
+
+    pub fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
+        self.store.put_simple_kv(write)
+    }
+
+    pub fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
+        self.store.delete_simple_kv(delete)
     }
 
     pub fn run_maintenance(

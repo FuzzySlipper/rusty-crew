@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildBuiltInToolCatalog,
   buildToolInventory,
   createToolRegistry,
   defaultToolRegistry,
@@ -37,6 +38,30 @@ assert.equal(
 assert.equal(
   readInventory.items.find((item) => item.name === "terminal")?.status,
   "not_requested",
+);
+
+const builtInCatalog = buildBuiltInToolCatalog();
+assert.deepEqual(builtInCatalog.schemaVersion, 1);
+assert.equal(builtInCatalog.catalogId, "default-local-tools");
+for (const toolset of [
+  "local_code_read",
+  "web_research",
+  "memory_profile",
+  "skills_read",
+  "planning_session",
+]) {
+  assert.ok(
+    builtInCatalog.toolsets.some((entry) => entry.id === toolset),
+    `missing built-in toolset catalog entry ${toolset}`,
+  );
+}
+assert.ok(
+  builtInCatalog.tools.some((entry) => entry.name === "todo"),
+  "missing todo tool catalog entry",
+);
+assert.equal(
+  builtInCatalog.toolsets.some((entry) => entry.id.startsWith("mcp:")),
+  false,
 );
 
 const writeInventory = defaultToolRegistry.buildInventory({

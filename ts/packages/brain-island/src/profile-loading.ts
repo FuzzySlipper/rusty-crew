@@ -109,6 +109,7 @@ export interface ProfileConfig {
   modelConfig: BrainModelConfig;
   brain?: ProfileBrainConfig;
   runtime?: ProfileRuntimeConfig;
+  localToolProfileId?: string;
   toolPolicy?: ProfileToolPolicy;
   prompt?: ProfilePromptFragments;
   skills?: string[];
@@ -606,6 +607,7 @@ function validateProfileConfig(
             },
           }
         : undefined,
+    localToolProfileId: optionalString(parsed.localToolProfileId),
     toolPolicy: isRecord(parsed.toolPolicy)
       ? profileToolPolicy(parsed.toolPolicy)
       : undefined,

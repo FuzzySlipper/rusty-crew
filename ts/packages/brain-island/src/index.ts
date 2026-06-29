@@ -315,6 +315,22 @@ export type {
   DelegationToolDetails,
 } from "./delegation-tools.js";
 export {
+  agentRoundTool,
+  coordinationTools,
+  createCoordinationToolResolver,
+  isCorrelatedReply,
+  replyFromEvent,
+  resolveCoordinationTools,
+  sendAgentMessageTool,
+} from "./coordination-tools.js";
+export type {
+  AgentMessageRouteResult,
+  AgentRoundResult,
+  CoordinationToolContext,
+  CoordinationToolDetails,
+  CoordinationToolRuntime,
+} from "./coordination-tools.js";
+export {
   createDenMemoryToolResolver,
   denMemoryProposeTool,
   denMemoryReadTool,

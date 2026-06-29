@@ -41,6 +41,7 @@ export type ApiCapabilityScope =
   | "search"
   | "storage"
   | "curator"
+  | "tool"
   | "service";
 
 export interface SlashCommandDescriptor {
@@ -113,7 +114,7 @@ export interface ChatCommandAutocompleteResult {
 
 export interface ApiCapabilityDescriptor {
   id: string;
-  method: "DELETE" | "GET" | "POST";
+  method: "DELETE" | "GET" | "PATCH" | "POST";
   path_template: string;
   description: string;
   auth: ApiCapabilityAuth;
@@ -838,6 +839,63 @@ export const API_CAPABILITIES = [
     "admin",
     ["mcp", "config", "profile"],
   ),
+  readCapability(
+    "admin.tools.catalog",
+    "GET",
+    "/v1/admin/tools/catalog",
+    "List built-in non-MCP tool policy sets and tool metadata.",
+    "admin",
+    ["tool", "profile", "config"],
+  ),
+  readCapability(
+    "admin.local_tool_profiles.list",
+    "GET",
+    "/v1/admin/local-tool-profiles",
+    "List DB-backed local built-in tool profiles.",
+    "admin",
+    ["tool", "profile", "config"],
+  ),
+  {
+    id: "admin.local_tool_profiles.create",
+    method: "POST",
+    path_template: "/v1/admin/local-tool-profiles",
+    description: "Create a DB-backed local built-in tool profile.",
+    auth: "admin",
+    mutation: "write",
+    stability: "experimental",
+    tags: ["tool", "profile", "config"],
+    public: true,
+  },
+  readCapability(
+    "admin.local_tool_profiles.read",
+    "GET",
+    "/v1/admin/local-tool-profiles/{profile_id}",
+    "Read one DB-backed local built-in tool profile.",
+    "admin",
+    ["tool", "profile", "config"],
+  ),
+  {
+    id: "admin.local_tool_profiles.update",
+    method: "PATCH",
+    path_template: "/v1/admin/local-tool-profiles/{profile_id}",
+    description: "Update one DB-backed local built-in tool profile.",
+    auth: "admin",
+    mutation: "write",
+    stability: "experimental",
+    tags: ["tool", "profile", "config"],
+    public: true,
+  },
+  {
+    id: "admin.local_tool_profiles.delete",
+    method: "DELETE",
+    path_template: "/v1/admin/local-tool-profiles/{profile_id}",
+    description: "Delete one custom DB-backed local built-in tool profile.",
+    auth: "admin",
+    mutation: "write",
+    stability: "experimental",
+    tags: ["tool", "profile", "config"],
+    public: true,
+  },
   readCapability(
     "admin.healthz",
     "GET",

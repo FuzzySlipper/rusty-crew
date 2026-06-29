@@ -24,6 +24,8 @@
     "smoke:planning-runtime-wake": "npm run smoke:planning-runtime-wake -w @rusty-crew/brain-island",
     "smoke:delegated-role-assembly": "npm run smoke:delegated-role-assembly -w @rusty-crew/brain-island",
     "smoke:delegation-tools": "npm run smoke:delegation-tools -w @rusty-crew/brain-island",
+    "smoke:coordination-tools": "npm run smoke:coordination-tools -w @rusty-crew/brain-island",
+    "smoke:coordination-tools-live": "npm run smoke:coordination-tools-live -w @rusty-crew/brain-island",
     "smoke:cron-expression": "npm run smoke:cron-expression -w @rusty-crew/brain-island",
     "smoke:cron-runtime-config": "npm run smoke:cron-runtime-config -w @rusty-crew/brain-island",
     "smoke:delegated-slice": "npm run smoke:delegated-slice -w @rusty-crew/brain-island",

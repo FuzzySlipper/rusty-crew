@@ -427,6 +427,8 @@ interface NativeBridgeBinding {
     query: NativeProfileMemoryQuery,
   ): NativeProfileMemoryRecord[];
   listSimpleKv(query: NativeSimpleKvQuery): NativeSimpleKvRecord[];
+  putSimpleKv(write: NativeSimpleKvWrite): NativeSimpleKvRecord;
+  deleteSimpleKv(input: NativeSimpleKvDelete): NativeSimpleKvRecord;
   getProfileMemory(
     profileId: string,
     targetType: string,
@@ -820,6 +822,22 @@ export interface NativeSimpleKvRecord {
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;
+}
+
+export interface NativeSimpleKvWrite {
+  scopeType: string;
+  scopeId: string;
+  key: string;
+  valueJson: string;
+  now: string;
+  expiresAt?: string;
+}
+
+export interface NativeSimpleKvDelete {
+  scopeType: string;
+  scopeId: string;
+  key: string;
+  expectedRevision: number;
 }
 
 export interface NativeProfileMemoryWrite {
@@ -1703,6 +1721,8 @@ export interface NativeBridgeModule {
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
   listSimpleKv(query: NativeSimpleKvQuery): Promise<NativeSimpleKvRecord[]>;
+  putSimpleKv(write: NativeSimpleKvWrite): Promise<NativeSimpleKvRecord>;
+  deleteSimpleKv(input: NativeSimpleKvDelete): Promise<NativeSimpleKvRecord>;
   getProfileMemory(input: {
     profileId: string;
     targetType: "profile" | "user";
@@ -1832,6 +1852,8 @@ export const nativeManifestOperationNames = [
   "list_recall_traces",
   "get_recall_trace",
   "list_simple_kv",
+  "put_simple_kv",
+  "delete_simple_kv",
   "storage_diagnostics",
   "run_maintenance",
   "subscribe_events",
@@ -1981,6 +2003,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     replaceProfileMemory: unavailable("initialize_engine"),
     removeProfileMemory: unavailable("initialize_engine"),
     listSimpleKv: unavailable("initialize_engine"),
+    putSimpleKv: unavailable("initialize_engine"),
+    deleteSimpleKv: unavailable("initialize_engine"),
     searchRuntime: unavailable("initialize_engine"),
     queryRuntimeCounters: unavailable("initialize_engine"),
     runtimeSummary: unavailable("initialize_engine"),
@@ -2963,6 +2987,8 @@ function createNativeBridgeModule(
     },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
     listSimpleKv: async (query) => binding.listSimpleKv(query),
+    putSimpleKv: async (write) => binding.putSimpleKv(write),
+    deleteSimpleKv: async (input) => binding.deleteSimpleKv(input),
     getProfileMemory: async (input) =>
       binding.getProfileMemory(
         input.profileId,

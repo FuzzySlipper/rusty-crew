@@ -239,6 +239,39 @@ try {
   assert.equal(mcpCatalog.body.data.bindings[0]?.endpointServerId, "field");
   assert.equal(mcpCatalog.body.data.bindings[0]?.resolvedServerId, "field");
 
+  const toolsCatalog = await get("/v1/admin/tools/catalog", token);
+  assert.equal(toolsCatalog.status, 200);
+  assert.equal(toolsCatalog.body.ok, true);
+  assert.equal(toolsCatalog.body.data.schemaVersion, 1);
+  assert.equal(toolsCatalog.body.data.catalogId, "default-local-tools");
+  for (const toolset of [
+    "local_code_read",
+    "web_research",
+    "memory_profile",
+    "skills_read",
+    "planning_session",
+  ]) {
+    assert.ok(
+      toolsCatalog.body.data.toolsets.some(
+        (entry: { id: string }) => entry.id === toolset,
+      ),
+      `missing built-in tool catalog toolset ${toolset}`,
+    );
+  }
+  assert.ok(
+    toolsCatalog.body.data.tools.some(
+      (entry: { name: string; description: string }) =>
+        entry.name === "todo" && entry.description.length > 0,
+    ),
+    "missing built-in todo tool catalog metadata",
+  );
+  assert.equal(
+    toolsCatalog.body.data.toolsets.some((entry: { id: string }) =>
+      entry.id.startsWith("mcp:"),
+    ),
+    false,
+  );
+
   const recentEvents = await get("/v1/admin/events/recent", token);
   assert.match(
     recentEvents.body.data.items[0]?.summary,
@@ -601,12 +634,13 @@ try {
         modelId: "deterministic",
         contextWindowTokens: 8192,
         maxOutputTokens: 512,
-        temperatureMilli: 0,
+        temperature: 0.5,
       },
       noAuthPort,
     );
     assert.equal(defaultProvider.status, 200);
     assert.equal(defaultProvider.body.data.provider.alias, "default");
+    assert.equal(defaultProvider.body.data.provider.temperatureMilli, 500);
     assert.equal(
       defaultProvider.body.data.provider.credential.hasSecret,
       false,
@@ -622,12 +656,14 @@ try {
         protocol: "chat_completions",
         providerKind: "local",
         modelId: "deterministic",
+        temperatureMilli: 0.5,
         apiKey: "alternate-secret-smoke",
       },
       noAuthPort,
     );
     assert.equal(alternateProvider.status, 200);
     assert.equal(alternateProvider.body.data.provider.alias, "alternate");
+    assert.equal(alternateProvider.body.data.provider.temperatureMilli, 500);
     assert.equal(
       alternateProvider.body.data.provider.credential.hasSecret,
       true,
@@ -635,6 +671,52 @@ try {
     assert.doesNotMatch(
       JSON.stringify(alternateProvider.body),
       /alternate-secret-smoke/,
+    );
+    const alternateRevision = alternateProvider.body.data.provider.revision;
+    const updatedAlternateProvider = await patch(
+      "/v1/admin/model-providers/alternate",
+      undefined,
+      {
+        alias: "alternate",
+        displayName: "Alternate Local Updated",
+        protocol: "chat_completions",
+        providerKind: "local",
+        modelId: "deterministic",
+        temperature: 0.75,
+        expectedRevision: alternateRevision,
+      },
+      noAuthPort,
+    );
+    assert.equal(updatedAlternateProvider.status, 200);
+    assert.equal(
+      updatedAlternateProvider.body.data.provider.revision,
+      alternateRevision + 1,
+    );
+
+    const staleAlternateProvider = await patch(
+      "/v1/admin/model-providers/alternate",
+      undefined,
+      {
+        alias: "alternate",
+        displayName: "Alternate Local Stale",
+        protocol: "chat_completions",
+        providerKind: "local",
+        modelId: "deterministic",
+        temperature: 0.9,
+        expectedRevision: alternateRevision,
+      },
+      noAuthPort,
+    );
+    assert.equal(staleAlternateProvider.status, 409);
+    assert.equal(staleAlternateProvider.body.ok, false);
+    assert.equal(staleAlternateProvider.body.error.code, "conflict");
+    assert.equal(
+      staleAlternateProvider.body.error.reason_code,
+      "model_provider_revision_mismatch",
+    );
+    assert.equal(
+      staleAlternateProvider.body.data.provider.revision,
+      alternateRevision + 1,
     );
 
     const providers = await get(
@@ -646,6 +728,81 @@ try {
       providers.body.data.items.map((item: { alias: string }) => item.alias),
       ["alternate", "default"],
     );
+
+    const localToolProfiles = await get(
+      "/v1/admin/local-tool-profiles",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(localToolProfiles.status, 200);
+    assert.equal(localToolProfiles.body.ok, true);
+    assert.ok(
+      localToolProfiles.body.data.items.some(
+        (item: { id: string; system: boolean; readOnly: boolean }) =>
+          item.id === "code_read" && item.system && item.readOnly,
+      ),
+      "missing seeded code_read local tool profile",
+    );
+
+    const customToolProfile = await post(
+      "/v1/admin/local-tool-profiles",
+      undefined,
+      {
+        id: "field_custom",
+        displayName: "Field Custom",
+        description: "Custom smoke local tools.",
+        toolsets: ["local_code_read"],
+        tools: ["todo"],
+      },
+      noAuthPort,
+    );
+    assert.equal(customToolProfile.status, 200);
+    assert.equal(customToolProfile.body.ok, true);
+    assert.equal(customToolProfile.body.data.profile.id, "field_custom");
+    assert.equal(customToolProfile.body.data.profile.revision, 1);
+
+    const invalidToolProfile = await post(
+      "/v1/admin/local-tool-profiles",
+      undefined,
+      {
+        id: "bad_mcp",
+        displayName: "Bad MCP",
+        toolsets: ["mcp:planner"],
+      },
+      noAuthPort,
+    );
+    assert.equal(invalidToolProfile.status, 400);
+    assert.equal(invalidToolProfile.body.ok, false);
+    assert.equal(
+      invalidToolProfile.body.error.reason_code,
+      "local_tool_profile_rejects_mcp_toolset",
+    );
+
+    const updatedToolProfile = await patch(
+      "/v1/admin/local-tool-profiles/field_custom",
+      undefined,
+      {
+        expectedRevision: customToolProfile.body.data.profile.revision,
+        displayName: "Field Custom Updated",
+        toolsets: ["local_code_read", "skills_read"],
+        tools: ["todo"],
+      },
+      noAuthPort,
+    );
+    assert.equal(updatedToolProfile.status, 200);
+    assert.equal(updatedToolProfile.body.data.profile.revision, 2);
+    assert.deepEqual(updatedToolProfile.body.data.profile.toolsets, [
+      "local_code_read",
+      "skills_read",
+    ]);
+
+    const deletedToolProfile = await del(
+      "/v1/admin/local-tool-profiles/field_custom",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(deletedToolProfile.status, 200);
+    assert.equal(deletedToolProfile.body.data.deleted, true);
 
     const invalidProfile = await post(
       "/v1/admin/control/profiles",
@@ -680,6 +837,7 @@ try {
             toolProfileKey: "field-created-profile-extra",
           },
         ],
+        localToolProfileId: "code_read",
       },
       noAuthPort,
     );
@@ -729,6 +887,11 @@ try {
     ) as {
       brain?: { module?: string };
       mcpConfig?: { toolProfile?: string };
+      localToolProfileId?: string;
+      toolPolicy?: {
+        requestedToolsets?: string[];
+        requestedTools?: string[];
+      };
       displayName?: string;
       providerAlias?: string;
       modelConfig?: unknown;
@@ -738,6 +901,11 @@ try {
     assert.equal(createdProfileConfig.modelConfig, undefined);
     assert.equal(createdProfileConfig.brain?.module, "local");
     assert.equal(createdProfileConfig.mcpConfig, undefined);
+    assert.equal(createdProfileConfig.localToolProfileId, "code_read");
+    assert.deepEqual(createdProfileConfig.toolPolicy?.requestedToolsets, [
+      "local_code_read",
+    ]);
+    assert.deepEqual(createdProfileConfig.toolPolicy?.requestedTools, []);
     const runtimeConfigAfterProfileCreate = JSON.parse(
       readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
     ) as {
@@ -1287,6 +1455,23 @@ async function patch(
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: (await response.json()) as any,
+  };
+}
+
+async function del(
+  path: string,
+  bearer: string | undefined,
+  requestPort = port,
+) {
+  const response = await fetch(`http://127.0.0.1:${requestPort}${path}`, {
+    method: "DELETE",
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+    },
   });
   return {
     status: response.status,

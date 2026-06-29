@@ -49,8 +49,8 @@ use rusty_crew_core_persistence::{
     ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryQuery,
-    SessionMemoryRecord, SimpleKvQuery, SimpleKvRecord, SimpleKvScope, UpdateBranchHeadRequest,
-    UpdateBranchHeadResult,
+    SessionMemoryRecord, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
+    SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
@@ -909,6 +909,14 @@ impl NativeBridge {
         self.engine()?.list_simple_kv(query)
     }
 
+    pub fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
+        self.engine()?.put_simple_kv(write)
+    }
+
+    pub fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
+        self.engine()?.delete_simple_kv(delete)
+    }
+
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
         self.engine()?.runtime_summary(scope)
     }
@@ -1712,6 +1720,24 @@ pub struct JsSimpleKvRecord {
     pub created_at: String,
     pub updated_at: String,
     pub expires_at: Option<String>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSimpleKvWrite {
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key: String,
+    pub value_json: String,
+    pub now: String,
+    pub expires_at: Option<String>,
+}
+
+#[napi_derive::napi(object)]
+pub struct JsSimpleKvDelete {
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key: String,
+    pub expected_revision: f64,
 }
 
 #[napi_derive::napi(object)]
@@ -3815,6 +3841,24 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn put_simple_kv(&self, write: JsSimpleKvWrite) -> napi::Result<JsSimpleKvRecord> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .put_simple_kv(&to_simple_kv_write(write)?)
+            .map_err(to_napi_error)?;
+        to_js_simple_kv_record(record)
+    }
+
+    #[napi]
+    pub fn delete_simple_kv(&self, delete: JsSimpleKvDelete) -> napi::Result<JsSimpleKvRecord> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .delete_simple_kv(&to_simple_kv_delete(delete)?)
+            .map_err(to_napi_error)?;
+        to_js_simple_kv_record(record)
+    }
+
+    #[napi]
     pub fn runtime_summary(
         &self,
         scope_type: String,
@@ -4158,6 +4202,41 @@ fn to_simple_kv_query(query: JsSimpleKvQuery) -> SimpleKvQuery {
             offset: query.offset,
         }),
     }
+}
+
+fn to_simple_kv_write(write: JsSimpleKvWrite) -> napi::Result<SimpleKvWrite> {
+    Ok(SimpleKvWrite {
+        scope: SimpleKvScope {
+            scope_type: write.scope_type,
+            scope_id: write.scope_id,
+        },
+        key: write.key,
+        value_json: serde_json::from_str(&write.value_json).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid simple_kv value_json: {error}"),
+            )
+        })?,
+        now: write.now,
+        expires_at: write.expires_at,
+    })
+}
+
+fn to_simple_kv_delete(delete: JsSimpleKvDelete) -> napi::Result<SimpleKvDelete> {
+    if !delete.expected_revision.is_finite() || delete.expected_revision < 0.0 {
+        return Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            "simple_kv expected_revision must be a non-negative finite number",
+        ));
+    }
+    Ok(SimpleKvDelete {
+        scope: SimpleKvScope {
+            scope_type: delete.scope_type,
+            scope_id: delete.scope_id,
+        },
+        key: delete.key,
+        expected_revision: delete.expected_revision as u64,
+    })
 }
 
 fn to_profile_memory_write(write: JsProfileMemoryWrite) -> napi::Result<ProfileMemoryWrite> {

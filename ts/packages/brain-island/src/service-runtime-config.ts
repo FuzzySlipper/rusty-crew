@@ -39,6 +39,10 @@ import {
 } from "./browser-tools.js";
 import { BrowserSessionManager } from "./browser-session-manager.js";
 import {
+  createCoordinationToolResolver,
+  type CoordinationToolRuntime,
+} from "./coordination-tools.js";
+import {
   createBrainModuleRegistry,
   brainStrategyMetadataForModuleStrategy,
   providerStateRebuildPolicyForModuleStrategy,
@@ -679,6 +683,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+  coordinationRuntime?: CoordinationToolRuntime;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await expandRuntimeConfigFromProfiles(
     input.runtimeConfig,
@@ -771,6 +776,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             curatorExecutor: input.curatorExecutor,
             mcpToolCatalog,
             mcpToolExecutorFactory: input.mcpToolExecutorFactory,
+            coordinationRuntime: input.coordinationRuntime,
           }),
         ),
       );
@@ -888,6 +894,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+  coordinationRuntime?: CoordinationToolRuntime;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
   const runtimeConfig = await expandRuntimeConfigFromProfiles(
     input.runtimeConfig,
@@ -950,6 +957,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         curatorExecutor: input.curatorExecutor,
         mcpToolCatalog,
         mcpToolExecutorFactory: input.mcpToolExecutorFactory,
+        coordinationRuntime: input.coordinationRuntime,
       }),
     ),
   );
@@ -1220,6 +1228,7 @@ async function createConfiguredBrain(
     curatorExecutor?: CuratorExecuteContext["executor"];
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+    coordinationRuntime?: CoordinationToolRuntime;
   } = {},
 ): Promise<BrainImplementation> {
   return module.createBrain({
@@ -1253,6 +1262,7 @@ function createServiceToolResolver(
     curatorExecutor?: CuratorExecuteContext["executor"];
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+    coordinationRuntime?: CoordinationToolRuntime;
   },
 ): BrainToolResolver {
   const todoStore = createServiceTodoStore(options.serviceConfig);
@@ -1286,6 +1296,7 @@ function createServiceToolResolver(
       manageMode: serviceSkillManageMode(profile),
     }),
     resolveDelegationTools,
+    createCoordinationToolResolver(options.coordinationRuntime),
     createPlanningToolResolver({
       bridge: options.bridge,
       runtimeConfig: options.runtimeConfig,

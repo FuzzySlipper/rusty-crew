@@ -97,6 +97,33 @@ assertUnique(
   ),
   "API capability route",
 );
+assert.ok(
+  API_CAPABILITIES.some(
+    (capability) =>
+      capability.id === "admin.tools.catalog" &&
+      capability.method === "GET" &&
+      capability.path_template === "/v1/admin/tools/catalog",
+  ),
+  "missing built-in tools catalog API capability",
+);
+assert.ok(
+  API_CAPABILITIES.some(
+    (capability) =>
+      capability.id === "admin.local_tool_profiles.list" &&
+      capability.method === "GET" &&
+      capability.path_template === "/v1/admin/local-tool-profiles",
+  ),
+  "missing local tool profiles list API capability",
+);
+assert.ok(
+  API_CAPABILITIES.some(
+    (capability) =>
+      capability.id === "admin.local_tool_profiles.update" &&
+      capability.method === "PATCH" &&
+      capability.path_template === "/v1/admin/local-tool-profiles/{profile_id}",
+  ),
+  "missing local tool profiles update API capability",
+);
 
 for (const command of SLASH_COMMAND_REGISTRY) {
   const routed = intercepted(

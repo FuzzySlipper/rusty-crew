@@ -23,6 +23,8 @@
     "smoke:planning-runtime-wake": "tsx src/smoke-planning-runtime-wake.ts",
     "smoke:delegated-role-assembly": "tsx src/smoke-delegated-role-assembly.ts",
     "smoke:delegation-tools": "tsx src/smoke-delegation-tools.ts",
+    "smoke:coordination-tools": "tsx src/smoke-coordination-tools.ts",
+    "smoke:coordination-tools-live": "tsx src/smoke-coordination-tools-live.ts",
     "smoke:cron-expression": "tsx src/smoke-cron-expression.ts",
     "smoke:cron-runtime-config": "tsx src/smoke-cron-runtime-config.ts",
     "smoke:mid-turn": "tsx src/smoke-mid-turn-delta.ts",

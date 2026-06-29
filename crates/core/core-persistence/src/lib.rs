@@ -907,6 +907,22 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.put_simple_kv(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.put_simple_kv(write),
+        }
+    }
+
+    pub fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.delete_simple_kv(delete),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.delete_simple_kv(delete),
+        }
+    }
+
     pub fn run_maintenance(
         &self,
         policy: &RuntimeMaintenancePolicy,
