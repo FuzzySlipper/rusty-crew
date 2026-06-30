@@ -131,6 +131,63 @@ assert.equal(currentSession.fields?.channelPresence, "idle");
 assert.equal(currentSession.fields?.mcpStatus, "active");
 assert.equal(currentSession.fields?.tools, 1);
 
+const model = buildReadOnlySlashCommandResponse("model", {
+  diagnostics,
+  session: sessionContext,
+  modelContext: {
+    session_id: "session-alpha",
+    agent_id: "agent-alpha",
+    profile_id: "prime",
+    provider: {
+      alias: "deepseek-flash",
+      status: "active",
+      protocol: "chat_completions",
+      provider_kind: "openai-compatible",
+      base_url_host: "127.0.0.1:18082",
+      base_url_redacted: "http://127.0.0.1:18082",
+      model_id: "gpt",
+      context_window_tokens: 128_000,
+      max_output_tokens: 4096,
+      temperature: 0.5,
+      reasoning_effort: "low",
+      reasoning_format: "none",
+      revision: 3,
+    },
+    brain: {
+      module: "pi-agent-core",
+      backend: "pi-agent-core",
+    },
+    tools: {
+      local_tool_profile_id: "full-agent",
+      tool_count: 3,
+      requested_toolsets: ["local_code_read"],
+      requested_tools: ["todo"],
+      mcp_binding_count: 1,
+      mcp_active_count: 1,
+    },
+    context: {
+      estimate_quality: "approximate",
+      estimate_method: "test",
+      context_window_tokens: 128_000,
+      estimated_prompt_tokens: 512,
+      estimated_remaining_tokens: 127_488,
+      max_output_tokens: 4096,
+      sampled_event_count: 7,
+      sampled_message_count: 2,
+    },
+    degraded: false,
+    diagnostics: [],
+  },
+});
+assert.equal(model.title, "Model");
+assert.equal(model.fields?.providerAlias, "deepseek-flash");
+assert.equal(model.fields?.modelId, "gpt");
+assert.equal(model.fields?.estimatedPromptTokens, 512);
+assert.equal(
+  model.items?.some((item) => item.includes("provider endpoint")),
+  true,
+);
+
 const missingSession = buildReadOnlySlashCommandResponse("session", {
   diagnostics,
   session: {
@@ -157,6 +214,7 @@ console.log(
       issues: status.items?.length,
       channelPresence: currentSession.fields?.channelPresence,
       mcpStatus: currentSession.fields?.mcpStatus,
+      modelProvider: model.fields?.providerAlias,
       missing: missingSession.fields?.status,
     },
     null,

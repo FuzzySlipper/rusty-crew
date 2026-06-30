@@ -44,6 +44,9 @@ export interface RustyViewChatContext {
   executeCommand?(
     input: ExecuteChatCommandInput,
   ): Promise<ExecuteChatCommandResult>;
+  contextUsage?(
+    input: SessionContextUsageInput,
+  ): Promise<SessionContextUsageResult>;
   sendMessage?(input: ChatSendMessageInput): Promise<SendChatMessageResult>;
   listMessageSlots?(input: ListMessageSlotsInput): Promise<MessageSlotPage>;
   searchTranscript?(
@@ -210,6 +213,62 @@ export interface ExecuteChatCommandInput {
   command: string;
   actor: ChatActor;
   requestId: string;
+}
+
+export interface SessionContextUsageInput {
+  session: SessionState;
+  requestId: string;
+}
+
+export interface SessionContextUsageResult {
+  session_id: string;
+  agent_id: string;
+  profile_id: string;
+  provider: {
+    alias: string;
+    status: "active" | "disabled" | "archived" | "missing" | "unknown";
+    protocol?: "responses" | "chat_completions";
+    provider_kind?: string;
+    display_name?: string;
+    base_url_host?: string;
+    base_url_redacted?: string;
+    model_id?: string;
+    context_window_tokens?: number;
+    max_output_tokens?: number;
+    temperature?: number;
+    reasoning_effort?: string;
+    reasoning_format?: string;
+    revision?: number;
+  };
+  brain: {
+    module?: string;
+    strategy?: string;
+    backend: string;
+  };
+  tools: {
+    local_tool_profile_id?: string;
+    tool_count: number;
+    requested_toolsets?: string[];
+    requested_tools?: string[];
+    mcp_binding_count: number;
+    mcp_active_count: number;
+  };
+  context: {
+    estimate_quality: "exact" | "approximate" | "unavailable";
+    estimate_method: string;
+    context_window_tokens?: number;
+    estimated_prompt_tokens?: number;
+    estimated_remaining_tokens?: number;
+    max_output_tokens?: number;
+    sampled_event_count: number;
+    sampled_message_count: number;
+  };
+  degraded: boolean;
+  diagnostics: Array<{
+    severity: "info" | "warning" | "error";
+    code: string;
+    message: string;
+  }>;
 }
 
 export interface ExecuteChatCommandResult {
@@ -1053,6 +1112,43 @@ export async function handleRustyViewChatRequest(
         pageLimit(url, 100, 500),
         cursorParam(request, url),
       ),
+    );
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "context"
+  ) {
+    if (!context.contextUsage) {
+      return failure(412, requestId, {
+        code: "failed_precondition",
+        reason_code: "chat_context_usage_not_configured",
+        message: "chat context usage diagnostics are not configured",
+        retryable: true,
+      });
+    }
+    const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
+    const sessions = await context.listSessions();
+    const session = sessions.find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (!session) {
+      return failure(404, requestId, {
+        code: "not_found",
+        reason_code: "chat_session_not_found",
+        message: `chat session ${sessionId} was not found`,
+        retryable: false,
+      });
+    }
+    return success(
+      requestId,
+      await context.contextUsage({
+        session,
+        requestId,
+      }),
     );
   }
 

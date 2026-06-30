@@ -199,6 +199,7 @@ import {
   type ReorderMessageVariantsInput,
   type RemoveAttachmentInput,
   type RemoveDataBankScopeInput,
+  type SessionContextUsageResult,
   type SelectActiveMessageVariantInput,
   type SelectActiveMessageVariantResult,
   type SelectActiveConversationBranchInput,
@@ -685,6 +686,7 @@ async function handleHttpRequest(
         listChatEvents: (session, cursor, limit) =>
           listChatEventsAfterCursor(state, session, cursor, limit),
         executeCommand: (input) => executeRustyViewChatCommand(state, input),
+        contextUsage: (input) => rustyViewSessionContextUsage(state, input),
         sendMessage: (input) => submitRustyViewChatMessage(state, input),
         listMessageSlots: (input) => listRustyViewMessageSlots(state, input),
         searchTranscript: (input) => searchRustyViewTranscript(state, input),
@@ -1112,9 +1114,16 @@ async function handleProfileRegistryWriteRequest(
       retryable: false,
     });
   }
-  let plan: ProfileRegistryWritePlan;
+  let plan: ProfileRegistryWritePlan | ProfileRegistryRuntimeConfigPlan;
   try {
-    plan = await planProfileRegistryWrite(state, route, request.body);
+    plan =
+      route.kind === "runtime-config"
+        ? await planProfileRegistryRuntimeConfigWrite(
+            state,
+            route,
+            request.body,
+          )
+        : await planProfileRegistryWrite(state, route, request.body);
   } catch (error) {
     if (
       error instanceof Error &&
@@ -1138,7 +1147,13 @@ async function handleProfileRegistryWriteRequest(
   const effects =
     route.kind === "lifecycle"
       ? await applyProfileRegistryLifecycleEffects(state, updated)
-      : undefined;
+      : route.kind === "runtime-config"
+        ? await applyProfileRegistryRuntimeConfigEffects(
+            state,
+            updated,
+            plan as ProfileRegistryRuntimeConfigPlan,
+          )
+        : undefined;
   return successRoute(request.requestId, {
     ...plan,
     applied: true,
@@ -1149,7 +1164,7 @@ async function handleProfileRegistryWriteRequest(
 
 interface ProfileRegistryWriteRoute {
   profileId: string;
-  kind: "update" | "lifecycle" | "prompt";
+  kind: "update" | "lifecycle" | "prompt" | "runtime-config";
   mode: "plan" | "apply";
 }
 
@@ -1177,6 +1192,46 @@ interface ProfileRegistryWritePlan {
   };
 }
 
+interface ProfileRegistryRuntimeConfigPlan {
+  ok: boolean;
+  profileId: string;
+  mode: "plan" | "apply";
+  expectedRevision: number;
+  current: NativeProfileRegistryRecord;
+  next: NativeProfileRegistryRecord;
+  nextWrite: NativeProfileRegistryWrite;
+  runtimeConfig: EditableProfileRuntimeConfig;
+  diagnostics: ProfileRegistryWritePlan["diagnostics"];
+  implications: {
+    registryRevisionWillIncrement: true;
+    profileFileWillChange: boolean;
+    serviceConfigWillChange: boolean;
+    configReloadRequired: true;
+    runtimeRebuildRecommended: boolean;
+    mcpRefreshRecommended: boolean;
+  };
+}
+
+interface EditableProfileRuntimeConfig {
+  providerAlias: string;
+  brain?: { module?: string; strategy?: string };
+  localToolProfileId?: string;
+  toolPolicy?: {
+    requestedToolsets?: string[];
+    requestedTools?: string[];
+    deniedTools?: string[];
+    includeDeprecated?: boolean;
+  };
+  mcpBindings: Array<{
+    serverId: string;
+    bindingId?: string;
+    adapterId?: string;
+    serverNames?: string[];
+    transport?: string;
+    toolProfileKey?: string;
+  }>;
+}
+
 function parseProfileRegistryWriteRoute(
   pathname: string,
 ): ProfileRegistryWriteRoute | undefined {
@@ -1193,14 +1248,17 @@ function parseProfileRegistryWriteRoute(
   const kind = parts[5];
   const mode = parts[6];
   if (
-    (kind !== "update" && kind !== "lifecycle" && kind !== "prompt") ||
+    (kind !== "update" &&
+      kind !== "lifecycle" &&
+      kind !== "prompt" &&
+      kind !== "runtime-config") ||
     (mode !== "plan" && mode !== "apply")
   ) {
     return undefined;
   }
   return {
     profileId: decodeURIComponent(parts[4] ?? ""),
-    kind,
+    kind: kind === "runtime-config" ? "runtime-config" : kind,
     mode,
   };
 }
@@ -1239,7 +1297,7 @@ async function planProfileRegistryWrite(
   return {
     ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
     profileId: route.profileId,
-    kind: route.kind,
+    kind: route.kind as "update" | "lifecycle" | "prompt",
     mode: route.mode,
     expectedRevision,
     current,
@@ -1266,6 +1324,75 @@ async function planProfileRegistryWrite(
   };
 }
 
+async function planProfileRegistryRuntimeConfigWrite(
+  state: ServiceState,
+  route: ProfileRegistryWriteRoute,
+  body: unknown,
+): Promise<ProfileRegistryRuntimeConfigPlan> {
+  if (!isRecord(body)) {
+    throw new Error("profile registry runtime-config body must be an object");
+  }
+  const current = await state.bridge.getProfileRegistryRecord(route.profileId);
+  if (current === undefined) {
+    throw new Error(
+      `profile registry record ${route.profileId} was not found; import file-backed profiles before registry mutation`,
+    );
+  }
+  const expectedRevision = requiredRevision(body);
+  const diagnostics: ProfileRegistryRuntimeConfigPlan["diagnostics"] = [];
+  if (expectedRevision !== current.revision) {
+    diagnostics.push({
+      severity: "error",
+      code: "profile_registry_revision_mismatch",
+      path: "expectedRevision",
+      message: `expected revision ${expectedRevision}, found ${current.revision}`,
+    });
+  }
+
+  const existing = await editableRuntimeConfigForProfile(state, current);
+  const runtimeConfig = await editableRuntimeConfigFromBody(
+    state,
+    current,
+    existing,
+    body,
+    diagnostics,
+  );
+  const next = nextProfileRegistryRuntimeConfigRecord(
+    current,
+    runtimeConfig,
+    state.now(),
+  );
+  const nextWrite = profileRegistryRecordToWrite(next, state.now());
+  return {
+    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    profileId: route.profileId,
+    mode: route.mode,
+    expectedRevision,
+    current,
+    next,
+    nextWrite,
+    runtimeConfig,
+    diagnostics,
+    implications: {
+      registryRevisionWillIncrement: true,
+      profileFileWillChange:
+        JSON.stringify(existing.profileFileRuntimeConfig) !==
+        JSON.stringify(profileFileRuntimeConfig(runtimeConfig)),
+      serviceConfigWillChange:
+        JSON.stringify(existing.mcpBindings) !==
+        JSON.stringify(runtimeConfig.mcpBindings),
+      configReloadRequired: true,
+      runtimeRebuildRecommended:
+        existing.runtimeConfig.providerAlias !== runtimeConfig.providerAlias ||
+        JSON.stringify(existing.runtimeConfig.brain ?? {}) !==
+          JSON.stringify(runtimeConfig.brain ?? {}),
+      mcpRefreshRecommended:
+        JSON.stringify(existing.mcpBindings) !==
+        JSON.stringify(runtimeConfig.mcpBindings),
+    },
+  };
+}
+
 function nextProfileRegistryFieldRecord(
   current: NativeProfileRegistryRecord,
   body: Record<string, unknown>,
@@ -1285,6 +1412,37 @@ function nextProfileRegistryFieldRecord(
     activeRuntimeSettingsJson: Object.hasOwn(body, "activeRuntimeSettingsJson")
       ? (body.activeRuntimeSettingsJson ?? {})
       : current.activeRuntimeSettingsJson,
+    updatedAt: now,
+  };
+}
+
+function nextProfileRegistryRuntimeConfigRecord(
+  current: NativeProfileRegistryRecord,
+  runtimeConfig: EditableProfileRuntimeConfig,
+  now: string,
+): NativeProfileRegistryRecord {
+  return {
+    ...current,
+    activeRuntimeSettingsJson: profileRuntimeSettingsJson(runtimeConfig),
+    derivedRuntimeRefs: [
+      ...current.derivedRuntimeRefs.filter(
+        (ref) => ref.refKind !== "mcp_binding",
+      ),
+      ...runtimeConfig.mcpBindings.map((binding) => ({
+        refKind: "mcp_binding",
+        refId:
+          binding.bindingId ??
+          `${current.agentId ?? current.profileId}-mcp-${binding.serverId}`,
+        status: "planned",
+        updatedAt: now,
+        metadataJson: {
+          server_id: binding.serverId,
+          server_names: binding.serverNames ?? [binding.serverId],
+          endpoint_ref: `config://mcp/${binding.serverId}`,
+          tool_profile_key: binding.toolProfileKey ?? current.profileId,
+        },
+      })),
+    ],
     updatedAt: now,
   };
 }
@@ -1354,6 +1512,399 @@ function profileRegistryRecordToWrite(
   };
 }
 
+async function editableRuntimeConfigForProfile(
+  state: ServiceState,
+  record: NativeProfileRegistryRecord,
+): Promise<{
+  runtimeConfig: EditableProfileRuntimeConfig;
+  profileFileRuntimeConfig: ReturnType<typeof profileFileRuntimeConfig>;
+  mcpBindings: EditableProfileRuntimeConfig["mcpBindings"];
+}> {
+  const profile = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    record.profileId as ProfileId,
+  ).catch(() => undefined);
+  const settings = optionalRecord(record.activeRuntimeSettingsJson) ?? {};
+  const providerAlias =
+    optionalString(settings.providerAlias) ??
+    optionalString(settings.provider_alias) ??
+    profile?.providerAlias ??
+    "default";
+  const mcpBindings = state.runtimeConfig.mcpBindings
+    .filter((binding) => String(binding.profileId) === record.profileId)
+    .map(editableMcpBindingFromRuntime);
+  const runtimeConfig: EditableProfileRuntimeConfig = {
+    providerAlias,
+    brain:
+      profile?.brain ??
+      brainMetadataFromUnknown(settings.brain) ??
+      defaultProfileBrainForModelProvider(
+        (await state.bridge.getModelProvider(providerAlias)) ??
+          ({
+            providerKind: "local",
+            protocol: "chat_completions",
+          } as NativeModelProviderRecord),
+      ),
+    localToolProfileId:
+      profile?.localToolProfileId ??
+      optionalString(settings.localToolProfileId) ??
+      optionalString(settings.local_tool_profile_id),
+    toolPolicy:
+      editableToolPolicy(profile?.toolPolicy) ??
+      profileToolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy),
+    mcpBindings,
+  };
+  return {
+    runtimeConfig,
+    profileFileRuntimeConfig: profileFileRuntimeConfig(runtimeConfig),
+    mcpBindings,
+  };
+}
+
+async function editableRuntimeConfigFromBody(
+  state: ServiceState,
+  record: NativeProfileRegistryRecord,
+  existing: Awaited<ReturnType<typeof editableRuntimeConfigForProfile>>,
+  body: Record<string, unknown>,
+  diagnostics: ProfileRegistryRuntimeConfigPlan["diagnostics"],
+): Promise<EditableProfileRuntimeConfig> {
+  const providerAlias = Object.hasOwn(body, "providerAlias")
+    ? requiredString(body.providerAlias, "providerAlias")
+    : existing.runtimeConfig.providerAlias;
+  const modelProvider = await state.bridge.getModelProvider(providerAlias);
+  if (modelProvider === undefined) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_provider_not_found",
+      path: "providerAlias",
+      message: `model provider alias ${providerAlias} was not found`,
+    });
+  } else if (modelProvider.status !== "active") {
+    diagnostics.push({
+      severity: "error",
+      code: "model_provider_not_active",
+      path: "providerAlias",
+      message: `model provider alias ${providerAlias} is ${modelProvider.status}; active provider required`,
+    });
+  }
+
+  const brain = Object.hasOwn(body, "brain")
+    ? profileBrainFromBody(body.brain)
+    : Object.hasOwn(body, "providerAlias") && modelProvider !== undefined
+      ? defaultProfileBrainForModelProvider(modelProvider)
+      : existing.runtimeConfig.brain;
+
+  const localToolProfileId = Object.hasOwn(body, "localToolProfileId")
+    ? optionalString(body.localToolProfileId)
+    : existing.runtimeConfig.localToolProfileId;
+  let toolPolicy = Object.hasOwn(body, "toolPolicy")
+    ? (profileToolPolicyFromUnknown(body.toolPolicy) ?? {})
+    : existing.runtimeConfig.toolPolicy;
+  if (localToolProfileId !== undefined) {
+    try {
+      const localToolProfile = await createLocalToolProfileStore({
+        bridge: state.bridge,
+        now: state.now,
+      }).resolve(localToolProfileId);
+      toolPolicy = localToolProfile.toolPolicy;
+    } catch (error) {
+      diagnostics.push({
+        severity: "error",
+        code:
+          error instanceof LocalToolProfileError
+            ? error.reasonCode
+            : "local_tool_profile_invalid",
+        path: "localToolProfileId",
+        message: errorMessage(
+          error,
+          `local tool profile ${localToolProfileId} is invalid`,
+        ),
+      });
+    }
+  } else {
+    validateInlineToolPolicy(toolPolicy, diagnostics);
+  }
+
+  const mcpBindings = Object.hasOwn(body, "mcpBindings")
+    ? editableMcpBindingsFromBody(body.mcpBindings)
+    : existing.runtimeConfig.mcpBindings;
+
+  return {
+    providerAlias,
+    brain,
+    localToolProfileId,
+    toolPolicy,
+    mcpBindings: mcpBindings.map((binding, index) =>
+      normalizedEditableMcpBinding(record, binding, index),
+    ),
+  };
+}
+
+function profileRuntimeSettingsJson(
+  runtimeConfig: EditableProfileRuntimeConfig,
+): Record<string, unknown> {
+  return compactRecord({
+    provider_alias: runtimeConfig.providerAlias,
+    providerAlias: runtimeConfig.providerAlias,
+    brain: runtimeConfig.brain,
+    skills_mode: "all",
+    localToolProfileId: runtimeConfig.localToolProfileId,
+    toolPolicy: runtimeConfig.toolPolicy,
+    mcp_bindings: runtimeConfig.mcpBindings.map((binding) => ({
+      server_id: binding.serverId,
+      binding_id: binding.bindingId,
+      adapter_id: binding.adapterId,
+      server_names: binding.serverNames ?? [binding.serverId],
+      transport: binding.transport ?? "streamable_http",
+      tool_profile_key: binding.toolProfileKey,
+      endpoint_ref: `config://mcp/${binding.serverId}`,
+    })),
+    mcpBindings: runtimeConfig.mcpBindings,
+    profile: profileFileRuntimeConfig(runtimeConfig),
+  });
+}
+
+function profileFileRuntimeConfig(
+  runtimeConfig: EditableProfileRuntimeConfig,
+): Record<string, unknown> {
+  return compactRecord({
+    providerAlias: runtimeConfig.providerAlias,
+    brain: runtimeConfig.brain,
+    localToolProfileId: runtimeConfig.localToolProfileId,
+    toolPolicy: runtimeConfig.toolPolicy,
+  });
+}
+
+function applyEditableRuntimeConfigToProfileJson(
+  profileConfig: Record<string, unknown>,
+  runtimeConfig: EditableProfileRuntimeConfig,
+): void {
+  profileConfig.providerAlias = runtimeConfig.providerAlias;
+  delete profileConfig.modelConfig;
+  if (runtimeConfig.brain === undefined) {
+    delete profileConfig.brain;
+  } else {
+    profileConfig.brain = runtimeConfig.brain;
+  }
+  if (runtimeConfig.localToolProfileId === undefined) {
+    delete profileConfig.localToolProfileId;
+  } else {
+    profileConfig.localToolProfileId = runtimeConfig.localToolProfileId;
+  }
+  if (runtimeConfig.toolPolicy === undefined) {
+    delete profileConfig.toolPolicy;
+  } else {
+    profileConfig.toolPolicy = runtimeConfig.toolPolicy;
+  }
+}
+
+async function readProfileConfigJsonForMutation(
+  profilePath: string,
+  profileId: string,
+): Promise<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(profilePath, "utf8"));
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      parsed = { profileId };
+    } else {
+      throw error;
+    }
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(`profile ${profileId} config root must be an object`);
+  }
+  parsed.profileId = profileId;
+  return parsed;
+}
+
+function runtimeMcpBindingsForProfile(
+  state: ServiceState,
+  record: NativeProfileRegistryRecord,
+  runtimeConfig: EditableProfileRuntimeConfig,
+): Record<string, unknown>[] {
+  const session = state.runtimeConfig.sessions.find(
+    (candidate) => String(candidate.profileId) === record.profileId,
+  );
+  const agentId = String(
+    record.agentId ?? session?.agentId ?? record.profileId,
+  );
+  return runtimeConfig.mcpBindings.map((binding, index) => ({
+    bindingId: binding.bindingId ?? `${agentId}-mcp-${index + 1}`,
+    adapterId: binding.adapterId ?? "mcp-ts-main",
+    agentId,
+    sessionId: String(session?.sessionId ?? `${record.profileId}-session`),
+    profileId: record.profileId,
+    serverNames: binding.serverNames ?? [binding.serverId],
+    endpointRef: `config://mcp/${binding.serverId}`,
+    transport: binding.transport ?? "streamable_http",
+    toolProfileKey: binding.toolProfileKey ?? record.profileId,
+    status: "active",
+    diagnostics: {},
+  }));
+}
+
+function editableMcpBindingFromRuntime(
+  binding: McpBindingRecord,
+): EditableProfileRuntimeConfig["mcpBindings"][number] {
+  return {
+    serverId:
+      serverIdFromEndpointRef(binding.endpointRef) ??
+      binding.serverNames[0] ??
+      binding.bindingId,
+    bindingId: binding.bindingId,
+    adapterId: String(binding.adapterId),
+    serverNames: binding.serverNames,
+    transport: binding.transport,
+    toolProfileKey: binding.toolProfileKey,
+  };
+}
+
+function editableMcpBindingsFromBody(
+  value: unknown,
+): EditableProfileRuntimeConfig["mcpBindings"] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error("mcpBindings must be an array when provided");
+  }
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(`mcpBindings[${index}] must be an object`);
+    }
+    const serverId = optionalString(item.serverId);
+    if (serverId === undefined) {
+      throw new Error(`mcpBindings[${index}].serverId is required`);
+    }
+    return {
+      serverId,
+      bindingId: optionalString(item.bindingId),
+      adapterId: optionalString(item.adapterId),
+      serverNames:
+        item.serverNames === undefined
+          ? undefined
+          : stringArray(item.serverNames, `mcpBindings[${index}].serverNames`),
+      transport: optionalString(item.transport),
+      toolProfileKey:
+        optionalString(item.toolProfileKey) ?? optionalString(item.toolProfile),
+    };
+  });
+}
+
+function normalizedEditableMcpBinding(
+  record: NativeProfileRegistryRecord,
+  binding: EditableProfileRuntimeConfig["mcpBindings"][number],
+  index: number,
+): EditableProfileRuntimeConfig["mcpBindings"][number] {
+  const agentId = String(record.agentId ?? record.profileId);
+  return {
+    ...binding,
+    bindingId: binding.bindingId ?? `${agentId}-mcp-${index + 1}`,
+    adapterId: binding.adapterId ?? "mcp-ts-main",
+    serverNames: binding.serverNames ?? [binding.serverId],
+    transport: binding.transport ?? "streamable_http",
+    toolProfileKey: binding.toolProfileKey ?? record.profileId,
+  };
+}
+
+function profileToolPolicyFromUnknown(
+  value: unknown,
+): EditableProfileRuntimeConfig["toolPolicy"] | undefined {
+  const policy = optionalRecord(value);
+  if (policy === undefined) return undefined;
+  return {
+    requestedToolsets:
+      policy.requestedToolsets === undefined
+        ? undefined
+        : stringArray(policy.requestedToolsets, "toolPolicy.requestedToolsets"),
+    requestedTools:
+      policy.requestedTools === undefined
+        ? undefined
+        : stringArray(policy.requestedTools, "toolPolicy.requestedTools"),
+    deniedTools:
+      policy.deniedTools === undefined
+        ? undefined
+        : stringArray(policy.deniedTools, "toolPolicy.deniedTools"),
+    includeDeprecated:
+      typeof policy.includeDeprecated === "boolean"
+        ? policy.includeDeprecated
+        : undefined,
+  };
+}
+
+function editableToolPolicy(
+  policy: ProfileConfig["toolPolicy"],
+): EditableProfileRuntimeConfig["toolPolicy"] | undefined {
+  if (policy === undefined) return undefined;
+  return {
+    requestedToolsets:
+      policy.requestedToolsets === undefined
+        ? undefined
+        : [...policy.requestedToolsets],
+    requestedTools:
+      policy.requestedTools === undefined
+        ? undefined
+        : [...policy.requestedTools],
+    deniedTools:
+      policy.deniedTools === undefined ? undefined : [...policy.deniedTools],
+    includeDeprecated: policy.includeDeprecated,
+  };
+}
+
+function validateInlineToolPolicy(
+  policy: EditableProfileRuntimeConfig["toolPolicy"],
+  diagnostics: ProfileRegistryRuntimeConfigPlan["diagnostics"],
+): void {
+  const catalog = buildBuiltInToolCatalog();
+  const validToolsets = new Set(catalog.toolsets.map((toolset) => toolset.id));
+  const validTools = new Set(catalog.tools.map((tool) => tool.name));
+  for (const toolset of policy?.requestedToolsets ?? []) {
+    if (toolset.startsWith("mcp:")) {
+      diagnostics.push({
+        severity: "error",
+        code: "inline_tool_policy_rejects_mcp_toolset",
+        path: "toolPolicy.requestedToolsets",
+        message: `inline tool policy cannot reference dynamic MCP toolset ${toolset}`,
+      });
+    } else if (!validToolsets.has(toolset)) {
+      diagnostics.push({
+        severity: "error",
+        code: "inline_tool_policy_unknown_toolset",
+        path: "toolPolicy.requestedToolsets",
+        message: `inline tool policy references unknown built-in toolset ${toolset}`,
+      });
+    }
+  }
+  for (const tool of policy?.requestedTools ?? []) {
+    if (!validTools.has(tool)) {
+      diagnostics.push({
+        severity: "error",
+        code: "inline_tool_policy_unknown_tool",
+        path: "toolPolicy.requestedTools",
+        message: `inline tool policy references unknown built-in tool ${tool}`,
+      });
+    }
+  }
+}
+
+function brainMetadataFromUnknown(
+  value: unknown,
+): EditableProfileRuntimeConfig["brain"] | undefined {
+  const brain = optionalRecord(value);
+  if (brain === undefined) return undefined;
+  return compactRecord({
+    module: optionalString(brain.module),
+    strategy: optionalString(brain.strategy),
+  }) as EditableProfileRuntimeConfig["brain"];
+}
+
+function serverIdFromEndpointRef(
+  value: string | undefined,
+): string | undefined {
+  const prefix = "config://mcp/";
+  return value?.startsWith(prefix) ? value.slice(prefix.length) : undefined;
+}
+
 async function applyProfileRegistryLifecycleEffects(
   state: ServiceState,
   record: NativeProfileRegistryRecord,
@@ -1388,6 +1939,63 @@ async function applyProfileRegistryLifecycleEffects(
     record.profileId,
   );
   return { sessionsArchived, brainHandle };
+}
+
+async function applyProfileRegistryRuntimeConfigEffects(
+  state: ServiceState,
+  record: NativeProfileRegistryRecord,
+  plan: ProfileRegistryRuntimeConfigPlan,
+): Promise<{
+  profilePath: string;
+  runtimeConfigPath: string;
+  mcpBindings: { removed: number; added: number };
+  applyResult: RustyCrewRuntimeConfigApplyResult;
+}> {
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    record.profileId,
+  );
+  if (profilePath === undefined) {
+    throw new Error(
+      `profile id ${record.profileId} is not a valid file profile id`,
+    );
+  }
+  const profileConfig = await readProfileConfigJsonForMutation(
+    profilePath,
+    record.profileId,
+  );
+  applyEditableRuntimeConfigToProfileJson(profileConfig, plan.runtimeConfig);
+  await writeJsonFileAtomic(profilePath, profileConfig);
+
+  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
+  const mcpBindings = runtimeConfigFile.array("mcpBindings");
+  const removed = removeRuntimeConfigEntries(
+    mcpBindings,
+    (entry) =>
+      runtimeEntryString(entry, "profileId", "profile_id") === record.profileId,
+  );
+  const runtimeMcpBindings = runtimeMcpBindingsForProfile(
+    state,
+    record,
+    plan.runtimeConfig,
+  );
+  mcpBindings.push(...runtimeMcpBindings);
+  await writeJsonFileAtomic(
+    state.config.paths.serviceConfigFile,
+    runtimeConfigFile.value,
+  );
+
+  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "profile_runtime_config_updated",
+    summaryPrefix: `Profile ${record.profileId} runtime config updated`,
+  });
+  return {
+    profilePath,
+    runtimeConfigPath: state.config.paths.serviceConfigFile,
+    mcpBindings: { removed, added: runtimeMcpBindings.length },
+    applyResult,
+  };
 }
 
 function requiredRevision(body: Record<string, unknown>): number {
@@ -2050,7 +2658,9 @@ function isProfileRegistryWriteRoute(pathname: string): boolean {
       pathname.endsWith("/lifecycle/plan") ||
       pathname.endsWith("/lifecycle/apply") ||
       pathname.endsWith("/prompt/plan") ||
-      pathname.endsWith("/prompt/apply"))
+      pathname.endsWith("/prompt/apply") ||
+      pathname.endsWith("/runtime-config/plan") ||
+      pathname.endsWith("/runtime-config/apply"))
   );
 }
 
@@ -6773,6 +7383,218 @@ async function submitRustyViewChatMessage(
   return result;
 }
 
+async function rustyViewSessionContextUsage(
+  state: ServiceState,
+  input: { session: SessionState; requestId: string },
+): Promise<SessionContextUsageResult> {
+  const diagnostics: SessionContextUsageResult["diagnostics"] = [];
+  const registryRecord = await state.bridge
+    .getProfileRegistryRecord(input.session.profileId)
+    .catch((error) => {
+      diagnostics.push({
+        severity: "warning",
+        code: "profile_registry_read_failed",
+        message: errorMessage(error, "profile registry read failed"),
+      });
+      return undefined;
+    });
+  const profile = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    input.session.profileId as ProfileId,
+  ).catch((error) => {
+    diagnostics.push({
+      severity: "warning",
+      code: "profile_file_read_failed",
+      message: errorMessage(error, "profile file read failed"),
+    });
+    return undefined;
+  });
+  if (registryRecord === undefined) {
+    diagnostics.push({
+      severity: "warning",
+      code: "profile_registry_record_missing",
+      message:
+        "profile registry record is missing; model diagnostics used profile file fallback where available",
+    });
+  }
+
+  const settings =
+    optionalRecord(registryRecord?.activeRuntimeSettingsJson) ?? {};
+  const providerAlias =
+    optionalString(settings.providerAlias) ??
+    optionalString(settings.provider_alias) ??
+    profile?.providerAlias ??
+    "default";
+  const provider = await state.bridge
+    .getModelProvider(providerAlias)
+    .catch((error) => {
+      diagnostics.push({
+        severity: "warning",
+        code: "model_provider_read_failed",
+        message: errorMessage(error, "model provider read failed"),
+      });
+      return undefined;
+    });
+  if (provider === undefined) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_provider_missing",
+      message: `model provider alias ${providerAlias} was not found`,
+    });
+  } else if (provider.status !== "active") {
+    diagnostics.push({
+      severity: "warning",
+      code: "model_provider_not_active",
+      message: `model provider alias ${providerAlias} is ${provider.status}`,
+    });
+  }
+
+  const brain =
+    brainMetadataFromUnknown(settings.brain) ??
+    profile?.brain ??
+    (provider === undefined
+      ? undefined
+      : defaultProfileBrainForModelProvider(provider));
+  const toolPolicy =
+    profileToolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy) ??
+    profile?.toolPolicy;
+  const localToolProfileId =
+    optionalString(settings.localToolProfileId) ??
+    optionalString(settings.local_tool_profile_id) ??
+    profile?.localToolProfileId;
+  const mcpBindings = state.runtimeConfig.mcpBindings.filter(
+    (binding) =>
+      String(binding.profileId) === input.session.profileId ||
+      String(binding.sessionId) === input.session.sessionId,
+  );
+  const activeMcpBindings = mcpBindings.filter(
+    (binding) => binding.status === undefined || binding.status === "active",
+  );
+  const sampledEvents =
+    state.chatEventsBySession.get(input.session.sessionId) ?? [];
+  const sampledText = sampledEvents
+    .flatMap((event) => chatEventTextFragments(event))
+    .join("\n");
+  const estimatedPromptTokens =
+    sampledText.trim().length === 0
+      ? 0
+      : estimateApproximateTokens(sampledText);
+  const contextWindowTokens = provider?.contextWindowTokens;
+  const maxOutputTokens = provider?.maxOutputTokens;
+  if (contextWindowTokens === undefined) {
+    diagnostics.push({
+      severity: "info",
+      code: "context_window_unknown",
+      message: "model provider does not declare contextWindowTokens",
+    });
+  }
+  const estimatedRemainingTokens =
+    contextWindowTokens === undefined
+      ? undefined
+      : Math.max(0, contextWindowTokens - estimatedPromptTokens);
+  const redactedUrl = redactedProviderUrl(provider?.baseUrl);
+  return {
+    session_id: input.session.sessionId,
+    agent_id: input.session.agentId,
+    profile_id: input.session.profileId,
+    provider: {
+      alias: providerAlias,
+      status: provider?.status ?? "missing",
+      protocol: provider?.protocol,
+      provider_kind: provider?.providerKind,
+      display_name: provider?.displayName,
+      base_url_host: redactedUrl.host,
+      base_url_redacted: redactedUrl.redacted,
+      model_id: provider?.modelId,
+      context_window_tokens: contextWindowTokens,
+      max_output_tokens: maxOutputTokens,
+      temperature:
+        provider?.temperatureMilli === undefined
+          ? undefined
+          : provider.temperatureMilli / 1_000,
+      reasoning_effort: provider?.reasoningEffort,
+      reasoning_format: provider?.reasoningFormat,
+      revision: provider?.revision,
+    },
+    brain: {
+      module: brain?.module,
+      strategy: brain?.strategy,
+      backend: brain?.module ?? providerBrainBackend(provider),
+    },
+    tools: {
+      local_tool_profile_id: localToolProfileId,
+      tool_count: input.session.toolProfile.tools.length,
+      requested_toolsets:
+        toolPolicy?.requestedToolsets === undefined
+          ? undefined
+          : [...toolPolicy.requestedToolsets],
+      requested_tools:
+        toolPolicy?.requestedTools === undefined
+          ? undefined
+          : [...toolPolicy.requestedTools],
+      mcp_binding_count: mcpBindings.length,
+      mcp_active_count: activeMcpBindings.length,
+    },
+    context: {
+      estimate_quality: provider === undefined ? "unavailable" : "approximate",
+      estimate_method:
+        "approximate_chars_div4_and_words_4over3_from_chat_events",
+      context_window_tokens: contextWindowTokens,
+      estimated_prompt_tokens: estimatedPromptTokens,
+      estimated_remaining_tokens: estimatedRemainingTokens,
+      max_output_tokens: maxOutputTokens,
+      sampled_event_count: sampledEvents.length,
+      sampled_message_count: sampledEvents.filter(
+        (event) =>
+          event.kind === "message_created" ||
+          event.kind === "assistant_message_completed",
+      ).length,
+    },
+    degraded: diagnostics.some((diagnostic) => diagnostic.severity !== "info"),
+    diagnostics,
+  };
+}
+
+function providerBrainBackend(
+  provider: NativeModelProviderRecord | undefined,
+): string {
+  if (provider === undefined) return "unknown";
+  return provider.protocol === "responses"
+    ? "openai-responses"
+    : "pi-agent-core";
+}
+
+function chatEventTextFragments(event: ChatEvent): string[] {
+  const payload = event.payload;
+  if (!isRecord(payload)) return [];
+  return [
+    optionalString(payload.body),
+    optionalString(payload.text),
+    optionalString(payload.summary),
+  ].filter((value): value is string => value !== undefined);
+}
+
+function estimateApproximateTokens(text: string): number {
+  const chars = Math.ceil(text.length / 4);
+  const words = Math.ceil(
+    text.trim().split(/\s+/).filter(Boolean).length * 1.33,
+  );
+  return Math.max(chars, words);
+}
+
+function redactedProviderUrl(baseUrl: string | undefined): {
+  host?: string;
+  redacted?: string;
+} {
+  if (baseUrl === undefined || baseUrl.trim() === "") return {};
+  try {
+    const parsed = new URL(baseUrl);
+    return { host: parsed.host, redacted: parsed.origin };
+  } catch {
+    return { redacted: "invalid-url" };
+  }
+}
+
 async function listRustyViewMessageSlots(
   state: ServiceState,
   input: ListMessageSlotsInput,
@@ -7685,12 +8507,21 @@ async function executeRustyViewChatCommand(
   if (
     routed.commandName === "help" ||
     routed.commandName === "status" ||
-    routed.commandName === "session"
+    routed.commandName === "session" ||
+    routed.commandName === "model"
   ) {
     const diagnosticsContext = await buildDiagnosticsContext(state);
+    const modelContext =
+      routed.commandName === "model"
+        ? await rustyViewSessionContextUsage(state, {
+            session: input.session,
+            requestId: input.requestId,
+          })
+        : undefined;
     const response = buildReadOnlySlashCommandResponse(routed.commandName, {
       diagnostics: diagnosticsContext.diagnostics,
       session: slashCommandSession(input.session),
+      modelContext,
       options: {
         primeProfiles: [input.session.profileId],
         allowNonPrimeReadCommands: true,
@@ -7826,6 +8657,7 @@ function rememberChatMessageReceipt(
 function appendCoreEventsToChatLog(
   state: ServiceState,
   session: SessionState,
+  wakeId: string,
   events: readonly CoreEvent[],
 ): void {
   for (const event of events) {
@@ -7843,6 +8675,7 @@ function appendCoreEventsToChatLog(
         payload: {
           status: event.packet.status,
           summary: event.packet.summary,
+          wake_id: wakeId,
         },
       });
     } else if (
@@ -8927,7 +9760,7 @@ async function dispatchWake(
           });
           return state.bridge.wakeBrain(request);
         },
-        (events) => appendCoreEventsToChatLog(state, session, events),
+        (events) => appendCoreEventsToChatLog(state, session, wakeId, events),
       ),
       {
         wakeId,

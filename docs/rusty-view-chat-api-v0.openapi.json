@@ -128,6 +128,34 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/context": {
+      "get": {
+        "operationId": "getChatSessionContextUsage",
+        "summary": "Read model/provider/brain and approximate context usage diagnostics",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Browser-safe session context usage diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/SessionContextUsageResult" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/stream": {
       "get": {
         "operationId": "streamChatSessionEvents",
@@ -1305,6 +1333,89 @@
           },
           "latest_cursor": { "type": "string" },
           "has_more": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "SessionContextUsageResult": {
+        "type": "object",
+        "required": ["session_id", "agent_id", "profile_id", "provider", "brain", "tools", "context", "degraded", "diagnostics"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "agent_id": { "type": "string" },
+          "profile_id": { "type": "string" },
+          "provider": {
+            "type": "object",
+            "required": ["alias", "status"],
+            "properties": {
+              "alias": { "type": "string" },
+              "status": { "type": "string", "enum": ["active", "disabled", "archived", "missing", "unknown"] },
+              "protocol": { "type": "string", "enum": ["responses", "chat_completions"] },
+              "provider_kind": { "type": "string" },
+              "display_name": { "type": "string" },
+              "base_url_host": { "type": "string" },
+              "base_url_redacted": { "type": "string" },
+              "model_id": { "type": "string" },
+              "context_window_tokens": { "type": "integer", "minimum": 0 },
+              "max_output_tokens": { "type": "integer", "minimum": 0 },
+              "temperature": { "type": "number", "minimum": 0 },
+              "reasoning_effort": { "type": "string" },
+              "reasoning_format": { "type": "string" },
+              "revision": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "brain": {
+            "type": "object",
+            "required": ["backend"],
+            "properties": {
+              "module": { "type": "string" },
+              "strategy": { "type": "string" },
+              "backend": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "tools": {
+            "type": "object",
+            "required": ["tool_count", "mcp_binding_count", "mcp_active_count"],
+            "properties": {
+              "local_tool_profile_id": { "type": "string" },
+              "tool_count": { "type": "integer", "minimum": 0 },
+              "requested_toolsets": { "type": "array", "items": { "type": "string" } },
+              "requested_tools": { "type": "array", "items": { "type": "string" } },
+              "mcp_binding_count": { "type": "integer", "minimum": 0 },
+              "mcp_active_count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "context": {
+            "type": "object",
+            "required": ["estimate_quality", "estimate_method", "sampled_event_count", "sampled_message_count"],
+            "properties": {
+              "estimate_quality": { "type": "string", "enum": ["exact", "approximate", "unavailable"] },
+              "estimate_method": { "type": "string" },
+              "context_window_tokens": { "type": "integer", "minimum": 0 },
+              "estimated_prompt_tokens": { "type": "integer", "minimum": 0 },
+              "estimated_remaining_tokens": { "type": "integer", "minimum": 0 },
+              "max_output_tokens": { "type": "integer", "minimum": 0 },
+              "sampled_event_count": { "type": "integer", "minimum": 0 },
+              "sampled_message_count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "degraded": { "type": "boolean" },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["severity", "code", "message"],
+              "properties": {
+                "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+                "code": { "type": "string" },
+                "message": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
         },
         "additionalProperties": false
       },

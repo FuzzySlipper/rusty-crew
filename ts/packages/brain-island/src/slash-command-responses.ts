@@ -1,4 +1,5 @@
 import { buildRuntimeHealthProjection } from "./runtime-health.js";
+import type { SessionContextUsageResult } from "./rusty-view-chat-api.js";
 import type { RuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
 import type {
   SlashCommandName,
@@ -10,11 +11,15 @@ import type {
 export interface SlashCommandResponseContext {
   diagnostics: RuntimeDiagnosticsProjection;
   session: SlashCommandSession;
+  modelContext?: SessionContextUsageResult;
   options?: SlashCommandRouterOptions;
 }
 
 export function buildReadOnlySlashCommandResponse(
-  commandName: Extract<SlashCommandName, "help" | "status" | "session">,
+  commandName: Extract<
+    SlashCommandName,
+    "help" | "status" | "session" | "model"
+  >,
   context: SlashCommandResponseContext,
 ): SlashCommandResponse {
   switch (commandName) {
@@ -24,13 +29,17 @@ export function buildReadOnlySlashCommandResponse(
       return statusResponse(context);
     case "session":
       return sessionResponse(context);
+    case "model":
+      return modelResponse(context);
   }
 }
 
 function helpResponse(
   options: SlashCommandRouterOptions | undefined,
 ): SlashCommandResponse {
-  const commands = (["help", "status", "session", "new", "reload-mcp"] as const)
+  const commands = (
+    ["help", "status", "session", "model", "new", "reload-mcp"] as const
+  )
     .filter(
       (command) =>
         options?.allowedCommands === undefined ||
@@ -46,6 +55,65 @@ function helpResponse(
       "Control commands require an authorized full/prime session by default.",
       "Responses are bounded and omit raw prompts, logs, secrets, and full tool output.",
     ],
+  };
+}
+
+function modelResponse(
+  context: SlashCommandResponseContext,
+): SlashCommandResponse {
+  const model = context.modelContext;
+  if (!model) {
+    return {
+      title: "Model",
+      summary: "Model diagnostics are not available on this service.",
+      fields: {
+        sessionId: context.session.sessionId,
+        profileId: context.session.profileId,
+      },
+    };
+  }
+  return {
+    title: "Model",
+    summary: model.degraded
+      ? `Model diagnostics for ${model.profile_id} are degraded.`
+      : `${model.profile_id} uses ${model.provider.model_id ?? "unknown model"} via ${model.provider.alias}.`,
+    fields: {
+      sessionId: model.session_id,
+      profileId: model.profile_id,
+      providerAlias: model.provider.alias,
+      providerStatus: model.provider.status,
+      protocol: model.provider.protocol ?? "unknown",
+      providerKind: model.provider.provider_kind ?? "unknown",
+      modelId: model.provider.model_id ?? "unknown",
+      brainBackend: model.brain.backend,
+      brainModule: model.brain.module ?? "unknown",
+      contextWindowTokens: model.context.context_window_tokens ?? 0,
+      estimatedPromptTokens: model.context.estimated_prompt_tokens ?? 0,
+      estimatedRemainingTokens: model.context.estimated_remaining_tokens ?? 0,
+      maxOutputTokens: model.context.max_output_tokens ?? 0,
+      estimateQuality: model.context.estimate_quality,
+      toolCount: model.tools.tool_count,
+      mcpBindings: model.tools.mcp_binding_count,
+      mcpActive: model.tools.mcp_active_count,
+    },
+    items: boundedItems([
+      model.provider.base_url_redacted
+        ? `provider endpoint ${model.provider.base_url_redacted}`
+        : "",
+      model.provider.temperature === undefined
+        ? ""
+        : `temperature ${model.provider.temperature}`,
+      model.provider.reasoning_effort
+        ? `reasoning effort ${model.provider.reasoning_effort}`
+        : "",
+      model.provider.reasoning_format
+        ? `reasoning format ${model.provider.reasoning_format}`
+        : "",
+      model.tools.local_tool_profile_id
+        ? `local tool profile ${model.tools.local_tool_profile_id}`
+        : "",
+      ...model.diagnostics.map((diagnostic) => diagnostic.message),
+    ]),
   };
 }
 

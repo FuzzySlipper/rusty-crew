@@ -88,6 +88,58 @@ class FinalMessageOnlyAgent {
   clearAllQueues(): void {}
 }
 
+class StreamingThenFinalMessageAgent {
+  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+
+  subscribe(
+    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+  ): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async prompt(
+    _input: PiAgentMessage | PiAgentMessage[] | string,
+  ): Promise<void> {
+    const signal = new AbortController().signal;
+    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.(
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "streamed " },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "answer" },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "streamed answer" }],
+        },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      { type: "agent_end", messages: [] } as PiAgentEvent,
+      signal,
+    );
+  }
+
+  async waitForIdle(): Promise<void> {}
+
+  clearAllQueues(): void {}
+}
+
 const textBrain = createPiAgentBrain({
   createAgent: (_options: PiAgentOptions) =>
     new FinalMessageOnlyAgent({
@@ -104,6 +156,22 @@ assert.deepEqual(
 );
 const textDelta = textDeltaText(textResult);
 assert.equal(textDelta, "final message text without streaming deltas");
+
+const streamedBrain = createPiAgentBrain({
+  createAgent: (_options: PiAgentOptions) =>
+    new StreamingThenFinalMessageAgent(),
+});
+
+const streamedResult = await wake(
+  streamedBrain,
+  "pi-agent-brain-streamed-events-wake",
+);
+
+assert.deepEqual(
+  streamedResult.events.map((event) => event.event.type),
+  ["started", "text_delta", "text_delta", "finished"],
+);
+assert.deepEqual(textDeltaTexts(streamedResult), ["streamed ", "answer"]);
 
 const errorBrain = createPiAgentBrain({
   createAgent: (_options: PiAgentOptions) =>
@@ -124,6 +192,7 @@ console.log(
     {
       eventTypes: textResult.events.map((event) => event.event.type),
       text: textDelta,
+      streamedTextParts: textDeltaTexts(streamedResult),
       errorText: textDeltaText(errorResult),
     },
     null,
@@ -180,7 +249,13 @@ async function wake(
 function textDeltaText(
   result: Awaited<ReturnType<ReturnType<typeof createPiAgentBrain>["wake"]>>,
 ): string | undefined {
+  return textDeltaTexts(result)[0];
+}
+
+function textDeltaTexts(
+  result: Awaited<ReturnType<ReturnType<typeof createPiAgentBrain>["wake"]>>,
+): string[] {
   return result.events
     .map((event) => event.event)
-    .find((event) => event.type === "text_delta")?.text;
+    .flatMap((event) => (event.type === "text_delta" ? [event.text] : []));
 }

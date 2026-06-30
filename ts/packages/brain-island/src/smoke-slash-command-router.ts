@@ -35,6 +35,11 @@ const session = intercepted(routeSlashCommand(input("/session", primeSession)));
 assert.equal(session.commandName, "session");
 assert.equal(session.response.fields?.profileId, "prime");
 
+const model = intercepted(routeSlashCommand(input("/model", primeSession)));
+assert.equal(model.commandName, "model");
+assert.equal(model.status, "ok");
+assert.equal(model.controlRequest, undefined);
+
 const newSession = intercepted(
   routeSlashCommand(input("/new fresh start", primeSession)),
 );
@@ -72,7 +77,7 @@ assert.equal(deniedRead.status, "denied");
 
 const allowedRead = intercepted(
   routeSlashCommand(
-    input("/status", workerSession, { allowNonPrimeReadCommands: true }),
+    input("/model", workerSession, { allowNonPrimeReadCommands: true }),
   ),
 );
 assert.equal(allowedRead.status, "ok");
@@ -95,6 +100,7 @@ console.log(
     {
       passThrough: passThrough.kind,
       help: help.response.items?.length,
+      model: model.commandName,
       newControl: newSession.controlRequest?.commandName,
       reloadControl: reloadMcp.controlRequest?.commandName,
       workerDenied: deniedWorkerControl.status,

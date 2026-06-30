@@ -746,8 +746,10 @@ try {
       noAuthPort,
     );
     assert.deepEqual(
-      providers.body.data.items.map((item: { alias: string }) => item.alias),
-      ["custom-chat", "alternate", "default"],
+      providers.body.data.items
+        .map((item: { alias: string }) => item.alias)
+        .sort(),
+      ["alternate", "custom-chat", "default"],
     );
 
     const localToolProfiles = await get(
@@ -1014,6 +1016,23 @@ try {
     );
     assert.equal(createdRegistry.status, 200);
     assert.equal(createdRegistry.body.data.source, "registry");
+    assert.equal(createdRegistry.body.data.providerAlias, "alternate");
+    assert.equal(createdRegistry.body.data.localToolProfileId, "code_read");
+    assert.deepEqual(createdRegistry.body.data.toolPolicy.requestedToolsets, [
+      "local_code_read",
+    ]);
+    assert.deepEqual(
+      createdRegistry.body.data.mcpBindings.map(
+        (binding: { serverId: string; toolProfileKey?: string }) => [
+          binding.serverId,
+          binding.toolProfileKey,
+        ],
+      ),
+      [
+        ["field", "field-created-profile"],
+        ["field-extra", "field-created-profile-extra"],
+      ],
+    );
     const registryRevision = createdRegistry.body.data.revision as number;
     const registryUpdatePlan = await post(
       "/v1/admin/profiles/registry/field-created-profile/update/plan",
@@ -1053,12 +1072,18 @@ try {
       registryUpdateApply.body.data.record.revision,
       registryRevision + 1,
     );
+    const longRegistrySoulMarkdown = Array.from(
+      { length: 180 },
+      (_, index) =>
+        `Registry DB soul line ${index + 1}: Rusty View prompt editor must round-trip long soul markdown without admin read truncation.`,
+    ).join("\n");
+    assert.ok(longRegistrySoulMarkdown.length > 2_048);
     const registryPromptApply = await post(
       "/v1/admin/profiles/registry/field-created-profile/prompt/apply",
       undefined,
       {
         expectedRevision: registryRevision + 1,
-        soulMarkdown: "Registry DB soul edited through Rusty View.",
+        soulMarkdown: longRegistrySoulMarkdown,
         memoryMarkdown: "Registry DB memory edited through Rusty View.",
       },
       noAuthPort,
@@ -1067,11 +1092,190 @@ try {
     assert.equal(registryPromptApply.body.data.ok, true);
     assert.equal(
       registryPromptApply.body.data.record.promptSoulMarkdown,
-      "Registry DB soul edited through Rusty View.",
+      longRegistrySoulMarkdown,
     );
     assert.equal(
       registryPromptApply.body.data.record.promptMemoryMarkdown,
       "Registry DB memory edited through Rusty View.",
+    );
+    const registryPromptReadback = await get(
+      "/v1/admin/profiles/registry/field-created-profile",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(registryPromptReadback.status, 200);
+    assert.equal(
+      registryPromptReadback.body.data.promptSoulMarkdown,
+      longRegistrySoulMarkdown,
+    );
+    const registryPromptExportPlan = await get(
+      "/v1/admin/profiles/registry/field-created-profile/export-plan",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(registryPromptExportPlan.status, 200);
+    assert.equal(
+      registryPromptExportPlan.body.data.entries.find(
+        (entry: { targetPath: string }) => entry.targetPath === "soul.md",
+      )?.contentText,
+      longRegistrySoulMarkdown,
+    );
+    assert.equal(
+      registryPromptExportPlan.body.data.entries.find(
+        (entry: { targetPath: string }) => entry.targetPath === "memory.md",
+      )?.contentText,
+      "Registry DB memory edited through Rusty View.",
+    );
+    const registryRuntimeRevision = registryPromptApply.body.data.record
+      .revision as number;
+    const registryRuntimePlan = await post(
+      "/v1/admin/profiles/registry/field-created-profile/runtime-config/plan",
+      undefined,
+      {
+        expectedRevision: registryRuntimeRevision,
+        providerAlias: "default",
+        localToolProfileId: "full_agent",
+        mcpBindings: [
+          {
+            serverId: "field",
+            toolProfileKey: "field-created-profile-updated",
+          },
+        ],
+      },
+      noAuthPort,
+    );
+    assert.equal(
+      registryRuntimePlan.status,
+      200,
+      JSON.stringify(registryRuntimePlan.body),
+    );
+    assert.equal(registryRuntimePlan.body.data.ok, true);
+    assert.equal(
+      registryRuntimePlan.body.data.runtimeConfig.providerAlias,
+      "default",
+    );
+    assert.equal(
+      registryRuntimePlan.body.data.runtimeConfig.localToolProfileId,
+      "full_agent",
+    );
+    assert.equal(
+      registryRuntimePlan.body.data.implications.runtimeRebuildRecommended,
+      true,
+    );
+    assert.equal(
+      registryRuntimePlan.body.data.implications.mcpRefreshRecommended,
+      true,
+    );
+    const registryRuntimeApply = await post(
+      "/v1/admin/profiles/registry/field-created-profile/runtime-config/apply",
+      undefined,
+      {
+        expectedRevision: registryRuntimeRevision,
+        providerAlias: "default",
+        localToolProfileId: "full_agent",
+        mcpBindings: [
+          {
+            serverId: "field",
+            toolProfileKey: "field-created-profile-updated",
+          },
+        ],
+      },
+      noAuthPort,
+    );
+    assert.equal(
+      registryRuntimeApply.status,
+      200,
+      JSON.stringify(registryRuntimeApply.body),
+    );
+    assert.equal(registryRuntimeApply.body.data.ok, true);
+    assert.equal(registryRuntimeApply.body.data.record.revision, 4);
+    assert.equal(registryRuntimeApply.body.data.effects.mcpBindings.removed, 2);
+    assert.equal(registryRuntimeApply.body.data.effects.mcpBindings.added, 1);
+    const registryRuntimeReadback = await get(
+      "/v1/admin/profiles/registry/field-created-profile",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(registryRuntimeReadback.status, 200);
+    assert.equal(registryRuntimeReadback.body.data.providerAlias, "default");
+    assert.equal(
+      registryRuntimeReadback.body.data.localToolProfileId,
+      "full_agent",
+    );
+    assert.deepEqual(
+      registryRuntimeReadback.body.data.mcpBindings.map(
+        (binding: { serverId: string; toolProfileKey?: string }) => [
+          binding.serverId,
+          binding.toolProfileKey,
+        ],
+      ),
+      [["field", "field-created-profile-updated"]],
+    );
+    const updatedCreatedProfileConfig = JSON.parse(
+      readFileSync(
+        join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
+        "utf8",
+      ),
+    ) as {
+      brain?: { module?: string };
+      providerAlias?: string;
+      localToolProfileId?: string;
+      toolPolicy?: { requestedToolsets?: string[] };
+    };
+    assert.equal(updatedCreatedProfileConfig.providerAlias, "default");
+    assert.equal(updatedCreatedProfileConfig.brain?.module, "local");
+    assert.equal(updatedCreatedProfileConfig.localToolProfileId, "full_agent");
+    assert(
+      updatedCreatedProfileConfig.toolPolicy?.requestedToolsets?.includes(
+        "local_code_write",
+      ),
+    );
+    const runtimeConfigAfterRegistryRuntimeUpdate = JSON.parse(
+      readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
+    ) as {
+      mcpBindings?: Array<{
+        bindingId: string;
+        profileId: string;
+        endpointRef: string;
+        toolProfileKey: string;
+      }>;
+    };
+    assert.deepEqual(
+      runtimeConfigAfterRegistryRuntimeUpdate.mcpBindings
+        ?.filter((binding) => binding.profileId === "field-created-profile")
+        .map((binding) => ({
+          bindingId: binding.bindingId,
+          endpointRef: binding.endpointRef,
+          toolProfileKey: binding.toolProfileKey,
+        })),
+      [
+        {
+          bindingId: "field-created-profile-mcp-1",
+          endpointRef: "config://mcp/field",
+          toolProfileKey: "field-created-profile-updated",
+        },
+      ],
+    );
+    const invalidRegistryRuntimePlan = await post(
+      "/v1/admin/profiles/registry/field-created-profile/runtime-config/plan",
+      undefined,
+      {
+        expectedRevision: registryRuntimeApply.body.data.record.revision,
+        providerAlias: "missing-provider",
+        localToolProfileId: null,
+        toolPolicy: { requestedToolsets: ["missing_toolset"] },
+      },
+      noAuthPort,
+    );
+    assert.equal(invalidRegistryRuntimePlan.status, 200);
+    assert.equal(invalidRegistryRuntimePlan.body.data.ok, false);
+    assert.deepEqual(
+      invalidRegistryRuntimePlan.body.data.diagnostics
+        .filter(
+          (diagnostic: { severity: string }) => diagnostic.severity === "error",
+        )
+        .map((diagnostic: { code: string }) => diagnostic.code),
+      ["model_provider_not_found", "inline_tool_policy_unknown_toolset"],
     );
     const registryMismatch = await post(
       "/v1/admin/profiles/registry/field-created-profile/update/apply",
@@ -1103,8 +1307,14 @@ try {
       "profile_registry_requires_import",
     );
 
+    const currentCreatedProfileConfig = JSON.parse(
+      readFileSync(
+        join(noAuthRoot, "config", "profiles", "field-created-profile.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
     const updatedProfileConfig = {
-      ...createdProfileConfig,
+      ...currentCreatedProfileConfig,
       profileId: "field-created-profile",
       displayName: "Field Created Profile Updated",
     };
@@ -1208,7 +1418,7 @@ try {
         (module: { profileId: string }) =>
           module.profileId === "field-created-profile",
       )?.providerAlias,
-      "alternate",
+      "default",
     );
     assert.equal(
       noAuthAfterProfile.body.data.overview.runtime.brainModules.find(
@@ -1223,7 +1433,7 @@ try {
     );
     assert.equal(
       noAuthAfterProfile.body.data.overview.adapters.mcp.totalSurfaces,
-      3,
+      2,
     );
 
     const refreshPlan = await patch(
@@ -1243,9 +1453,9 @@ try {
       refreshPlan.body.data.refresh.affectedProfiles.map(
         (profile: { profileId: string }) => profile.profileId,
       ),
-      ["field-created-profile"],
+      [],
     );
-    assert.equal(refreshPlan.body.data.refresh.outcomes[0]?.status, "planned");
+    assert.deepEqual(refreshPlan.body.data.refresh.outcomes, []);
 
     const disabledRefresh = await patch(
       "/v1/admin/model-providers/alternate?refresh=apply",
@@ -1261,18 +1471,8 @@ try {
     );
     assert.equal(disabledRefresh.status, 200);
     assert.equal(disabledRefresh.body.data.provider.status, "disabled");
-    assert.equal(
-      disabledRefresh.body.data.refresh.affectedProfiles[0]?.profileId,
-      "field-created-profile",
-    );
-    assert.equal(
-      disabledRefresh.body.data.refresh.outcomes[0]?.status,
-      "failed",
-    );
-    assert.match(
-      disabledRefresh.body.data.refresh.outcomes[0]?.summary,
-      /active provider required/,
-    );
+    assert.deepEqual(disabledRefresh.body.data.refresh.affectedProfiles, []);
+    assert.deepEqual(disabledRefresh.body.data.refresh.outcomes, []);
     const reenabledAlternate = await patch(
       "/v1/admin/model-providers/alternate",
       undefined,

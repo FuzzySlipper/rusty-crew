@@ -5,10 +5,11 @@ import type {
   NativeBridgeModule,
   NativeProfileRegistryRecord,
 } from "@rusty-crew/native-bridge";
-import type { ProfileId } from "@rusty-crew/contracts";
+import type { McpBindingRecord, ProfileId } from "@rusty-crew/contracts";
 import { buildProfileRegistryImportPlan } from "./profile-registry-import.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { NativeRuntimeConfigDiagnostic } from "@rusty-crew/native-bridge";
+import { loadProfileConfig, type ProfileConfig } from "./profile-loading.js";
 
 export type AdminProfileRegistrySource = "registry" | "file_fallback";
 export type AdminProfileAssetStatus =
@@ -35,6 +36,22 @@ export interface AdminProfileRegistryRecord {
   defaultSessionKind?: string;
   agentId?: string;
   ownerId?: string;
+  providerAlias?: string;
+  localToolProfileId?: string;
+  toolPolicy?: {
+    requestedToolsets?: string[];
+    requestedTools?: string[];
+    deniedTools?: string[];
+    includeDeprecated?: boolean;
+  };
+  mcpBindings?: Array<{
+    serverId: string;
+    bindingId?: string;
+    adapterId?: string;
+    serverNames?: string[];
+    transport?: string;
+    toolProfileKey?: string;
+  }>;
   promptSoulMarkdown?: string;
   promptMemoryMarkdown?: string;
   revision?: number;
@@ -98,7 +115,7 @@ export async function buildAdminProfileRegistryDiagnostics(
   const records = [
     ...(await Promise.all(
       registryRecords.map((record) =>
-        registryAdminRecord(record, input.runtimeConfig.profilesDir),
+        registryAdminRecord(record, input.runtimeConfig),
       ),
     )),
     ...(await Promise.all(
@@ -151,11 +168,20 @@ export function filterAdminProfileRegistryRecords(
 
 async function registryAdminRecord(
   record: NativeProfileRegistryRecord,
-  profilesDir: string,
+  runtimeConfig: RustyCrewRuntimeConfig,
 ): Promise<AdminProfileRegistryRecord> {
   const sourceAssetStatuses = await assetStatuses(
     record.sourceAssetRefs,
-    profilesDir,
+    runtimeConfig.profilesDir,
+  );
+  const profile = await loadProfileConfig(
+    runtimeConfig.profilesDir,
+    record.profileId as ProfileId,
+  ).catch(() => undefined);
+  const runtime = runtimeConfigReadbackFromRegistry(
+    record,
+    runtimeConfig,
+    profile,
   );
   return {
     source: "registry",
@@ -166,6 +192,10 @@ async function registryAdminRecord(
     defaultSessionKind: record.defaultSessionKind,
     agentId: record.agentId,
     ownerId: record.ownerId,
+    providerAlias: runtime.providerAlias,
+    localToolProfileId: runtime.localToolProfileId,
+    toolPolicy: runtime.toolPolicy,
+    mcpBindings: runtime.mcpBindings,
     promptSoulMarkdown: record.promptSoulMarkdown,
     promptMemoryMarkdown: record.promptMemoryMarkdown,
     revision: record.revision,
@@ -202,6 +232,9 @@ async function fallbackAdminRecord(
     defaultSessionKind: plan.registryWrite.defaultSessionKind,
     agentId: plan.registryWrite.agentId,
     ownerId: plan.registryWrite.ownerId,
+    providerAlias: plan.profile.providerAlias,
+    localToolProfileId: plan.profile.localToolProfileId,
+    toolPolicy: adminToolPolicy(plan.profile.toolPolicy),
     promptSoulMarkdown: plan.registryWrite.promptSoulMarkdown,
     promptMemoryMarkdown: plan.registryWrite.promptMemoryMarkdown,
     importedFrom: plan.registryWrite.importExport.importedFrom,
@@ -227,6 +260,164 @@ async function fallbackAdminRecord(
     ],
     fallbackStatus: "file_backed_fallback",
   };
+}
+
+function runtimeConfigReadbackFromRegistry(
+  record: NativeProfileRegistryRecord,
+  runtimeConfig: RustyCrewRuntimeConfig,
+  profile?: ProfileConfig,
+): {
+  providerAlias?: string;
+  localToolProfileId?: string;
+  toolPolicy?: AdminProfileRegistryRecord["toolPolicy"];
+  mcpBindings?: AdminProfileRegistryRecord["mcpBindings"];
+} {
+  const settings = recordValue(record.activeRuntimeSettingsJson);
+  const settingsProfile = profileConfigFromRegistrySettings(settings);
+  const mcpBindings = runtimeConfig.mcpBindings
+    .filter((binding) => String(binding.profileId) === record.profileId)
+    .map(adminMcpBindingFromRuntime);
+  return {
+    providerAlias:
+      stringValue(settings.providerAlias) ??
+      stringValue(settings.provider_alias) ??
+      profile?.providerAlias ??
+      settingsProfile.providerAlias,
+    localToolProfileId:
+      stringValue(settings.localToolProfileId) ??
+      stringValue(settings.local_tool_profile_id) ??
+      profile?.localToolProfileId ??
+      settingsProfile.localToolProfileId,
+    toolPolicy:
+      adminToolPolicy(profile?.toolPolicy) ??
+      toolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy) ??
+      adminToolPolicy(settingsProfile.toolPolicy),
+    mcpBindings:
+      mcpBindings.length > 0
+        ? mcpBindings
+        : mcpBindingsFromSettings(
+            settings.mcpBindings ?? settings.mcp_bindings,
+          ),
+  };
+}
+
+function profileConfigFromRegistrySettings(
+  settings: Record<string, unknown>,
+): Pick<ProfileConfig, "providerAlias" | "localToolProfileId" | "toolPolicy"> {
+  const profile = recordValue(settings.profile);
+  return {
+    providerAlias: stringValue(profile.providerAlias),
+    localToolProfileId: stringValue(profile.localToolProfileId),
+    toolPolicy: toolPolicyFromUnknown(profile.toolPolicy),
+  };
+}
+
+function adminMcpBindingFromRuntime(
+  binding: McpBindingRecord,
+): NonNullable<AdminProfileRegistryRecord["mcpBindings"]>[number] {
+  return {
+    serverId: serverIdFromMcpBinding(binding),
+    bindingId: binding.bindingId,
+    adapterId: String(binding.adapterId),
+    serverNames: binding.serverNames,
+    transport: binding.transport,
+    toolProfileKey: binding.toolProfileKey,
+  };
+}
+
+function mcpBindingsFromSettings(
+  value: unknown,
+): AdminProfileRegistryRecord["mcpBindings"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap(
+    (item): NonNullable<AdminProfileRegistryRecord["mcpBindings"]> => {
+      const binding = recordValue(item);
+      const serverId =
+        stringValue(binding.serverId) ??
+        serverIdFromEndpointRef(stringValue(binding.endpointRef)) ??
+        stringList(binding.serverNames)?.[0];
+      if (serverId === undefined) return [];
+      return [
+        {
+          serverId,
+          bindingId: stringValue(binding.bindingId),
+          adapterId: stringValue(binding.adapterId),
+          serverNames: stringList(binding.serverNames),
+          transport: stringValue(binding.transport),
+          toolProfileKey: stringValue(binding.toolProfileKey),
+        },
+      ];
+    },
+  );
+}
+
+function serverIdFromMcpBinding(binding: McpBindingRecord): string {
+  return (
+    serverIdFromEndpointRef(binding.endpointRef) ??
+    binding.serverNames[0] ??
+    binding.bindingId
+  );
+}
+
+function serverIdFromEndpointRef(
+  value: string | undefined,
+): string | undefined {
+  const prefix = "config://mcp/";
+  return value?.startsWith(prefix) ? value.slice(prefix.length) : undefined;
+}
+
+function toolPolicyFromUnknown(
+  value: unknown,
+): AdminProfileRegistryRecord["toolPolicy"] | undefined {
+  const policy = recordValue(value);
+  if (Object.keys(policy).length === 0) return undefined;
+  return {
+    requestedToolsets: stringList(policy.requestedToolsets),
+    requestedTools: stringList(policy.requestedTools),
+    deniedTools: stringList(policy.deniedTools),
+    includeDeprecated:
+      typeof policy.includeDeprecated === "boolean"
+        ? policy.includeDeprecated
+        : undefined,
+  };
+}
+
+function adminToolPolicy(
+  policy: ProfileConfig["toolPolicy"],
+): AdminProfileRegistryRecord["toolPolicy"] | undefined {
+  if (policy === undefined) return undefined;
+  return {
+    requestedToolsets:
+      policy.requestedToolsets === undefined
+        ? undefined
+        : [...policy.requestedToolsets],
+    requestedTools:
+      policy.requestedTools === undefined
+        ? undefined
+        : [...policy.requestedTools],
+    deniedTools:
+      policy.deniedTools === undefined ? undefined : [...policy.deniedTools],
+    includeDeprecated: policy.includeDeprecated,
+  };
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(
+    (item): item is string => typeof item === "string" && item.trim() !== "",
+  );
 }
 
 async function missingFallbackRecord(

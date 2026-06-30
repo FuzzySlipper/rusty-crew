@@ -52,9 +52,13 @@ export function createPiAgentBrain(
       const agent = options.createAgent(
         buildAgentOptions(input, options, actions),
       );
+      let sawTextDelta = false;
       const unsubscribe = agent.subscribe((event) => {
-        const mapped = mapPiAgentEvent(event);
+        const mapped = mapPiAgentEvent(event, { sawTextDelta });
         if (mapped) {
+          if (mapped.type === "text_delta") {
+            sawTextDelta = true;
+          }
           events.push(envelope(input, mapped));
         }
       });
@@ -144,7 +148,10 @@ function toPiMessages(
   }));
 }
 
-function mapPiAgentEvent(event: PiAgentEvent): BrainEvent | undefined {
+function mapPiAgentEvent(
+  event: PiAgentEvent,
+  state: { sawTextDelta: boolean },
+): BrainEvent | undefined {
   switch (event.type) {
     case "agent_start":
       return { type: "started" };
@@ -157,6 +164,9 @@ function mapPiAgentEvent(event: PiAgentEvent): BrainEvent | undefined {
         : undefined;
     }
     case "message_end": {
+      if (state.sawTextDelta) {
+        return undefined;
+      }
       const text = assistantMessageText(event.message);
       if (text) return { type: "text_delta", text };
       const errorText = assistantMessageErrorText(event.message);

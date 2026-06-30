@@ -211,6 +211,19 @@ try {
     streamedEvents.some((event) => event.kind === "tool_call_completed"),
     "active stream should receive tool completion while wake is live",
   );
+  const chatTurnEvents = await get(
+    "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+    token,
+  );
+  assert.equal(chatTurnEvents.status, 200);
+  const completionEvent = chatTurnEvents.body.data.items.find(
+    (event: { kind: string }) => event.kind === "assistant_message_completed",
+  );
+  assert.equal(
+    completionEvent?.payload.wake_id,
+    sent.body.data.wake_id,
+    "assistant completion events should carry wake_id for client reconciliation",
+  );
 
   const postTurnPage = await get("/v1/chat/sessions", token);
   assert.equal(postTurnPage.status, 200);
@@ -700,13 +713,41 @@ try {
   });
   assert.equal(missingSend.status, 404);
 
+  const provider = await post("/v1/admin/model-providers", token, {
+    alias: "default",
+    protocol: "chat_completions",
+    providerKind: "local",
+    baseUrl: "http://127.0.0.1:18082/v1",
+    modelId: "gpt",
+    contextWindowTokens: 128_000,
+    maxOutputTokens: 4096,
+    temperature: 0.5,
+    reasoningEffort: "low",
+    reasoningFormat: "none",
+  });
+  assert.equal(provider.status, 200);
+
+  const contextUsage = await get(
+    "/v1/chat/sessions/chat-session/context",
+    token,
+  );
+  assert.equal(contextUsage.status, 200);
+  assert.equal(contextUsage.body.data.provider.alias, "default");
+  assert.equal(contextUsage.body.data.provider.model_id, "gpt");
+  assert.equal(contextUsage.body.data.provider.context_window_tokens, 128_000);
+  assert.equal(contextUsage.body.data.context.estimate_quality, "approximate");
+  assert.equal(
+    typeof contextUsage.body.data.context.estimated_prompt_tokens,
+    "number",
+  );
+
   const registry = await get("/v1/chat/commands", token);
   assert.equal(registry.status, 200);
   assert.deepEqual(
     registry.body.data.commands.map(
       (command: { name: string }) => command.name,
     ),
-    ["help", "status", "session", "new", "reload-mcp"],
+    ["help", "status", "session", "model", "new", "reload-mcp"],
   );
   const newDescriptor = registry.body.data.commands.find(
     (command: { name: string }) => command.name === "new",
@@ -755,6 +796,20 @@ try {
   assert.equal(statusCommand.status, 200);
   assert.equal(statusCommand.body.data.status, "completed");
   assert.equal(statusCommand.body.data.command_name, "status");
+
+  const modelCommand = await post(
+    "/v1/chat/sessions/chat-session/commands",
+    token,
+    {
+      command: "/model",
+      actor: { id: "human-operator", kind: "human" },
+    },
+  );
+  assert.equal(modelCommand.status, 200);
+  assert.equal(modelCommand.body.data.status, "completed");
+  assert.equal(modelCommand.body.data.command_name, "model");
+  assert.equal(modelCommand.body.data.response.fields.providerAlias, "default");
+  assert.equal(modelCommand.body.data.response.fields.modelId, "gpt");
 
   const unknownCommand = await post(
     "/v1/chat/sessions/chat-session/commands",

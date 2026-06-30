@@ -128,10 +128,14 @@ modelConfig:
     true,
   );
   assert.equal(
-    diagnostics.records.some((record) =>
-      JSON.stringify(record).includes("Do useful fallback work."),
-    ),
-    false,
+    diagnostics.records.find((record) => record.profileId === "file-only")
+      ?.promptSoulMarkdown,
+    "Do useful fallback work.",
+  );
+  assert.equal(
+    diagnostics.records.find((record) => record.profileId === "registered")
+      ?.providerAlias,
+    undefined,
   );
   assert.equal(
     filterAdminProfileRegistryRecords(

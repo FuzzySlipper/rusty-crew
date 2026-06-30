@@ -462,9 +462,11 @@ function redactAdminData<T>(data: T): T {
   return redactValue(data) as T;
 }
 
-function redactValue(value: unknown): unknown {
-  if (typeof value === "string") return value.slice(0, 2_048);
-  if (Array.isArray(value)) return value.map(redactValue);
+function redactValue(value: unknown, key?: string): unknown {
+  if (typeof value === "string") {
+    return shouldPreserveFullAdminString(key) ? value : value.slice(0, 2_048);
+  }
+  if (Array.isArray(value)) return value.map((item) => redactValue(item));
   if (value === null || typeof value !== "object") return value;
 
   const output: Record<string, unknown> = {};
@@ -472,10 +474,20 @@ function redactValue(value: unknown): unknown {
     if (isSecretLikeKey(key)) {
       output[key] = "[redacted]";
     } else {
-      output[key] = redactValue(nested);
+      output[key] = redactValue(nested, key);
     }
   }
   return output;
+}
+
+function shouldPreserveFullAdminString(key: string | undefined): boolean {
+  return (
+    key === "promptSoulMarkdown" ||
+    key === "promptMemoryMarkdown" ||
+    key === "soulMarkdown" ||
+    key === "memoryMarkdown" ||
+    key === "contentText"
+  );
 }
 
 function isSecretLikeKey(key: string): boolean {

@@ -15,6 +15,12 @@ const profilesDir = join(root, "profiles");
 mkdirSync(profilesDir, { recursive: true });
 
 try {
+  const longRegisteredSoulMarkdown = Array.from(
+    { length: 180 },
+    (_, index) =>
+      `Registered DB soul export line ${index + 1}: export-plan contentText must preserve generated prompt markdown.`,
+  ).join("\n");
+  assert.ok(longRegisteredSoulMarkdown.length > 2_048);
   const registeredDir = join(profilesDir, "registered");
   mkdirSync(registeredDir, { recursive: true });
   const registeredProfilePath = join(registeredDir, "profile.yaml");
@@ -51,7 +57,7 @@ modelConfig:
       displayName: "Registered",
       defaultSessionKind: "full",
       agentId: "registered",
-      promptSoulMarkdown: "Registered DB soul text.",
+      promptSoulMarkdown: longRegisteredSoulMarkdown,
       promptMemoryMarkdown: "Registered DB memory text.",
       activeRuntimeSettingsJson: {
         modelConfig: { provider: "den-router" },
@@ -124,10 +130,10 @@ modelConfig:
   assert.equal(
     registryPlan.entries.find((entry) => entry.targetPath === "soul.md")
       ?.contentText,
-    "Registered DB soul text.",
+    longRegisteredSoulMarkdown,
   );
   assert.equal(
-    JSON.stringify(registryPlan).includes("Registered DB soul text."),
+    JSON.stringify(registryPlan).includes("Registered DB soul export line 180"),
     true,
   );
   assert.equal(JSON.stringify(registryPlan).includes("must-not-export"), false);
@@ -149,16 +155,24 @@ modelConfig:
   const route = handleAdminDiagnosticsRequest(
     {
       method: "GET",
-      url: "/v1/admin/profiles/registry/file-only/export-plan",
+      url: "/v1/admin/profiles/registry/registered/export-plan",
     },
     { diagnostics: emptyRuntimeDiagnostics(), profileRegistry: diagnostics },
   );
   assert.equal(route.status, 200);
   assert.equal(route.body.ok, true);
   const routePlan = route.body.ok
-    ? (route.body.data as { profileId: string })
+    ? (route.body.data as {
+        profileId: string;
+        entries: { targetPath: string; contentText?: string }[];
+      })
     : undefined;
-  assert.equal(routePlan?.profileId, "file-only");
+  assert.equal(routePlan?.profileId, "registered");
+  assert.equal(
+    routePlan?.entries.find((entry) => entry.targetPath === "soul.md")
+      ?.contentText,
+    longRegisteredSoulMarkdown,
+  );
 
   console.log(
     JSON.stringify(

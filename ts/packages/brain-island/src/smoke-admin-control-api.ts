@@ -24,6 +24,12 @@ const observationProducer = new AgentActivityObservationProducer({
   sink: observationSink,
   required: true,
 });
+const longProfileSoulMarkdown = Array.from(
+  { length: 180 },
+  (_, index) =>
+    `Admin control profile soul line ${index + 1}: read_profile_config must preserve long editable prompt markdown.`,
+).join("\n");
+assert.ok(longProfileSoulMarkdown.length > 2_048);
 const curatorRequests: unknown[] = [];
 const schedulerCalls: string[] = [];
 const executor: AdminControlExecutor = {
@@ -105,7 +111,11 @@ const executor: AdminControlExecutor = {
       status: "completed",
       summary: `Read ${command.target.profileId}.`,
       affectedIds: { profileId: command.target.profileId ?? "" },
-      result: { profileId: command.target.profileId, profileConfig: {} },
+      result: {
+        profileId: command.target.profileId,
+        profileConfig: {},
+        soulMarkdown: longProfileSoulMarkdown,
+      },
     };
   },
   planProfileUpdate(command) {
@@ -429,6 +439,10 @@ assert.equal(readProfile.status, 200);
 const readProfileData = okData<AdminControlResponse>(readProfile);
 assert.equal(readProfileData.command.name, "read_profile_config");
 assert.equal(readProfileData.command.target.profileId, "prime");
+assert.equal(
+  (readProfileData.outcome.result as { soulMarkdown?: string })?.soulMarkdown,
+  longProfileSoulMarkdown,
+);
 
 const planProfileUpdate = await handleAdminControlRequest(
   {

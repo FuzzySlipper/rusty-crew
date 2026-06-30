@@ -4,6 +4,7 @@ export type SlashCommandName =
   | "help"
   | "status"
   | "session"
+  | "model"
   | "new"
   | "reload-mcp";
 
@@ -158,6 +159,12 @@ export const SLASH_COMMAND_REGISTRY = [
   slashCommand({
     name: "session",
     description: "Show details for the current session.",
+    readOnly: true,
+  }),
+  slashCommand({
+    name: "model",
+    description:
+      "Show the active model provider, brain backend, and context estimate.",
     readOnly: true,
   }),
   slashCommand({
@@ -812,6 +819,14 @@ export const API_CAPABILITIES = [
     "chat",
     ["chat"],
   ),
+  readCapability(
+    "chat.sessions.context",
+    "GET",
+    "/v1/chat/sessions/{session_id}/context",
+    "Read browser-safe model/provider/brain and approximate context usage diagnostics for a chat session.",
+    "chat",
+    ["chat", "session", "diagnostics"],
+  ),
   {
     id: "chat.commands.execute",
     method: "POST",
@@ -1079,6 +1094,22 @@ export const API_CAPABILITIES = [
     "Apply DB-backed profile soul and memory prompt text changes with revision checking.",
     "admin",
     ["profile", "config", "prompt"],
+  ),
+  mutationCapability(
+    "admin.profiles.registry.runtime_config_plan",
+    "POST",
+    "/v1/admin/profiles/registry/{profile_id}/runtime-config/plan",
+    "Plan DB-backed profile provider, built-in tool policy, and MCP binding changes without applying them.",
+    "admin",
+    ["profile", "config", "tool", "mcp"],
+  ),
+  mutationCapability(
+    "admin.profiles.registry.runtime_config_apply",
+    "POST",
+    "/v1/admin/profiles/registry/{profile_id}/runtime-config/apply",
+    "Apply DB-backed profile provider, built-in tool policy, and MCP binding changes with revision checking and runtime reload.",
+    "admin",
+    ["profile", "config", "tool", "mcp"],
   ),
   readCapability(
     "admin.storage.query_catalog",

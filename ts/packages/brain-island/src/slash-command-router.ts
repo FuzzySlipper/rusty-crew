@@ -123,6 +123,12 @@ export function routeSlashCommand(
         summary: "Session summary requested.",
         fields: sessionFields(input.session),
       });
+    case "model":
+      return intercepted("model", "ok", {
+        title: "Model",
+        summary: "Model and brain diagnostics requested.",
+        fields: sessionFields(input.session),
+      });
     case "new":
       return intercepted(
         "new",
