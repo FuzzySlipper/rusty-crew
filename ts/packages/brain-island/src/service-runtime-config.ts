@@ -86,6 +86,10 @@ import {
   type SessionMemoryPromptConfig,
 } from "./profile-loading.js";
 import {
+  contextStrategyPolicyFromUnknown,
+  type ContextStrategyPolicy,
+} from "./context-strategy.js";
+import {
   buildServiceMcpToolCatalog,
   buildServiceMcpEndpointConfig,
   createServiceMcpToolResolver,
@@ -128,6 +132,7 @@ export interface RustyCrewConfiguredSession {
   maxHistoryMessages?: number;
   turnTimeoutMs?: number;
   sessionMemoryPrompt?: SessionMemoryPromptConfig;
+  contextPolicy?: ContextStrategyPolicy;
 }
 
 export interface EffectiveSessionDefaults {
@@ -1753,6 +1758,11 @@ function configuredSession(
     sessionMemoryPrompt: isRecord(parsed.sessionMemoryPrompt)
       ? sessionMemoryPromptConfig(parsed.sessionMemoryPrompt)
       : undefined,
+    contextPolicy: isRecord(parsed.contextPolicy)
+      ? contextStrategyPolicyFromUnknown(parsed.contextPolicy)
+      : isRecord(parsed.context_policy)
+        ? contextStrategyPolicyFromUnknown(parsed.context_policy)
+        : undefined,
   };
 }
 

@@ -41,6 +41,14 @@ try {
   assert.equal(contextUsage.body.data.provider.context_window_tokens, 128_000);
   assert.equal(contextUsage.body.data.context.estimate_quality, "approximate");
   assert.equal(typeof contextUsage.body.data.brain.backend, "string");
+  assert.equal(
+    contextUsage.body.data.context_strategy.strategy_id,
+    "recent_window",
+  );
+  assert.equal(
+    contextUsage.body.data.context_strategy.auto_compaction_enabled,
+    false,
+  );
 
   const commandCatalog = await get("/v1/chat/commands", token);
   assert.equal(commandCatalog.status, 200);

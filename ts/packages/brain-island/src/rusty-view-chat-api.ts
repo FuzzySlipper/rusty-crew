@@ -245,6 +245,16 @@ export interface SessionContextUsageResult {
     strategy?: string;
     backend: string;
   };
+  context_strategy: {
+    strategy_id: string;
+    enabled: boolean;
+    auto_compaction_enabled: boolean;
+    compact_at_percent: number;
+    target_percent_after_compaction: number;
+    max_context_percent_for_wake: number;
+    debug_visibility: "off" | "status" | "verbose";
+    include_debug_events_in_model_context: boolean;
+  };
   tools: {
     local_tool_profile_id?: string;
     tool_count: number;

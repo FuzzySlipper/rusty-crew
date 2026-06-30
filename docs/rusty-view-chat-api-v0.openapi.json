@@ -1338,7 +1338,7 @@
       },
       "SessionContextUsageResult": {
         "type": "object",
-        "required": ["session_id", "agent_id", "profile_id", "provider", "brain", "tools", "context", "degraded", "diagnostics"],
+        "required": ["session_id", "agent_id", "profile_id", "provider", "brain", "context_strategy", "tools", "context", "degraded", "diagnostics"],
         "properties": {
           "session_id": { "type": "string" },
           "agent_id": { "type": "string" },
@@ -1371,6 +1371,21 @@
               "module": { "type": "string" },
               "strategy": { "type": "string" },
               "backend": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "context_strategy": {
+            "type": "object",
+            "required": ["strategy_id", "enabled", "auto_compaction_enabled", "compact_at_percent", "target_percent_after_compaction", "max_context_percent_for_wake", "debug_visibility", "include_debug_events_in_model_context"],
+            "properties": {
+              "strategy_id": { "type": "string" },
+              "enabled": { "type": "boolean" },
+              "auto_compaction_enabled": { "type": "boolean" },
+              "compact_at_percent": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "target_percent_after_compaction": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "max_context_percent_for_wake": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "debug_visibility": { "type": "string", "enum": ["off", "status", "verbose"] },
+              "include_debug_events_in_model_context": { "type": "boolean" }
             },
             "additionalProperties": false
           },

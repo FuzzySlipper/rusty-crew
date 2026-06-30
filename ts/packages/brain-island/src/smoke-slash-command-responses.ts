@@ -157,6 +157,16 @@ const model = buildReadOnlySlashCommandResponse("model", {
       module: "pi-agent-core",
       backend: "pi-agent-core",
     },
+    context_strategy: {
+      strategy_id: "recent_window",
+      enabled: true,
+      auto_compaction_enabled: false,
+      compact_at_percent: 80,
+      target_percent_after_compaction: 55,
+      max_context_percent_for_wake: 95,
+      debug_visibility: "status",
+      include_debug_events_in_model_context: false,
+    },
     tools: {
       local_tool_profile_id: "full-agent",
       tool_count: 3,

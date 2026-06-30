@@ -87,6 +87,8 @@ function modelResponse(
       modelId: model.provider.model_id ?? "unknown",
       brainBackend: model.brain.backend,
       brainModule: model.brain.module ?? "unknown",
+      contextStrategy: model.context_strategy.strategy_id,
+      autoCompactionEnabled: model.context_strategy.auto_compaction_enabled,
       contextWindowTokens: model.context.context_window_tokens ?? 0,
       estimatedPromptTokens: model.context.estimated_prompt_tokens ?? 0,
       estimatedRemainingTokens: model.context.estimated_remaining_tokens ?? 0,

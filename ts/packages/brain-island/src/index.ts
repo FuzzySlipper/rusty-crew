@@ -997,3 +997,18 @@ export type {
   MemorySpaceRecordReadResult,
   MemorySpaceToolDetails,
 } from "./memory-space-api.js";
+export {
+  contextStrategyCatalog,
+  contextStrategyDescriptor,
+  contextStrategyPolicyFromPatch,
+  contextStrategyPolicyFromUnknown,
+  defaultContextStrategyPolicy,
+} from "./context-strategy.js";
+export type {
+  ContextDebugVisibility,
+  ContextStrategyCatalog,
+  ContextStrategyDescriptor,
+  ContextStrategyId,
+  ContextStrategyPolicy,
+  ContextStrategyPolicyDiagnostic,
+} from "./context-strategy.js";

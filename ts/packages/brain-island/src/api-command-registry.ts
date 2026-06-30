@@ -863,6 +863,14 @@ export const API_CAPABILITIES = [
     ["tool", "profile", "config"],
   ),
   readCapability(
+    "admin.context_strategies.catalog",
+    "GET",
+    "/v1/admin/context-strategies",
+    "List model context strategy ids, policy defaults, and UI validation metadata.",
+    "admin",
+    ["service", "config", "profile"],
+  ),
+  readCapability(
     "admin.local_tool_profiles.list",
     "GET",
     "/v1/admin/local-tool-profiles",

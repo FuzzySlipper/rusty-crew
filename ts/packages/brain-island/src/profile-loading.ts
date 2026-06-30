@@ -13,6 +13,10 @@ import {
   type ToolProfileSelection,
 } from "./tool-profile-selection.js";
 import { defaultToolRegistry, type ToolRegistry } from "./tool-registry.js";
+import {
+  contextStrategyPolicyFromUnknown,
+  type ContextStrategyPolicy,
+} from "./context-strategy.js";
 
 export type ProfileLoadErrorCode =
   | "profile_not_found"
@@ -117,6 +121,7 @@ export interface ProfileConfig {
   mcpConfig?: ProfileMcpConfig;
   backgroundReview?: ProfileBackgroundReviewConfig;
   memoryConfig?: ProfileMemoryConfig;
+  contextPolicy?: ContextStrategyPolicy;
   sessionDefaults?: ProfileSessionDefaultsConfig;
   channelDefaults?: ProfileChannelDefaultsConfig;
 }
@@ -645,6 +650,11 @@ function validateProfileConfig(
     memoryConfig: isRecord(parsed.memoryConfig)
       ? profileMemoryConfig(parsed.memoryConfig)
       : undefined,
+    contextPolicy: isRecord(parsed.contextPolicy)
+      ? contextStrategyPolicyFromUnknown(parsed.contextPolicy)
+      : isRecord(parsed.context_policy)
+        ? contextStrategyPolicyFromUnknown(parsed.context_policy)
+        : undefined,
     sessionDefaults: isRecord(parsed.sessionDefaults)
       ? {
           ownerId: optionalString(parsed.sessionDefaults.ownerId),

@@ -10,6 +10,10 @@ import { buildProfileRegistryImportPlan } from "./profile-registry-import.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { NativeRuntimeConfigDiagnostic } from "@rusty-crew/native-bridge";
 import { loadProfileConfig, type ProfileConfig } from "./profile-loading.js";
+import {
+  contextStrategyPolicyFromUnknown,
+  type ContextStrategyPolicy,
+} from "./context-strategy.js";
 
 export type AdminProfileRegistrySource = "registry" | "file_fallback";
 export type AdminProfileAssetStatus =
@@ -44,6 +48,7 @@ export interface AdminProfileRegistryRecord {
     deniedTools?: string[];
     includeDeprecated?: boolean;
   };
+  contextPolicy?: ContextStrategyPolicy;
   mcpBindings?: Array<{
     serverId: string;
     bindingId?: string;
@@ -195,6 +200,7 @@ async function registryAdminRecord(
     providerAlias: runtime.providerAlias,
     localToolProfileId: runtime.localToolProfileId,
     toolPolicy: runtime.toolPolicy,
+    contextPolicy: runtime.contextPolicy,
     mcpBindings: runtime.mcpBindings,
     promptSoulMarkdown: record.promptSoulMarkdown,
     promptMemoryMarkdown: record.promptMemoryMarkdown,
@@ -235,6 +241,7 @@ async function fallbackAdminRecord(
     providerAlias: plan.profile.providerAlias,
     localToolProfileId: plan.profile.localToolProfileId,
     toolPolicy: adminToolPolicy(plan.profile.toolPolicy),
+    contextPolicy: plan.profile.contextPolicy,
     promptSoulMarkdown: plan.registryWrite.promptSoulMarkdown,
     promptMemoryMarkdown: plan.registryWrite.promptMemoryMarkdown,
     importedFrom: plan.registryWrite.importExport.importedFrom,
@@ -270,6 +277,7 @@ function runtimeConfigReadbackFromRegistry(
   providerAlias?: string;
   localToolProfileId?: string;
   toolPolicy?: AdminProfileRegistryRecord["toolPolicy"];
+  contextPolicy?: ContextStrategyPolicy;
   mcpBindings?: AdminProfileRegistryRecord["mcpBindings"];
 } {
   const settings = recordValue(record.activeRuntimeSettingsJson);
@@ -292,6 +300,12 @@ function runtimeConfigReadbackFromRegistry(
       adminToolPolicy(profile?.toolPolicy) ??
       toolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy) ??
       adminToolPolicy(settingsProfile.toolPolicy),
+    contextPolicy:
+      profile?.contextPolicy ??
+      contextStrategyPolicyFromUnknown(
+        settings.contextPolicy ?? settings.context_policy,
+      ) ??
+      settingsProfile.contextPolicy,
     mcpBindings:
       mcpBindings.length > 0
         ? mcpBindings
@@ -303,12 +317,16 @@ function runtimeConfigReadbackFromRegistry(
 
 function profileConfigFromRegistrySettings(
   settings: Record<string, unknown>,
-): Pick<ProfileConfig, "providerAlias" | "localToolProfileId" | "toolPolicy"> {
+): Pick<
+  ProfileConfig,
+  "providerAlias" | "localToolProfileId" | "toolPolicy" | "contextPolicy"
+> {
   const profile = recordValue(settings.profile);
   return {
     providerAlias: stringValue(profile.providerAlias),
     localToolProfileId: stringValue(profile.localToolProfileId),
     toolPolicy: toolPolicyFromUnknown(profile.toolPolicy),
+    contextPolicy: contextStrategyPolicyFromUnknown(profile.contextPolicy),
   };
 }
 

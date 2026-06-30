@@ -258,6 +258,15 @@ try {
       `missing built-in tool catalog toolset ${toolset}`,
     );
   }
+  const contextStrategies = await get("/v1/admin/context-strategies", token);
+  assert.equal(contextStrategies.status, 200);
+  assert.equal(contextStrategies.body.data.defaultStrategyId, "recent_window");
+  assert.ok(
+    contextStrategies.body.data.strategies.some(
+      (strategy: { id: string }) =>
+        strategy.id === "rolling_summary_compaction",
+    ),
+  );
   assert.ok(
     toolsCatalog.body.data.tools.some(
       (entry: { name: string; description: string }) =>
@@ -1135,6 +1144,17 @@ try {
         expectedRevision: registryRuntimeRevision,
         providerAlias: "default",
         localToolProfileId: "full_agent",
+        contextPolicy: {
+          strategyId: "rolling_summary_compaction",
+          enabled: true,
+          autoCompactionEnabled: true,
+          compactAtPercent: 82,
+          targetPercentAfterCompaction: 50,
+          maxContextPercentForWake: 94,
+          debugVisibility: "verbose",
+          includeDebugEventsInModelContext: false,
+          strategyConfig: { fixture: "runtime-config-plan" },
+        },
         mcpBindings: [
           {
             serverId: "field",
@@ -1159,6 +1179,38 @@ try {
       "full_agent",
     );
     assert.equal(
+      registryRuntimePlan.body.data.runtimeConfig.contextPolicy.strategyId,
+      "rolling_summary_compaction",
+    );
+    assert.equal(
+      registryRuntimePlan.body.data.runtimeConfig.contextPolicy
+        .compactAtPercent,
+      82,
+    );
+    const invalidContextPolicyPlan = await post(
+      "/v1/admin/profiles/registry/field-created-profile/runtime-config/plan",
+      undefined,
+      {
+        expectedRevision: registryRuntimeRevision,
+        contextPolicy: {
+          strategyId: "missing_strategy",
+          compactAtPercent: 82,
+          targetPercentAfterCompaction: 50,
+          maxContextPercentForWake: 94,
+        },
+      },
+      noAuthPort,
+    );
+    assert.equal(invalidContextPolicyPlan.status, 200);
+    assert.equal(invalidContextPolicyPlan.body.data.ok, false);
+    assert.equal(
+      invalidContextPolicyPlan.body.data.diagnostics.find(
+        (diagnostic: { code: string }) =>
+          diagnostic.code === "context_strategy_unknown",
+      )?.path,
+      "contextPolicy.strategyId",
+    );
+    assert.equal(
       registryRuntimePlan.body.data.implications.runtimeRebuildRecommended,
       true,
     );
@@ -1173,6 +1225,17 @@ try {
         expectedRevision: registryRuntimeRevision,
         providerAlias: "default",
         localToolProfileId: "full_agent",
+        contextPolicy: {
+          strategyId: "rolling_summary_compaction",
+          enabled: true,
+          autoCompactionEnabled: true,
+          compactAtPercent: 82,
+          targetPercentAfterCompaction: 50,
+          maxContextPercentForWake: 94,
+          debugVisibility: "verbose",
+          includeDebugEventsInModelContext: false,
+          strategyConfig: { fixture: "runtime-config-apply" },
+        },
         mcpBindings: [
           {
             serverId: "field",
@@ -1202,6 +1265,14 @@ try {
       registryRuntimeReadback.body.data.localToolProfileId,
       "full_agent",
     );
+    assert.equal(
+      registryRuntimeReadback.body.data.contextPolicy.strategyId,
+      "rolling_summary_compaction",
+    );
+    assert.equal(
+      registryRuntimeReadback.body.data.contextPolicy.debugVisibility,
+      "verbose",
+    );
     assert.deepEqual(
       registryRuntimeReadback.body.data.mcpBindings.map(
         (binding: { serverId: string; toolProfileKey?: string }) => [
@@ -1221,6 +1292,7 @@ try {
       providerAlias?: string;
       localToolProfileId?: string;
       toolPolicy?: { requestedToolsets?: string[] };
+      contextPolicy?: { strategyId?: string; compactAtPercent?: number };
     };
     assert.equal(updatedCreatedProfileConfig.providerAlias, "default");
     assert.equal(updatedCreatedProfileConfig.brain?.module, "local");
@@ -1229,6 +1301,10 @@ try {
       updatedCreatedProfileConfig.toolPolicy?.requestedToolsets?.includes(
         "local_code_write",
       ),
+    );
+    assert.equal(
+      updatedCreatedProfileConfig.contextPolicy?.strategyId,
+      "rolling_summary_compaction",
     );
     const runtimeConfigAfterRegistryRuntimeUpdate = JSON.parse(
       readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),

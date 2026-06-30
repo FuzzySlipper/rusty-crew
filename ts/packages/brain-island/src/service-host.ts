@@ -135,6 +135,14 @@ import {
   type DirectDebugServiceContext,
 } from "./direct-debug-service.js";
 import {
+  contextStrategyCatalog,
+  contextStrategyDescriptor,
+  contextStrategyPolicyFromPatch,
+  contextStrategyPolicyFromUnknown,
+  defaultContextStrategyPolicy,
+  type ContextStrategyPolicy,
+} from "./context-strategy.js";
+import {
   loadProfileConfig,
   loadProfileContext,
   parseProfileConfigDraft,
@@ -751,6 +759,10 @@ async function handleHttpRequest(
     return handleAdminToolsCatalogRequest(request);
   }
 
+  if (url.pathname === "/v1/admin/context-strategies") {
+    return handleAdminContextStrategiesRequest(request);
+  }
+
   if (
     url.pathname === "/v1/admin/local-tool-profiles" ||
     url.pathname.startsWith("/v1/admin/local-tool-profiles/")
@@ -993,6 +1005,22 @@ async function handleAdminToolsCatalogRequest(
   return successRoute(requestIdValue, buildBuiltInToolCatalog());
 }
 
+async function handleAdminContextStrategiesRequest(
+  request: IncomingMessage,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  if ((request.method ?? "GET").toUpperCase() !== "GET") {
+    return failure(405, requestIdValue, {
+      code: "method_not_allowed",
+      reason_code: "context_strategy_catalog_read_only",
+      message: "context strategy catalog routes only support GET",
+      retryable: false,
+    });
+  }
+
+  return successRoute(requestIdValue, contextStrategyCatalog());
+}
+
 async function handleAdminLocalToolProfilesRequest(
   request: IncomingMessage,
   state: ServiceState,
@@ -1222,6 +1250,7 @@ interface EditableProfileRuntimeConfig {
     deniedTools?: string[];
     includeDeprecated?: boolean;
   };
+  contextPolicy: ContextStrategyPolicy;
   mcpBindings: Array<{
     serverId: string;
     bindingId?: string;
@@ -1385,7 +1414,9 @@ async function planProfileRegistryRuntimeConfigWrite(
       runtimeRebuildRecommended:
         existing.runtimeConfig.providerAlias !== runtimeConfig.providerAlias ||
         JSON.stringify(existing.runtimeConfig.brain ?? {}) !==
-          JSON.stringify(runtimeConfig.brain ?? {}),
+          JSON.stringify(runtimeConfig.brain ?? {}) ||
+        JSON.stringify(existing.runtimeConfig.contextPolicy) !==
+          JSON.stringify(runtimeConfig.contextPolicy),
       mcpRefreshRecommended:
         JSON.stringify(existing.mcpBindings) !==
         JSON.stringify(runtimeConfig.mcpBindings),
@@ -1552,6 +1583,11 @@ async function editableRuntimeConfigForProfile(
     toolPolicy:
       editableToolPolicy(profile?.toolPolicy) ??
       profileToolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy),
+    contextPolicy:
+      profile?.contextPolicy ??
+      contextStrategyPolicyFromUnknown(
+        settings.contextPolicy ?? settings.context_policy,
+      ),
     mcpBindings,
   };
   return {
@@ -1628,12 +1664,23 @@ async function editableRuntimeConfigFromBody(
   const mcpBindings = Object.hasOwn(body, "mcpBindings")
     ? editableMcpBindingsFromBody(body.mcpBindings)
     : existing.runtimeConfig.mcpBindings;
+  const contextPolicy = Object.hasOwn(body, "contextPolicy")
+    ? contextStrategyPolicyFromPatch(
+        body.contextPolicy,
+        existing.runtimeConfig.contextPolicy,
+      )
+    : {
+        policy: existing.runtimeConfig.contextPolicy,
+        diagnostics: [],
+      };
+  diagnostics.push(...contextPolicy.diagnostics);
 
   return {
     providerAlias,
     brain,
     localToolProfileId,
     toolPolicy,
+    contextPolicy: contextPolicy.policy,
     mcpBindings: mcpBindings.map((binding, index) =>
       normalizedEditableMcpBinding(record, binding, index),
     ),
@@ -1650,6 +1697,7 @@ function profileRuntimeSettingsJson(
     skills_mode: "all",
     localToolProfileId: runtimeConfig.localToolProfileId,
     toolPolicy: runtimeConfig.toolPolicy,
+    contextPolicy: runtimeConfig.contextPolicy,
     mcp_bindings: runtimeConfig.mcpBindings.map((binding) => ({
       server_id: binding.serverId,
       binding_id: binding.bindingId,
@@ -1672,6 +1720,7 @@ function profileFileRuntimeConfig(
     brain: runtimeConfig.brain,
     localToolProfileId: runtimeConfig.localToolProfileId,
     toolPolicy: runtimeConfig.toolPolicy,
+    contextPolicy: runtimeConfig.contextPolicy,
   });
 }
 
@@ -1696,6 +1745,7 @@ function applyEditableRuntimeConfigToProfileJson(
   } else {
     profileConfig.toolPolicy = runtimeConfig.toolPolicy;
   }
+  profileConfig.contextPolicy = runtimeConfig.contextPolicy;
 }
 
 async function readProfileConfigJsonForMutation(
@@ -3186,6 +3236,38 @@ async function buildSessionMemoryContextForWake(
     });
     return undefined;
   }
+}
+
+async function prepareContextStrategyForWake(
+  state: ServiceState,
+  input: {
+    session: Pick<SessionState, "sessionId" | "profileId">;
+    configuredSession?: Pick<
+      RustyCrewConfiguredSession,
+      "sessionMemoryPrompt" | "contextPolicy"
+    >;
+    profileContext: Awaited<ReturnType<typeof loadProfileContext>>;
+  },
+): Promise<{
+  policy: ContextStrategyPolicy;
+  sessionMemoryContext?: string;
+}> {
+  const policy =
+    input.configuredSession?.contextPolicy ??
+    input.profileContext.profile.contextPolicy ??
+    defaultContextStrategyPolicy();
+  const descriptor = contextStrategyDescriptor(policy.strategyId);
+  if (!policy.enabled || descriptor === undefined) {
+    return { policy };
+  }
+  // First implementation keeps current wake behavior behind the strategy seam.
+  // Future strategies can replace this helper without changing dispatch.
+  const sessionMemoryContext = await buildSessionMemoryContextForWake(state, {
+    session: input.session,
+    configuredSession: input.configuredSession,
+    profileContext: input.profileContext,
+  });
+  return { policy, sessionMemoryContext };
 }
 
 function effectiveSessionMemoryPromptConfig(
@@ -7458,6 +7540,11 @@ async function rustyViewSessionContextUsage(
   const toolPolicy =
     profileToolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy) ??
     profile?.toolPolicy;
+  const contextPolicy =
+    profile?.contextPolicy ??
+    contextStrategyPolicyFromUnknown(
+      settings.contextPolicy ?? settings.context_policy,
+    );
   const localToolProfileId =
     optionalString(settings.localToolProfileId) ??
     optionalString(settings.local_tool_profile_id) ??
@@ -7520,6 +7607,18 @@ async function rustyViewSessionContextUsage(
       module: brain?.module,
       strategy: brain?.strategy,
       backend: brain?.module ?? providerBrainBackend(provider),
+    },
+    context_strategy: {
+      strategy_id: contextPolicy.strategyId,
+      enabled: contextPolicy.enabled,
+      auto_compaction_enabled: contextPolicy.autoCompactionEnabled,
+      compact_at_percent: contextPolicy.compactAtPercent,
+      target_percent_after_compaction:
+        contextPolicy.targetPercentAfterCompaction,
+      max_context_percent_for_wake: contextPolicy.maxContextPercentForWake,
+      debug_visibility: contextPolicy.debugVisibility,
+      include_debug_events_in_model_context:
+        contextPolicy.includeDebugEventsInModelContext,
     },
     tools: {
       local_tool_profile_id: localToolProfileId,
@@ -9734,13 +9833,13 @@ async function dispatchWake(
       state.runtimeConfig,
       session,
     );
-    const sessionMemoryContext = await buildSessionMemoryContextForWake(state, {
+    const contextStrategy = await prepareContextStrategyForWake(state, {
       session,
       configuredSession: configured,
       profileContext,
     });
     const role = buildProfileRoleAssembly(profileContext, {
-      sessionMemoryContext,
+      sessionMemoryContext: contextStrategy.sessionMemoryContext,
     });
     const turnTimeoutMs = effectiveTurnTimeoutMs(
       effectiveWakeTimeoutMs({
