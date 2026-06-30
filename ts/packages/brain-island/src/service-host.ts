@@ -7958,6 +7958,8 @@ async function listRustyViewAttachments(
     message_id: input.messageId,
     scope_id: input.scopeId,
     include_removed: input.includeRemoved,
+    include_expired: false,
+    expired_only: false,
     page: { limit: input.limit, offset: input.offset },
   })) as AttachmentRecord[];
   return {
@@ -8412,6 +8414,8 @@ async function findRustyViewAttachment(
   const records = (await state.bridge.queryAttachments({
     session_id: sessionId,
     include_removed: true,
+    include_expired: true,
+    expired_only: false,
     page: { limit: 1000, offset: 0 },
   })) as AttachmentRecord[];
   return records.find((record) => record.attachment_id === attachmentId);

@@ -544,7 +544,7 @@ try {
       link_metadata_json: { linked_by: "smoke" },
     },
   );
-  assert.equal(attachment.status, 201);
+  assert.equal(attachment.status, 201, JSON.stringify(attachment.body));
   assert.equal(attachment.body.data.attachment.links.length, 1);
   assert.equal(
     attachment.body.data.attachment.links[0].scope_id,
