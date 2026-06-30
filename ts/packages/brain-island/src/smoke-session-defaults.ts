@@ -52,6 +52,17 @@ const profileContext = {
   },
 };
 
+const profileWithoutResourceLimits = {
+  ...profileContext,
+  profile: {
+    ...profile,
+    runtime: {
+      ...profile.runtime,
+      defaultResourceLimits: undefined,
+    },
+  },
+};
+
 const inherited = sessionWithProfileDefaults(
   {
     sessionId: "runner-session" as SessionId,
@@ -66,6 +77,34 @@ assert.equal(inherited.maxHistoryMessages, 200);
 assert.equal(inherited.turnTimeoutMs, 1_800_000);
 assert.equal(inherited.resourceLimits?.workdir, "/home/dev/rusty-crew");
 assert.equal(inherited.toolProfile?.tools[0]?.name, "read_file");
+
+const serviceDefaultWorkdir = sessionWithProfileDefaults(
+  {
+    sessionId: "default-workdir-session" as SessionId,
+    agentId: "runner" as AgentId,
+    profileId: "runner-profile" as ProfileId,
+    kind: "full",
+  },
+  profileWithoutResourceLimits,
+  "/home",
+);
+assert.equal(serviceDefaultWorkdir.resourceLimits?.workdir, "/home");
+
+const explicitSessionWorkdir = sessionWithProfileDefaults(
+  {
+    sessionId: "explicit-workdir-session" as SessionId,
+    agentId: "runner" as AgentId,
+    profileId: "runner-profile" as ProfileId,
+    kind: "full",
+    resourceLimits: { workdir: "/tmp/session-workdir" },
+  },
+  profileContext,
+  "/home",
+);
+assert.equal(
+  explicitSessionWorkdir.resourceLimits?.workdir,
+  "/tmp/session-workdir",
+);
 
 const explicit = {
   sessionId: "explicit-session" as SessionId,

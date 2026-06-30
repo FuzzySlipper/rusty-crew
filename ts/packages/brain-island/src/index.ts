@@ -291,10 +291,14 @@ export type {
 export {
   gitDiffTool,
   gitStatusTool,
+  defaultLocalToolWorkdir,
   readFileTool,
+  resolveToolPath,
   resolveLocalCodeTools,
   searchFilesTool,
   terminalTool,
+  workerPatchTool,
+  workerWriteTool,
   writeFileTool,
 } from "./local-code-tools.js";
 export type {

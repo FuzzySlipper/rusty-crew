@@ -806,7 +806,11 @@ export async function applyRustyCrewRuntimeConfig(input: {
   );
   for (const session of runtimeConfig.sessions) {
     const profile = await loadProfile(session.profileId);
-    const configuredSession = sessionWithProfileDefaults(session, profile);
+    const configuredSession = sessionWithProfileDefaults(
+      session,
+      profile,
+      input.serviceConfig.paths.defaultWorkdir,
+    );
     const existing = existingSessionsById.get(session.sessionId);
     if (!existing && !createMissingSessions) {
       result.sessionsMissing += 1;
@@ -1035,16 +1039,30 @@ export async function registerConfiguredScheduledJobs(input: {
 export function sessionWithProfileDefaults(
   session: RustyCrewConfiguredSession,
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
+  defaultWorkdir?: string,
 ): RustyCrewConfiguredSession {
   const defaults = effectiveSessionDefaults(session, profile.profile);
   return {
     ...session,
-    resourceLimits:
-      session.resourceLimits ??
-      profile.profile.runtime?.defaultResourceLimits ??
-      undefined,
+    resourceLimits: resourceLimitsWithDefaultWorkdir(
+      session.resourceLimits ?? profile.profile.runtime?.defaultResourceLimits,
+      defaultWorkdir,
+    ),
     toolProfile: session.toolProfile ?? profile.toolSelection.toolProfile,
     ...defaults,
+  };
+}
+
+function resourceLimitsWithDefaultWorkdir(
+  limits: ResourceLimits | undefined,
+  defaultWorkdir: string | undefined,
+): ResourceLimits | undefined {
+  if (defaultWorkdir === undefined) {
+    return limits;
+  }
+  return {
+    ...limits,
+    workdir: limits?.workdir ?? defaultWorkdir,
   };
 }
 

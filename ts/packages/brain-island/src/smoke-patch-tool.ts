@@ -23,7 +23,12 @@ import {
 } from "./index.js";
 
 const workdir = mkdtempSync(join(tmpdir(), "rusty-crew-patch-tool-"));
+const outsideDir = mkdtempSync(
+  join(tmpdir(), "rusty-crew-patch-tool-outside-"),
+);
+const outsidePatchPath = join(outsideDir, "outside.txt");
 writeFileSync(join(workdir, "target.txt"), "hello world\n", "utf8");
+writeFileSync(outsidePatchPath, "outside old\n", "utf8");
 
 const sessionId = "patch-tool-session" as SessionId;
 const agentId = "patch-tool-agent" as AgentId;
@@ -149,6 +154,27 @@ try {
     '{"ok": true}\n',
   );
 
+  const absolutePatchResult = await directPatch.execute("patch-absolute", {
+    path: outsidePatchPath,
+    old_string: "outside old",
+    new_string: "outside new",
+  });
+  assert.equal((absolutePatchResult.details as { ok: boolean }).ok, true);
+  assert.equal(readFileSync(outsidePatchPath, "utf8"), "outside new\n");
+
+  const workerPatch = patchTool(
+    { workdir, maxDurationMs: 5_000 },
+    { name: "worker_patch", filesystemScope: "workdir" },
+  );
+  const workerPatchResult = await workerPatch.execute("worker-patch-outside", {
+    path: outsidePatchPath,
+    old_string: "outside new",
+    new_string: "should not write",
+  });
+  assert.equal((workerPatchResult.details as { ok: boolean }).ok, false);
+  assert.match(textResult(workerPatchResult), /path escapes session workdir/);
+  assert.equal(readFileSync(outsidePatchPath, "utf8"), "outside new\n");
+
   console.log(
     JSON.stringify(
       {
@@ -159,6 +185,10 @@ try {
           join(workdir, "config.json"),
           "utf8",
         ).trim(),
+        absolutePatchText: readFileSync(outsidePatchPath, "utf8").trim(),
+        workerPatchDenied: /path escapes session workdir/.test(
+          textResult(workerPatchResult),
+        ),
         diffLines: textResult(patchResult).split("\n").length,
       },
       null,
@@ -167,6 +197,7 @@ try {
   );
 } finally {
   rmSync(workdir, { force: true, recursive: true });
+  rmSync(outsideDir, { force: true, recursive: true });
 }
 
 function textResult(result: AgentToolResult<unknown>): string {

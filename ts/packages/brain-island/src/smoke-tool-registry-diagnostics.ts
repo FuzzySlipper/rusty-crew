@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildToolRegistryDiagnostics,
+  defaultToolRegistry,
   formatToolRegistryDiagnosticsMarkdown,
 } from "./index.js";
 import type { ToolRegistryEntry } from "./index.js";
@@ -18,7 +19,7 @@ const report = buildToolRegistryDiagnostics({
   },
 });
 
-assert.equal(report.summary.registeredTools, 37);
+assert.equal(report.summary.registeredTools, defaultToolRegistry.entries.length);
 assert.equal(report.summary.selectedTools, 4);
 assert.equal(report.summary.deniedTools, 3);
 assert.equal(report.summary.missingTools, 1);

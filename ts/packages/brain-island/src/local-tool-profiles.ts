@@ -242,6 +242,14 @@ function defaultLocalToolProfiles(now: string): LocalToolProfile[] {
       tools: [],
     }),
     defaultProfile(now, {
+      id: "worker_code_write",
+      displayName: "Worker Code Write",
+      description:
+        "Delegated-worker write and patch tools that stay inside the worker workdir.",
+      toolsets: ["local_code_read", "worker_code_write"],
+      tools: [],
+    }),
+    defaultProfile(now, {
       id: "memory_skills",
       displayName: "Memory And Skills",
       description: "Profile memory, skills read, and session planning tools.",

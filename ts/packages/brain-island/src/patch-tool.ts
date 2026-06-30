@@ -20,6 +20,14 @@ const patchParameters = Type.Object({
 });
 
 type PatchParams = Static<typeof patchParameters>;
+type FilesystemScope = "unrestricted" | "workdir";
+
+interface PatchToolOptions {
+  name?: string;
+  label?: string;
+  description?: string;
+  filesystemScope?: FilesystemScope;
+}
 
 interface PatchToolDetails {
   ok: boolean;
@@ -52,19 +60,22 @@ interface V4AHunk {
 
 export function patchTool(
   context: LocalToolContext,
+  options: PatchToolOptions = {},
 ): BrainTool<typeof patchParameters, PatchToolDetails> {
+  const filesystemScope = options.filesystemScope ?? "unrestricted";
   return {
-    name: "patch",
-    label: "Patch",
+    name: options.name ?? "patch",
+    label: options.label ?? "Patch",
     description:
-      "Apply bounded find-and-replace edits or V4A multi-file patches inside the session workdir and return a unified diff.",
+      options.description ??
+      "Apply bounded find-and-replace edits or V4A multi-file patches. Relative paths resolve from the session workdir; absolute paths are allowed.",
     parameters: patchParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: PatchParams) => {
       if ((params.mode ?? "replace") === "patch") {
-        return executePatchMode(context, params);
+        return executePatchMode(context, params, filesystemScope);
       }
-      return executeReplaceMode(context, params);
+      return executeReplaceMode(context, params, filesystemScope);
     },
   };
 }
@@ -72,6 +83,7 @@ export function patchTool(
 async function executeReplaceMode(
   context: LocalToolContext,
   params: PatchParams,
+  filesystemScope: FilesystemScope,
 ): Promise<BrainToolResult<PatchToolDetails>> {
   const path = params.path ?? "";
   const oldString = params.old_string ?? "";
@@ -87,7 +99,7 @@ async function executeReplaceMode(
 
   let absolutePath: string;
   try {
-    absolutePath = scopedPath(context.workdir, path);
+    absolutePath = resolvePatchPath(context.workdir, path, filesystemScope);
   } catch {
     return errorResult(`path escapes session workdir: ${path}`);
   }
@@ -148,6 +160,7 @@ async function executeReplaceMode(
 async function executePatchMode(
   context: LocalToolContext,
   params: PatchParams,
+  filesystemScope: FilesystemScope,
 ): Promise<BrainToolResult<PatchToolDetails>> {
   const patchBlock = params.patch ?? "";
   if (patchBlock.length === 0) {
@@ -164,7 +177,7 @@ async function executePatchMode(
   const diffs: string[] = [];
   const errors: string[] = [];
   for (const file of files) {
-    await applyPatchFile(context, file, diffs, errors);
+    await applyPatchFile(context, file, diffs, errors, filesystemScope);
   }
 
   const output = [
@@ -185,10 +198,15 @@ async function applyPatchFile(
   file: V4AFile,
   diffs: string[],
   errors: string[],
+  filesystemScope: FilesystemScope,
 ): Promise<void> {
   let absolutePath: string;
   try {
-    absolutePath = scopedPath(context.workdir, file.path);
+    absolutePath = resolvePatchPath(
+      context.workdir,
+      file.path,
+      filesystemScope,
+    );
   } catch {
     errors.push(`path escapes session workdir: ${file.path}`);
     return;
@@ -471,8 +489,15 @@ async function checkJsonSyntax(
   }
 }
 
-function scopedPath(workdir: string, path: string): string {
+function resolvePatchPath(
+  workdir: string,
+  path: string,
+  scope: FilesystemScope,
+): string {
   const target = resolve(workdir, path);
+  if (scope === "unrestricted") {
+    return target;
+  }
   const scopedRelative = relative(workdir, target);
   if (
     scopedRelative === ".." ||

@@ -21,6 +21,7 @@ export type ToolSafetyFlag =
   | "read_only"
   | "writes_files"
   | "executes_process"
+  | "workdir_scoped"
   | "network_access"
   | "external_write"
   | "coordination_action";
@@ -222,7 +223,8 @@ export function createToolRegistry(
 const defaultToolRegistryDefinitions = [
   {
     name: "read_file",
-    description: "Read a UTF-8 text file from the session workdir.",
+    description:
+      "Read a UTF-8 text file. Relative paths resolve from the session workdir; absolute paths are allowed.",
     category: "local",
     toolsets: ["local_code_read", "review_readonly"],
     implementationModule: "./local-code-tools.js#readFileTool",
@@ -234,7 +236,8 @@ const defaultToolRegistryDefinitions = [
   },
   {
     name: "write_file",
-    description: "Write a bounded UTF-8 text file inside the session workdir.",
+    description:
+      "Write a bounded UTF-8 text file. Relative paths resolve from the session workdir; absolute paths are allowed.",
     category: "local",
     toolsets: ["local_code_write"],
     implementationModule: "./local-code-tools.js#writeFileTool",
@@ -247,7 +250,7 @@ const defaultToolRegistryDefinitions = [
   {
     name: "search_files",
     description:
-      "Search files beneath the session workdir and return path matches.",
+      "Search files beneath a root and return path matches. Relative roots resolve from the session workdir; absolute roots are allowed.",
     category: "local",
     toolsets: ["local_code_read", "review_readonly"],
     implementationModule: "./local-code-tools.js#searchFilesTool",
@@ -296,13 +299,40 @@ const defaultToolRegistryDefinitions = [
   },
   {
     name: "patch",
-    description: "Apply a bounded multi-file patch and report a unified diff.",
+    description:
+      "Apply a bounded multi-file patch. Relative paths resolve from the session workdir; absolute paths are allowed.",
     category: "patch",
     toolsets: ["local_code_write"],
     implementationModule: "./patch-tool.js#patchTool",
     surfaces: ["brain"],
     safety: ["writes_files"],
     outputShape: "patch.apply_result.v1",
+    version: "1.0.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "worker_write",
+    description:
+      "Write a bounded UTF-8 text file inside a delegated worker workdir.",
+    category: "local",
+    toolsets: ["worker_code_write"],
+    implementationModule: "./local-code-tools.js#workerWriteTool",
+    surfaces: ["brain"],
+    safety: ["writes_files", "workdir_scoped"],
+    outputShape: "local.worker_file_write_result.v1",
+    version: "1.0.0",
+    inventoryTest: "smoke:tool-registry",
+  },
+  {
+    name: "worker_patch",
+    description:
+      "Apply bounded patches inside a delegated worker workdir and report a unified diff.",
+    category: "patch",
+    toolsets: ["worker_code_write"],
+    implementationModule: "./local-code-tools.js#workerPatchTool",
+    surfaces: ["brain"],
+    safety: ["writes_files", "workdir_scoped"],
+    outputShape: "patch.worker_apply_result.v1",
     version: "1.0.0",
     inventoryTest: "smoke:tool-registry",
   },

@@ -16,6 +16,7 @@ import {
   RUSTY_CREW_DEFAULT_ADMIN_HOST,
   RUSTY_CREW_DEFAULT_ADMIN_PORT,
   RUSTY_CREW_DEFAULT_DATA_DIR,
+  RUSTY_CREW_DEFAULT_WORKDIR,
 } from "./service-config.js";
 import { loadRustyCrewRuntimeConfig } from "./service-runtime-config.js";
 
@@ -25,6 +26,7 @@ const defaultConfig = loadRustyCrewServiceConfig({
   RUSTY_CREW_ADMIN_TOKEN: "default-token",
 });
 assert.equal(defaultConfig.paths.dataDir, RUSTY_CREW_DEFAULT_DATA_DIR);
+assert.equal(defaultConfig.paths.defaultWorkdir, RUSTY_CREW_DEFAULT_WORKDIR);
 assert.equal(
   defaultConfig.paths.staticDir,
   existsSync(join(RUSTY_CREW_DEFAULT_DATA_DIR, "site"))
@@ -68,6 +70,7 @@ const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {
   const config = loadRustyCrewServiceConfig({
     RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_DEFAULT_WORKDIR: join(root, "work"),
     RUSTY_CREW_ADMIN_PORT: "19447",
     RUSTY_CREW_ADMIN_TOKEN: "local-token",
     RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "2000",
@@ -106,6 +109,7 @@ try {
   assert.equal(config.paths.runDir, join(root, "run"));
   assert.equal(config.paths.artifactDir, join(root, "artifacts"));
   assert.equal(config.paths.backupDir, join(root, "backups"));
+  assert.equal(config.paths.defaultWorkdir, join(root, "work"));
   assert.equal(config.paths.staticDir, undefined);
   assert.equal(config.admin.authMode, "bearer");
   assert.equal(config.admin.token, "local-token");

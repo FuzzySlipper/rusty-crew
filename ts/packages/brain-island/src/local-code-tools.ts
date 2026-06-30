@@ -11,6 +11,7 @@ const defaultMaxReadBytes = 256 * 1024;
 const defaultMaxSearchFileBytes = 256 * 1024;
 const defaultMaxCommandOutputBytes = 128 * 1024;
 const defaultCommandTimeoutMs = 30_000;
+export const defaultLocalToolWorkdir = "/home";
 
 const readFileParameters = Type.Object({
   path: Type.String({ minLength: 1 }),
@@ -24,6 +25,7 @@ const writeFileParameters = Type.Object({
 
 const searchFilesParameters = Type.Object({
   query: Type.String({ minLength: 1 }),
+  root: Type.Optional(Type.String({ minLength: 1 })),
   maxResults: Type.Optional(Type.Number({ minimum: 1 })),
 });
 
@@ -49,6 +51,8 @@ export interface LocalToolContext {
   maxDurationMs?: number;
 }
 
+type FilesystemScope = "unrestricted" | "workdir";
+
 export interface LocalToolProcessResult {
   command: string;
   cwd: string;
@@ -69,6 +73,8 @@ export const resolveLocalCodeTools: BrainToolResolver = ({ wake }) => {
     gitStatusTool(context),
     gitDiffTool(context),
     patchTool(context),
+    workerWriteTool(context),
+    workerPatchTool(context),
   ];
 };
 
@@ -77,11 +83,16 @@ export function readFileTool(
 ): BrainTool<typeof readFileParameters> {
   return {
     name: "read_file",
-    description: "Read a UTF-8 text file from the session workdir.",
+    description:
+      "Read a UTF-8 text file. Relative paths resolve from the session workdir; absolute paths are allowed.",
     label: "Read file",
     parameters: readFileParameters,
     execute: async (_toolCallId, params: ReadFileParams) => {
-      const target = scopedPath(context.workdir, params.path);
+      const target = resolveToolPath(
+        context.workdir,
+        params.path,
+        "unrestricted",
+      );
       const maxBytes = params.maxBytes ?? defaultMaxReadBytes;
       const data = await readFile(target);
       const truncated = data.byteLength > maxBytes;
@@ -106,12 +117,17 @@ export function writeFileTool(
 ): BrainTool<typeof writeFileParameters> {
   return {
     name: "write_file",
-    description: "Write a bounded UTF-8 text file inside the session workdir.",
+    description:
+      "Write a bounded UTF-8 text file. Relative paths resolve from the session workdir; absolute paths are allowed.",
     label: "Write file",
     parameters: writeFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: WriteFileParams) => {
-      const target = scopedPath(context.workdir, params.path);
+      const target = resolveToolPath(
+        context.workdir,
+        params.path,
+        "unrestricted",
+      );
       await writeFile(target, params.content, "utf8");
       const details = {
         path: params.path,
@@ -137,22 +153,22 @@ export function searchFilesTool(
   return {
     name: "search_files",
     description:
-      "Search file paths and UTF-8 file contents beneath the session workdir.",
+      "Search file paths and UTF-8 file contents beneath a root. Relative roots resolve from the session workdir; absolute roots are allowed.",
     label: "Search files",
     parameters: searchFilesParameters,
     execute: async (_toolCallId, params: SearchFilesParams) => {
       const maxResults = params.maxResults ?? 50;
       const matches: Array<{ path: string; line?: number; preview: string }> =
         [];
-      await searchDirectory(
+      const root = resolveToolPath(
         context.workdir,
-        context.workdir,
-        params.query,
-        matches,
-        maxResults,
+        params.root ?? ".",
+        "unrestricted",
       );
+      await searchDirectory(root, root, params.query, matches, maxResults);
       const details = {
         query: params.query,
+        root,
         matches,
         truncated: matches.length >= maxResults,
       };
@@ -229,7 +245,10 @@ export function gitDiffTool(
     parameters: gitDiffParameters,
     execute: async (_toolCallId, params: GitDiffParams, signal) => {
       const scopedDiffPath = params.path
-        ? relative(context.workdir, scopedPath(context.workdir, params.path))
+        ? relative(
+            context.workdir,
+            resolveToolPath(context.workdir, params.path, "unrestricted"),
+          )
         : undefined;
       const args = ["diff", "--", ...(scopedDiffPath ? [scopedDiffPath] : [])];
       const result = await runProcess("git", args, context.workdir, {
@@ -245,15 +264,63 @@ export function gitDiffTool(
   };
 }
 
+export function workerWriteTool(
+  context: LocalToolContext,
+): BrainTool<typeof writeFileParameters> {
+  return {
+    name: "worker_write",
+    description:
+      "Write a bounded UTF-8 text file inside the delegated worker workdir.",
+    label: "Worker write",
+    parameters: writeFileParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId, params: WriteFileParams) => {
+      const target = resolveToolPath(context.workdir, params.path, "workdir");
+      await writeFile(target, params.content, "utf8");
+      const details = {
+        path: params.path,
+        absolutePath: target,
+        bytesWritten: Buffer.byteLength(params.content, "utf8"),
+      };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(details, null, 2),
+          },
+        ],
+        details,
+      };
+    },
+  };
+}
+
+export function workerPatchTool(context: LocalToolContext): BrainTool {
+  return patchTool(context, {
+    name: "worker_patch",
+    label: "Worker patch",
+    description:
+      "Apply bounded find-and-replace edits or V4A multi-file patches inside the delegated worker workdir and return a unified diff.",
+    filesystemScope: "workdir",
+  });
+}
+
 function localToolContext(limits: ResourceLimits): LocalToolContext {
   return {
-    workdir: resolve(limits.workdir ?? process.cwd()),
+    workdir: resolve(limits.workdir ?? defaultLocalToolWorkdir),
     maxDurationMs: limits.maxDurationMs,
   };
 }
 
-function scopedPath(workdir: string, path: string): string {
+export function resolveToolPath(
+  workdir: string,
+  path: string,
+  scope: FilesystemScope = "unrestricted",
+): string {
   const target = resolve(workdir, path);
+  if (scope === "unrestricted") {
+    return target;
+  }
   const scopedRelative = relative(workdir, target);
   if (
     scopedRelative === ".." ||

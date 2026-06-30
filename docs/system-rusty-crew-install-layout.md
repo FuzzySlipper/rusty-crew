@@ -104,6 +104,7 @@ RUSTY_CREW_RUN_DIR=/home/system/rusty-crew/run
 RUSTY_CREW_ARTIFACT_DIR=/home/system/rusty-crew/artifacts
 RUSTY_CREW_BACKUP_DIR=/home/system/rusty-crew/backups
 RUSTY_CREW_STATIC_DIR=/home/system/rusty-crew/site
+RUSTY_CREW_DEFAULT_WORKDIR=/home
 
 RUSTY_CREW_ADMIN_HOST=0.0.0.0
 RUSTY_CREW_ADMIN_PORT=9347

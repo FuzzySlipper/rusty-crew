@@ -4,7 +4,7 @@
   "tools": [
     {
       "name": "read_file",
-      "description": "Read a UTF-8 text file from the session workdir.",
+      "description": "Read a UTF-8 text file. Relative paths resolve from the session workdir; absolute paths are allowed.",
       "category": "local",
       "toolsets": ["local_code_read", "review_readonly"],
       "surfaces": ["brain"],
@@ -14,7 +14,7 @@
     },
     {
       "name": "write_file",
-      "description": "Write a bounded UTF-8 text file inside the session workdir.",
+      "description": "Write a bounded UTF-8 text file. Relative paths resolve from the session workdir; absolute paths are allowed.",
       "category": "local",
       "toolsets": ["local_code_write"],
       "surfaces": ["brain"],
@@ -24,7 +24,7 @@
     },
     {
       "name": "search_files",
-      "description": "Search files beneath the session workdir and return path matches.",
+      "description": "Search files beneath a root and return path matches. Relative roots resolve from the session workdir; absolute roots are allowed.",
       "category": "local",
       "toolsets": ["local_code_read", "review_readonly"],
       "surfaces": ["brain"],
@@ -64,12 +64,32 @@
     },
     {
       "name": "patch",
-      "description": "Apply a bounded multi-file patch and report a unified diff.",
+      "description": "Apply a bounded multi-file patch. Relative paths resolve from the session workdir; absolute paths are allowed.",
       "category": "patch",
       "toolsets": ["local_code_write"],
       "surfaces": ["brain"],
       "safety": ["writes_files"],
       "output_shape": "patch.apply_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "worker_write",
+      "description": "Write a bounded UTF-8 text file inside a delegated worker workdir.",
+      "category": "local",
+      "toolsets": ["worker_code_write"],
+      "surfaces": ["brain"],
+      "safety": ["writes_files", "workdir_scoped"],
+      "output_shape": "local.worker_file_write_result.v1",
+      "version": "1.0.0"
+    },
+    {
+      "name": "worker_patch",
+      "description": "Apply bounded patches inside a delegated worker workdir and report a unified diff.",
+      "category": "patch",
+      "toolsets": ["worker_code_write"],
+      "surfaces": ["brain"],
+      "safety": ["writes_files", "workdir_scoped"],
+      "output_shape": "patch.worker_apply_result.v1",
       "version": "1.0.0"
     },
     {
@@ -120,6 +140,26 @@
       "surfaces": ["brain"],
       "safety": ["read_only", "coordination_action"],
       "output_shape": "delegation.find_relevant_paths_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "send_agent_message",
+      "description": "Route a Rusty Crew internal message to another agent and request a wake.",
+      "category": "coordination",
+      "toolsets": ["agent_coordination", "full_agent"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "coordination.send_agent_message_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "agent_round",
+      "description": "Send a Rusty Crew internal message to another agent, wake it, and wait for one correlated reply.",
+      "category": "coordination",
+      "toolsets": ["agent_coordination", "full_agent"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "coordination.agent_round_result.v1",
       "version": "0.1.0"
     },
     {
