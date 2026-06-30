@@ -41,11 +41,11 @@ use rusty_crew_core_protocol::{
     AttachmentId, BodyState, BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope,
     BrainImplementationRegistration, BrainProviderStateScope, BrainWakeProviderStateInput,
     BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, ClockConfig, CompletionStatus,
-    CoreError, CoreErrorKind, CoreEvent, CoreResult, DataBankScopeId,
-    DelegatedResourceCleanupReport, DelegatedRunStatus, DelegatedSessionRuntimeStatus,
-    DelegationLifecycleEvent, DelegationLifecyclePhase, DelegationLineage, DenDataUpdate,
-    EngineConfig, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
-    FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
+    ContextCompactionArtifact, ContextCompactionArtifactQuery, CoreError, CoreErrorKind, CoreEvent,
+    CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
+    DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
+    DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
+    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
     ModelProviderQuery, ModelProviderRecord, ModelProviderWrite, ParentConsumptionPolicy,
@@ -1060,6 +1060,20 @@ impl CoreEngine {
         query: &SessionActivityDigestQuery,
     ) -> CoreResult<Vec<SessionActivityDigest>> {
         self.store.list_session_activity_digests(query)
+    }
+
+    pub fn save_context_compaction_artifact(
+        &self,
+        artifact: &ContextCompactionArtifact,
+    ) -> CoreResult<ContextCompactionArtifact> {
+        self.store.save_context_compaction_artifact(artifact)
+    }
+
+    pub fn list_context_compaction_artifacts(
+        &self,
+        query: &ContextCompactionArtifactQuery,
+    ) -> CoreResult<Vec<ContextCompactionArtifact>> {
+        self.store.list_context_compaction_artifacts(query)
     }
 
     pub fn record_memory_governance_decision(

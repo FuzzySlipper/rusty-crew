@@ -1003,6 +1003,7 @@ export {
   contextStrategyPolicyFromPatch,
   contextStrategyPolicyFromUnknown,
   defaultContextStrategyPolicy,
+  prepareContextStrategyRoleAssembly,
 } from "./context-strategy.js";
 export type {
   ContextDebugVisibility,
@@ -1011,4 +1012,29 @@ export type {
   ContextStrategyId,
   ContextStrategyPolicy,
   ContextStrategyPolicyDiagnostic,
+  ContextStrategyRoleAssemblyPreparation,
 } from "./context-strategy.js";
+export {
+  contextTokenBudget,
+  estimateApproximateTokens,
+  estimateContextUsage,
+  textFragmentsFromPayload,
+} from "./context-estimate.js";
+export type {
+  ContextBudgetProvider,
+  ContextEstimateInput,
+  ContextEstimateQuality,
+  ContextTokenBudget,
+  ContextUsageEstimate,
+} from "./context-estimate.js";
+export {
+  contextFillPercent,
+  evaluateContextCompactionTrigger,
+} from "./context-compaction-trigger.js";
+export type {
+  ContextCompactionAttemptRef,
+  ContextCompactionAttemptStatus,
+  ContextCompactionDecisionStatus,
+  ContextCompactionTriggerDecision,
+  ContextCompactionTriggerInput,
+} from "./context-compaction-trigger.js";

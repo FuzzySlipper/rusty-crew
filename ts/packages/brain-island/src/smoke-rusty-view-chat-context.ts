@@ -4,12 +4,14 @@ import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import type { SessionId } from "@rusty-crew/contracts";
 import { startRustyCrewServiceHost } from "./service-host.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-context-"));
 const port = await openPort();
 const token = "rusty-view-chat-context-token";
 writeRuntimeConfig(root);
+const bridge = await loadNativeBridge();
 const host = await startHost();
 
 try {
@@ -28,6 +30,33 @@ try {
     reasoningFormat: "none",
   });
   assert.ok(provider.status === 200 || provider.status === 201);
+  await bridge.saveContextCompactionArtifact({
+    artifact_id: "context_artifact_smoke",
+    session_id: "chat-session" as SessionId,
+    strategy_id: "rolling_summary_compaction",
+    source_refs_json: {
+      message_slot_ids: ["slot-smoke"],
+      cursor_range: { from: "chat-session:0", to: "chat-session:4" },
+    },
+    provider_metadata_json: {
+      provider_alias: "default",
+      model_id: "gpt",
+    },
+    estimate_before_json: {
+      estimator_id: "fallback_chars_words_v1",
+      estimated_prompt_tokens: 90_000,
+    },
+    estimate_after_json: {
+      estimated_prompt_tokens: 22_000,
+    },
+    summary_text:
+      "Smoke artifact summary is intentionally not returned by /context.",
+    enters_future_context: true,
+    context_policy: "summary_context",
+    metadata_json: { smoke: true },
+    created_at: "2026-06-30T01:00:00Z",
+    updated_at: "2026-06-30T01:00:00Z",
+  });
 
   const contextUsage = await get(
     "/v1/chat/sessions/chat-session/context",
@@ -40,6 +69,13 @@ try {
   assert.equal(contextUsage.body.data.provider.temperature, 0.5);
   assert.equal(contextUsage.body.data.provider.context_window_tokens, 128_000);
   assert.equal(contextUsage.body.data.context.estimate_quality, "approximate");
+  assert.equal(
+    contextUsage.body.data.context.estimator_id,
+    "fallback_chars_words_v1",
+  );
+  assert.equal(contextUsage.body.data.context.reserved_response_tokens, 4_096);
+  assert.equal(contextUsage.body.data.context.safety_margin_tokens, 2_560);
+  assert.equal(contextUsage.body.data.context.usable_input_tokens, 121_344);
   assert.equal(typeof contextUsage.body.data.brain.backend, "string");
   assert.equal(
     contextUsage.body.data.context_strategy.strategy_id,
@@ -48,6 +84,22 @@ try {
   assert.equal(
     contextUsage.body.data.context_strategy.auto_compaction_enabled,
     false,
+  );
+  assert.equal(
+    contextUsage.body.data.latest_compaction_artifact.artifact_id,
+    "context_artifact_smoke",
+  );
+  assert.equal(
+    contextUsage.body.data.latest_compaction_artifact.strategy_id,
+    "rolling_summary_compaction",
+  );
+  assert.equal(
+    contextUsage.body.data.latest_compaction_artifact.enters_future_context,
+    true,
+  );
+  assert.equal(
+    contextUsage.body.data.latest_compaction_artifact.summary_text,
+    undefined,
   );
 
   const commandCatalog = await get("/v1/chat/commands", token);
@@ -104,7 +156,7 @@ async function startHost() {
       RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "0",
       RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "0",
     },
-    bridge: await loadNativeBridge(),
+    bridge,
   });
 }
 

@@ -160,6 +160,10 @@ export interface ChatEvent {
     | "command_started"
     | "command_completed"
     | "command_failed"
+    | "context_status"
+    | "context_compaction_started"
+    | "context_compaction_completed"
+    | "context_compaction_failed"
     | "message_slot_created"
     | "message_variant_created"
     | "message_variant_deleted"
@@ -266,12 +270,27 @@ export interface SessionContextUsageResult {
   context: {
     estimate_quality: "exact" | "approximate" | "unavailable";
     estimate_method: string;
+    estimator_id: string;
     context_window_tokens?: number;
     estimated_prompt_tokens?: number;
     estimated_remaining_tokens?: number;
     max_output_tokens?: number;
+    reserved_response_tokens?: number;
+    safety_margin_tokens?: number;
+    usable_input_tokens?: number;
     sampled_event_count: number;
     sampled_message_count: number;
+  };
+  latest_compaction_artifact?: {
+    artifact_id: string;
+    strategy_id: string;
+    branch_id?: string;
+    enters_future_context: boolean;
+    context_policy: string;
+    created_at: string;
+    updated_at: string;
+    estimate_before_json?: unknown;
+    estimate_after_json?: unknown;
   };
   degraded: boolean;
   diagnostics: Array<{

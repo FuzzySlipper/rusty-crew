@@ -140,8 +140,13 @@ import {
   contextStrategyPolicyFromPatch,
   contextStrategyPolicyFromUnknown,
   defaultContextStrategyPolicy,
+  prepareContextStrategyRoleAssembly,
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
+import {
+  estimateContextUsage,
+  textFragmentsFromPayload,
+} from "./context-estimate.js";
 import {
   loadProfileConfig,
   loadProfileContext,
@@ -2445,6 +2450,63 @@ async function handleDirectDebugRequest(
     parts[0] === "v1" &&
     parts[1] === "debug" &&
     parts[2] === "sessions" &&
+    parts[4] === "context-compaction-events"
+  ) {
+    if ((request.method ?? "GET").toUpperCase() !== "POST") {
+      return failure(405, requestId(request), {
+        code: "method_not_allowed",
+        reason_code: "debug_context_compaction_events_requires_post",
+        message: "context compaction debug event route only supports POST",
+        retryable: false,
+      });
+    }
+    const requestIdValue = requestId(request);
+    const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
+    const sessions = await state.bridge.listSessions();
+    const session = sessions.find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (!session) {
+      return failure(404, requestIdValue, {
+        code: "not_found",
+        reason_code: "debug_context_compaction_session_not_found",
+        message: `debug session ${sessionId} was not found`,
+        retryable: false,
+      });
+    }
+    const body = recordBody(await readJsonBody(request));
+    const result = emitContextCompactionDebugEvents(state, session, {
+      wakeId: optionalString(body.wakeId) ?? optionalString(body.wake_id),
+      strategyId:
+        optionalString(body.strategyId) ??
+        optionalString(body.strategy_id) ??
+        "rolling_summary_compaction",
+      estimateQuality:
+        optionalString(body.estimateQuality) ??
+        optionalString(body.estimate_quality) ??
+        "approximate",
+      fillPercent:
+        optionalNumber(body.fillPercent) ?? optionalNumber(body.fill_percent),
+      compactAtPercent:
+        optionalNumber(body.compactAtPercent) ??
+        optionalNumber(body.compact_at_percent),
+      targetPercentAfterCompaction:
+        optionalNumber(body.targetPercentAfterCompaction) ??
+        optionalNumber(body.target_percent_after_compaction),
+      artifactId:
+        optionalString(body.artifactId) ?? optionalString(body.artifact_id),
+      reasonCode:
+        optionalString(body.reasonCode) ?? optionalString(body.reason_code),
+      fail: body.fail === true,
+    });
+    return successRoute(requestIdValue, result);
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[0] === "v1" &&
+    parts[1] === "debug" &&
+    parts[2] === "sessions" &&
     parts[4] === "context"
   ) {
     if ((request.method ?? "GET").toUpperCase() !== "GET") {
@@ -3250,6 +3312,7 @@ async function prepareContextStrategyForWake(
   },
 ): Promise<{
   policy: ContextStrategyPolicy;
+  additionalInstructions: string[];
   sessionMemoryContext?: string;
 }> {
   const policy =
@@ -3258,8 +3321,9 @@ async function prepareContextStrategyForWake(
     defaultContextStrategyPolicy();
   const descriptor = contextStrategyDescriptor(policy.strategyId);
   if (!policy.enabled || descriptor === undefined) {
-    return { policy };
+    return { policy, additionalInstructions: [] };
   }
+  const rolePreparation = prepareContextStrategyRoleAssembly(policy);
   // First implementation keeps current wake behavior behind the strategy seam.
   // Future strategies can replace this helper without changing dispatch.
   const sessionMemoryContext = await buildSessionMemoryContextForWake(state, {
@@ -3267,7 +3331,11 @@ async function prepareContextStrategyForWake(
     configuredSession: input.configuredSession,
     profileContext: input.profileContext,
   });
-  return { policy, sessionMemoryContext };
+  return {
+    policy,
+    additionalInstructions: rolePreparation.additionalInstructions,
+    sessionMemoryContext,
+  };
 }
 
 function effectiveSessionMemoryPromptConfig(
@@ -7559,26 +7627,42 @@ async function rustyViewSessionContextUsage(
   );
   const sampledEvents =
     state.chatEventsBySession.get(input.session.sessionId) ?? [];
-  const sampledText = sampledEvents
-    .flatMap((event) => chatEventTextFragments(event))
-    .join("\n");
-  const estimatedPromptTokens =
-    sampledText.trim().length === 0
-      ? 0
-      : estimateApproximateTokens(sampledText);
-  const contextWindowTokens = provider?.contextWindowTokens;
-  const maxOutputTokens = provider?.maxOutputTokens;
-  if (contextWindowTokens === undefined) {
+  const sampledMessageCount = sampledEvents.filter(
+    (event) =>
+      event.kind === "message_created" ||
+      event.kind === "assistant_message_completed",
+  ).length;
+  const contextUsage = estimateContextUsage({
+    provider,
+    textFragments: sampledEvents.flatMap((event) =>
+      textFragmentsFromPayload(event.payload),
+    ),
+    sampledEventCount: sampledEvents.length,
+    sampledMessageCount,
+  });
+  if (contextUsage.budget.contextWindowTokens === undefined) {
     diagnostics.push({
       severity: "info",
       code: "context_window_unknown",
       message: "model provider does not declare contextWindowTokens",
     });
   }
-  const estimatedRemainingTokens =
-    contextWindowTokens === undefined
-      ? undefined
-      : Math.max(0, contextWindowTokens - estimatedPromptTokens);
+  const latestCompactionArtifact = await state.bridge
+    .listContextCompactionArtifacts({
+      session_id: input.session.sessionId,
+      latest_only: true,
+      limit: 1,
+      offset: 0,
+    })
+    .then((artifacts) => artifacts[0])
+    .catch((error) => {
+      diagnostics.push({
+        severity: "warning",
+        code: "context_compaction_artifact_read_failed",
+        message: errorMessage(error, "context compaction artifact read failed"),
+      });
+      return undefined;
+    });
   const redactedUrl = redactedProviderUrl(provider?.baseUrl);
   return {
     session_id: input.session.sessionId,
@@ -7593,8 +7677,8 @@ async function rustyViewSessionContextUsage(
       base_url_host: redactedUrl.host,
       base_url_redacted: redactedUrl.redacted,
       model_id: provider?.modelId,
-      context_window_tokens: contextWindowTokens,
-      max_output_tokens: maxOutputTokens,
+      context_window_tokens: contextUsage.budget.contextWindowTokens,
+      max_output_tokens: contextUsage.budget.maxOutputTokens,
       temperature:
         provider?.temperatureMilli === undefined
           ? undefined
@@ -7635,20 +7719,34 @@ async function rustyViewSessionContextUsage(
       mcp_active_count: activeMcpBindings.length,
     },
     context: {
-      estimate_quality: provider === undefined ? "unavailable" : "approximate",
-      estimate_method:
-        "approximate_chars_div4_and_words_4over3_from_chat_events",
-      context_window_tokens: contextWindowTokens,
-      estimated_prompt_tokens: estimatedPromptTokens,
-      estimated_remaining_tokens: estimatedRemainingTokens,
-      max_output_tokens: maxOutputTokens,
-      sampled_event_count: sampledEvents.length,
-      sampled_message_count: sampledEvents.filter(
-        (event) =>
-          event.kind === "message_created" ||
-          event.kind === "assistant_message_completed",
-      ).length,
+      estimate_quality: contextUsage.estimateQuality,
+      estimate_method: contextUsage.estimateMethod,
+      estimator_id: contextUsage.estimatorId,
+      context_window_tokens: contextUsage.budget.contextWindowTokens,
+      estimated_prompt_tokens: contextUsage.estimatedPromptTokens,
+      estimated_remaining_tokens: contextUsage.estimatedRemainingTokens,
+      max_output_tokens: contextUsage.budget.maxOutputTokens,
+      reserved_response_tokens: contextUsage.budget.reservedResponseTokens,
+      safety_margin_tokens: contextUsage.budget.safetyMarginTokens,
+      usable_input_tokens: contextUsage.budget.usableInputTokens,
+      sampled_event_count: contextUsage.sampledEventCount,
+      sampled_message_count: contextUsage.sampledMessageCount,
     },
+    latest_compaction_artifact:
+      latestCompactionArtifact === undefined
+        ? undefined
+        : {
+            artifact_id: latestCompactionArtifact.artifact_id,
+            strategy_id: latestCompactionArtifact.strategy_id,
+            branch_id: latestCompactionArtifact.branch_id,
+            enters_future_context:
+              latestCompactionArtifact.enters_future_context,
+            context_policy: latestCompactionArtifact.context_policy,
+            created_at: latestCompactionArtifact.created_at,
+            updated_at: latestCompactionArtifact.updated_at,
+            estimate_before_json: latestCompactionArtifact.estimate_before_json,
+            estimate_after_json: latestCompactionArtifact.estimate_after_json,
+          },
     degraded: diagnostics.some((diagnostic) => diagnostic.severity !== "info"),
     diagnostics,
   };
@@ -7661,24 +7759,6 @@ function providerBrainBackend(
   return provider.protocol === "responses"
     ? "openai-responses"
     : "pi-agent-core";
-}
-
-function chatEventTextFragments(event: ChatEvent): string[] {
-  const payload = event.payload;
-  if (!isRecord(payload)) return [];
-  return [
-    optionalString(payload.body),
-    optionalString(payload.text),
-    optionalString(payload.summary),
-  ].filter((value): value is string => value !== undefined);
-}
-
-function estimateApproximateTokens(text: string): number {
-  const chars = Math.ceil(text.length / 4);
-  const words = Math.ceil(
-    text.trim().split(/\s+/).filter(Boolean).length * 1.33,
-  );
-  return Math.max(chars, words);
 }
 
 function redactedProviderUrl(baseUrl: string | undefined): {
@@ -8927,6 +9007,94 @@ function appendChatEvent(
   return chatEvent;
 }
 
+interface ContextCompactionDebugEventInput {
+  wakeId?: string;
+  strategyId: string;
+  estimateQuality: string;
+  fillPercent?: number;
+  compactAtPercent?: number;
+  targetPercentAfterCompaction?: number;
+  artifactId?: string;
+  reasonCode?: string;
+  fail: boolean;
+}
+
+function emitContextCompactionDebugEvents(
+  state: ServiceState,
+  session: SessionState,
+  input: ContextCompactionDebugEventInput,
+): { events: ChatEvent[]; latest_cursor: string } {
+  const basePayload = contextDebugPayload(session.sessionId, input);
+  const events = [
+    appendChatEvent(state, session.sessionId, {
+      kind: "context_status",
+      payload: {
+        ...basePayload,
+        status: input.fail ? "will_fail" : "ready",
+      },
+    }),
+    appendChatEvent(state, session.sessionId, {
+      kind: "context_compaction_started",
+      payload: {
+        ...basePayload,
+        status: "started",
+      },
+    }),
+  ];
+  events.push(
+    appendChatEvent(state, session.sessionId, {
+      kind: input.fail
+        ? "context_compaction_failed"
+        : "context_compaction_completed",
+      payload: {
+        ...basePayload,
+        status: input.fail ? "failed" : "completed",
+        reason_code: input.fail
+          ? (input.reasonCode ?? "debug_context_compaction_failed")
+          : input.reasonCode,
+      },
+    }),
+  );
+  return {
+    events,
+    latest_cursor:
+      events.at(-1)?.event_id ??
+      latestChatCursor(state, session.sessionId) ??
+      "",
+  };
+}
+
+function contextDebugPayload(
+  sessionId: SessionId,
+  input: ContextCompactionDebugEventInput,
+): Record<string, unknown> {
+  return {
+    session_id: sessionId,
+    wake_id: input.wakeId,
+    strategy_id: input.strategyId,
+    estimate_quality: safeEstimateQuality(input.estimateQuality),
+    fill_percent: boundedPercent(input.fillPercent),
+    compact_at_percent: boundedPercent(input.compactAtPercent),
+    target_percent_after_compaction: boundedPercent(
+      input.targetPercentAfterCompaction,
+    ),
+    artifact_id: input.artifactId,
+    ui_debug: true,
+    model_facing: false,
+  };
+}
+
+function safeEstimateQuality(
+  raw: string,
+): "exact" | "approximate" | "unavailable" {
+  return raw === "exact" || raw === "unavailable" ? raw : "approximate";
+}
+
+function boundedPercent(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(100, Math.trunc(value)));
+}
+
 function listChatEventsAfterCursor(
   state: ServiceState,
   session: SessionState,
@@ -9840,6 +10008,7 @@ async function dispatchWake(
     });
     const role = buildProfileRoleAssembly(profileContext, {
       sessionMemoryContext: contextStrategy.sessionMemoryContext,
+      additionalInstructions: contextStrategy.additionalInstructions,
     });
     const turnTimeoutMs = effectiveTurnTimeoutMs(
       effectiveWakeTimeoutMs({

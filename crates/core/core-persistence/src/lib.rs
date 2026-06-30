@@ -29,12 +29,13 @@ use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
     session_memory_space_descriptor, AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord,
     AgentMessage, AttachmentId, AttachmentLinkId, BrainEvent, CompletionPacket,
-    ConversationBranchId, ConversationSnapshotId, CoreError, CoreErrorKind, CoreEvent,
-    CoreEventKind, CoreResult, DataBankScopeId, DelegatedCompletion, DelegatedFanOutGroup,
-    DelegationLineage, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
-    DurableIdentityStatus, EngineStorageConfig, FanOutFailurePolicy, FanOutGroupStatus,
-    IsoTimestamp, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
-    MemoryEvidenceRef, MemoryExportImportPolicy, MemoryFieldType, MemoryGovernanceDecisionInput,
+    ContextCompactionArtifact, ContextCompactionArtifactQuery, ConversationBranchId,
+    ConversationSnapshotId, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,
+    DataBankScopeId, DelegatedCompletion, DelegatedFanOutGroup, DelegationLineage,
+    DenRuntimeReference, DurableAgentKind, DurableAgentRecord, DurableIdentityStatus,
+    EngineStorageConfig, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp,
+    MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryEvidenceRef,
+    MemoryExportImportPolicy, MemoryFieldType, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord, MemoryGovernanceMode,
     MemoryIndexingPolicy, MemoryOperation, MemoryOperationPolicy, MemoryPromptPolicy,
     MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus,
@@ -60,7 +61,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 28;
+const CURRENT_SCHEMA_VERSION: i64 = 29;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -223,6 +224,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 28,
         description: "add session activity digest persistence",
         apply: migrate_v28_add_session_activity_digests,
+    },
+    SchemaMigration {
+        version: 29,
+        description: "add context compaction artifact persistence",
+        apply: migrate_v29_add_context_compaction_artifacts,
     },
 ];
 
@@ -1284,6 +1290,28 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.list_session_activity_digests(query),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.list_session_activity_digests(query),
+        }
+    }
+
+    pub fn save_context_compaction_artifact(
+        &self,
+        artifact: &ContextCompactionArtifact,
+    ) -> CoreResult<ContextCompactionArtifact> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.save_context_compaction_artifact(artifact),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.save_context_compaction_artifact(artifact),
+        }
+    }
+
+    pub fn list_context_compaction_artifacts(
+        &self,
+        query: &ContextCompactionArtifactQuery,
+    ) -> CoreResult<Vec<ContextCompactionArtifact>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_context_compaction_artifacts(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_context_compaction_artifacts(query),
         }
     }
 
@@ -3578,6 +3606,7 @@ pub enum DiagnosticTable {
     ProfileMemories,
     SessionMemoryRecords,
     SessionActivityDigests,
+    ContextCompactionArtifacts,
     RoleplayLoreRecords,
     RoleplayLoreProvenanceEvents,
     RoleplayLoreLayers,
@@ -3631,6 +3660,7 @@ impl DiagnosticTable {
         Self::ProfileMemories,
         Self::SessionMemoryRecords,
         Self::SessionActivityDigests,
+        Self::ContextCompactionArtifacts,
         Self::RoleplayLoreRecords,
         Self::RoleplayLoreProvenanceEvents,
         Self::RoleplayLoreLayers,
@@ -3684,6 +3714,7 @@ impl DiagnosticTable {
             "profile_memories" => Ok(Self::ProfileMemories),
             "session_memory_records" => Ok(Self::SessionMemoryRecords),
             "session_activity_digests" => Ok(Self::SessionActivityDigests),
+            "context_compaction_artifacts" => Ok(Self::ContextCompactionArtifacts),
             "module_roleplay_lore_records" => Ok(Self::RoleplayLoreRecords),
             "module_roleplay_lore_provenance_events" => Ok(Self::RoleplayLoreProvenanceEvents),
             "module_roleplay_lore_layers" => Ok(Self::RoleplayLoreLayers),
@@ -3742,6 +3773,7 @@ impl DiagnosticTable {
             Self::ProfileMemories => "profile_memories",
             Self::SessionMemoryRecords => "session_memory_records",
             Self::SessionActivityDigests => "session_activity_digests",
+            Self::ContextCompactionArtifacts => "context_compaction_artifacts",
             Self::RoleplayLoreRecords => "module_roleplay_lore_records",
             Self::RoleplayLoreProvenanceEvents => "module_roleplay_lore_provenance_events",
             Self::RoleplayLoreLayers => "module_roleplay_lore_layers",
@@ -5507,6 +5539,29 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<SessionActivityDigest>> {
         let conn = self.conn()?;
         list_session_activity_digests(&conn, query)
+    }
+
+    pub fn save_context_compaction_artifact(
+        &self,
+        artifact: &ContextCompactionArtifact,
+    ) -> CoreResult<ContextCompactionArtifact> {
+        artifact.validate()?;
+        let conn = self.conn()?;
+        insert_or_replace_context_compaction_artifact(&conn, artifact)?;
+        get_context_compaction_artifact_by_id(&conn, &artifact.artifact_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "saved context compaction artifact was not readable",
+            )
+        })
+    }
+
+    pub fn list_context_compaction_artifacts(
+        &self,
+        query: &ContextCompactionArtifactQuery,
+    ) -> CoreResult<Vec<ContextCompactionArtifact>> {
+        let conn = self.conn()?;
+        list_context_compaction_artifacts(&conn, query)
     }
 
     pub fn record_memory_governance_decision(
@@ -8839,6 +8894,38 @@ fn migrate_v28_add_session_activity_digests(tx: &rusqlite::Transaction<'_>) -> C
         ",
     )
     .map_err(|error| persistence_error("apply schema migration 28", error))
+}
+
+fn migrate_v29_add_context_compaction_artifacts(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    tx.execute_batch(
+        "
+            CREATE TABLE IF NOT EXISTS context_compaction_artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                branch_id TEXT,
+                strategy_id TEXT NOT NULL,
+                source_refs_json TEXT NOT NULL,
+                provider_metadata_json TEXT NOT NULL,
+                estimate_before_json TEXT NOT NULL,
+                estimate_after_json TEXT,
+                summary_text TEXT NOT NULL,
+                enters_future_context INTEGER NOT NULL,
+                context_policy TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_context_compaction_session_latest
+                ON context_compaction_artifacts(session_id, created_at DESC, artifact_id);
+            CREATE INDEX IF NOT EXISTS idx_context_compaction_branch_latest
+                ON context_compaction_artifacts(session_id, branch_id, created_at DESC, artifact_id);
+            CREATE INDEX IF NOT EXISTS idx_context_compaction_strategy_latest
+                ON context_compaction_artifacts(session_id, strategy_id, created_at DESC, artifact_id);
+            CREATE INDEX IF NOT EXISTS idx_context_compaction_future_context
+                ON context_compaction_artifacts(session_id, enters_future_context, created_at DESC, artifact_id);
+        ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 29", error))
 }
 
 fn migrate_v23_add_session_memory_records(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -18779,6 +18866,186 @@ fn row_to_session_activity_digest(
     })
 }
 
+fn insert_or_replace_context_compaction_artifact(
+    conn: &Connection,
+    artifact: &ContextCompactionArtifact,
+) -> CoreResult<()> {
+    artifact.validate()?;
+    conn.execute(
+        "INSERT INTO context_compaction_artifacts (
+            artifact_id,
+            session_id,
+            branch_id,
+            strategy_id,
+            source_refs_json,
+            provider_metadata_json,
+            estimate_before_json,
+            estimate_after_json,
+            summary_text,
+            enters_future_context,
+            context_policy,
+            metadata_json,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        ON CONFLICT(artifact_id) DO UPDATE SET
+            session_id = excluded.session_id,
+            branch_id = excluded.branch_id,
+            strategy_id = excluded.strategy_id,
+            source_refs_json = excluded.source_refs_json,
+            provider_metadata_json = excluded.provider_metadata_json,
+            estimate_before_json = excluded.estimate_before_json,
+            estimate_after_json = excluded.estimate_after_json,
+            summary_text = excluded.summary_text,
+            enters_future_context = excluded.enters_future_context,
+            context_policy = excluded.context_policy,
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at",
+        params![
+            artifact.artifact_id.as_str(),
+            artifact.session_id.0.as_str(),
+            artifact.branch_id.as_ref().map(|id| id.0.as_str()),
+            artifact.strategy_id.as_str(),
+            to_json_text(&artifact.source_refs_json)?,
+            to_json_text(&artifact.provider_metadata_json)?,
+            to_json_text(&artifact.estimate_before_json)?,
+            artifact
+                .estimate_after_json
+                .as_ref()
+                .map(to_json_text)
+                .transpose()?,
+            artifact.summary_text.as_str(),
+            if artifact.enters_future_context {
+                1_i64
+            } else {
+                0_i64
+            },
+            artifact.context_policy.as_str(),
+            to_json_text(&artifact.metadata_json)?,
+            artifact.created_at.as_str(),
+            artifact.updated_at.as_str(),
+        ],
+    )
+    .map_err(|error| persistence_error("insert context compaction artifact", error))?;
+    Ok(())
+}
+
+fn get_context_compaction_artifact_by_id(
+    conn: &Connection,
+    artifact_id: &str,
+) -> CoreResult<Option<ContextCompactionArtifact>> {
+    conn.query_row(
+        "SELECT artifact_id,
+                session_id,
+                branch_id,
+                strategy_id,
+                source_refs_json,
+                provider_metadata_json,
+                estimate_before_json,
+                estimate_after_json,
+                summary_text,
+                enters_future_context,
+                context_policy,
+                metadata_json,
+                created_at,
+                updated_at
+         FROM context_compaction_artifacts
+         WHERE artifact_id = ?1",
+        params![artifact_id],
+        row_to_context_compaction_artifact,
+    )
+    .optional()
+    .map_err(|error| persistence_error("get context compaction artifact", error))
+}
+
+fn list_context_compaction_artifacts(
+    conn: &Connection,
+    query: &ContextCompactionArtifactQuery,
+) -> CoreResult<Vec<ContextCompactionArtifact>> {
+    let (limit, offset) = QueryPage {
+        limit: if query.latest_only {
+            Some(1)
+        } else {
+            query.limit
+        },
+        offset: query.offset,
+    }
+    .bounded(100, 1_000);
+    let mut stmt = conn
+        .prepare(
+            "SELECT artifact_id,
+                    session_id,
+                    branch_id,
+                    strategy_id,
+                    source_refs_json,
+                    provider_metadata_json,
+                    estimate_before_json,
+                    estimate_after_json,
+                    summary_text,
+                    enters_future_context,
+                    context_policy,
+                    metadata_json,
+                    created_at,
+                    updated_at
+             FROM context_compaction_artifacts
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR branch_id = ?2)
+               AND (?3 IS NULL OR strategy_id = ?3)
+               AND (?4 IS NULL OR enters_future_context = ?4)
+             ORDER BY created_at DESC, artifact_id ASC
+             LIMIT ?5 OFFSET ?6",
+        )
+        .map_err(|error| persistence_error("prepare list context compaction artifacts", error))?;
+    let enters_future_context = query
+        .enters_future_context
+        .map(|value| if value { 1_i64 } else { 0_i64 });
+    let rows = stmt
+        .query_map(
+            params![
+                query.session_id.as_ref().map(|id| id.0.as_str()),
+                query.branch_id.as_ref().map(|id| id.0.as_str()),
+                query.strategy_id.as_deref(),
+                enters_future_context,
+                limit,
+                offset,
+            ],
+            row_to_context_compaction_artifact,
+        )
+        .map_err(|error| persistence_error("query context compaction artifacts", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load context compaction artifacts", error))
+}
+
+fn row_to_context_compaction_artifact(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ContextCompactionArtifact> {
+    let source_refs_json: String = row.get(4)?;
+    let provider_metadata_json: String = row.get(5)?;
+    let estimate_before_json: String = row.get(6)?;
+    let estimate_after_json: Option<String> = row.get(7)?;
+    let enters_future_context: i64 = row.get(9)?;
+    let artifact = ContextCompactionArtifact {
+        artifact_id: row.get(0)?,
+        session_id: SessionId(row.get(1)?),
+        branch_id: row.get::<_, Option<String>>(2)?.map(ConversationBranchId),
+        strategy_id: row.get(3)?,
+        source_refs_json: from_json_text(&source_refs_json).map_err(to_sql_error)?,
+        provider_metadata_json: from_json_text(&provider_metadata_json).map_err(to_sql_error)?,
+        estimate_before_json: from_json_text(&estimate_before_json).map_err(to_sql_error)?,
+        estimate_after_json: estimate_after_json
+            .map(|text| from_json_text(&text).map_err(to_sql_error))
+            .transpose()?,
+        summary_text: row.get(8)?,
+        enters_future_context: enters_future_context != 0,
+        context_policy: row.get(10)?,
+        metadata_json: from_json_text(&row.get::<_, String>(11)?).map_err(to_sql_error)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+    };
+    artifact.validate().map_err(to_sql_core_error)?;
+    Ok(artifact)
+}
+
 fn row_to_memory_proposal(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryProposalRecord> {
     let envelope_json: String = row.get(0)?;
     let status: String = row.get(1)?;
@@ -25447,6 +25714,128 @@ mod tests {
                 .unwrap()[0]
                 .value,
             2
+        );
+
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn context_compaction_artifacts_preserve_raw_message_history() {
+        let db_path = temp_db_path("context-compaction-artifacts");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let session_id = SessionId::new("session-1");
+        let slot_id = MessageSlotId::new("slot-context");
+        let variant_id = MessageVariantId::new("variant-context-primary");
+        store
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: session_id.clone(),
+                primary_variant_id: variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({"fixture": "context_compaction"}),
+                created_at: "2026-06-30T00:00:00Z".to_string(),
+                updated_at: "2026-06-30T00:00:00Z".to_string(),
+            })
+            .unwrap();
+        store
+            .save_message_variant(&variant_write(
+                &slot_id,
+                &variant_id,
+                MessageVariantSource::Primary,
+                0,
+                "message-context",
+                "raw context compaction source text",
+            ))
+            .unwrap();
+        let slots_before = store.count_rows("message_slots").unwrap();
+        let variants_before = store.count_rows("message_variants").unwrap();
+
+        let artifact = ContextCompactionArtifact {
+            artifact_id: "artifact_context_one".to_string(),
+            session_id: session_id.clone(),
+            branch_id: None,
+            strategy_id: "rolling_summary_compaction".to_string(),
+            source_refs_json: json!({
+                "message_slot_ids": [slot_id.0.as_str()],
+                "message_variant_ids": [variant_id.0.as_str()],
+                "cursor_range": {"from": "session-1:0", "to": "session-1:1"}
+            }),
+            provider_metadata_json: json!({
+                "provider_alias": "deepseek-flash",
+                "model_id": "deepseek-chat"
+            }),
+            estimate_before_json: json!({
+                "estimator_id": "fallback_chars_words_v1",
+                "estimated_prompt_tokens": 85000
+            }),
+            estimate_after_json: Some(json!({
+                "estimated_prompt_tokens": 24000
+            })),
+            summary_text: "The conversation discussed durable compaction provenance.".to_string(),
+            enters_future_context: true,
+            context_policy: "summary_context".to_string(),
+            metadata_json: json!({"created_by": "test"}),
+            created_at: "2026-06-30T00:01:00Z".to_string(),
+            updated_at: "2026-06-30T00:01:00Z".to_string(),
+        };
+        let saved = store.save_context_compaction_artifact(&artifact).unwrap();
+        assert_eq!(saved.artifact_id, "artifact_context_one");
+        assert_eq!(saved.strategy_id, "rolling_summary_compaction");
+
+        let latest = store
+            .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+                session_id: Some(session_id.clone()),
+                branch_id: None,
+                strategy_id: Some("rolling_summary_compaction".to_string()),
+                enters_future_context: Some(true),
+                latest_only: true,
+                limit: None,
+                offset: None,
+            })
+            .unwrap();
+        assert_eq!(latest, vec![artifact]);
+        assert_eq!(store.count_rows("message_slots").unwrap(), slots_before);
+        assert_eq!(
+            store.count_rows("message_variants").unwrap(),
+            variants_before
+        );
+        let slots_after = store
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(session_id),
+                include_alternates: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            slots_after[0].primary.message.body,
+            "raw context compaction source text"
+        );
+        drop(store);
+
+        let reopened = CoordinationStore::open_file(&db_path).unwrap();
+        let reopened_artifacts = reopened
+            .list_context_compaction_artifacts(&ContextCompactionArtifactQuery {
+                session_id: Some(SessionId::new("session-1")),
+                branch_id: None,
+                strategy_id: None,
+                enters_future_context: None,
+                latest_only: true,
+                limit: None,
+                offset: None,
+            })
+            .unwrap();
+        assert_eq!(reopened_artifacts.len(), 1);
+        assert_eq!(reopened_artifacts[0].artifact_id, "artifact_context_one");
+        let reopened_slots = reopened
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(SessionId::new("session-1")),
+                include_alternates: false,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(
+            reopened_slots[0].primary.message.body,
+            "raw context compaction source text"
         );
 
         remove_temp_db(&db_path);

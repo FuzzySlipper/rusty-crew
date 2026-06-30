@@ -14,6 +14,7 @@ export type AgentId = Brand<string, "AgentId">;
 export type AgentInstanceId = Brand<string, "AgentInstanceId">;
 export type SessionId = Brand<string, "SessionId">;
 export type ProfileId = Brand<string, "ProfileId">;
+export type ConversationBranchId = Brand<string, "ConversationBranchId">;
 export type ProjectId = Brand<string, "ProjectId">;
 export type TaskId = Brand<string, "TaskId">;
 export type RunId = Brand<string, "RunId">;
@@ -1231,6 +1232,40 @@ export interface SessionActivityDigestQuery {
   session_id?: SessionId;
   wake_id?: string;
   include_reviewed: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Durable record for a derived context-compaction summary.
+ *
+ * This is not raw transcript storage and is not ordinary session memory. It
+ * keeps provenance and estimates so context strategies can decide whether to
+ * project it into future model context while source history stays intact.
+ */
+export interface ContextCompactionArtifact {
+  artifact_id: string;
+  session_id: SessionId;
+  branch_id?: ConversationBranchId;
+  strategy_id: string;
+  source_refs_json: unknown;
+  provider_metadata_json: unknown;
+  estimate_before_json: unknown;
+  estimate_after_json?: unknown;
+  summary_text: string;
+  enters_future_context: boolean;
+  context_policy: string;
+  metadata_json: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextCompactionArtifactQuery {
+  session_id?: SessionId;
+  branch_id?: ConversationBranchId;
+  strategy_id?: string;
+  enters_future_context?: boolean;
+  latest_only: boolean;
   limit?: number;
   offset?: number;
 }

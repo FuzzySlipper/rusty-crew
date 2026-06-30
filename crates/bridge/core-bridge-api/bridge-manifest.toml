@@ -866,6 +866,24 @@ output = "Vec<core_protocol::SessionActivityDigest>"
 errors = "core_protocol::CoreError"
 summary = "List bounded per-wake activity digests for capture decision producer review."
 
+[[operation]]
+name = "save_context_compaction_artifact"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ContextCompactionArtifact"
+output = "core_protocol::ContextCompactionArtifact"
+errors = "core_protocol::CoreError"
+summary = "Persist a derived context compaction artifact with source refs and token estimates."
+
+[[operation]]
+name = "list_context_compaction_artifacts"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ContextCompactionArtifactQuery"
+output = "Vec<core_protocol::ContextCompactionArtifact>"
+errors = "core_protocol::CoreError"
+summary = "List derived context compaction artifacts for session context diagnostics and strategy readback."
+
 # Observability/event projection.
 
 [[operation]]

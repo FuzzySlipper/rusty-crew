@@ -21,6 +21,8 @@ import type {
   BrainWakeStreamItem,
   BodyState,
   CompletionPacket,
+  ContextCompactionArtifact,
+  ContextCompactionArtifactQuery,
   CoreEvent,
   DelegatedResourceCleanupReport,
   DelegatedSessionRuntimeStatus,
@@ -422,6 +424,8 @@ interface NativeBridgeBinding {
   listMemoryProposalsJson(inputJson: string): string;
   saveSessionActivityDigestJson(inputJson: string): string;
   listSessionActivityDigestsJson(inputJson: string): string;
+  saveContextCompactionArtifactJson(inputJson: string): string;
+  listContextCompactionArtifactsJson(inputJson: string): string;
   recordMemoryGovernanceDecisionJson(inputJson: string): string;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
@@ -1687,6 +1691,12 @@ export interface NativeBridgeModule {
   listSessionActivityDigests(
     query: SessionActivityDigestQuery,
   ): Promise<SessionActivityDigest[]>;
+  saveContextCompactionArtifact(
+    artifact: ContextCompactionArtifact,
+  ): Promise<ContextCompactionArtifact>;
+  listContextCompactionArtifacts(
+    query: ContextCompactionArtifactQuery,
+  ): Promise<ContextCompactionArtifact[]>;
   recordMemoryGovernanceDecision(
     decision: MemoryGovernanceDecisionInput,
   ): Promise<MemoryGovernanceDecisionRecord>;
@@ -1969,6 +1979,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listMemoryProposals: unavailable("initialize_engine"),
     saveSessionActivityDigest: unavailable("initialize_engine"),
     listSessionActivityDigests: unavailable("initialize_engine"),
+    saveContextCompactionArtifact: unavailable("initialize_engine"),
+    listContextCompactionArtifacts: unavailable("initialize_engine"),
     recordMemoryGovernanceDecision: unavailable("initialize_engine"),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
@@ -2877,6 +2889,14 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.listSessionActivityDigestsJson(JSON.stringify(query)),
       ) as SessionActivityDigest[],
+    saveContextCompactionArtifact: async (artifact) =>
+      JSON.parse(
+        binding.saveContextCompactionArtifactJson(JSON.stringify(artifact)),
+      ) as ContextCompactionArtifact,
+    listContextCompactionArtifacts: async (query) =>
+      JSON.parse(
+        binding.listContextCompactionArtifactsJson(JSON.stringify(query)),
+      ) as ContextCompactionArtifact[],
     recordMemoryGovernanceDecision: async (decision) =>
       JSON.parse(
         binding.recordMemoryGovernanceDecisionJson(JSON.stringify(decision)),

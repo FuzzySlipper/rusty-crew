@@ -741,6 +741,72 @@ try {
     "number",
   );
 
+  const beforeContextDebug = await get(
+    "/v1/chat/sessions/chat-session/events?cursor=chat-session:0&limit=500",
+    token,
+  );
+  assert.equal(beforeContextDebug.status, 200);
+  const contextDebugCursor = beforeContextDebug.body.data.latest_cursor;
+  const contextDebugAbort = new AbortController();
+  const contextDebugStream = await fetch(
+    `http://127.0.0.1:${port}/v1/chat/sessions/chat-session/stream?cursor=${encodeURIComponent(
+      contextDebugCursor,
+    )}`,
+    {
+      headers: { authorization: `Bearer ${token}` },
+      signal: contextDebugAbort.signal,
+    },
+  );
+  assert.equal(contextDebugStream.status, 200);
+  const contextDebugEventsPromise = collectSseEventsUntil(
+    contextDebugStream,
+    (events) =>
+      events.some((event) => event.kind === "context_compaction_started") &&
+      events.some((event) => event.kind === "context_compaction_completed"),
+    contextDebugAbort,
+  );
+  const fakeContextCompaction = await post(
+    "/v1/debug/sessions/chat-session/context-compaction-events",
+    token,
+    {
+      wakeId: "wake-context-smoke",
+      strategyId: "rolling_summary_compaction",
+      estimateQuality: "approximate",
+      fillPercent: 87,
+      compactAtPercent: 80,
+      targetPercentAfterCompaction: 45,
+      artifactId: "context_artifact_smoke",
+    },
+  );
+  assert.equal(fakeContextCompaction.status, 200);
+  const contextDebugStreamEvents = await contextDebugEventsPromise;
+  const contextStarted = contextDebugStreamEvents.find(
+    (event) => event.kind === "context_compaction_started",
+  );
+  assert.equal(contextStarted?.payload?.model_facing, false);
+  assert.equal(contextStarted?.payload?.ui_debug, true);
+  assert.equal(contextStarted?.payload?.fill_percent, 87);
+  const contextCompleted = contextDebugStreamEvents.find(
+    (event) => event.kind === "context_compaction_completed",
+  );
+  assert.equal(
+    contextCompleted?.payload?.artifact_id,
+    "context_artifact_smoke",
+  );
+  const contextEventsReadback = await get(
+    `/v1/chat/sessions/chat-session/events?cursor=${encodeURIComponent(
+      contextDebugCursor,
+    )}`,
+    token,
+  );
+  assert.equal(contextEventsReadback.status, 200);
+  const readbackKinds = contextEventsReadback.body.data.items.map(
+    (event: { kind: string }) => event.kind,
+  );
+  assert.ok(readbackKinds.includes("context_status"));
+  assert.ok(readbackKinds.includes("context_compaction_started"));
+  assert.ok(readbackKinds.includes("context_compaction_completed"));
+
   const registry = await get("/v1/chat/commands", token);
   assert.equal(registry.status, 200);
   assert.deepEqual(
@@ -1057,6 +1123,7 @@ interface SseEvent {
   event_id: string;
   sequence_id: number;
   kind: string;
+  payload?: Record<string, unknown>;
 }
 
 function withLiveWakeEventsBridge(

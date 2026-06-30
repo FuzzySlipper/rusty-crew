@@ -178,10 +178,14 @@ const model = buildReadOnlySlashCommandResponse("model", {
     context: {
       estimate_quality: "approximate",
       estimate_method: "test",
+      estimator_id: "test_estimator",
       context_window_tokens: 128_000,
       estimated_prompt_tokens: 512,
       estimated_remaining_tokens: 127_488,
       max_output_tokens: 4096,
+      reserved_response_tokens: 4096,
+      safety_margin_tokens: 2560,
+      usable_input_tokens: 121_344,
       sampled_event_count: 7,
       sampled_message_count: 2,
     },
@@ -193,6 +197,7 @@ assert.equal(model.title, "Model");
 assert.equal(model.fields?.providerAlias, "deepseek-flash");
 assert.equal(model.fields?.modelId, "gpt");
 assert.equal(model.fields?.estimatedPromptTokens, 512);
+assert.equal(model.fields?.estimatorId, "test_estimator");
 assert.equal(
   model.items?.some((item) => item.includes("provider endpoint")),
   true,

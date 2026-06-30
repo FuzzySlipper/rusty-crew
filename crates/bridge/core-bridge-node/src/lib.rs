@@ -53,11 +53,12 @@ use rusty_crew_core_persistence::{
     SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
-    AttachmentId, BodyState, BrainWakeProviderStateInput, DataBankScopeId,
-    MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
-    MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
-    MessageVariantId, ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus,
-    ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
+    AttachmentId, BodyState, BrainWakeProviderStateInput, ContextCompactionArtifact,
+    ContextCompactionArtifactQuery, DataBankScopeId, MemoryGovernanceDecisionInput,
+    MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
+    MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
+    ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus, ProfileRegistryUpdate,
+    ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
@@ -850,6 +851,20 @@ impl NativeBridge {
         query: &SessionActivityDigestQuery,
     ) -> CoreResult<Vec<SessionActivityDigest>> {
         self.engine()?.list_session_activity_digests(query)
+    }
+
+    pub fn save_context_compaction_artifact(
+        &self,
+        artifact: &ContextCompactionArtifact,
+    ) -> CoreResult<ContextCompactionArtifact> {
+        self.engine()?.save_context_compaction_artifact(artifact)
+    }
+
+    pub fn list_context_compaction_artifacts(
+        &self,
+        query: &ContextCompactionArtifactQuery,
+    ) -> CoreResult<Vec<ContextCompactionArtifact>> {
+        self.engine()?.list_context_compaction_artifacts(query)
     }
 
     pub fn record_memory_governance_decision(
@@ -3716,6 +3731,36 @@ impl NativeBridgeBinding {
             .list_session_activity_digests(&query)
             .map_err(to_napi_error)?;
         serialize_json(&records, "session activity digests")
+    }
+
+    #[napi]
+    pub fn save_context_compaction_artifact_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let artifact =
+            parse_json::<ContextCompactionArtifact>(&input_json, "context compaction artifact")?;
+        let record = bridge
+            .save_context_compaction_artifact(&artifact)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "context compaction artifact")
+    }
+
+    #[napi]
+    pub fn list_context_compaction_artifacts_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<ContextCompactionArtifactQuery>(
+            &input_json,
+            "context compaction artifact query",
+        )?;
+        let records = bridge
+            .list_context_compaction_artifacts(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "context compaction artifacts")
     }
 
     #[napi]

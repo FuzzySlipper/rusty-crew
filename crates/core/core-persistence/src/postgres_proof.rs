@@ -24,16 +24,17 @@ use crate::{
     AgentInstanceId, AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite,
     AttachmentQuery, AttachmentRecord, AttachmentStatus, AttachmentWrite,
     BranchAwareSessionMemoryQuery, BranchHeadConflict, BranchHeadExpectation, ChannelBindingQuery,
-    ChannelBindingRecord, CompletionPacketQuery, CompletionPacketRecord, ConversationBranchId,
-    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
-    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
-    ConversationJumpTarget, ConversationSnapshotId, ConversationSnapshotQuery,
-    ConversationSnapshotRecord, ConversationSnapshotSource, ConversationSnapshotWrite, CoreError,
-    CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, DataBankScopeId, DataBankScopeQuery,
-    DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite, DelegatedCompletion,
-    DenRuntimeReference, DurableAgentKind, DurableAgentRecord, DurableIdentityStatus,
-    DurableMessageRecord, DurableMessageStatus, DurableMessageWrite, ExternalBindingStatus,
-    IsoTimestamp, LoreRecallEntry, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    ChannelBindingRecord, CompletionPacketQuery, CompletionPacketRecord, ContextCompactionArtifact,
+    ContextCompactionArtifactQuery, ConversationBranchId, ConversationBranchQuery,
+    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
+    ConversationJumpRequest, ConversationJumpResult, ConversationJumpTarget,
+    ConversationSnapshotId, ConversationSnapshotQuery, ConversationSnapshotRecord,
+    ConversationSnapshotSource, ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreEvent,
+    CoreEventKind, CoreResult, DataBankScopeId, DataBankScopeQuery, DataBankScopeRecord,
+    DataBankScopeStatus, DataBankScopeWrite, DelegatedCompletion, DenRuntimeReference,
+    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord,
+    DurableMessageStatus, DurableMessageWrite, ExternalBindingStatus, IsoTimestamp,
+    LoreRecallEntry, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
     LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockRecord, MessageId,
     MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId,
     MessageVariantQuery, MessageVariantRecord, MessageVariantSource, MessageVariantStatus,
@@ -2058,6 +2059,10 @@ impl PostgresRuntimeCounterProofStore {
                     rows: self.table_rows("session_activity_digests")?,
                 },
                 RuntimeStorageTableCount {
+                    table: "context_compaction_artifacts".to_string(),
+                    rows: self.table_rows("context_compaction_artifacts")?,
+                },
+                RuntimeStorageTableCount {
                     table: "memory_proposals".to_string(),
                     rows: self.table_rows("memory_proposals")?,
                 },
@@ -2584,6 +2589,32 @@ impl PostgresRuntimeCounterProofStore {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         list_session_activity_digests(&mut *client, &schema, query)
+    }
+
+    pub fn save_context_compaction_artifact(
+        &self,
+        artifact: &ContextCompactionArtifact,
+    ) -> CoreResult<ContextCompactionArtifact> {
+        artifact.validate()?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        insert_or_replace_context_compaction_artifact(&mut *client, &schema, artifact)?;
+        get_context_compaction_artifact_by_id(&mut *client, &schema, &artifact.artifact_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "saved PostgreSQL context compaction artifact was not readable",
+                )
+            })
+    }
+
+    pub fn list_context_compaction_artifacts(
+        &self,
+        query: &ContextCompactionArtifactQuery,
+    ) -> CoreResult<Vec<ContextCompactionArtifact>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        list_context_compaction_artifacts(&mut *client, &schema, query)
     }
 
     pub fn record_memory_governance_decision(
@@ -5173,6 +5204,24 @@ impl PostgresRuntimeCounterProofStore {
                     ON {schema}.session_activity_digests(profile_id, reviewed_at, created_at DESC, digest_id);
                  CREATE INDEX IF NOT EXISTS session_activity_digests_session_idx
                     ON {schema}.session_activity_digests(session_id, created_at DESC, digest_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.context_compaction_artifacts (
+                    artifact_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    branch_id TEXT,
+                    strategy_id TEXT NOT NULL,
+                    enters_future_context BOOLEAN NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS context_compaction_session_latest_idx
+                    ON {schema}.context_compaction_artifacts(session_id, created_at DESC, artifact_id);
+                 CREATE INDEX IF NOT EXISTS context_compaction_branch_latest_idx
+                    ON {schema}.context_compaction_artifacts(session_id, branch_id, created_at DESC, artifact_id);
+                 CREATE INDEX IF NOT EXISTS context_compaction_strategy_latest_idx
+                    ON {schema}.context_compaction_artifacts(session_id, strategy_id, created_at DESC, artifact_id);
+                 CREATE INDEX IF NOT EXISTS context_compaction_future_context_idx
+                    ON {schema}.context_compaction_artifacts(session_id, enters_future_context, created_at DESC, artifact_id);
                  CREATE TABLE IF NOT EXISTS {schema}.memory_proposals (
                     proposal_id TEXT PRIMARY KEY,
                     space_id TEXT NOT NULL,
@@ -9747,6 +9796,117 @@ fn list_session_activity_digests<C: GenericClient>(
         .map(|row| {
             let record_json: String = row.get(0);
             parse_postgres_json(&record_json, "session activity digest record_json")
+        })
+        .collect()
+}
+
+fn insert_or_replace_context_compaction_artifact<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    artifact: &ContextCompactionArtifact,
+) -> CoreResult<()> {
+    artifact.validate()?;
+    let record_json = to_json_text(artifact)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {schema}.context_compaction_artifacts (
+                artifact_id,
+                session_id,
+                branch_id,
+                strategy_id,
+                enters_future_context,
+                record_json,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (artifact_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                branch_id = EXCLUDED.branch_id,
+                strategy_id = EXCLUDED.strategy_id,
+                enters_future_context = EXCLUDED.enters_future_context,
+                record_json = EXCLUDED.record_json,
+                updated_at = EXCLUDED.updated_at"
+        ),
+        &[
+            &artifact.artifact_id,
+            &artifact.session_id.0,
+            &artifact.branch_id.as_ref().map(|id| id.0.as_str()),
+            &artifact.strategy_id,
+            &artifact.enters_future_context,
+            &record_json,
+            &artifact.created_at,
+            &artifact.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL context compaction artifact", error))?;
+    Ok(())
+}
+
+fn get_context_compaction_artifact_by_id<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    artifact_id: &str,
+) -> CoreResult<Option<ContextCompactionArtifact>> {
+    let row = conn
+        .query_opt(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.context_compaction_artifacts
+                 WHERE artifact_id = $1"
+            ),
+            &[&artifact_id],
+        )
+        .map_err(|error| postgres_error("get PostgreSQL context compaction artifact", error))?;
+    row.map(|row| {
+        let record_json: String = row.get(0);
+        parse_postgres_json(&record_json, "context compaction artifact record_json")
+    })
+    .transpose()
+}
+
+fn list_context_compaction_artifacts<C: GenericClient>(
+    conn: &mut C,
+    schema: &str,
+    query: &ContextCompactionArtifactQuery,
+) -> CoreResult<Vec<ContextCompactionArtifact>> {
+    let session_id = query.session_id.as_ref().map(|id| id.0.as_str());
+    let branch_id = query.branch_id.as_ref().map(|id| id.0.as_str());
+    let strategy_id = query.strategy_id.as_deref();
+    let (limit, offset) = QueryPage {
+        limit: if query.latest_only {
+            Some(1)
+        } else {
+            query.limit
+        },
+        offset: query.offset,
+    }
+    .bounded(100, 1_000);
+    let rows = conn
+        .query(
+            &format!(
+                "SELECT record_json
+                 FROM {schema}.context_compaction_artifacts
+                 WHERE ($1::TEXT IS NULL OR session_id = $1)
+                   AND ($2::TEXT IS NULL OR branch_id = $2)
+                   AND ($3::TEXT IS NULL OR strategy_id = $3)
+                   AND ($4::BOOLEAN IS NULL OR enters_future_context = $4)
+                 ORDER BY created_at DESC, artifact_id ASC
+                 LIMIT $5 OFFSET $6"
+            ),
+            &[
+                &session_id,
+                &branch_id,
+                &strategy_id,
+                &query.enters_future_context,
+                &limit,
+                &offset,
+            ],
+        )
+        .map_err(|error| postgres_error("list PostgreSQL context compaction artifacts", error))?;
+    rows.iter()
+        .map(|row| {
+            let record_json: String = row.get(0);
+            parse_postgres_json(&record_json, "context compaction artifact record_json")
         })
         .collect()
 }

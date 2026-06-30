@@ -118,6 +118,8 @@ pub const OPERATION_NAMES: &[&str] = &[
     "run_maintenance",
     "save_session_activity_digest",
     "list_session_activity_digests",
+    "save_context_compaction_artifact",
+    "list_context_compaction_artifacts",
     "subscribe_events",
     "unsubscribe_events",
     "get_buffer",

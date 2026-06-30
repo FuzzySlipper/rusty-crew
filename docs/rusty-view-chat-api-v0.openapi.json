@@ -1404,16 +1404,36 @@
           },
           "context": {
             "type": "object",
-            "required": ["estimate_quality", "estimate_method", "sampled_event_count", "sampled_message_count"],
+            "required": ["estimate_quality", "estimate_method", "estimator_id", "sampled_event_count", "sampled_message_count"],
             "properties": {
               "estimate_quality": { "type": "string", "enum": ["exact", "approximate", "unavailable"] },
               "estimate_method": { "type": "string" },
+              "estimator_id": { "type": "string" },
               "context_window_tokens": { "type": "integer", "minimum": 0 },
               "estimated_prompt_tokens": { "type": "integer", "minimum": 0 },
               "estimated_remaining_tokens": { "type": "integer", "minimum": 0 },
               "max_output_tokens": { "type": "integer", "minimum": 0 },
+              "reserved_response_tokens": { "type": "integer", "minimum": 0 },
+              "safety_margin_tokens": { "type": "integer", "minimum": 0 },
+              "usable_input_tokens": { "type": "integer", "minimum": 0 },
               "sampled_event_count": { "type": "integer", "minimum": 0 },
               "sampled_message_count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "latest_compaction_artifact": {
+            "type": "object",
+            "required": ["artifact_id", "strategy_id", "enters_future_context", "context_policy", "created_at", "updated_at"],
+            "properties": {
+              "artifact_id": { "type": "string" },
+              "strategy_id": { "type": "string" },
+              "branch_id": { "type": "string" },
+              "enters_future_context": { "type": "boolean" },
+              "context_policy": { "type": "string" },
+              "created_at": { "type": "string", "format": "date-time" },
+              "updated_at": { "type": "string", "format": "date-time" },
+              "estimate_before_json": {},
+              "estimate_after_json": {}
             },
             "additionalProperties": false
           },
@@ -1462,6 +1482,10 @@
           "command_started",
           "command_completed",
           "command_failed",
+          "context_status",
+          "context_compaction_started",
+          "context_compaction_completed",
+          "context_compaction_failed",
           "message_slot_created",
           "message_variant_created",
           "message_variant_deleted",
@@ -1489,6 +1513,7 @@
           { "$ref": "#/components/schemas/AssistantMessageCompletedPayload" },
           { "$ref": "#/components/schemas/ToolCallPayload" },
           { "$ref": "#/components/schemas/CommandPayload" },
+          { "$ref": "#/components/schemas/ContextDebugPayload" },
           { "$ref": "#/components/schemas/MessageSlotPayload" },
           { "$ref": "#/components/schemas/MessageVariantPayload" },
           { "$ref": "#/components/schemas/ConversationTreePayload" },
@@ -1565,6 +1590,24 @@
           "old_session_id": { "type": "string" },
           "new_session_id": { "type": "string" },
           "reason_code": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ContextDebugPayload": {
+        "type": "object",
+        "required": ["session_id", "strategy_id", "ui_debug", "model_facing"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "wake_id": { "type": "string" },
+          "strategy_id": { "type": "string" },
+          "estimate_quality": { "type": "string", "enum": ["exact", "approximate", "unavailable"] },
+          "fill_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "compact_at_percent": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "target_percent_after_compaction": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "artifact_id": { "type": "string" },
+          "reason_code": { "type": "string" },
+          "ui_debug": { "type": "boolean", "const": true },
+          "model_facing": { "type": "boolean", "const": false }
         },
         "additionalProperties": false
       },

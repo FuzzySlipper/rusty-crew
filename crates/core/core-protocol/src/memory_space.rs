@@ -750,6 +750,56 @@ pub struct SessionActivityDigestQuery {
     pub offset: Option<u32>,
 }
 
+/// Durable record for a derived context-compaction summary.
+///
+/// Compaction artifacts are not raw transcript storage and are not ordinary
+/// session memory. They preserve provenance, model metadata, token estimates,
+/// and strategy decisions so future context strategies can decide whether and
+/// how to project them into model context while keeping source transcript
+/// history intact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextCompactionArtifact {
+    pub artifact_id: String,
+    pub session_id: SessionId,
+    pub branch_id: Option<crate::ConversationBranchId>,
+    pub strategy_id: String,
+    pub source_refs_json: Value,
+    pub provider_metadata_json: Value,
+    pub estimate_before_json: Value,
+    pub estimate_after_json: Option<Value>,
+    pub summary_text: String,
+    pub enters_future_context: bool,
+    pub context_policy: String,
+    pub metadata_json: Value,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+impl ContextCompactionArtifact {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_identifier("context compaction artifact id", &self.artifact_id)?;
+        validate_identifier("context compaction strategy id", &self.strategy_id)?;
+        if self.summary_text.trim().is_empty() {
+            return invalid("context compaction artifact summary_text must not be empty");
+        }
+        if self.context_policy.trim().is_empty() {
+            return invalid("context compaction artifact context_policy must not be empty");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextCompactionArtifactQuery {
+    pub session_id: Option<SessionId>,
+    pub branch_id: Option<crate::ConversationBranchId>,
+    pub strategy_id: Option<String>,
+    pub enters_future_context: Option<bool>,
+    pub latest_only: bool,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryGovernanceDecisionKind {

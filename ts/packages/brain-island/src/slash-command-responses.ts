@@ -94,6 +94,7 @@ function modelResponse(
       estimatedRemainingTokens: model.context.estimated_remaining_tokens ?? 0,
       maxOutputTokens: model.context.max_output_tokens ?? 0,
       estimateQuality: model.context.estimate_quality,
+      estimatorId: model.context.estimator_id,
       toolCount: model.tools.tool_count,
       mcpBindings: model.tools.mcp_binding_count,
       mcpActive: model.tools.mcp_active_count,

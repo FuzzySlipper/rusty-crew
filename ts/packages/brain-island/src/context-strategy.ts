@@ -33,6 +33,12 @@ export interface ContextStrategyPolicyDiagnostic {
   message: string;
 }
 
+export interface ContextStrategyRoleAssemblyPreparation {
+  strategyId: ContextStrategyId;
+  additionalInstructions: string[];
+  diagnostics: ContextStrategyPolicyDiagnostic[];
+}
+
 export interface ContextStrategyCatalog {
   schemaVersion: 1;
   defaultStrategyId: ContextStrategyId;
@@ -109,6 +115,53 @@ export function contextStrategyDescriptor(
   return CONTEXT_STRATEGY_DESCRIPTORS.find(
     (descriptor) => descriptor.id === id,
   );
+}
+
+export function prepareContextStrategyRoleAssembly(
+  policy: ContextStrategyPolicy,
+): ContextStrategyRoleAssemblyPreparation {
+  const descriptor = contextStrategyDescriptor(policy.strategyId);
+  if (!policy.enabled || descriptor === undefined) {
+    return {
+      strategyId: policy.strategyId,
+      additionalInstructions: [],
+      diagnostics:
+        descriptor === undefined
+          ? [
+              {
+                severity: "error",
+                code: "context_strategy_unknown",
+                path: "contextPolicy.strategyId",
+                message: `unknown context strategy ${policy.strategyId}`,
+              },
+            ]
+          : [],
+    };
+  }
+  switch (policy.strategyId) {
+    case "recent_window":
+      return {
+        strategyId: policy.strategyId,
+        additionalInstructions: [],
+        diagnostics: [],
+      };
+    case "session_memory_augmented":
+      return {
+        strategyId: policy.strategyId,
+        additionalInstructions: [
+          "Context strategy: session_memory_augmented. Use the selected recent conversation window plus any Rust-selected session memory context provided below. Treat session memory as compact derived context, not as a replacement for current user messages.",
+        ],
+        diagnostics: [],
+      };
+    case "rolling_summary_compaction":
+      return {
+        strategyId: policy.strategyId,
+        additionalInstructions: [
+          `Context strategy: rolling_summary_compaction. Prefer recent conversation evidence and durable summary artifacts when present. Auto-compaction is ${policy.autoCompactionEnabled ? "enabled" : "disabled"} at ${policy.compactAtPercent}% with target ${policy.targetPercentAfterCompaction}%.`,
+        ],
+        diagnostics: [],
+      };
+  }
 }
 
 export function contextStrategyPolicyFromUnknown(
