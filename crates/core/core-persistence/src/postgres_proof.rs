@@ -67,11 +67,14 @@ use crate::{
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionState, SessionStatus,
     SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
     SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
-    UpdateBranchHeadResult, WorkerRunQuery, WorkerRunRecord, WorkerRunStatus, COUNTER_BRAIN_TURNS,
-    COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED, COUNTER_DELEGATIONS_COMPLETED,
-    COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED, COUNTER_DELEGATIONS_TIMED_OUT,
-    COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS,
-    COUNTER_WAKES,
+    UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
+    WorkerPoolCompletionRequest, WorkerPoolLeaseRecord, WorkerPoolLeaseStatus,
+    WorkerPoolMemberRecord, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
+    WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery, WorkerRunRecord,
+    WorkerRunStatus, COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED,
+    COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED,
+    COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS,
+    COUNTER_TOOL_ERRORS, COUNTER_WAKES,
 };
 use postgres::{types::ToSql, Client, GenericClient, NoTls, Row, Transaction};
 use rusty_crew_core_protocol::{
@@ -1569,6 +1572,401 @@ impl PostgresRuntimeCounterProofStore {
         rows.iter().map(row_to_delegated_completion).collect()
     }
 
+    pub fn upsert_worker_pool_member(&self, record: &WorkerPoolMemberRecord) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        save_worker_pool_member_in_client(&mut *self.client()?, &schema, record)
+    }
+
+    pub fn heartbeat_worker_pool_member(
+        &self,
+        member_id: &str,
+        status: WorkerPoolMemberStatus,
+        now: &IsoTimestamp,
+    ) -> CoreResult<bool> {
+        let schema = self.quoted_schema();
+        let status = worker_pool_member_status_as_str(status).to_string();
+        let rows = self
+            .client()?
+            .execute(
+                &format!(
+                    "UPDATE {schema}.worker_pool_members
+                     SET status = $1,
+                         last_heartbeat_at = $2,
+                         updated_at = $2
+                     WHERE member_id = $3"
+                ),
+                &[&status, now, &member_id],
+            )
+            .map_err(|error| postgres_error("heartbeat PostgreSQL worker pool member", error))?;
+        Ok(rows > 0)
+    }
+
+    pub fn load_worker_pool_member(
+        &self,
+        member_id: &str,
+    ) -> CoreResult<Option<WorkerPoolMemberRecord>> {
+        let schema = self.quoted_schema();
+        load_worker_pool_member_from_client(&mut *self.client()?, &schema, member_id)
+    }
+
+    pub fn create_worker_pool_work_item(
+        &self,
+        record: &WorkerPoolWorkItemRecord,
+    ) -> CoreResult<()> {
+        let schema = self.quoted_schema();
+        save_worker_pool_work_item_in_client(&mut *self.client()?, &schema, record)
+    }
+
+    pub fn load_worker_pool_work_item(
+        &self,
+        work_item_id: &str,
+    ) -> CoreResult<Option<WorkerPoolWorkItemRecord>> {
+        let schema = self.quoted_schema();
+        load_worker_pool_work_item_from_client(&mut *self.client()?, &schema, work_item_id)
+    }
+
+    pub fn claim_next_worker_pool_work_item(
+        &self,
+        request: &WorkerPoolClaimRequest,
+    ) -> CoreResult<Result<WorkerPoolClaimRecord, WorkerPoolNoCapacityReason>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL worker pool claim transaction", error)
+        })?;
+
+        let Some(member) =
+            load_worker_pool_member_for_update_from_client(&mut tx, &schema, &request.member_id)?
+        else {
+            return Ok(Err(WorkerPoolNoCapacityReason::MemberUnavailable));
+        };
+        if !member.status.can_claim() {
+            return Ok(Err(WorkerPoolNoCapacityReason::MemberUnavailable));
+        }
+        if member.last_heartbeat_at < request.min_heartbeat_at {
+            return Ok(Err(WorkerPoolNoCapacityReason::MemberHeartbeatStale));
+        }
+        if member.active_leases >= member.concurrency_limit {
+            return Ok(Err(WorkerPoolNoCapacityReason::MemberAtCapacity));
+        }
+
+        let Some(mut work_item) = find_next_worker_pool_work_item_for_postgres_claim(
+            &mut tx,
+            &schema,
+            &member.profile_id,
+        )?
+        else {
+            return Ok(Err(WorkerPoolNoCapacityReason::NoPendingWork));
+        };
+
+        let rows = tx
+            .execute(
+                &format!(
+                    "UPDATE {schema}.worker_pool_work_items
+                     SET status = $1,
+                         claimed_by_member_id = $2,
+                         lease_id = $3,
+                         claim_token = $4,
+                         claim_deadline_at = $5,
+                         updated_at = $6
+                     WHERE work_item_id = $7
+                       AND status = $8"
+                ),
+                &[
+                    &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Claimed),
+                    &member.member_id,
+                    &request.lease_id,
+                    &request.claim_token,
+                    &request.claim_deadline_at,
+                    &request.now,
+                    &work_item.work_item_id,
+                    &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Pending),
+                ],
+            )
+            .map_err(|error| postgres_error("claim PostgreSQL worker pool work item", error))?;
+        if rows != 1 {
+            return Ok(Err(WorkerPoolNoCapacityReason::NoPendingWork));
+        }
+
+        let lease = WorkerPoolLeaseRecord {
+            lease_id: request.lease_id.clone(),
+            work_item_id: work_item.work_item_id.clone(),
+            member_id: member.member_id.clone(),
+            claim_token: request.claim_token.clone(),
+            status: WorkerPoolLeaseStatus::Active,
+            claimed_at: request.now.clone(),
+            claim_deadline_at: request.claim_deadline_at.clone(),
+            terminal_at: None,
+        };
+        save_worker_pool_lease_in_client(&mut tx, &schema, &lease)?;
+
+        let next_active_leases = member.active_leases.saturating_add(1);
+        let next_member_status = if next_active_leases >= member.concurrency_limit {
+            WorkerPoolMemberStatus::Busy
+        } else {
+            member.status
+        };
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.worker_pool_members
+                 SET active_leases = $1,
+                     status = $2,
+                     updated_at = $3
+                 WHERE member_id = $4"
+            ),
+            &[
+                &(next_active_leases as i64),
+                &worker_pool_member_status_as_str(next_member_status),
+                &request.now,
+                &member.member_id,
+            ],
+        )
+        .map_err(|error| {
+            postgres_error("update PostgreSQL worker pool member claim count", error)
+        })?;
+        insert_worker_pool_event_in_client(
+            &mut tx,
+            &schema,
+            WorkerPoolEventWrite {
+                work_item_id: &work_item.work_item_id,
+                lease_id: Some(&lease.lease_id),
+                member_id: Some(&member.member_id),
+                event_type: "claimed",
+                event_json: &serde_json::json!({
+                    "claim_deadline_at": request.claim_deadline_at,
+                    "profile_id": member.profile_id.0,
+                }),
+                recorded_at: &request.now,
+            },
+        )?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL worker pool claim", error))?;
+
+        work_item.status = WorkerPoolWorkStatus::Claimed;
+        work_item.updated_at = request.now.clone();
+        work_item.claimed_by_member_id = Some(member.member_id.clone());
+        work_item.lease_id = Some(lease.lease_id.clone());
+        work_item.claim_token = Some(lease.claim_token.clone());
+        work_item.claim_deadline_at = Some(lease.claim_deadline_at.clone());
+        let mut updated_member = member;
+        updated_member.active_leases = next_active_leases;
+        updated_member.status = next_member_status;
+        updated_member.updated_at = request.now.clone();
+        Ok(Ok(WorkerPoolClaimRecord {
+            member: updated_member,
+            work_item,
+            lease,
+        }))
+    }
+
+    pub fn complete_worker_pool_work_item(
+        &self,
+        request: &WorkerPoolCompletionRequest,
+    ) -> CoreResult<bool> {
+        if !request.status.is_terminal() || request.status == WorkerPoolWorkStatus::Pending {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "worker pool completion must use a terminal work status",
+            ));
+        }
+
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL worker pool completion transaction", error)
+        })?;
+        let Some(lease) = load_worker_pool_lease_from_client(&mut tx, &schema, &request.lease_id)?
+        else {
+            return Ok(false);
+        };
+        if lease.status != WorkerPoolLeaseStatus::Active || lease.claim_token != request.claim_token
+        {
+            return Ok(false);
+        }
+        let Some(work_item) =
+            load_worker_pool_work_item_from_client(&mut tx, &schema, &lease.work_item_id)?
+        else {
+            return Ok(false);
+        };
+        if work_item.status.is_terminal() {
+            return Ok(false);
+        }
+
+        let lease_status = worker_pool_lease_status_for_work_status(request.status)?;
+        let rows = tx
+            .execute(
+                &format!(
+                    "UPDATE {schema}.worker_pool_work_items
+                     SET status = $1,
+                         updated_at = $2,
+                         terminal_at = $2,
+                         terminal_summary = $3
+                     WHERE work_item_id = $4
+                       AND lease_id = $5
+                       AND claim_token = $6
+                       AND status IN ($7, $8)"
+                ),
+                &[
+                    &worker_pool_work_status_as_str(request.status),
+                    &request.now,
+                    &request.summary,
+                    &work_item.work_item_id,
+                    &lease.lease_id,
+                    &request.claim_token,
+                    &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Claimed),
+                    &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Running),
+                ],
+            )
+            .map_err(|error| postgres_error("complete PostgreSQL worker pool work item", error))?;
+        if rows != 1 {
+            return Ok(false);
+        }
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.worker_pool_leases
+                 SET status = $1,
+                     terminal_at = $2
+                 WHERE lease_id = $3
+                   AND status = $4"
+            ),
+            &[
+                &worker_pool_lease_status_as_str(lease_status),
+                &request.now,
+                &lease.lease_id,
+                &worker_pool_lease_status_as_str(WorkerPoolLeaseStatus::Active),
+            ],
+        )
+        .map_err(|error| postgres_error("complete PostgreSQL worker pool lease", error))?;
+        release_worker_pool_member_lease_in_client(
+            &mut tx,
+            &schema,
+            &lease.member_id,
+            &request.now,
+        )?;
+        insert_worker_pool_event_in_client(
+            &mut tx,
+            &schema,
+            WorkerPoolEventWrite {
+                work_item_id: &work_item.work_item_id,
+                lease_id: Some(&lease.lease_id),
+                member_id: Some(&lease.member_id),
+                event_type: worker_pool_work_status_as_str(request.status),
+                event_json: &serde_json::json!({ "summary": request.summary }),
+                recorded_at: &request.now,
+            },
+        )?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL worker pool completion", error))?;
+        Ok(true)
+    }
+
+    pub fn expire_worker_pool_claims(
+        &self,
+        stale_before: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<WorkerPoolWorkItemRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error(
+                "start PostgreSQL worker pool claim expiry transaction",
+                error,
+            )
+        })?;
+        let rows = tx
+            .query(
+                &format!(
+                    "{WORKER_POOL_WORK_ITEM_SELECT}
+                     FROM {schema}.worker_pool_work_items
+                     WHERE status IN ($1, $2)
+                       AND claim_deadline_at IS NOT NULL
+                       AND claim_deadline_at < $3
+                     ORDER BY claim_deadline_at ASC, work_item_id ASC
+                     FOR UPDATE SKIP LOCKED"
+                ),
+                &[
+                    &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Claimed),
+                    &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Running),
+                    stale_before,
+                ],
+            )
+            .map_err(|error| postgres_error("query stale PostgreSQL worker pool claims", error))?;
+        let stale = rows
+            .iter()
+            .map(row_to_worker_pool_work_item)
+            .collect::<CoreResult<Vec<_>>>()?;
+        let mut expired = Vec::new();
+        for mut item in stale {
+            let rows = tx
+                .execute(
+                    &format!(
+                        "UPDATE {schema}.worker_pool_work_items
+                         SET status = $1,
+                             updated_at = $2,
+                             terminal_at = $2,
+                             terminal_summary = $3
+                         WHERE work_item_id = $4
+                           AND status IN ($5, $6)"
+                    ),
+                    &[
+                        &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Expired),
+                        now,
+                        &"worker pool claim expired",
+                        &item.work_item_id,
+                        &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Claimed),
+                        &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Running),
+                    ],
+                )
+                .map_err(|error| {
+                    postgres_error("expire PostgreSQL worker pool work item", error)
+                })?;
+            if rows != 1 {
+                continue;
+            }
+            if let Some(lease_id) = item.lease_id.as_deref() {
+                tx.execute(
+                    &format!(
+                        "UPDATE {schema}.worker_pool_leases
+                         SET status = $1,
+                             terminal_at = $2
+                         WHERE lease_id = $3
+                           AND status = $4"
+                    ),
+                    &[
+                        &worker_pool_lease_status_as_str(WorkerPoolLeaseStatus::Expired),
+                        now,
+                        &lease_id,
+                        &worker_pool_lease_status_as_str(WorkerPoolLeaseStatus::Active),
+                    ],
+                )
+                .map_err(|error| postgres_error("expire PostgreSQL worker pool lease", error))?;
+            }
+            if let Some(member_id) = item.claimed_by_member_id.as_deref() {
+                release_worker_pool_member_lease_in_client(&mut tx, &schema, member_id, now)?;
+            }
+            insert_worker_pool_event_in_client(
+                &mut tx,
+                &schema,
+                WorkerPoolEventWrite {
+                    work_item_id: &item.work_item_id,
+                    lease_id: item.lease_id.as_deref(),
+                    member_id: item.claimed_by_member_id.as_deref(),
+                    event_type: worker_pool_work_status_as_str(WorkerPoolWorkStatus::Expired),
+                    event_json: &serde_json::json!({ "reason": "claim_deadline_expired" }),
+                    recorded_at: now,
+                },
+            )?;
+            item.status = WorkerPoolWorkStatus::Expired;
+            item.updated_at = now.clone();
+            item.terminal_at = Some(now.clone());
+            item.terminal_summary = Some("worker pool claim expired".to_string());
+            expired.push(item);
+        }
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL worker pool expiry", error))?;
+        Ok(expired)
+    }
+
     pub fn increment_counter(
         &self,
         scope: &RuntimeCounterScope,
@@ -1934,7 +2332,7 @@ impl PostgresRuntimeCounterProofStore {
             backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
             schema: self.schema.clone(),
             proof_repository:
-                "sessions,events,queued_messages,scheduled_jobs,worker_runs,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers"
+                "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers"
                     .to_string(),
             schema_version: self.schema_version()?,
             table_counts: vec![
@@ -1973,6 +2371,22 @@ impl PostgresRuntimeCounterProofStore {
                 RuntimeStorageTableCount {
                     table: "worker_runs".to_string(),
                     rows: self.table_rows("worker_runs")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "worker_pool_members".to_string(),
+                    rows: self.table_rows("worker_pool_members")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "worker_pool_work_items".to_string(),
+                    rows: self.table_rows("worker_pool_work_items")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "worker_pool_leases".to_string(),
+                    rows: self.table_rows("worker_pool_leases")?,
+                },
+                RuntimeStorageTableCount {
+                    table: "worker_pool_events".to_string(),
+                    rows: self.table_rows("worker_pool_events")?,
                 },
                 RuntimeStorageTableCount {
                     table: "completion_packets".to_string(),
@@ -5134,6 +5548,73 @@ impl PostgresRuntimeCounterProofStore {
                     ON {schema}.worker_runs(delegated_session_id);
                  CREATE INDEX IF NOT EXISTS worker_runs_profile_task_created_idx
                     ON {schema}.worker_runs(profile_id, task_id, created_at, run_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.worker_pool_members (
+                    member_id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL,
+                    agent_id TEXT,
+                    session_id TEXT,
+                    status TEXT NOT NULL,
+                    concurrency_limit BIGINT NOT NULL CHECK (concurrency_limit >= 0),
+                    active_leases BIGINT NOT NULL DEFAULT 0 CHECK (active_leases >= 0),
+                    capabilities_json TEXT NOT NULL,
+                    registered_at TEXT NOT NULL,
+                    last_heartbeat_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS worker_pool_members_status_heartbeat_idx
+                    ON {schema}.worker_pool_members(status, last_heartbeat_at, member_id);
+                 CREATE INDEX IF NOT EXISTS worker_pool_members_profile_status_idx
+                    ON {schema}.worker_pool_members(profile_id, status, member_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.worker_pool_work_items (
+                    work_item_id TEXT PRIMARY KEY,
+                    requested_profile_id TEXT,
+                    task_id TEXT,
+                    status TEXT NOT NULL,
+                    priority BIGINT NOT NULL DEFAULT 100,
+                    work_json TEXT NOT NULL,
+                    required_capabilities_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    claimed_by_member_id TEXT,
+                    lease_id TEXT,
+                    claim_token TEXT,
+                    claim_deadline_at TEXT,
+                    terminal_at TEXT,
+                    terminal_summary TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS worker_pool_work_items_pending_idx
+                    ON {schema}.worker_pool_work_items(status, priority, created_at, work_item_id);
+                 CREATE INDEX IF NOT EXISTS worker_pool_work_items_claim_deadline_idx
+                    ON {schema}.worker_pool_work_items(status, claim_deadline_at, work_item_id);
+                 CREATE INDEX IF NOT EXISTS worker_pool_work_items_member_status_idx
+                    ON {schema}.worker_pool_work_items(claimed_by_member_id, status, work_item_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.worker_pool_leases (
+                    lease_id TEXT PRIMARY KEY,
+                    work_item_id TEXT NOT NULL,
+                    member_id TEXT NOT NULL,
+                    claim_token TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    claimed_at TEXT NOT NULL,
+                    claim_deadline_at TEXT NOT NULL,
+                    terminal_at TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS worker_pool_leases_member_status_idx
+                    ON {schema}.worker_pool_leases(member_id, status, claimed_at, lease_id);
+                 CREATE INDEX IF NOT EXISTS worker_pool_leases_work_item_idx
+                    ON {schema}.worker_pool_leases(work_item_id, status, lease_id);
+                 CREATE TABLE IF NOT EXISTS {schema}.worker_pool_events (
+                    sequence BIGSERIAL PRIMARY KEY,
+                    work_item_id TEXT NOT NULL,
+                    lease_id TEXT,
+                    member_id TEXT,
+                    event_type TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS worker_pool_events_work_item_idx
+                    ON {schema}.worker_pool_events(work_item_id, sequence);
+                 CREATE INDEX IF NOT EXISTS worker_pool_events_member_idx
+                    ON {schema}.worker_pool_events(member_id, sequence);
                  CREATE TABLE IF NOT EXISTS {schema}.completion_packets (
                     sequence BIGINT PRIMARY KEY,
                     session_id TEXT NOT NULL,
@@ -6783,6 +7264,23 @@ const WORKER_RUN_SELECT: &str = "SELECT
     fan_out_max_concurrency,
     fan_out_failure_policy";
 
+const WORKER_POOL_WORK_ITEM_SELECT: &str = "SELECT
+    work_item_id,
+    requested_profile_id,
+    task_id,
+    status,
+    priority,
+    work_json,
+    required_capabilities_json,
+    created_at,
+    updated_at,
+    claimed_by_member_id,
+    lease_id,
+    claim_token,
+    claim_deadline_at,
+    terminal_at,
+    terminal_summary";
+
 fn save_completion_packet_in_tx(
     tx: &mut impl GenericClient,
     schema: &str,
@@ -7057,6 +7555,504 @@ fn row_to_delegated_completion(row: &Row) -> CoreResult<DelegatedCompletion> {
         parent_consumption: parent_consumption_policy_from_str(&parent_consumption)?,
         packet: parse_postgres_json(&packet_json, "delegated completion packet_json")?,
     })
+}
+
+fn save_worker_pool_member_in_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    record: &WorkerPoolMemberRecord,
+) -> CoreResult<()> {
+    let status = worker_pool_member_status_as_str(record.status).to_string();
+    let capabilities_json = to_json_text(&record.capabilities_json)?;
+    client
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.worker_pool_members (
+                    member_id,
+                    profile_id,
+                    agent_id,
+                    session_id,
+                    status,
+                    concurrency_limit,
+                    active_leases,
+                    capabilities_json,
+                    registered_at,
+                    last_heartbeat_at,
+                    updated_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 ON CONFLICT(member_id) DO UPDATE SET
+                    profile_id = EXCLUDED.profile_id,
+                    agent_id = EXCLUDED.agent_id,
+                    session_id = EXCLUDED.session_id,
+                    status = EXCLUDED.status,
+                    concurrency_limit = EXCLUDED.concurrency_limit,
+                    active_leases = EXCLUDED.active_leases,
+                    capabilities_json = EXCLUDED.capabilities_json,
+                    last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+                    updated_at = EXCLUDED.updated_at"
+            ),
+            &[
+                &record.member_id,
+                &record.profile_id.0,
+                &record.agent_id.as_ref().map(|value| value.0.as_str()),
+                &record.session_id.as_ref().map(|value| value.0.as_str()),
+                &status,
+                &(record.concurrency_limit as i64),
+                &(record.active_leases as i64),
+                &capabilities_json,
+                &record.registered_at,
+                &record.last_heartbeat_at,
+                &record.updated_at,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL worker pool member", error))?;
+    Ok(())
+}
+
+fn save_worker_pool_work_item_in_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    record: &WorkerPoolWorkItemRecord,
+) -> CoreResult<()> {
+    let status = worker_pool_work_status_as_str(record.status).to_string();
+    let work_json = to_json_text(&record.work_json)?;
+    let required_capabilities_json = to_json_text(&record.required_capabilities_json)?;
+    client
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.worker_pool_work_items (
+                    work_item_id,
+                    requested_profile_id,
+                    task_id,
+                    status,
+                    priority,
+                    work_json,
+                    required_capabilities_json,
+                    created_at,
+                    updated_at,
+                    claimed_by_member_id,
+                    lease_id,
+                    claim_token,
+                    claim_deadline_at,
+                    terminal_at,
+                    terminal_summary
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"
+            ),
+            &[
+                &record.work_item_id,
+                &record
+                    .requested_profile_id
+                    .as_ref()
+                    .map(|value| value.0.as_str()),
+                &record.task_id.as_ref().map(|value| value.0.as_str()),
+                &status,
+                &(record.priority as i64),
+                &work_json,
+                &required_capabilities_json,
+                &record.created_at,
+                &record.updated_at,
+                &record.claimed_by_member_id,
+                &record.lease_id,
+                &record.claim_token,
+                &record.claim_deadline_at,
+                &record.terminal_at,
+                &record.terminal_summary,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL worker pool work item", error))?;
+    Ok(())
+}
+
+fn load_worker_pool_member_from_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    member_id: &str,
+) -> CoreResult<Option<WorkerPoolMemberRecord>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "SELECT
+                    member_id,
+                    profile_id,
+                    agent_id,
+                    session_id,
+                    status,
+                    concurrency_limit,
+                    active_leases,
+                    capabilities_json,
+                    registered_at,
+                    last_heartbeat_at,
+                    updated_at
+                 FROM {schema}.worker_pool_members
+                 WHERE member_id = $1"
+            ),
+            &[&member_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL worker pool member", error))?;
+    row.as_ref().map(row_to_worker_pool_member).transpose()
+}
+
+fn load_worker_pool_member_for_update_from_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    member_id: &str,
+) -> CoreResult<Option<WorkerPoolMemberRecord>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "SELECT
+                    member_id,
+                    profile_id,
+                    agent_id,
+                    session_id,
+                    status,
+                    concurrency_limit,
+                    active_leases,
+                    capabilities_json,
+                    registered_at,
+                    last_heartbeat_at,
+                    updated_at
+                 FROM {schema}.worker_pool_members
+                 WHERE member_id = $1
+                 FOR UPDATE"
+            ),
+            &[&member_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL worker pool member for update", error))?;
+    row.as_ref().map(row_to_worker_pool_member).transpose()
+}
+
+fn load_worker_pool_work_item_from_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    work_item_id: &str,
+) -> CoreResult<Option<WorkerPoolWorkItemRecord>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "{WORKER_POOL_WORK_ITEM_SELECT}
+                 FROM {schema}.worker_pool_work_items
+                 WHERE work_item_id = $1"
+            ),
+            &[&work_item_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL worker pool work item", error))?;
+    row.as_ref().map(row_to_worker_pool_work_item).transpose()
+}
+
+fn find_next_worker_pool_work_item_for_postgres_claim(
+    client: &mut impl GenericClient,
+    schema: &str,
+    profile_id: &ProfileId,
+) -> CoreResult<Option<WorkerPoolWorkItemRecord>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "{WORKER_POOL_WORK_ITEM_SELECT}
+                 FROM {schema}.worker_pool_work_items
+                 WHERE status = $1
+                   AND (requested_profile_id IS NULL OR requested_profile_id = $2)
+                 ORDER BY priority ASC, created_at ASC, work_item_id ASC
+                 LIMIT 1
+                 FOR UPDATE SKIP LOCKED"
+            ),
+            &[
+                &worker_pool_work_status_as_str(WorkerPoolWorkStatus::Pending),
+                &profile_id.0,
+            ],
+        )
+        .map_err(|error| postgres_error("find next PostgreSQL worker pool work item", error))?;
+    row.as_ref().map(row_to_worker_pool_work_item).transpose()
+}
+
+fn save_worker_pool_lease_in_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    lease: &WorkerPoolLeaseRecord,
+) -> CoreResult<()> {
+    let status = worker_pool_lease_status_as_str(lease.status).to_string();
+    client
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.worker_pool_leases (
+                    lease_id,
+                    work_item_id,
+                    member_id,
+                    claim_token,
+                    status,
+                    claimed_at,
+                    claim_deadline_at,
+                    terminal_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+            ),
+            &[
+                &lease.lease_id,
+                &lease.work_item_id,
+                &lease.member_id,
+                &lease.claim_token,
+                &status,
+                &lease.claimed_at,
+                &lease.claim_deadline_at,
+                &lease.terminal_at,
+            ],
+        )
+        .map_err(|error| postgres_error("save PostgreSQL worker pool lease", error))?;
+    Ok(())
+}
+
+fn load_worker_pool_lease_from_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    lease_id: &str,
+) -> CoreResult<Option<WorkerPoolLeaseRecord>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "SELECT
+                    lease_id,
+                    work_item_id,
+                    member_id,
+                    claim_token,
+                    status,
+                    claimed_at,
+                    claim_deadline_at,
+                    terminal_at
+                 FROM {schema}.worker_pool_leases
+                 WHERE lease_id = $1
+                 FOR UPDATE"
+            ),
+            &[&lease_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL worker pool lease", error))?;
+    row.as_ref().map(row_to_worker_pool_lease).transpose()
+}
+
+fn release_worker_pool_member_lease_in_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    member_id: &str,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    client
+        .execute(
+            &format!(
+                "UPDATE {schema}.worker_pool_members
+                 SET active_leases = CASE
+                        WHEN active_leases > 0 THEN active_leases - 1
+                        ELSE 0
+                     END,
+                     status = CASE
+                        WHEN status IN ($1, $2) THEN $1
+                        ELSE status
+                     END,
+                     updated_at = $3
+                 WHERE member_id = $4"
+            ),
+            &[
+                &worker_pool_member_status_as_str(WorkerPoolMemberStatus::Available),
+                &worker_pool_member_status_as_str(WorkerPoolMemberStatus::Busy),
+                now,
+                &member_id,
+            ],
+        )
+        .map_err(|error| postgres_error("release PostgreSQL worker pool member lease", error))?;
+    Ok(())
+}
+
+struct WorkerPoolEventWrite<'a> {
+    work_item_id: &'a str,
+    lease_id: Option<&'a str>,
+    member_id: Option<&'a str>,
+    event_type: &'a str,
+    event_json: &'a serde_json::Value,
+    recorded_at: &'a IsoTimestamp,
+}
+
+fn insert_worker_pool_event_in_client(
+    client: &mut impl GenericClient,
+    schema: &str,
+    write: WorkerPoolEventWrite<'_>,
+) -> CoreResult<()> {
+    let event_json = to_json_text(write.event_json)?;
+    client
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.worker_pool_events (
+                    work_item_id,
+                    lease_id,
+                    member_id,
+                    event_type,
+                    event_json,
+                    recorded_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6)"
+            ),
+            &[
+                &write.work_item_id,
+                &write.lease_id,
+                &write.member_id,
+                &write.event_type,
+                &event_json,
+                write.recorded_at,
+            ],
+        )
+        .map_err(|error| postgres_error("insert PostgreSQL worker pool event", error))?;
+    Ok(())
+}
+
+fn row_to_worker_pool_member(row: &Row) -> CoreResult<WorkerPoolMemberRecord> {
+    let status: String = row.get(4);
+    let capabilities_json: String = row.get(7);
+    Ok(WorkerPoolMemberRecord {
+        member_id: row.get(0),
+        profile_id: ProfileId::new(row.get::<_, String>(1)),
+        agent_id: row.get::<_, Option<String>>(2).map(AgentId::new),
+        session_id: row.get::<_, Option<String>>(3).map(SessionId::new),
+        status: worker_pool_member_status_from_str(&status)?,
+        concurrency_limit: row.get::<_, i64>(5) as u32,
+        active_leases: row.get::<_, i64>(6) as u32,
+        capabilities_json: parse_postgres_json(
+            &capabilities_json,
+            "worker pool capabilities_json",
+        )?,
+        registered_at: row.get(8),
+        last_heartbeat_at: row.get(9),
+        updated_at: row.get(10),
+    })
+}
+
+fn row_to_worker_pool_work_item(row: &Row) -> CoreResult<WorkerPoolWorkItemRecord> {
+    let status: String = row.get(3);
+    let work_json: String = row.get(5);
+    let required_capabilities_json: String = row.get(6);
+    Ok(WorkerPoolWorkItemRecord {
+        work_item_id: row.get(0),
+        requested_profile_id: row.get::<_, Option<String>>(1).map(ProfileId::new),
+        task_id: row.get::<_, Option<String>>(2).map(TaskId::new),
+        status: worker_pool_work_status_from_str(&status)?,
+        priority: row.get::<_, i64>(4) as i32,
+        work_json: parse_postgres_json(&work_json, "worker pool work_json")?,
+        required_capabilities_json: parse_postgres_json(
+            &required_capabilities_json,
+            "worker pool required_capabilities_json",
+        )?,
+        created_at: row.get(7),
+        updated_at: row.get(8),
+        claimed_by_member_id: row.get(9),
+        lease_id: row.get(10),
+        claim_token: row.get(11),
+        claim_deadline_at: row.get(12),
+        terminal_at: row.get(13),
+        terminal_summary: row.get(14),
+    })
+}
+
+fn row_to_worker_pool_lease(row: &Row) -> CoreResult<WorkerPoolLeaseRecord> {
+    let status: String = row.get(4);
+    Ok(WorkerPoolLeaseRecord {
+        lease_id: row.get(0),
+        work_item_id: row.get(1),
+        member_id: row.get(2),
+        claim_token: row.get(3),
+        status: worker_pool_lease_status_from_str(&status)?,
+        claimed_at: row.get(5),
+        claim_deadline_at: row.get(6),
+        terminal_at: row.get(7),
+    })
+}
+
+fn worker_pool_member_status_as_str(status: WorkerPoolMemberStatus) -> &'static str {
+    match status {
+        WorkerPoolMemberStatus::Available => "available",
+        WorkerPoolMemberStatus::Busy => "busy",
+        WorkerPoolMemberStatus::Offline => "offline",
+        WorkerPoolMemberStatus::Quarantined => "quarantined",
+        WorkerPoolMemberStatus::Retired => "retired",
+    }
+}
+
+fn worker_pool_member_status_from_str(raw: &str) -> CoreResult<WorkerPoolMemberStatus> {
+    match raw {
+        "available" => Ok(WorkerPoolMemberStatus::Available),
+        "busy" => Ok(WorkerPoolMemberStatus::Busy),
+        "offline" => Ok(WorkerPoolMemberStatus::Offline),
+        "quarantined" => Ok(WorkerPoolMemberStatus::Quarantined),
+        "retired" => Ok(WorkerPoolMemberStatus::Retired),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL worker pool member status {other}"),
+        )),
+    }
+}
+
+fn worker_pool_work_status_as_str(status: WorkerPoolWorkStatus) -> &'static str {
+    match status {
+        WorkerPoolWorkStatus::Pending => "pending",
+        WorkerPoolWorkStatus::Claimed => "claimed",
+        WorkerPoolWorkStatus::Running => "running",
+        WorkerPoolWorkStatus::Completed => "completed",
+        WorkerPoolWorkStatus::Failed => "failed",
+        WorkerPoolWorkStatus::Cancelled => "cancelled",
+        WorkerPoolWorkStatus::Expired => "expired",
+    }
+}
+
+fn worker_pool_work_status_from_str(raw: &str) -> CoreResult<WorkerPoolWorkStatus> {
+    match raw {
+        "pending" => Ok(WorkerPoolWorkStatus::Pending),
+        "claimed" => Ok(WorkerPoolWorkStatus::Claimed),
+        "running" => Ok(WorkerPoolWorkStatus::Running),
+        "completed" => Ok(WorkerPoolWorkStatus::Completed),
+        "failed" => Ok(WorkerPoolWorkStatus::Failed),
+        "cancelled" => Ok(WorkerPoolWorkStatus::Cancelled),
+        "expired" => Ok(WorkerPoolWorkStatus::Expired),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL worker pool work status {other}"),
+        )),
+    }
+}
+
+fn worker_pool_lease_status_as_str(status: WorkerPoolLeaseStatus) -> &'static str {
+    match status {
+        WorkerPoolLeaseStatus::Active => "active",
+        WorkerPoolLeaseStatus::Completed => "completed",
+        WorkerPoolLeaseStatus::Failed => "failed",
+        WorkerPoolLeaseStatus::Cancelled => "cancelled",
+        WorkerPoolLeaseStatus::Expired => "expired",
+        WorkerPoolLeaseStatus::Released => "released",
+    }
+}
+
+fn worker_pool_lease_status_from_str(raw: &str) -> CoreResult<WorkerPoolLeaseStatus> {
+    match raw {
+        "active" => Ok(WorkerPoolLeaseStatus::Active),
+        "completed" => Ok(WorkerPoolLeaseStatus::Completed),
+        "failed" => Ok(WorkerPoolLeaseStatus::Failed),
+        "cancelled" => Ok(WorkerPoolLeaseStatus::Cancelled),
+        "expired" => Ok(WorkerPoolLeaseStatus::Expired),
+        "released" => Ok(WorkerPoolLeaseStatus::Released),
+        other => Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("unknown PostgreSQL worker pool lease status {other}"),
+        )),
+    }
+}
+
+fn worker_pool_lease_status_for_work_status(
+    status: WorkerPoolWorkStatus,
+) -> CoreResult<WorkerPoolLeaseStatus> {
+    match status {
+        WorkerPoolWorkStatus::Completed => Ok(WorkerPoolLeaseStatus::Completed),
+        WorkerPoolWorkStatus::Failed => Ok(WorkerPoolLeaseStatus::Failed),
+        WorkerPoolWorkStatus::Cancelled => Ok(WorkerPoolLeaseStatus::Cancelled),
+        WorkerPoolWorkStatus::Expired => Ok(WorkerPoolLeaseStatus::Expired),
+        WorkerPoolWorkStatus::Pending
+        | WorkerPoolWorkStatus::Claimed
+        | WorkerPoolWorkStatus::Running => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "worker pool lease terminal status requires terminal work status",
+        )),
+    }
 }
 
 fn postgres_completion_status_as_str(status: &CompletionStatus) -> &'static str {
