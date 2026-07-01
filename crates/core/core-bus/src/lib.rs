@@ -116,14 +116,17 @@ impl CoreBus {
         to: AgentId,
         body: impl Into<String>,
     ) -> CoreResult<()> {
-        self.publish(CoreEvent::AgentMessageRouted {
-            message: AgentMessage {
-                from,
-                to,
-                body: body.into(),
-                correlation_id: None,
-            },
-        })?;
+        self.route_agent_message(AgentMessage {
+            from,
+            to,
+            body: body.into(),
+            correlation_id: None,
+            projection: None,
+        })
+    }
+
+    pub fn route_agent_message(&self, message: AgentMessage) -> CoreResult<()> {
+        self.publish(CoreEvent::AgentMessageRouted { message })?;
         Ok(())
     }
 
@@ -310,6 +313,53 @@ mod tests {
             .unwrap();
 
         let event = events.recv().unwrap();
-        assert!(matches!(event, CoreEvent::AgentMessageRouted { .. }));
+        let CoreEvent::AgentMessageRouted { message } = event else {
+            panic!("expected routed message");
+        };
+        assert_eq!(message.body, "hello");
+        assert_eq!(message.projection, None);
+    }
+
+    #[test]
+    fn routes_full_messages_with_projection_hints() {
+        let bus = CoreBus::new();
+        let (_id, events) = bus
+            .subscribe(EventSubscription {
+                event_kinds: vec![CoreEventKind::AgentMessageRouted],
+                session_id: None,
+                agent_id: None,
+                adapter_id: None,
+            })
+            .unwrap();
+
+        bus.route_agent_message(AgentMessage {
+            from: AgentId::new("planner"),
+            to: AgentId::new("operator"),
+            body: "ready".to_string(),
+            correlation_id: Some("handoff-1".to_string()),
+            projection: Some(rusty_crew_core_protocol::AgentMessageProjectionHint {
+                visibility: rusty_crew_core_protocol::ProjectionVisibility::Observation,
+                target_ref: Some(rusty_crew_core_protocol::ProjectionRef {
+                    system: "den".to_string(),
+                    kind: "project".to_string(),
+                    id: "rusty-crew".to_string(),
+                }),
+                work_ref: Some(rusty_crew_core_protocol::ProjectionRef {
+                    system: "den".to_string(),
+                    kind: "task".to_string(),
+                    id: "3875".to_string(),
+                }),
+                reason: Some("projection proof".to_string()),
+            }),
+        })
+        .unwrap();
+
+        let event = events.recv().unwrap();
+        let CoreEvent::AgentMessageRouted { message } = event else {
+            panic!("expected routed message");
+        };
+        let projection = message.projection.expect("projection hint");
+        assert_eq!(projection.target_ref.expect("target ref").id, "rusty-crew");
+        assert_eq!(projection.work_ref.expect("work ref").id, "3875");
     }
 }

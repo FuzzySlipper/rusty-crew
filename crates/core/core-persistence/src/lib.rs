@@ -61,7 +61,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
-const CURRENT_SCHEMA_VERSION: i64 = 30;
+const CURRENT_SCHEMA_VERSION: i64 = 31;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -234,6 +234,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 30,
         description: "add optional worker-pool capacity primitives",
         apply: migrate_v30_add_worker_pool_capacity,
+    },
+    SchemaMigration {
+        version: 31,
+        description: "link worker runs to optional worker-pool leases",
+        apply: migrate_v31_add_worker_run_pool_provenance,
     },
 ];
 
@@ -3980,6 +3985,10 @@ pub struct WorkerRunRecord {
     pub fan_out_group_id: Option<String>,
     pub fan_out_max_concurrency: Option<u32>,
     pub fan_out_failure_policy: FanOutFailurePolicy,
+    pub worker_pool_work_item_id: Option<String>,
+    pub worker_pool_lease_id: Option<String>,
+    pub worker_pool_member_id: Option<String>,
+    pub worker_pool_claim_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4014,6 +4023,8 @@ pub enum WorkerPoolWorkStatus {
     Running,
     Completed,
     Failed,
+    Blocked,
+    Exhausted,
     Cancelled,
     Expired,
 }
@@ -4026,6 +4037,8 @@ impl WorkerPoolWorkStatus {
             Self::Running => "running",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::Blocked => "blocked",
+            Self::Exhausted => "exhausted",
             Self::Cancelled => "cancelled",
             Self::Expired => "expired",
         }
@@ -4034,7 +4047,12 @@ impl WorkerPoolWorkStatus {
     pub const fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Expired
+            Self::Completed
+                | Self::Failed
+                | Self::Blocked
+                | Self::Exhausted
+                | Self::Cancelled
+                | Self::Expired
         )
     }
 }
@@ -4044,6 +4062,8 @@ pub enum WorkerPoolLeaseStatus {
     Active,
     Completed,
     Failed,
+    Blocked,
+    Exhausted,
     Cancelled,
     Expired,
     Released,
@@ -4055,6 +4075,8 @@ impl WorkerPoolLeaseStatus {
             Self::Active => "active",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::Blocked => "blocked",
+            Self::Exhausted => "exhausted",
             Self::Cancelled => "cancelled",
             Self::Expired => "expired",
             Self::Released => "released",
@@ -7286,8 +7308,12 @@ impl CoordinationStore {
                 parent_consumption,
                 fan_out_group_id,
                 fan_out_max_concurrency,
-                fan_out_failure_policy
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                fan_out_failure_policy,
+                worker_pool_work_item_id,
+                worker_pool_lease_id,
+                worker_pool_member_id,
+                worker_pool_claim_token
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 record.run_id.0.as_str(),
                 record.parent_session_id.0.as_str(),
@@ -7311,6 +7337,10 @@ impl CoordinationStore {
                 record.fan_out_group_id.as_deref(),
                 record.fan_out_max_concurrency.map(|value| value as i64),
                 fan_out_failure_policy_as_str(&record.fan_out_failure_policy),
+                record.worker_pool_work_item_id.as_deref(),
+                record.worker_pool_lease_id.as_deref(),
+                record.worker_pool_member_id.as_deref(),
+                record.worker_pool_claim_token.as_deref(),
             ],
         )
         .map_err(|error| persistence_error("save worker run", error))?;
@@ -7336,7 +7366,11 @@ impl CoordinationStore {
                 parent_consumption,
                 fan_out_group_id,
                 fan_out_max_concurrency,
-                fan_out_failure_policy
+                fan_out_failure_policy,
+                worker_pool_work_item_id,
+                worker_pool_lease_id,
+                worker_pool_member_id,
+                worker_pool_claim_token
              FROM worker_runs
              WHERE run_id = ?1",
             params![run_id.0.as_str()],
@@ -7368,7 +7402,11 @@ impl CoordinationStore {
                 parent_consumption,
                 fan_out_group_id,
                 fan_out_max_concurrency,
-                fan_out_failure_policy
+                fan_out_failure_policy,
+                worker_pool_work_item_id,
+                worker_pool_lease_id,
+                worker_pool_member_id,
+                worker_pool_claim_token
              FROM worker_runs
              WHERE delegated_session_id = ?1",
             params![delegated_session_id.0.as_str()],
@@ -7492,7 +7530,11 @@ impl CoordinationStore {
                     parent_consumption,
                     fan_out_group_id,
                     fan_out_max_concurrency,
-                    fan_out_failure_policy
+                    fan_out_failure_policy,
+                    worker_pool_work_item_id,
+                    worker_pool_lease_id,
+                    worker_pool_member_id,
+                    worker_pool_claim_token
                  FROM worker_runs
                  WHERE session_id = ?1 AND fan_out_group_id = ?2
                  ORDER BY source_wake_id ASC, source_action_index ASC",
@@ -7974,7 +8016,11 @@ impl CoordinationStore {
                     parent_consumption,
                     fan_out_group_id,
                     fan_out_max_concurrency,
-                    fan_out_failure_policy
+                    fan_out_failure_policy,
+                    worker_pool_work_item_id,
+                    worker_pool_lease_id,
+                    worker_pool_member_id,
+                    worker_pool_claim_token
                  FROM worker_runs
                  WHERE session_id = ?1 AND fan_out_group_id IS NOT NULL
                  ORDER BY fan_out_group_id ASC, source_wake_id ASC, source_action_index ASC",
@@ -9720,6 +9766,22 @@ fn migrate_v30_add_worker_pool_capacity(tx: &rusqlite::Transaction<'_>) -> CoreR
         ",
     )
     .map_err(|error| persistence_error("apply schema migration 30", error))
+}
+
+fn migrate_v31_add_worker_run_pool_provenance(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
+    add_missing_column_tx(tx, "worker_runs", "worker_pool_work_item_id", "TEXT")?;
+    add_missing_column_tx(tx, "worker_runs", "worker_pool_lease_id", "TEXT")?;
+    add_missing_column_tx(tx, "worker_runs", "worker_pool_member_id", "TEXT")?;
+    add_missing_column_tx(tx, "worker_runs", "worker_pool_claim_token", "TEXT")?;
+    tx.execute_batch(
+        "
+            CREATE INDEX IF NOT EXISTS idx_worker_runs_pool_lease
+                ON worker_runs(worker_pool_lease_id);
+            CREATE INDEX IF NOT EXISTS idx_worker_runs_pool_member
+                ON worker_runs(worker_pool_member_id, status);
+        ",
+    )
+    .map_err(|error| persistence_error("apply schema migration 31", error))
 }
 
 fn migrate_v23_add_session_memory_records(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -13474,7 +13536,11 @@ fn query_worker_runs(
                 parent_consumption,
                 fan_out_group_id,
                 fan_out_max_concurrency,
-                fan_out_failure_policy
+                fan_out_failure_policy,
+                worker_pool_work_item_id,
+                worker_pool_lease_id,
+                worker_pool_member_id,
+                worker_pool_claim_token
              FROM worker_runs
              WHERE (?1 IS NULL OR session_id = ?1)
                AND (?2 IS NULL OR delegated_session_id = ?2)
@@ -21097,6 +21163,10 @@ fn row_to_worker_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRunRecor
         fan_out_group_id: row.get(13)?,
         fan_out_max_concurrency: row.get::<_, Option<i64>>(14)?.map(|value| value as u32),
         fan_out_failure_policy: fan_out_failure_policy_from_str(&fan_out_failure_policy)?,
+        worker_pool_work_item_id: row.get(16)?,
+        worker_pool_lease_id: row.get(17)?,
+        worker_pool_member_id: row.get(18)?,
+        worker_pool_claim_token: row.get(19)?,
     })
 }
 
@@ -21226,6 +21296,8 @@ fn worker_pool_work_status_from_str(raw: &str) -> rusqlite::Result<WorkerPoolWor
         "running" => Ok(WorkerPoolWorkStatus::Running),
         "completed" => Ok(WorkerPoolWorkStatus::Completed),
         "failed" => Ok(WorkerPoolWorkStatus::Failed),
+        "blocked" => Ok(WorkerPoolWorkStatus::Blocked),
+        "exhausted" => Ok(WorkerPoolWorkStatus::Exhausted),
         "cancelled" => Ok(WorkerPoolWorkStatus::Cancelled),
         "expired" => Ok(WorkerPoolWorkStatus::Expired),
         other => Err(rusqlite::Error::FromSqlConversionFailure(
@@ -21244,6 +21316,8 @@ fn worker_pool_lease_status_from_str(raw: &str) -> rusqlite::Result<WorkerPoolLe
         "active" => Ok(WorkerPoolLeaseStatus::Active),
         "completed" => Ok(WorkerPoolLeaseStatus::Completed),
         "failed" => Ok(WorkerPoolLeaseStatus::Failed),
+        "blocked" => Ok(WorkerPoolLeaseStatus::Blocked),
+        "exhausted" => Ok(WorkerPoolLeaseStatus::Exhausted),
         "cancelled" => Ok(WorkerPoolLeaseStatus::Cancelled),
         "expired" => Ok(WorkerPoolLeaseStatus::Expired),
         "released" => Ok(WorkerPoolLeaseStatus::Released),
@@ -21264,6 +21338,8 @@ fn worker_pool_lease_status_for_work_status(
     match status {
         WorkerPoolWorkStatus::Completed => Ok(WorkerPoolLeaseStatus::Completed),
         WorkerPoolWorkStatus::Failed => Ok(WorkerPoolLeaseStatus::Failed),
+        WorkerPoolWorkStatus::Blocked => Ok(WorkerPoolLeaseStatus::Blocked),
+        WorkerPoolWorkStatus::Exhausted => Ok(WorkerPoolLeaseStatus::Exhausted),
         WorkerPoolWorkStatus::Cancelled => Ok(WorkerPoolLeaseStatus::Cancelled),
         WorkerPoolWorkStatus::Expired => Ok(WorkerPoolLeaseStatus::Expired),
         WorkerPoolWorkStatus::Pending
@@ -21877,6 +21953,7 @@ mod tests {
                                 to: AgentId::new("agent-beta"),
                                 body: "projected conformance message".to_string(),
                                 correlation_id: Some("conformance-corr".to_string()),
+                                projection: None,
                             },
                         },
                     )
@@ -21948,6 +22025,7 @@ mod tests {
                         to: AgentId::new("agent-alpha"),
                         body: "ttl bounded conformance queue".to_string(),
                         correlation_id: Some("queue-conformance".to_string()),
+                        projection: None,
                     },
                     source_sequence: Some(42),
                     enqueued_at: "2026-06-20T00:00:00Z".to_string(),
@@ -22161,6 +22239,7 @@ mod tests {
                                 to: AgentId::new("agent-beta"),
                                 body: "counter conformance message".to_string(),
                                 correlation_id: None,
+                                projection: None,
                             },
                         },
                     )
@@ -22271,6 +22350,7 @@ mod tests {
                                 to: AgentId::new("agent-beta"),
                                 body: "needle event search".to_string(),
                                 correlation_id: Some("search-conformance".to_string()),
+                                projection: None,
                             },
                         },
                     )
@@ -22285,6 +22365,7 @@ mod tests {
                             to: AgentId::new("agent-alpha"),
                             body: "needle queue search".to_string(),
                             correlation_id: None,
+                            projection: None,
                         },
                         source_sequence: Some(1),
                         enqueued_at: "2026-06-20T00:00:00Z".to_string(),
@@ -22593,6 +22674,7 @@ mod tests {
                         to: AgentId::new("agent-alpha"),
                         body: "roleplay search needle: ask about the tavern ledger".to_string(),
                         correlation_id: Some("roleplay-search".to_string()),
+                        projection: None,
                     },
                 },
             )
@@ -23180,6 +23262,7 @@ mod tests {
                             to: AgentId::new(format!("scale-agent-{:02}", (turn + 1) % 36)),
                             body: format!("scale search row {turn}: roleplay lore needle"),
                             correlation_id: Some("scale-pressure".to_string()),
+                            projection: None,
                         },
                     },
                 )
@@ -23241,6 +23324,7 @@ mod tests {
                         to: AgentId::new("scale-agent-00"),
                         body: format!("scale queued message {index}"),
                         correlation_id: Some("scale-queue".to_string()),
+                        projection: None,
                     },
                     source_sequence: Some(sequence + index as u64),
                     enqueued_at: "2026-06-26T02:00:00Z".to_string(),
@@ -26288,6 +26372,7 @@ mod tests {
                         to: AgentId::new("agent-beta"),
                         body: "hello".to_string(),
                         correlation_id: Some("corr-1".to_string()),
+                        projection: None,
                     },
                 },
             )
@@ -26364,6 +26449,7 @@ mod tests {
                         to: AgentId::new("agent-beta"),
                         body: "hello nebula".to_string(),
                         correlation_id: Some("corr-search".to_string()),
+                        projection: None,
                     },
                 },
             )
@@ -26487,6 +26573,7 @@ mod tests {
                         to: AgentId::new("agent-beta"),
                         body: "counter message".to_string(),
                         correlation_id: None,
+                        projection: None,
                     },
                 },
             )
@@ -26588,6 +26675,7 @@ mod tests {
                         to: AgentId::new("agent-beta"),
                         body: "reset this derived projection".to_string(),
                         correlation_id: None,
+                        projection: None,
                     },
                 },
             )
@@ -26641,6 +26729,7 @@ mod tests {
                 to: AgentId::new("agent-alpha"),
                 body: "time boxed queue work".to_string(),
                 correlation_id: Some("queue-corr".to_string()),
+                projection: None,
             },
             source_sequence: Some(42),
             enqueued_at: "2026-06-20T00:00:00Z".to_string(),
@@ -26782,6 +26871,10 @@ mod tests {
                 fan_out_group_id: None,
                 fan_out_max_concurrency: None,
                 fan_out_failure_policy: FanOutFailurePolicy::FailSoft,
+                worker_pool_work_item_id: None,
+                worker_pool_lease_id: None,
+                worker_pool_member_id: None,
+                worker_pool_claim_token: None,
             })
             .unwrap();
         store
@@ -26793,6 +26886,7 @@ mod tests {
                         to: beta.agent_id.clone(),
                         body: "first query message".to_string(),
                         correlation_id: Some("query-corr".to_string()),
+                        projection: None,
                     },
                 },
             )
@@ -26806,6 +26900,7 @@ mod tests {
                         to: alpha.agent_id.clone(),
                         body: "second query message".to_string(),
                         correlation_id: Some("query-corr".to_string()),
+                        projection: None,
                     },
                 },
             )
@@ -27531,6 +27626,10 @@ mod tests {
                     fan_out_group_id: Some("scale-group".to_string()),
                     fan_out_max_concurrency: Some(4),
                     fan_out_failure_policy: FanOutFailurePolicy::FailSoft,
+                    worker_pool_work_item_id: None,
+                    worker_pool_lease_id: None,
+                    worker_pool_member_id: None,
+                    worker_pool_claim_token: None,
                 })
                 .unwrap();
 
@@ -27544,6 +27643,7 @@ mod tests {
                                 to: AgentId::new(format!("agent-{:02}", (index + 1) % 30)),
                                 body: format!("scale message {index}-{message_index}"),
                                 correlation_id: Some("corr-alpha".to_string()),
+                                projection: None,
                             },
                         },
                     )
@@ -27563,6 +27663,7 @@ mod tests {
                         to: AgentId::new("agent-00"),
                         body: format!("expired queue message {index}"),
                         correlation_id: Some("queue-scale".to_string()),
+                        projection: None,
                     },
                     source_sequence: Some(sequence + index as u64),
                     enqueued_at: "2026-06-20T02:00:00Z".to_string(),
@@ -27585,6 +27686,7 @@ mod tests {
                     to: AgentId::new("agent-00"),
                     body: "fresh queue message".to_string(),
                     correlation_id: Some("queue-scale".to_string()),
+                    projection: None,
                 },
                 source_sequence: Some(sequence + 10),
                 enqueued_at: "2026-06-20T02:00:00Z".to_string(),
@@ -28189,6 +28291,7 @@ mod tests {
                 to: AgentId::new("agent-alpha"),
                 body: format!("logical import queue {message_id}"),
                 correlation_id: Some("logical-import-queue".to_string()),
+                projection: None,
             },
             source_sequence: Some(7),
             enqueued_at: "2026-06-26T09:58:00Z".to_string(),

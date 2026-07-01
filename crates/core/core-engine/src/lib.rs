@@ -33,7 +33,9 @@ use rusty_crew_core_persistence::{
     ScheduledRunTrigger, SelectActiveBranchRequest, SelectActiveBranchResult,
     SelectActiveVariantRequest, SelectActiveVariantResult, SessionMemoryPromptContext,
     SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord,
-    SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerRunRecord,
+    SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerPoolClaimRecord,
+    WorkerPoolClaimRequest, WorkerPoolCompletionRequest, WorkerPoolMemberStatus,
+    WorkerPoolNoCapacityReason, WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunRecord,
     WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
@@ -52,7 +54,7 @@ use rusty_crew_core_protocol::{
     ProfileId, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
     ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionActivityDigest,
     SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
-    ShutdownSummary, ToolProfile,
+    ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -462,6 +464,7 @@ impl CoreEngine {
                 to: session.agent_id.clone(),
                 body: body.into(),
                 correlation_id,
+                projection: None,
             },
             source_sequence: None,
             enqueued_at: now.clone(),
@@ -1436,6 +1439,7 @@ impl CoreEngine {
             to: delegated.agent_id.clone(),
             body: format!("Checkpoint requested: {}", reason.into()),
             correlation_id: Some(format!("checkpoint:{}", delegated.session_id)),
+            projection: None,
         })?;
         self.store.update_worker_run_status_by_delegated_session(
             &delegated.session_id,
@@ -1847,6 +1851,7 @@ impl CoreEngine {
                 fan_out_group_id,
                 fan_out_max_concurrency,
                 fan_out_failure_policy,
+                capacity_request,
                 ..
             } = action
             else {
@@ -1857,6 +1862,28 @@ impl CoreEngine {
             if self.store.load_worker_run(&run_id)?.is_some() {
                 continue;
             }
+
+            let pooled_claim = match self.prepare_worker_pool_claim(WorkerPoolDelegationInput {
+                request: capacity_request.as_ref(),
+                run_id: &run_id,
+                profile_id,
+                task_id: task_id.as_ref(),
+                prompt,
+                wake_id: &batch.wake_id,
+                action_index: index as u32,
+            })? {
+                WorkerPoolDelegationPlan::Direct => None,
+                WorkerPoolDelegationPlan::Claimed(claim) => Some(*claim),
+                WorkerPoolDelegationPlan::Rejected(reason) => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "worker-pool capacity unavailable for action {index}: {}",
+                            worker_pool_no_capacity_reason_as_str(reason)
+                        ),
+                    ));
+                }
+            };
 
             let session_id = delegated_session_id(&batch.session_id, &batch.wake_id, index);
             let agent_id = delegated_agent_id(&session_id);
@@ -1907,6 +1934,18 @@ impl CoreEngine {
                 fan_out_failure_policy: fan_out_failure_policy
                     .clone()
                     .unwrap_or(FanOutFailurePolicy::FailSoft),
+                worker_pool_work_item_id: pooled_claim
+                    .as_ref()
+                    .map(|claim| claim.work_item.work_item_id.clone()),
+                worker_pool_lease_id: pooled_claim
+                    .as_ref()
+                    .map(|claim| claim.lease.lease_id.clone()),
+                worker_pool_member_id: pooled_claim
+                    .as_ref()
+                    .map(|claim| claim.member.member_id.clone()),
+                worker_pool_claim_token: pooled_claim
+                    .as_ref()
+                    .map(|claim| claim.lease.claim_token.clone()),
             })?;
             self.store.save_session_with_config(&state, &config)?;
             self.store.update_worker_run_status_by_delegated_session(
@@ -1930,6 +1969,7 @@ impl CoreEngine {
                     to: agent_id,
                     body: prompt.clone(),
                     correlation_id: Some(correlation_id),
+                    projection: None,
                 },
             })?;
             if session_kind_can_wake(&state.kind) {
@@ -1952,6 +1992,108 @@ impl CoreEngine {
         }
 
         Ok(())
+    }
+
+    fn prepare_worker_pool_claim(
+        &self,
+        input: WorkerPoolDelegationInput<'_>,
+    ) -> CoreResult<WorkerPoolDelegationPlan> {
+        let Some(request) = input.request else {
+            return Ok(WorkerPoolDelegationPlan::Direct);
+        };
+        if request.member_id.trim().is_empty() {
+            return Ok(WorkerPoolDelegationPlan::Rejected(
+                WorkerPoolNoCapacityReason::MemberUnavailable,
+            ));
+        }
+        let now = self.now();
+        let Some(member) = self.store.load_worker_pool_member(&request.member_id)? else {
+            return Ok(self.worker_pool_no_capacity_plan(
+                request,
+                WorkerPoolNoCapacityReason::MemberUnavailable,
+            ));
+        };
+        if !matches!(
+            member.status,
+            WorkerPoolMemberStatus::Available | WorkerPoolMemberStatus::Busy
+        ) {
+            return Ok(self.worker_pool_no_capacity_plan(
+                request,
+                WorkerPoolNoCapacityReason::MemberUnavailable,
+            ));
+        }
+        if member.profile_id != *input.profile_id {
+            return Ok(self.worker_pool_no_capacity_plan(
+                request,
+                WorkerPoolNoCapacityReason::MemberUnavailable,
+            ));
+        }
+        if member.last_heartbeat_at > now {
+            return Ok(self.worker_pool_no_capacity_plan(
+                request,
+                WorkerPoolNoCapacityReason::MemberHeartbeatStale,
+            ));
+        }
+        if member.active_leases >= member.concurrency_limit {
+            return Ok(self.worker_pool_no_capacity_plan(
+                request,
+                WorkerPoolNoCapacityReason::MemberAtCapacity,
+            ));
+        }
+
+        let claim_ttl_ms = request.claim_ttl_ms.unwrap_or(300_000).max(1);
+        let claim_deadline_at = add_millis_to_iso(&now, u64::from(claim_ttl_ms))?;
+        let work_item = WorkerPoolWorkItemRecord {
+            work_item_id: input.run_id.0.clone(),
+            requested_profile_id: Some(input.profile_id.clone()),
+            task_id: input.task_id.cloned(),
+            status: WorkerPoolWorkStatus::Pending,
+            priority: 100,
+            work_json: serde_json::json!({
+                "kind": "delegation_request",
+                "wake_id": input.wake_id,
+                "action_index": input.action_index,
+                "prompt": input.prompt,
+            }),
+            required_capabilities_json: serde_json::json!({
+                "profile_id": input.profile_id.0,
+            }),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            claimed_by_member_id: None,
+            lease_id: None,
+            claim_token: None,
+            claim_deadline_at: None,
+            terminal_at: None,
+            terminal_summary: None,
+        };
+        self.store.create_worker_pool_work_item(&work_item)?;
+        let claim = self
+            .store
+            .claim_next_worker_pool_work_item(&WorkerPoolClaimRequest {
+                member_id: request.member_id.clone(),
+                lease_id: format!("lease:{}", input.run_id.0),
+                claim_token: format!("claim:{}:{}", input.wake_id, input.action_index),
+                now,
+                claim_deadline_at,
+                min_heartbeat_at: member.last_heartbeat_at,
+            })?;
+        Ok(match claim {
+            Ok(claim) => WorkerPoolDelegationPlan::Claimed(Box::new(claim)),
+            Err(reason) => self.worker_pool_no_capacity_plan(request, reason),
+        })
+    }
+
+    fn worker_pool_no_capacity_plan(
+        &self,
+        request: &WorkerPoolCapacityRequest,
+        reason: WorkerPoolNoCapacityReason,
+    ) -> WorkerPoolDelegationPlan {
+        if request.fallback_policy == WorkerPoolCapacityFallbackPolicy::DirectOnNoCapacity {
+            WorkerPoolDelegationPlan::Direct
+        } else {
+            WorkerPoolDelegationPlan::Rejected(reason)
+        }
     }
 
     fn cancel_delegated_children_for_parent(
@@ -2217,6 +2359,26 @@ impl CoreEngine {
                 status,
                 self.now(),
             )?;
+            if let Some(run) = self
+                .store
+                .load_worker_run_by_delegated_session(&packet.session_id)?
+            {
+                if let (Some(lease_id), Some(claim_token)) = (
+                    run.worker_pool_lease_id.as_ref(),
+                    run.worker_pool_claim_token.as_ref(),
+                ) {
+                    let pool_status = worker_pool_status_for_completion(&packet.status);
+                    let _ = self.store.complete_worker_pool_work_item(
+                        &WorkerPoolCompletionRequest {
+                            lease_id: lease_id.clone(),
+                            claim_token: claim_token.clone(),
+                            status: pool_status,
+                            now: self.now(),
+                            summary: Some(packet.summary.clone()),
+                        },
+                    )?;
+                }
+            }
             if let Ok(session) = self.sessions.get_session(&packet.session_id) {
                 self.publish_delegation_lifecycle(
                     &session,
@@ -2522,6 +2684,40 @@ fn delegation_phase_for_completion_status(status: CompletionStatus) -> Delegatio
     }
 }
 
+enum WorkerPoolDelegationPlan {
+    Direct,
+    Claimed(Box<WorkerPoolClaimRecord>),
+    Rejected(WorkerPoolNoCapacityReason),
+}
+
+struct WorkerPoolDelegationInput<'a> {
+    request: Option<&'a WorkerPoolCapacityRequest>,
+    run_id: &'a RunId,
+    profile_id: &'a ProfileId,
+    task_id: Option<&'a rusty_crew_core_protocol::TaskId>,
+    prompt: &'a str,
+    wake_id: &'a str,
+    action_index: u32,
+}
+
+fn worker_pool_status_for_completion(status: &CompletionStatus) -> WorkerPoolWorkStatus {
+    match status {
+        CompletionStatus::Completed => WorkerPoolWorkStatus::Completed,
+        CompletionStatus::Failed => WorkerPoolWorkStatus::Failed,
+        CompletionStatus::Blocked => WorkerPoolWorkStatus::Blocked,
+        CompletionStatus::Exhausted => WorkerPoolWorkStatus::Exhausted,
+    }
+}
+
+fn worker_pool_no_capacity_reason_as_str(reason: WorkerPoolNoCapacityReason) -> &'static str {
+    match reason {
+        WorkerPoolNoCapacityReason::NoPendingWork => "no_pending_work",
+        WorkerPoolNoCapacityReason::MemberUnavailable => "member_unavailable",
+        WorkerPoolNoCapacityReason::MemberHeartbeatStale => "member_heartbeat_stale",
+        WorkerPoolNoCapacityReason::MemberAtCapacity => "member_at_capacity",
+    }
+}
+
 fn validate_tool_profile(tool_profile: &ToolProfile) -> CoreResult<()> {
     let mut names = HashSet::new();
     for tool in &tool_profile.tools {
@@ -2695,6 +2891,7 @@ mod tests {
                     to: created.agent_id.clone(),
                     body: "do not resurrect this stale message".to_string(),
                     correlation_id: None,
+                    projection: None,
                 },
                 source_sequence: None,
                 enqueued_at: "2026-06-18T23:59:00Z".to_string(),
@@ -2787,6 +2984,7 @@ mod tests {
                 to: worker.agent_id.clone(),
                 body: "please wake".to_string(),
                 correlation_id: None,
+                projection: None,
             })
             .unwrap();
 
@@ -2828,6 +3026,7 @@ mod tests {
                 to: worker.agent_id,
                 body: "do not wake".to_string(),
                 correlation_id: None,
+                projection: None,
             })
             .unwrap();
 
@@ -2986,6 +3185,7 @@ mod tests {
                     to: prime.agent_id.clone(),
                     body: format!("bus-message-{index}"),
                     correlation_id: Some(format!("bus-{index}")),
+                    projection: None,
                 })
                 .unwrap();
         }
@@ -3120,6 +3320,7 @@ mod tests {
                 to: prime.agent_id.clone(),
                 body: "first".to_string(),
                 correlation_id: None,
+                projection: None,
             })
             .unwrap();
         engine
@@ -3128,6 +3329,7 @@ mod tests {
                 to: prime.agent_id.clone(),
                 body: "second".to_string(),
                 correlation_id: None,
+                projection: None,
             })
             .unwrap();
         drop(engine);
@@ -3265,6 +3467,7 @@ mod tests {
                             to: AgentId::new("planner"),
                             body: "done".to_string(),
                             correlation_id: Some("reply-1".to_string()),
+                            projection: None,
                         },
                     },
                     BrainAction::DeliverCompletion {
@@ -3352,6 +3555,7 @@ mod tests {
                     parent_consumption: Some(
                         rusty_crew_core_protocol::ParentConsumptionPolicy::AwaitCompletion,
                     ),
+                    capacity_request: None,
                 }],
             })
             .unwrap();
@@ -3490,6 +3694,190 @@ mod tests {
     }
 
     #[test]
+    fn pooled_capacity_binds_to_normal_worker_run_and_closes_on_completion() {
+        let data_dir = unique_data_dir("pooled-delegation");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .store
+            .upsert_worker_pool_member(&rusty_crew_core_persistence::WorkerPoolMemberRecord {
+                member_id: "member-coder-1".to_string(),
+                profile_id: ProfileId::new("coder-profile"),
+                agent_id: Some(AgentId::new("agent:member-coder-1")),
+                session_id: None,
+                status: WorkerPoolMemberStatus::Available,
+                concurrency_limit: 1,
+                active_leases: 0,
+                capabilities_json: serde_json::json!({"profile": "coder-profile"}),
+                registered_at: "2026-06-19T00:00:00Z".to_string(),
+                last_heartbeat_at: "2026-06-19T00:00:00Z".to_string(),
+                updated_at: "2026-06-19T00:00:00Z".to_string(),
+            })
+            .unwrap();
+
+        let receipt = engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id.clone(),
+                actions: vec![
+                    BrainAction::RequestDelegation {
+                        profile_id: ProfileId::new("coder-profile"),
+                        task_id: None,
+                        prompt: "direct child".to_string(),
+                        expected_output: None,
+                        resource_limits: None,
+                        timeout_ms: None,
+                        priority: None,
+                        fan_out_group_id: None,
+                        fan_out_max_concurrency: None,
+                        fan_out_failure_policy: None,
+                        correlation_id: Some("direct-child".to_string()),
+                        parent_consumption: None,
+                        capacity_request: None,
+                    },
+                    BrainAction::RequestDelegation {
+                        profile_id: ProfileId::new("coder-profile"),
+                        task_id: None,
+                        prompt: "pooled child".to_string(),
+                        expected_output: None,
+                        resource_limits: None,
+                        timeout_ms: None,
+                        priority: None,
+                        fan_out_group_id: None,
+                        fan_out_max_concurrency: None,
+                        fan_out_failure_policy: None,
+                        correlation_id: Some("pooled-child".to_string()),
+                        parent_consumption: None,
+                        capacity_request: Some(WorkerPoolCapacityRequest {
+                            member_id: "member-coder-1".to_string(),
+                            claim_ttl_ms: Some(60_000),
+                            fallback_policy: WorkerPoolCapacityFallbackPolicy::RejectOnNoCapacity,
+                        }),
+                    },
+                ],
+            })
+            .unwrap();
+        assert_eq!(receipt.accepted_actions, 2);
+
+        let store = CoordinationStore::open(data_dir.clone()).unwrap();
+        let direct_run = store
+            .load_worker_run(&RunId::new("planner-wake:0"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(direct_run.worker_pool_lease_id, None);
+        let pooled_run = store
+            .load_worker_run(&RunId::new("planner-wake:1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            pooled_run.worker_pool_work_item_id.as_deref(),
+            Some("planner-wake:1")
+        );
+        assert_eq!(
+            pooled_run.worker_pool_lease_id.as_deref(),
+            Some("lease:planner-wake:1")
+        );
+        assert_eq!(
+            pooled_run.worker_pool_member_id.as_deref(),
+            Some("member-coder-1")
+        );
+        assert_eq!(
+            store
+                .load_worker_pool_member("member-coder-1")
+                .unwrap()
+                .unwrap()
+                .active_leases,
+            1
+        );
+
+        let pooled_session_id = delegated_session_id(&planner.session_id, "planner-wake", 1);
+        engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "pooled-worker-wake".to_string(),
+                session_id: pooled_session_id,
+                actions: vec![BrainAction::DeliverCompletion {
+                    packet: CompletionPacket {
+                        session_id: delegated_session_id(&planner.session_id, "planner-wake", 1),
+                        status: CompletionStatus::Completed,
+                        summary: "pooled child completed".to_string(),
+                    },
+                }],
+            })
+            .unwrap();
+
+        let reopened = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(
+            reopened
+                .load_worker_pool_work_item("planner-wake:1")
+                .unwrap()
+                .unwrap()
+                .status,
+            WorkerPoolWorkStatus::Completed
+        );
+        assert_eq!(
+            reopened
+                .load_worker_pool_member("member-coder-1")
+                .unwrap()
+                .unwrap()
+                .active_leases,
+            0
+        );
+    }
+
+    #[test]
+    fn pooled_capacity_required_reports_typed_no_capacity_without_direct_fallback() {
+        let data_dir = unique_data_dir("pooled-no-capacity");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+
+        let error = engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "planner-wake".to_string(),
+                session_id: planner.session_id,
+                actions: vec![BrainAction::RequestDelegation {
+                    profile_id: ProfileId::new("coder-profile"),
+                    task_id: None,
+                    prompt: "pooled child".to_string(),
+                    expected_output: None,
+                    resource_limits: None,
+                    timeout_ms: None,
+                    priority: None,
+                    fan_out_group_id: None,
+                    fan_out_max_concurrency: None,
+                    fan_out_failure_policy: None,
+                    correlation_id: None,
+                    parent_consumption: None,
+                    capacity_request: Some(WorkerPoolCapacityRequest {
+                        member_id: "missing-member".to_string(),
+                        claim_ttl_ms: Some(60_000),
+                        fallback_policy: WorkerPoolCapacityFallbackPolicy::RejectOnNoCapacity,
+                    }),
+                }],
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::ActionRejected);
+        assert!(error.message.contains("member_unavailable"));
+        let store = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(store.count_rows("worker_runs").unwrap(), 0);
+        assert_eq!(store.count_rows("worker_pool_work_items").unwrap(), 0);
+    }
+
+    #[test]
     fn rejects_invalid_brain_actions_before_bus_execution() {
         let engine = test_engine();
         let worker = engine
@@ -3563,6 +3951,7 @@ mod tests {
                     fan_out_failure_policy: None,
                     correlation_id: None,
                     parent_consumption: None,
+                    capacity_request: None,
                 }],
             })
             .unwrap();
@@ -3611,6 +4000,7 @@ mod tests {
                 fan_out_failure_policy: None,
                 correlation_id: None,
                 parent_consumption: None,
+                capacity_request: None,
             }],
         };
 
@@ -3662,6 +4052,7 @@ mod tests {
                     fan_out_failure_policy: None,
                     correlation_id: None,
                     parent_consumption: None,
+                    capacity_request: None,
                 }],
             })
             .unwrap();
@@ -3976,6 +4367,7 @@ mod tests {
                             to: worker.agent_id.clone(),
                             body: "please keep working after restart".to_string(),
                             correlation_id: Some("persisted-message".to_string()),
+                            projection: None,
                         },
                     },
                     BrainAction::RequestDelegation {
@@ -3991,6 +4383,7 @@ mod tests {
                         fan_out_failure_policy: None,
                         correlation_id: None,
                         parent_consumption: None,
+                        capacity_request: None,
                     },
                 ],
             })
@@ -4090,6 +4483,7 @@ mod tests {
                             to: reviewer.agent_id.clone(),
                             body: "please review restart hydration".to_string(),
                             correlation_id: Some("restart-review".to_string()),
+                            projection: None,
                         },
                     },
                     BrainAction::RequestDelegation {
@@ -4105,6 +4499,7 @@ mod tests {
                         fan_out_failure_policy: None,
                         correlation_id: Some("delegated-restart".to_string()),
                         parent_consumption: None,
+                        capacity_request: None,
                     },
                 ],
             })
@@ -4119,6 +4514,7 @@ mod tests {
                         to: planner.agent_id.clone(),
                         body: "restart review acknowledged".to_string(),
                         correlation_id: Some("restart-review".to_string()),
+                        projection: None,
                     },
                 }],
             })
@@ -4272,6 +4668,7 @@ mod tests {
                             to: reviewer.agent_id.clone(),
                             body: "please review the persistent proof".to_string(),
                             correlation_id: Some("proof-thread".to_string()),
+                            projection: None,
                         },
                     },
                     BrainAction::RequestDelegation {
@@ -4291,6 +4688,7 @@ mod tests {
                         fan_out_failure_policy: None,
                         correlation_id: Some("proof-delegation".to_string()),
                         parent_consumption: Some(ParentConsumptionPolicy::AwaitCompletion),
+                        capacity_request: None,
                     },
                 ],
             })
@@ -4305,6 +4703,7 @@ mod tests {
                         to: observer.agent_id.clone(),
                         body: "persistent proof review forwarded".to_string(),
                         correlation_id: Some("proof-thread".to_string()),
+                        projection: None,
                     },
                 }],
             })
@@ -4365,6 +4764,7 @@ mod tests {
                     to: planner.agent_id.clone(),
                     body: "expired proof queue item".to_string(),
                     correlation_id: Some("proof-queue".to_string()),
+                    projection: None,
                 },
                 source_sequence: None,
                 enqueued_at: "2026-06-19T00:00:00Z".to_string(),
@@ -4386,6 +4786,7 @@ mod tests {
                     to: planner.agent_id.clone(),
                     body: "future proof queue item".to_string(),
                     correlation_id: Some("proof-queue".to_string()),
+                    projection: None,
                 },
                 source_sequence: None,
                 enqueued_at: "2026-06-19T00:00:00Z".to_string(),
@@ -4634,6 +5035,7 @@ mod tests {
                             fan_out_failure_policy: None,
                             correlation_id: Some(format!("correlation-{index}")),
                             parent_consumption: Some(policy.clone()),
+                            capacity_request: None,
                         },
                     )
                     .collect(),
@@ -5247,6 +5649,7 @@ mod tests {
                     fan_out_failure_policy: None,
                     correlation_id: None,
                     parent_consumption: None,
+                    capacity_request: None,
                 }],
             })
             .unwrap();
@@ -5348,6 +5751,7 @@ mod tests {
                     fan_out_failure_policy: None,
                     correlation_id: None,
                     parent_consumption: None,
+                    capacity_request: None,
                 }],
             })
             .unwrap();
@@ -5488,6 +5892,7 @@ mod tests {
                     fan_out_failure_policy: None,
                     correlation_id: None,
                     parent_consumption: None,
+                    capacity_request: None,
                 }],
             })
             .unwrap();
@@ -5519,6 +5924,7 @@ mod tests {
             fan_out_failure_policy: Some(failure_policy),
             correlation_id: Some(format!("{group_id}:{index}")),
             parent_consumption: Some(ParentConsumptionPolicy::AwaitCompletion),
+            capacity_request: None,
         }
     }
 

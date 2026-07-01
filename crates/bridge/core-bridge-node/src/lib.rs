@@ -251,6 +251,7 @@ impl NativeBridge {
                 to,
                 body,
                 correlation_id,
+                projection: None,
             })
     }
 
@@ -5502,6 +5503,7 @@ mod tests {
                     fan_out_failure_policy: None,
                     correlation_id: None,
                     parent_consumption: None,
+                    capacity_request: None,
                 }],
             })
             .unwrap();

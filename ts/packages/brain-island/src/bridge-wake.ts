@@ -171,6 +171,14 @@ function toAgentMessage(message: RustAgentMessageJson): AgentMessage {
     to: message.to,
     body: message.body,
     correlationId: message.correlation_id,
+    projection: message.projection
+      ? {
+          visibility: message.projection.visibility,
+          targetRef: message.projection.target_ref,
+          workRef: message.projection.work_ref,
+          reason: message.projection.reason,
+        }
+      : undefined,
   };
 }
 
@@ -359,6 +367,20 @@ interface RustAgentMessageJson {
   to: AgentMessage["to"];
   body: string;
   correlation_id?: string;
+  projection?: {
+    visibility: "observation" | "user_visible";
+    target_ref?: {
+      system: string;
+      kind: string;
+      id: string;
+    };
+    work_ref?: {
+      system: string;
+      kind: string;
+      id: string;
+    };
+    reason?: string;
+  };
 }
 
 type RustCoreEventJson =

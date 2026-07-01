@@ -3079,6 +3079,13 @@ function toNativeBrainAction(action: BrainAction): unknown {
         fan_out_failure_policy: action.fanOutFailurePolicy,
         correlation_id: action.correlationId,
         parent_consumption: action.parentConsumption,
+        capacity_request: action.capacityRequest
+          ? {
+              member_id: action.capacityRequest.memberId,
+              claim_ttl_ms: action.capacityRequest.claimTtlMs,
+              fallback_policy: action.capacityRequest.fallbackPolicy,
+            }
+          : undefined,
       };
     case "deliver_completion":
       return {
@@ -3176,6 +3183,14 @@ function toNativeAgentMessage(message: AgentMessage): RawAgentMessage {
     to: message.to,
     body: message.body,
     correlation_id: message.correlationId,
+    projection: message.projection
+      ? {
+          visibility: message.projection.visibility,
+          target_ref: message.projection.targetRef,
+          work_ref: message.projection.workRef,
+          reason: message.projection.reason,
+        }
+      : undefined,
   };
 }
 
@@ -4206,6 +4221,14 @@ function toAgentMessage(message: RawAgentMessage): AgentMessage {
     to: message.to,
     body: message.body,
     correlationId: message.correlation_id,
+    projection: message.projection
+      ? {
+          visibility: message.projection.visibility,
+          targetRef: message.projection.target_ref,
+          workRef: message.projection.work_ref,
+          reason: message.projection.reason,
+        }
+      : undefined,
   };
 }
 
@@ -4312,6 +4335,13 @@ function toBrainAction(action: RawBrainAction): BrainAction {
         fanOutFailurePolicy: action.fan_out_failure_policy,
         correlationId: action.correlation_id,
         parentConsumption: action.parent_consumption,
+        capacityRequest: action.capacity_request
+          ? {
+              memberId: action.capacity_request.member_id,
+              claimTtlMs: action.capacity_request.claim_ttl_ms,
+              fallbackPolicy: action.capacity_request.fallback_policy,
+            }
+          : undefined,
       };
     case "deliver_completion":
       return {
@@ -4870,6 +4900,20 @@ interface RawAgentMessage {
   to: AgentId;
   body: string;
   correlation_id?: string;
+  projection?: {
+    visibility: "observation" | "user_visible";
+    target_ref?: {
+      system: string;
+      kind: string;
+      id: string;
+    };
+    work_ref?: {
+      system: string;
+      kind: string;
+      id: string;
+    };
+    reason?: string;
+  };
 }
 
 interface RawOpenAiResponsesBrainRunResult {
@@ -4932,6 +4976,11 @@ type RawBrainAction =
         BrainAction,
         { type: "request_delegation" }
       >["parentConsumption"];
+      capacity_request?: {
+        member_id: string;
+        claim_ttl_ms?: number;
+        fallback_policy?: "reject_on_no_capacity" | "direct_on_no_capacity";
+      };
     }
   | {
       type: "deliver_completion";

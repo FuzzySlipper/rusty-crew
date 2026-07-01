@@ -443,6 +443,33 @@ pub struct AgentMessage {
     pub to: AgentId,
     pub body: String,
     pub correlation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<AgentMessageProjectionHint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMessageProjectionHint {
+    pub visibility: ProjectionVisibility,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_ref: Option<ProjectionRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_ref: Option<ProjectionRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionVisibility {
+    Observation,
+    UserVisible,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectionRef {
+    pub system: String,
+    pub kind: String,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -799,10 +826,29 @@ pub enum BrainAction {
         fan_out_failure_policy: Option<FanOutFailurePolicy>,
         correlation_id: Option<String>,
         parent_consumption: Option<ParentConsumptionPolicy>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capacity_request: Option<WorkerPoolCapacityRequest>,
     },
     DeliverCompletion {
         packet: CompletionPacket,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerPoolCapacityRequest {
+    pub member_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_ttl_ms: Option<u32>,
+    #[serde(default)]
+    pub fallback_policy: WorkerPoolCapacityFallbackPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerPoolCapacityFallbackPolicy {
+    #[default]
+    RejectOnNoCapacity,
+    DirectOnNoCapacity,
 }
 
 impl BrainAction {
@@ -1125,6 +1171,47 @@ mod tests {
         let round_trip: ExternalEventPayload =
             serde_json::from_value(json).expect("deserialize payload");
         assert_eq!(round_trip, payload);
+    }
+
+    #[test]
+    fn agent_message_projection_hint_round_trips_and_defaults_private() {
+        let private_message = AgentMessage {
+            from: AgentId::new("planner"),
+            to: AgentId::new("coder"),
+            body: "internal note".to_string(),
+            correlation_id: None,
+            projection: None,
+        };
+        let private_json = serde_json::to_value(&private_message).expect("serialize private");
+        assert!(private_json.get("projection").is_none());
+
+        let projected = AgentMessage {
+            from: AgentId::new("planner"),
+            to: AgentId::new("operator"),
+            body: "ready for review".to_string(),
+            correlation_id: Some("review-thread".to_string()),
+            projection: Some(AgentMessageProjectionHint {
+                visibility: ProjectionVisibility::UserVisible,
+                target_ref: Some(ProjectionRef {
+                    system: "den".to_string(),
+                    kind: "project".to_string(),
+                    id: "rusty-crew".to_string(),
+                }),
+                work_ref: Some(ProjectionRef {
+                    system: "den".to_string(),
+                    kind: "task".to_string(),
+                    id: "3875".to_string(),
+                }),
+                reason: Some("operator-visible handoff".to_string()),
+            }),
+        };
+        let json = serde_json::to_value(&projected).expect("serialize projected");
+        assert_eq!(json["projection"]["visibility"], "user_visible");
+        assert_eq!(json["projection"]["target_ref"]["system"], "den");
+        assert_eq!(json["projection"]["work_ref"]["kind"], "task");
+
+        let round_trip: AgentMessage = serde_json::from_value(json).expect("deserialize projected");
+        assert_eq!(round_trip, projected);
     }
 
     #[test]

@@ -33,6 +33,17 @@ const delegationResourceSchema = Type.Object({
   maxDelegationDepth: Type.Optional(Type.Number({ minimum: 0 })),
 });
 
+const capacityRequestSchema = Type.Object({
+  memberId: Type.String({ minLength: 1 }),
+  claimTtlMs: Type.Optional(Type.Number({ minimum: 1 })),
+  fallbackPolicy: Type.Optional(
+    Type.Union([
+      Type.Literal("reject_on_no_capacity"),
+      Type.Literal("direct_on_no_capacity"),
+    ]),
+  ),
+});
+
 const spawnSubagentParameters = Type.Object({
   profileId: Type.String({ minLength: 1 }),
   prompt: Type.String({ minLength: 1 }),
@@ -43,6 +54,7 @@ const spawnSubagentParameters = Type.Object({
   priority: Type.Optional(prioritySchema),
   correlationId: Type.Optional(Type.String({ minLength: 1 })),
   parentConsumption: Type.Optional(parentConsumptionSchema),
+  capacityRequest: Type.Optional(capacityRequestSchema),
 });
 
 const fanOutSubagentsParameters = Type.Object({
@@ -62,6 +74,7 @@ const fanOutSubagentsParameters = Type.Object({
       expectedOutput: Type.Optional(Type.String({ minLength: 1 })),
       correlationId: Type.Optional(Type.String({ minLength: 1 })),
       resourceLimits: Type.Optional(delegationResourceSchema),
+      capacityRequest: Type.Optional(capacityRequestSchema),
     }),
     { minItems: 1, maxItems: 20 },
   ),
@@ -182,6 +195,7 @@ export function spawnSubagentTool(
           priority: params.priority,
           correlationId: params.correlationId,
           parentConsumption: params.parentConsumption,
+          capacityRequest: params.capacityRequest,
         }),
       ]),
   };
@@ -233,6 +247,7 @@ export function fanOutSubagentsTool(
           fanOutFailurePolicy: failurePolicy,
           correlationId: subagent.correlationId,
           parentConsumption: params.parentConsumption,
+          capacityRequest: subagent.capacityRequest,
         }),
       );
       return queueDelegationActions(context, "fan_out_subagents", actions, {
@@ -395,6 +410,10 @@ function requestDelegationAction(
     fanOutFailurePolicy?: FanOutFailurePolicy;
     correlationId?: string;
     parentConsumption?: ParentConsumptionPolicy;
+    capacityRequest?: Extract<
+      BrainAction,
+      { type: "request_delegation" }
+    >["capacityRequest"];
   },
 ): BrainAction {
   return {
@@ -411,6 +430,7 @@ function requestDelegationAction(
     fanOutFailurePolicy: input.fanOutFailurePolicy,
     correlationId: input.correlationId,
     parentConsumption: input.parentConsumption,
+    capacityRequest: input.capacityRequest,
   };
 }
 
@@ -609,6 +629,8 @@ function delegationRequestFromFields(
   if (!priority.ok) return priority;
   const parentConsumption = optionalParentConsumption(fields);
   if (!parentConsumption.ok) return parentConsumption;
+  const capacityRequest = optionalCapacityRequest(fields);
+  if (!capacityRequest.ok) return capacityRequest;
   return {
     ok: true,
     value: {
@@ -629,6 +651,7 @@ function delegationRequestFromFields(
         stringField(fields, "correlation") ??
         stringField(fields, "correlation_id"),
       parentConsumption: parentConsumption.value,
+      capacityRequest: capacityRequest.value,
     },
   };
 }
@@ -754,6 +777,39 @@ function optionalParentConsumption(
     return { ok: true, value: raw };
   }
   return { ok: false, reasonCode: "invalid_parent_consumption" };
+}
+
+function optionalCapacityRequest(
+  fields: Record<string, string>,
+): ParseResult<
+  | Extract<BrainAction, { type: "request_delegation" }>["capacityRequest"]
+  | undefined
+> {
+  const memberId =
+    stringField(fields, "pool_member_id") ??
+    stringField(fields, "pool_member") ??
+    stringField(fields, "worker_pool_member_id");
+  if (memberId === undefined) return { ok: true, value: undefined };
+  const claimTtlMs = optionalPositiveIntegerField(fields, "pool_claim_ttl_ms");
+  if (!claimTtlMs.ok) return claimTtlMs;
+  const fallback =
+    stringField(fields, "pool_fallback_policy") ??
+    stringField(fields, "pool_fallback");
+  if (
+    fallback !== undefined &&
+    fallback !== "reject_on_no_capacity" &&
+    fallback !== "direct_on_no_capacity"
+  ) {
+    return { ok: false, reasonCode: "invalid_pool_fallback_policy" };
+  }
+  return {
+    ok: true,
+    value: {
+      memberId,
+      claimTtlMs: claimTtlMs.value,
+      fallbackPolicy: fallback,
+    },
+  };
 }
 
 function optionalFailurePolicy(

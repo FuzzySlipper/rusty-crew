@@ -2761,6 +2761,7 @@ mod tests {
             to: AgentId::new(to),
             body: body.to_string(),
             correlation_id: correlation_id.map(str::to_string),
+            projection: None,
         }
     }
 

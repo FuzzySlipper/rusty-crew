@@ -166,6 +166,7 @@ mod tests {
                             to: rusty_crew_core_protocol::AgentId::new("operator"),
                             body: "done".to_string(),
                             correlation_id: None,
+                            projection: None,
                         },
                     }],
                 },

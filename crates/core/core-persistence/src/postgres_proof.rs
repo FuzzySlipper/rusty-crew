@@ -5540,7 +5540,11 @@ impl PostgresRuntimeCounterProofStore {
                     parent_consumption TEXT NOT NULL,
                     fan_out_group_id TEXT,
                     fan_out_max_concurrency BIGINT,
-                    fan_out_failure_policy TEXT NOT NULL
+                    fan_out_failure_policy TEXT NOT NULL,
+                    worker_pool_work_item_id TEXT,
+                    worker_pool_lease_id TEXT,
+                    worker_pool_member_id TEXT,
+                    worker_pool_claim_token TEXT
                  );
                  CREATE INDEX IF NOT EXISTS worker_runs_parent_status_created_idx
                     ON {schema}.worker_runs(session_id, status, created_at, run_id);
@@ -5548,6 +5552,18 @@ impl PostgresRuntimeCounterProofStore {
                     ON {schema}.worker_runs(delegated_session_id);
                  CREATE INDEX IF NOT EXISTS worker_runs_profile_task_created_idx
                     ON {schema}.worker_runs(profile_id, task_id, created_at, run_id);
+                 ALTER TABLE {schema}.worker_runs
+                    ADD COLUMN IF NOT EXISTS worker_pool_work_item_id TEXT;
+                 ALTER TABLE {schema}.worker_runs
+                    ADD COLUMN IF NOT EXISTS worker_pool_lease_id TEXT;
+                 ALTER TABLE {schema}.worker_runs
+                    ADD COLUMN IF NOT EXISTS worker_pool_member_id TEXT;
+                 ALTER TABLE {schema}.worker_runs
+                    ADD COLUMN IF NOT EXISTS worker_pool_claim_token TEXT;
+                 CREATE INDEX IF NOT EXISTS worker_runs_pool_lease_idx
+                    ON {schema}.worker_runs(worker_pool_lease_id);
+                 CREATE INDEX IF NOT EXISTS worker_runs_pool_member_idx
+                    ON {schema}.worker_runs(worker_pool_member_id, status);
                  CREATE TABLE IF NOT EXISTS {schema}.worker_pool_members (
                     member_id TEXT PRIMARY KEY,
                     profile_id TEXT NOT NULL,
@@ -7262,7 +7278,11 @@ const WORKER_RUN_SELECT: &str = "SELECT
     parent_consumption,
     fan_out_group_id,
     fan_out_max_concurrency,
-    fan_out_failure_policy";
+    fan_out_failure_policy,
+    worker_pool_work_item_id,
+    worker_pool_lease_id,
+    worker_pool_member_id,
+    worker_pool_claim_token";
 
 const WORKER_POOL_WORK_ITEM_SELECT: &str = "SELECT
     work_item_id,
@@ -7465,8 +7485,12 @@ fn save_worker_run_in_client(
                     parent_consumption,
                     fan_out_group_id,
                     fan_out_max_concurrency,
-                    fan_out_failure_policy
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    fan_out_failure_policy,
+                    worker_pool_work_item_id,
+                    worker_pool_lease_id,
+                    worker_pool_member_id,
+                    worker_pool_claim_token
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
                  ON CONFLICT(run_id) DO UPDATE SET
                     session_id = EXCLUDED.session_id,
                     delegated_session_id = EXCLUDED.delegated_session_id,
@@ -7481,7 +7505,11 @@ fn save_worker_run_in_client(
                     parent_consumption = EXCLUDED.parent_consumption,
                     fan_out_group_id = EXCLUDED.fan_out_group_id,
                     fan_out_max_concurrency = EXCLUDED.fan_out_max_concurrency,
-                    fan_out_failure_policy = EXCLUDED.fan_out_failure_policy"
+                    fan_out_failure_policy = EXCLUDED.fan_out_failure_policy,
+                    worker_pool_work_item_id = EXCLUDED.worker_pool_work_item_id,
+                    worker_pool_lease_id = EXCLUDED.worker_pool_lease_id,
+                    worker_pool_member_id = EXCLUDED.worker_pool_member_id,
+                    worker_pool_claim_token = EXCLUDED.worker_pool_claim_token"
             ),
             &[
                 &record.run_id.0,
@@ -7506,6 +7534,10 @@ fn save_worker_run_in_client(
                 &record.fan_out_group_id,
                 &record.fan_out_max_concurrency.map(|value| value as i64),
                 &fan_out_failure_policy,
+                &record.worker_pool_work_item_id,
+                &record.worker_pool_lease_id,
+                &record.worker_pool_member_id,
+                &record.worker_pool_claim_token,
             ],
         )
         .map_err(|error| postgres_error("save PostgreSQL worker run", error))?;
@@ -7533,6 +7565,10 @@ fn row_to_worker_run(row: &Row) -> CoreResult<WorkerRunRecord> {
         fan_out_group_id: row.get(13),
         fan_out_max_concurrency: row.get::<_, Option<i64>>(14).map(|value| value as u32),
         fan_out_failure_policy: fan_out_failure_policy_from_str(&fan_out_failure_policy)?,
+        worker_pool_work_item_id: row.get(16),
+        worker_pool_lease_id: row.get(17),
+        worker_pool_member_id: row.get(18),
+        worker_pool_claim_token: row.get(19),
     })
 }
 
@@ -7991,6 +8027,8 @@ fn worker_pool_work_status_as_str(status: WorkerPoolWorkStatus) -> &'static str 
         WorkerPoolWorkStatus::Running => "running",
         WorkerPoolWorkStatus::Completed => "completed",
         WorkerPoolWorkStatus::Failed => "failed",
+        WorkerPoolWorkStatus::Blocked => "blocked",
+        WorkerPoolWorkStatus::Exhausted => "exhausted",
         WorkerPoolWorkStatus::Cancelled => "cancelled",
         WorkerPoolWorkStatus::Expired => "expired",
     }
@@ -8003,6 +8041,8 @@ fn worker_pool_work_status_from_str(raw: &str) -> CoreResult<WorkerPoolWorkStatu
         "running" => Ok(WorkerPoolWorkStatus::Running),
         "completed" => Ok(WorkerPoolWorkStatus::Completed),
         "failed" => Ok(WorkerPoolWorkStatus::Failed),
+        "blocked" => Ok(WorkerPoolWorkStatus::Blocked),
+        "exhausted" => Ok(WorkerPoolWorkStatus::Exhausted),
         "cancelled" => Ok(WorkerPoolWorkStatus::Cancelled),
         "expired" => Ok(WorkerPoolWorkStatus::Expired),
         other => Err(CoreError::new(
@@ -8017,6 +8057,8 @@ fn worker_pool_lease_status_as_str(status: WorkerPoolLeaseStatus) -> &'static st
         WorkerPoolLeaseStatus::Active => "active",
         WorkerPoolLeaseStatus::Completed => "completed",
         WorkerPoolLeaseStatus::Failed => "failed",
+        WorkerPoolLeaseStatus::Blocked => "blocked",
+        WorkerPoolLeaseStatus::Exhausted => "exhausted",
         WorkerPoolLeaseStatus::Cancelled => "cancelled",
         WorkerPoolLeaseStatus::Expired => "expired",
         WorkerPoolLeaseStatus::Released => "released",
@@ -8028,6 +8070,8 @@ fn worker_pool_lease_status_from_str(raw: &str) -> CoreResult<WorkerPoolLeaseSta
         "active" => Ok(WorkerPoolLeaseStatus::Active),
         "completed" => Ok(WorkerPoolLeaseStatus::Completed),
         "failed" => Ok(WorkerPoolLeaseStatus::Failed),
+        "blocked" => Ok(WorkerPoolLeaseStatus::Blocked),
+        "exhausted" => Ok(WorkerPoolLeaseStatus::Exhausted),
         "cancelled" => Ok(WorkerPoolLeaseStatus::Cancelled),
         "expired" => Ok(WorkerPoolLeaseStatus::Expired),
         "released" => Ok(WorkerPoolLeaseStatus::Released),
@@ -8044,6 +8088,8 @@ fn worker_pool_lease_status_for_work_status(
     match status {
         WorkerPoolWorkStatus::Completed => Ok(WorkerPoolLeaseStatus::Completed),
         WorkerPoolWorkStatus::Failed => Ok(WorkerPoolLeaseStatus::Failed),
+        WorkerPoolWorkStatus::Blocked => Ok(WorkerPoolLeaseStatus::Blocked),
+        WorkerPoolWorkStatus::Exhausted => Ok(WorkerPoolLeaseStatus::Exhausted),
         WorkerPoolWorkStatus::Cancelled => Ok(WorkerPoolLeaseStatus::Cancelled),
         WorkerPoolWorkStatus::Expired => Ok(WorkerPoolLeaseStatus::Expired),
         WorkerPoolWorkStatus::Pending
@@ -15990,6 +16036,7 @@ mod tests {
                         to: AgentId::new("agent-beta"),
                         body: "projected conformance message".to_string(),
                         correlation_id: Some("conformance-corr".to_string()),
+                        projection: None,
                     },
                 },
             )
@@ -16118,6 +16165,7 @@ mod tests {
                 to: AgentId::new("agent-alpha"),
                 body: "ttl bounded conformance queue".to_string(),
                 correlation_id: Some("queue-conformance".to_string()),
+                projection: None,
             },
             source_sequence: Some(42),
             enqueued_at: "2026-06-20T00:00:00Z".to_string(),
@@ -16329,6 +16377,10 @@ mod tests {
                 fan_out_group_id: Some("group-alpha".to_string()),
                 fan_out_max_concurrency: Some(2),
                 fan_out_failure_policy: FanOutFailurePolicy::FailFast,
+                worker_pool_work_item_id: None,
+                worker_pool_lease_id: None,
+                worker_pool_member_id: None,
+                worker_pool_claim_token: None,
             })
             .unwrap();
         store
@@ -16349,6 +16401,10 @@ mod tests {
                 fan_out_group_id: Some("group-alpha".to_string()),
                 fan_out_max_concurrency: Some(2),
                 fan_out_failure_policy: FanOutFailurePolicy::FailSoft,
+                worker_pool_work_item_id: None,
+                worker_pool_lease_id: None,
+                worker_pool_member_id: None,
+                worker_pool_claim_token: None,
             })
             .unwrap();
 
@@ -16508,6 +16564,7 @@ mod tests {
                         to: AgentId::new("agent-beta"),
                         body: "counter message".to_string(),
                         correlation_id: None,
+                        projection: None,
                     },
                 },
             )
@@ -16567,6 +16624,7 @@ mod tests {
                     to: AgentId::new("agent-alpha"),
                     body: "expire me".to_string(),
                     correlation_id: Some("maintenance".to_string()),
+                    projection: None,
                 },
                 source_sequence: Some(42),
                 enqueued_at: "2026-06-20T08:00:00Z".to_string(),

@@ -131,6 +131,22 @@ export interface AgentMessage {
   to: AgentId;
   body: string;
   correlationId?: string;
+  projection?: AgentMessageProjectionHint;
+}
+
+export interface AgentMessageProjectionHint {
+  visibility: ProjectionVisibility;
+  targetRef?: ProjectionRef;
+  workRef?: ProjectionRef;
+  reason?: string;
+}
+
+export type ProjectionVisibility = "observation" | "user_visible";
+
+export interface ProjectionRef {
+  system: string;
+  kind: string;
+  id: string;
 }
 
 export type CoreEventKind =
@@ -671,8 +687,19 @@ export type BrainAction =
       fanOutFailurePolicy?: FanOutFailurePolicy;
       correlationId?: string;
       parentConsumption?: ParentConsumptionPolicy;
+      capacityRequest?: WorkerPoolCapacityRequest;
     }
   | { type: "deliver_completion"; packet: CompletionPacket };
+
+export interface WorkerPoolCapacityRequest {
+  memberId: string;
+  claimTtlMs?: number;
+  fallbackPolicy?: WorkerPoolCapacityFallbackPolicy;
+}
+
+export type WorkerPoolCapacityFallbackPolicy =
+  | "reject_on_no_capacity"
+  | "direct_on_no_capacity";
 
 export interface BrainWakeRequest {
   brain: BrainImplementationHandle;

@@ -127,20 +127,7 @@ impl BrainActionExecutor {
                 BrainAction::SendMessage { message } => {
                     self.publish_message(message.clone())?;
                 }
-                BrainAction::RequestDelegation {
-                    profile_id: _,
-                    task_id: _,
-                    prompt: _,
-                    expected_output: _,
-                    resource_limits: _,
-                    timeout_ms: _,
-                    priority: _,
-                    fan_out_group_id: _,
-                    fan_out_max_concurrency: _,
-                    fan_out_failure_policy: _,
-                    correlation_id: _,
-                    parent_consumption: _,
-                } => {}
+                BrainAction::RequestDelegation { .. } => {}
                 BrainAction::DeliverCompletion { packet } => {
                     self.publish_completion(packet.clone())?;
                 }
