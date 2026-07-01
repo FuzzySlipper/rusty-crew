@@ -8,8 +8,10 @@ import type {
   BrainImplementationHandle,
   BrainImplementationId,
   BrainProviderStateScope,
+  CompletionStatus,
   CompletionPacket,
   ChannelBindingRecord,
+  CoreEventKind,
   McpBindingRecord,
   McpSurfaceDiagnostics,
   ProfileId,
@@ -116,6 +118,10 @@ import {
 } from "./tool-session-selection.js";
 import { createWebToolResolver } from "./web-tools.js";
 import type { RuntimeBrainModuleDiagnostics } from "./runtime-diagnostics.js";
+import {
+  DEFAULT_DEN_OBSERVATION_EVENT_FILTERS,
+  type DenObservationEventFilter,
+} from "./runtime-core-event-observation.js";
 
 export interface RustyCrewConfiguredBrain {
   implementationId: BrainImplementationId;
@@ -163,12 +169,17 @@ export interface RustyCrewRuntimeConfig {
   profilesDir: string;
   skillsDir?: string;
   storage?: RustyCrewStorageConfig;
+  denObservation?: RustyCrewDenObservationConfig;
   brains: RustyCrewConfiguredBrain[];
   sessions: RustyCrewConfiguredSession[];
   scheduledJobs: RustyCrewScheduledJob[];
   channelBindings: ChannelBindingRecord[];
   mcpServers?: RustyCrewMcpServerConfig[];
   mcpBindings: McpBindingRecord[];
+}
+
+export interface RustyCrewDenObservationConfig {
+  eventFilters: DenObservationEventFilter[];
 }
 
 export interface RustyCrewRuntimeConfigApplyResult {
@@ -595,6 +606,7 @@ function runtimeConfigFromNativeDraft(
     profilesDir: draft.profilesDir,
     skillsDir: draft.skillsDir,
     storage: original.storage,
+    denObservation: original.denObservation,
     brains: draft.brains.map((brain) => ({
       implementationId: brain.implementationId as BrainImplementationId,
       profileId: brain.profileId as ProfileId,
@@ -1530,6 +1542,7 @@ function emptyRuntimeConfig(
   return {
     profilesDir: join(serviceConfig.paths.configDir, "profiles"),
     storage: serviceConfig.storage,
+    denObservation: runtimeDenObservationConfig(undefined),
     brains: [],
     sessions: [],
     scheduledJobs: [],
@@ -1556,6 +1569,7 @@ function validateRuntimeConfig(
     profilesDir,
     skillsDir,
     storage: runtimeStorageConfig(parsed.storage, serviceConfig),
+    denObservation: runtimeDenObservationConfig(parsed.denObservation),
     brains: arrayValue(parsed.brains).map((item, index) =>
       configuredBrain(item, index),
     ),
@@ -1575,6 +1589,93 @@ function validateRuntimeConfig(
     mcpBindings: arrayValue(parsed.mcpBindings).map((item, index) =>
       configuredMcpBinding(item, index),
     ),
+  };
+}
+
+const CORE_EVENT_KINDS = new Set<CoreEventKind>([
+  "session_created",
+  "session_archived",
+  "agent_message_routed",
+  "delegation_lifecycle_observed",
+  "external_event_injected",
+  "den_data_updated",
+  "brain_wake_requested",
+  "brain_event_observed",
+  "brain_actions_accepted",
+  "completion_packet_delivered",
+]);
+
+const OBSERVATION_VISIBILITIES = new Set<
+  NonNullable<DenObservationEventFilter["visibility"]>
+>(["channel", "task", "agent", "debug"]);
+
+const SESSION_KINDS = new Set<SessionKind>(["full", "worker", "delegated"]);
+
+const COMPLETION_STATUSES = new Set<CompletionStatus>([
+  "completed",
+  "failed",
+  "blocked",
+  "exhausted",
+]);
+
+function runtimeDenObservationConfig(
+  input: unknown,
+): RustyCrewDenObservationConfig {
+  if (input === undefined) {
+    return {
+      eventFilters: [...DEFAULT_DEN_OBSERVATION_EVENT_FILTERS],
+    };
+  }
+  if (!isRecord(input)) {
+    throw new Error("denObservation config must be an object");
+  }
+  return {
+    eventFilters:
+      input.eventFilters === undefined
+        ? [...DEFAULT_DEN_OBSERVATION_EVENT_FILTERS]
+        : arrayValue(input.eventFilters).map((item, index) =>
+            denObservationEventFilter(item, index),
+          ),
+  };
+}
+
+function denObservationEventFilter(
+  input: unknown,
+  index: number,
+): DenObservationEventFilter {
+  const path = `denObservation.eventFilters[${index}]`;
+  if (!isRecord(input)) {
+    throw new Error(`${path} must be an object`);
+  }
+  const eventKind = enumString(
+    input.eventKind,
+    `${path}.eventKind`,
+    CORE_EVENT_KINDS,
+  );
+  return {
+    eventKind,
+    visibility:
+      input.visibility === undefined
+        ? undefined
+        : enumString(
+            input.visibility,
+            `${path}.visibility`,
+            OBSERVATION_VISIBILITIES,
+          ),
+    sessionKind:
+      input.sessionKind === undefined
+        ? undefined
+        : enumString(input.sessionKind, `${path}.sessionKind`, SESSION_KINDS),
+    completionStatus:
+      input.completionStatus === undefined
+        ? undefined
+        : enumString(
+            input.completionStatus,
+            `${path}.completionStatus`,
+            COMPLETION_STATUSES,
+          ),
+    profileId: optionalString(input.profileId),
+    agentId: optionalString(input.agentId),
   };
 }
 
@@ -1954,6 +2055,21 @@ function stringList(input: unknown, name: string): string[] {
     throw new Error(`${name} must be a non-empty string array`);
   }
   return input.map((item, index) => requiredString(item, `${name}[${index}]`));
+}
+
+function enumString<T extends string>(
+  input: unknown,
+  name: string,
+  allowed: ReadonlySet<T>,
+): T {
+  if (typeof input !== "string" || !allowed.has(input as T)) {
+    throw new Error(
+      `${name} must be one of ${[...allowed]
+        .map((item) => JSON.stringify(item))
+        .join(", ")}`,
+    );
+  }
+  return input as T;
 }
 
 function externalBindingStatus(

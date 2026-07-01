@@ -328,6 +328,88 @@ try {
     )?.body ?? "",
     new RegExp(finalCompletionText),
   );
+  const completionMessage = gatewayRequests.find(
+    (request) => request.path === "/v1/conversation/channels/42/messages",
+  )?.body as
+    | {
+        metadata?: {
+          kind?: string;
+          delivery_intent_id?: number;
+          source_message_id?: number;
+          wake_id?: string;
+          completion_packet?: {
+            kind?: string;
+            session_id?: string;
+            status?: string;
+            summary?: string;
+          };
+          work_ref?: {
+            source_domain?: string;
+            ref_kind?: string;
+            id?: string;
+            delivery_intent_id?: number;
+            channel_id?: number;
+            channel_message_id?: number;
+          };
+          result_ref?: {
+            source_domain?: string;
+            ref_kind?: string;
+            id?: string;
+          };
+          runtime_refs?: {
+            session_id?: string;
+            profile_id?: string;
+            agent_id?: string;
+            instance_id?: string;
+          };
+        };
+      }
+    | undefined;
+  assert.deepEqual(
+    {
+      kind: completionMessage?.metadata?.kind,
+      delivery_intent_id: completionMessage?.metadata?.delivery_intent_id,
+      source_message_id: completionMessage?.metadata?.source_message_id,
+      completion_kind: completionMessage?.metadata?.completion_packet?.kind,
+      completion_session:
+        completionMessage?.metadata?.completion_packet?.session_id,
+      completion_status: completionMessage?.metadata?.completion_packet?.status,
+      completion_summary:
+        completionMessage?.metadata?.completion_packet?.summary,
+      work_ref: completionMessage?.metadata?.work_ref,
+      result_ref: completionMessage?.metadata?.result_ref,
+      runtime_refs: completionMessage?.metadata?.runtime_refs,
+    },
+    {
+      kind: "rusty_crew_completion_projection.v1",
+      delivery_intent_id: 91,
+      source_message_id: 7,
+      completion_kind: "completion_packet.v1",
+      completion_session: "field-session",
+      completion_status: "completed",
+      completion_summary: finalCompletionText,
+      work_ref: {
+        source_domain: "runtime",
+        ref_kind: "session",
+        id: "field-session",
+        delivery_intent_id: 91,
+        channel_id: 42,
+        channel_message_id: 7,
+      },
+      result_ref: {
+        source_domain: "runtime",
+        ref_kind: "completion_packet",
+        id: "field-session:completed",
+        label: "completion completed for field-session",
+      },
+      runtime_refs: {
+        session_id: "field-session",
+        profile_id: "field-profile",
+        agent_id: "field-agent",
+        instance_id: "field-agent@rusty-crew",
+      },
+    },
+  );
   const lifecycleEvents = gatewayRequests
     .filter((request) => request.path === "/v1/delivery/intents/91/events")
     .map(
@@ -335,27 +417,49 @@ try {
         (request.body as { event_type?: string } | undefined)?.event_type,
     );
   assert.deepEqual(lifecycleEvents, ["running", "completed"]);
+  const deliveryCompletedPayload = gatewayRequests
+    .filter((request) => request.path === "/v1/delivery/intents/91/events")
+    .map((request) => request.body as { event_type?: string; payload?: any })
+    .find((request) => request.event_type === "completed")?.payload;
+  assert.equal(
+    deliveryCompletedPayload?.completion_packet?.summary,
+    finalCompletionText,
+  );
+  await waitUntil(
+    () =>
+      gatewayRequests.some(
+        (request) =>
+          request.path === "/v1/observation/activity-events" &&
+          (request.body as { event_type?: string } | undefined)?.event_type ===
+            "model_turn_started",
+      ),
+    "runtime core event was projected to Observation",
+  );
   const activityEvents = gatewayRequests
     .filter((request) => request.path === "/v1/observation/activity-events")
     .map((request) => request.body as ObservationActivityRequest);
-  assert.deepEqual(
-    activityEvents.map((event) => event.event_type),
-    ["adapter_connected", "tool_call_started", "tool_call_completed"],
+  const activityEventTypes = activityEvents.map((event) => event.event_type);
+  assert.equal(activityEventTypes.includes("adapter_connected"), true);
+  assert.equal(activityEventTypes.includes("tool_call_started"), true);
+  assert.equal(activityEventTypes.includes("tool_call_completed"), true);
+  assert.equal(activityEventTypes.includes("brain_wake_requested"), false);
+  assert.equal(activityEventTypes.includes("model_turn_started"), true);
+  assert.equal(activityEventTypes.includes("model_turn_completed"), true);
+  assert.equal(activityEventTypes.includes("work_completed"), true);
+  const toolStartedEvent = activityEvents.find(
+    (event) => event.event_type === "tool_call_started",
   );
-  assert.deepEqual(activityEvents[1]?.agent_identity, {
+  assert.deepEqual(toolStartedEvent?.agent_identity, {
     profile: "field-profile",
     instance_id: "field-agent@rusty-crew",
     session_key: "field-session",
   });
-  assert.equal(
-    activityEvents[1]?.runtime_instance_id,
-    "field-agent@rusty-crew",
-  );
-  assert.equal(activityEvents[1]?.payload.kind, "agent_activity.v1");
-  assert.equal(activityEvents[1]?.payload.tool_name, "den_memory_recall");
-  assert.equal(activityEvents[1]?.payload.adapter, "rusty-crew");
-  assert.equal(activityEvents[1]?.payload.visibility, "channel");
-  const toolWorkRef = activityEvents[1]?.payload.work_ref as
+  assert.equal(toolStartedEvent?.runtime_instance_id, "field-agent@rusty-crew");
+  assert.equal(toolStartedEvent?.payload.kind, "agent_activity.v1");
+  assert.equal(toolStartedEvent?.payload.tool_name, "den_memory_recall");
+  assert.equal(toolStartedEvent?.payload.adapter, "rusty-crew");
+  assert.equal(toolStartedEvent?.payload.visibility, "channel");
+  const toolWorkRef = toolStartedEvent?.payload.work_ref as
     | {
         session_id?: string;
         run_id?: string;
@@ -378,6 +482,22 @@ try {
   assert.match(
     toolWorkRef?.run_id ?? "",
     /^delivery_intent:91;wake:service-field-session-[0-9]+-1$/,
+  );
+  const completionActivity = activityEvents.find(
+    (event) => event.event_type === "work_completed",
+  );
+  assert.deepEqual(completionActivity?.agent_identity, {
+    profile: "field-profile",
+    instance_id: "field-agent@rusty-crew",
+    session_key: "field-session",
+  });
+  assert.equal(
+    (
+      completionActivity?.payload.work_ref as
+        | { session_id?: string }
+        | undefined
+    )?.session_id,
+    "field-session",
   );
 
   const diagnostics = await fetch(
@@ -470,6 +590,7 @@ try {
         gatewayRequests: gatewayRequests.length,
         startupEvent: body.data.items[0]?.eventType,
         lifecycleEvents,
+        activityEventTypes,
         channelDiagnostics: channelBody.data.items.length,
       },
       null,

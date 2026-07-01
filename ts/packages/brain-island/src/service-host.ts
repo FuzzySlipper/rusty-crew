@@ -25,6 +25,7 @@ import type {
   ChannelBindingRecord,
   ChannelMembershipStatus,
   ChannelSubscriptionStatus,
+  CompletionPacket,
   CoreEvent,
   EngineHandle,
   EngineStorageConfig,
@@ -77,10 +78,15 @@ import {
 } from "@rusty-crew/adapter-telegram";
 import {
   AgentActivityObservationProducer,
+  type AgentActivityEventInput,
   type AgentActivityObservationEvent,
   type AgentActivityObservationSink,
   type AgentActivityWorkRef,
 } from "./agent-activity-observation.js";
+import {
+  runtimeCoreEventObservationInput,
+  type RuntimeObservationSessionIdentity,
+} from "./runtime-core-event-observation.js";
 import {
   deliveryIntentWakeDecision,
   normalizeChannelWakePolicy,
@@ -331,6 +337,7 @@ interface ServiceState {
   runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
   denGatewayClient?: DenSuccessorGatewayClient;
   denGatewayStartupReport?: DenSuccessorGatewayStartupReport;
+  denObservationSubscription?: SubscriptionHandle;
   telegramConnector?: TelegramChannelConnector;
   telegramOutboundSubscription?: SubscriptionHandle;
   readonly curator: ServiceCuratorRuntime;
@@ -538,6 +545,7 @@ export async function startRustyCrewServiceHost(
     };
     liveState = state;
     state.denGatewayStartupReport = await connectDenSuccessorGateway(state);
+    await startDenObservationProjection(state);
     await ensureDenConversationChannels(state);
     await startTelegramConnector(state);
     startServiceBackgroundLoops(state);
@@ -3826,6 +3834,121 @@ async function connectDenSuccessorGateway(
     severity: report.failures.length === 0 ? "info" : "warning",
   });
   return report;
+}
+
+async function startDenObservationProjection(
+  state: ServiceState,
+): Promise<void> {
+  if (state.denGatewayClient === undefined) return;
+  const subscription = await state.bridge.subscribeEvents({
+    eventKinds: [
+      "session_created",
+      "session_archived",
+      "agent_message_routed",
+      "delegation_lifecycle_observed",
+      "brain_wake_requested",
+      "brain_actions_accepted",
+      "completion_packet_delivered",
+    ],
+  });
+  state.denObservationSubscription = subscription;
+  const timer = setInterval(() => {
+    void drainDenObservationProjection(state).catch((error) =>
+      recordServiceEvent(state, {
+        source: "den-successor-gateway",
+        eventType: "den_observation_projection_degraded",
+        severity: "warning",
+        summary: errorMessage(error, "Den Observation projection failed"),
+      }),
+    );
+  }, 1_000);
+  state.timers.add(timer);
+  recordServiceEvent(state, {
+    source: "den-successor-gateway",
+    eventType: "den_observation_projection_started",
+    summary:
+      "Den Observation projection subscribed to Rusty Crew runtime events.",
+  });
+}
+
+async function drainDenObservationProjection(
+  state: ServiceState,
+): Promise<void> {
+  const subscription = state.denObservationSubscription;
+  if (subscription === undefined || state.denGatewayClient === undefined)
+    return;
+  const events = await drainSubscriptionEventsUntilIdle(
+    state.bridge,
+    subscription,
+  );
+  if (events.length === 0) return;
+
+  const sessionLookup = await runtimeObservationSessionLookup(state);
+  const producer = new AgentActivityObservationProducer({
+    sink: createDenGatewayObservationSink(state.denGatewayClient),
+    required: true,
+  });
+  let projected = 0;
+  let degraded = 0;
+  for (const event of events) {
+    const input: AgentActivityEventInput | undefined =
+      runtimeCoreEventObservationInput(event, {
+        lookupSession: sessionLookup,
+        filters: state.runtimeConfig.denObservation?.eventFilters,
+      });
+    if (input === undefined) continue;
+    const result = await producer.publish(input);
+    if (result.status === "published") {
+      projected += 1;
+    } else if (result.status === "degraded") {
+      degraded += 1;
+    }
+  }
+  if (projected > 0) {
+    recordServiceEvent(state, {
+      source: "den-successor-gateway",
+      eventType: "den_observation_projection_published",
+      summary: `Published ${projected} Den Observation runtime event(s).`,
+    });
+  }
+  if (degraded > 0) {
+    recordServiceEvent(state, {
+      source: "den-successor-gateway",
+      eventType: "den_observation_projection_degraded",
+      severity: "warning",
+      summary: `Publishing ${degraded} Den Observation runtime event(s) degraded.`,
+    });
+  }
+}
+
+async function runtimeObservationSessionLookup(
+  state: ServiceState,
+): Promise<
+  (
+    sessionId: SessionId | string,
+  ) => RuntimeObservationSessionIdentity | undefined
+> {
+  const sessions = await state.bridge.listSessions().catch(() => []);
+  const byId = new Map<string, RuntimeObservationSessionIdentity>();
+  for (const session of sessions) {
+    byId.set(session.sessionId, {
+      sessionId: session.sessionId,
+      agentId: session.agentId,
+      profileId: session.profileId,
+      kind: session.kind,
+    });
+  }
+  for (const session of state.runtimeConfig.sessions) {
+    if (!byId.has(session.sessionId)) {
+      byId.set(session.sessionId, {
+        sessionId: session.sessionId,
+        agentId: session.agentId,
+        profileId: session.profileId,
+        kind: session.kind,
+      });
+    }
+  }
+  return (sessionId) => byId.get(String(sessionId));
 }
 
 async function ensureDenConversationChannels(
@@ -7165,6 +7288,7 @@ interface ServiceWakeDispatchReport {
   status: "completed" | "skipped" | "failed";
   summary: string;
   reasonCode?: string;
+  completionPacket?: CompletionPacket;
 }
 
 interface ChatStreamSubscriber {
@@ -7433,10 +7557,37 @@ async function processDenDeliveryIntent(
           agent_instance_id: claimedBy.instance_id,
           session_id: session.sessionId,
           metadata: {
+            kind: "rusty_crew_completion_projection.v1",
             delivery_intent_id: intent.id,
             delivery_idempotency_key: intent.idempotency_key,
-            source_message_id: intent.channel_message_id,
+            source_message_id: deliveryBody.sourceMessageId,
             wake_id: wakeReport.wakeId,
+            completion_packet: completionPacketProjectionMetadata(
+              wakeReport.completionPacket,
+            ),
+            work_ref: {
+              source_domain: "runtime",
+              ref_kind: "session",
+              id: session.sessionId,
+              delivery_intent_id: intent.id,
+              channel_id: deliveryBody.channelId,
+              channel_message_id: deliveryBody.sourceMessageId,
+            },
+            result_ref:
+              wakeReport.completionPacket === undefined
+                ? undefined
+                : {
+                    source_domain: "runtime",
+                    ref_kind: "completion_packet",
+                    id: `${wakeReport.completionPacket.sessionId}:${wakeReport.completionPacket.status}`,
+                    label: `completion ${wakeReport.completionPacket.status} for ${wakeReport.completionPacket.sessionId}`,
+                  },
+            runtime_refs: {
+              session_id: session.sessionId,
+              profile_id: session.profileId,
+              agent_id: session.agentId,
+              instance_id: claimedBy.instance_id,
+            },
           },
           dedupe_key: `rusty-crew-delivery:${intent.id}:completion`,
         },
@@ -7452,6 +7603,9 @@ async function processDenDeliveryIntent(
         session_id: session.sessionId,
         summary: wakeReport.summary,
         wake_id: wakeReport.wakeId,
+        completion_packet: completionPacketProjectionMetadata(
+          wakeReport.completionPacket,
+        ),
       },
     });
     recordServiceEvent(state, {
@@ -10228,6 +10382,7 @@ async function dispatchWake(
       observationContext,
     });
     const accepted = observed.accepted;
+    const completionPacket = wakeCompletionPacket(observed.events);
     const completionSummary = wakeCompletionSummary(observed.events);
     const report: ServiceWakeDispatchReport = {
       sessionId,
@@ -10239,6 +10394,7 @@ async function dispatchWake(
           ? `wake ${wakeId} completed for ${session.agentId}`
           : `wake ${wakeId} was rejected for ${session.agentId}`),
       reasonCode: accepted.accepted ? undefined : "wake_rejected",
+      completionPacket,
     };
     if (report.status === "completed") {
       ensureChatWakeTerminalEvents(state, session, wakeId, observed.events, {
@@ -10525,16 +10681,9 @@ function toolActivityWorkRef(input: {
 function wakeCompletionSummary(
   events: readonly CoreEvent[],
 ): string | undefined {
-  const packet = events
-    .filter(
-      (
-        event,
-      ): event is Extract<CoreEvent, { type: "completion_packet_delivered" }> =>
-        event.type === "completion_packet_delivered",
-    )
-    .at(-1);
-  if (packet?.packet.summary.trim()) {
-    return packet.packet.summary.trim();
+  const packet = wakeCompletionPacket(events);
+  if (packet?.summary.trim()) {
+    return packet.summary.trim();
   }
 
   const text = mergeTextParts(
@@ -10545,6 +10694,31 @@ function wakeCompletionSummary(
     ),
   ).trim();
   return text ? truncate(text, 480) : undefined;
+}
+
+function wakeCompletionPacket(
+  events: readonly CoreEvent[],
+): CompletionPacket | undefined {
+  return events
+    .filter(
+      (
+        event,
+      ): event is Extract<CoreEvent, { type: "completion_packet_delivered" }> =>
+        event.type === "completion_packet_delivered",
+    )
+    .at(-1)?.packet;
+}
+
+function completionPacketProjectionMetadata(
+  packet: CompletionPacket | undefined,
+): Record<string, unknown> | undefined {
+  if (packet === undefined) return undefined;
+  return {
+    kind: "completion_packet.v1",
+    session_id: packet.sessionId,
+    status: packet.status,
+    summary: packet.summary,
+  };
 }
 
 function mergeTextParts(parts: readonly string[]): string {
@@ -10634,6 +10808,12 @@ async function stopService(
   if (server) await closeServer(server);
   try {
     await stopTelegramConnector(state);
+    if (state.denObservationSubscription !== undefined) {
+      await state.bridge
+        .unsubscribeEvents(state.denObservationSubscription)
+        .catch(() => undefined);
+      state.denObservationSubscription = undefined;
+    }
     await state.bridge
       .unsubscribeEvents(state.wakeSubscription)
       .catch(() => undefined);

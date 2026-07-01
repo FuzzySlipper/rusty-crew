@@ -1,6 +1,17 @@
 {
   "profilesDir": "__FIXTURE_ROOT__/profiles",
   "skillsDir": "__FIXTURE_ROOT__/skills",
+  "denObservation": {
+    "eventFilters": [
+      { "eventKind": "session_created" },
+      { "eventKind": "session_archived" },
+      { "eventKind": "agent_message_routed", "visibility": "channel" },
+      { "eventKind": "delegation_lifecycle_observed" },
+      { "eventKind": "brain_wake_requested" },
+      { "eventKind": "brain_actions_accepted" },
+      { "eventKind": "completion_packet_delivered" }
+    ]
+  },
   "brains": [
     {
       "implementationId": "parity-runner-brain",

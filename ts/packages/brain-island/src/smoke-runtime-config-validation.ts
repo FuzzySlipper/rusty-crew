@@ -201,6 +201,7 @@ const createPlan = await planCreateProfileWithRust({
   request: {
     profileId: "field-created-profile",
     displayName: "Field Created Profile",
+    mcpToolProfile: "field-created-profile",
     source: { templateId: "starter" },
     now: "2026-06-26T09:30:00.000Z",
     profileFileExists: false,

@@ -75,6 +75,7 @@
     "smoke:background-governance-observation": "tsx src/smoke-background-governance-observation.ts",
     "smoke:agent-activity-observation": "tsx src/smoke-agent-activity-observation.ts",
     "smoke:runtime-activity-observer": "tsx src/smoke-runtime-activity-observer.ts",
+    "smoke:runtime-core-event-observation": "tsx src/smoke-runtime-core-event-observation.ts",
     "smoke:observation-activity-e2e": "tsx src/smoke-observation-activity-e2e.ts",
     "smoke:admin-diagnostics-api": "tsx src/smoke-admin-diagnostics-api.ts",
     "smoke:storage-query-catalog": "tsx src/smoke-storage-query-catalog.ts",
