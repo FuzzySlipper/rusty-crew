@@ -14,6 +14,32 @@ import { createPiAgentBrain } from "./pi-agent-brain.js";
 
 const sessionId = "pi-agent-brain-events-session" as SessionId;
 
+function assistantMessage(content: unknown): PiAgentMessage {
+  return {
+    role: "assistant",
+    content,
+    api: "openai-completions",
+    provider: "den-router",
+    model: "fake-model",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: 0,
+      },
+    },
+    stopReason: "stop",
+    timestamp: Date.now(),
+  } as PiAgentMessage;
+}
+
 class FinalMessageOnlyAgent {
   private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
 
@@ -262,6 +288,178 @@ assert.deepEqual(textDeltaTexts(reasoningStreamedResult), [
   " after",
 ]);
 
+class StreamingPiThinkingMessageAgent {
+  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+
+  subscribe(
+    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+  ): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async prompt(
+    _input: PiAgentMessage | PiAgentMessage[] | string,
+  ): Promise<void> {
+    const signal = new AbortController().signal;
+    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.(
+      {
+        type: "message_update",
+        message: assistantMessage([
+          { type: "thinking", thinking: "native pi thinking " },
+        ]),
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta: "native pi thinking ",
+          partial: assistantMessage([
+            { type: "thinking", thinking: "native pi thinking " },
+          ]),
+        },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      {
+        type: "message_update",
+        message: assistantMessage([
+          { type: "thinking", thinking: "native pi thinking continued" },
+        ]),
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta: "continued",
+          partial: assistantMessage([
+            { type: "thinking", thinking: "native pi thinking continued" },
+          ]),
+        },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      {
+        type: "message_update",
+        message: assistantMessage([
+          { type: "thinking", thinking: "native pi thinking continued" },
+          { type: "text", text: "visible native answer" },
+        ]),
+        assistantMessageEvent: {
+          type: "text_delta",
+          contentIndex: 1,
+          delta: "visible native answer",
+          partial: assistantMessage([
+            { type: "thinking", thinking: "native pi thinking continued" },
+            { type: "text", text: "visible native answer" },
+          ]),
+        },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      {
+        type: "message_end",
+        message: assistantMessage([
+          { type: "thinking", thinking: "native pi thinking continued" },
+          { type: "text", text: "visible native answer" },
+        ]),
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      { type: "agent_end", messages: [] } as PiAgentEvent,
+      signal,
+    );
+  }
+
+  async waitForIdle(): Promise<void> {}
+
+  clearAllQueues(): void {}
+}
+
+const nativeThinkingStreamedBrain = createPiAgentBrain({
+  createAgent: (_options: PiAgentOptions) =>
+    new StreamingPiThinkingMessageAgent(),
+});
+
+const nativeThinkingStreamedResult = await wake(
+  nativeThinkingStreamedBrain,
+  "pi-agent-brain-native-thinking-streamed-events-wake",
+);
+
+assert.deepEqual(
+  nativeThinkingStreamedResult.events.map((event) => event.event.type),
+  ["started", "reasoning_delta", "reasoning_delta", "text_delta", "finished"],
+);
+assert.deepEqual(reasoningDeltaTexts(nativeThinkingStreamedResult), [
+  "native pi thinking ",
+  "continued",
+]);
+assert.deepEqual(textDeltaTexts(nativeThinkingStreamedResult), [
+  "visible native answer",
+]);
+
+const nativeThinkingFinalBrain = createPiAgentBrain({
+  createAgent: (_options: PiAgentOptions) =>
+    new FinalNativeThinkingMessageAgent(),
+});
+
+class FinalNativeThinkingMessageAgent {
+  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+
+  subscribe(
+    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+  ): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async prompt(
+    _input: PiAgentMessage | PiAgentMessage[] | string,
+  ): Promise<void> {
+    const signal = new AbortController().signal;
+    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.(
+      {
+        type: "message_end",
+        message: assistantMessage([
+          { type: "thinking", thinking: "final native thinking" },
+          { type: "text", text: "final visible answer" },
+        ]),
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      { type: "agent_end", messages: [] } as PiAgentEvent,
+      signal,
+    );
+  }
+
+  async waitForIdle(): Promise<void> {}
+
+  clearAllQueues(): void {}
+}
+
+const nativeThinkingFinalResult = await wake(
+  nativeThinkingFinalBrain,
+  "pi-agent-brain-native-thinking-final-events-wake",
+);
+
+assert.deepEqual(
+  nativeThinkingFinalResult.events.map((event) => event.event.type),
+  ["started", "reasoning_delta", "text_delta", "finished"],
+);
+assert.deepEqual(reasoningDeltaTexts(nativeThinkingFinalResult), [
+  "final native thinking",
+]);
+assert.deepEqual(textDeltaTexts(nativeThinkingFinalResult), [
+  "final visible answer",
+]);
+
 const errorBrain = createPiAgentBrain({
   createAgent: (_options: PiAgentOptions) =>
     new FinalMessageOnlyAgent({
@@ -283,6 +481,9 @@ console.log(
       text: textDelta,
       streamedTextParts: textDeltaTexts(streamedResult),
       reasoningText: reasoningDeltaTexts(reasoningFinalResult).join(""),
+      nativeThinkingText: reasoningDeltaTexts(
+        nativeThinkingStreamedResult,
+      ).join(""),
       errorText: textDeltaText(errorResult),
     },
     null,

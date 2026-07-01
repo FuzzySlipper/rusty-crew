@@ -156,19 +156,40 @@ function mapPiAgentEvent(
     case "agent_start":
       return [{ type: "started" }];
     case "message_update": {
-      if (event.assistantMessageEvent.type !== "text_delta") {
-        return [];
+      if (event.assistantMessageEvent.type === "text_delta") {
+        return event.assistantMessageEvent.delta
+          ? splitLiteralThinkBlocks(event.assistantMessageEvent.delta)
+          : [];
       }
-      return event.assistantMessageEvent.delta
-        ? splitLiteralThinkBlocks(event.assistantMessageEvent.delta)
-        : [];
+      if (event.assistantMessageEvent.type === "thinking_delta") {
+        return event.assistantMessageEvent.delta
+          ? [
+              {
+                type: "reasoning_delta",
+                text: event.assistantMessageEvent.delta,
+                format: "pi-thinking",
+              },
+            ]
+          : [];
+      }
+      return [];
     }
     case "message_end": {
       if (state.sawTextDelta) {
         return [];
       }
+      const events: BrainEvent[] = [];
+      const thinking = assistantMessageThinking(event.message);
+      if (thinking) {
+        events.push({
+          type: "reasoning_delta",
+          text: thinking,
+          format: "pi-thinking",
+        });
+      }
       const text = assistantMessageText(event.message);
-      if (text) return splitLiteralThinkBlocks(text);
+      if (text) events.push(...splitLiteralThinkBlocks(text));
+      if (events.length > 0) return events;
       const errorText = assistantMessageErrorText(event.message);
       return errorText ? [{ type: "text_delta", text: errorText }] : [];
     }
@@ -237,6 +258,19 @@ function assistantMessageText(message: PiAgentMessage): string | undefined {
   const text = content
     .flatMap((item) =>
       item.type === "text" && typeof item.text === "string" ? [item.text] : [],
+    )
+    .join("");
+  return text.trim() ? text : undefined;
+}
+
+function assistantMessageThinking(message: PiAgentMessage): string | undefined {
+  if (message.role !== "assistant") return undefined;
+  const content = Array.isArray(message.content) ? message.content : [];
+  const text = content
+    .flatMap((item) =>
+      item.type === "thinking" && typeof item.thinking === "string"
+        ? [item.thinking]
+        : [],
     )
     .join("");
   return text.trim() ? text : undefined;
