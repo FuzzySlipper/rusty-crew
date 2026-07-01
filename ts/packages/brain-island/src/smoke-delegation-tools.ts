@@ -31,10 +31,13 @@ assert.deepEqual(
   selection.toolProfile.tools.map((tool) => tool.name),
   [
     "spawn_subagent",
+    "spawn_subagent_md",
     "fan_out_subagents",
+    "fan_out_subagents_md",
     "scout_codebase",
     "summarize_files",
     "find_relevant_paths",
+    "deliver_completion_md",
   ],
 );
 
@@ -59,6 +62,31 @@ class DelegationToolFakeAgent {
       correlationId: "spawn-proof",
       parentConsumption: "await_completion",
     });
+    await this.callTool("spawn_subagent_md", {
+      markdown: `---
+profile: coder-profile
+task: 3877
+priority: normal
+correlation: spawn-md-proof
+parent_consumption: await_completion
+---
+
+Implement the markdown delegation tool.
+
+## Expected Output
+
+Completion packet with smoke evidence.`,
+    });
+    await this.callTool(
+      "spawn_subagent_md",
+      {
+        markdown: `---
+profile: coder-profile
+
+This frontmatter is not closed.`,
+      },
+      false,
+    );
     await this.callTool("fan_out_subagents", {
       groupId: "audit-fan-out",
       maxConcurrency: 2,
@@ -76,6 +104,38 @@ class DelegationToolFakeAgent {
         },
       ],
     });
+    await this.callTool("fan_out_subagents_md", {
+      markdown: `---
+group_id: md-fan-out
+max_concurrency: 2
+failure_policy: fail_soft
+priority: normal
+---
+
+## reviewer-profile
+correlation: md-review
+
+Review the markdown delegation tool.
+
+## packet-auditor-profile
+correlation: md-packet
+
+Audit markdown handoff evidence.`,
+    });
+    await this.callTool(
+      "fan_out_subagents_md",
+      {
+        markdown: `---
+group_id: md-fan-out-invalid
+failure_policy: keep_going_anyway
+---
+
+## reviewer-profile
+
+Review the markdown delegation tool.`,
+      },
+      false,
+    );
     await this.callTool("scout_codebase", {
       goal: "Find the brain action submission path.",
       paths: ["ts/packages/brain-island/src", "crates/core"],
@@ -94,13 +154,17 @@ class DelegationToolFakeAgent {
 
   clearAllQueues(): void {}
 
-  private async callTool(name: string, params: Record<string, unknown>) {
+  private async callTool(
+    name: string,
+    params: Record<string, unknown>,
+    expectedOk = true,
+  ) {
     const tool = this.options.initialState?.tools?.find(
       (candidate) => candidate.name === name,
     );
     assert.ok(tool, `${name} should be selected`);
     const result = await tool.execute(`${name}-call`, params);
-    assert.equal((result.details as { ok?: boolean }).ok, true);
+    assert.equal((result.details as { ok?: boolean }).ok, expectedOk);
   }
 }
 
@@ -146,20 +210,35 @@ const result = await brain.wake({
   },
 });
 
-assert.equal(result.actions.length, 6);
-assert.equal(plannerSawToolActions.length, 6);
+assert.equal(result.actions.length, 9);
+assert.equal(plannerSawToolActions.length, 9);
 assert.ok(
   result.actions.every((action) => action.type === "request_delegation"),
 );
-const [spawn, fanOutFirst, fanOutSecond, scout, summarize, findPaths] =
-  result.actions.filter(
-    (action): action is Extract<BrainAction, { type: "request_delegation" }> =>
-      action.type === "request_delegation",
-  );
+const [
+  spawn,
+  spawnMd,
+  fanOutFirst,
+  fanOutSecond,
+  fanOutMdFirst,
+  fanOutMdSecond,
+  scout,
+  summarize,
+  findPaths,
+] = result.actions.filter(
+  (action): action is Extract<BrainAction, { type: "request_delegation" }> =>
+    action.type === "request_delegation",
+);
 assert.equal(spawn?.profileId, "coder-profile");
 assert.equal(spawn?.correlationId, "spawn-proof");
+assert.equal(spawnMd?.correlationId, "spawn-md-proof");
+assert.equal(spawnMd?.taskId, "3877");
+assert.match(spawnMd?.expectedOutput ?? "", /Completion packet/);
 assert.equal(fanOutFirst?.fanOutGroupId, "audit-fan-out");
 assert.equal(fanOutSecond?.fanOutFailurePolicy, "fail_soft");
+assert.equal(fanOutMdFirst?.fanOutGroupId, "md-fan-out");
+assert.equal(fanOutMdFirst?.correlationId, "md-review");
+assert.equal(fanOutMdSecond?.profileId, "packet-auditor-profile");
 assert.equal(scout?.resourceLimits?.maxDelegationDepth, 0);
 assert.match(summarize?.prompt ?? "", /README\.md/);
 assert.match(findPaths?.prompt ?? "", /ToolProfile/);

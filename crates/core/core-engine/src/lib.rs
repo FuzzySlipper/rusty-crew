@@ -2096,24 +2096,45 @@ impl CoreEngine {
         session: &SessionState,
         batch: &BrainActionBatch,
     ) -> Vec<ActionRejection> {
-        batch
-            .actions
-            .iter()
-            .enumerate()
-            .filter_map(|(index, action)| {
-                let BrainAction::RequestDelegation { .. } = action else {
-                    return None;
-                };
-                match session.resource_limits.max_delegation_depth {
-                    Some(0) => Some(ActionRejection {
-                        index: index as u32,
-                        kind: CoreErrorKind::ActionRejected,
-                        message: "request_delegation exceeds max_delegation_depth".to_string(),
-                    }),
-                    _ => None,
+        let mut rejections = Vec::new();
+        for (index, action) in batch.actions.iter().enumerate() {
+            match action {
+                BrainAction::RequestDelegation { .. } => {
+                    if session.resource_limits.max_delegation_depth == Some(0) {
+                        rejections.push(ActionRejection {
+                            index: index as u32,
+                            kind: CoreErrorKind::ActionRejected,
+                            message: "request_delegation exceeds max_delegation_depth".to_string(),
+                        });
+                    }
                 }
-            })
-            .collect()
+                BrainAction::DeliverCompletion { packet } => {
+                    match self
+                        .store
+                        .load_worker_run_by_delegated_session(&packet.session_id)
+                    {
+                        Ok(Some(run)) if run.status.is_terminal() => {
+                            rejections.push(ActionRejection {
+                                index: index as u32,
+                                kind: CoreErrorKind::ActionRejected,
+                                message: format!(
+                                    "completion packet for delegated session {} rejected because worker run {} is already terminal",
+                                    packet.session_id, run.run_id
+                                ),
+                            });
+                        }
+                        Ok(_) => {}
+                        Err(error) => rejections.push(ActionRejection {
+                            index: index as u32,
+                            kind: error.kind,
+                            message: error.message,
+                        }),
+                    }
+                }
+                BrainAction::SendMessage { .. } => {}
+            }
+        }
+        rejections
     }
 
     fn validate_fan_out_invariants(&self, batch: &BrainActionBatch) -> Vec<ActionRejection> {
@@ -4841,6 +4862,71 @@ mod tests {
         assert_eq!(
             store
                 .load_worker_run_by_delegated_session(&terminal)
+                .unwrap()
+                .unwrap()
+                .status,
+            WorkerRunStatus::Completed
+        );
+    }
+
+    #[test]
+    fn duplicate_delegated_completion_is_rejected_after_terminal_run() {
+        let data_dir = unique_data_dir("delegated-completion-terminal-finality");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let planner = engine
+            .create_session(session_config(
+                "planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let delegated_session_id = spawn_delegated(&engine, &planner, "planner-wake", Some(30_000));
+
+        let first = engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "delegated-wake-1".to_string(),
+                session_id: delegated_session_id.clone(),
+                actions: vec![BrainAction::DeliverCompletion {
+                    packet: CompletionPacket {
+                        session_id: delegated_session_id.clone(),
+                        status: CompletionStatus::Completed,
+                        summary: "first delegated completion".to_string(),
+                    },
+                }],
+            })
+            .unwrap();
+        assert_eq!(first.accepted_actions, 1);
+        assert!(first.rejected_actions.is_empty());
+
+        let duplicate = engine
+            .execute_brain_actions(BrainActionBatch {
+                wake_id: "delegated-wake-2".to_string(),
+                session_id: delegated_session_id.clone(),
+                actions: vec![BrainAction::DeliverCompletion {
+                    packet: CompletionPacket {
+                        session_id: delegated_session_id.clone(),
+                        status: CompletionStatus::Failed,
+                        summary: "stale duplicate delegated completion".to_string(),
+                    },
+                }],
+            })
+            .unwrap();
+        assert_eq!(duplicate.accepted_actions, 0);
+        assert_eq!(duplicate.rejected_actions.len(), 1);
+        assert_eq!(
+            duplicate.rejected_actions[0].kind,
+            CoreErrorKind::ActionRejected
+        );
+        assert!(duplicate.rejected_actions[0]
+            .message
+            .contains("already terminal"));
+
+        let store = CoordinationStore::open(data_dir).unwrap();
+        assert_eq!(store.count_rows("completion_packets").unwrap(), 1);
+        assert_eq!(
+            store
+                .load_worker_run_by_delegated_session(&delegated_session_id)
                 .unwrap()
                 .unwrap()
                 .status,

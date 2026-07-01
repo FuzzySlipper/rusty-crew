@@ -42,6 +42,7 @@ import {
   createCoordinationToolResolver,
   type CoordinationToolRuntime,
 } from "./coordination-tools.js";
+import { resolveCompletionTools } from "./completion-tools.js";
 import {
   createBrainModuleRegistry,
   brainStrategyMetadataForModuleStrategy,
@@ -1319,6 +1320,7 @@ function createServiceToolResolver(
       manageMode: serviceSkillManageMode(profile),
     }),
     resolveDelegationTools,
+    resolveCompletionTools,
     createCoordinationToolResolver(options.coordinationRuntime),
     createPlanningToolResolver({
       bridge: options.bridge,

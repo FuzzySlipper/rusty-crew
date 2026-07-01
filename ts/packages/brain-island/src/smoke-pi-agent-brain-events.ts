@@ -173,6 +173,95 @@ assert.deepEqual(
 );
 assert.deepEqual(textDeltaTexts(streamedResult), ["streamed ", "answer"]);
 
+const reasoningFinalBrain = createPiAgentBrain({
+  createAgent: (_options: PiAgentOptions) =>
+    new FinalMessageOnlyAgent({
+      kind: "text",
+      text: "<think>private chain</think>visible answer",
+    }),
+});
+
+const reasoningFinalResult = await wake(
+  reasoningFinalBrain,
+  "pi-agent-brain-reasoning-final-events-wake",
+);
+
+assert.deepEqual(
+  reasoningFinalResult.events.map((event) => event.event.type),
+  ["started", "reasoning_delta", "text_delta", "finished"],
+);
+assert.deepEqual(reasoningDeltaTexts(reasoningFinalResult), ["private chain"]);
+assert.deepEqual(textDeltaTexts(reasoningFinalResult), ["visible answer"]);
+
+class StreamingThinkMessageAgent {
+  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+
+  subscribe(
+    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+  ): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async prompt(
+    _input: PiAgentMessage | PiAgentMessage[] | string,
+  ): Promise<void> {
+    const signal = new AbortController().signal;
+    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.(
+      {
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "text_delta",
+          delta: "before <think>stream thought</think> after",
+        },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "before  after" }],
+        },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      { type: "agent_end", messages: [] } as PiAgentEvent,
+      signal,
+    );
+  }
+
+  async waitForIdle(): Promise<void> {}
+
+  clearAllQueues(): void {}
+}
+
+const reasoningStreamedBrain = createPiAgentBrain({
+  createAgent: (_options: PiAgentOptions) => new StreamingThinkMessageAgent(),
+});
+
+const reasoningStreamedResult = await wake(
+  reasoningStreamedBrain,
+  "pi-agent-brain-reasoning-streamed-events-wake",
+);
+
+assert.deepEqual(
+  reasoningStreamedResult.events.map((event) => event.event.type),
+  ["started", "text_delta", "reasoning_delta", "text_delta", "finished"],
+);
+assert.deepEqual(reasoningDeltaTexts(reasoningStreamedResult), [
+  "stream thought",
+]);
+assert.deepEqual(textDeltaTexts(reasoningStreamedResult), [
+  "before ",
+  " after",
+]);
+
 const errorBrain = createPiAgentBrain({
   createAgent: (_options: PiAgentOptions) =>
     new FinalMessageOnlyAgent({
@@ -193,6 +282,7 @@ console.log(
       eventTypes: textResult.events.map((event) => event.event.type),
       text: textDelta,
       streamedTextParts: textDeltaTexts(streamedResult),
+      reasoningText: reasoningDeltaTexts(reasoningFinalResult).join(""),
       errorText: textDeltaText(errorResult),
     },
     null,
@@ -258,4 +348,12 @@ function textDeltaTexts(
   return result.events
     .map((event) => event.event)
     .flatMap((event) => (event.type === "text_delta" ? [event.text] : []));
+}
+
+function reasoningDeltaTexts(
+  result: Awaited<ReturnType<ReturnType<typeof createPiAgentBrain>["wake"]>>,
+): string[] {
+  return result.events
+    .map((event) => event.event)
+    .flatMap((event) => (event.type === "reasoning_delta" ? [event.text] : []));
 }

@@ -152,6 +152,7 @@ export interface ChatEvent {
     | "message_created"
     | "assistant_turn_started"
     | "assistant_text_delta"
+    | "assistant_reasoning_delta"
     | "assistant_message_completed"
     | "assistant_turn_finished"
     | "tool_call_started"
@@ -1047,7 +1048,7 @@ export async function handleRustyViewChatRequest(
 
   if (url.pathname === "/v1/chat/sessions") {
     const sessions = await context.listSessions();
-    return success(requestId, sessionPage(sessions, context, url));
+    return success(requestId, await sessionPage(sessions, context, url));
   }
 
   if (url.pathname === "/v1/chat/commands") {
@@ -1939,11 +1940,11 @@ async function handleRemoveDataBankScope(
   );
 }
 
-function sessionPage(
+async function sessionPage(
   sessions: SessionState[],
   context: RustyViewChatContext,
   url: URL,
-): ChatSessionPage {
+): Promise<ChatSessionPage> {
   const limit = pageLimit(url, 100, 500);
   const offset = pageOffset(url);
   const profileId = trimmedParam(url, "profile_id");
@@ -1954,13 +1955,32 @@ function sessionPage(
     )
     .filter((session) => status === undefined || session.status === status)
     .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
-  const items = filtered.slice(offset, offset + limit).map((session) => {
-    const stats = chatEventStats(session, context);
-    return sessionSummary(session, {
-      messageCount: stats.messageCount,
-      latestCursor: stats.latestCursor,
-    });
-  });
+  const items = await Promise.all(
+    filtered.slice(offset, offset + limit).map(async (session) => {
+      const stats = chatEventStats(session, context);
+      const slotCount =
+        stats.hasLoggedEvents || context.listMessageSlots === undefined
+          ? undefined
+          : (
+              await context.listMessageSlots({
+                session,
+                includeAlternates: false,
+                limit: CHAT_SUMMARY_EVENT_LIMIT,
+                offset: 0,
+              })
+            ).items.length;
+      return sessionSummary(session, {
+        messageCount: stats.hasLoggedEvents
+          ? stats.messageCount
+          : (slotCount ?? stats.messageCount),
+        latestCursor:
+          stats.latestCursor ??
+          (slotCount === undefined
+            ? undefined
+            : cursorFor(session.sessionId, slotCount)),
+      });
+    }),
+  );
   return {
     items,
     total: filtered.length,
@@ -1992,6 +2012,11 @@ async function openSessionResult(
     })
     .then((page) => page.items)
     .catch(() => undefined);
+  const fallbackMessageCount = messageSlots?.length ?? pendingMessages.length;
+  const fallbackLatestCursor = cursorFor(
+    session.sessionId,
+    fallbackMessageCount,
+  );
   const snapshot: ChatEvent = {
     event_id: eventId(session.sessionId, 0),
     session_id: session.sessionId,
@@ -2002,8 +2027,8 @@ async function openSessionResult(
       session: sessionSummary(session, {
         messageCount: stats.hasLoggedEvents
           ? stats.messageCount
-          : pendingMessages.length,
-        latestCursor: stats.latestCursor,
+          : fallbackMessageCount,
+        latestCursor: stats.latestCursor ?? fallbackLatestCursor,
       }),
     },
   };
@@ -2011,17 +2036,19 @@ async function openSessionResult(
     snapshot,
     ...(loggedEvents.length > 0
       ? loggedEvents
-      : pendingMessages.map((message, index) =>
-          messageCreatedEvent(session, message, index + 1, now),
-        )),
+      : messageSlots !== undefined && messageSlots.length > 0
+        ? messageSlotEvents(session, messageSlots, cursor)
+        : pendingMessages.map((message, index) =>
+            messageCreatedEvent(session, message, index + 1, now),
+          )),
   ].slice(0, limit);
   const latestSequence = events.at(-1)?.sequence_id ?? 0;
   return {
     session: sessionSummary(session, {
       messageCount: stats.hasLoggedEvents
         ? stats.messageCount
-        : pendingMessages.length,
-      latestCursor: stats.latestCursor,
+        : fallbackMessageCount,
+      latestCursor: stats.latestCursor ?? fallbackLatestCursor,
     }),
     events,
     ...(messageSlots === undefined ? {} : { message_slots: messageSlots }),
@@ -2036,23 +2063,94 @@ async function eventPageResult(
   limit: number,
   cursor: string | undefined,
 ): Promise<{ items: ChatEvent[]; latest_cursor: string; has_more: boolean }> {
-  const events =
-    context.listChatEvents?.(session, cursor, limit) ??
-    (await pendingMessagesForSession(session, context)).map((message, index) =>
-      messageCreatedEvent(
-        session,
-        message,
-        cursorSequence(cursor, session.sessionId) + index + 1,
-        context.now?.() ?? new Date().toISOString(),
-      ),
-    );
+  const pageProbeLimit = limit + 1;
+  const loggedEvents =
+    context.listChatEvents?.(session, cursor, pageProbeLimit) ?? [];
+  const rawEvents =
+    loggedEvents.length > 0
+      ? loggedEvents
+      : context.listMessageSlots !== undefined
+        ? messageSlotEvents(
+            session,
+            (
+              await context.listMessageSlots({
+                session,
+                includeAlternates: false,
+                limit: pageProbeLimit,
+                offset: 0,
+              })
+            ).items,
+            cursor,
+          )
+        : (await pendingMessagesForSession(session, context)).map(
+            (message, index) =>
+              messageCreatedEvent(
+                session,
+                message,
+                cursorSequence(cursor, session.sessionId) + index + 1,
+                context.now?.() ?? new Date().toISOString(),
+              ),
+          );
+  const events = rawEvents.slice(0, limit);
   const latestSequence =
     events.at(-1)?.sequence_id ?? cursorSequence(cursor, session.sessionId);
   return {
     items: [...events],
     latest_cursor: cursorFor(session.sessionId, latestSequence),
-    has_more: events.length >= limit,
+    has_more: rawEvents.length > limit,
   };
+}
+
+function messageSlotEvents(
+  session: SessionState,
+  slots: readonly MessageSlotRecord[],
+  cursor: string | undefined,
+): ChatEvent[] {
+  const after = cursorSequence(cursor, session.sessionId);
+  return [...slots]
+    .sort((left, right) => left.created_at.localeCompare(right.created_at))
+    .map((slot, index) => {
+      const variant =
+        slot.active_variant_id === undefined || slot.active_variant_id === null
+          ? slot.primary
+          : (slot.alternates.find(
+              (candidate) => candidate.variant_id === slot.active_variant_id,
+            ) ?? slot.primary);
+      return durableMessageEvent(session, variant.message, index + 1);
+    })
+    .filter((event) => event.sequence_id > after);
+}
+
+function durableMessageEvent(
+  session: SessionState,
+  message: DurableMessageRecord,
+  sequence: number,
+): ChatEvent {
+  return {
+    event_id: eventId(session.sessionId, sequence),
+    session_id: session.sessionId,
+    sequence_id: sequence,
+    created_at: message.created_at,
+    kind: "message_created",
+    payload: {
+      message_id: message.message_id,
+      role:
+        message.author_role === "assistant" ||
+        message.author_id === session.agentId
+          ? "assistant"
+          : "user",
+      body: message.body,
+      correlation_id: recordString(message.metadata_json, "correlation_id"),
+      source: "durable_message_slot",
+      slot_status: message.status,
+    },
+  };
+}
+
+function recordString(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const field = value[key];
+  return typeof field === "string" ? field : undefined;
 }
 
 async function pendingMessagesForSession(

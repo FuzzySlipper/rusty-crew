@@ -63,6 +63,7 @@ for (const kind of [
   "message_created",
   "assistant_turn_started",
   "assistant_text_delta",
+  "assistant_reasoning_delta",
   "assistant_message_completed",
   "assistant_turn_finished",
   "tool_call_started",

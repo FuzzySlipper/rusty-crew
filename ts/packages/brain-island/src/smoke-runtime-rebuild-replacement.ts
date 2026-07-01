@@ -24,6 +24,35 @@ const host = await startRustyCrewServiceHost({
 });
 
 try {
+  await host.bridge.createProfileRegistryRecord({
+    profileId: "replace-profile",
+    lifecycleStatus: "active",
+    defaultSessionKind: "full",
+    agentId: "replace-agent",
+    activeRuntimeSettingsJson: {},
+    sourceAssetRefs: [],
+    derivedRuntimeRefs: [
+      {
+        refKind: "brain",
+        refId: "replace-profile-brain",
+        status: "planned",
+        metadataJson: { profile_id: "replace-profile" },
+      },
+      {
+        refKind: "session",
+        refId: "old-session",
+        status: "planned",
+        metadataJson: {
+          agent_id: "replace-agent",
+          profile_id: "replace-profile",
+          session_id: "old-session",
+        },
+      },
+    ],
+    importExport: { metadataJson: {} },
+    now: new Date().toISOString(),
+  });
+
   await host.bridge.enqueueBodyFollowUpMessage({
     sessionId: "old-session" as SessionId,
     from: "operator" as AgentId,
@@ -69,6 +98,11 @@ try {
       degradedBindingIds?: string[];
     };
     queuedMessages?: { action?: string };
+    profileRegistry?: {
+      action?: string;
+      updatedProfileId?: string;
+      updatedRefIds?: string[];
+    };
     apply?: {
       replacementSession?: {
         oldSessionId?: string;
@@ -93,6 +127,9 @@ try {
     result.queuedMessages?.action,
     "start_replacement_session_with_empty_queue",
   );
+  assert.equal(result.profileRegistry?.action, "update_session_refs");
+  assert.equal(result.profileRegistry?.updatedProfileId, "replace-profile");
+  assert.deepEqual(result.profileRegistry?.updatedRefIds, ["old-session"]);
   assert.equal(result.apply?.replacementSession?.oldSessionId, "old-session");
   assert.equal(result.apply?.replacementSession?.newSessionId, "new-session");
   assert.equal(
@@ -130,6 +167,17 @@ try {
   assert.equal(runtimeConfig.mcpBindings?.[0]?.sessionId, "new-session");
   assert.equal(
     runtimeConfig.scheduledJobs?.[0]?.targetSessionId,
+    "new-session",
+  );
+  const registryRecord =
+    await host.bridge.getProfileRegistryRecord("replace-profile");
+  const sessionRef = registryRecord?.derivedRuntimeRefs.find(
+    (ref) => ref.refKind === "session",
+  );
+  assert.equal(sessionRef?.refId, "new-session");
+  assert.equal(
+    (sessionRef?.metadataJson as { session_id?: string } | undefined)
+      ?.session_id,
     "new-session",
   );
   console.log("runtime rebuild replacement smoke passed");

@@ -630,6 +630,11 @@ export type BrainEvent =
   | { type: "started" }
   | { type: "text_delta"; text: string }
   | {
+      type: "reasoning_delta";
+      text: string;
+      format?: string;
+    }
+  | {
       type: "tool_call_started";
       toolName: string;
       metadata?: ToolCallMetadata;

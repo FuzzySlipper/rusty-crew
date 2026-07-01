@@ -364,6 +364,7 @@ interface ServiceState {
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
+  schedulerHeartbeat: ServiceSchedulerHeartbeatState;
   readonly now: () => string;
   nextWakeSequence: number;
   stopping: boolean;
@@ -382,6 +383,19 @@ interface ServiceBackgroundReviewRuntime {
   lastPersistedCaptureProposalCount?: number;
   lastSkippedReasons?: readonly string[];
   lastRunAt?: string;
+  lastError?: string;
+}
+
+interface ServiceSchedulerHeartbeatState {
+  enabled: boolean;
+  intervalMs: number;
+  running: boolean;
+  lastStartedAt?: string;
+  lastCompletedAt?: string;
+  lastDurationMs?: number;
+  lastSummary?: string;
+  lastSkippedAt?: string;
+  lastSkipReason?: string;
   lastError?: string;
 }
 
@@ -513,6 +527,11 @@ export async function startRustyCrewServiceHost(
       chatSubscribersBySession: new Map(),
       suppressedWakeEvents: new Map(),
       recentEvents: [],
+      schedulerHeartbeat: {
+        enabled: config.background.schedulerTickIntervalMs > 0,
+        intervalMs: config.background.schedulerTickIntervalMs,
+        running: false,
+      },
       now: options.now ?? (() => new Date().toISOString()),
       nextWakeSequence: 0,
       stopping: false,
@@ -2639,6 +2658,7 @@ function writeRustyViewChatSseStream(input: {
     "x-accel-buffering": "no",
     ...chatCorsHeaders(input.request),
   });
+  response.write(": connected\n\n");
   for (const event of input.replay) {
     writeSseEvent(response, event);
   }
@@ -3384,6 +3404,15 @@ async function buildServiceBackgroundDiagnostics(
   return buildBackgroundServiceDiagnosticsProjection({
     now,
     scheduler: {
+      heartbeatEnabled: state.schedulerHeartbeat.enabled,
+      heartbeatIntervalMs: state.schedulerHeartbeat.intervalMs,
+      heartbeatRunning: state.schedulerHeartbeat.running,
+      lastHeartbeatStartedAt: state.schedulerHeartbeat.lastStartedAt,
+      lastHeartbeatCompletedAt: state.schedulerHeartbeat.lastCompletedAt,
+      lastHeartbeatDurationMs: state.schedulerHeartbeat.lastDurationMs,
+      lastHeartbeatSummary: state.schedulerHeartbeat.lastSummary,
+      lastHeartbeatSkippedAt: state.schedulerHeartbeat.lastSkippedAt,
+      lastHeartbeatSkipReason: state.schedulerHeartbeat.lastSkipReason,
       jobCount: jobs.length,
       activeJobs: activeJobs.length,
       pausedJobs: pausedJobs.length,
@@ -3392,7 +3421,7 @@ async function buildServiceBackgroundDiagnostics(
       failedRuns: failedRuns.length,
       nextDueAt: earliestDueAt(activeJobs),
       lastRunAt: lastRun?.completedAt,
-      lastError: failedRuns[0]?.error,
+      lastError: state.schedulerHeartbeat.lastError ?? failedRuns[0]?.error,
     },
     curator: {
       status: "available",
@@ -5643,7 +5672,7 @@ function createServiceControlExecutor(
       archiveSession: async ({ sessionId }) => {
         await state.bridge.archiveSession(sessionId as SessionId);
       },
-      createSession: async ({ sessionId, template }) => {
+      createSession: async ({ sessionId, template, command }) => {
         const sessionConfig = optionalRecord(template.sessionConfig) ?? {};
         await state.bridge.createSession({
           sessionId,
@@ -5662,6 +5691,26 @@ function createServiceControlExecutor(
               ? undefined
               : (compactRecord(sessionConfig.historyWindow as never) as never),
         });
+        const oldSessionId = command.target.sessionId;
+        if (oldSessionId !== undefined) {
+          const oldSession = await serviceSessionById(state, oldSessionId);
+          await replaceRuntimeSessionInConfig(
+            state,
+            oldSession,
+            sessionId,
+            "move",
+          );
+          await applyServiceRuntimeConfigFromDisk(state, {
+            createMissingSessions: false,
+            eventType: "new_session_runtime_config_moved",
+            summaryPrefix: `New session moved runtime config from ${oldSessionId}`,
+          });
+          recordServiceEvent(state, {
+            source: "service-host",
+            eventType: "new_session_runtime_config_moved",
+            summary: `New session moved runtime config from ${oldSessionId} to ${sessionId}.`,
+          });
+        }
       },
       auditSink: {
         writeNewSessionLifecycleAudit(event) {
@@ -6306,6 +6355,7 @@ interface ServiceRuntimeRebuildPlan {
 }
 
 interface ServiceRuntimeRebuildApplyResult extends ServiceRuntimeRebuildPlan {
+  profileRegistry?: ServiceRuntimeReplacementSessionResult["profileRegistry"];
   apply:
     | {
         status: "completed";
@@ -6327,6 +6377,11 @@ interface ServiceRuntimeRebuildApplyResult extends ServiceRuntimeRebuildPlan {
 interface ServiceRuntimeReplacementSessionResult {
   oldSessionId: string;
   newSessionId: string;
+  profileRegistry: {
+    action: "update_session_refs" | "record_missing" | "unchanged";
+    updatedProfileId?: string;
+    updatedRefIds: string[];
+  };
   channelBindings: {
     action: "unchanged" | "move_to_replacement_session";
     bindingIds: string[];
@@ -6719,6 +6774,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
       ttlPolicy: "unchanged",
     },
     channelBindings: replacement.channelBindings,
+    profileRegistry: replacement.profileRegistry,
     mcp: mcpRefresh,
     apply: {
       status: "completed",
@@ -6835,9 +6891,15 @@ async function replaceRuntimeSessionInConfig(
     state.config.paths.serviceConfigFile,
     runtimeConfigFile.value,
   );
+  const profileRegistry = await replaceProfileRegistrySessionRefs(
+    state,
+    oldSession,
+    newSessionId,
+  );
   return {
     oldSessionId: oldSession.sessionId,
     newSessionId,
+    profileRegistry,
     channelBindings: {
       action:
         channelBindingAction === "move"
@@ -6859,6 +6921,74 @@ async function replaceRuntimeSessionInConfig(
       expiredQueuedMessagesCopied: false,
     },
   };
+}
+
+async function replaceProfileRegistrySessionRefs(
+  state: ServiceState,
+  oldSession: SessionState,
+  newSessionId: string,
+): Promise<ServiceRuntimeReplacementSessionResult["profileRegistry"]> {
+  const record = await state.bridge.getProfileRegistryRecord(
+    oldSession.profileId,
+  );
+  if (record === undefined) {
+    return { action: "record_missing", updatedRefIds: [] };
+  }
+
+  const now = state.now();
+  const updatedRefIds: string[] = [];
+  const derivedRuntimeRefs = record.derivedRuntimeRefs.map((ref) => {
+    if (ref.refKind !== "session" || ref.refId !== oldSession.sessionId) {
+      return ref;
+    }
+    updatedRefIds.push(ref.refId);
+    return {
+      ...ref,
+      refId: newSessionId,
+      updatedAt: now,
+      metadataJson: replaceRuntimeRefSessionMetadata(
+        ref.metadataJson,
+        newSessionId,
+      ),
+    };
+  });
+
+  if (updatedRefIds.length === 0) {
+    return {
+      action: "unchanged",
+      updatedProfileId: record.profileId,
+      updatedRefIds: [],
+    };
+  }
+
+  await state.bridge.updateProfileRegistryRecord({
+    write: profileRegistryRecordToWrite(
+      {
+        ...record,
+        derivedRuntimeRefs,
+        updatedAt: now,
+      },
+      now,
+    ),
+    expectedRevision: record.revision,
+  });
+
+  return {
+    action: "update_session_refs",
+    updatedProfileId: record.profileId,
+    updatedRefIds,
+  };
+}
+
+function replaceRuntimeRefSessionMetadata(
+  metadata: unknown,
+  newSessionId: string,
+): unknown {
+  if (!isRecord(metadata)) return metadata;
+  const next = { ...metadata };
+  if (next.session_id !== undefined) next.session_id = newSessionId;
+  if (next.sessionId !== undefined) next.sessionId = newSessionId;
+  return next;
 }
 
 function runtimeConfigSessionEntryFromState(
@@ -7052,14 +7182,9 @@ type ServiceWakeSource = "background" | "direct_debug" | "delivery" | "chat";
 function startServiceBackgroundLoops(state: ServiceState): void {
   if (state.config.background.schedulerTickIntervalMs > 0) {
     const timer = setInterval(() => {
-      void runSchedulerHeartbeat(state).catch((error) =>
-        recordServiceEvent(state, {
-          source: "service-host",
-          eventType: "scheduler_heartbeat_failed",
-          severity: "error",
-          summary: errorMessage(error, "scheduler heartbeat failed"),
-        }),
-      );
+      void runSchedulerHeartbeat(state).catch((error) => {
+        recordSchedulerHeartbeatFailure(state, error);
+      });
     }, state.config.background.schedulerTickIntervalMs);
     state.timers.add(timer);
   }
@@ -8895,6 +9020,17 @@ function appendBrainEventToChatLog(
         payload: { wake_id: wakeId, text: event.text },
       });
       return;
+    case "reasoning_delta":
+      appendChatEvent(state, session.sessionId, {
+        kind: "assistant_reasoning_delta",
+        payload: {
+          wake_id: wakeId,
+          text: event.text,
+          visibility: "reasoning",
+          ...(event.format === undefined ? {} : { format: event.format }),
+        },
+      });
+      return;
     case "tool_call_started":
       appendChatEvent(state, session.sessionId, {
         kind: "tool_call_started",
@@ -8945,6 +9081,7 @@ function ensureChatWakeTerminalEvents(
       event.type === "brain_event_observed" &&
       (event.event.type === "started" ||
         event.event.type === "text_delta" ||
+        event.event.type === "reasoning_delta" ||
         event.event.type === "tool_call_started" ||
         event.event.type === "tool_call_finished"),
   );
@@ -9848,34 +9985,77 @@ function parseJson(value: string): unknown {
 
 async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
   if (state.stopping) return;
-  const tick = await state.bridge.runSchedulerTick();
-  const hostRuns = await runScheduledHostExecutors({
-    ...scheduledHostExecutorContext(state),
-  });
-  const scheduledJobs = await registerConfiguredScheduledJobs({
-    bridge: state.bridge,
-    runtimeConfig: state.runtimeConfig,
-    now: state.now,
-  });
-  const curatorLifecycle = await runServiceCuratorLifecycleTransitions(state);
-  const maintenance = await state.bridge.runMaintenance({
-    expireQueuedMessagesAt: state.now(),
-  });
-  if (
-    tick.wakesRequested > 0 ||
-    tick.runsCompleted > 0 ||
-    tick.runsFailed > 0 ||
-    hostRuns.claimed > 0 ||
-    scheduledJobs.registered > 0 ||
-    curatorLifecycle.transitions.length > 0 ||
-    maintenance.expiredQueueMessages > 0
-  ) {
+  if (state.schedulerHeartbeat.running) {
+    state.schedulerHeartbeat.lastSkippedAt = state.now();
+    state.schedulerHeartbeat.lastSkipReason =
+      "previous scheduler heartbeat is still running";
     recordServiceEvent(state, {
       source: "service-host",
-      eventType: "scheduler_heartbeat",
-      summary: `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`,
+      eventType: "scheduler_heartbeat_skipped",
+      severity: "warning",
+      summary:
+        "Scheduler heartbeat skipped because the previous tick is still running.",
     });
+    return;
   }
+  const startedAt = state.now();
+  const startedMonotonic = Date.now();
+  state.schedulerHeartbeat.running = true;
+  state.schedulerHeartbeat.lastStartedAt = startedAt;
+  state.schedulerHeartbeat.lastSkipReason = undefined;
+  try {
+    const tick = await state.bridge.runSchedulerTick();
+    const hostRuns = await runScheduledHostExecutors({
+      ...scheduledHostExecutorContext(state),
+    });
+    const scheduledJobs = await registerConfiguredScheduledJobs({
+      bridge: state.bridge,
+      runtimeConfig: state.runtimeConfig,
+      now: state.now,
+    });
+    const curatorLifecycle = await runServiceCuratorLifecycleTransitions(state);
+    const maintenance = await state.bridge.runMaintenance({
+      expireQueuedMessagesAt: state.now(),
+    });
+    const summary = `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`;
+    state.schedulerHeartbeat.lastCompletedAt = state.now();
+    state.schedulerHeartbeat.lastDurationMs = Date.now() - startedMonotonic;
+    state.schedulerHeartbeat.lastSummary = summary;
+    state.schedulerHeartbeat.lastError = undefined;
+    if (
+      tick.wakesRequested > 0 ||
+      tick.runsCompleted > 0 ||
+      tick.runsFailed > 0 ||
+      hostRuns.claimed > 0 ||
+      scheduledJobs.registered > 0 ||
+      curatorLifecycle.transitions.length > 0 ||
+      maintenance.expiredQueueMessages > 0
+    ) {
+      recordServiceEvent(state, {
+        source: "service-host",
+        eventType: "scheduler_heartbeat",
+        summary,
+      });
+    }
+  } finally {
+    state.schedulerHeartbeat.running = false;
+  }
+}
+
+function recordSchedulerHeartbeatFailure(
+  state: ServiceState,
+  error: unknown,
+): void {
+  const summary = errorMessage(error, "scheduler heartbeat failed");
+  state.schedulerHeartbeat.lastCompletedAt = state.now();
+  state.schedulerHeartbeat.lastError = summary;
+  state.schedulerHeartbeat.lastSummary = summary;
+  recordServiceEvent(state, {
+    source: "service-host",
+    eventType: "scheduler_heartbeat_failed",
+    severity: "error",
+    summary,
+  });
 }
 
 async function runServiceCuratorLifecycleTransitions(

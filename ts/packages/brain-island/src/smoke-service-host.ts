@@ -468,6 +468,26 @@ try {
     token,
   );
   assert.equal(backgroundDiagnostics.status, 200);
+  assert.equal(
+    backgroundDiagnostics.body.data.scheduler.heartbeatEnabled,
+    true,
+  );
+  assert.equal(
+    backgroundDiagnostics.body.data.scheduler.heartbeatIntervalMs,
+    100,
+  );
+  assert.equal(
+    typeof backgroundDiagnostics.body.data.scheduler.lastHeartbeatStartedAt,
+    "string",
+  );
+  assert.equal(
+    typeof backgroundDiagnostics.body.data.scheduler.lastHeartbeatCompletedAt,
+    "string",
+  );
+  assert.equal(
+    typeof backgroundDiagnostics.body.data.scheduler.lastHeartbeatSummary,
+    "string",
+  );
   assert.equal(backgroundDiagnostics.body.data.backgroundReview.enabled, true);
   assert.equal(
     backgroundDiagnostics.body.data.backgroundReview.recentFindings > 0,

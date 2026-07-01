@@ -177,7 +177,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Server-sent events whose data field is a JSON ChatEvent. Live subscribers can render assistant_text_delta, tool_call_started, tool_call_completed, and tool_call_failed before the wake terminal event."
+            "description": "Server-sent events whose data field is a JSON ChatEvent. Live subscribers can render assistant_text_delta, assistant_reasoning_delta, tool_call_started, tool_call_completed, and tool_call_failed before the wake terminal event."
                 }
               }
             }
@@ -1474,6 +1474,7 @@
           "message_created",
           "assistant_turn_started",
           "assistant_text_delta",
+          "assistant_reasoning_delta",
           "assistant_message_completed",
           "assistant_turn_finished",
           "tool_call_started",
@@ -1510,6 +1511,7 @@
           { "$ref": "#/components/schemas/SessionSnapshotPayload" },
           { "$ref": "#/components/schemas/MessageCreatedPayload" },
           { "$ref": "#/components/schemas/AssistantTextDeltaPayload" },
+          { "$ref": "#/components/schemas/AssistantReasoningDeltaPayload" },
           { "$ref": "#/components/schemas/AssistantMessageCompletedPayload" },
           { "$ref": "#/components/schemas/ToolCallPayload" },
           { "$ref": "#/components/schemas/CommandPayload" },
@@ -1554,6 +1556,17 @@
           "message_id": { "type": "string" },
           "delta": { "type": "string" },
           "coalesced": { "type": "boolean", "default": false }
+        },
+        "additionalProperties": false
+      },
+      "AssistantReasoningDeltaPayload": {
+        "type": "object",
+        "required": ["text", "visibility"],
+        "properties": {
+          "wake_id": { "type": "string" },
+          "text": { "type": "string" },
+          "format": { "type": "string" },
+          "visibility": { "type": "string", "enum": ["reasoning"] }
         },
         "additionalProperties": false
       },

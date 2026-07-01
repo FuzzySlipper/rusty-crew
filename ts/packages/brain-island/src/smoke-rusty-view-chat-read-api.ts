@@ -112,6 +112,7 @@ try {
     streamResponse,
     (events) =>
       events.some((event) => event.kind === "assistant_text_delta") &&
+      events.some((event) => event.kind === "assistant_reasoning_delta") &&
       events.some((event) => event.kind === "tool_call_started") &&
       events.some((event) => event.kind === "tool_call_completed"),
     streamAbort,
@@ -211,11 +212,25 @@ try {
     streamedEvents.some((event) => event.kind === "tool_call_completed"),
     "active stream should receive tool completion while wake is live",
   );
+  assert.ok(
+    streamedEvents.some(
+      (event) =>
+        event.kind === "assistant_reasoning_delta" &&
+        event.payload?.text === "live private reasoning",
+    ),
+    "active stream should receive reasoning deltas separately from text",
+  );
   const chatTurnEvents = await get(
     "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
     token,
   );
   assert.equal(chatTurnEvents.status, 200);
+  const replayedReasoningEvent = chatTurnEvents.body.data.items.find(
+    (event: { kind: string; payload?: { text?: string; format?: string } }) =>
+      event.kind === "assistant_reasoning_delta",
+  );
+  assert.equal(replayedReasoningEvent?.payload?.text, "live private reasoning");
+  assert.equal(replayedReasoningEvent?.payload?.format, "smoke");
   const completionEvent = chatTurnEvents.body.data.items.find(
     (event: { kind: string }) => event.kind === "assistant_message_completed",
   );
@@ -1139,6 +1154,15 @@ function withLiveWakeEventsBridge(
               wakeId: request.wakeId,
               sessionId: request.sessionId,
               event: { type: "text_delta", text: "live streaming delta" },
+            },
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: {
+                type: "reasoning_delta",
+                text: "live private reasoning",
+                format: "smoke",
+              },
             },
             {
               wakeId: request.wakeId,

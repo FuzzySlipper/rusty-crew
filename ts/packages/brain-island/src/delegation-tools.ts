@@ -108,11 +108,16 @@ const findRelevantPathsParameters = Type.Object({
   correlationId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
+const markdownDelegationParameters = Type.Object({
+  markdown: Type.String({ minLength: 1 }),
+});
+
 type SpawnSubagentParams = Static<typeof spawnSubagentParameters>;
 type FanOutSubagentsParams = Static<typeof fanOutSubagentsParameters>;
 type ScoutCodebaseParams = Static<typeof scoutCodebaseParameters>;
 type SummarizeFilesParams = Static<typeof summarizeFilesParameters>;
 type FindRelevantPathsParams = Static<typeof findRelevantPathsParameters>;
+type MarkdownDelegationParams = Static<typeof markdownDelegationParameters>;
 
 export interface DelegationToolContext {
   actions?: BrainActionCollector;
@@ -124,7 +129,9 @@ export interface DelegationToolDetails {
   ok: boolean;
   operation:
     | "spawn_subagent"
+    | "spawn_subagent_md"
     | "fan_out_subagents"
+    | "fan_out_subagents_md"
     | "scout_codebase"
     | "summarize_files"
     | "find_relevant_paths";
@@ -145,7 +152,9 @@ export const resolveDelegationTools: BrainToolResolver = ({ wake, actions }) =>
 export function delegationTools(context: DelegationToolContext): BrainTool[] {
   return [
     spawnSubagentTool(context),
+    spawnSubagentMarkdownTool(context),
     fanOutSubagentsTool(context),
+    fanOutSubagentsMarkdownTool(context),
     scoutCodebaseTool(context),
     summarizeFilesTool(context),
     findRelevantPathsTool(context),
@@ -175,6 +184,27 @@ export function spawnSubagentTool(
           parentConsumption: params.parentConsumption,
         }),
       ]),
+  };
+}
+
+export function spawnSubagentMarkdownTool(
+  context: DelegationToolContext,
+): BrainTool<typeof markdownDelegationParameters, DelegationToolDetails> {
+  return {
+    name: "spawn_subagent_md",
+    label: "Spawn subagent from markdown",
+    description:
+      "Queue one Rust-owned delegated subagent request from markdown with simple frontmatter. Put stable fields like profile, task, priority, timeout_ms, and parent_consumption in the header; put the delegated prompt in the markdown body. Do not write JSON.",
+    parameters: markdownDelegationParameters,
+    execute: async (_toolCallId, params: MarkdownDelegationParams) => {
+      const parsed = parseSingleDelegationMarkdown(params.markdown, context);
+      if (!parsed.ok) {
+        return rejected("spawn_subagent_md", parsed.reasonCode);
+      }
+      return queueDelegationActions(context, "spawn_subagent_md", [
+        requestDelegationAction(context, parsed.request),
+      ]);
+    },
   };
 }
 
@@ -210,6 +240,36 @@ export function fanOutSubagentsTool(
         failurePolicy,
         maxConcurrency: params.maxConcurrency,
       });
+    },
+  };
+}
+
+export function fanOutSubagentsMarkdownTool(
+  context: DelegationToolContext,
+): BrainTool<typeof markdownDelegationParameters, DelegationToolDetails> {
+  return {
+    name: "fan_out_subagents_md",
+    label: "Fan out subagents from markdown",
+    description:
+      "Queue a bounded fan-out group from markdown. Put group fields like group_id, max_concurrency, failure_policy, timeout_ms, priority, and parent_consumption in frontmatter. Add one markdown section per subagent using '## profile-id' headings and optional key: value lines before the prompt. Do not write JSON.",
+    parameters: markdownDelegationParameters,
+    execute: async (_toolCallId, params: MarkdownDelegationParams) => {
+      const parsed = parseFanOutDelegationMarkdown(params.markdown, context);
+      if (!parsed.ok) {
+        return rejected("fan_out_subagents_md", parsed.reasonCode);
+      }
+      return queueDelegationActions(
+        context,
+        "fan_out_subagents_md",
+        parsed.requests.map((request) =>
+          requestDelegationAction(context, request),
+        ),
+        {
+          groupId: parsed.groupId,
+          failurePolicy: parsed.failurePolicy,
+          maxConcurrency: parsed.maxConcurrency,
+        },
+      );
     },
   };
 }
@@ -418,6 +478,379 @@ function profileId(
 
 function bullets(values: readonly string[]): string {
   return values.map((value) => `- ${value}`).join("\n");
+}
+
+type ParsedDelegationRequest = Parameters<typeof requestDelegationAction>[1];
+
+type ParseResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reasonCode: string };
+
+type SingleDelegationParseResult =
+  | { ok: true; request: ParsedDelegationRequest }
+  | { ok: false; reasonCode: string };
+
+type FanOutDelegationParseResult =
+  | {
+      ok: true;
+      groupId: string;
+      failurePolicy: FanOutFailurePolicy;
+      maxConcurrency?: number;
+      requests: ParsedDelegationRequest[];
+    }
+  | { ok: false; reasonCode: string };
+
+interface MarkdownEnvelope {
+  frontmatter: Record<string, string>;
+  bodyMarkdown: string;
+}
+
+function parseSingleDelegationMarkdown(
+  markdown: string,
+  context: DelegationToolContext,
+): SingleDelegationParseResult {
+  const envelope = parseMarkdownEnvelope(markdown);
+  if (!envelope.ok) return envelope;
+  const body = envelope.value.bodyMarkdown.trim();
+  if (!body) return { ok: false, reasonCode: "markdown_body_required" };
+  const mapped = delegationRequestFromFields(
+    envelope.value.frontmatter,
+    body,
+    context,
+  );
+  return mapped.ok ? { ok: true, request: mapped.value } : mapped;
+}
+
+function parseFanOutDelegationMarkdown(
+  markdown: string,
+  context: DelegationToolContext,
+): FanOutDelegationParseResult {
+  const envelope = parseMarkdownEnvelope(markdown);
+  if (!envelope.ok) return envelope;
+  const groupId =
+    stringField(envelope.value.frontmatter, "group_id") ??
+    stringField(envelope.value.frontmatter, "group");
+  if (!groupId) return { ok: false, reasonCode: "fan_out_group_required" };
+  const failurePolicy = optionalFailurePolicy(envelope.value.frontmatter);
+  if (!failurePolicy.ok) return failurePolicy;
+  const maxConcurrency = optionalPositiveIntegerField(
+    envelope.value.frontmatter,
+    "max_concurrency",
+  );
+  if (!maxConcurrency.ok) return maxConcurrency;
+  const timeoutMs = optionalPositiveIntegerField(
+    envelope.value.frontmatter,
+    "timeout_ms",
+  );
+  if (!timeoutMs.ok) return timeoutMs;
+  const priority = optionalPriority(envelope.value.frontmatter);
+  if (!priority.ok) return priority;
+  const parentConsumption = optionalParentConsumption(
+    envelope.value.frontmatter,
+  );
+  if (!parentConsumption.ok) return parentConsumption;
+  const sections = parseFanOutSections(envelope.value.bodyMarkdown);
+  if (!sections.ok) return sections;
+  if (sections.value.length > 20) {
+    return { ok: false, reasonCode: "fan_out_max_items_exceeded" };
+  }
+  const requests: ParsedDelegationRequest[] = [];
+  for (const section of sections.value) {
+    const mapped = delegationRequestFromFields(
+      section.fields,
+      section.prompt,
+      context,
+      section.profile,
+    );
+    if (!mapped.ok) return mapped;
+    requests.push({
+      ...mapped.value,
+      timeoutMs: mapped.value.timeoutMs ?? timeoutMs.value,
+      priority: mapped.value.priority ?? priority.value,
+      fanOutGroupId: groupId,
+      fanOutMaxConcurrency: maxConcurrency.value,
+      fanOutFailurePolicy: failurePolicy.value ?? "fail_soft",
+      parentConsumption:
+        mapped.value.parentConsumption ?? parentConsumption.value,
+      expectedOutput:
+        mapped.value.expectedOutput ??
+        stringField(envelope.value.frontmatter, "expected_output"),
+    });
+  }
+  return {
+    ok: true,
+    groupId,
+    failurePolicy: failurePolicy.value ?? "fail_soft",
+    maxConcurrency: maxConcurrency.value,
+    requests,
+  };
+}
+
+function delegationRequestFromFields(
+  fields: Record<string, string>,
+  prompt: string,
+  context: DelegationToolContext,
+  profileFallback?: string,
+): ParseResult<ParsedDelegationRequest> {
+  const profile =
+    stringField(fields, "profile") ??
+    stringField(fields, "profile_id") ??
+    profileFallback;
+  const timeoutMs = optionalPositiveIntegerField(fields, "timeout_ms");
+  if (!timeoutMs.ok) return timeoutMs;
+  const maxDurationMs = optionalPositiveIntegerField(fields, "max_duration_ms");
+  if (!maxDurationMs.ok) return maxDurationMs;
+  const maxDelegationDepth = optionalNonNegativeIntegerField(
+    fields,
+    "max_delegation_depth",
+  );
+  if (!maxDelegationDepth.ok) return maxDelegationDepth;
+  const priority = optionalPriority(fields);
+  if (!priority.ok) return priority;
+  const parentConsumption = optionalParentConsumption(fields);
+  if (!parentConsumption.ok) return parentConsumption;
+  return {
+    ok: true,
+    value: {
+      profileId: profileId(profile, context),
+      prompt,
+      taskId: stringField(fields, "task") ?? stringField(fields, "task_id"),
+      expectedOutput:
+        stringField(fields, "expected_output") ??
+        sectionByHeading(prompt, "Expected Output"),
+      resourceLimits: compactResourceLimits({
+        workdir: stringField(fields, "workdir"),
+        maxDurationMs: maxDurationMs.value,
+        maxDelegationDepth: maxDelegationDepth.value,
+      }),
+      timeoutMs: timeoutMs.value,
+      priority: priority.value,
+      correlationId:
+        stringField(fields, "correlation") ??
+        stringField(fields, "correlation_id"),
+      parentConsumption: parentConsumption.value,
+    },
+  };
+}
+
+function parseMarkdownEnvelope(
+  markdown: string,
+): ParseResult<MarkdownEnvelope> {
+  const normalized = markdown.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return { ok: false, reasonCode: "markdown_body_required" };
+  if (!normalized.startsWith("---\n")) {
+    return { ok: true, value: { frontmatter: {}, bodyMarkdown: normalized } };
+  }
+  const closing = normalized.indexOf("\n---", 4);
+  if (closing === -1) {
+    return { ok: false, reasonCode: "invalid_frontmatter" };
+  }
+  const closeEnd = closing + "\n---".length;
+  const afterClose = normalized.slice(closeEnd);
+  if (afterClose.length > 0 && !afterClose.startsWith("\n")) {
+    return { ok: false, reasonCode: "invalid_frontmatter" };
+  }
+  const frontmatter = parseSimpleFrontmatter(normalized.slice(4, closing));
+  if (!frontmatter.ok) return frontmatter;
+  return {
+    ok: true,
+    value: {
+      frontmatter: frontmatter.value,
+      bodyMarkdown: afterClose.trim(),
+    },
+  };
+}
+
+function parseSimpleFrontmatter(
+  raw: string,
+): ParseResult<Record<string, string>> {
+  const fields: Record<string, string> = {};
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(trimmed);
+    if (!match) return { ok: false, reasonCode: "invalid_frontmatter" };
+    const key = normalizeFieldName(match[1]!);
+    const value = unquote(match[2]!.trim());
+    if (!value) return { ok: false, reasonCode: "invalid_frontmatter" };
+    fields[key] = value;
+  }
+  return { ok: true, value: fields };
+}
+
+interface FanOutSection {
+  profile: string;
+  fields: Record<string, string>;
+  prompt: string;
+}
+
+function parseFanOutSections(markdown: string): ParseResult<FanOutSection[]> {
+  const sections: FanOutSection[] = [];
+  const heading = /^##\s+(.+)$/gm;
+  const matches = [...markdown.matchAll(heading)];
+  if (matches.length === 0) {
+    return { ok: false, reasonCode: "fan_out_subagents_required" };
+  }
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index]!;
+    const next = matches[index + 1];
+    const profile = match[1]!.replace(/^subagent:\s*/i, "").trim();
+    const rawSection = markdown
+      .slice(match.index! + match[0].length, next?.index ?? markdown.length)
+      .trim();
+    const extracted = extractLeadingFields(rawSection);
+    if (!profile && !stringField(extracted.fields, "profile")) {
+      return { ok: false, reasonCode: "profile_required" };
+    }
+    if (!extracted.body.trim()) {
+      return { ok: false, reasonCode: "markdown_body_required" };
+    }
+    sections.push({
+      profile,
+      fields: extracted.fields,
+      prompt: extracted.body.trim(),
+    });
+  }
+  return { ok: true, value: sections };
+}
+
+function extractLeadingFields(markdown: string): {
+  fields: Record<string, string>;
+  body: string;
+} {
+  const fields: Record<string, string> = {};
+  const lines = markdown.split("\n");
+  let cursor = 0;
+  for (; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor]!;
+    if (!line.trim()) {
+      cursor += 1;
+      break;
+    }
+    const match = /^([A-Za-z0-9_-]+):\s*(.+)$/.exec(line.trim());
+    if (!match) break;
+    fields[normalizeFieldName(match[1]!)] = unquote(match[2]!.trim());
+  }
+  return { fields, body: lines.slice(cursor).join("\n") };
+}
+
+function optionalPriority(
+  fields: Record<string, string>,
+): ParseResult<"low" | "normal" | "high" | undefined> {
+  const raw = stringField(fields, "priority");
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === "low" || raw === "normal" || raw === "high") {
+    return { ok: true, value: raw };
+  }
+  return { ok: false, reasonCode: "invalid_priority" };
+}
+
+function optionalParentConsumption(
+  fields: Record<string, string>,
+): ParseResult<ParentConsumptionPolicy | undefined> {
+  const raw = stringField(fields, "parent_consumption");
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === "await_completion" || raw === "observe_only") {
+    return { ok: true, value: raw };
+  }
+  return { ok: false, reasonCode: "invalid_parent_consumption" };
+}
+
+function optionalFailurePolicy(
+  fields: Record<string, string>,
+): ParseResult<FanOutFailurePolicy | undefined> {
+  const raw = stringField(fields, "failure_policy");
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === "fail_fast" || raw === "fail_soft") {
+    return { ok: true, value: raw };
+  }
+  return { ok: false, reasonCode: "invalid_failure_policy" };
+}
+
+function optionalPositiveIntegerField(
+  fields: Record<string, string>,
+  key: string,
+): ParseResult<number | undefined> {
+  const value = stringField(fields, key);
+  if (value === undefined) return { ok: true, value: undefined };
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return { ok: false, reasonCode: `invalid_${key}` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function optionalNonNegativeIntegerField(
+  fields: Record<string, string>,
+  key: string,
+): ParseResult<number | undefined> {
+  const value = stringField(fields, key);
+  if (value === undefined) return { ok: true, value: undefined };
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return { ok: false, reasonCode: `invalid_${key}` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function stringField(
+  fields: Record<string, string>,
+  key: string,
+): string | undefined {
+  const value = fields[normalizeFieldName(key)]?.trim();
+  return value ? value : undefined;
+}
+
+function compactResourceLimits(
+  input: ResourceLimits,
+): ResourceLimits | undefined {
+  return input.workdir !== undefined ||
+    input.maxDurationMs !== undefined ||
+    input.maxDelegationDepth !== undefined
+    ? input
+    : undefined;
+}
+
+function sectionByHeading(
+  markdown: string,
+  heading: string,
+): string | undefined {
+  const pattern = new RegExp(
+    `^##\\s+${escapeRegExp(heading)}\\s*$\\n([\\s\\S]*?)(?=^##\\s+|$)`,
+    "im",
+  );
+  return pattern.exec(markdown)?.[1]?.trim() || undefined;
+}
+
+function normalizeFieldName(value: string): string {
+  return value.trim().toLowerCase().replace(/-/g, "_");
+}
+
+function unquote(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1).trim();
+  }
+  return value.trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function rejected(
+  operation: DelegationToolDetails["operation"],
+  reasonCode: string,
+): BrainToolResult<DelegationToolDetails> {
+  return result({
+    ok: false,
+    operation,
+    reasonCode,
+    queuedActions: 0,
+    actions: [],
+  });
 }
 
 function result(

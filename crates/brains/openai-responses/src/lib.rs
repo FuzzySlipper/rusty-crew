@@ -1491,10 +1491,9 @@ where
                 ResponsesEvent::ReasoningDelta(delta) => {
                     items.push(event(
                         request,
-                        BrainEvent::ProviderStatus {
-                            level: BrainProviderStatusLevel::Info,
-                            message: "reasoning delta".to_string(),
-                            metadata_json: Some(json!({"delta": delta}).to_string()),
+                        BrainEvent::ReasoningDelta {
+                            text: delta,
+                            format: Some("openai-responses".to_string()),
                         },
                     ));
                 }
@@ -2296,7 +2295,7 @@ mod tests {
         )));
         assert!(items.iter().any(|item| matches!(
             item,
-            BrainWakeStreamItem::Event { event } if matches!(&event.event, BrainEvent::ProviderStatus { message, .. } if message == "reasoning delta")
+            BrainWakeStreamItem::Event { event } if matches!(&event.event, BrainEvent::ReasoningDelta { text, format } if text == "thinking" && format.as_deref() == Some("openai-responses"))
         )));
         assert!(matches!(
             result.provider_state,

@@ -1,6 +1,15 @@
 export type BackgroundServiceHealth = "ok" | "degraded" | "blocked";
 
 export interface SchedulerBackgroundDiagnostics {
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMs?: number;
+  heartbeatRunning?: boolean;
+  lastHeartbeatStartedAt?: string;
+  lastHeartbeatCompletedAt?: string;
+  lastHeartbeatDurationMs?: number;
+  lastHeartbeatSummary?: string;
+  lastHeartbeatSkippedAt?: string;
+  lastHeartbeatSkipReason?: string;
   jobCount: number;
   activeJobs: number;
   pausedJobs: number;

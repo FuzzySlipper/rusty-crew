@@ -308,9 +308,11 @@ export type {
 export {
   delegationTools,
   fanOutSubagentsTool,
+  fanOutSubagentsMarkdownTool,
   findRelevantPathsTool,
   resolveDelegationTools,
   scoutCodebaseTool,
+  spawnSubagentMarkdownTool,
   spawnSubagentTool,
   summarizeFilesTool,
 } from "./delegation-tools.js";
@@ -318,6 +320,15 @@ export type {
   DelegationToolContext,
   DelegationToolDetails,
 } from "./delegation-tools.js";
+export {
+  completionTools,
+  deliverCompletionMarkdownTool,
+  resolveCompletionTools,
+} from "./completion-tools.js";
+export type {
+  CompletionToolContext,
+  CompletionToolDetails,
+} from "./completion-tools.js";
 export {
   agentRoundTool,
   coordinationTools,

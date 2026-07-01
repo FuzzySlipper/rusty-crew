@@ -285,6 +285,8 @@ function brainEventSummary(
       return `Brain started for ${event.sessionId}`;
     case "text_delta":
       return `Brain produced text for ${event.sessionId}`;
+    case "reasoning_delta":
+      return `Brain produced reasoning for ${event.sessionId}`;
     case "tool_call_started":
       return `Tool started: ${event.event.toolName}`;
     case "tool_call_finished":

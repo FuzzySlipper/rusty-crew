@@ -350,6 +350,21 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:delegation-tools",
   },
   {
+    name: "spawn_subagent_md",
+    description:
+      "Queue one Rust-owned delegated subagent request from markdown and simple frontmatter so agents do not hand-author JSON.",
+    category: "delegation",
+    toolsets: ["delegation_basic"],
+    implementationModule: "./delegation-tools.js#spawnSubagentMarkdownTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "delegation.spawn_subagent_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:delegation-tools",
+    coexistenceNote:
+      "Markdown/frontmatter input surface over the same delegation action shape as spawn_subagent; intended to avoid agent-authored JSON.",
+  },
+  {
     name: "fan_out_subagents",
     description:
       "Queue a bounded Rust-owned fan-out group of delegated subagent requests.",
@@ -361,6 +376,21 @@ const defaultToolRegistryDefinitions = [
     outputShape: "delegation.fan_out_request_actions.v1",
     version: "0.1.0",
     inventoryTest: "smoke:delegation-tools",
+  },
+  {
+    name: "fan_out_subagents_md",
+    description:
+      "Queue a bounded Rust-owned fan-out group from markdown sections and simple frontmatter so agents do not hand-author JSON.",
+    category: "delegation",
+    toolsets: ["delegation_basic"],
+    implementationModule: "./delegation-tools.js#fanOutSubagentsMarkdownTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "delegation.fan_out_request_actions.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:delegation-tools",
+    coexistenceNote:
+      "Markdown/frontmatter input surface over the same delegation action shape as fan_out_subagents; intended to avoid agent-authored JSON.",
   },
   {
     name: "scout_codebase",
@@ -400,6 +430,19 @@ const defaultToolRegistryDefinitions = [
     outputShape: "delegation.find_relevant_paths_result.v1",
     version: "0.1.0",
     inventoryTest: "smoke:delegation-tools",
+  },
+  {
+    name: "deliver_completion_md",
+    description:
+      "Queue a completion packet from markdown and simple frontmatter so workers do not hand-author completion JSON.",
+    category: "delegation",
+    toolsets: ["delegation_basic"],
+    implementationModule: "./completion-tools.js#deliverCompletionMarkdownTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "completion.markdown_packet_result.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:completion-tools",
   },
   {
     name: "send_agent_message",

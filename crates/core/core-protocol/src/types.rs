@@ -740,6 +740,11 @@ pub enum BrainEvent {
     TextDelta {
         text: String,
     },
+    ReasoningDelta {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        format: Option<String>,
+    },
     ToolCallStarted {
         tool_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

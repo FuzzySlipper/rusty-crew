@@ -3239,6 +3239,12 @@ function toNativeBrainEventForJson(event: BrainEvent): unknown {
       return { type: event.type };
     case "text_delta":
       return { type: event.type, text: event.text };
+    case "reasoning_delta":
+      return {
+        type: event.type,
+        text: event.text,
+        format: event.format,
+      };
     case "tool_call_started":
       return {
         type: event.type,
@@ -4210,6 +4216,12 @@ function toBrainEvent(event: RawBrainEvent): BrainEvent {
       return event;
     case "text_delta":
       return { type: event.type, text: event.text };
+    case "reasoning_delta":
+      return {
+        type: event.type,
+        text: event.text,
+        format: event.format,
+      };
     case "tool_call_started":
       return {
         type: event.type,
@@ -4349,6 +4361,12 @@ function toNativeBrainEvent(event: BrainEvent): {
       return { eventType: event.type };
     case "text_delta":
       return { eventType: event.type, text: event.text };
+    case "reasoning_delta":
+      return {
+        eventType: event.type,
+        text: event.text,
+        toolName: event.format,
+      };
     case "tool_call_started":
       return {
         eventType: event.type,
@@ -4935,6 +4953,7 @@ type RawBrainWakeProviderStateOutput =
 type RawBrainEvent =
   | { type: "started" }
   | { type: "text_delta"; text: string }
+  | { type: "reasoning_delta"; text: string; format?: string }
   | {
       type: "tool_call_started";
       tool_name: string;

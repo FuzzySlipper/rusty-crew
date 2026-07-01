@@ -54,8 +54,8 @@ export function createPiAgentBrain(
       );
       let sawTextDelta = false;
       const unsubscribe = agent.subscribe((event) => {
-        const mapped = mapPiAgentEvent(event, { sawTextDelta });
-        if (mapped) {
+        const mappedEvents = mapPiAgentEvent(event, { sawTextDelta });
+        for (const mapped of mappedEvents) {
           if (mapped.type === "text_delta") {
             sawTextDelta = true;
           }
@@ -151,39 +151,83 @@ function toPiMessages(
 function mapPiAgentEvent(
   event: PiAgentEvent,
   state: { sawTextDelta: boolean },
-): BrainEvent | undefined {
+): BrainEvent[] {
   switch (event.type) {
     case "agent_start":
-      return { type: "started" };
+      return [{ type: "started" }];
     case "message_update": {
       if (event.assistantMessageEvent.type !== "text_delta") {
-        return undefined;
+        return [];
       }
       return event.assistantMessageEvent.delta
-        ? { type: "text_delta", text: event.assistantMessageEvent.delta }
-        : undefined;
+        ? splitLiteralThinkBlocks(event.assistantMessageEvent.delta)
+        : [];
     }
     case "message_end": {
       if (state.sawTextDelta) {
-        return undefined;
+        return [];
       }
       const text = assistantMessageText(event.message);
-      if (text) return { type: "text_delta", text };
+      if (text) return splitLiteralThinkBlocks(text);
       const errorText = assistantMessageErrorText(event.message);
-      return errorText ? { type: "text_delta", text: errorText } : undefined;
+      return errorText ? [{ type: "text_delta", text: errorText }] : [];
     }
     case "tool_execution_start":
-      return { type: "tool_call_started", toolName: event.toolName };
+      return [{ type: "tool_call_started", toolName: event.toolName }];
     case "tool_execution_end":
-      return {
-        type: "tool_call_finished",
-        toolName: event.toolName,
-        isError: event.isError,
-      };
+      return [
+        {
+          type: "tool_call_finished",
+          toolName: event.toolName,
+          isError: event.isError,
+        },
+      ];
     case "agent_end":
-      return { type: "finished" };
+      return [{ type: "finished" }];
     default:
-      return undefined;
+      return [];
+  }
+}
+
+function splitLiteralThinkBlocks(text: string): BrainEvent[] {
+  const events: BrainEvent[] = [];
+  let cursor = 0;
+  const openTag = "<think>";
+  const closeTag = "</think>";
+
+  while (cursor < text.length) {
+    const open = text.indexOf(openTag, cursor);
+    if (open === -1) {
+      pushTextDelta(events, text.slice(cursor));
+      break;
+    }
+    pushTextDelta(events, text.slice(cursor, open));
+    const contentStart = open + openTag.length;
+    const close = text.indexOf(closeTag, contentStart);
+    if (close === -1) {
+      pushReasoningDelta(events, text.slice(contentStart));
+      break;
+    }
+    pushReasoningDelta(events, text.slice(contentStart, close));
+    cursor = close + closeTag.length;
+  }
+
+  return events;
+}
+
+function pushTextDelta(events: BrainEvent[], text: string): void {
+  if (text.length > 0) {
+    events.push({ type: "text_delta", text });
+  }
+}
+
+function pushReasoningDelta(events: BrainEvent[], text: string): void {
+  if (text.length > 0) {
+    events.push({
+      type: "reasoning_delta",
+      text,
+      format: "literal-think-tag",
+    });
   }
 }
 

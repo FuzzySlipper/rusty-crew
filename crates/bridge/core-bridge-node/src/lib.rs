@@ -3943,6 +3943,10 @@ impl NativeBridgeBinding {
             "text_delta" => rusty_crew_core_bridge_api::BrainEvent::TextDelta {
                 text: text.unwrap_or_default(),
             },
+            "reasoning_delta" => rusty_crew_core_bridge_api::BrainEvent::ReasoningDelta {
+                text: text.unwrap_or_default(),
+                format: tool_name,
+            },
             "tool_call_started" => rusty_crew_core_bridge_api::BrainEvent::ToolCallStarted {
                 tool_name: tool_name.ok_or_else(|| {
                     napi::Error::new(
