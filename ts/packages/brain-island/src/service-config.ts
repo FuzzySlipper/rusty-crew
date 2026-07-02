@@ -33,6 +33,11 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_ADMIN_ALLOW_LAN?: string;
   RUSTY_CREW_ADMIN_AUTH_MODE?: string;
   RUSTY_CREW_ADMIN_TOKEN?: string;
+  RUSTY_CREW_OPENAI_OAUTH_ISSUER?: string;
+  RUSTY_CREW_OPENAI_OAUTH_CLIENT_ID?: string;
+  RUSTY_CREW_OPENAI_OAUTH_REDIRECT_URI?: string;
+  RUSTY_CREW_OPENAI_OAUTH_ALLOW_REDIRECT_URI_OVERRIDE?: string;
+  RUSTY_CREW_OPENAI_OAUTH_ORIGINATOR?: string;
   RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS?: string;
   RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS?: string;
   RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS?: string;
@@ -89,6 +94,14 @@ export interface RustyCrewAdminConfig {
   allowLan: boolean;
   authMode: "bearer" | "none";
   token?: string;
+}
+
+export interface RustyCrewOpenAiOauthConfig {
+  issuer: string;
+  clientId: string;
+  redirectUri: string;
+  allowRedirectUriOverride: boolean;
+  originator: string;
 }
 
 export interface RustyCrewBackgroundConfig {
@@ -159,6 +172,7 @@ export interface RustyCrewStorageConfig {
 export interface RustyCrewServiceConfig {
   paths: RustyCrewServicePaths;
   admin: RustyCrewAdminConfig;
+  openAiOauth: RustyCrewOpenAiOauthConfig;
   background: RustyCrewBackgroundConfig;
   denConversationProjectId: string;
   denMemory: RustyCrewDenMemoryConfig;
@@ -177,6 +191,12 @@ export const RUSTY_CREW_DEFAULT_DATA_DIR = "/home/agents/rusty-crew";
 export const RUSTY_CREW_DEFAULT_WORKDIR = "/home";
 export const RUSTY_CREW_DEFAULT_ADMIN_HOST = "0.0.0.0";
 export const RUSTY_CREW_DEFAULT_ADMIN_PORT = 9347;
+export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ISSUER = "https://auth.openai.com";
+export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_CLIENT_ID =
+  "app_EMoamEEZ73f0CkXaXp7hrann";
+export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_REDIRECT_URI =
+  "http://localhost:1455/auth/callback";
+export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ORIGINATOR = "rusty_crew";
 
 export function loadRustyCrewServiceConfig(
   env: RustyCrewServiceEnv = process.env,
@@ -227,6 +247,25 @@ export function loadRustyCrewServiceConfig(
     authMode: parseAuthMode(env.RUSTY_CREW_ADMIN_AUTH_MODE),
     token: normalizeOptional(env.RUSTY_CREW_ADMIN_TOKEN),
   };
+  const openAiOauth: RustyCrewOpenAiOauthConfig = {
+    issuer:
+      normalizeOptional(env.RUSTY_CREW_OPENAI_OAUTH_ISSUER) ??
+      RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ISSUER,
+    clientId:
+      normalizeOptional(env.RUSTY_CREW_OPENAI_OAUTH_CLIENT_ID) ??
+      RUSTY_CREW_DEFAULT_OPENAI_OAUTH_CLIENT_ID,
+    redirectUri:
+      normalizeOptional(env.RUSTY_CREW_OPENAI_OAUTH_REDIRECT_URI) ??
+      RUSTY_CREW_DEFAULT_OPENAI_OAUTH_REDIRECT_URI,
+    allowRedirectUriOverride: parseBoolean(
+      env.RUSTY_CREW_OPENAI_OAUTH_ALLOW_REDIRECT_URI_OVERRIDE,
+      false,
+      "RUSTY_CREW_OPENAI_OAUTH_ALLOW_REDIRECT_URI_OVERRIDE",
+    ),
+    originator:
+      normalizeOptional(env.RUSTY_CREW_OPENAI_OAUTH_ORIGINATOR) ??
+      RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ORIGINATOR,
+  };
   const background: RustyCrewBackgroundConfig = {
     schedulerTickIntervalMs: parseNonNegativeInteger(
       env.RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS,
@@ -262,6 +301,7 @@ export function loadRustyCrewServiceConfig(
   validateRustyCrewServiceConfig({
     paths,
     admin,
+    openAiOauth,
     background,
     denConversationProjectId,
     denMemory,
@@ -273,6 +313,7 @@ export function loadRustyCrewServiceConfig(
   return {
     paths,
     admin,
+    openAiOauth,
     background,
     denConversationProjectId,
     denMemory,
@@ -309,9 +350,27 @@ export function validateRustyCrewServiceConfig(
   }
 
   validateDenMemoryConfig(config.denMemory);
+  validateOpenAiOauthConfig(config.openAiOauth);
   validateMcpConfig(config.mcp);
   validateTelegramConfig(config.telegram);
   validateStorageConfig(config.storage);
+}
+
+function validateOpenAiOauthConfig(config: RustyCrewOpenAiOauthConfig): void {
+  validateHttpUrl(
+    config.issuer,
+    "RUSTY_CREW_OPENAI_OAUTH_ISSUER must be a valid HTTP(S) URL",
+  );
+  validateHttpUrl(
+    config.redirectUri,
+    "RUSTY_CREW_OPENAI_OAUTH_REDIRECT_URI must be a valid HTTP(S) URL",
+  );
+  if (!config.clientId.trim()) {
+    throw new Error("RUSTY_CREW_OPENAI_OAUTH_CLIENT_ID must not be empty");
+  }
+  if (!config.originator.trim()) {
+    throw new Error("RUSTY_CREW_OPENAI_OAUTH_ORIGINATOR must not be empty");
+  }
 }
 
 export function ensureRustyCrewServiceDirectories(

@@ -1055,9 +1055,9 @@ impl LiveResponsesClient {
     ) -> Result<Self, ResponsesStreamError> {
         let base_url = base_url.into();
         let endpoint = format!("{}/responses", base_url.trim_end_matches('/'));
-        let _idle_timeout_ms = idle_timeout_ms;
         let client = HttpClient::builder()
             .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_millis(idle_timeout_ms))
             .build()
             .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
         Ok(Self {
@@ -2010,7 +2010,7 @@ fn tool_metadata(call: &PendingResponsesFunctionCall) -> ToolCallMetadata {
         profile_id: None,
         tool_profile_key: None,
         source_tool_name: Some(call.name.clone()),
-        catalog_revision: Some("openai-responses-fake".to_string()),
+        catalog_revision: Some("openai-responses-neutral-tools".to_string()),
         policy: Some(ToolCallPolicyMetadata {
             allowed: Some(true),
             denial_reason: None,

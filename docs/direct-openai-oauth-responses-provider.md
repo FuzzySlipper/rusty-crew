@@ -58,7 +58,7 @@ Authorization URL query:
 
 - `response_type=code`
 - `client_id=<client id>`
-- `redirect_uri=http://localhost:<port>/auth/callback`
+- `redirect_uri=<Crew-configured registered callback URI>`
 - `scope=openid profile email offline_access api.connectors.read api.connectors.invoke`
 - `code_challenge=<pkce challenge>`
 - `code_challenge_method=S256`
@@ -67,6 +67,28 @@ Authorization URL query:
 - `state=<state>`
 - `originator=<originator>`
 - optional `allowed_workspace_id=<comma-separated workspace ids>`
+
+Rusty Crew's default direct OpenAI client uses the registered callback
+`http://localhost:1455/auth/callback`. Rusty View and other frontends must not
+derive `redirect_uri` from the browser origin (for example a LAN
+`http://192.168.x.x:9347/...` URL) unless the operator has configured a
+separate OpenAI OAuth client registration and enabled redirect URI overrides in
+Crew service config. The provider OAuth status/start API exposes the configured
+redirect URI and whether overrides are allowed.
+
+For LAN or remote-operator use with the default registered localhost callback:
+
+1. Start the OAuth login through Crew and open the returned authorization URL.
+2. Complete the OpenAI login in the browser.
+3. If the browser lands on a localhost callback that the operator machine is
+   not serving, copy the final callback URL from the address bar.
+4. POST that full URL to the Crew completion route as `callbackUrl`. Crew
+   extracts `code` and `state`, finds the pending login for that provider, and
+   exchanges the code using the original registered redirect URI and private
+   PKCE verifier.
+
+This path avoids asking users to paste internal pending ids, verifier material,
+token bundles, or secret JSON.
 
 Authorization-code exchange:
 
@@ -248,6 +270,8 @@ For model-provider create/update routes:
 - OpenAI OAuth UI should normally start an OAuth login attempt instead of asking
   users to paste token bundles. The completed callback path will write the
   `openai_oauth` envelope.
+- Remote/LAN UIs should complete fixed-redirect logins by submitting the pasted
+  callback URL as `callbackUrl`, not by inventing a LAN redirect URI.
 - Provider read/list routes expose only `credential.hasSecret`,
   `credential.secretRef`, `credential.updatedAt`, and `credential.kind`. They
   must not expose `credentialSecret`, token values, or raw secret JSON.

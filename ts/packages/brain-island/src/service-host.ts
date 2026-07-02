@@ -2321,10 +2321,27 @@ async function handleOpenAiOauthProviderAdminRequest(
 
   if (request.action === "start" && request.method === "POST") {
     const body = optionalRecord(request.body) ?? {};
+    const requestedRedirectUri = optionalString(
+      body.redirectUri ?? body.redirect_uri,
+    );
+    if (
+      requestedRedirectUri !== undefined &&
+      requestedRedirectUri !== state.config.openAiOauth.redirectUri &&
+      !state.config.openAiOauth.allowRedirectUriOverride
+    ) {
+      return failure(400, request.requestId, {
+        code: "invalid_input",
+        reason_code: "openai_oauth_unregistered_redirect_uri",
+        message:
+          "OpenAI OAuth redirectUri override is disabled; use the configured registered redirectUri from status/start response",
+        retryable: false,
+      });
+    }
     const pending = startOpenAiOauthLogin(provider, state, body);
     state.openAiOauthPendingLogins.set(pending.pendingLoginId, pending);
     return successRoute(request.requestId, {
       provider: modelProviderApiRecord(provider),
+      loginConfig: openAiOauthLoginConfig(state),
       pendingLogin: redactedOpenAiOauthPendingLogin(pending),
     });
   }
@@ -2334,20 +2351,53 @@ async function handleOpenAiOauthProviderAdminRequest(
       request.body,
       "OpenAI OAuth complete request body",
     );
-    const pendingLoginId = requiredString(
-      body.pendingLoginId ?? body.pending_login_id,
-      "OpenAI OAuth pendingLoginId",
+    const callbackUrl = optionalString(
+      body.callbackUrl ??
+        body.callback_url ??
+        body.authorizationResponseUrl ??
+        body.authorization_response_url,
     );
-    const pending = state.openAiOauthPendingLogins.get(pendingLoginId);
+    let callback: ReturnType<typeof parseOpenAiOauthCallbackUrl> | undefined;
+    try {
+      callback = callbackUrl
+        ? parseOpenAiOauthCallbackUrl(callbackUrl)
+        : undefined;
+    } catch {
+      return failure(400, request.requestId, {
+        code: "invalid_input",
+        reason_code: "openai_oauth_invalid_callback_url",
+        message:
+          "OpenAI OAuth callbackUrl must be a full callback URL or query string containing code and state",
+        retryable: false,
+      });
+    }
+    if (callback?.error !== undefined) {
+      return failure(400, request.requestId, {
+        code: "invalid_input",
+        reason_code: "openai_oauth_callback_error",
+        message: `OpenAI OAuth callback returned error ${callback.error}`,
+        retryable: false,
+      });
+    }
+    const stateValue = requiredString(
+      body.state ?? callback?.state,
+      "OpenAI OAuth state",
+    );
+    const pendingLoginId = optionalString(
+      body.pendingLoginId ?? body.pending_login_id,
+    );
+    const pending =
+      pendingLoginId !== undefined
+        ? state.openAiOauthPendingLogins.get(pendingLoginId)
+        : findOpenAiOauthPendingLoginByState(provider.alias, stateValue, state);
     if (!pending || pending.providerAlias !== provider.alias) {
       return failure(404, request.requestId, {
         code: "not_found",
         reason_code: "openai_oauth_pending_login_not_found",
-        message: `OpenAI OAuth pending login ${pendingLoginId} was not found`,
+        message: "OpenAI OAuth pending login was not found",
         retryable: false,
       });
     }
-    const stateValue = requiredString(body.state, "OpenAI OAuth state");
     if (stateValue !== pending.state) {
       return failure(400, request.requestId, {
         code: "invalid_input",
@@ -2382,7 +2432,10 @@ async function handleOpenAiOauthProviderAdminRequest(
       );
     } else {
       completionMode = "real";
-      const code = requiredString(body.code, "OpenAI OAuth code");
+      const code = requiredString(
+        body.code ?? callback?.code,
+        "OpenAI OAuth code",
+      );
       const exchange = await state.bridge.exchangeOpenAiOauthCode({
         issuer: pending.issuer,
         clientId: pending.clientId,
@@ -2415,13 +2468,13 @@ async function handleOpenAiOauthProviderAdminRequest(
       ),
       now: state.now(),
     });
-    state.openAiOauthPendingLogins.delete(pendingLoginId);
+    state.openAiOauthPendingLogins.delete(pending.pendingLoginId);
     return successRoute(request.requestId, {
       provider: modelProviderApiRecord(updated),
       credential: updated.credential,
       completionMode,
       oauthSummary,
-      pendingLoginId,
+      pendingLoginId: pending.pendingLoginId,
     });
   }
 
@@ -2462,10 +2515,12 @@ function openAiOauthProviderStatus(
   provider: NativeModelProviderRecord & { temperature?: number };
   credential: NativeModelProviderRecord["credential"];
   pendingLogins: Array<ReturnType<typeof redactedOpenAiOauthPendingLogin>>;
+  loginConfig: ReturnType<typeof openAiOauthLoginConfig>;
 } {
   return {
     provider: modelProviderApiRecord(provider),
     credential: provider.credential,
+    loginConfig: openAiOauthLoginConfig(state),
     pendingLogins: [...state.openAiOauthPendingLogins.values()]
       .filter((pending) => pending.providerAlias === provider.alias)
       .map(redactedOpenAiOauthPendingLogin),
@@ -2477,13 +2532,13 @@ function startOpenAiOauthLogin(
   state: ServiceState,
   body: Record<string, unknown>,
 ): OpenAiOauthPendingLogin {
-  const issuer = optionalString(body.issuer) ?? "https://auth.openai.com";
+  const issuer = optionalString(body.issuer) ?? state.config.openAiOauth.issuer;
   const clientId =
     optionalString(body.clientId ?? body.client_id) ??
-    "app_EMoamEEZ73f0CkXaXp7hrann";
+    state.config.openAiOauth.clientId;
   const redirectUri =
     optionalString(body.redirectUri ?? body.redirect_uri) ??
-    "http://localhost:1455/auth/callback";
+    state.config.openAiOauth.redirectUri;
   const scopes = optionalStringArray(
     body.scopes,
     [
@@ -2516,7 +2571,8 @@ function startOpenAiOauthLogin(
       [],
       "OpenAI OAuth allowedWorkspaceIds",
     ),
-    originator: optionalString(body.originator) ?? "rusty_crew",
+    originator:
+      optionalString(body.originator) ?? state.config.openAiOauth.originator,
   });
   return {
     pendingLoginId,
@@ -2531,6 +2587,69 @@ function startOpenAiOauthLogin(
     authorizationUrl,
     createdAt,
     expiresAt,
+  };
+}
+
+function openAiOauthLoginConfig(state: ServiceState): {
+  issuer: string;
+  clientId: string;
+  redirectUri: string;
+  redirectUriOverrideAllowed: boolean;
+  redirectUriMode: "fixed_registered" | "operator_configured";
+  callbackUrlCompletionAccepted: boolean;
+  callbackUrlCompletionField: "callbackUrl";
+  pendingLoginIdRequiredForCallbackUrl: boolean;
+  remoteOperatorFlow: "paste_callback_url";
+} {
+  return {
+    issuer: state.config.openAiOauth.issuer,
+    clientId: state.config.openAiOauth.clientId,
+    redirectUri: state.config.openAiOauth.redirectUri,
+    redirectUriOverrideAllowed:
+      state.config.openAiOauth.allowRedirectUriOverride,
+    redirectUriMode: state.config.openAiOauth.allowRedirectUriOverride
+      ? "operator_configured"
+      : "fixed_registered",
+    callbackUrlCompletionAccepted: true,
+    callbackUrlCompletionField: "callbackUrl",
+    pendingLoginIdRequiredForCallbackUrl: false,
+    remoteOperatorFlow: "paste_callback_url",
+  };
+}
+
+function findOpenAiOauthPendingLoginByState(
+  providerAlias: string,
+  stateValue: string,
+  serviceState: ServiceState,
+): OpenAiOauthPendingLogin | undefined {
+  for (const pending of serviceState.openAiOauthPendingLogins.values()) {
+    if (
+      pending.providerAlias === providerAlias &&
+      pending.state === stateValue
+    ) {
+      return pending;
+    }
+  }
+  return undefined;
+}
+
+function parseOpenAiOauthCallbackUrl(value: string): {
+  code?: string;
+  state?: string;
+  error?: string;
+  errorDescription?: string;
+} {
+  const trimmed = value.trim();
+  const url = new URL(
+    trimmed.startsWith("?")
+      ? `http://localhost:1455/auth/callback${trimmed}`
+      : trimmed,
+  );
+  return {
+    code: optionalString(url.searchParams.get("code")),
+    state: optionalString(url.searchParams.get("state")),
+    error: optionalString(url.searchParams.get("error")),
+    errorDescription: optionalString(url.searchParams.get("error_description")),
   };
 }
 

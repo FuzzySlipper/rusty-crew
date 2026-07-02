@@ -141,14 +141,17 @@ impl OpenAiOauthClient {
             .map_err(|_| OpenAiOauthError::Transport)?;
 
         let tokens: TokenResponse = decode_token_response(response)?;
-        let exchanged_api_token =
-            self.exchange_api_token(&request.issuer, &request.client_id, &tokens.id_token)?;
+        let exchanged_api_token = self.exchange_api_token_optional(
+            &request.issuer,
+            &request.client_id,
+            &tokens.id_token,
+        )?;
         let metadata = token_metadata(&tokens.id_token, &tokens.access_token);
         Ok(OpenAiOauthTokenExchangeResult {
             id_token: tokens.id_token,
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
-            exchanged_api_token: Some(exchanged_api_token),
+            exchanged_api_token,
             access_token_expires_at: metadata.access_token_expires_at,
             email: metadata.email,
             account_id: metadata.account_id,
@@ -189,6 +192,19 @@ impl OpenAiOauthClient {
 
         let body: ExchangeResponse = decode_token_response(response)?;
         Ok(body.access_token)
+    }
+
+    fn exchange_api_token_optional(
+        &self,
+        issuer: &str,
+        client_id: &str,
+        id_token: &str,
+    ) -> Result<Option<String>, OpenAiOauthError> {
+        match self.exchange_api_token(issuer, client_id, id_token) {
+            Ok(token) => Ok(Some(token)),
+            Err(error) if optional_api_token_exchange_failure(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn refresh_envelope(
@@ -247,7 +263,8 @@ impl OpenAiOauthClient {
             .refresh_token
             .unwrap_or_else(|| refresh_token.clone());
         let next_exchanged_api_token = if policy.exchange_api_token {
-            Some(self.exchange_api_token(issuer, client_id, &next_id_token)?)
+            self.exchange_api_token_optional(issuer, client_id, &next_id_token)?
+                .or_else(|| exchanged_api_token.clone())
         } else {
             exchanged_api_token.clone()
         };
@@ -380,6 +397,18 @@ fn decode_token_response<T: for<'de> Deserialize<'de>>(
     }
     serde_json::from_str(&text)
         .map_err(|error| OpenAiOauthError::MalformedResponse(error.to_string()))
+}
+
+fn optional_api_token_exchange_failure(error: &OpenAiOauthError) -> bool {
+    matches!(
+        error,
+        OpenAiOauthError::Status {
+            status: 400 | 401,
+            reason_code: Some(reason_code),
+            message,
+        } if reason_code == "invalid_subject_token"
+            || message.to_ascii_lowercase().contains("missing organization_id")
+    )
 }
 
 fn token_endpoint(issuer: &str) -> String {
@@ -598,6 +627,35 @@ mod tests {
             .contains("code_verifier=pkce-verifier-secret"));
         assert!(requests[1].body.contains("requested_token=openai-api-key"));
         assert!(requests[1].body.contains("subject_token=id.jwt.sig"));
+    }
+
+    #[test]
+    fn authorization_code_exchange_tolerates_missing_organization_for_optional_api_token() {
+        let server = FakeOauthServer::new(vec![
+            fake_json(
+                200,
+                r#"{"id_token":"id.jwt.sig","access_token":"access.jwt.sig","refresh_token":"refresh.jwt"}"#,
+            ),
+            fake_json(
+                401,
+                r#"{"error":{"message":"Invalid ID token: missing organization_id","code":"invalid_subject_token"}}"#,
+            ),
+        ]);
+        let client = OpenAiOauthClient::new().unwrap();
+
+        let result = client
+            .exchange_authorization_code(&OpenAiOauthCodeExchangeRequest {
+                issuer: server.issuer(),
+                client_id: "client-1".to_string(),
+                redirect_uri: "http://localhost/callback".to_string(),
+                code: "authorization-code-secret".to_string(),
+                code_verifier: "pkce-verifier-secret".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(result.refresh_token, "refresh.jwt");
+        assert_eq!(result.exchanged_api_token, None);
+        assert_eq!(server.requests().len(), 2);
     }
 
     #[test]

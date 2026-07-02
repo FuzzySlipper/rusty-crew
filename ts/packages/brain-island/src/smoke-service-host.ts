@@ -728,16 +728,45 @@ try {
       noAuthPort,
     );
     assert.equal(oauthProvider.status, 200);
+    const oauthInvalidLanStart = await post(
+      "/v1/admin/model-providers/openai-oauth/oauth/openai/start",
+      undefined,
+      {
+        redirectUri: "http://192.168.1.44:9347/auth/callback",
+        originator: "rusty_crew_smoke",
+      },
+      noAuthPort,
+    );
+    assert.equal(oauthInvalidLanStart.status, 400);
+    assert.equal(
+      oauthInvalidLanStart.body.error.reason_code,
+      "openai_oauth_unregistered_redirect_uri",
+    );
     const oauthStart = await post(
       "/v1/admin/model-providers/openai-oauth/oauth/openai/start",
       undefined,
       {
-        redirectUri: "http://localhost:1455/auth/callback",
         originator: "rusty_crew_smoke",
       },
       noAuthPort,
     );
     assert.equal(oauthStart.status, 200);
+    assert.equal(
+      oauthStart.body.data.loginConfig.redirectUri,
+      "http://localhost:1455/auth/callback",
+    );
+    assert.equal(
+      oauthStart.body.data.loginConfig.redirectUriOverrideAllowed,
+      false,
+    );
+    assert.equal(
+      oauthStart.body.data.loginConfig.remoteOperatorFlow,
+      "paste_callback_url",
+    );
+    assert.equal(
+      oauthStart.body.data.loginConfig.pendingLoginIdRequiredForCallbackUrl,
+      false,
+    );
     assert.match(
       oauthStart.body.data.pendingLogin.authorizationUrl,
       /https:\/\/auth\.openai\.com\/oauth\/authorize/,
@@ -769,6 +798,10 @@ try {
       noAuthPort,
     );
     assert.equal(oauthStatusWithPending.status, 200);
+    assert.equal(
+      oauthStatusWithPending.body.data.loginConfig.callbackUrlCompletionField,
+      "callbackUrl",
+    );
     assert.equal(oauthStatusWithPending.body.data.pendingLogins.length, 1);
     assert.equal(
       Object.hasOwn(oauthStatusWithPending.body.data.pendingLogins[0], "state"),
@@ -851,13 +884,14 @@ try {
         realOauthStart.body.data.pendingLogin.authorizationUrl,
       ).searchParams.get("state");
       assert.equal(typeof realOauthState, "string");
+      assert.ok(realOauthState);
       const realOauthComplete = await post(
         "/v1/admin/model-providers/openai-oauth-real/oauth/openai/complete",
         undefined,
         {
-          pendingLoginId: realOauthStart.body.data.pendingLogin.pendingLoginId,
-          state: realOauthState,
-          code: "authorization-code-smoke",
+          callbackUrl: `http://localhost:1455/auth/callback?code=authorization-code-smoke&state=${encodeURIComponent(
+            realOauthState,
+          )}`,
         },
         noAuthPort,
       );

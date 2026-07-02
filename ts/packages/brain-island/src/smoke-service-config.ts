@@ -16,6 +16,10 @@ import {
   RUSTY_CREW_DEFAULT_ADMIN_HOST,
   RUSTY_CREW_DEFAULT_ADMIN_PORT,
   RUSTY_CREW_DEFAULT_DATA_DIR,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_CLIENT_ID,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ISSUER,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ORIGINATOR,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_REDIRECT_URI,
   RUSTY_CREW_DEFAULT_WORKDIR,
 } from "./service-config.js";
 import { loadRustyCrewRuntimeConfig } from "./service-runtime-config.js";
@@ -37,6 +41,23 @@ assert.equal(defaultConfig.admin.host, RUSTY_CREW_DEFAULT_ADMIN_HOST);
 assert.equal(defaultConfig.admin.port, RUSTY_CREW_DEFAULT_ADMIN_PORT);
 assert.equal(defaultConfig.admin.allowLan, true);
 assert.equal(defaultConfig.admin.authMode, "bearer");
+assert.equal(
+  defaultConfig.openAiOauth.issuer,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ISSUER,
+);
+assert.equal(
+  defaultConfig.openAiOauth.clientId,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_CLIENT_ID,
+);
+assert.equal(
+  defaultConfig.openAiOauth.redirectUri,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_REDIRECT_URI,
+);
+assert.equal(defaultConfig.openAiOauth.allowRedirectUriOverride, false);
+assert.equal(
+  defaultConfig.openAiOauth.originator,
+  RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ORIGINATOR,
+);
 assert.equal(defaultConfig.background.schedulerTickIntervalMs, 1_000);
 assert.equal(defaultConfig.background.wakeDispatchIntervalMs, 250);
 assert.equal(defaultConfig.denMemory.baseUrl, undefined);
@@ -73,6 +94,11 @@ try {
     RUSTY_CREW_DEFAULT_WORKDIR: join(root, "work"),
     RUSTY_CREW_ADMIN_PORT: "19447",
     RUSTY_CREW_ADMIN_TOKEN: "local-token",
+    RUSTY_CREW_OPENAI_OAUTH_ISSUER: "http://127.0.0.1:18001",
+    RUSTY_CREW_OPENAI_OAUTH_CLIENT_ID: "client-local",
+    RUSTY_CREW_OPENAI_OAUTH_REDIRECT_URI: "http://127.0.0.1:1455/auth/callback",
+    RUSTY_CREW_OPENAI_OAUTH_ALLOW_REDIRECT_URI_OVERRIDE: "true",
+    RUSTY_CREW_OPENAI_OAUTH_ORIGINATOR: "rusty_crew_smoke",
     RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "2000",
     RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "500",
     RUSTY_CREW_DEN_MEMORY_BASE_URL: "http://127.0.0.1:19999",
@@ -113,6 +139,14 @@ try {
   assert.equal(config.paths.staticDir, undefined);
   assert.equal(config.admin.authMode, "bearer");
   assert.equal(config.admin.token, "local-token");
+  assert.equal(config.openAiOauth.issuer, "http://127.0.0.1:18001");
+  assert.equal(config.openAiOauth.clientId, "client-local");
+  assert.equal(
+    config.openAiOauth.redirectUri,
+    "http://127.0.0.1:1455/auth/callback",
+  );
+  assert.equal(config.openAiOauth.allowRedirectUriOverride, true);
+  assert.equal(config.openAiOauth.originator, "rusty_crew_smoke");
   assert.equal(config.background.schedulerTickIntervalMs, 2_000);
   assert.equal(config.background.wakeDispatchIntervalMs, 500);
   assert.equal(config.denMemory.baseUrl, "http://127.0.0.1:19999");
