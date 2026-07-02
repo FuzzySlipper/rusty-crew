@@ -3,8 +3,10 @@
 Rusty Crew is the Rust-owned coordination runtime for agent services that grew
 out of pi-crew. The near-term goal is a local service that can host multiple
 full/prime agents, delegate bounded subagent work, connect to Den services, and
-keep deterministic coordination state in Rust while TypeScript owns LLM calls,
-tools, profiles, skills, MCP, and platform adapters.
+keep deterministic coordination state in Rust while brain modules run behind a
+neutral wake contract. TypeScript owns the pi-agent brain integration, many
+tools, profiles, skills, MCP clients, and platform adapters; Rust brain modules
+are also supported when they stay behind the same wake/stream/action contract.
 
 This repository is no longer a bare scaffold. It has a working Rust engine,
 native bridge, TypeScript brain island, service host, profile loading, tool
@@ -34,8 +36,11 @@ field-test configuration under `/home/agents/rusty-crew`.
 - `ts/packages/native-bridge` loads the native bridge and maps Rust wire shapes
   into TypeScript.
 - `ts/packages/brain-island` owns profile loading, role assembly, pi-agent
-  integration, model calls, model-callable tools, service runtime config,
-  admin/debug APIs, and production brain wake wiring.
+  integration, model-callable tools, service runtime config, admin/debug APIs,
+  and production brain wake wiring.
+- `crates/brains/*` contains direct Rust brain modules that implement provider
+  loops behind the neutral wake/stream/action/provider-state contract. These
+  crates may not reach into Rust coordination internals.
 - `ts/packages/adapter-den` owns Den successor Gateway integration,
   observation/conversation/delivery/timeline projections, and Den memory
   client helpers.
@@ -137,11 +142,14 @@ package pin is tracked in `docs/pi-package-source-lock.md`.
 - Rust owns deterministic coordination, persistence, lifecycle validation,
   action acceptance/rejection, body projection, wake thresholds, delegation,
   completion routing, and runtime counters.
-- TypeScript owns LLM providers, pi-agent integration, profile composition,
-  model-callable tool definitions/execution, MCP clients, skills, memory
-  clients, and platform adapters.
-- Den is product data plus observability. Den services are not the internal
-  coordination bus.
+- Brain modules may be TypeScript or Rust. TypeScript owns the pi-agent brain
+  integration and many tool/provider/adapter surfaces; Rust brain modules are
+  allowed only behind the neutral wake/stream/action/provider-state contract.
+- Rusty Crew owns Crew service data: coordination state, profiles, provider
+  state, transcripts, memory, lore, module data, telemetry, and diagnostics.
+- Den owns Den product/planning/observability data. Den services are not the
+  internal coordination bus and are not the storage fallback for Crew service
+  data.
 - Platform adapters should be isolated so Den Channels, Telegram, MCP, and
   future connectors can change without reshaping Rust coordination state.
 - Queues must be treated cautiously. Durable or body-owned queues require

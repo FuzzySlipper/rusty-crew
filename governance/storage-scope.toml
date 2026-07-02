@@ -1,0 +1,139 @@
+# Draft storage-scope ownership map for Rusty Crew.
+#
+# This file is intentionally ahead of enforcement. It gives future boundary
+# smokes a stable source for table/module ownership while core-persistence is
+# split into repository modules.
+
+[[scope]]
+id = "storage_admin"
+label = "Storage Admin"
+owns = [
+  "schema_migrations",
+  "runtime_import_batches",
+]
+notes = "Migrations, backend diagnostics, maintenance, logical import/export batch metadata."
+
+[[scope]]
+id = "sessions_identities"
+label = "Sessions And Identities"
+owns = [
+  "agents",
+  "agent_instances",
+  "sessions",
+  "session_identity",
+  "session_configs",
+]
+notes = "Durable agent, instance, session, and immutable session config records."
+
+[[scope]]
+id = "events_projections"
+label = "Events And Body Projections"
+owns = [
+  "event_history",
+  "body_projections",
+]
+notes = "Append-only events and restart hydration projections."
+
+[[scope]]
+id = "queues_messages"
+label = "Queues And Messages"
+owns = [
+  "agent_messages",
+  "queued_messages",
+]
+notes = "Internal messages, queued messages, TTL expiry, terminal state, no-resurrection policy."
+
+[[scope]]
+id = "scheduler_jobs"
+label = "Scheduler Jobs"
+owns = [
+  "scheduled_jobs",
+  "scheduled_job_runs",
+]
+notes = "Scheduled jobs, run claims, stale claim expiry, and manual run requests."
+
+[[scope]]
+id = "worker_runs_completions"
+label = "Worker Runs And Completions"
+owns = [
+  "worker_runs",
+  "completion_packets",
+  "delegated_fan_out_groups",
+]
+notes = "Worker/delegated run state, completion packets, delegation lineage, fan-out groups."
+
+[[scope]]
+id = "provider_state"
+label = "Provider State"
+owns = [
+  "provider_wire_states",
+]
+notes = "Provider wire-state payloads, expiry, invalidation, and diagnostics."
+
+[[scope]]
+id = "profile_registry"
+label = "Profile Registry And Config"
+owns = [
+  "profile_registry",
+  "model_providers",
+]
+notes = "Active profile registry, DB-backed prompt fields, model provider aliases, profile import/export metadata."
+
+[[scope]]
+id = "bindings"
+label = "Bindings"
+owns = [
+  "mcp_bindings",
+  "channel_bindings",
+]
+notes = "MCP, channel, adapter, and external binding records scoped by profile/session/agent."
+
+[[scope]]
+id = "conversations_attachments"
+label = "Conversations And Attachments"
+owns = [
+  "message_slots",
+  "message_variants",
+  "conversation_branches",
+  "conversation_snapshots",
+  "attachments",
+  "data_bank_scopes",
+]
+notes = "Transcripts, branch state, message variants, attachments, and data-bank scopes."
+
+[[scope]]
+id = "memory_lore_modules"
+label = "Memory, Lore, And Modules"
+owns = [
+  "profile_memories",
+  "memory_spaces",
+  "memory_proposals",
+  "module_schema_registry",
+]
+generated_prefixes = [
+  "module_",
+  "idx_module_",
+  "trg_module_",
+]
+notes = "Dense/profile memory, typed memory spaces, roleplay lore, module registry records, and generated module-owned tables."
+
+[[scope]]
+id = "telemetry_search"
+label = "Telemetry And Search"
+owns = [
+  "runtime_counters",
+  "runtime_search_fts",
+  "tool_call_history",
+  "session_activity_digests",
+  "context_compaction_artifacts",
+]
+notes = "Runtime counters, runtime search/read models, tool telemetry, context artifacts, and query catalog support."
+
+[rules]
+sql_outside_core_persistence = "forbidden"
+typescript_raw_sql = "forbidden"
+den_as_crew_storage = "forbidden"
+dynamic_physical_names = "must_be_whitelisted_or_descriptor_generated"
+module_tables = "must_use_module_schema_registry_descriptors"
+queue_import = "must_not_resurrect_expired_or_terminal_work"
+

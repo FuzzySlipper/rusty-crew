@@ -24,17 +24,28 @@ not the current planning queue.
 
 ## Architecture Soul
 
-> Rust owns deterministic coordination. TypeScript owns brain capability and
-> external adapters. The bridge manifest defines the border.
+> Rust owns deterministic coordination. Brain modules run behind the neutral
+> wake contract. TypeScript owns the pi-agent brain integration and external
+> adapters. The bridge manifest defines the border.
 
 - Rust is authoritative for coordination: internal bus routing, sessions,
   body-state projection, wake thresholds, brain action validation, delegated
   worker lifecycle, completion packet persistence, and restart hydration.
-- TypeScript owns the brain island, the current
-  `@earendil-works/pi-agent-core` / `@earendil-works/pi-ai` integration, tool
-  execution, role/profile composition, and platform adapters.
-- Den owns product data and observability. Den is not the internal
-  agent-to-agent coordination bus.
+- TypeScript owns the current `@earendil-works/pi-agent-core` /
+  `@earendil-works/pi-ai` integration, many model-callable tool
+  implementations, role/profile composition, MCP clients, and platform
+  adapters.
+- Rust brain modules are first-class only behind the same neutral
+  wake/stream/action/provider-state contract. They must not depend on
+  coordination internals, persistence, adapters, service-host code, or local
+  config.
+- Rusty Crew owns Crew service data: coordination state, profile registry,
+  provider state, transcripts, memory, lore, module data, telemetry, and
+  diagnostics. This storage must be partitioned by durable concern instead of
+  becoming one vague store.
+- Den owns Den product/planning/observability data. Den is not the internal
+  agent-to-agent coordination bus and is not the storage fallback for Crew
+  service data.
 - The brain receives frozen state snapshots and emits structured actions. It
   must not reach around Rust coordination internals.
 - Worker spawning and prompting are Rust-owned lifecycle operations, not
@@ -53,7 +64,7 @@ not the current planning queue.
       /core-protocol      # transport-free Rust protocol types
       /core-bus           # in-process coordination bus
       /core-session       # full/worker/delegated session registry
-      /core-persistence   # SQLite coordination store and hydration
+      /core-persistence   # Crew storage boundary: coordination + service data
       /core-body          # body projection, wake threshold, action executor
       /core-engine        # composition crate for the Rust coordination service
     /bridge
@@ -61,6 +72,7 @@ not the current planning queue.
       /core-bridge-node   # napi-rs native Node boundary
       /core-bridge-mock   # in-process test bridge
       /core-bridge-codegen # manifest/codegen placeholder
+    /brains               # Rust brain modules behind the neutral wake contract
   /docs                   # architecture notes, ADRs, measurements, smokes
   /governance
     ownership.toml        # crate/package ownership boundary rules
@@ -69,7 +81,7 @@ not the current planning queue.
       /contracts          # TypeScript contracts until codegen owns this
       /core-bridge        # TS bridge facade
       /native-bridge      # native addon loader
-      /brain-island       # pi Agent/LLM boundary
+      /brain-island       # pi Agent brain boundary and tool/profile assembly
       /adapter-den        # Den data + observability adapter
       /adapter-*          # remaining adapter boundaries
 ```
@@ -106,18 +118,19 @@ cargo run --release -p rusty-crew-core-bridge-node --bin measure_brain_event_thr
 
 ## Agent Lane Quick Reference
 
-| Lane             | Language | Crate/Package Dir                                            | May Not                                                                         |
-| ---------------- | -------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| rust-protocol    | Rust     | `crates/core/core-protocol`, `crates/bridge/core-bridge-api` | Depend on native bridge or TS runtime details                                   |
-| rust-bus         | Rust     | `crates/core/core-bus`                                       | Know about Den, Node, or platform adapters                                      |
-| rust-session     | Rust     | `crates/core/core-session`                                   | Own product data or adapter behavior                                            |
-| rust-body        | Rust     | `crates/core/core-body`                                      | Call LLMs or platform APIs directly                                             |
-| rust-persistence | Rust     | `crates/core/core-persistence`                               | Mirror Den product records into coordination storage                            |
-| rust-engine      | Rust     | `crates/core/core-engine`                                    | Move brain or adapter implementation details into core                          |
-| bridge-native    | Rust/TS  | `crates/bridge/*`, `ts/packages/*bridge*`                    | Expand manifest surface for convenience-only behavior                           |
-| ts-brain         | TS       | `ts/packages/brain-island`                                   | Route coordination around Rust                                                  |
-| ts-adapter       | TS       | `ts/packages/adapter-*`                                      | Make coordination decisions or block internal routing on observability failures |
-| contract-steward | Rust/TS  | `crates/bridge/core-bridge-api`, `ts/packages/contracts`     | Hand-edit generated artifacts once codegen owns them                            |
+| Lane             | Language | Crate/Package Dir                                            | May Not                                                                          |
+| ---------------- | -------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| rust-protocol    | Rust     | `crates/core/core-protocol`, `crates/bridge/core-bridge-api` | Depend on native bridge or TS runtime details                                    |
+| rust-bus         | Rust     | `crates/core/core-bus`                                       | Know about Den, Node, or platform adapters                                       |
+| rust-session     | Rust     | `crates/core/core-session`                                   | Own product data or adapter behavior                                             |
+| rust-body        | Rust     | `crates/core/core-body`                                      | Call LLMs or platform APIs directly                                              |
+| rust-persistence | Rust     | `crates/core/core-persistence`                               | Mirror Den product records or become one undifferentiated store                  |
+| rust-engine      | Rust     | `crates/core/core-engine`                                    | Move brain or adapter implementation details into core                           |
+| rust-brain       | Rust     | `crates/brains/*`                                            | Depend on coordination internals, persistence, adapters, service-host, or config |
+| bridge-native    | Rust/TS  | `crates/bridge/*`, `ts/packages/*bridge*`                    | Expand manifest surface for convenience-only behavior                            |
+| ts-brain         | TS       | `ts/packages/brain-island`                                   | Route coordination around Rust or own service-host/adapters as hidden globals    |
+| ts-adapter       | TS       | `ts/packages/adapter-*`                                      | Make coordination decisions or block internal routing on observability failures  |
+| contract-steward | Rust/TS  | `crates/bridge/core-bridge-api`, `ts/packages/contracts`     | Hand-edit generated artifacts once codegen owns them                             |
 
 ## Design Principles
 
