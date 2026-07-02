@@ -165,7 +165,12 @@ interface NativeBridgeBinding {
     wakeId: string,
     outputJson: string,
   ): void;
-  runOpenaiResponsesBrainJson(inputJson: string): string;
+  runOpenaiResponsesBrainJson(inputJson: string): Promise<string>;
+  startOpenaiResponsesBrainJson(inputJson: string): string;
+  drainOpenaiResponsesBrainStreamJson(
+    wakeId: string,
+    maxItems?: number,
+  ): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
@@ -1727,6 +1732,19 @@ export interface NativeBridgeModule {
   runOpenAiResponsesBrain(
     input: OpenAiResponsesBrainRunInput,
   ): Promise<BrainWakeExecutionResult>;
+  startOpenAiResponsesBrain(input: OpenAiResponsesBrainRunInput): Promise<{
+    wakeId: string;
+  }>;
+  drainOpenAiResponsesBrainStream(input: {
+    wakeId: string;
+    maxItems?: number;
+  }): Promise<{
+    wakeId: string;
+    items: BrainWakeStreamItem[];
+    terminal: boolean;
+    providerState?: BrainWakeProviderStateOutput;
+    error?: string;
+  }>;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
@@ -2009,6 +2027,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     removeDataBankScope: unavailable("remove_data_bank_scope"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     runOpenAiResponsesBrain: unavailable("wake_brain"),
+    startOpenAiResponsesBrain: unavailable("wake_brain"),
+    drainOpenAiResponsesBrainStream: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
     getProfileMemory: unavailable("initialize_engine"),
     addProfileMemory: unavailable("initialize_engine"),
@@ -2992,7 +3012,7 @@ function createNativeBridgeModule(
     },
     runOpenAiResponsesBrain: async (input) => {
       const raw = JSON.parse(
-        binding.runOpenaiResponsesBrainJson(
+        await binding.runOpenaiResponsesBrainJson(
           JSON.stringify(toNativeOpenAiResponsesBrainRunInput(input)),
         ),
       ) as RawOpenAiResponsesBrainRunResult;
@@ -3003,6 +3023,31 @@ function createNativeBridgeModule(
         providerState: raw.provider_state
           ? toBrainWakeProviderStateOutput(raw.provider_state)
           : undefined,
+      };
+    },
+    startOpenAiResponsesBrain: async (input) => {
+      const raw = JSON.parse(
+        binding.startOpenaiResponsesBrainJson(
+          JSON.stringify(toNativeOpenAiResponsesBrainRunInput(input)),
+        ),
+      ) as RawOpenAiResponsesBufferedStartResult;
+      return { wakeId: raw.wake_id };
+    },
+    drainOpenAiResponsesBrainStream: async (input) => {
+      const raw = JSON.parse(
+        binding.drainOpenaiResponsesBrainStreamJson(
+          input.wakeId,
+          input.maxItems,
+        ),
+      ) as RawOpenAiResponsesBufferedDrainResult;
+      return {
+        wakeId: raw.wake_id,
+        items: raw.items.map(toBrainWakeStreamItem),
+        terminal: raw.terminal,
+        providerState: raw.provider_state
+          ? toBrainWakeProviderStateOutput(raw.provider_state)
+          : undefined,
+        error: raw.error,
       };
     },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
@@ -4919,6 +4964,18 @@ interface RawAgentMessage {
 interface RawOpenAiResponsesBrainRunResult {
   stream: RawBrainWakeStreamItem[];
   provider_state?: RawBrainWakeProviderStateOutput;
+}
+
+interface RawOpenAiResponsesBufferedStartResult {
+  wake_id: string;
+}
+
+interface RawOpenAiResponsesBufferedDrainResult {
+  wake_id: string;
+  items: RawBrainWakeStreamItem[];
+  terminal: boolean;
+  provider_state?: RawBrainWakeProviderStateOutput;
+  error?: string;
 }
 
 type RawBrainWakeStreamItem =

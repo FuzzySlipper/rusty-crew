@@ -4,6 +4,7 @@ import type {
   CompletionPacket,
   BrainProviderStateScope,
   BrainWakeProviderStateOutput,
+  BrainWakeStreamItem,
   BrainStrategyMetadata,
   ProviderStateMode,
   SessionId,
@@ -361,6 +362,76 @@ function withOpenAiResponsesProviderStateScope<
   };
 }
 
+async function runOpenAiResponsesBrainWithIncrementalDrain(
+  context: BrainModuleContext,
+  input: Parameters<NativeBridgeModule["runOpenAiResponsesBrain"]>[0],
+): Promise<{
+  events: BrainEventEnvelope[];
+  actions: BrainAction[];
+  providerState?: BrainWakeProviderStateOutput;
+}> {
+  const bridge = context.bridge;
+  if (bridge === undefined) {
+    throw new Error(
+      "OpenAI Responses incremental drain requires native bridge",
+    );
+  }
+  const started = await bridge.startOpenAiResponsesBrain(input);
+  const actions: BrainAction[] = [];
+
+  for (;;) {
+    const drained = await bridge.drainOpenAiResponsesBrainStream({
+      wakeId: started.wakeId,
+      maxItems: 32,
+    });
+    let submittedEvent = false;
+    for (const item of drained.items) {
+      submittedEvent =
+        (await handleDrainedOpenAiResponsesStreamItem(bridge, item, actions)) ||
+        submittedEvent;
+    }
+    if (drained.error !== undefined) {
+      throw new Error(
+        `OpenAI Responses buffered wake ${started.wakeId} failed: ${drained.error}`,
+      );
+    }
+    if (drained.terminal) {
+      if (submittedEvent && actions.length > 0) {
+        await delay(25);
+      }
+      return {
+        events: [],
+        actions,
+        providerState: drained.providerState,
+      };
+    }
+    await delay(25);
+  }
+}
+
+async function handleDrainedOpenAiResponsesStreamItem(
+  bridge: NativeBridgeModule,
+  item: BrainWakeStreamItem,
+  actions: BrainAction[],
+): Promise<boolean> {
+  switch (item.type) {
+    case "event":
+      await bridge.submitBrainEvent(item.event);
+      return true;
+    case "actions":
+      actions.push(...item.batch.actions);
+      return false;
+    case "wake_failed":
+      throw new Error(
+        `OpenAI Responses wake ${item.failure.wakeId} failed: ${item.failure.message}`,
+      );
+  }
+}
+
+async function delay(delayMs: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
 export const openAiResponsesBrainModule: BrainModule = {
   moduleId: "openai-responses",
   displayName: "OpenAI Responses",
@@ -434,19 +505,20 @@ export const openAiResponsesBrainModule: BrainModule = {
       }> {
         if (context.bridge?.runOpenAiResponsesBrain !== undefined) {
           try {
+            const input = {
+              wakeId: wake.wakeId,
+              sessionId: wake.sessionId,
+              bodyState: wake.state,
+              providerState: wake.providerState,
+              providerStateAbsence: wake.providerStateAbsence,
+              config: {
+                model: context.profile.profile.modelConfig.modelName,
+                instructions: wake.systemPrompt,
+              },
+              client: openAiResponsesClientConfig(context),
+            };
             return withOpenAiResponsesProviderStateScope(
-              await context.bridge.runOpenAiResponsesBrain({
-                wakeId: wake.wakeId,
-                sessionId: wake.sessionId,
-                bodyState: wake.state,
-                providerState: wake.providerState,
-                providerStateAbsence: wake.providerStateAbsence,
-                config: {
-                  model: context.profile.profile.modelConfig.modelName,
-                  instructions: wake.systemPrompt,
-                },
-                client: openAiResponsesClientConfig(context),
-              }),
+              await runOpenAiResponsesBrainWithIncrementalDrain(context, input),
               context,
             );
           } catch (error) {
@@ -454,6 +526,27 @@ export const openAiResponsesBrainModule: BrainModule = {
               process.env.RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE === "1"
             ) {
               throw error;
+            }
+            try {
+              return withOpenAiResponsesProviderStateScope(
+                await context.bridge.runOpenAiResponsesBrain({
+                  wakeId: wake.wakeId,
+                  sessionId: wake.sessionId,
+                  bodyState: wake.state,
+                  providerState: wake.providerState,
+                  providerStateAbsence: wake.providerStateAbsence,
+                  config: {
+                    model: context.profile.profile.modelConfig.modelName,
+                    instructions: wake.systemPrompt,
+                  },
+                  client: openAiResponsesClientConfig(context),
+                }),
+                context,
+              );
+            } catch {
+              // Fall through to the deterministic TS scaffold below. This
+              // preserves the existing non-required-native behavior while the
+              // buffered drain path is still settling.
             }
           }
         }

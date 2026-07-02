@@ -53,23 +53,23 @@ use rusty_crew_core_persistence::{
     SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
-    AttachmentId, BodyState, BrainWakeProviderStateInput, ContextCompactionArtifact,
-    ContextCompactionArtifactQuery, DataBankScopeId, MemoryGovernanceDecisionInput,
-    MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
-    MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus, ProfileRegistryUpdate,
-    ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
+    AttachmentId, BodyState, BrainWakeProviderStateInput, BrainWakeStreamItem,
+    ContextCompactionArtifact, ContextCompactionArtifactQuery, DataBankScopeId,
+    MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
+    MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
+    MessageVariantId, ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus,
+    ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_openai_responses_brain::{
     FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
     NeutralToolOutput, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
-    ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage,
+    ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::Receiver;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug)]
 pub struct NativeBridge {
@@ -2196,6 +2196,67 @@ fn default_responses_stream_idle_timeout_ms() -> u64 {
     30_000
 }
 
+pub struct OpenAiResponsesBrainRunTask {
+    input_json: String,
+}
+
+struct OpenAiResponsesBrainRunOutput {
+    stream: Vec<BrainWakeStreamItem>,
+    provider_state: Option<BrainWakeProviderStateOutput>,
+    transport_metrics: ResponsesTransportMetrics,
+}
+
+#[derive(Debug, Default)]
+struct BufferedOpenAiResponsesRun {
+    items: VecDeque<BrainWakeStreamItem>,
+    terminal: bool,
+    provider_state: Option<BrainWakeProviderStateOutput>,
+    transport_metrics: Option<ResponsesTransportMetrics>,
+    error: Option<String>,
+}
+
+static OPENAI_RESPONSES_BUFFERED_RUNS: OnceLock<
+    Mutex<HashMap<String, BufferedOpenAiResponsesRun>>,
+> = OnceLock::new();
+
+fn openai_responses_buffered_runs() -> &'static Mutex<HashMap<String, BufferedOpenAiResponsesRun>> {
+    OPENAI_RESPONSES_BUFFERED_RUNS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+impl napi::Task for OpenAiResponsesBrainRunTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        run_openai_responses_brain_json_blocking(std::mem::take(&mut self.input_json))
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
+    let result = run_openai_responses_brain(input_json);
+    let mut runs = openai_responses_buffered_runs()
+        .lock()
+        .expect("openai responses buffered run registry poisoned");
+    let Some(run) = runs.get_mut(&wake_id) else {
+        return;
+    };
+    match result {
+        Ok(output) => {
+            run.items.extend(output.stream);
+            run.provider_state = output.provider_state;
+            run.transport_metrics = Some(output.transport_metrics);
+        }
+        Err(error) => {
+            run.error = Some(error.to_string());
+        }
+    }
+    run.terminal = true;
+}
+
 struct EchoNeutralToolExecutor;
 
 impl NeutralToolExecutor for EchoNeutralToolExecutor {
@@ -2487,7 +2548,18 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
-    pub fn run_openai_responses_brain_json(&self, input_json: String) -> napi::Result<String> {
+    pub fn run_openai_responses_brain_json(
+        &self,
+        input_json: String,
+    ) -> napi::bindgen_prelude::AsyncTask<OpenAiResponsesBrainRunTask> {
+        // The responses brain still uses blocking provider I/O internally.
+        // Running it as a napi task keeps the Node event loop available for
+        // admin APIs, adapters, and SSE while this worker-thread task drains.
+        napi::bindgen_prelude::AsyncTask::new(OpenAiResponsesBrainRunTask { input_json })
+    }
+
+    #[napi]
+    pub fn start_openai_responses_brain_json(&self, input_json: String) -> napi::Result<String> {
         let input: JsOpenAiResponsesBrainRunInput =
             serde_json::from_str(&input_json).map_err(|error| {
                 napi::Error::new(
@@ -2495,65 +2567,72 @@ impl NativeBridgeBinding {
                     format!("invalid OpenAI Responses brain input JSON: {error}"),
                 )
             })?;
-        let mut config = ResponsesBrainConfig::replay(input.config.model);
-        config.instructions = input.config.instructions;
-        config.stream_idle_timeout_ms = input.config.stream_idle_timeout_ms;
-        let descriptors = input
-            .body_state
-            .session
-            .tool_profile
-            .tools
-            .iter()
-            .map(|tool| NeutralBrainTool {
-                name: tool.name.clone(),
-                description: tool.description.clone(),
-                input_schema: json!({"type": "object", "properties": {}}),
-            })
-            .collect::<Vec<_>>();
-        let history = rusty_crew_openai_responses_brain::ResponsesReplayProjection::from_body_state(
-            &input.body_state,
-        );
-        let request = BrainWakeRequest {
-            brain: BrainImplementationHandle::new(0),
-            session_id: SessionId::new(input.session_id),
-            body_state: RuntimeBufferHandle::new(0),
-            system_prompt: RuntimeBufferHandle::new(0),
-            role_assembly: RuntimeBufferHandle::new(0),
-            wake_id: input.wake_id,
-            provider_state: input.provider_state,
-            provider_state_absence: input
-                .provider_state_absence
-                .as_deref()
-                .map(parse_provider_state_absence_reason)
-                .transpose()
-                .map_err(to_napi_error)?,
-        };
-        let result = match input.client {
-            JsOpenAiResponsesClientConfig::Fake => {
-                let client = fake_responses_client_for_body(&input.body_state);
-                let mut brain =
-                    ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
-                brain.wake_with_history(request, history)
+        let wake_id = input.wake_id;
+        {
+            let mut runs = openai_responses_buffered_runs().lock().map_err(|_| {
+                napi::Error::new(
+                    napi::Status::GenericFailure,
+                    "openai responses buffered run registry is poisoned",
+                )
+            })?;
+            if runs.contains_key(&wake_id) {
+                return Err(napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("OpenAI Responses buffered wake {wake_id} already exists"),
+                ));
             }
-            JsOpenAiResponsesClientConfig::Live { base_url, api_key } => {
-                let client =
-                    LiveResponsesClient::new(base_url, api_key, config.stream_idle_timeout_ms)
-                        .map_err(|error| {
-                            napi::Error::new(napi::Status::GenericFailure, error.to_string())
-                        })?;
-                let mut brain =
-                    ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
-                brain.wake_with_history(request, history)
-            }
+            runs.insert(wake_id.clone(), BufferedOpenAiResponsesRun::default());
         }
-        .map_err(to_napi_error)?;
+        let thread_wake_id = wake_id.clone();
+        std::thread::spawn(move || run_openai_responses_brain_buffered(thread_wake_id, input_json));
+        serde_json::to_string(&json!({ "wake_id": wake_id })).map_err(|error| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("serialize OpenAI Responses buffered wake start: {error}"),
+            )
+        })
+    }
+
+    #[napi]
+    pub fn drain_openai_responses_brain_stream_json(
+        &self,
+        wake_id: String,
+        max_items: Option<u32>,
+    ) -> napi::Result<String> {
+        let max_items = max_items.unwrap_or(64).max(1) as usize;
+        let mut runs = openai_responses_buffered_runs().lock().map_err(|_| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                "openai responses buffered run registry is poisoned",
+            )
+        })?;
+        let run = runs.get_mut(&wake_id).ok_or_else(|| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("OpenAI Responses buffered wake {wake_id} was not found"),
+            )
+        })?;
+        let items = (0..max_items)
+            .filter_map(|_| run.items.pop_front())
+            .collect::<Vec<_>>();
+        let terminal = run.terminal && run.items.is_empty();
         let output = json!({
-            "stream": result.stream.drain_until_terminal().map_err(to_napi_error)?,
-            "provider_state": result.provider_state,
-            "transport_metrics": result.transport_metrics,
+            "wake_id": wake_id,
+            "items": items,
+            "terminal": terminal,
+            "provider_state": terminal.then(|| run.provider_state.clone()).flatten(),
+            "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
+            "error": terminal.then(|| run.error.clone()).flatten(),
         });
-        serde_json::to_string(&output)
-            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+        if terminal {
+            runs.remove(&wake_id);
+        }
+        serde_json::to_string(&output).map_err(|error| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("serialize OpenAI Responses buffered wake drain: {error}"),
+            )
+        })
     }
 
     #[napi]
@@ -5075,7 +5154,95 @@ fn parse_provider_state_absence_reason(
     })
 }
 
+fn run_openai_responses_brain_json_blocking(input_json: String) -> napi::Result<String> {
+    let output = run_openai_responses_brain(input_json)?;
+    let output = json!({
+        "stream": output.stream,
+        "provider_state": output.provider_state,
+        "transport_metrics": output.transport_metrics,
+    });
+    serde_json::to_string(&output)
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+}
+
+fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponsesBrainRunOutput> {
+    let input: JsOpenAiResponsesBrainRunInput =
+        serde_json::from_str(&input_json).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid OpenAI Responses brain input JSON: {error}"),
+            )
+        })?;
+    let mut config = ResponsesBrainConfig::replay(input.config.model);
+    config.instructions = input.config.instructions;
+    config.stream_idle_timeout_ms = input.config.stream_idle_timeout_ms;
+    let descriptors = input
+        .body_state
+        .session
+        .tool_profile
+        .tools
+        .iter()
+        .map(|tool| NeutralBrainTool {
+            name: tool.name.clone(),
+            description: tool.description.clone(),
+            input_schema: json!({"type": "object", "properties": {}}),
+        })
+        .collect::<Vec<_>>();
+    let history = rusty_crew_openai_responses_brain::ResponsesReplayProjection::from_body_state(
+        &input.body_state,
+    );
+    let request = BrainWakeRequest {
+        brain: BrainImplementationHandle::new(0),
+        session_id: SessionId::new(input.session_id),
+        body_state: RuntimeBufferHandle::new(0),
+        system_prompt: RuntimeBufferHandle::new(0),
+        role_assembly: RuntimeBufferHandle::new(0),
+        wake_id: input.wake_id,
+        provider_state: input.provider_state,
+        provider_state_absence: input
+            .provider_state_absence
+            .as_deref()
+            .map(parse_provider_state_absence_reason)
+            .transpose()
+            .map_err(to_napi_error)?,
+    };
+    let result = match input.client {
+        JsOpenAiResponsesClientConfig::Fake => {
+            let client = fake_responses_client_for_body(&input.body_state);
+            let mut brain =
+                ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
+            brain.wake_with_history(request, history)
+        }
+        JsOpenAiResponsesClientConfig::Live { base_url, api_key } => {
+            let client = LiveResponsesClient::new(base_url, api_key, config.stream_idle_timeout_ms)
+                .map_err(|error| {
+                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                })?;
+            let mut brain =
+                ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
+            brain.wake_with_history(request, history)
+        }
+    }
+    .map_err(to_napi_error)?;
+    Ok(OpenAiResponsesBrainRunOutput {
+        stream: result
+            .stream
+            .drain_until_terminal()
+            .map_err(to_napi_error)?,
+        provider_state: result.provider_state,
+        transport_metrics: result.transport_metrics,
+    })
+}
+
 fn fake_responses_client_for_body(body: &BodyState) -> FakeResponsesClient {
+    if let Ok(raw_delay_ms) = std::env::var("RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS") {
+        if let Ok(delay_ms) = raw_delay_ms.parse::<u64>() {
+            if delay_ms > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            }
+        }
+    }
+
     let Some(tool) = body.session.tool_profile.tools.first() else {
         return FakeResponsesClient::new(vec![Ok(vec![
             ResponsesEvent::TextDelta("responses module scaffold wake completed".to_string()),
