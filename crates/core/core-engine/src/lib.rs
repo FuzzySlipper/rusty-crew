@@ -608,83 +608,91 @@ impl CoreEngine {
     }
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
-        self.store.count_rows(table)
+        self.store.admin().count_rows(table)
     }
 
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
-        self.store.database_size()
+        self.store.admin().database_size()
     }
 
     pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
-        self.store.storage_diagnostics()
+        self.store.admin().storage_diagnostics()
     }
 
     pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
-        self.store.storage_schema()
+        self.store.admin().storage_schema()
     }
 
     pub fn list_profile_registry_records(
         &self,
         query: &ProfileRegistryQuery,
     ) -> CoreResult<Vec<ProfileRegistryRecord>> {
-        self.store.list_profile_registry_records(query)
+        self.store
+            .service_data()
+            .list_profile_registry_records(query)
     }
 
     pub fn create_profile_registry_record(
         &self,
         write: &ProfileRegistryWrite,
     ) -> CoreResult<ProfileRegistryRecord> {
-        self.store.create_profile_registry_record(write)
+        self.store
+            .service_data()
+            .create_profile_registry_record(write)
     }
 
     pub fn update_profile_registry_record(
         &self,
         update: &rusty_crew_core_protocol::ProfileRegistryUpdate,
     ) -> CoreResult<ProfileRegistryRecord> {
-        self.store.update_profile_registry_record(update)
+        self.store
+            .service_data()
+            .update_profile_registry_record(update)
     }
 
     pub fn get_profile_registry_record(
         &self,
         profile_id: &ProfileId,
     ) -> CoreResult<Option<ProfileRegistryRecord>> {
-        self.store.get_profile_registry_record(profile_id)
+        self.store
+            .service_data()
+            .get_profile_registry_record(profile_id)
     }
 
     pub fn upsert_model_provider(
         &self,
         write: &ModelProviderWrite,
     ) -> CoreResult<ModelProviderRecord> {
-        self.store.upsert_model_provider(write)
+        self.store.service_data().upsert_model_provider(write)
     }
 
     pub fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
-        self.store.get_model_provider(alias)
+        self.store.service_data().get_model_provider(alias)
     }
 
     pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
-        self.store.get_model_provider_secret(alias)
+        self.store.service_data().get_model_provider_secret(alias)
     }
 
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,
     ) -> CoreResult<Vec<ModelProviderRecord>> {
-        self.store.list_model_providers(query)
+        self.store.service_data().list_model_providers(query)
     }
 
     pub fn add_roleplay_lore_record(
         &self,
         write: &RoleplayLoreWrite,
     ) -> CoreResult<RoleplayLoreRecord> {
-        self.store.add_roleplay_lore_record(write)
+        self.store.memory().add_roleplay_lore_record(write)
     }
 
     pub fn replace_roleplay_lore_record(
         &self,
         replace: &RoleplayLoreReplace,
     ) -> CoreResult<RoleplayLoreRecord> {
-        self.store.replace_roleplay_lore_record(replace)
+        self.store.memory().replace_roleplay_lore_record(replace)
     }
 
     pub fn supersede_roleplay_lore_record(
@@ -705,7 +713,7 @@ impl CoreEngine {
         &self,
         query: &RoleplayLoreQuery,
     ) -> CoreResult<Vec<RoleplayLoreRecord>> {
-        self.store.query_roleplay_lore_records(query)
+        self.store.memory().query_roleplay_lore_records(query)
     }
 
     pub fn roleplay_lore_provenance_events(
@@ -837,61 +845,61 @@ impl CoreEngine {
     }
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
-        self.store.list_simple_kv(query)
+        self.store.module_data().list_simple_kv(query)
     }
 
     pub fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
-        self.store.put_simple_kv(write)
+        self.store.module_data().put_simple_kv(write)
     }
 
     pub fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
-        self.store.delete_simple_kv(delete)
+        self.store.module_data().delete_simple_kv(delete)
     }
 
     pub fn run_maintenance(
         &self,
         policy: &RuntimeMaintenancePolicy,
     ) -> CoreResult<RuntimeMaintenanceReport> {
-        self.store.run_maintenance(policy)
+        self.store.admin().run_maintenance(policy)
     }
 
     pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
-        self.store.save_message_slot(slot)
+        self.store.conversation().save_message_slot(slot)
     }
 
     pub fn save_message_variant(
         &self,
         variant: &MessageVariantWrite,
     ) -> CoreResult<MessageVariantRecord> {
-        self.store.save_message_variant(variant)
+        self.store.conversation().save_message_variant(variant)
     }
 
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,
     ) -> CoreResult<Vec<MessageSlotRecord>> {
-        self.store.query_message_slots(query)
+        self.store.conversation().query_message_slots(query)
     }
 
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
-        self.store.query_message_variants(query)
+        self.store.conversation().query_message_variants(query)
     }
 
     pub fn save_conversation_branch(
         &self,
         branch: &ConversationBranchWrite,
     ) -> CoreResult<ConversationBranchRecord> {
-        self.store.save_conversation_branch(branch)
+        self.store.conversation().save_conversation_branch(branch)
     }
 
     pub fn query_conversation_branches(
         &self,
         query: &ConversationBranchQuery,
     ) -> CoreResult<Vec<ConversationBranchRecord>> {
-        self.store.query_conversation_branches(query)
+        self.store.conversation().query_conversation_branches(query)
     }
 
     pub fn get_conversation_branch_state(
@@ -900,6 +908,7 @@ impl CoreEngine {
         default_updated_at: &IsoTimestamp,
     ) -> CoreResult<ConversationBranchStateRecord> {
         self.store
+            .conversation()
             .get_conversation_branch_state(session_id, default_updated_at)
     }
 
@@ -907,43 +916,51 @@ impl CoreEngine {
         &self,
         request: &SelectActiveBranchRequest,
     ) -> CoreResult<SelectActiveBranchResult> {
-        self.store.select_active_conversation_branch(request)
+        self.store
+            .conversation()
+            .select_active_conversation_branch(request)
     }
 
     pub fn update_conversation_branch_head(
         &self,
         request: &UpdateBranchHeadRequest,
     ) -> CoreResult<UpdateBranchHeadResult> {
-        self.store.update_conversation_branch_head(request)
+        self.store
+            .conversation()
+            .update_conversation_branch_head(request)
     }
 
     pub fn save_conversation_snapshot(
         &self,
         snapshot: &ConversationSnapshotWrite,
     ) -> CoreResult<ConversationSnapshotRecord> {
-        self.store.save_conversation_snapshot(snapshot)
+        self.store
+            .conversation()
+            .save_conversation_snapshot(snapshot)
     }
 
     pub fn query_conversation_snapshots(
         &self,
         query: &ConversationSnapshotQuery,
     ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
-        self.store.query_conversation_snapshots(query)
+        self.store
+            .conversation()
+            .query_conversation_snapshots(query)
     }
 
     pub fn resolve_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
     ) -> CoreResult<ConversationJumpResult> {
-        self.store.resolve_conversation_jump(request)
+        self.store.conversation().resolve_conversation_jump(request)
     }
 
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
-        self.store.save_attachment(attachment)
+        self.store.conversation().save_attachment(attachment)
     }
 
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
-        self.store.query_attachments(query)
+        self.store.conversation().query_attachments(query)
     }
 
     pub fn remove_attachment(
@@ -951,21 +968,23 @@ impl CoreEngine {
         attachment_id: &AttachmentId,
         updated_at: &IsoTimestamp,
     ) -> CoreResult<AttachmentRecord> {
-        self.store.remove_attachment(attachment_id, updated_at)
+        self.store
+            .conversation()
+            .remove_attachment(attachment_id, updated_at)
     }
 
     pub fn save_data_bank_scope(
         &self,
         scope: &DataBankScopeWrite,
     ) -> CoreResult<DataBankScopeRecord> {
-        self.store.save_data_bank_scope(scope)
+        self.store.conversation().save_data_bank_scope(scope)
     }
 
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
     ) -> CoreResult<Vec<DataBankScopeRecord>> {
-        self.store.query_data_bank_scopes(query)
+        self.store.conversation().query_data_bank_scopes(query)
     }
 
     pub fn remove_data_bank_scope(
@@ -973,14 +992,18 @@ impl CoreEngine {
         scope_id: &DataBankScopeId,
         updated_at: &IsoTimestamp,
     ) -> CoreResult<DataBankScopeRecord> {
-        self.store.remove_data_bank_scope(scope_id, updated_at)
+        self.store
+            .conversation()
+            .remove_data_bank_scope(scope_id, updated_at)
     }
 
     pub fn select_active_message_variant(
         &self,
         request: &SelectActiveVariantRequest,
     ) -> CoreResult<SelectActiveVariantResult> {
-        self.store.select_active_message_variant(request)
+        self.store
+            .conversation()
+            .select_active_message_variant(request)
     }
 
     pub fn delete_message_variant(
@@ -990,6 +1013,7 @@ impl CoreEngine {
         updated_at: &IsoTimestamp,
     ) -> CoreResult<MessageSlotRecord> {
         self.store
+            .conversation()
             .delete_message_variant(slot_id, variant_id, updated_at)
     }
 
@@ -1000,6 +1024,7 @@ impl CoreEngine {
         updated_at: &IsoTimestamp,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         self.store
+            .conversation()
             .reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
     }
 
@@ -1007,7 +1032,7 @@ impl CoreEngine {
         &self,
         query: &ProfileMemoryQuery,
     ) -> CoreResult<Vec<ProfileMemoryRecord>> {
-        self.store.list_profile_memory(query)
+        self.store.memory().list_profile_memory(query)
     }
 
     pub fn list_memory_space_descriptors(&self) -> CoreResult<Vec<MemorySpaceDescriptor>> {
@@ -1021,14 +1046,16 @@ impl CoreEngine {
         &self,
         query: &SessionMemoryQuery,
     ) -> CoreResult<Vec<SessionMemoryRecord>> {
-        self.store.query_session_memory_records(query)
+        self.store.memory().query_session_memory_records(query)
     }
 
     pub fn build_session_memory_prompt_context(
         &self,
         query: &BranchAwareSessionMemoryQuery,
     ) -> CoreResult<SessionMemoryPromptContext> {
-        self.store.build_session_memory_prompt_context(query)
+        self.store
+            .memory()
+            .build_session_memory_prompt_context(query)
     }
 
     pub fn save_memory_proposal(
@@ -1041,6 +1068,7 @@ impl CoreEngine {
             proposal.created_at = Some(now.clone());
         }
         self.store
+            .memory()
             .save_memory_proposal(&proposal, &descriptor, &now)
     }
 
@@ -1048,35 +1076,39 @@ impl CoreEngine {
         &self,
         query: &MemoryProposalQuery,
     ) -> CoreResult<Vec<MemoryProposalRecord>> {
-        self.store.list_memory_proposals(query)
+        self.store.memory().list_memory_proposals(query)
     }
 
     pub fn save_session_activity_digest(
         &self,
         digest: &SessionActivityDigest,
     ) -> CoreResult<SessionActivityDigest> {
-        self.store.save_session_activity_digest(digest)
+        self.store.memory().save_session_activity_digest(digest)
     }
 
     pub fn list_session_activity_digests(
         &self,
         query: &SessionActivityDigestQuery,
     ) -> CoreResult<Vec<SessionActivityDigest>> {
-        self.store.list_session_activity_digests(query)
+        self.store.memory().list_session_activity_digests(query)
     }
 
     pub fn save_context_compaction_artifact(
         &self,
         artifact: &ContextCompactionArtifact,
     ) -> CoreResult<ContextCompactionArtifact> {
-        self.store.save_context_compaction_artifact(artifact)
+        self.store
+            .conversation()
+            .save_context_compaction_artifact(artifact)
     }
 
     pub fn list_context_compaction_artifacts(
         &self,
         query: &ContextCompactionArtifactQuery,
     ) -> CoreResult<Vec<ContextCompactionArtifact>> {
-        self.store.list_context_compaction_artifacts(query)
+        self.store
+            .conversation()
+            .list_context_compaction_artifacts(query)
     }
 
     pub fn record_memory_governance_decision(
@@ -1084,6 +1116,7 @@ impl CoreEngine {
         decision: &MemoryGovernanceDecisionInput,
     ) -> CoreResult<MemoryGovernanceDecisionRecord> {
         self.store
+            .memory()
             .record_memory_governance_decision(decision, &self.now())
     }
 
@@ -1108,7 +1141,9 @@ impl CoreEngine {
         target: &ProfileMemoryTarget,
         key: &str,
     ) -> CoreResult<Option<ProfileMemoryRecord>> {
-        self.store.get_profile_memory(profile_id, target, key)
+        self.store
+            .memory()
+            .get_profile_memory(profile_id, target, key)
     }
 
     pub fn add_profile_memory(
@@ -1117,7 +1152,7 @@ impl CoreEngine {
         caps: &ProfileMemoryCaps,
     ) -> CoreResult<ProfileMemoryRecord> {
         write.now = self.now();
-        self.store.add_profile_memory(&write, caps)
+        self.store.memory().add_profile_memory(&write, caps)
     }
 
     pub fn replace_profile_memory(
@@ -1126,36 +1161,36 @@ impl CoreEngine {
         caps: &ProfileMemoryCaps,
     ) -> CoreResult<ProfileMemoryRecord> {
         replace.write.now = self.now();
-        self.store.replace_profile_memory(&replace, caps)
+        self.store.memory().replace_profile_memory(&replace, caps)
     }
 
     pub fn remove_profile_memory(
         &self,
         delete: &ProfileMemoryDelete,
     ) -> CoreResult<ProfileMemoryRecord> {
-        self.store.remove_profile_memory(delete)
+        self.store.memory().remove_profile_memory(delete)
     }
 
     pub fn search_runtime(
         &self,
         filter: &RuntimeSearchFilter,
     ) -> CoreResult<Vec<RuntimeSearchResult>> {
-        self.store.search_runtime(filter)
+        self.store.admin().search_runtime(filter)
     }
 
     pub fn query_runtime_counters(
         &self,
         query: &RuntimeCounterQuery,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
-        self.store.query_runtime_counters(query)
+        self.store.admin().query_runtime_counters(query)
     }
 
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
-        self.store.runtime_summary(scope)
+        self.store.admin().runtime_summary(scope)
     }
 
     pub fn reset_runtime_counters(&self, query: &RuntimeCounterQuery) -> CoreResult<u64> {
-        self.store.reset_runtime_counters(query, self.now())
+        self.store.admin().reset_runtime_counters(query, self.now())
     }
 
     pub fn register_scheduled_wake_job(
@@ -1188,7 +1223,7 @@ impl CoreEngine {
             updated_at: now,
             paused_at: None,
         };
-        self.store.upsert_scheduled_job(&record)?;
+        self.store.coordination().upsert_scheduled_job(&record)?;
         Ok(record)
     }
 
@@ -1220,7 +1255,7 @@ impl CoreEngine {
             updated_at: now,
             paused_at: None,
         };
-        self.store.upsert_scheduled_job(&record)?;
+        self.store.coordination().upsert_scheduled_job(&record)?;
         Ok(record)
     }
 
@@ -1231,12 +1266,14 @@ impl CoreEngine {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> CoreResult<Vec<ScheduledJobRecord>> {
-        self.store.query_scheduled_jobs(&ScheduledJobQuery {
-            status,
-            job_kind,
-            page: Some(QueryPage { limit, offset }),
-            ..ScheduledJobQuery::default()
-        })
+        self.store
+            .coordination()
+            .query_scheduled_jobs(&ScheduledJobQuery {
+                status,
+                job_kind,
+                page: Some(QueryPage { limit, offset }),
+                ..ScheduledJobQuery::default()
+            })
     }
 
     pub fn list_scheduled_runs(
@@ -1248,14 +1285,16 @@ impl CoreEngine {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> CoreResult<Vec<ScheduledRunRecord>> {
-        self.store.query_scheduled_runs(&ScheduledRunQuery {
-            job_id,
-            status,
-            trigger,
-            target_session_id,
-            page: Some(QueryPage { limit, offset }),
-            ..ScheduledRunQuery::default()
-        })
+        self.store
+            .coordination()
+            .query_scheduled_runs(&ScheduledRunQuery {
+                job_id,
+                status,
+                trigger,
+                target_session_id,
+                page: Some(QueryPage { limit, offset }),
+                ..ScheduledRunQuery::default()
+            })
     }
 
     pub fn claim_scheduled_host_runs(
@@ -1268,7 +1307,9 @@ impl CoreEngine {
         })?;
         let supported_job_kinds = normalized_supported_host_job_kinds(supported_job_kinds)?;
         let now = self.now();
-        self.store.expire_stale_scheduled_runs(&now, &now)?;
+        self.store
+            .coordination()
+            .expire_stale_scheduled_runs(&now, &now)?;
         let mut claimed = Vec::new();
         let max_claims = limit.unwrap_or(10).clamp(1, 100);
         for job_kind in supported_job_kinds {
@@ -1276,15 +1317,18 @@ impl CoreEngine {
                 break;
             }
             let remaining = max_claims.saturating_sub(claimed.len() as u32);
-            let due_jobs = self.store.query_scheduled_jobs(&ScheduledJobQuery {
-                status: Some(ScheduledJobStatus::Active),
-                job_kind: Some(job_kind),
-                due_at_or_before: Some(now.clone()),
-                page: Some(QueryPage {
-                    limit: Some(remaining),
-                    offset: None,
-                }),
-            })?;
+            let due_jobs = self
+                .store
+                .coordination()
+                .query_scheduled_jobs(&ScheduledJobQuery {
+                    status: Some(ScheduledJobStatus::Active),
+                    job_kind: Some(job_kind),
+                    due_at_or_before: Some(now.clone()),
+                    page: Some(QueryPage {
+                        limit: Some(remaining),
+                        offset: None,
+                    }),
+                })?;
             for job in due_jobs {
                 claimed.push(self.claim_scheduled_run(
                     &job,
@@ -1302,7 +1346,7 @@ impl CoreEngine {
         supported_job_kinds: Vec<String>,
     ) -> CoreResult<Option<ScheduledRunRecord>> {
         let supported_job_kinds = normalized_supported_host_job_kinds(supported_job_kinds)?;
-        let Some(job) = self.store.load_scheduled_job(job_id)? else {
+        let Some(job) = self.store.coordination().load_scheduled_job(job_id)? else {
             return Ok(None);
         };
         if job.status == ScheduledJobStatus::Archived {

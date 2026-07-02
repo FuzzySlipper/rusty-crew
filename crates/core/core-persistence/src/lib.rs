@@ -6,6 +6,7 @@
 pub mod module_schema;
 #[cfg(feature = "postgres")]
 pub mod postgres_proof;
+mod repos;
 mod repositories;
 
 pub use crate::module_schema::{
@@ -60,23 +61,24 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+pub(crate) use repos::queued_messages::{
+    expire_queued_messages_in_tx, load_queued_messages, purge_terminal_queued_messages_in_tx,
+    save_queued_message_in_tx,
+};
+pub(crate) use repos::runtime_counters::{
+    counter_value, increment_counter_for_scopes_in_tx, increment_event_counters_in_tx,
+    load_runtime_counters, query_runtime_counters, reset_runtime_counters, COUNTER_BRAIN_TURNS,
+    COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED, COUNTER_DELEGATIONS_COMPLETED,
+    COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED, COUNTER_DELEGATIONS_TIMED_OUT,
+    COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS,
+    COUNTER_WAKES,
+};
+
 const DB_FILE_NAME: &str = "coordination.sqlite3";
 const CURRENT_SCHEMA_VERSION: i64 = 31;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
-const COUNTER_BRAIN_TURNS: &str = "brain_turns";
-const COUNTER_WAKES: &str = "wakes";
-const COUNTER_TOOL_CALLS: &str = "tool_calls";
-const COUNTER_TOOL_ERRORS: &str = "tool_errors";
-const COUNTER_DELEGATIONS_CREATED: &str = "delegations_created";
-const COUNTER_DELEGATIONS_COMPLETED: &str = "delegations_completed";
-const COUNTER_DELEGATIONS_FAILED: &str = "delegations_failed";
-const COUNTER_DELEGATIONS_TIMED_OUT: &str = "delegations_timed_out";
-const COUNTER_DELEGATIONS_CANCELLED: &str = "delegations_cancelled";
-const COUNTER_MESSAGES: &str = "messages";
-const COUNTER_COMPLETIONS: &str = "completions";
-const COUNTER_QUEUE_EXPIRATIONS: &str = "queue_expirations";
 
 struct SchemaMigration {
     version: i64,
@@ -118,12 +120,12 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         version: 7,
         description: "add durable runtime counters",
-        apply: migrate_v7_add_runtime_counters,
+        apply: repos::runtime_counters::migrate_v7_add_runtime_counters,
     },
     SchemaMigration {
         version: 8,
         description: "add queued message retention state",
-        apply: migrate_v8_add_queued_message_retention,
+        apply: repos::queued_messages::migrate_v8_add_queued_message_retention,
     },
     SchemaMigration {
         version: 9,
@@ -153,7 +155,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         version: 14,
         description: "add scheduler job and run persistence",
-        apply: migrate_v14_add_scheduler_persistence,
+        apply: repos::scheduler::migrate_v14_add_scheduler_persistence,
     },
     SchemaMigration {
         version: 15,
@@ -260,6 +262,36 @@ pub enum CoreCoordinationStore {
     Postgres(Arc<postgres_proof::PostgresRuntimeCounterProofStore>),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CoordinationRepositorySet<'a> {
+    store: &'a CoreCoordinationStore,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ServiceDataRepositorySet<'a> {
+    store: &'a CoreCoordinationStore,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ConversationRepositorySet<'a> {
+    store: &'a CoreCoordinationStore,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryRepositorySet<'a> {
+    store: &'a CoreCoordinationStore,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleDataRepositorySet<'a> {
+    store: &'a CoreCoordinationStore,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct StorageAdminRepositorySet<'a> {
+    store: &'a CoreCoordinationStore,
+}
+
 impl CoreCoordinationStore {
     pub fn open_storage(
         engine_data_dir: impl AsRef<Path>,
@@ -304,6 +336,30 @@ impl CoreCoordinationStore {
             #[cfg(feature = "postgres")]
             Self::Postgres(_) => CoreCoordinationStoreBackend::Postgres,
         }
+    }
+
+    pub fn coordination(&self) -> CoordinationRepositorySet<'_> {
+        CoordinationRepositorySet { store: self }
+    }
+
+    pub fn service_data(&self) -> ServiceDataRepositorySet<'_> {
+        ServiceDataRepositorySet { store: self }
+    }
+
+    pub fn conversation(&self) -> ConversationRepositorySet<'_> {
+        ConversationRepositorySet { store: self }
+    }
+
+    pub fn memory(&self) -> MemoryRepositorySet<'_> {
+        MemoryRepositorySet { store: self }
+    }
+
+    pub fn module_data(&self) -> ModuleDataRepositorySet<'_> {
+        ModuleDataRepositorySet { store: self }
+    }
+
+    pub fn admin(&self) -> StorageAdminRepositorySet<'_> {
+        StorageAdminRepositorySet { store: self }
     }
 
     pub fn sqlite_compat_store(&self) -> &CoordinationStore {
@@ -423,7 +479,7 @@ impl CoreCoordinationStore {
                     parent_session_id: Some(parent_session_id.clone()),
                     ..Default::default()
                 })?;
-                Ok(aggregate_fan_out_groups(
+                Ok(repos::worker_runs::aggregate_fan_out_groups(
                     runs.into_iter()
                         .filter(|run| run.fan_out_group_id.is_some())
                         .collect(),
@@ -1668,6 +1724,533 @@ impl CoreCoordinationStore {
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.expire_worker_pool_claims(stale_before, now),
         }
+    }
+}
+
+impl CoordinationRepositorySet<'_> {
+    pub fn save_session(&self, state: &SessionState) -> CoreResult<()> {
+        self.store.save_session(state)
+    }
+
+    pub fn save_session_with_config(
+        &self,
+        state: &SessionState,
+        config: &SessionConfig,
+    ) -> CoreResult<()> {
+        self.store.save_session_with_config(state, config)
+    }
+
+    pub fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
+        self.store.load_sessions()
+    }
+
+    pub fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
+        self.store.save_event(sequence, event)
+    }
+
+    pub fn load_event_history(&self) -> CoreResult<Vec<PersistedEvent>> {
+        self.store.load_event_history()
+    }
+
+    pub fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
+        self.store.save_queued_message(record)
+    }
+
+    pub fn expire_queued_messages_at(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        self.store.expire_queued_messages_at(now)
+    }
+
+    pub fn load_queued_messages(
+        &self,
+        filter: &QueuedMessageFilter,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        self.store.load_queued_messages(filter)
+    }
+
+    pub fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
+        self.store.upsert_scheduled_job(record)
+    }
+
+    pub fn query_scheduled_jobs(
+        &self,
+        query: &ScheduledJobQuery,
+    ) -> CoreResult<Vec<ScheduledJobRecord>> {
+        self.store.query_scheduled_jobs(query)
+    }
+
+    pub fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
+        self.store.load_scheduled_job(job_id)
+    }
+
+    pub fn pause_scheduled_job(&self, job_id: &str, now: &IsoTimestamp) -> CoreResult<()> {
+        self.store.pause_scheduled_job(job_id, now)
+    }
+
+    pub fn resume_scheduled_job(
+        &self,
+        job_id: &str,
+        next_due_at: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        self.store.resume_scheduled_job(job_id, next_due_at, now)
+    }
+
+    pub fn claim_scheduled_run(
+        &self,
+        run: &ScheduledRunRecord,
+        next_due_at: Option<&IsoTimestamp>,
+    ) -> CoreResult<()> {
+        self.store.claim_scheduled_run(run, next_due_at)
+    }
+
+    pub fn complete_scheduled_run(
+        &self,
+        run_id: &RunId,
+        status: ScheduledRunStatus,
+        completed_at: &IsoTimestamp,
+        output_json: &JsonValue,
+        error: Option<&str>,
+    ) -> CoreResult<()> {
+        self.store
+            .complete_scheduled_run(run_id, status, completed_at, output_json, error)
+    }
+
+    pub fn query_scheduled_runs(
+        &self,
+        query: &ScheduledRunQuery,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        self.store.query_scheduled_runs(query)
+    }
+
+    pub fn expire_stale_scheduled_runs(
+        &self,
+        stale_before: &IsoTimestamp,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<ScheduledRunRecord>> {
+        self.store.expire_stale_scheduled_runs(stale_before, now)
+    }
+
+    pub fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
+        self.store.save_worker_run_requested(record)
+    }
+
+    pub fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>> {
+        self.store.load_worker_run(run_id)
+    }
+
+    pub fn load_worker_run_by_delegated_session(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<Option<WorkerRunRecord>> {
+        self.store.load_worker_run_by_delegated_session(session_id)
+    }
+
+    pub fn update_worker_run_status_by_delegated_session(
+        &self,
+        session_id: &SessionId,
+        status: WorkerRunStatus,
+        now: IsoTimestamp,
+    ) -> CoreResult<()> {
+        self.store
+            .update_worker_run_status_by_delegated_session(session_id, status, now)
+    }
+}
+
+impl ServiceDataRepositorySet<'_> {
+    pub fn list_profile_registry_records(
+        &self,
+        query: &ProfileRegistryQuery,
+    ) -> CoreResult<Vec<ProfileRegistryRecord>> {
+        self.store.list_profile_registry_records(query)
+    }
+
+    pub fn create_profile_registry_record(
+        &self,
+        write: &ProfileRegistryWrite,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        self.store.create_profile_registry_record(write)
+    }
+
+    pub fn update_profile_registry_record(
+        &self,
+        update: &ProfileRegistryUpdate,
+    ) -> CoreResult<ProfileRegistryRecord> {
+        self.store.update_profile_registry_record(update)
+    }
+
+    pub fn get_profile_registry_record(
+        &self,
+        profile_id: &ProfileId,
+    ) -> CoreResult<Option<ProfileRegistryRecord>> {
+        self.store.get_profile_registry_record(profile_id)
+    }
+
+    pub fn upsert_model_provider(
+        &self,
+        write: &ModelProviderWrite,
+    ) -> CoreResult<ModelProviderRecord> {
+        self.store.upsert_model_provider(write)
+    }
+
+    pub fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
+        self.store.get_model_provider(alias)
+    }
+
+    pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+        self.store.get_model_provider_secret(alias)
+    }
+
+    pub fn list_model_providers(
+        &self,
+        query: &ModelProviderQuery,
+    ) -> CoreResult<Vec<ModelProviderRecord>> {
+        self.store.list_model_providers(query)
+    }
+}
+
+impl ConversationRepositorySet<'_> {
+    pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
+        self.store.save_message_slot(slot)
+    }
+
+    pub fn save_message_variant(
+        &self,
+        variant: &MessageVariantWrite,
+    ) -> CoreResult<MessageVariantRecord> {
+        self.store.save_message_variant(variant)
+    }
+
+    pub fn query_message_slots(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<Vec<MessageSlotRecord>> {
+        self.store.query_message_slots(query)
+    }
+
+    pub fn query_message_variants(
+        &self,
+        query: &MessageVariantQuery,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.store.query_message_variants(query)
+    }
+
+    pub fn save_conversation_branch(
+        &self,
+        branch: &ConversationBranchWrite,
+    ) -> CoreResult<ConversationBranchRecord> {
+        self.store.save_conversation_branch(branch)
+    }
+
+    pub fn query_conversation_branches(
+        &self,
+        query: &ConversationBranchQuery,
+    ) -> CoreResult<Vec<ConversationBranchRecord>> {
+        self.store.query_conversation_branches(query)
+    }
+
+    pub fn get_conversation_branch_state(
+        &self,
+        session_id: &SessionId,
+        default_updated_at: &IsoTimestamp,
+    ) -> CoreResult<ConversationBranchStateRecord> {
+        self.store
+            .get_conversation_branch_state(session_id, default_updated_at)
+    }
+
+    pub fn select_active_conversation_branch(
+        &self,
+        request: &SelectActiveBranchRequest,
+    ) -> CoreResult<SelectActiveBranchResult> {
+        self.store.select_active_conversation_branch(request)
+    }
+
+    pub fn update_conversation_branch_head(
+        &self,
+        request: &UpdateBranchHeadRequest,
+    ) -> CoreResult<UpdateBranchHeadResult> {
+        self.store.update_conversation_branch_head(request)
+    }
+
+    pub fn save_conversation_snapshot(
+        &self,
+        snapshot: &ConversationSnapshotWrite,
+    ) -> CoreResult<ConversationSnapshotRecord> {
+        self.store.save_conversation_snapshot(snapshot)
+    }
+
+    pub fn query_conversation_snapshots(
+        &self,
+        query: &ConversationSnapshotQuery,
+    ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
+        self.store.query_conversation_snapshots(query)
+    }
+
+    pub fn resolve_conversation_jump(
+        &self,
+        request: &ConversationJumpRequest,
+    ) -> CoreResult<ConversationJumpResult> {
+        self.store.resolve_conversation_jump(request)
+    }
+
+    pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
+        self.store.save_attachment(attachment)
+    }
+
+    pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
+        self.store.query_attachments(query)
+    }
+
+    pub fn remove_attachment(
+        &self,
+        attachment_id: &AttachmentId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<AttachmentRecord> {
+        self.store.remove_attachment(attachment_id, updated_at)
+    }
+
+    pub fn save_data_bank_scope(
+        &self,
+        scope: &DataBankScopeWrite,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.store.save_data_bank_scope(scope)
+    }
+
+    pub fn query_data_bank_scopes(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<Vec<DataBankScopeRecord>> {
+        self.store.query_data_bank_scopes(query)
+    }
+
+    pub fn remove_data_bank_scope(
+        &self,
+        scope_id: &DataBankScopeId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.store.remove_data_bank_scope(scope_id, updated_at)
+    }
+
+    pub fn select_active_message_variant(
+        &self,
+        request: &SelectActiveVariantRequest,
+    ) -> CoreResult<SelectActiveVariantResult> {
+        self.store.select_active_message_variant(request)
+    }
+
+    pub fn delete_message_variant(
+        &self,
+        slot_id: &MessageSlotId,
+        variant_id: &MessageVariantId,
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<MessageSlotRecord> {
+        self.store
+            .delete_message_variant(slot_id, variant_id, updated_at)
+    }
+
+    pub fn reorder_message_variants(
+        &self,
+        slot_id: &MessageSlotId,
+        ordered_variant_ids: &[MessageVariantId],
+        updated_at: &IsoTimestamp,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.store
+            .reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
+    }
+
+    pub fn save_context_compaction_artifact(
+        &self,
+        artifact: &ContextCompactionArtifact,
+    ) -> CoreResult<ContextCompactionArtifact> {
+        self.store.save_context_compaction_artifact(artifact)
+    }
+
+    pub fn list_context_compaction_artifacts(
+        &self,
+        query: &ContextCompactionArtifactQuery,
+    ) -> CoreResult<Vec<ContextCompactionArtifact>> {
+        self.store.list_context_compaction_artifacts(query)
+    }
+}
+
+impl MemoryRepositorySet<'_> {
+    pub fn list_profile_memory(
+        &self,
+        query: &ProfileMemoryQuery,
+    ) -> CoreResult<Vec<ProfileMemoryRecord>> {
+        self.store.list_profile_memory(query)
+    }
+
+    pub fn add_profile_memory(
+        &self,
+        write: &ProfileMemoryWrite,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        self.store.add_profile_memory(write, caps)
+    }
+
+    pub fn query_session_memory_records(
+        &self,
+        query: &SessionMemoryQuery,
+    ) -> CoreResult<Vec<SessionMemoryRecord>> {
+        self.store.query_session_memory_records(query)
+    }
+
+    pub fn build_session_memory_prompt_context(
+        &self,
+        query: &BranchAwareSessionMemoryQuery,
+    ) -> CoreResult<SessionMemoryPromptContext> {
+        self.store.build_session_memory_prompt_context(query)
+    }
+
+    pub fn save_memory_proposal(
+        &self,
+        envelope: &MemoryProposalEnvelope,
+        descriptor: &MemorySpaceDescriptor,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryProposalRecord> {
+        self.store.save_memory_proposal(envelope, descriptor, now)
+    }
+
+    pub fn list_memory_proposals(
+        &self,
+        query: &MemoryProposalQuery,
+    ) -> CoreResult<Vec<MemoryProposalRecord>> {
+        self.store.list_memory_proposals(query)
+    }
+
+    pub fn save_session_activity_digest(
+        &self,
+        digest: &SessionActivityDigest,
+    ) -> CoreResult<SessionActivityDigest> {
+        self.store.save_session_activity_digest(digest)
+    }
+
+    pub fn list_session_activity_digests(
+        &self,
+        query: &SessionActivityDigestQuery,
+    ) -> CoreResult<Vec<SessionActivityDigest>> {
+        self.store.list_session_activity_digests(query)
+    }
+
+    pub fn record_memory_governance_decision(
+        &self,
+        decision: &MemoryGovernanceDecisionInput,
+        now: &IsoTimestamp,
+    ) -> CoreResult<MemoryGovernanceDecisionRecord> {
+        self.store.record_memory_governance_decision(decision, now)
+    }
+
+    pub fn get_profile_memory(
+        &self,
+        profile_id: &ProfileId,
+        target: &ProfileMemoryTarget,
+        key: &str,
+    ) -> CoreResult<Option<ProfileMemoryRecord>> {
+        self.store.get_profile_memory(profile_id, target, key)
+    }
+
+    pub fn add_roleplay_lore_record(
+        &self,
+        write: &RoleplayLoreWrite,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        self.store.add_roleplay_lore_record(write)
+    }
+
+    pub fn replace_roleplay_lore_record(
+        &self,
+        replace: &RoleplayLoreReplace,
+    ) -> CoreResult<RoleplayLoreRecord> {
+        self.store.replace_roleplay_lore_record(replace)
+    }
+
+    pub fn query_roleplay_lore_records(
+        &self,
+        query: &RoleplayLoreQuery,
+    ) -> CoreResult<Vec<RoleplayLoreRecord>> {
+        self.store.query_roleplay_lore_records(query)
+    }
+
+    pub fn replace_profile_memory(
+        &self,
+        replace: &ProfileMemoryReplace,
+        caps: &ProfileMemoryCaps,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        self.store.replace_profile_memory(replace, caps)
+    }
+
+    pub fn remove_profile_memory(
+        &self,
+        delete: &ProfileMemoryDelete,
+    ) -> CoreResult<ProfileMemoryRecord> {
+        self.store.remove_profile_memory(delete)
+    }
+}
+
+impl ModuleDataRepositorySet<'_> {
+    pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
+        self.store.list_simple_kv(query)
+    }
+
+    pub fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
+        self.store.put_simple_kv(write)
+    }
+
+    pub fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
+        self.store.delete_simple_kv(delete)
+    }
+}
+
+impl StorageAdminRepositorySet<'_> {
+    pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
+        self.store.count_rows(table)
+    }
+
+    pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
+        self.store.database_size()
+    }
+
+    pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
+        self.store.storage_diagnostics()
+    }
+
+    pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
+        self.store.storage_schema()
+    }
+
+    pub fn run_maintenance(
+        &self,
+        policy: &RuntimeMaintenancePolicy,
+    ) -> CoreResult<RuntimeMaintenanceReport> {
+        self.store.run_maintenance(policy)
+    }
+
+    pub fn search_runtime(
+        &self,
+        filter: &RuntimeSearchFilter,
+    ) -> CoreResult<Vec<RuntimeSearchResult>> {
+        self.store.search_runtime(filter)
+    }
+
+    pub fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        self.store.query_runtime_counters(query)
+    }
+
+    pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+        self.store.runtime_summary(scope)
+    }
+
+    pub fn reset_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+        now: IsoTimestamp,
+    ) -> CoreResult<u64> {
+        self.store.reset_runtime_counters(query, now)
     }
 }
 
@@ -6049,114 +6632,6 @@ impl CoordinationStore {
         load_queued_messages(&conn, filter)
     }
 
-    pub fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
-        let conn = self.conn()?;
-        save_scheduled_job(&conn, record)
-    }
-
-    pub fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
-        let conn = self.conn()?;
-        load_scheduled_job(&conn, job_id)
-    }
-
-    pub fn query_scheduled_jobs(
-        &self,
-        query: &ScheduledJobQuery,
-    ) -> CoreResult<Vec<ScheduledJobRecord>> {
-        let conn = self.conn()?;
-        query_scheduled_jobs(&conn, query)
-    }
-
-    pub fn pause_scheduled_job(&self, job_id: &str, now: &IsoTimestamp) -> CoreResult<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "UPDATE scheduled_jobs
-             SET status = 'paused', paused_at = ?2, updated_at = ?2
-             WHERE job_id = ?1 AND status != 'archived'",
-            params![job_id, now],
-        )
-        .map_err(|error| persistence_error("pause scheduled job", error))?;
-        Ok(())
-    }
-
-    pub fn resume_scheduled_job(
-        &self,
-        job_id: &str,
-        next_due_at: &IsoTimestamp,
-        now: &IsoTimestamp,
-    ) -> CoreResult<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "UPDATE scheduled_jobs
-             SET status = 'active', next_due_at = ?2, paused_at = NULL, updated_at = ?3
-             WHERE job_id = ?1 AND status != 'archived'",
-            params![job_id, next_due_at, now],
-        )
-        .map_err(|error| persistence_error("resume scheduled job", error))?;
-        Ok(())
-    }
-
-    pub fn claim_scheduled_run(
-        &self,
-        run: &ScheduledRunRecord,
-        next_due_at: Option<&IsoTimestamp>,
-    ) -> CoreResult<()> {
-        let mut conn = self.conn()?;
-        let tx = conn
-            .transaction()
-            .map_err(|error| persistence_error("start claim scheduled run", error))?;
-        save_scheduled_run_in_tx(&tx, run)?;
-        if run.trigger == ScheduledRunTrigger::Due {
-            tx.execute(
-                "UPDATE scheduled_jobs
-                 SET next_due_at = ?2, updated_at = ?3
-                 WHERE job_id = ?1 AND status = 'active'",
-                params![run.job_id.as_str(), next_due_at, run.updated_at.as_str()],
-            )
-            .map_err(|error| persistence_error("advance scheduled job", error))?;
-        }
-        tx.commit()
-            .map_err(|error| persistence_error("commit claim scheduled run", error))?;
-        Ok(())
-    }
-
-    pub fn complete_scheduled_run(
-        &self,
-        run_id: &RunId,
-        status: ScheduledRunStatus,
-        completed_at: &IsoTimestamp,
-        output_json: &JsonValue,
-        error: Option<&str>,
-    ) -> CoreResult<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "UPDATE scheduled_job_runs
-             SET status = ?2,
-                 completed_at = ?3,
-                 updated_at = ?3,
-                 output_json = ?4,
-                 error = ?5
-             WHERE run_id = ?1",
-            params![
-                run_id.0.as_str(),
-                scheduled_run_status_as_str(status),
-                completed_at,
-                to_json_text(output_json)?,
-                error,
-            ],
-        )
-        .map_err(|error| persistence_error("complete scheduled run", error))?;
-        Ok(())
-    }
-
-    pub fn query_scheduled_runs(
-        &self,
-        query: &ScheduledRunQuery,
-    ) -> CoreResult<Vec<ScheduledRunRecord>> {
-        let conn = self.conn()?;
-        query_scheduled_runs(&conn, query)
-    }
-
     pub fn save_provider_wire_state(
         &self,
         write: &ProviderWireStateWrite,
@@ -6221,41 +6696,6 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
         let conn = self.conn()?;
         list_provider_wire_state_diagnostics(&conn, limit)
-    }
-
-    pub fn expire_stale_scheduled_runs(
-        &self,
-        stale_before: &IsoTimestamp,
-        now: &IsoTimestamp,
-    ) -> CoreResult<Vec<ScheduledRunRecord>> {
-        let mut conn = self.conn()?;
-        let tx = conn
-            .transaction()
-            .map_err(|error| persistence_error("start expire stale scheduled runs", error))?;
-        let stale = query_scheduled_runs(
-            &tx,
-            &ScheduledRunQuery {
-                status: Some(ScheduledRunStatus::Claimed),
-                stale_claim_deadline_before: Some(stale_before.clone()),
-                page: None,
-                ..ScheduledRunQuery::default()
-            },
-        )?;
-        for run in &stale {
-            tx.execute(
-                "UPDATE scheduled_job_runs
-                 SET status = 'expired',
-                     completed_at = ?2,
-                     updated_at = ?2,
-                     error = 'claim deadline elapsed'
-                 WHERE run_id = ?1 AND status = 'claimed'",
-                params![run.run_id.0.as_str(), now],
-            )
-            .map_err(|error| persistence_error("expire stale scheduled run", error))?;
-        }
-        tx.commit()
-            .map_err(|error| persistence_error("commit expire stale scheduled runs", error))?;
-        Ok(stale)
     }
 
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
@@ -6912,14 +7352,6 @@ impl CoordinationStore {
         Ok(variants)
     }
 
-    pub fn query_completion_packets(
-        &self,
-        query: &CompletionPacketQuery,
-    ) -> CoreResult<Vec<CompletionPacketRecord>> {
-        let conn = self.conn()?;
-        query_completion_packets(&conn, query)
-    }
-
     pub fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
         if !should_persist_event(event) {
             return Ok(());
@@ -7287,269 +7719,6 @@ impl CoordinationStore {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| persistence_error("load tool call history", error))
-    }
-
-    pub fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "INSERT OR REPLACE INTO worker_runs (
-                run_id,
-                session_id,
-                delegated_session_id,
-                parent_agent_id,
-                profile_id,
-                task_id,
-                status,
-                created_at,
-                last_updated_at,
-                source_wake_id,
-                source_action_index,
-                delegation_correlation_id,
-                parent_consumption,
-                fan_out_group_id,
-                fan_out_max_concurrency,
-                fan_out_failure_policy,
-                worker_pool_work_item_id,
-                worker_pool_lease_id,
-                worker_pool_member_id,
-                worker_pool_claim_token
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
-            params![
-                record.run_id.0.as_str(),
-                record.parent_session_id.0.as_str(),
-                record
-                    .delegated_session_id
-                    .as_ref()
-                    .map(|session_id| session_id.0.as_str()),
-                record
-                    .parent_agent_id
-                    .as_ref()
-                    .map(|agent_id| agent_id.0.as_str()),
-                record.profile_id.0.as_str(),
-                record.task_id.as_ref().map(|task_id| task_id.0.as_str()),
-                record.status.as_str(),
-                record.created_at.as_str(),
-                record.last_updated_at.as_str(),
-                record.source_wake_id.as_str(),
-                record.source_action_index as i64,
-                record.delegation_correlation_id.as_deref(),
-                parent_consumption_policy_as_str(&record.parent_consumption),
-                record.fan_out_group_id.as_deref(),
-                record.fan_out_max_concurrency.map(|value| value as i64),
-                fan_out_failure_policy_as_str(&record.fan_out_failure_policy),
-                record.worker_pool_work_item_id.as_deref(),
-                record.worker_pool_lease_id.as_deref(),
-                record.worker_pool_member_id.as_deref(),
-                record.worker_pool_claim_token.as_deref(),
-            ],
-        )
-        .map_err(|error| persistence_error("save worker run", error))?;
-        Ok(())
-    }
-
-    pub fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>> {
-        let conn = self.conn()?;
-        conn.query_row(
-            "SELECT
-                run_id,
-                session_id,
-                delegated_session_id,
-                parent_agent_id,
-                profile_id,
-                task_id,
-                status,
-                created_at,
-                last_updated_at,
-                source_wake_id,
-                source_action_index,
-                delegation_correlation_id,
-                parent_consumption,
-                fan_out_group_id,
-                fan_out_max_concurrency,
-                fan_out_failure_policy,
-                worker_pool_work_item_id,
-                worker_pool_lease_id,
-                worker_pool_member_id,
-                worker_pool_claim_token
-             FROM worker_runs
-             WHERE run_id = ?1",
-            params![run_id.0.as_str()],
-            row_to_worker_run,
-        )
-        .optional()
-        .map_err(|error| persistence_error("load worker run", error))
-    }
-
-    pub fn load_worker_run_by_delegated_session(
-        &self,
-        delegated_session_id: &SessionId,
-    ) -> CoreResult<Option<WorkerRunRecord>> {
-        let conn = self.conn()?;
-        conn.query_row(
-            "SELECT
-                run_id,
-                session_id,
-                delegated_session_id,
-                parent_agent_id,
-                profile_id,
-                task_id,
-                status,
-                created_at,
-                last_updated_at,
-                source_wake_id,
-                source_action_index,
-                delegation_correlation_id,
-                parent_consumption,
-                fan_out_group_id,
-                fan_out_max_concurrency,
-                fan_out_failure_policy,
-                worker_pool_work_item_id,
-                worker_pool_lease_id,
-                worker_pool_member_id,
-                worker_pool_claim_token
-             FROM worker_runs
-             WHERE delegated_session_id = ?1",
-            params![delegated_session_id.0.as_str()],
-            row_to_worker_run,
-        )
-        .optional()
-        .map_err(|error| persistence_error("load worker run by delegated session", error))
-    }
-
-    pub fn query_worker_runs(&self, query: &WorkerRunQuery) -> CoreResult<Vec<WorkerRunRecord>> {
-        let conn = self.conn()?;
-        query_worker_runs(&conn, query)
-    }
-
-    pub fn update_worker_run_status_by_delegated_session(
-        &self,
-        delegated_session_id: &SessionId,
-        status: WorkerRunStatus,
-        now: IsoTimestamp,
-    ) -> CoreResult<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "UPDATE worker_runs
-             SET status = ?1, last_updated_at = ?2
-             WHERE delegated_session_id = ?3",
-            params![
-                status.as_str(),
-                now.as_str(),
-                delegated_session_id.0.as_str()
-            ],
-        )
-        .map_err(|error| persistence_error("update worker run status", error))?;
-        Ok(())
-    }
-
-    pub fn update_worker_run_status(
-        &self,
-        run_id: &RunId,
-        status: WorkerRunStatus,
-        now: IsoTimestamp,
-    ) -> CoreResult<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "UPDATE worker_runs
-             SET status = ?1, last_updated_at = ?2
-             WHERE run_id = ?3",
-            params![status.as_str(), now.as_str(), run_id.0.as_str()],
-        )
-        .map_err(|error| persistence_error("update worker run status by run id", error))?;
-        Ok(())
-    }
-
-    pub fn delegated_completions_for_parent(
-        &self,
-        parent_session_id: &SessionId,
-    ) -> CoreResult<Vec<DelegatedCompletion>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT
-                    worker_runs.run_id,
-                    worker_runs.delegated_session_id,
-                    worker_runs.task_id,
-                    worker_runs.source_wake_id,
-                    worker_runs.source_action_index,
-                    worker_runs.delegation_correlation_id,
-                    worker_runs.parent_consumption,
-                    completion_packets.packet_json
-                 FROM worker_runs
-                 JOIN completion_packets
-                    ON completion_packets.session_id = worker_runs.delegated_session_id
-                 WHERE worker_runs.session_id = ?1
-                 ORDER BY completion_packets.sequence ASC",
-            )
-            .map_err(|error| persistence_error("prepare delegated completions", error))?;
-
-        let rows = stmt
-            .query_map(params![parent_session_id.0.as_str()], |row| {
-                let parent_consumption: String = row.get(6)?;
-                let packet_json: String = row.get(7)?;
-                let packet =
-                    from_json_text::<CompletionPacket>(&packet_json).map_err(to_sql_error)?;
-                Ok(DelegatedCompletion {
-                    run_id: RunId(row.get(0)?),
-                    child_session_id: SessionId(row.get(1)?),
-                    requested_task_id: row.get::<_, Option<String>>(2)?.map(TaskId),
-                    source_wake_id: row.get(3)?,
-                    source_action_index: row.get::<_, i64>(4)? as u32,
-                    correlation_id: row.get(5)?,
-                    parent_consumption: parent_consumption_policy_from_str(&parent_consumption)?,
-                    packet,
-                })
-            })
-            .map_err(|error| persistence_error("query delegated completions", error))?;
-
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|error| persistence_error("load delegated completions", error))
-    }
-
-    pub fn worker_runs_for_fan_out_group(
-        &self,
-        parent_session_id: &SessionId,
-        group_id: &str,
-    ) -> CoreResult<Vec<WorkerRunRecord>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT
-                    run_id,
-                    session_id,
-                    delegated_session_id,
-                    parent_agent_id,
-                    profile_id,
-                    task_id,
-                    status,
-                    created_at,
-                    last_updated_at,
-                    source_wake_id,
-                    source_action_index,
-                    delegation_correlation_id,
-                    parent_consumption,
-                    fan_out_group_id,
-                    fan_out_max_concurrency,
-                    fan_out_failure_policy,
-                    worker_pool_work_item_id,
-                    worker_pool_lease_id,
-                    worker_pool_member_id,
-                    worker_pool_claim_token
-                 FROM worker_runs
-                 WHERE session_id = ?1 AND fan_out_group_id = ?2
-                 ORDER BY source_wake_id ASC, source_action_index ASC",
-            )
-            .map_err(|error| persistence_error("prepare worker runs for fan-out group", error))?;
-
-        let rows = stmt
-            .query_map(
-                params![parent_session_id.0.as_str(), group_id],
-                row_to_worker_run,
-            )
-            .map_err(|error| persistence_error("query worker runs for fan-out group", error))?;
-
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|error| persistence_error("load worker runs for fan-out group", error))
     }
 
     pub fn upsert_worker_pool_member(&self, record: &WorkerPoolMemberRecord) -> CoreResult<()> {
@@ -7993,50 +8162,6 @@ impl CoordinationStore {
         Ok(expired)
     }
 
-    pub fn fan_out_groups_for_parent(
-        &self,
-        parent_session_id: &SessionId,
-    ) -> CoreResult<Vec<DelegatedFanOutGroup>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT
-                    run_id,
-                    session_id,
-                    delegated_session_id,
-                    parent_agent_id,
-                    profile_id,
-                    task_id,
-                    status,
-                    created_at,
-                    last_updated_at,
-                    source_wake_id,
-                    source_action_index,
-                    delegation_correlation_id,
-                    parent_consumption,
-                    fan_out_group_id,
-                    fan_out_max_concurrency,
-                    fan_out_failure_policy,
-                    worker_pool_work_item_id,
-                    worker_pool_lease_id,
-                    worker_pool_member_id,
-                    worker_pool_claim_token
-                 FROM worker_runs
-                 WHERE session_id = ?1 AND fan_out_group_id IS NOT NULL
-                 ORDER BY fan_out_group_id ASC, source_wake_id ASC, source_action_index ASC",
-            )
-            .map_err(|error| persistence_error("prepare fan-out groups", error))?;
-
-        let rows = stmt
-            .query_map(params![parent_session_id.0.as_str()], row_to_worker_run)
-            .map_err(|error| persistence_error("query fan-out groups", error))?;
-        let runs = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| persistence_error("load fan-out group runs", error))?;
-
-        Ok(aggregate_fan_out_groups(runs))
-    }
-
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
         let table = DiagnosticTable::parse(table)?;
 
@@ -8137,34 +8262,6 @@ impl CoordinationStore {
         tx.commit().map_err(|error| {
             persistence_error("commit compiled module schema registry install", error)
         })?;
-        Ok(())
-    }
-
-    fn save_completion_packet_in_tx(
-        &self,
-        tx: &rusqlite::Transaction<'_>,
-        sequence: u64,
-        packet: &CompletionPacket,
-    ) -> CoreResult<()> {
-        let packet_json = to_json_text(packet)?;
-        let status_json = to_json_text(&packet.status)?;
-        tx.execute(
-            "INSERT OR REPLACE INTO completion_packets (
-                sequence,
-                session_id,
-                status,
-                summary,
-                packet_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                sequence as i64,
-                packet.session_id.0,
-                status_json,
-                packet.summary,
-                packet_json,
-            ],
-        )
-        .map_err(|error| persistence_error("save completion packet", error))?;
         Ok(())
     }
 
@@ -9039,56 +9136,6 @@ fn migrate_v6_add_runtime_search_index(tx: &rusqlite::Transaction<'_>) -> CoreRe
     .map_err(|error| persistence_error("apply schema migration 6", error))
 }
 
-fn migrate_v7_add_runtime_counters(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
-    tx.execute_batch(
-        "
-            CREATE TABLE IF NOT EXISTS runtime_counters (
-                scope_type TEXT NOT NULL,
-                scope_id TEXT NOT NULL,
-                counter_name TEXT NOT NULL,
-                value INTEGER NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (scope_type, scope_id, counter_name)
-            );
-            CREATE INDEX IF NOT EXISTS idx_runtime_counters_scope
-                ON runtime_counters(scope_type, scope_id);
-            ",
-    )
-    .map_err(|error| persistence_error("apply schema migration 7", error))
-}
-
-fn migrate_v8_add_queued_message_retention(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
-    tx.execute_batch(
-        "
-            CREATE TABLE IF NOT EXISTS queued_messages (
-                message_id TEXT PRIMARY KEY,
-                owner_session_id TEXT,
-                owner_agent_id TEXT NOT NULL,
-                from_agent TEXT NOT NULL,
-                to_agent TEXT NOT NULL,
-                body TEXT NOT NULL,
-                correlation_id TEXT,
-                source_sequence INTEGER,
-                enqueued_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                ttl_ms INTEGER NOT NULL,
-                delivery_attempts INTEGER NOT NULL DEFAULT 0,
-                state TEXT NOT NULL,
-                terminal_at TEXT,
-                state_reason TEXT,
-                message_json TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_queued_messages_state_expiry
-                ON queued_messages(state, expires_at);
-            CREATE INDEX IF NOT EXISTS idx_queued_messages_owner_agent
-                ON queued_messages(owner_agent_id, state, expires_at);
-            CREATE INDEX IF NOT EXISTS idx_queued_messages_owner_session
-                ON queued_messages(owner_session_id, state, expires_at);
-            ",
-    )
-    .map_err(|error| persistence_error("apply schema migration 8", error))
-}
-
 fn migrate_v9_add_scale_guardrail_indexes(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     tx.execute_batch(
         "
@@ -9245,54 +9292,6 @@ fn migrate_v13_add_profile_memory(tx: &rusqlite::Transaction<'_>) -> CoreResult<
             ",
     )
     .map_err(|error| persistence_error("apply schema migration 13", error))
-}
-
-fn migrate_v14_add_scheduler_persistence(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
-    tx.execute_batch(
-        "
-            CREATE TABLE IF NOT EXISTS scheduled_jobs (
-                job_id TEXT PRIMARY KEY,
-                job_kind TEXT NOT NULL,
-                target_session_id TEXT,
-                interval_ms INTEGER,
-                next_due_at TEXT,
-                payload_json TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                paused_at TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due
-                ON scheduled_jobs(status, next_due_at, job_id);
-            CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_kind_status
-                ON scheduled_jobs(job_kind, status, job_id);
-
-            CREATE TABLE IF NOT EXISTS scheduled_job_runs (
-                run_id TEXT PRIMARY KEY,
-                job_id TEXT NOT NULL,
-                job_kind TEXT NOT NULL,
-                target_session_id TEXT,
-                status TEXT NOT NULL,
-                trigger_kind TEXT NOT NULL,
-                scheduled_for TEXT,
-                claimed_at TEXT NOT NULL,
-                claim_deadline_at TEXT NOT NULL,
-                completed_at TEXT,
-                error TEXT,
-                output_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (job_id) REFERENCES scheduled_jobs(job_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_created
-                ON scheduled_job_runs(job_id, created_at, run_id);
-            CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_status_deadline
-                ON scheduled_job_runs(status, claim_deadline_at, run_id);
-            CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_target
-                ON scheduled_job_runs(target_session_id, status, created_at);
-            ",
-    )
-    .map_err(|error| persistence_error("apply schema migration 14", error))
 }
 
 fn migrate_v15_add_session_history_window(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
@@ -10728,619 +10727,6 @@ fn provider_wire_state_invalidation_reason_from_str(
             0,
             rusqlite::types::Type::Text,
             format!("unknown provider wire state invalidation reason {other}").into(),
-        )),
-    }
-}
-
-fn save_queued_message_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    record: &QueuedMessageRecord,
-) -> CoreResult<()> {
-    let message_json = to_json_text(&record.message)?;
-    tx.execute(
-        "INSERT INTO queued_messages (
-            message_id,
-            owner_session_id,
-            owner_agent_id,
-            from_agent,
-            to_agent,
-            body,
-            correlation_id,
-            source_sequence,
-            enqueued_at,
-            expires_at,
-            ttl_ms,
-            delivery_attempts,
-            state,
-            terminal_at,
-            state_reason,
-            message_json
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-        ON CONFLICT(message_id) DO UPDATE SET
-            owner_session_id = excluded.owner_session_id,
-            owner_agent_id = excluded.owner_agent_id,
-            from_agent = excluded.from_agent,
-            to_agent = excluded.to_agent,
-            body = excluded.body,
-            correlation_id = excluded.correlation_id,
-            source_sequence = excluded.source_sequence,
-            expires_at = excluded.expires_at,
-            ttl_ms = excluded.ttl_ms,
-            delivery_attempts = excluded.delivery_attempts,
-            state = excluded.state,
-            terminal_at = excluded.terminal_at,
-            state_reason = excluded.state_reason,
-            message_json = excluded.message_json",
-        params![
-            record.message_id,
-            record
-                .owner_session_id
-                .as_ref()
-                .map(|value| value.0.as_str()),
-            record.owner_agent_id.0,
-            record.message.from.0,
-            record.message.to.0,
-            record.message.body,
-            record.message.correlation_id,
-            record.source_sequence.map(|value| value as i64),
-            record.enqueued_at,
-            record.expires_at,
-            record.ttl_ms as i64,
-            record.delivery_attempts as i64,
-            queued_message_state_as_str(record.state),
-            record.terminal_at,
-            record.state_reason,
-            message_json,
-        ],
-    )
-    .map_err(|error| persistence_error("save queued message", error))?;
-    save_queued_message_search_row_in_tx(tx, record)
-}
-
-fn expire_queued_messages_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    now: &IsoTimestamp,
-) -> CoreResult<Vec<QueuedMessageRecord>> {
-    let expiring = load_queued_messages_in_tx(
-        tx,
-        &QueuedMessageFilter {
-            state: Some(QueuedMessageState::Pending),
-            owner_session_id: None,
-            owner_agent_id: None,
-            limit: None,
-        },
-    )?
-    .into_iter()
-    .filter(|message| message.expires_at <= *now)
-    .collect::<Vec<_>>();
-
-    for mut message in expiring.clone() {
-        message.state = QueuedMessageState::Expired;
-        message.terminal_at = Some(now.clone());
-        message.state_reason = Some("ttl_expired".to_string());
-        save_queued_message_in_tx(tx, &message)?;
-        increment_counter_for_scopes_in_tx(
-            tx,
-            queued_message_counter_scopes(&message),
-            COUNTER_QUEUE_EXPIRATIONS,
-            1,
-        )?;
-    }
-    Ok(expiring
-        .into_iter()
-        .map(|mut message| {
-            message.state = QueuedMessageState::Expired;
-            message.terminal_at = Some(now.clone());
-            message.state_reason = Some("ttl_expired".to_string());
-            message
-        })
-        .collect())
-}
-
-fn purge_terminal_queued_messages_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    cutoff: &IsoTimestamp,
-) -> CoreResult<u64> {
-    tx.execute(
-        "DELETE FROM runtime_search_fts
-         WHERE row_type = 'queue_message'
-           AND row_key IN (
-               SELECT message_id FROM queued_messages
-               WHERE state IN ('delivered', 'expired', 'discarded', 'cancelled')
-                 AND terminal_at IS NOT NULL
-                 AND terminal_at < ?1
-           )",
-        params![cutoff],
-    )
-    .map_err(|error| persistence_error("delete purged queue search rows", error))?;
-    let purged = tx
-        .execute(
-            "DELETE FROM queued_messages
-             WHERE state IN ('delivered', 'expired', 'discarded', 'cancelled')
-               AND terminal_at IS NOT NULL
-               AND terminal_at < ?1",
-            params![cutoff],
-        )
-        .map_err(|error| persistence_error("purge terminal queued messages", error))?;
-    Ok(purged as u64)
-}
-
-fn load_queued_messages(
-    conn: &Connection,
-    filter: &QueuedMessageFilter,
-) -> CoreResult<Vec<QueuedMessageRecord>> {
-    load_queued_messages_with_conn(conn, filter)
-}
-
-fn load_queued_messages_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    filter: &QueuedMessageFilter,
-) -> CoreResult<Vec<QueuedMessageRecord>> {
-    load_queued_messages_with_conn(tx, filter)
-}
-
-fn load_queued_messages_with_conn(
-    conn: &Connection,
-    filter: &QueuedMessageFilter,
-) -> CoreResult<Vec<QueuedMessageRecord>> {
-    let state = filter.state.map(queued_message_state_as_str);
-    let owner_session_id = filter
-        .owner_session_id
-        .as_ref()
-        .map(|value| value.0.as_str());
-    let owner_agent_id = filter.owner_agent_id.as_ref().map(|value| value.0.as_str());
-    let limit = filter.limit.unwrap_or(1_000).clamp(1, 10_000) as i64;
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                message_id,
-                owner_session_id,
-                owner_agent_id,
-                from_agent,
-                to_agent,
-                body,
-                correlation_id,
-                source_sequence,
-                enqueued_at,
-                expires_at,
-                ttl_ms,
-                delivery_attempts,
-                state,
-                terminal_at,
-                state_reason,
-                message_json
-             FROM queued_messages
-             WHERE (?1 IS NULL OR state = ?1)
-               AND (?2 IS NULL OR owner_session_id = ?2)
-               AND (?3 IS NULL OR owner_agent_id = ?3)
-             ORDER BY enqueued_at ASC, message_id ASC
-             LIMIT ?4",
-        )
-        .map_err(|error| persistence_error("prepare queued message query", error))?;
-    let rows = stmt
-        .query_map(
-            params![state, owner_session_id, owner_agent_id, limit],
-            row_to_queued_message,
-        )
-        .map_err(|error| persistence_error("query queued messages", error))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| persistence_error("load queued messages", error))
-}
-
-fn row_to_queued_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueuedMessageRecord> {
-    let message_json: String = row.get(15)?;
-    let state: String = row.get(12)?;
-    Ok(QueuedMessageRecord {
-        message_id: row.get(0)?,
-        owner_session_id: row.get::<_, Option<String>>(1)?.map(SessionId),
-        owner_agent_id: AgentId(row.get(2)?),
-        message: from_json_text(&message_json).map_err(to_sql_error)?,
-        source_sequence: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
-        enqueued_at: row.get(8)?,
-        expires_at: row.get(9)?,
-        ttl_ms: row.get::<_, i64>(10)? as u32,
-        delivery_attempts: row.get::<_, i64>(11)? as u32,
-        state: queued_message_state_from_str(&state)?,
-        terminal_at: row.get(13)?,
-        state_reason: row.get(14)?,
-    })
-}
-
-fn save_scheduled_job(conn: &Connection, record: &ScheduledJobRecord) -> CoreResult<()> {
-    conn.execute(
-        "INSERT OR REPLACE INTO scheduled_jobs (
-            job_id,
-            job_kind,
-            target_session_id,
-            interval_ms,
-            next_due_at,
-            payload_json,
-            status,
-            created_at,
-            updated_at,
-            paused_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![
-            record.job_id.as_str(),
-            record.job_kind.as_str(),
-            record
-                .target_session_id
-                .as_ref()
-                .map(|session_id| session_id.0.as_str()),
-            record.interval_ms.map(|value| value as i64),
-            record.next_due_at.as_deref(),
-            to_json_text(&record.payload_json)?,
-            scheduled_job_status_as_str(record.status),
-            record.created_at.as_str(),
-            record.updated_at.as_str(),
-            record.paused_at.as_deref(),
-        ],
-    )
-    .map_err(|error| persistence_error("save scheduled job", error))?;
-    Ok(())
-}
-
-fn load_scheduled_job(conn: &Connection, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
-    conn.query_row(
-        "SELECT
-            job_id,
-            job_kind,
-            target_session_id,
-            interval_ms,
-            next_due_at,
-            payload_json,
-            status,
-            created_at,
-            updated_at,
-            paused_at
-         FROM scheduled_jobs
-         WHERE job_id = ?1",
-        params![job_id],
-        row_to_scheduled_job,
-    )
-    .optional()
-    .map_err(|error| persistence_error("load scheduled job", error))
-}
-
-fn query_scheduled_jobs(
-    conn: &Connection,
-    query: &ScheduledJobQuery,
-) -> CoreResult<Vec<ScheduledJobRecord>> {
-    let status = query.status.map(scheduled_job_status_as_str);
-    let job_kind = query.job_kind.as_deref();
-    let due_at_or_before = query.due_at_or_before.as_deref();
-    let (limit, offset) = query
-        .page
-        .unwrap_or(QueryPage {
-            limit: None,
-            offset: None,
-        })
-        .bounded(100, 1_000);
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                job_id,
-                job_kind,
-                target_session_id,
-                interval_ms,
-                next_due_at,
-                payload_json,
-                status,
-                created_at,
-                updated_at,
-                paused_at
-             FROM scheduled_jobs
-             WHERE (?1 IS NULL OR status = ?1)
-               AND (?2 IS NULL OR job_kind = ?2)
-               AND (?3 IS NULL OR (next_due_at IS NOT NULL AND next_due_at <= ?3))
-             ORDER BY COALESCE(next_due_at, created_at) ASC, job_id ASC
-             LIMIT ?4 OFFSET ?5",
-        )
-        .map_err(|error| persistence_error("prepare scheduled jobs query", error))?;
-    let rows = stmt
-        .query_map(
-            params![status, job_kind, due_at_or_before, limit, offset],
-            row_to_scheduled_job,
-        )
-        .map_err(|error| persistence_error("query scheduled jobs", error))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| persistence_error("load scheduled jobs", error))
-}
-
-fn row_to_scheduled_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledJobRecord> {
-    let payload_json: String = row.get(5)?;
-    let status: String = row.get(6)?;
-    Ok(ScheduledJobRecord {
-        job_id: row.get(0)?,
-        job_kind: row.get(1)?,
-        target_session_id: row.get::<_, Option<String>>(2)?.map(SessionId),
-        interval_ms: row.get::<_, Option<i64>>(3)?.map(|value| value as u64),
-        next_due_at: row.get(4)?,
-        payload_json: from_json_text(&payload_json).map_err(to_sql_error)?,
-        status: scheduled_job_status_from_str(&status)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
-        paused_at: row.get(9)?,
-    })
-}
-
-fn save_scheduled_run_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    run: &ScheduledRunRecord,
-) -> CoreResult<()> {
-    tx.execute(
-        "INSERT INTO scheduled_job_runs (
-            run_id,
-            job_id,
-            job_kind,
-            target_session_id,
-            status,
-            trigger_kind,
-            scheduled_for,
-            claimed_at,
-            claim_deadline_at,
-            completed_at,
-            error,
-            output_json,
-            created_at,
-            updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-        params![
-            run.run_id.0.as_str(),
-            run.job_id.as_str(),
-            run.job_kind.as_str(),
-            run.target_session_id
-                .as_ref()
-                .map(|session_id| session_id.0.as_str()),
-            scheduled_run_status_as_str(run.status),
-            scheduled_run_trigger_as_str(run.trigger),
-            run.scheduled_for.as_deref(),
-            run.claimed_at.as_str(),
-            run.claim_deadline_at.as_str(),
-            run.completed_at.as_deref(),
-            run.error.as_deref(),
-            to_json_text(&run.output_json)?,
-            run.created_at.as_str(),
-            run.updated_at.as_str(),
-        ],
-    )
-    .map_err(|error| persistence_error("save scheduled run", error))?;
-    Ok(())
-}
-
-fn query_scheduled_runs(
-    conn: &Connection,
-    query: &ScheduledRunQuery,
-) -> CoreResult<Vec<ScheduledRunRecord>> {
-    let job_id = query.job_id.as_deref();
-    let status = query.status.map(scheduled_run_status_as_str);
-    let trigger = query.trigger.map(scheduled_run_trigger_as_str);
-    let target_session_id = query
-        .target_session_id
-        .as_ref()
-        .map(|session_id| session_id.0.as_str());
-    let stale_before = query.stale_claim_deadline_before.as_deref();
-    let (limit, offset) = query
-        .page
-        .unwrap_or(QueryPage {
-            limit: None,
-            offset: None,
-        })
-        .bounded(100, 1_000);
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                run_id,
-                job_id,
-                job_kind,
-                target_session_id,
-                status,
-                trigger_kind,
-                scheduled_for,
-                claimed_at,
-                claim_deadline_at,
-                completed_at,
-                error,
-                output_json,
-                created_at,
-                updated_at
-             FROM scheduled_job_runs
-             WHERE (?1 IS NULL OR job_id = ?1)
-               AND (?2 IS NULL OR status = ?2)
-               AND (?3 IS NULL OR trigger_kind = ?3)
-               AND (?4 IS NULL OR target_session_id = ?4)
-               AND (?5 IS NULL OR claim_deadline_at < ?5)
-             ORDER BY created_at ASC, run_id ASC
-             LIMIT ?6 OFFSET ?7",
-        )
-        .map_err(|error| persistence_error("prepare scheduled runs query", error))?;
-    let rows = stmt
-        .query_map(
-            params![
-                job_id,
-                status,
-                trigger,
-                target_session_id,
-                stale_before,
-                limit,
-                offset,
-            ],
-            row_to_scheduled_run,
-        )
-        .map_err(|error| persistence_error("query scheduled runs", error))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| persistence_error("load scheduled runs", error))
-}
-
-fn row_to_scheduled_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledRunRecord> {
-    let status: String = row.get(4)?;
-    let trigger: String = row.get(5)?;
-    let output_json: String = row.get(11)?;
-    Ok(ScheduledRunRecord {
-        run_id: RunId(row.get(0)?),
-        job_id: row.get(1)?,
-        job_kind: row.get(2)?,
-        target_session_id: row.get::<_, Option<String>>(3)?.map(SessionId),
-        status: scheduled_run_status_from_str(&status)?,
-        trigger: scheduled_run_trigger_from_str(&trigger)?,
-        scheduled_for: row.get(6)?,
-        claimed_at: row.get(7)?,
-        claim_deadline_at: row.get(8)?,
-        completed_at: row.get(9)?,
-        error: row.get(10)?,
-        output_json: from_json_text(&output_json).map_err(to_sql_error)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
-    })
-}
-
-fn scheduled_job_status_as_str(status: ScheduledJobStatus) -> &'static str {
-    match status {
-        ScheduledJobStatus::Active => "active",
-        ScheduledJobStatus::Paused => "paused",
-        ScheduledJobStatus::Archived => "archived",
-    }
-}
-
-fn scheduled_job_status_from_str(raw: &str) -> rusqlite::Result<ScheduledJobStatus> {
-    match raw {
-        "active" => Ok(ScheduledJobStatus::Active),
-        "paused" => Ok(ScheduledJobStatus::Paused),
-        "archived" => Ok(ScheduledJobStatus::Archived),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::<dyn std::error::Error + Send + Sync>::from(format!(
-                "unknown scheduled job status {other}",
-            )),
-        )),
-    }
-}
-
-fn scheduled_run_status_as_str(status: ScheduledRunStatus) -> &'static str {
-    match status {
-        ScheduledRunStatus::Claimed => "claimed",
-        ScheduledRunStatus::Completed => "completed",
-        ScheduledRunStatus::Skipped => "skipped",
-        ScheduledRunStatus::Failed => "failed",
-        ScheduledRunStatus::Expired => "expired",
-        ScheduledRunStatus::Cancelled => "cancelled",
-    }
-}
-
-fn scheduled_run_status_from_str(raw: &str) -> rusqlite::Result<ScheduledRunStatus> {
-    match raw {
-        "claimed" => Ok(ScheduledRunStatus::Claimed),
-        "completed" => Ok(ScheduledRunStatus::Completed),
-        "skipped" => Ok(ScheduledRunStatus::Skipped),
-        "failed" => Ok(ScheduledRunStatus::Failed),
-        "expired" => Ok(ScheduledRunStatus::Expired),
-        "cancelled" => Ok(ScheduledRunStatus::Cancelled),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::<dyn std::error::Error + Send + Sync>::from(format!(
-                "unknown scheduled run status {other}",
-            )),
-        )),
-    }
-}
-
-fn scheduled_run_trigger_as_str(trigger: ScheduledRunTrigger) -> &'static str {
-    match trigger {
-        ScheduledRunTrigger::Due => "due",
-        ScheduledRunTrigger::Manual => "manual",
-    }
-}
-
-fn scheduled_run_trigger_from_str(raw: &str) -> rusqlite::Result<ScheduledRunTrigger> {
-    match raw {
-        "due" => Ok(ScheduledRunTrigger::Due),
-        "manual" => Ok(ScheduledRunTrigger::Manual),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::<dyn std::error::Error + Send + Sync>::from(format!(
-                "unknown scheduled run trigger {other}",
-            )),
-        )),
-    }
-}
-
-fn save_queued_message_search_row_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    record: &QueuedMessageRecord,
-) -> CoreResult<()> {
-    tx.execute(
-        "DELETE FROM runtime_search_fts WHERE row_type = ?1 AND row_key = ?2",
-        params!["queue_message", record.message_id],
-    )
-    .map_err(|error| persistence_error("delete queued message search row", error))?;
-    insert_runtime_search_row(
-        tx,
-        &RuntimeSearchInsert {
-            row_type: RuntimeSearchRowType::QueueMessage,
-            row_key: record.message_id.clone(),
-            sequence: record.source_sequence,
-            session_id: record
-                .owner_session_id
-                .as_ref()
-                .map(|value| value.0.clone()),
-            agent_id: Some(record.owner_agent_id.0.clone()),
-            instance_id: record
-                .owner_session_id
-                .as_ref()
-                .map(|value| AgentInstanceId::new(format!("instance:{value}")).0),
-            task_id: None,
-            event_kind: Some(CoreEventKind::AgentMessageRouted),
-            recorded_at: record.enqueued_at.clone(),
-            title: format!(
-                "queued message {}",
-                queued_message_state_as_str(record.state)
-            ),
-            body: record.message.body.clone(),
-        },
-    )
-}
-
-fn queued_message_counter_scopes(message: &QueuedMessageRecord) -> Vec<RuntimeCounterScope> {
-    let mut scopes = vec![
-        RuntimeCounterScope::Runtime,
-        RuntimeCounterScope::Agent(message.owner_agent_id.clone()),
-    ];
-    if let Some(session_id) = &message.owner_session_id {
-        scopes.push(RuntimeCounterScope::Session(session_id.clone()));
-        scopes.push(RuntimeCounterScope::Instance(AgentInstanceId::new(
-            format!("instance:{session_id}"),
-        )));
-    }
-    scopes
-}
-
-fn queued_message_state_as_str(state: QueuedMessageState) -> &'static str {
-    match state {
-        QueuedMessageState::Pending => "pending",
-        QueuedMessageState::Delivered => "delivered",
-        QueuedMessageState::Expired => "expired",
-        QueuedMessageState::Discarded => "discarded",
-        QueuedMessageState::Cancelled => "cancelled",
-    }
-}
-
-fn queued_message_state_from_str(raw: &str) -> rusqlite::Result<QueuedMessageState> {
-    match raw {
-        "pending" => Ok(QueuedMessageState::Pending),
-        "delivered" => Ok(QueuedMessageState::Delivered),
-        "expired" => Ok(QueuedMessageState::Expired),
-        "discarded" => Ok(QueuedMessageState::Discarded),
-        "cancelled" => Ok(QueuedMessageState::Cancelled),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            12,
-            rusqlite::types::Type::Text,
-            Box::new(CoreError::new(
-                CoreErrorKind::PersistenceFailure,
-                format!("unknown queued message state {other}"),
-            )),
         )),
     }
 }
@@ -13457,182 +12843,6 @@ fn ensure_variant_belongs_to_slot_in_tx(
     }
 }
 
-fn query_completion_packets(
-    conn: &Connection,
-    query: &CompletionPacketQuery,
-) -> CoreResult<Vec<CompletionPacketRecord>> {
-    let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
-    let status_json = query.status.as_ref().map(to_json_text).transpose()?;
-    let (limit, offset) = query
-        .page
-        .unwrap_or(QueryPage {
-            limit: None,
-            offset: None,
-        })
-        .bounded(100, 1_000);
-    let mut stmt = conn
-        .prepare(
-            "SELECT sequence, packet_json
-             FROM completion_packets
-             WHERE (?1 IS NULL OR session_id = ?1)
-               AND (?2 IS NULL OR status = ?2)
-             ORDER BY sequence ASC
-             LIMIT ?3 OFFSET ?4",
-        )
-        .map_err(|error| persistence_error("prepare query completion packets", error))?;
-    let rows = stmt
-        .query_map(params![session_id, status_json, limit, offset], |row| {
-            let packet_json: String = row.get(1)?;
-            Ok(CompletionPacketRecord {
-                sequence: row.get::<_, i64>(0)? as u64,
-                packet: from_json_text(&packet_json).map_err(to_sql_error)?,
-            })
-        })
-        .map_err(|error| persistence_error("query completion packets", error))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| persistence_error("load queried completion packets", error))
-}
-
-fn query_worker_runs(
-    conn: &Connection,
-    query: &WorkerRunQuery,
-) -> CoreResult<Vec<WorkerRunRecord>> {
-    let parent_session_id = query
-        .parent_session_id
-        .as_ref()
-        .map(|value| value.0.as_str());
-    let delegated_session_id = query
-        .delegated_session_id
-        .as_ref()
-        .map(|value| value.0.as_str());
-    let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
-    let task_id = query.task_id.as_ref().map(|value| value.0.as_str());
-    let status = query.status.as_ref().map(WorkerRunStatus::as_str);
-    let terminal = query
-        .terminal
-        .map(|value| if value { 1_i64 } else { 0_i64 });
-    let (limit, offset) = query
-        .page
-        .unwrap_or(QueryPage {
-            limit: None,
-            offset: None,
-        })
-        .bounded(100, 1_000);
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                run_id,
-                session_id,
-                delegated_session_id,
-                parent_agent_id,
-                profile_id,
-                task_id,
-                status,
-                created_at,
-                last_updated_at,
-                source_wake_id,
-                source_action_index,
-                delegation_correlation_id,
-                parent_consumption,
-                fan_out_group_id,
-                fan_out_max_concurrency,
-                fan_out_failure_policy,
-                worker_pool_work_item_id,
-                worker_pool_lease_id,
-                worker_pool_member_id,
-                worker_pool_claim_token
-             FROM worker_runs
-             WHERE (?1 IS NULL OR session_id = ?1)
-               AND (?2 IS NULL OR delegated_session_id = ?2)
-               AND (?3 IS NULL OR profile_id = ?3)
-               AND (?4 IS NULL OR task_id = ?4)
-               AND (?5 IS NULL OR status = ?5)
-               AND (
-                   ?6 IS NULL
-                   OR (?6 = 1 AND status IN ('completed', 'failed', 'blocked', 'exhausted', 'cancelled', 'expired'))
-                   OR (?6 = 0 AND status NOT IN ('completed', 'failed', 'blocked', 'exhausted', 'cancelled', 'expired'))
-               )
-             ORDER BY created_at ASC, run_id ASC
-             LIMIT ?7 OFFSET ?8",
-        )
-        .map_err(|error| persistence_error("prepare query worker runs", error))?;
-    let rows = stmt
-        .query_map(
-            params![
-                parent_session_id,
-                delegated_session_id,
-                profile_id,
-                task_id,
-                status,
-                terminal,
-                limit,
-                offset,
-            ],
-            row_to_worker_run,
-        )
-        .map_err(|error| persistence_error("query worker runs", error))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| persistence_error("load queried worker runs", error))
-}
-
-fn query_runtime_counters(
-    conn: &Connection,
-    query: &RuntimeCounterQuery,
-) -> CoreResult<Vec<RuntimeCounterRecord>> {
-    let scope_parts = query.scope.as_ref().map(runtime_counter_scope_parts);
-    let scope_type = scope_parts.as_ref().map(|(scope_type, _)| *scope_type);
-    let scope_id = scope_parts.as_ref().map(|(_, scope_id)| scope_id.as_str());
-    let counter_name = query.counter_name.as_deref();
-    let (limit, offset) = query
-        .page
-        .unwrap_or(QueryPage {
-            limit: None,
-            offset: None,
-        })
-        .bounded(200, 5_000);
-    let mut stmt = conn
-        .prepare(
-            "SELECT scope_type, scope_id, counter_name, value, updated_at
-             FROM runtime_counters
-             WHERE (?1 IS NULL OR scope_type = ?1)
-               AND (?2 IS NULL OR scope_id = ?2)
-               AND (?3 IS NULL OR counter_name = ?3)
-             ORDER BY scope_type ASC, scope_id ASC, counter_name ASC
-             LIMIT ?4 OFFSET ?5",
-        )
-        .map_err(|error| persistence_error("prepare query runtime counters", error))?;
-    let rows = stmt
-        .query_map(
-            params![scope_type, scope_id, counter_name, limit, offset],
-            row_to_runtime_counter,
-        )
-        .map_err(|error| persistence_error("query runtime counters", error))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| persistence_error("load queried runtime counters", error))
-}
-
-fn reset_runtime_counters(
-    conn: &Connection,
-    query: &RuntimeCounterQuery,
-    now: &IsoTimestamp,
-) -> CoreResult<u64> {
-    let scope_parts = query.scope.as_ref().map(runtime_counter_scope_parts);
-    let scope_type = scope_parts.as_ref().map(|(scope_type, _)| *scope_type);
-    let scope_id = scope_parts.as_ref().map(|(_, scope_id)| scope_id.as_str());
-    let counter_name = query.counter_name.as_deref();
-    let changed = conn
-        .execute(
-            "UPDATE runtime_counters
-             SET value = 0, updated_at = ?4
-             WHERE (?1 IS NULL OR scope_type = ?1)
-               AND (?2 IS NULL OR scope_id = ?2)
-               AND (?3 IS NULL OR counter_name = ?3)",
-            params![scope_type, scope_id, counter_name, now],
-        )
-        .map_err(|error| persistence_error("reset runtime counters", error))?;
-    Ok(changed as u64)
-}
-
 fn save_import_batch(conn: &Connection, record: &RuntimeImportBatchRecord) -> CoreResult<()> {
     conn.execute(
         "INSERT INTO runtime_import_batches (
@@ -14431,215 +13641,6 @@ fn runtime_object_kind_from_str(raw: &str) -> rusqlite::Result<RuntimeObjectKind
             )),
         )),
     }
-}
-
-fn load_runtime_counters(
-    conn: &Connection,
-    scope: Option<&RuntimeCounterScope>,
-) -> CoreResult<Vec<RuntimeCounterRecord>> {
-    if let Some(scope) = scope {
-        let (scope_type, scope_id) = runtime_counter_scope_parts(scope);
-        let mut stmt = conn
-            .prepare(
-                "SELECT scope_type, scope_id, counter_name, value, updated_at
-                 FROM runtime_counters
-                 WHERE scope_type = ?1 AND scope_id = ?2
-                 ORDER BY counter_name ASC",
-            )
-            .map_err(|error| persistence_error("prepare scoped runtime counters", error))?;
-        let rows = stmt
-            .query_map(params![scope_type, scope_id], row_to_runtime_counter)
-            .map_err(|error| persistence_error("query scoped runtime counters", error))?;
-        return rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| persistence_error("load scoped runtime counters", error));
-    }
-
-    let mut stmt = conn
-        .prepare(
-            "SELECT scope_type, scope_id, counter_name, value, updated_at
-             FROM runtime_counters
-             ORDER BY scope_type ASC, scope_id ASC, counter_name ASC",
-        )
-        .map_err(|error| persistence_error("prepare runtime counters", error))?;
-    let rows = stmt
-        .query_map([], row_to_runtime_counter)
-        .map_err(|error| persistence_error("query runtime counters", error))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| persistence_error("load runtime counters", error))
-}
-
-fn row_to_runtime_counter(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeCounterRecord> {
-    let scope_type: String = row.get(0)?;
-    let scope_id: String = row.get(1)?;
-    Ok(RuntimeCounterRecord {
-        scope: runtime_counter_scope_from_parts(&scope_type, &scope_id)?,
-        counter_name: row.get(2)?,
-        value: row.get::<_, i64>(3)? as u64,
-        updated_at: row.get(4)?,
-    })
-}
-
-fn counter_value(counters: &[RuntimeCounterRecord], name: &str) -> u64 {
-    counters
-        .iter()
-        .find(|counter| counter.counter_name == name)
-        .map_or(0, |counter| counter.value)
-}
-
-fn increment_counter_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    scope: &RuntimeCounterScope,
-    counter_name: &str,
-    amount: u64,
-) -> CoreResult<()> {
-    if amount == 0 {
-        return Ok(());
-    }
-
-    let (scope_type, scope_id) = runtime_counter_scope_parts(scope);
-    tx.execute(
-        "INSERT INTO runtime_counters (
-            scope_type,
-            scope_id,
-            counter_name,
-            value
-        ) VALUES (?1, ?2, ?3, ?4)
-        ON CONFLICT(scope_type, scope_id, counter_name) DO UPDATE SET
-            value = value + excluded.value,
-            updated_at = CURRENT_TIMESTAMP",
-        params![scope_type, scope_id, counter_name, amount as i64],
-    )
-    .map_err(|error| persistence_error("increment runtime counter", error))?;
-    Ok(())
-}
-
-fn increment_counter_for_scopes_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    scopes: Vec<RuntimeCounterScope>,
-    counter_name: &str,
-    amount: u64,
-) -> CoreResult<()> {
-    for scope in dedupe_counter_scopes(scopes) {
-        increment_counter_in_tx(tx, &scope, counter_name, amount)?;
-    }
-    Ok(())
-}
-
-fn increment_event_counters_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    event: &CoreEvent,
-) -> CoreResult<()> {
-    for (counter_name, amount) in event_counter_deltas(event) {
-        increment_counter_for_scopes_in_tx(tx, event_counter_scopes(event), counter_name, amount)?;
-    }
-    Ok(())
-}
-
-fn event_counter_deltas(event: &CoreEvent) -> Vec<(&'static str, u64)> {
-    match event {
-        CoreEvent::AgentMessageRouted { .. } => vec![(COUNTER_MESSAGES, 1)],
-        CoreEvent::BrainWakeRequested { .. } => vec![(COUNTER_WAKES, 1)],
-        CoreEvent::BrainActionsAccepted { count, .. } => {
-            vec![
-                (COUNTER_BRAIN_TURNS, 1),
-                ("accepted_actions", *count as u64),
-            ]
-        }
-        CoreEvent::BrainEventObserved { event, .. } => match event {
-            BrainEvent::ToolCallStarted { .. } => vec![(COUNTER_TOOL_CALLS, 1)],
-            BrainEvent::ToolCallFinished { is_error: true, .. } => vec![(COUNTER_TOOL_ERRORS, 1)],
-            _ => Vec::new(),
-        },
-        CoreEvent::DelegationLifecycleObserved { lifecycle } => match lifecycle.phase {
-            rusty_crew_core_protocol::DelegationLifecyclePhase::Created => {
-                vec![(COUNTER_DELEGATIONS_CREATED, 1)]
-            }
-            rusty_crew_core_protocol::DelegationLifecyclePhase::Completed => {
-                vec![(COUNTER_DELEGATIONS_COMPLETED, 1)]
-            }
-            rusty_crew_core_protocol::DelegationLifecyclePhase::Failed
-            | rusty_crew_core_protocol::DelegationLifecyclePhase::Blocked
-            | rusty_crew_core_protocol::DelegationLifecyclePhase::Exhausted => {
-                vec![(COUNTER_DELEGATIONS_FAILED, 1)]
-            }
-            rusty_crew_core_protocol::DelegationLifecyclePhase::TimedOut => {
-                vec![(COUNTER_DELEGATIONS_TIMED_OUT, 1)]
-            }
-            rusty_crew_core_protocol::DelegationLifecyclePhase::Cancelled => {
-                vec![(COUNTER_DELEGATIONS_CANCELLED, 1)]
-            }
-            rusty_crew_core_protocol::DelegationLifecyclePhase::WakeRequested
-            | rusty_crew_core_protocol::DelegationLifecyclePhase::CheckpointRequested => Vec::new(),
-        },
-        CoreEvent::CompletionPacketDelivered { .. } => vec![(COUNTER_COMPLETIONS, 1)],
-        CoreEvent::SessionCreated { .. }
-        | CoreEvent::SessionArchived { .. }
-        | CoreEvent::ExternalEventInjected { .. }
-        | CoreEvent::DenDataUpdated { .. } => Vec::new(),
-    }
-}
-
-fn event_counter_scopes(event: &CoreEvent) -> Vec<RuntimeCounterScope> {
-    let mut scopes = vec![RuntimeCounterScope::Runtime];
-    scopes.extend(
-        event_agent_ids(event)
-            .into_iter()
-            .map(RuntimeCounterScope::Agent),
-    );
-    let session_ids = event_session_ids(event);
-    scopes.extend(
-        session_ids
-            .iter()
-            .cloned()
-            .map(RuntimeCounterScope::Session),
-    );
-    scopes.extend(session_ids.into_iter().map(|session_id| {
-        RuntimeCounterScope::Instance(AgentInstanceId::new(format!("instance:{session_id}")))
-    }));
-    scopes
-}
-
-fn runtime_counter_scope_parts(scope: &RuntimeCounterScope) -> (&'static str, String) {
-    match scope {
-        RuntimeCounterScope::Runtime => ("runtime", "_global".to_string()),
-        RuntimeCounterScope::Agent(agent_id) => ("agent", agent_id.0.clone()),
-        RuntimeCounterScope::Instance(instance_id) => ("instance", instance_id.0.clone()),
-        RuntimeCounterScope::Session(session_id) => ("session", session_id.0.clone()),
-    }
-}
-
-fn runtime_counter_scope_from_parts(
-    scope_type: &str,
-    scope_id: &str,
-) -> rusqlite::Result<RuntimeCounterScope> {
-    match scope_type {
-        "runtime" if scope_id == "_global" => Ok(RuntimeCounterScope::Runtime),
-        "agent" => Ok(RuntimeCounterScope::Agent(AgentId::new(scope_id))),
-        "instance" => Ok(RuntimeCounterScope::Instance(AgentInstanceId::new(
-            scope_id,
-        ))),
-        "session" => Ok(RuntimeCounterScope::Session(SessionId::new(scope_id))),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::new(CoreError::new(
-                CoreErrorKind::PersistenceFailure,
-                format!("unknown runtime counter scope {other}:{scope_id}"),
-            )),
-        )),
-    }
-}
-
-fn dedupe_counter_scopes(scopes: Vec<RuntimeCounterScope>) -> Vec<RuntimeCounterScope> {
-    let mut deduped = Vec::new();
-    for scope in scopes {
-        if deduped.contains(&scope) {
-            continue;
-        }
-        deduped.push(scope);
-    }
-    deduped
 }
 
 fn save_event_indexes_in_tx(
@@ -21159,57 +20160,6 @@ fn should_persist_event(event: &CoreEvent) -> bool {
     )
 }
 
-fn row_to_worker_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRunRecord> {
-    let status: String = row.get(6)?;
-    let fan_out_failure_policy: String = row.get(15)?;
-    Ok(WorkerRunRecord {
-        run_id: RunId(row.get(0)?),
-        parent_session_id: SessionId(row.get(1)?),
-        delegated_session_id: row.get::<_, Option<String>>(2)?.map(SessionId),
-        parent_agent_id: row.get::<_, Option<String>>(3)?.map(AgentId),
-        profile_id: ProfileId(row.get(4)?),
-        task_id: row.get::<_, Option<String>>(5)?.map(TaskId),
-        status: worker_run_status_from_str(&status)?,
-        created_at: row.get(7)?,
-        last_updated_at: row.get(8)?,
-        source_wake_id: row.get(9)?,
-        source_action_index: row.get::<_, i64>(10)? as u32,
-        delegation_correlation_id: row.get(11)?,
-        parent_consumption: parent_consumption_policy_from_str(&row.get::<_, String>(12)?)?,
-        fan_out_group_id: row.get(13)?,
-        fan_out_max_concurrency: row.get::<_, Option<i64>>(14)?.map(|value| value as u32),
-        fan_out_failure_policy: fan_out_failure_policy_from_str(&fan_out_failure_policy)?,
-        worker_pool_work_item_id: row.get(16)?,
-        worker_pool_lease_id: row.get(17)?,
-        worker_pool_member_id: row.get(18)?,
-        worker_pool_claim_token: row.get(19)?,
-    })
-}
-
-fn worker_run_status_from_str(raw: &str) -> rusqlite::Result<WorkerRunStatus> {
-    match raw {
-        "requested" => Ok(WorkerRunStatus::Requested),
-        "session_created" => Ok(WorkerRunStatus::SessionCreated),
-        "wake_requested" => Ok(WorkerRunStatus::WakeRequested),
-        "running" => Ok(WorkerRunStatus::Running),
-        "checkpoint_waiting" => Ok(WorkerRunStatus::CheckpointWaiting),
-        "completed" => Ok(WorkerRunStatus::Completed),
-        "failed" => Ok(WorkerRunStatus::Failed),
-        "blocked" => Ok(WorkerRunStatus::Blocked),
-        "exhausted" => Ok(WorkerRunStatus::Exhausted),
-        "cancelled" => Ok(WorkerRunStatus::Cancelled),
-        "expired" => Ok(WorkerRunStatus::Expired),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            6,
-            rusqlite::types::Type::Text,
-            Box::new(CoreError::new(
-                CoreErrorKind::PersistenceFailure,
-                format!("unknown worker run status {other}"),
-            )),
-        )),
-    }
-}
-
 fn row_to_worker_pool_member(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerPoolMemberRecord> {
     let status: String = row.get(4)?;
     let capabilities_json: String = row.get(7)?;
@@ -21647,108 +20597,6 @@ fn parent_consumption_policy_from_str(raw: &str) -> rusqlite::Result<ParentConsu
     }
 }
 
-fn fan_out_failure_policy_as_str(policy: &FanOutFailurePolicy) -> &'static str {
-    match policy {
-        FanOutFailurePolicy::FailFast => "fail_fast",
-        FanOutFailurePolicy::FailSoft => "fail_soft",
-    }
-}
-
-fn fan_out_failure_policy_from_str(raw: &str) -> rusqlite::Result<FanOutFailurePolicy> {
-    match raw {
-        "fail_fast" => Ok(FanOutFailurePolicy::FailFast),
-        "fail_soft" => Ok(FanOutFailurePolicy::FailSoft),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            15,
-            rusqlite::types::Type::Text,
-            Box::new(CoreError::new(
-                CoreErrorKind::PersistenceFailure,
-                format!("unknown fan-out failure policy {other}"),
-            )),
-        )),
-    }
-}
-
-fn aggregate_fan_out_groups(mut runs: Vec<WorkerRunRecord>) -> Vec<DelegatedFanOutGroup> {
-    runs.sort_by(|left, right| {
-        left.fan_out_group_id
-            .cmp(&right.fan_out_group_id)
-            .then_with(|| left.source_wake_id.cmp(&right.source_wake_id))
-            .then_with(|| left.source_action_index.cmp(&right.source_action_index))
-    });
-
-    let mut groups = Vec::new();
-    let mut index = 0;
-    while index < runs.len() {
-        let Some(group_id) = runs[index].fan_out_group_id.clone() else {
-            index += 1;
-            continue;
-        };
-        let mut group_runs = Vec::new();
-        while index < runs.len() && runs[index].fan_out_group_id.as_deref() == Some(&group_id) {
-            group_runs.push(runs[index].clone());
-            index += 1;
-        }
-        groups.push(aggregate_fan_out_group(group_id, &group_runs));
-    }
-    groups
-}
-
-fn aggregate_fan_out_group(group_id: String, runs: &[WorkerRunRecord]) -> DelegatedFanOutGroup {
-    let mut group = DelegatedFanOutGroup {
-        group_id,
-        total: runs.len() as u32,
-        pending: 0,
-        completed: 0,
-        failed: 0,
-        blocked: 0,
-        exhausted: 0,
-        cancelled: 0,
-        expired: 0,
-        max_concurrency: runs.iter().find_map(|run| run.fan_out_max_concurrency),
-        failure_policy: runs
-            .iter()
-            .find(|run| run.fan_out_failure_policy == FanOutFailurePolicy::FailFast)
-            .map(|run| run.fan_out_failure_policy.clone())
-            .unwrap_or(FanOutFailurePolicy::FailSoft),
-        status: FanOutGroupStatus::InProgress,
-    };
-
-    for run in runs {
-        match run.status {
-            WorkerRunStatus::Requested
-            | WorkerRunStatus::SessionCreated
-            | WorkerRunStatus::WakeRequested
-            | WorkerRunStatus::Running
-            | WorkerRunStatus::CheckpointWaiting => group.pending += 1,
-            WorkerRunStatus::Completed => group.completed += 1,
-            WorkerRunStatus::Failed => group.failed += 1,
-            WorkerRunStatus::Blocked => group.blocked += 1,
-            WorkerRunStatus::Exhausted => group.exhausted += 1,
-            WorkerRunStatus::Cancelled => group.cancelled += 1,
-            WorkerRunStatus::Expired => group.expired += 1,
-        }
-    }
-
-    let non_success =
-        group.failed + group.blocked + group.exhausted + group.cancelled + group.expired;
-    group.status = if group.pending > 0 {
-        if group.failure_policy == FanOutFailurePolicy::FailFast && non_success > 0 {
-            FanOutGroupStatus::FailedFast
-        } else {
-            FanOutGroupStatus::InProgress
-        }
-    } else if non_success == 0 {
-        FanOutGroupStatus::Completed
-    } else if group.failure_policy == FanOutFailurePolicy::FailFast {
-        FanOutGroupStatus::FailedFast
-    } else {
-        FanOutGroupStatus::PartialFailure
-    };
-
-    group
-}
-
 fn add_missing_column(
     conn: &Connection,
     table: &str,
@@ -21895,6 +20743,92 @@ mod tests {
         #[test]
         fn sqlite_facade_satisfies_repository_conformance_suite() {
             run_repository_conformance_suite(&SqliteFacadeRepositoryConformance);
+        }
+
+        #[test]
+        fn sqlite_store_facades_expose_distinct_concern_boundaries() {
+            let db_path = temp_db_path("sqlite-store-facades");
+            let store = CoreCoordinationStore::open_sqlite_file(&db_path).unwrap();
+
+            let state = sample_session_state();
+            let config = sample_session_config();
+            store
+                .coordination()
+                .save_session_with_config(&state, &config)
+                .unwrap();
+            assert_eq!(store.coordination().load_sessions().unwrap().len(), 1);
+
+            let profile = store
+                .service_data()
+                .create_profile_registry_record(&profile_registry_write("facade-profile"))
+                .unwrap();
+            assert_eq!(profile.profile_id, ProfileId::new("facade-profile"));
+
+            let scope = SimpleKvScope {
+                scope_type: "profile".to_string(),
+                scope_id: "facade-profile".to_string(),
+            };
+            store
+                .module_data()
+                .put_simple_kv(&SimpleKvWrite {
+                    scope: scope.clone(),
+                    key: "checkpoint".to_string(),
+                    value_json: json!({"ok": true}),
+                    now: "2026-07-02T00:00:00Z".to_string(),
+                    expires_at: None,
+                })
+                .unwrap();
+            assert_eq!(
+                store
+                    .module_data()
+                    .list_simple_kv(&SimpleKvQuery {
+                        scope,
+                        key_prefix: Some("check".to_string()),
+                        include_expired: false,
+                        expired_only: false,
+                        now: Some("2026-07-02T00:01:00Z".to_string()),
+                        page: Some(page()),
+                    })
+                    .unwrap()
+                    .len(),
+                1
+            );
+
+            store
+                .memory()
+                .add_roleplay_lore_record(&roleplay_lore_write(
+                    "facade-lore",
+                    "facade-world",
+                    None,
+                    "Facade Lore",
+                    "Facade memory/lore boundary survives restart.",
+                    "2026-07-02T00:00:00Z",
+                ))
+                .unwrap();
+            assert_eq!(
+                store
+                    .memory()
+                    .query_roleplay_lore_records(&RoleplayLoreQuery {
+                        world_id: Some("facade-world".to_string()),
+                        ..RoleplayLoreQuery::default()
+                    })
+                    .unwrap()
+                    .len(),
+                1
+            );
+
+            assert!(store.admin().database_size().unwrap().database_bytes > 0);
+
+            drop(store);
+            let reopened = CoreCoordinationStore::open_sqlite_file(&db_path).unwrap();
+            assert_eq!(reopened.coordination().load_sessions().unwrap().len(), 1);
+            assert!(reopened
+                .service_data()
+                .get_profile_registry_record(&ProfileId::new("facade-profile"))
+                .unwrap()
+                .is_some());
+
+            remove_temp_db(&db_path);
         }
 
         fn run_repository_conformance_suite<B: RepositoryConformanceBackend>(backend: &B) {
