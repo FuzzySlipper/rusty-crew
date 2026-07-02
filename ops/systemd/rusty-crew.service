@@ -7,7 +7,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/dev/rusty-crew
-EnvironmentFile=/home/agents/rusty-crew/config/service.env
+EnvironmentFile=/home/system/database/rusty-crew-postgres.env
+EnvironmentFile=/home/system/rusty-crew/config/service.env
+EnvironmentFile=-/home/system/rusty-crew/config/adapter-secrets.env
 ExecStart=/usr/bin/env npm run service:start
 Restart=on-failure
 RestartSec=5s

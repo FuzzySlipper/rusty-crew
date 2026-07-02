@@ -1,13 +1,30 @@
 # Direct OpenAI OAuth Responses Provider
 
-Status: design note for task #3972
+Status: implemented green-path note for task #3972/#3978
 Date: 2026-07-02
 
-Rusty Crew should support a direct OpenAI OAuth-backed Responses provider so the
-Responses brain can avoid routing through den-router for the ChatGPT/Codex auth
-path. Codex is useful here because its Rust source is an available reference for
-the sanctioned OAuth and Responses behavior, but Rusty Crew should implement its
-own provider, credential envelopes, API routes, tests, and diagnostics.
+Rusty Crew supports a direct OpenAI OAuth-backed Responses provider so the
+Responses brain does not need to route through den-router for the ChatGPT/Codex
+auth path. This is the green path for `openai-responses` live profiles.
+
+The direct provider shape is:
+
+- model provider: `providerKind=openai`, `protocol=responses`
+- credential: typed `openai_oauth` provider secret envelope
+- request base URL: `https://chatgpt.com/backend-api/codex`
+- profile brain module: `openai-responses`
+- live mode: `RUSTY_CREW_OPENAI_RESPONSES_LIVE=1`
+- native required: `RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1`
+
+`RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY=1` is not part of the direct OpenAI
+OAuth path. That flag exists only for explicitly configured API-key-compatible
+proxy endpoints that handle credentials outside Rusty Crew. Direct OAuth
+providers get their credentials from the provider secret envelope and should not
+depend on no-key mode.
+
+Codex is useful here because its Rust source is an available reference for the
+sanctioned OAuth and Responses behavior, but Rusty Crew implements its own
+provider, credential envelopes, API routes, tests, and diagnostics.
 
 Do not vendor or depend on Codex crates for this work. The local Codex checkout is
 Apache-2.0 licensed reference material. Any direct code copy would need explicit
@@ -299,9 +316,9 @@ APIs, DB-backed TTL state is the better default.
 
 ## Difference From den-router Proxy Usage
 
-The current den-router path is useful for early testing because it hides OpenAI
-auth outside Rusty Crew. It is not the desired long-term shape for Rusty Crew's
-Responses brain.
+The den-router path was useful during early testing because it hid OpenAI auth
+outside Rusty Crew. It is now optional compatibility/proxy behavior, not the
+default certification path for Rusty Crew's Responses brain.
 
 Direct provider path:
 
@@ -314,12 +331,39 @@ Direct provider path:
 
 den-router proxy path after certification:
 
-- Keep only as a generic OpenAI-compatible provider option when explicitly
-  configured by URL and credential.
+- Keep only as a generic OpenAI-compatible provider option when a profile
+  explicitly selects a proxy URL and credential behavior.
 - Remove any special assumption that `gpt`/den-router is the canonical
   Responses route.
 - Remove live-test wording that suggests den-router is required for OpenAI OAuth
   Responses.
+- Do not block Rusty Crew OpenAI Responses certification on den-router proxy
+  repairs. Track den-router failures in focused Den tasks for den-router.
+
+## Diagnostics And Operator Readback
+
+Direct OAuth status is visible through Rusty Crew admin APIs:
+
+- `GET /v1/admin/model-providers/:alias/oauth/openai/status` reports the
+  configured redirect URI, whether LAN redirect overrides are allowed, pending
+  login summaries, redacted credential presence, and redacted OAuth summary
+  fields such as account id/email when available.
+- `GET /v1/chat/sessions/:sessionId/context` reports the selected model
+  provider, brain module, protocol, provider kind, and redacted credential
+  status for a session.
+- Provider list/read routes expose credential metadata such as
+  `credential.kind`, `credential.hasSecret`, and `credential.updatedAt`; they
+  must never return token values or raw secret JSON.
+
+Common direct OAuth failures should be diagnosed in Rusty Crew first:
+
+- missing secret envelope for a provider configured as `openai_oauth`;
+- expired or missing pending login during callback completion;
+- callback state mismatch;
+- refresh-token expiration, reuse, or invalidation;
+- provider response authentication failure after one forced refresh retry;
+- non-streaming or idle provider response before the configured stream idle
+  budget.
 
 ## Validation Plan
 
@@ -342,3 +386,11 @@ Live certification:
 - Certify that live chat streams initial output, tool-call activity, reasoning
   visibility where applicable, and terminal events without changing the test to
   avoid the failure.
+
+Latest direct-path evidence:
+
+- Rusty View broker run:
+  `/home/agent/.cache/den-playwright/runs/rusty-view/rusty-view-20260702T105956.010098079Z-3045777/run-index.json`
+- Session: `responses-live-cert-session-20260702T10594590-1`
+- Result: long live Responses stream completed with 7,282 raw events, preserved
+  beginning/end replay from cursor `0`, and did not depend on den-router.

@@ -1,19 +1,19 @@
 # Local Service Runbook
 
-Status: Initial local deployment runbook for task 3066
+Status: Local deployment runbook; updated for `/home/system/rusty-crew`
 
 This runbook starts Rusty Crew from the source checkout at `/home/dev/rusty-crew`
-while keeping mutable service state under `/home/agents/rusty-crew`.
+while keeping mutable service state under `/home/system/rusty-crew`.
 
 ## Paths
 
 - Source checkout: `/home/dev/rusty-crew`
-- Runtime root: `/home/agents/rusty-crew`
-- Service env file: `/home/agents/rusty-crew/config/service.env`
-- Runtime config: `/home/agents/rusty-crew/config/service.json`
-- Engine data: `/home/agents/rusty-crew/data/engine`
-- Static frontend site: `/home/agents/rusty-crew/site`
-- Local lock: `/home/agents/rusty-crew/run/service.lock`
+- Runtime root: `/home/system/rusty-crew`
+- Service env file: `/home/system/rusty-crew/config/service.env`
+- Runtime config: `/home/system/rusty-crew/config/service.json`
+- Engine data: `/home/system/rusty-crew/data/engine`
+- Static frontend site: `/home/system/rusty-crew/site`
+- Local lock: `/home/system/rusty-crew/run/service.lock`
 - Systemd user unit source: `ops/systemd/rusty-crew.service`
 
 ## First Setup
@@ -21,12 +21,12 @@ while keeping mutable service state under `/home/agents/rusty-crew`.
 From `/home/dev/rusty-crew`:
 
 ```bash
-mkdir -p /home/agents/rusty-crew/config
-cp ops/systemd/service.env.example /home/agents/rusty-crew/config/service.env
-chmod 600 /home/agents/rusty-crew/config/service.env
+mkdir -p /home/system/rusty-crew/config
+cp ops/systemd/service.env.example /home/system/rusty-crew/config/service.env
+chmod 600 /home/system/rusty-crew/config/service.env
 ```
 
-Edit `/home/agents/rusty-crew/config/service.env` and set
+Edit `/home/system/rusty-crew/config/service.env` and set
 `RUSTY_CREW_ADMIN_TOKEN` to a local token when using bearer auth.
 
 The local deployment intentionally binds admin HTTP on the trusted LAN:
@@ -61,7 +61,7 @@ npm run typecheck
 npm run smoke:service-config
 npm run smoke:service-host
 set -a
-. /home/agents/rusty-crew/config/service.env
+. /home/system/rusty-crew/config/service.env
 set +a
 npm run service:start
 ```
@@ -79,22 +79,22 @@ http://127.0.0.1:9347/admin
 ```
 
 Enter the local admin token from
-`/home/agents/rusty-crew/config/service.env` when the page prompts for it. In
+`/home/system/rusty-crew/config/service.env` when the page prompts for it. In
 `RUSTY_CREW_ADMIN_AUTH_MODE=none`, the token box is hidden and the page reads
 diagnostics directly.
 
 ## Static Frontend
 
 Rusty Crew can serve a static frontend from the same origin as the service API.
-When `/home/agents/rusty-crew/site` exists, it is used as the default site
+When `/home/system/rusty-crew/site` exists, it is used as the default site
 directory. `RUSTY_CREW_STATIC_DIR` can point at a different directory while
 developing or testing a frontend build.
 
 Deployment is intentionally file-copy simple:
 
 ```bash
-mkdir -p /home/agents/rusty-crew/site
-cp -a /home/dev/rusty-view/dist/apps/debug-chat/browser/. /home/agents/rusty-crew/site/
+mkdir -p /home/system/rusty-crew/site
+cp -a /home/dev/rusty-view/dist/apps/debug-chat/browser/. /home/system/rusty-crew/site/
 ```
 
 With a site directory present, `/` serves the frontend app and `/v1/*` remains
@@ -117,9 +117,18 @@ npm run service:debug-turn -- field-prime-session "Reply with one sentence from 
 When `RUSTY_CREW_ADMIN_AUTH_MODE=none`, no token is required. In bearer mode,
 export `RUSTY_CREW_ADMIN_TOKEN` before running the CLI.
 
-Profiles with `modelConfig.provider=den-router` use the local den-router-backed
-Pi agent path. Profiles with other providers currently use the deterministic
-local service brain.
+Profiles with centralized model-provider aliases use the selected brain module
+and provider protocol from the session context. Direct OpenAI OAuth Responses
+profiles should use an `openai-responses` brain with a provider alias whose
+credential kind is `openai_oauth`; den-router is only an explicit proxy/provider
+choice, not the default OpenAI OAuth path.
+
+Useful model/brain readbacks:
+
+```bash
+curl http://127.0.0.1:9347/v1/chat/sessions/<session-id>/context
+curl http://127.0.0.1:9347/v1/admin/model-providers/<alias>/oauth/openai/status
+```
 
 ## Background Heartbeat
 
@@ -184,14 +193,14 @@ systemctl --user daemon-reload
 
 ## Runtime Config
 
-`/home/agents/rusty-crew/config/service.json` is optional. If absent, the
+`/home/system/rusty-crew/config/service.json` is optional. If absent, the
 service starts with an empty runtime shell.
 
 Minimal shape:
 
 ```json
 {
-  "profilesDir": "/home/agents/rusty-crew/config/profiles",
+  "profilesDir": "/home/system/rusty-crew/config/profiles",
   "brains": [{ "profileId": "prime" }],
   "sessions": [
     {
@@ -279,7 +288,7 @@ background heartbeat.
 ## Guardrails
 
 - Do not run two Rusty Crew service processes against the same runtime root.
-  Startup creates `/home/agents/rusty-crew/run/service.lock` and fails if it is
+  Startup creates `/home/system/rusty-crew/run/service.lock` and fails if it is
   already present.
 - If the process dies hard, inspect the lock file before removing it. It records
   the pid and creation time.
@@ -328,7 +337,7 @@ For now, prefer stopped-service backup for local field tests:
 
 ```bash
 systemctl --user stop rusty-crew.service
-tar -C /home/agents -czf /home/agents/rusty-crew-field-test.tgz rusty-crew
+tar -C /home/system -czf /home/system/rusty-crew-field-test.tgz rusty-crew
 ```
 
 If using direct-run testing, stop the foreground process first. Do not copy only
@@ -352,5 +361,5 @@ If direct-run testing was used, stop the foreground process with `Ctrl-C`.
 Archive the runtime root only after confirming the service is stopped:
 
 ```bash
-tar -C /home/agents -czf /home/agents/rusty-crew-field-test.tgz rusty-crew
+tar -C /home/system -czf /home/system/rusty-crew-field-test.tgz rusty-crew
 ```

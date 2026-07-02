@@ -11,7 +11,7 @@ are also supported when they stay behind the same wake/stream/action contract.
 This repository is no longer a bare scaffold. It has a working Rust engine,
 native bridge, TypeScript brain island, service host, profile loading, tool
 registry, admin diagnostics/control surfaces, Den successor adapters, and local
-field-test configuration under `/home/agents/rusty-crew`.
+field-test configuration under `/home/system/rusty-crew`.
 
 ## Source Of Truth
 
@@ -29,7 +29,8 @@ field-test configuration under `/home/agents/rusty-crew`.
   coordination event shapes.
 - `crates/core/core-engine` owns deterministic coordination: sessions,
   messages, body projection, brain action validation, delegation lifecycle,
-  fan-out accounting, completion routing, counters, and SQLite persistence.
+  fan-out accounting, completion routing, counters, and backend-neutral
+  persistence.
 - `crates/bridge/core-bridge-api` is the stable bridge-facing Rust facade.
   `crates/bridge/core-bridge-node` exposes the native Node transport.
 - `ts/packages/contracts` mirrors bridge-visible TypeScript contracts.
@@ -51,10 +52,10 @@ field-test configuration under `/home/agents/rusty-crew`.
 
 The local service is expected to use:
 
-- config: `/home/agents/rusty-crew/config`
-- data: `/home/agents/rusty-crew/data`
-- logs: `/home/agents/rusty-crew/logs`
-- run state: `/home/agents/rusty-crew/run`
+- config: `/home/system/rusty-crew/config`
+- data: `/home/system/rusty-crew/data`
+- logs: `/home/system/rusty-crew/logs`
+- run state: `/home/system/rusty-crew/run`
 
 The service host should bind admin/debug HTTP surfaces on `0.0.0.0` in this
 trusted LAN development environment. Tokens and service URLs belong in local
