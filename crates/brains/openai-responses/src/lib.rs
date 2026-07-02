@@ -18,6 +18,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
+use std::io::Read;
 use std::time::{Duration, Instant};
 
 pub const MODULE_ID: &str = "openai-responses";
@@ -907,6 +908,18 @@ pub trait ResponsesClient {
         &mut self,
         request: ResponsesRequest,
     ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError>;
+
+    fn stream_observed(
+        &mut self,
+        request: ResponsesRequest,
+        on_event: &mut dyn FnMut(&ResponsesEvent),
+    ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
+        let events = self.stream(request)?;
+        for event in &events {
+            on_event(event);
+        }
+        Ok(events)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1031,8 +1044,9 @@ impl LiveResponsesClient {
     ) -> Result<Self, ResponsesStreamError> {
         let base_url = base_url.into();
         let endpoint = format!("{}/responses", base_url.trim_end_matches('/'));
+        let _idle_timeout_ms = idle_timeout_ms;
         let client = HttpClient::builder()
-            .timeout(Duration::from_millis(idle_timeout_ms.max(1_000)))
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
         Ok(Self {
@@ -1048,46 +1062,95 @@ impl ResponsesClient for LiveResponsesClient {
         &mut self,
         request: ResponsesRequest,
     ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
+        self.stream_observed(request, &mut |_| {})
+    }
+
+    fn stream_observed(
+        &mut self,
+        request: ResponsesRequest,
+        on_event: &mut dyn FnMut(&ResponsesEvent),
+    ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
         let mut request = self.client.post(&self.endpoint).json(&request);
         if let Some(api_key) = &self.api_key {
             request = request.bearer_auth(api_key);
         }
-        let response = request
-            .send()
-            .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
+        let mut response = request.send().map_err(transport_error)?;
         let status = response.status();
-        let body = response
-            .text()
-            .map_err(|error| ResponsesStreamError::Transport(error.to_string()))?;
         if !status.is_success() {
+            let body = response.text().map_err(transport_error)?;
             return Err(ResponsesStreamError::Transport(format!(
                 "HTTP {status}: {body}"
             )));
         }
-        parse_sse_events(&body)
+        parse_sse_response(&mut response, on_event)
     }
 }
 
-fn parse_sse_events(body: &str) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
+fn transport_error(error: reqwest::Error) -> ResponsesStreamError {
+    if error.is_timeout() {
+        ResponsesStreamError::IdleTimeout
+    } else {
+        ResponsesStreamError::Transport(error.to_string())
+    }
+}
+
+fn parse_sse_response(
+    response: &mut reqwest::blocking::Response,
+    on_event: &mut dyn FnMut(&ResponsesEvent),
+) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
     let mut events = Vec::new();
     let mut data_lines = Vec::new();
-    for line in body.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.is_empty() {
-            flush_sse_data(&mut data_lines, &mut events)?;
-            continue;
+    let mut pending_line = String::new();
+    let mut buffer = [0_u8; 8192];
+
+    loop {
+        let read = response.read(&mut buffer).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                ResponsesStreamError::IdleTimeout
+            } else {
+                ResponsesStreamError::Transport(error.to_string())
+            }
+        })?;
+        if read == 0 {
+            break;
         }
-        if let Some(data) = line.strip_prefix("data:") {
-            data_lines.push(data.trim_start().to_string());
+        let chunk = String::from_utf8_lossy(&buffer[..read]);
+        pending_line.push_str(&chunk);
+        while let Some(newline_index) = pending_line.find('\n') {
+            let line = pending_line[..newline_index].to_string();
+            pending_line.replace_range(..=newline_index, "");
+            handle_sse_line(&line, &mut data_lines, &mut events, on_event)?;
         }
     }
-    flush_sse_data(&mut data_lines, &mut events)?;
+
+    if !pending_line.is_empty() {
+        handle_sse_line(&pending_line, &mut data_lines, &mut events, on_event)?;
+    }
+    flush_sse_data(&mut data_lines, &mut events, Some(on_event))?;
     Ok(events)
+}
+
+fn handle_sse_line(
+    line: &str,
+    data_lines: &mut Vec<String>,
+    events: &mut Vec<ResponsesEvent>,
+    on_event: &mut dyn FnMut(&ResponsesEvent),
+) -> Result<(), ResponsesStreamError> {
+    let line = line.trim_end_matches('\r');
+    if line.is_empty() {
+        flush_sse_data(data_lines, events, Some(on_event))?;
+        return Ok(());
+    }
+    if let Some(data) = line.strip_prefix("data:") {
+        data_lines.push(data.trim_start().to_string());
+    }
+    Ok(())
 }
 
 fn flush_sse_data(
     data_lines: &mut Vec<String>,
     events: &mut Vec<ResponsesEvent>,
+    mut on_event: Option<&mut dyn FnMut(&ResponsesEvent)>,
 ) -> Result<(), ResponsesStreamError> {
     if data_lines.is_empty() {
         return Ok(());
@@ -1100,6 +1163,9 @@ fn flush_sse_data(
     let value: Value = serde_json::from_str(&data)
         .map_err(|error| ResponsesStreamError::Transport(format!("invalid SSE JSON: {error}")))?;
     if let Some(event) = event_from_provider_value(value)? {
+        if let Some(on_event) = on_event.as_deref_mut() {
+            on_event(&event);
+        }
         events.push(event);
     }
     Ok(())
@@ -1281,6 +1347,39 @@ pub struct ResponsesReplayBrain<C, T> {
     max_continuations: usize,
 }
 
+type BrainWakeItemSink<'a> = Option<&'a mut dyn FnMut(BrainWakeStreamItem)>;
+
+fn push_stream_item(
+    items: &mut Vec<BrainWakeStreamItem>,
+    item: BrainWakeStreamItem,
+    sink: &mut BrainWakeItemSink<'_>,
+) {
+    if let Some(sink) = sink.as_deref_mut() {
+        sink(item.clone());
+    }
+    items.push(item);
+}
+
+fn streaming_item_from_provider_event(
+    request: &BrainWakeRequest,
+    provider_event: &ResponsesEvent,
+) -> Option<BrainWakeStreamItem> {
+    match provider_event {
+        ResponsesEvent::TextDelta(text) => Some(event(
+            request,
+            BrainEvent::TextDelta { text: text.clone() },
+        )),
+        ResponsesEvent::ReasoningDelta(text) => Some(event(
+            request,
+            BrainEvent::ReasoningDelta {
+                text: text.clone(),
+                format: Some("openai-responses".to_string()),
+            },
+        )),
+        _ => None,
+    }
+}
+
 impl<C, T> ResponsesReplayBrain<C, T>
 where
     C: ResponsesClient,
@@ -1317,8 +1416,31 @@ where
         request: BrainWakeRequest,
         history: ResponsesReplayProjection,
     ) -> CoreResult<ResponsesBrainWakeResult> {
+        self.wake_with_history_internal(request, history, None)
+    }
+
+    pub fn wake_with_history_and_stream_sink(
+        &mut self,
+        request: BrainWakeRequest,
+        history: ResponsesReplayProjection,
+        sink: &mut dyn FnMut(BrainWakeStreamItem),
+    ) -> CoreResult<ResponsesBrainWakeResult> {
+        self.wake_with_history_internal(request, history, Some(sink))
+    }
+
+    fn wake_with_history_internal(
+        &mut self,
+        request: BrainWakeRequest,
+        history: ResponsesReplayProjection,
+        mut sink: BrainWakeItemSink<'_>,
+    ) -> CoreResult<ResponsesBrainWakeResult> {
         let mut metrics = ResponsesTransportMetricsBuilder::new(&self.request_builder.config);
-        let mut items = vec![event(&request, BrainEvent::Started)];
+        let mut items = Vec::new();
+        push_stream_item(
+            &mut items,
+            event(&request, BrainEvent::Started),
+            &mut sink,
+        );
         if let Some(absence) = &request.provider_state_absence {
             if matches!(
                 absence,
@@ -1327,16 +1449,20 @@ where
                     | ProviderStateAbsenceReason::Invalidated
                     | ProviderStateAbsenceReason::LoadFailed
             ) {
-                items.push(event(
-                    &request,
-                    BrainEvent::ProviderStatus {
-                        level: BrainProviderStatusLevel::Info,
-                        message: format!(
-                            "responses replay starting without provider state: {absence:?}"
-                        ),
-                        metadata_json: None,
-                    },
-                ));
+                push_stream_item(
+                    &mut items,
+                    event(
+                        &request,
+                        BrainEvent::ProviderStatus {
+                            level: BrainProviderStatusLevel::Info,
+                            message: format!(
+                                "responses replay starting without provider state: {absence:?}"
+                            ),
+                            metadata_json: None,
+                        },
+                    ),
+                    &mut sink,
+                );
             }
         }
 
@@ -1356,13 +1482,29 @@ where
             );
             if let Some(reason) = planned_request.fallback_reason {
                 metrics.observe_fallback(reason);
-                items.push(previous_response_chain_fallback_event(&request, reason));
+                push_stream_item(
+                    &mut items,
+                    previous_response_chain_fallback_event(&request, reason),
+                    &mut sink,
+                );
             }
             let planned_fingerprint = request_fingerprint(&planned_request.request);
             let committed_input_items = planned_request.request.input.clone();
             metrics.observe_request(&planned_request.request);
             let request_started_at = Instant::now();
-            let events = match self.client.stream(planned_request.request.clone()) {
+            let mut observed_deltas = Vec::new();
+            let events = match self.client.stream_observed(
+                planned_request.request.clone(),
+                &mut |provider_event| {
+                    if let Some(item) = streaming_item_from_provider_event(&request, provider_event)
+                    {
+                        if let Some(sink) = sink.as_deref_mut() {
+                            sink(item.clone());
+                        }
+                        observed_deltas.push(item);
+                    }
+                },
+            ) {
                 Ok(events) => {
                     metrics.observe_events(&events, request_started_at.elapsed());
                     events
@@ -1372,10 +1514,14 @@ where
                         metrics.observe_fallback(
                             PreviousResponseChainFallbackReason::PredecessorRejectedByProvider,
                         );
-                        items.push(previous_response_chain_fallback_event(
-                            &request,
-                            PreviousResponseChainFallbackReason::PredecessorRejectedByProvider,
-                        ));
+                        push_stream_item(
+                            &mut items,
+                            previous_response_chain_fallback_event(
+                                &request,
+                                PreviousResponseChainFallbackReason::PredecessorRejectedByProvider,
+                            ),
+                            &mut sink,
+                        );
                         let replay_request = self.request_builder.build_replay(
                             &request,
                             request.provider_state.as_ref(),
@@ -1386,13 +1532,28 @@ where
                         let replay_input_items = replay_request.input.clone();
                         metrics.observe_request(&replay_request);
                         let request_started_at = Instant::now();
-                        let completed_without_pending = match self.client.stream(replay_request) {
+                        let mut observed_deltas = Vec::new();
+                        let completed_without_pending = match self.client.stream_observed(
+                            replay_request,
+                            &mut |provider_event| {
+                                if let Some(item) =
+                                    streaming_item_from_provider_event(&request, provider_event)
+                                {
+                                    if let Some(sink) = sink.as_deref_mut() {
+                                        sink(item.clone());
+                                    }
+                                    observed_deltas.push(item);
+                                }
+                            },
+                        ) {
                             Ok(events) => {
                                 metrics.observe_events(&events, request_started_at.elapsed());
                                 self.process_provider_events(
                                     &request,
                                     &mut items,
                                     events,
+                                    observed_deltas.len(),
+                                    &mut sink,
                                     &mut continuation_items,
                                     &mut committed_output_items,
                                     &mut last_response_id,
@@ -1400,13 +1561,25 @@ where
                                 )
                             }
                             Err(error) => {
-                                return Ok(failed_result(&request, items, error, metrics.finish()))
+                                return Ok(failed_result(
+                                    &request,
+                                    items,
+                                    error,
+                                    metrics.finish(),
+                                    &mut sink,
+                                ))
                             }
                         };
                         let completed_without_pending = match completed_without_pending {
                             Ok(done) => done,
                             Err(error) => {
-                                return Ok(failed_result(&request, items, error, metrics.finish()))
+                                return Ok(failed_result(
+                                    &request,
+                                    items,
+                                    error,
+                                    metrics.finish(),
+                                    &mut sink,
+                                ))
                             }
                         };
                         if continuation_items.is_empty() {
@@ -1415,6 +1588,7 @@ where
                                 &request,
                                 &self.request_builder.config,
                                 items,
+                                &mut sink,
                                 CompletedResponsesAttempt {
                                     response_id: last_response_id,
                                     output_items: committed_output_items,
@@ -1428,13 +1602,21 @@ where
                         metrics.observe_continuation_round();
                         continue;
                     }
-                    return Ok(failed_result(&request, items, error, metrics.finish()));
+                    return Ok(failed_result(
+                        &request,
+                        items,
+                        error,
+                        metrics.finish(),
+                        &mut sink,
+                    ));
                 }
             };
             let completed_without_pending = self.process_provider_events(
                 &request,
                 &mut items,
                 events,
+                observed_deltas.len(),
+                &mut sink,
                 &mut continuation_items,
                 &mut committed_output_items,
                 &mut last_response_id,
@@ -1442,13 +1624,22 @@ where
             );
             let completed_without_pending = match completed_without_pending {
                 Ok(done) => done,
-                Err(error) => return Ok(failed_result(&request, items, error, metrics.finish())),
+                Err(error) => {
+                    return Ok(failed_result(
+                        &request,
+                        items,
+                        error,
+                        metrics.finish(),
+                        &mut sink,
+                    ))
+                }
             };
             if completed_without_pending {
                 return Ok(finish_responses_wake(
                     &request,
                     &self.request_builder.config,
                     items,
+                    &mut sink,
                     CompletedResponsesAttempt {
                         response_id: last_response_id,
                         output_items: committed_output_items,
@@ -1467,6 +1658,7 @@ where
             items,
             ResponsesStreamError::IdleTimeout,
             metrics.finish(),
+            &mut sink,
         ))
     }
 
@@ -1476,6 +1668,8 @@ where
         request: &BrainWakeRequest,
         items: &mut Vec<BrainWakeStreamItem>,
         events: Vec<ResponsesEvent>,
+        eagerly_streamed_delta_count: usize,
+        sink: &mut BrainWakeItemSink<'_>,
         continuation_items: &mut Vec<ResponsesInputItem>,
         committed_output_items: &mut Vec<ResponsesOutputItem>,
         last_response_id: &mut Option<String>,
@@ -1483,19 +1677,32 @@ where
     ) -> Result<bool, ResponsesStreamError> {
         let mut completed = false;
         let mut pending_calls = Vec::new();
+        let mut observed_delta_index = 0;
         for provider_event in events {
             match provider_event {
                 ResponsesEvent::TextDelta(text) => {
-                    items.push(event(request, BrainEvent::TextDelta { text }));
+                    let item = event(request, BrainEvent::TextDelta { text });
+                    if observed_delta_index < eagerly_streamed_delta_count {
+                        items.push(item);
+                    } else {
+                        push_stream_item(items, item, sink);
+                    }
+                    observed_delta_index += 1;
                 }
                 ResponsesEvent::ReasoningDelta(delta) => {
-                    items.push(event(
+                    let item = event(
                         request,
                         BrainEvent::ReasoningDelta {
                             text: delta,
                             format: Some("openai-responses".to_string()),
                         },
-                    ));
+                    );
+                    if observed_delta_index < eagerly_streamed_delta_count {
+                        items.push(item);
+                    } else {
+                        push_stream_item(items, item, sink);
+                    }
+                    observed_delta_index += 1;
                 }
                 ResponsesEvent::OutputItemAdded(output) => {
                     committed_output_items.push(output);
@@ -1542,22 +1749,30 @@ where
             return Ok(true);
         }
         for call in pending_calls {
-            items.push(event(
-                request,
-                BrainEvent::ToolCallStarted {
+            push_stream_item(
+                items,
+                event(
+                    request,
+                    BrainEvent::ToolCallStarted {
                     tool_name: call.name.clone(),
                     metadata: Some(tool_metadata(&call)),
-                },
-            ));
+                    },
+                ),
+                sink,
+            );
             let output = self.tools.execute(&call);
-            items.push(event(
-                request,
-                BrainEvent::ToolCallFinished {
+            push_stream_item(
+                items,
+                event(
+                    request,
+                    BrainEvent::ToolCallFinished {
                     tool_name: call.name.clone(),
                     is_error: output.is_error,
                     metadata: Some(tool_metadata(&call)),
-                },
-            ));
+                    },
+                ),
+                sink,
+            );
             continuation_items.push(ResponsesInputItem::FunctionCall {
                 id: call.provider_item_id.clone(),
                 call_id: call.call_id.clone(),
@@ -1610,10 +1825,11 @@ fn finish_responses_wake(
     request: &BrainWakeRequest,
     config: &ResponsesBrainConfig,
     mut items: Vec<BrainWakeStreamItem>,
+    sink: &mut BrainWakeItemSink<'_>,
     completed: CompletedResponsesAttempt,
     transport_metrics: ResponsesTransportMetrics,
 ) -> ResponsesBrainWakeResult {
-    items.push(event(request, BrainEvent::Finished));
+    push_stream_item(&mut items, event(request, BrainEvent::Finished), sink);
     let batch = BrainActionBatch {
         wake_id: request.wake_id.clone(),
         session_id: request.session_id.clone(),
@@ -1625,7 +1841,7 @@ fn finish_responses_wake(
             },
         }],
     };
-    items.push(BrainWakeStreamItem::actions(batch));
+    push_stream_item(&mut items, BrainWakeStreamItem::actions(batch), sink);
     let provider_state = provider_state_output(
         request,
         config,
@@ -1731,13 +1947,18 @@ fn failed_result(
     mut items: Vec<BrainWakeStreamItem>,
     error: ResponsesStreamError,
     transport_metrics: ResponsesTransportMetrics,
+    sink: &mut BrainWakeItemSink<'_>,
 ) -> ResponsesBrainWakeResult {
-    items.push(BrainWakeStreamItem::wake_failed(BrainWakeFailure {
-        wake_id: request.wake_id.clone(),
-        session_id: request.session_id.clone(),
-        kind: CoreErrorKind::BrainUnavailable,
-        message: error.to_string(),
-    }));
+    push_stream_item(
+        &mut items,
+        BrainWakeStreamItem::wake_failed(BrainWakeFailure {
+            wake_id: request.wake_id.clone(),
+            session_id: request.session_id.clone(),
+            kind: CoreErrorKind::BrainUnavailable,
+            message: error.to_string(),
+        }),
+        sink,
+    );
     ResponsesBrainWakeResult {
         stream: BrainWakeStream::from_items(items),
         provider_state: None,

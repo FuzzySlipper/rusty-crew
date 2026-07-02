@@ -102,7 +102,7 @@ function toBodyState(value: unknown): BodyState {
         maxDelegationDepth: state.session.resource_limits?.max_delegation_depth,
       },
       toolProfile: {
-        tools: state.session.tool_profile?.tools ?? [],
+        tools: (state.session.tool_profile?.tools ?? []).map(toToolDescriptor),
       },
       historyWindow: state.session.history_window
         ? {
@@ -227,7 +227,7 @@ function toCoreEvent(event: RustCoreEventJson): CoreEvent {
         type: event.type,
         sessionId: event.session_id,
         wakeId: event.wake_id,
-        event: event.event,
+        event: toBrainEvent(event.event),
       };
     case "brain_actions_accepted":
       return {
@@ -263,13 +263,61 @@ function toBodyStateSession(
       maxDelegationDepth: session.resource_limits?.max_delegation_depth,
     },
     toolProfile: {
-      tools: session.tool_profile?.tools ?? [],
+      tools: (session.tool_profile?.tools ?? []).map(toToolDescriptor),
     },
     status: session.status,
     brainTurnCount: session.brain_turn_count,
     createdAt: session.created_at,
     lastActiveAt: session.last_active_at,
   };
+}
+
+function toToolDescriptor(
+  tool: RustToolDescriptorJson,
+): BodyState["session"]["toolProfile"]["tools"][number] {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.input_schema,
+  };
+}
+
+function toBrainEvent(
+  event: RustBrainEventJson,
+): Extract<CoreEvent, { type: "brain_event_observed" }>["event"] {
+  switch (event.type) {
+    case "started":
+    case "finished":
+      return { type: event.type };
+    case "text_delta":
+      return { type: event.type, text: event.text };
+    case "reasoning_delta":
+      return {
+        type: event.type,
+        text: event.text,
+        format: event.format,
+      };
+    case "tool_call_started":
+      return {
+        type: event.type,
+        toolName: event.tool_name,
+        metadata: event.metadata,
+      };
+    case "tool_call_finished":
+      return {
+        type: event.type,
+        toolName: event.tool_name,
+        isError: event.is_error,
+        metadata: event.metadata,
+      };
+    case "provider_status":
+      return {
+        type: event.type,
+        level: event.level,
+        message: event.message,
+        metadataJson: event.metadata_json,
+      };
+  }
 }
 
 function toDelegationLineage(
@@ -313,7 +361,9 @@ interface RustSessionStateJson {
     max_duration_ms?: number;
     max_delegation_depth?: number;
   };
-  tool_profile?: BodyState["session"]["toolProfile"];
+  tool_profile?: {
+    tools: RustToolDescriptorJson[];
+  };
   history_window?: {
     max_messages?: number;
   };
@@ -425,7 +475,7 @@ type RustCoreEventJson =
       type: "brain_event_observed";
       session_id: BodyState["session"]["sessionId"];
       wake_id?: string;
-      event: Extract<CoreEvent, { type: "brain_event_observed" }>["event"];
+      event: RustBrainEventJson;
     }
   | {
       type: "brain_actions_accepted";
@@ -442,4 +492,41 @@ type RustCoreEventJson =
         >["packet"]["status"];
         summary: string;
       };
+    };
+
+interface RustToolDescriptorJson {
+  name: string;
+  description: string;
+  input_schema?: BodyState["session"]["toolProfile"]["tools"][number]["inputSchema"];
+}
+
+type ToolEventMetadata = Extract<
+  Extract<CoreEvent, { type: "brain_event_observed" }>["event"],
+  { type: "tool_call_started" }
+>["metadata"];
+
+type RustBrainEventJson =
+  | { type: "started" }
+  | { type: "finished" }
+  | { type: "text_delta"; text: string }
+  | { type: "reasoning_delta"; text: string; format?: string }
+  | {
+      type: "tool_call_started";
+      tool_name: string;
+      metadata?: ToolEventMetadata;
+    }
+  | {
+      type: "tool_call_finished";
+      tool_name: string;
+      is_error: boolean;
+      metadata?: ToolEventMetadata;
+    }
+  | {
+      type: "provider_status";
+      level: Extract<
+        Extract<CoreEvent, { type: "brain_event_observed" }>["event"],
+        { type: "provider_status" }
+      >["level"];
+      message: string;
+      metadata_json?: string;
     };

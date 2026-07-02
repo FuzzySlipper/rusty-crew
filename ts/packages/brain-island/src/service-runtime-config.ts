@@ -48,6 +48,8 @@ import { resolveCompletionTools } from "./completion-tools.js";
 import {
   createBrainModuleRegistry,
   brainStrategyMetadataForModuleStrategy,
+  openAiResponsesClientMode,
+  openAiResponsesStreamIdleTimeoutMs,
   providerStateRebuildPolicyForModuleStrategy,
   resolveBrainModuleStrategy,
   resolveBrainStrategyMetadata,
@@ -1213,6 +1215,12 @@ function brainModuleDiagnostics(input: {
         input.profile.profile.modelConfig.api === "openai-responses"
           ? "responses"
           : "chat_completions",
+      ...(input.selection.moduleId === "openai-responses"
+        ? { clientMode: openAiResponsesClientMode() }
+        : {}),
+      ...(input.selection.moduleId === "openai-responses"
+        ? { streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs() }
+        : {}),
       modelId: input.profile.profile.modelConfig.modelName,
       ...(input.profile.profile.modelConfig.baseUrl === undefined
         ? {}

@@ -9249,21 +9249,77 @@ function ensureChatWakeTerminalEvents(
       event.type === "brain_event_observed" && event.event.type === "finished",
   );
 
-  if (!hasCompletion && fallback.summary?.trim()) {
+  ensureChatWakeTerminalEventsFromChatLog(state, session, wakeId, {
+    status: "completed",
+    summary: fallback.summary,
+    source: "terminal_fallback",
+    requireCompletion: !hasCompletion,
+    requireFinished: !hasFinished,
+  });
+}
+
+function ensureChatWakeTerminalEventsFromChatLog(
+  state: ServiceState,
+  session: SessionState,
+  wakeId: string,
+  input: {
+    status: "completed" | "failed";
+    summary?: string;
+    reasonCode?: string;
+    source: string;
+    requireCompletion?: boolean;
+    requireFinished?: boolean;
+  },
+): void {
+  const events = state.chatEventsBySession.get(session.sessionId) ?? [];
+  const wakeEvents = events.filter((event) => {
+    const payload = event.payload;
+    return isRecord(payload) && payload.wake_id === wakeId;
+  });
+  const hasAssistantTurn = wakeEvents.some((event) =>
+    [
+      "assistant_turn_started",
+      "assistant_text_delta",
+      "assistant_reasoning_delta",
+      "tool_call_started",
+      "tool_call_completed",
+      "tool_call_failed",
+    ].includes(event.kind),
+  );
+  if (!hasAssistantTurn) return;
+
+  const needsCompletion =
+    input.requireCompletion !== false &&
+    !wakeEvents.some((event) => event.kind === "assistant_message_completed");
+  const needsFinished =
+    input.requireFinished !== false &&
+    !wakeEvents.some((event) => event.kind === "assistant_turn_finished");
+  const summary = input.summary?.trim();
+  if (needsCompletion && summary) {
     appendChatEvent(state, session.sessionId, {
       kind: "assistant_message_completed",
       payload: {
-        status: "completed",
-        summary: fallback.summary.trim(),
+        status: input.status,
+        summary,
         wake_id: wakeId,
-        source: "terminal_fallback",
+        source: input.source,
+        ...(input.reasonCode === undefined
+          ? {}
+          : { reason_code: input.reasonCode }),
       },
     });
   }
-  if (!hasFinished) {
+  if (needsFinished) {
     appendChatEvent(state, session.sessionId, {
       kind: "assistant_turn_finished",
-      payload: { wake_id: wakeId, source: "terminal_fallback" },
+      payload: {
+        wake_id: wakeId,
+        source: input.source,
+        status: input.status,
+        ...(input.reasonCode === undefined
+          ? {}
+          : { reason_code: input.reasonCode }),
+      },
     });
   }
 }
@@ -10278,6 +10334,12 @@ async function dispatchWake(
   observationContext?: ServiceWakeObservationContext,
 ): Promise<ServiceWakeDispatchReport> {
   const sessionId = event.sessionId;
+  let activeWake:
+    | {
+        session: SessionState;
+        wakeId: string;
+      }
+    | undefined;
   if (state.inFlightWakes.has(sessionId)) {
     return {
       sessionId,
@@ -10324,6 +10386,7 @@ async function dispatchWake(
     }
 
     const wakeId = nextWakeId(state, session);
+    activeWake = { session, wakeId };
     const profileContext = await loadProfileContext({
       profilesDir: state.runtimeConfig.profilesDir,
       skillsDir: state.runtimeConfig.skillsDir,
@@ -10436,6 +10499,19 @@ async function dispatchWake(
         summary: `wake ${error.wakeId} timed out after ${error.timeoutMs}ms`,
         reasonCode: "wake_timeout",
       };
+      if (activeWake !== undefined) {
+        ensureChatWakeTerminalEventsFromChatLog(
+          state,
+          activeWake.session,
+          error.wakeId,
+          {
+            status: "failed",
+            summary: report.summary,
+            reasonCode: report.reasonCode,
+            source: "wake_timeout",
+          },
+        );
+      }
       recordServiceEvent(state, {
         source: "service-host",
         eventType: "brain_wake_timeout",
@@ -10446,10 +10522,24 @@ async function dispatchWake(
     }
     const report: ServiceWakeDispatchReport = {
       sessionId,
+      wakeId: activeWake?.wakeId,
       status: "failed",
       summary: errorMessage(error, `wake for ${sessionId} failed`),
       reasonCode: "wake_dispatch_failed",
     };
+    if (activeWake !== undefined) {
+      ensureChatWakeTerminalEventsFromChatLog(
+        state,
+        activeWake.session,
+        activeWake.wakeId,
+        {
+          status: "failed",
+          summary: report.summary,
+          reasonCode: report.reasonCode,
+          source: "wake_dispatch_failed",
+        },
+      );
+    }
     recordServiceEvent(state, {
       source: "service-host",
       eventType: "brain_wake_failed",

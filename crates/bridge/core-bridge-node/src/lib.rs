@@ -2237,7 +2237,16 @@ impl napi::Task for OpenAiResponsesBrainRunTask {
 }
 
 fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
-    let result = run_openai_responses_brain(input_json);
+    let sink_wake_id = wake_id.clone();
+    let mut sink = move |item: BrainWakeStreamItem| {
+        let mut runs = openai_responses_buffered_runs()
+            .lock()
+            .expect("openai responses buffered run registry poisoned");
+        if let Some(run) = runs.get_mut(&sink_wake_id) {
+            run.items.push_back(item);
+        }
+    };
+    let result = run_openai_responses_brain_with_stream_sink(input_json, &mut sink);
     let mut runs = openai_responses_buffered_runs()
         .lock()
         .expect("openai responses buffered run registry poisoned");
@@ -2246,7 +2255,6 @@ fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
     };
     match result {
         Ok(output) => {
-            run.items.extend(output.stream);
             run.provider_state = output.provider_state;
             run.transport_metrics = Some(output.transport_metrics);
         }
@@ -2612,9 +2620,26 @@ impl NativeBridgeBinding {
                 format!("OpenAI Responses buffered wake {wake_id} was not found"),
             )
         })?;
-        let items = (0..max_items)
-            .filter_map(|_| run.items.pop_front())
-            .collect::<Vec<_>>();
+        let mut items = Vec::new();
+        for _ in 0..max_items {
+            if run.terminal
+                && !items.is_empty()
+                && run
+                    .items
+                    .front()
+                    .is_some_and(BrainWakeStreamItem::is_terminal)
+            {
+                break;
+            }
+            let Some(item) = run.items.pop_front() else {
+                break;
+            };
+            let is_terminal = item.is_terminal();
+            items.push(item);
+            if is_terminal {
+                break;
+            }
+        }
         let terminal = run.terminal && run.items.is_empty();
         let output = json!({
             "wake_id": wake_id,
@@ -5166,6 +5191,20 @@ fn run_openai_responses_brain_json_blocking(input_json: String) -> napi::Result<
 }
 
 fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponsesBrainRunOutput> {
+    run_openai_responses_brain_internal(input_json, None)
+}
+
+fn run_openai_responses_brain_with_stream_sink(
+    input_json: String,
+    sink: &mut dyn FnMut(BrainWakeStreamItem),
+) -> napi::Result<OpenAiResponsesBrainRunOutput> {
+    run_openai_responses_brain_internal(input_json, Some(sink))
+}
+
+fn run_openai_responses_brain_internal(
+    input_json: String,
+    mut sink: Option<&mut dyn FnMut(BrainWakeStreamItem)>,
+) -> napi::Result<OpenAiResponsesBrainRunOutput> {
     let input: JsOpenAiResponsesBrainRunInput =
         serde_json::from_str(&input_json).map_err(|error| {
             napi::Error::new(
@@ -5211,7 +5250,11 @@ fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponse
             let client = fake_responses_client_for_body(&input.body_state);
             let mut brain =
                 ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
-            brain.wake_with_history(request, history)
+            if let Some(sink) = sink.as_deref_mut() {
+                brain.wake_with_history_and_stream_sink(request, history, sink)
+            } else {
+                brain.wake_with_history(request, history)
+            }
         }
         JsOpenAiResponsesClientConfig::Live { base_url, api_key } => {
             let client = LiveResponsesClient::new(base_url, api_key, config.stream_idle_timeout_ms)
@@ -5220,7 +5263,11 @@ fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponse
                 })?;
             let mut brain =
                 ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
-            brain.wake_with_history(request, history)
+            if let Some(sink) = sink.as_deref_mut() {
+                brain.wake_with_history_and_stream_sink(request, history, sink)
+            } else {
+                brain.wake_with_history(request, history)
+            }
         }
     }
     .map_err(to_napi_error)?;
@@ -5273,6 +5320,7 @@ fn fake_responses_client_for_body(body: &BodyState) -> FakeResponsesClient {
             },
         ]),
     ])
+    .expect_function_output("fake-call")
     .expect_function_output("fake-call")
 }
 

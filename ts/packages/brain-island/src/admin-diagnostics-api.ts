@@ -236,6 +236,7 @@ export function handleAdminDiagnosticsRequest(
           implementationId: module.implementationId,
           moduleId: module.moduleId,
           strategyId: module.effectiveStrategy ?? module.strategy,
+          modelProvider: module.modelProvider,
           providerStateMode: module.providerStateMode,
           providerState: module.providerState,
         })),

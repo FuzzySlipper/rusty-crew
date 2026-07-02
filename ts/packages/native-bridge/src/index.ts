@@ -3047,7 +3047,7 @@ function createNativeBridgeModule(
         providerState: raw.provider_state
           ? toBrainWakeProviderStateOutput(raw.provider_state)
           : undefined,
-        error: raw.error,
+        error: typeof raw.error === "string" ? raw.error : undefined,
       };
     },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
@@ -4975,7 +4975,7 @@ interface RawOpenAiResponsesBufferedDrainResult {
   items: RawBrainWakeStreamItem[];
   terminal: boolean;
   provider_state?: RawBrainWakeProviderStateOutput;
-  error?: string;
+  error?: string | null;
 }
 
 type RawBrainWakeStreamItem =

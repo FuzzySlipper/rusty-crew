@@ -773,12 +773,15 @@ pub enum BrainEvent {
         format: Option<String>,
     },
     ToolCallStarted {
+        #[serde(alias = "toolName")]
         tool_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<ToolCallMetadata>,
     },
     ToolCallFinished {
+        #[serde(alias = "toolName")]
         tool_name: String,
+        #[serde(alias = "isError")]
         is_error: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<ToolCallMetadata>,
@@ -786,7 +789,11 @@ pub enum BrainEvent {
     ProviderStatus {
         level: BrainProviderStatusLevel,
         message: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            alias = "metadataJson",
+            skip_serializing_if = "Option::is_none"
+        )]
         metadata_json: Option<String>,
     },
     Finished,

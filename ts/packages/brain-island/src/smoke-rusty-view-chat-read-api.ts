@@ -61,9 +61,12 @@ try {
     "http://rusty-view.local",
   );
   assert.equal(page.body.ok, true);
-  assert.equal(page.body.data.total, 2);
-  assert.equal(page.body.data.items[0]?.session_id, "chat-session");
-  assert.equal(typeof page.body.data.items[0]?.latest_cursor, "string");
+  assert.equal(page.body.data.total, 3);
+  const listedChatSession = page.body.data.items.find(
+    (item: { session_id: string }) => item.session_id === "chat-session",
+  );
+  assert.ok(listedChatSession, "chat-session should be listed");
+  assert.equal(typeof listedChatSession.latest_cursor, "string");
 
   await host.bridge.routeAgentMessage(
     "human-operator" as AgentId,
@@ -239,6 +242,56 @@ try {
     sent.body.data.wake_id,
     "assistant completion events should carry wake_id for client reconciliation",
   );
+
+  const failStreamAbort = new AbortController();
+  const failStreamResponse = await fetch(
+    `http://127.0.0.1:${port}/v1/chat/sessions/chat-fail-session/stream`,
+    {
+      headers: { authorization: `Bearer ${token}` },
+      signal: failStreamAbort.signal,
+    },
+  );
+  assert.equal(failStreamResponse.status, 200);
+  const failStreamEventsPromise = collectSseEventsUntil(
+    failStreamResponse,
+    (events) =>
+      events.some((event) => event.kind === "assistant_message_completed") &&
+      events.some((event) => event.kind === "assistant_turn_finished"),
+    failStreamAbort,
+  );
+  const failedSent = await post(
+    "/v1/chat/sessions/chat-fail-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "please fail after partial streamed events",
+      client_message_id: "client-message-fail-1",
+    },
+    { "Idempotency-Key": "chat-send-fail-1" },
+  );
+  assert.equal(failedSent.status, 409);
+  assert.equal(failedSent.body.ok, true);
+  assert.equal(failedSent.body.data.status, "rejected");
+  assert.equal(failedSent.body.data.reason_code, "wake_dispatch_failed");
+  assert.equal(typeof failedSent.body.data.wake_id, "string");
+  const failStreamEvents = await failStreamEventsPromise;
+  const failedCompletion = failStreamEvents.find(
+    (event) => event.kind === "assistant_message_completed",
+  );
+  assert.equal(failedCompletion?.payload?.status, "failed");
+  assert.equal(
+    failedCompletion?.payload?.wake_id,
+    failedSent.body.data.wake_id,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /synthetic live wake failure/,
+  );
+  const failedFinished = failStreamEvents.find(
+    (event) => event.kind === "assistant_turn_finished",
+  );
+  assert.equal(failedFinished?.payload?.status, "failed");
+  assert.equal(failedFinished?.payload?.wake_id, failedSent.body.data.wake_id);
 
   const postTurnPage = await get("/v1/chat/sessions", token);
   assert.equal(postTurnPage.status, 200);
@@ -1149,6 +1202,40 @@ function withLiveWakeEventsBridge(
     registerBrainRuntime: async (registration, executor) => {
       const wrappedExecutor: BrainWakeExecutor = {
         wake: async (request, buffers) => {
+          if (request.sessionId === "chat-fail-session") {
+            await submitLiveWakeEvents(bridge, [
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: { type: "started" },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: { type: "text_delta", text: "partial failure delta" },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_failure_tool",
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_failure_tool",
+                  isError: true,
+                },
+              },
+            ]);
+            throw new Error(
+              "synthetic live wake failure after partial chat events",
+            );
+          }
           const liveEvents = submitLiveWakeEvents(bridge, [
             {
               wakeId: request.wakeId,
@@ -1233,6 +1320,12 @@ function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
           {
             sessionId: "mcp-session",
             agentId: "mcp-agent",
+            profileId: "chat-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "chat-fail-session",
+            agentId: "chat-fail-agent",
             profileId: "chat-profile",
             kind: "full",
           },

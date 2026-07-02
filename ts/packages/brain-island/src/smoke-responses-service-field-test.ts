@@ -25,6 +25,10 @@ try {
   assert.equal(initialProviderState.providerState.status, "missing");
   assert.equal(initialProviderState.providerStateMode, "optional");
   assert.equal(initialProviderState.moduleId, "openai-responses");
+  assert.equal(
+    initialProviderState.modelProvider.clientMode,
+    process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1" ? "live" : "fake",
+  );
 
   const beforeFirstTurn = await client.diagnostics();
   const firstTurn = await client.requestDirectDebugTurn({
@@ -141,6 +145,9 @@ async function providerStateDiagnostics(): Promise<{
   profileId: string;
   moduleId: string;
   providerStateMode: string;
+  modelProvider: {
+    clientMode: string;
+  };
   providerState: {
     status: string;
     sessions: Array<{
@@ -160,6 +167,9 @@ async function providerStateDiagnostics(): Promise<{
       profileId: string;
       moduleId: string;
       providerStateMode: string;
+      modelProvider: {
+        clientMode: string;
+      };
       providerState: {
         status: string;
         sessions: Array<{

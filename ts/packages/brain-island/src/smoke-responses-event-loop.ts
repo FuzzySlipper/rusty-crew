@@ -90,18 +90,83 @@ try {
     )}ms < ${fakeDelayMs}ms`,
   );
 
+  const chatStreamAbort = new AbortController();
+  const chatStreamResponse = await fetch(
+    `http://127.0.0.1:${port}/v1/chat/sessions/responses-chat-stream-session/stream`,
+    { signal: chatStreamAbort.signal },
+  );
+  assert.equal(chatStreamResponse.status, 200);
+  assert.equal(
+    chatStreamResponse.headers
+      .get("content-type")
+      ?.includes("text/event-stream"),
+    true,
+  );
+  const streamedEventsPromise = collectSseEventsUntil(
+    chatStreamResponse,
+    (events) => events.some((event) => event.kind === "assistant_text_delta"),
+    chatStreamAbort,
+  );
+  let chatPostSettled = false;
+  const chatStartedAt = performance.now();
+  const chatPostPromise = fetch(
+    `http://127.0.0.1:${port}/v1/chat/sessions/responses-chat-stream-session/messages`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "responses-chat-stream-1",
+      },
+      body: JSON.stringify({
+        actor: { id: "human-operator", kind: "human" },
+        body: "prove Rust brain stream reaches chat SSE before POST settles",
+        client_message_id: "responses-chat-stream-message-1",
+      }),
+    },
+  )
+    .then(async (response) => ({
+      status: response.status,
+      body: (await response.json()) as {
+        ok: boolean;
+        data: { status: string; wake_id?: string };
+      },
+    }))
+    .finally(() => {
+      chatPostSettled = true;
+    });
+  const streamedEvents = await streamedEventsPromise;
+  const chatStreamDurationMs = performance.now() - chatStartedAt;
+  assert.equal(
+    chatPostSettled,
+    false,
+    "Rusty View chat SSE should receive responses text before chat POST completes",
+  );
+  const chatPost = await chatPostPromise;
+  const chatPostDurationMs = performance.now() - chatStartedAt;
+  assert.equal(chatPost.status, 202);
+  assert.equal(chatPost.body.ok, true);
+  assert.equal(chatPost.body.data.status, "accepted");
+
   console.log(
     JSON.stringify(
       {
         profile: "responses-event-loop-profile",
-        session: "responses-event-loop-session",
+        sessions: [
+          "responses-event-loop-session",
+          "responses-chat-stream-session",
+        ],
         route: "/v1/debug/sessions/responses-event-loop-session/turn",
         concurrentRoute: "/v1/admin/diagnostics",
+        chatRoute: "/v1/chat/sessions/responses-chat-stream-session/messages",
         fakeDelayMs,
         preAdminDelayMs: Math.round(preAdminDelayMs),
         adminDurationMs: Math.round(adminDurationMs),
         turnDurationMs: Math.round(turnDurationMs),
+        chatStreamDurationMs: Math.round(chatStreamDurationMs),
+        chatPostDurationMs: Math.round(chatPostDurationMs),
+        streamedEvents: streamedEvents.map((event) => event.kind),
         wakeId: turn.wakeId,
+        chatWakeId: chatPost.body.data.wake_id,
       },
       null,
       2,
@@ -139,6 +204,12 @@ function writeRuntimeConfig(rootDir: string): void {
             profileId: "responses-event-loop-profile",
             kind: "full",
           },
+          {
+            sessionId: "responses-chat-stream-session",
+            agentId: "responses-chat-stream-agent",
+            profileId: "responses-event-loop-profile",
+            kind: "full",
+          },
         ],
       },
       null,
@@ -172,6 +243,67 @@ function writeRuntimeConfig(rootDir: string): void {
 
 function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+interface SseEvent {
+  event_id: string;
+  sequence_id: number;
+  kind: string;
+  payload?: Record<string, unknown>;
+}
+
+async function collectSseEventsUntil(
+  response: Response,
+  done: (events: SseEvent[]) => boolean,
+  controller: AbortController,
+): Promise<SseEvent[]> {
+  assert.ok(response.body, "SSE response should have a body");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  const deadline = Date.now() + 5_000;
+  try {
+    while (!done(parseSseEvents(text)) && Date.now() < deadline) {
+      const remaining = Math.max(deadline - Date.now(), 1);
+      const read = await Promise.race([
+        reader.read(),
+        new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) =>
+          setTimeout(
+            () => resolve({ done: true, value: undefined }),
+            remaining,
+          ),
+        ),
+      ]);
+      if (read.done) break;
+      text += decoder.decode(read.value, { stream: true });
+    }
+  } finally {
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
+  }
+  const events = parseSseEvents(text);
+  assert.ok(
+    done(events),
+    `SSE stream did not reach expected condition; received ${events
+      .map((event) => event.kind)
+      .join(", ")}`,
+  );
+  return events;
+}
+
+function parseSseEvents(text: string): SseEvent[] {
+  return text
+    .split("\n\n")
+    .map((block) => block.trim())
+    .filter((block) => block.includes("data: "))
+    .map((block) => {
+      const data = block
+        .split("\n")
+        .find((line) => line.startsWith("data: "))
+        ?.slice("data: ".length);
+      assert.ok(data, "SSE event should include data");
+      return JSON.parse(data) as SseEvent;
+    });
 }
 
 function openPort(): Promise<number> {

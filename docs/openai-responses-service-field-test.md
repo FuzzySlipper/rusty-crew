@@ -7,6 +7,32 @@ through the native bridge when the service provides a native bridge. The
 deterministic fake client remains the default so local service smokes and CI do
 not require OpenAI credentials.
 
+Fake mode is smoke-only. A deployed service, field certification run, or user
+profile that is meant to talk to a real provider should set live mode
+explicitly and require the native path:
+
+```env
+RUSTY_CREW_OPENAI_RESPONSES_LIVE=1
+RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE=1
+```
+
+Live mode reports a configured Responses stream idle budget, defaulting to 120
+seconds, so operators can see what first-token/read window the profile expects:
+
+```env
+RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS=120000
+```
+
+If the endpoint handles credentials itself, such as local den-router OAuth,
+also set:
+
+```env
+RUSTY_CREW_OPENAI_RESPONSES_ALLOW_NO_KEY=1
+```
+
+Do not certify a live profile while these settings are absent; otherwise the
+service is allowed to use the deterministic fake client for smoke coverage.
+
 ## Deterministic Service Smoke
 
 ```bash
@@ -48,5 +74,15 @@ Expected behavior:
   deterministic smoke;
 - provider-state diagnostics start as `missing`, become `valid` after the first
   wake, survive restart, and update after the second wake;
+- `/v1/admin/diagnostics/provider-state` reports
+  `modelProvider.clientMode: "live"` for the Responses profile;
+- the same diagnostic reports the effective
+  `modelProvider.streamIdleTimeoutMs`. Provider/router transports can still
+  surface lower-level idle failures before that budget when they do not open the
+  SSE stream or send heartbeat/data bytes;
 - live mode is never enabled unless `RUSTY_CREW_OPENAI_RESPONSES_LIVE=1` is set
   by the command/environment.
+
+In deterministic smoke mode the same diagnostics route reports
+`modelProvider.clientMode: "fake"`. That is expected only for local tests and
+CI-style smoke runs.

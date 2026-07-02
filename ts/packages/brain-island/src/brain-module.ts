@@ -309,10 +309,39 @@ export const localBrainModule: BrainModule = {
   },
 };
 
+export type OpenAiResponsesClientMode = "fake" | "live";
+
+export function openAiResponsesClientMode(
+  env: Partial<
+    Pick<NodeJS.ProcessEnv, "RUSTY_CREW_OPENAI_RESPONSES_LIVE">
+  > = process.env,
+): OpenAiResponsesClientMode {
+  return env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1" ? "live" : "fake";
+}
+
+export function openAiResponsesStreamIdleTimeoutMs(
+  env: Partial<
+    Pick<
+      NodeJS.ProcessEnv,
+      | "RUSTY_CREW_OPENAI_RESPONSES_LIVE"
+      | "RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS"
+    >
+  > = process.env,
+): number {
+  const configured = Number.parseInt(
+    env.RUSTY_CREW_OPENAI_RESPONSES_STREAM_IDLE_TIMEOUT_MS ?? "",
+    10,
+  );
+  if (Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+  return openAiResponsesClientMode(env) === "live" ? 120_000 : 30_000;
+}
+
 function openAiResponsesClientConfig(
   context: BrainModuleContext,
 ): { mode: "fake" } | { mode: "live"; baseUrl: string; apiKey?: string } {
-  if (process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE !== "1") {
+  if (openAiResponsesClientMode() !== "live") {
     return { mode: "fake" };
   }
   const keyEnv =
@@ -384,11 +413,8 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
       wakeId: started.wakeId,
       maxItems: 32,
     });
-    let submittedEvent = false;
     for (const item of drained.items) {
-      submittedEvent =
-        (await handleDrainedOpenAiResponsesStreamItem(bridge, item, actions)) ||
-        submittedEvent;
+      await handleDrainedOpenAiResponsesStreamItem(bridge, item, actions);
     }
     if (drained.error !== undefined) {
       throw new Error(
@@ -396,9 +422,6 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
       );
     }
     if (drained.terminal) {
-      if (submittedEvent && actions.length > 0) {
-        await delay(25);
-      }
       return {
         events: [],
         actions,
@@ -413,14 +436,14 @@ async function handleDrainedOpenAiResponsesStreamItem(
   bridge: NativeBridgeModule,
   item: BrainWakeStreamItem,
   actions: BrainAction[],
-): Promise<boolean> {
+): Promise<void> {
   switch (item.type) {
     case "event":
       await bridge.submitBrainEvent(item.event);
-      return true;
+      return;
     case "actions":
       actions.push(...item.batch.actions);
-      return false;
+      return;
     case "wake_failed":
       throw new Error(
         `OpenAI Responses wake ${item.failure.wakeId} failed: ${item.failure.message}`,
@@ -514,6 +537,7 @@ export const openAiResponsesBrainModule: BrainModule = {
               config: {
                 model: context.profile.profile.modelConfig.modelName,
                 instructions: wake.systemPrompt,
+                streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
               },
               client: openAiResponsesClientConfig(context),
             };
@@ -538,6 +562,7 @@ export const openAiResponsesBrainModule: BrainModule = {
                   config: {
                     model: context.profile.profile.modelConfig.modelName,
                     instructions: wake.systemPrompt,
+                    streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
                   },
                   client: openAiResponsesClientConfig(context),
                 }),

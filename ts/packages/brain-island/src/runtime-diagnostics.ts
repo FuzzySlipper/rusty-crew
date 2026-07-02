@@ -193,6 +193,8 @@ export interface RuntimeBrainModuleDiagnostics {
   modelProvider?: {
     providerKind: string;
     protocol: "responses" | "chat_completions" | string;
+    clientMode?: "fake" | "live" | string;
+    streamIdleTimeoutMs?: number;
     modelId: string;
     status?: string;
     baseUrl?: string;
