@@ -312,6 +312,8 @@ import {
 } from "./wake-timeout.js";
 import { buildBuiltInToolCatalog } from "./tool-registry.js";
 
+const CHAT_EVENT_RETENTION_LIMIT = 50_000;
+
 export interface RustyCrewServiceHostOptions {
   env?: RustyCrewServiceEnv;
   config?: RustyCrewServiceConfig;
@@ -9897,8 +9899,8 @@ function appendChatEvent(
   };
   const events = state.chatEventsBySession.get(sessionId) ?? [];
   events.push(chatEvent);
-  if (events.length > 1_000) {
-    events.splice(0, events.length - 1_000);
+  if (events.length > CHAT_EVENT_RETENTION_LIMIT) {
+    events.splice(0, events.length - CHAT_EVENT_RETENTION_LIMIT);
   }
   state.chatEventsBySession.set(sessionId, events);
   const subscribers = state.chatSubscribersBySession.get(sessionId);

@@ -61,7 +61,7 @@ try {
     "http://rusty-view.local",
   );
   assert.equal(page.body.ok, true);
-  assert.equal(page.body.data.total, 3);
+  assert.equal(page.body.data.total, 4);
   const listedChatSession = page.body.data.items.find(
     (item: { session_id: string }) => item.session_id === "chat-session",
   );
@@ -241,6 +241,33 @@ try {
     completionEvent?.payload.wake_id,
     sent.body.data.wake_id,
     "assistant completion events should carry wake_id for client reconciliation",
+  );
+
+  const retainedSend = await post(
+    "/v1/chat/sessions/chat-retention-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "emit enough streamed deltas to cross the old retention limit",
+      client_message_id: "client-message-retention",
+    },
+    { "Idempotency-Key": "chat-send-retention" },
+  );
+  assert.equal(retainedSend.status, 202);
+  const retainedReplay = await get(
+    "/v1/chat/sessions/chat-retention-session/events?cursor=chat-retention-session:1&limit=500",
+    token,
+  );
+  assert.equal(retainedReplay.status, 200);
+  assert.equal(
+    retainedReplay.body.data.items[0]?.kind,
+    "assistant_turn_started",
+    "chat event retention should not drop the start of a long streamed wake",
+  );
+  assert.equal(
+    retainedReplay.body.data.items[1]?.payload?.text,
+    " retained-delta-0",
+    "chat event retention should preserve early deltas from long streamed wakes",
   );
 
   const failStreamAbort = new AbortController();
@@ -1236,6 +1263,34 @@ function withLiveWakeEventsBridge(
               "synthetic live wake failure after partial chat events",
             );
           }
+          if (request.sessionId === "chat-retention-session") {
+            const retentionEvents: BrainEventEnvelope[] = [
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: { type: "started" },
+              },
+            ];
+            for (let index = 0; index < 1_100; index += 1) {
+              retentionEvents.push({
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "text_delta",
+                  text: ` retained-delta-${index}`,
+                },
+              });
+            }
+            const liveEvents = submitLiveWakeEventsWithoutDelay(
+              bridge,
+              retentionEvents,
+            );
+            const [result] = await Promise.all([
+              executor.wake(request, buffers),
+              liveEvents,
+            ]);
+            return result;
+          }
           const liveEvents = submitLiveWakeEvents(bridge, [
             {
               wakeId: request.wakeId,
@@ -1282,6 +1337,15 @@ function withLiveWakeEventsBridge(
   };
 }
 
+async function submitLiveWakeEventsWithoutDelay(
+  bridge: NativeBridgeModule,
+  events: BrainEventEnvelope[],
+): Promise<void> {
+  for (const event of events) {
+    await bridge.submitBrainEvent(event);
+  }
+}
+
 async function submitLiveWakeEvents(
   bridge: NativeBridgeModule,
   events: BrainEventEnvelope[],
@@ -1326,6 +1390,12 @@ function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
           {
             sessionId: "chat-fail-session",
             agentId: "chat-fail-agent",
+            profileId: "chat-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "chat-retention-session",
+            agentId: "chat-retention-agent",
             profileId: "chat-profile",
             kind: "full",
           },

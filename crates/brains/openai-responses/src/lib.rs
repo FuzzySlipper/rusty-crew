@@ -279,8 +279,15 @@ impl ResponsesRequestBuilder {
         history: ResponsesReplayProjection,
         continuation_items: Vec<ResponsesInputItem>,
     ) -> ResponsesRequest {
+        let include_provider_item_ids = matches!(
+            self.config.strategy,
+            ResponsesBrainStrategy::PreviousResponseChain
+        );
         let mut input = history.input_items;
-        input.extend(provider_replay_items(provider_state));
+        input.extend(provider_replay_items(
+            provider_state,
+            include_provider_item_ids,
+        ));
         input.extend(history.replay_hints);
         input.extend(continuation_items);
         if input.is_empty() {
@@ -517,7 +524,7 @@ impl PreviousResponseChainStateV1 {
             self.committed_output_items
                 .iter()
                 .cloned()
-                .filter_map(replay_item_from_record)
+                .filter_map(|record| replay_item_from_record(record, true))
                 .filter_map(|item| serde_json::to_value(item).ok()),
         );
         items
@@ -658,6 +665,7 @@ fn request_fingerprint(request: &ResponsesRequest) -> String {
 
 fn provider_replay_items(
     provider_state: Option<&BrainWakeProviderStateInput>,
+    include_provider_item_ids: bool,
 ) -> Vec<ResponsesInputItem> {
     let Some(state) = provider_state else {
         return Vec::new();
@@ -673,14 +681,14 @@ fn provider_replay_items(
     let mut items = Vec::new();
     if let Some(completed) = payload.last_completed_response {
         for record in completed.output_items {
-            if let Some(item) = replay_item_from_record(record) {
+            if let Some(item) = replay_item_from_record(record, include_provider_item_ids) {
                 items.push(item);
             }
         }
     }
     if let Some(hints) = payload.replay_hints {
         for record in hints.reasoning_items {
-            if let Some(item) = replay_item_from_record(record) {
+            if let Some(item) = replay_item_from_record(record, include_provider_item_ids) {
                 items.push(item);
             }
         }
@@ -696,7 +704,10 @@ fn provider_replay_items(
     items
 }
 
-fn replay_item_from_record(record: OpenAiResponseOutputItemRecord) -> Option<ResponsesInputItem> {
+fn replay_item_from_record(
+    record: OpenAiResponseOutputItemRecord,
+    include_provider_item_ids: bool,
+) -> Option<ResponsesInputItem> {
     let output = serde_json::from_value::<ResponsesOutputItem>(record.raw_json).ok()?;
     match output {
         ResponsesOutputItem::Message { text, .. } => {
@@ -707,7 +718,7 @@ fn replay_item_from_record(record: OpenAiResponseOutputItemRecord) -> Option<Res
             summary,
             encrypted_content,
         } => Some(ResponsesInputItem::Reasoning {
-            id,
+            id: include_provider_item_ids.then_some(id).flatten(),
             summary,
             encrypted_content,
         }),
@@ -717,7 +728,7 @@ fn replay_item_from_record(record: OpenAiResponseOutputItemRecord) -> Option<Res
             name,
             arguments,
         } => Some(ResponsesInputItem::FunctionCall {
-            id,
+            id: include_provider_item_ids.then_some(id).flatten(),
             call_id,
             name,
             arguments,
@@ -2256,6 +2267,60 @@ mod tests {
             item,
             ResponsesInputItem::AssistantMessage { content } if content == "answer"
         )));
+    }
+
+    #[test]
+    fn stateless_replay_strips_provider_item_ids_from_replayed_items() {
+        let builder = ResponsesRequestBuilder::new(ResponsesBrainConfig::replay("gpt-5"));
+        let state = provider_state(provider_state_payload(
+            "resp-typed",
+            vec![
+                ResponsesOutputItem::Reasoning {
+                    id: Some("rs_ephemeral".to_string()),
+                    summary: Some("kept as reasoning".to_string()),
+                    encrypted_content: Some("opaque".to_string()),
+                },
+                ResponsesOutputItem::FunctionCall {
+                    id: Some("fc_ephemeral".to_string()),
+                    call_id: "call-1".to_string(),
+                    name: "lookup".to_string(),
+                    arguments: "{\"q\":\"rust\"}".to_string(),
+                },
+            ],
+        ));
+        let request = builder.build(
+            &wake_request(Some(state.clone()), None),
+            Some(&state),
+            ResponsesReplayProjection {
+                input_items: vec![ResponsesInputItem::UserMessage {
+                    content: "human: continue".to_string(),
+                }],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+
+        let replayed_reasoning = request
+            .input
+            .iter()
+            .find_map(|item| match item {
+                ResponsesInputItem::Reasoning { id, .. } => Some(id),
+                _ => None,
+            })
+            .expect("reasoning item should be replayed");
+        assert_eq!(replayed_reasoning, &None);
+
+        let replayed_call = request
+            .input
+            .iter()
+            .find_map(|item| match item {
+                ResponsesInputItem::FunctionCall { id, call_id, .. } if call_id == "call-1" => {
+                    Some(id)
+                }
+                _ => None,
+            })
+            .expect("function call should be replayed");
+        assert_eq!(replayed_call, &None);
     }
 
     #[test]
