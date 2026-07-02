@@ -1,0 +1,229 @@
+{
+  "format_version": 1,
+  "manifest_version": 1,
+  "operation_count": 97,
+  "schema_source": "rusty-crew-core-protocol serde wire fixtures",
+  "fixtures": [
+    {
+      "name": "body_state_v1",
+      "operation": "project_body_state_json",
+      "direction": "rust_to_ts",
+      "rust_type": "rusty_crew_core_protocol::BodyState",
+      "value": {
+        "child_completions": [],
+        "delta_policy": {
+          "max_queued_messages": 20,
+          "mode": "frozen_snapshot_next_wake",
+          "queue_owner": "body",
+          "queued_message_ttl_ms": 30000
+        },
+        "fan_out_groups": [],
+        "pending_messages": [
+          {
+            "body": "Bridge validation fixture message.",
+            "correlation_id": "validation-correlation",
+            "from": "validation-agent",
+            "to": "operator"
+          }
+        ],
+        "recent_events": [
+          {
+            "session_id": "validation-session",
+            "type": "brain_wake_requested"
+          }
+        ],
+        "session": {
+          "agent_id": "validation-agent",
+          "brain_turn_count": 7,
+          "created_at": "2026-07-02T00:00:00.000Z",
+          "delegation": null,
+          "handle": 1,
+          "history_window": {
+            "max_messages": 200
+          },
+          "kind": "full",
+          "last_active_at": "2026-07-02T00:00:00.000Z",
+          "profile_id": "validation-profile",
+          "resource_limits": {
+            "max_delegation_depth": 3,
+            "max_duration_ms": null,
+            "workdir": "/home"
+          },
+          "session_id": "validation-session",
+          "status": "idle",
+          "tool_profile": {
+            "tools": [
+              {
+                "description": "Send a direct runtime message.",
+                "input_schema": 42,
+                "name": "send_message"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list_sessions_v1",
+      "operation": "list_sessions",
+      "direction": "rust_to_ts",
+      "rust_type": "Vec<rusty_crew_core_protocol::SessionState>",
+      "value": [
+        {
+          "agent_id": "validation-agent",
+          "brain_turn_count": 7,
+          "created_at": "2026-07-02T00:00:00.000Z",
+          "delegation": null,
+          "handle": 1,
+          "history_window": {
+            "max_messages": 200
+          },
+          "kind": "full",
+          "last_active_at": "2026-07-02T00:00:00.000Z",
+          "profile_id": "validation-profile",
+          "resource_limits": {
+            "max_delegation_depth": 3,
+            "max_duration_ms": null,
+            "workdir": "/home"
+          },
+          "session_id": "validation-session",
+          "status": "idle",
+          "tool_profile": {
+            "tools": [
+              {
+                "description": "Send a direct runtime message.",
+                "input_schema": 42,
+                "name": "send_message"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "brain_wake_stream_result_v1",
+      "operation": "run_openai_responses_brain",
+      "direction": "rust_to_ts",
+      "rust_type": "Vec<rusty_crew_core_protocol::BrainWakeStreamItem>",
+      "value": {
+        "stream": [
+          {
+            "event": {
+              "event": {
+                "type": "started"
+              },
+              "session_id": "validation-session",
+              "wake_id": "validation-wake"
+            },
+            "type": "event"
+          },
+          {
+            "batch": {
+              "actions": [
+                {
+                  "message": {
+                    "body": "Bridge validation fixture message.",
+                    "correlation_id": "validation-correlation",
+                    "from": "validation-agent",
+                    "to": "operator"
+                  },
+                  "type": "send_message"
+                }
+              ],
+              "session_id": "validation-session",
+              "wake_id": "validation-wake"
+            },
+            "type": "actions"
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile_registry_record_v1",
+      "operation": "list_profile_registry_records",
+      "direction": "rust_to_ts",
+      "rust_type": "rusty_crew_core_protocol::ProfileRegistryRecord",
+      "value": {
+        "active_runtime_settings_json": {
+          "providerAlias": "validation-provider"
+        },
+        "agent_id": "validation-agent",
+        "created_at": "2026-07-02T00:00:00.000Z",
+        "default_session_kind": "full",
+        "derived_runtime_refs": [
+          {
+            "metadata_json": {
+              "fixture": true
+            },
+            "ref_id": "validation-session",
+            "ref_kind": "session",
+            "status": "active",
+            "updated_at": "2026-07-02T00:00:00.000Z"
+          }
+        ],
+        "display_name": "Validation Profile",
+        "import_export": {
+          "exported_at": null,
+          "exported_to": null,
+          "imported_at": null,
+          "imported_from": null,
+          "metadata_json": {
+            "fixture": true
+          }
+        },
+        "lifecycle_status": "active",
+        "owner_id": "operator",
+        "profile_id": "validation-profile",
+        "prompt_memory_markdown": "Remember bridge drift checks.",
+        "prompt_soul_markdown": "You are a validation fixture.",
+        "revision": 3,
+        "source_asset_refs": [
+          {
+            "asset_kind": "profile_config",
+            "content_hash": "sha256:validation",
+            "last_seen_at": "2026-07-02T00:00:00.000Z",
+            "metadata_json": {
+              "fixture": true
+            },
+            "path": "profiles/validation-profile/profile.json"
+          }
+        ],
+        "summary": "Fixture profile record.",
+        "updated_at": "2026-07-02T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "model_provider_record_v1",
+      "operation": "list_model_providers",
+      "direction": "rust_to_ts",
+      "rust_type": "rusty_crew_core_protocol::ModelProviderRecord",
+      "value": {
+        "alias": "validation-provider",
+        "base_url": "http://127.0.0.1:18082/v1",
+        "context_window_tokens": 128000,
+        "created_at": "2026-07-02T00:00:00.000Z",
+        "credential": {
+          "has_secret": true,
+          "kind": "api_key",
+          "secret_ref": "db://model_providers/validation-provider/secret",
+          "updated_at": "2026-07-02T00:00:00.000Z"
+        },
+        "description": "Fixture model provider record.",
+        "display_name": "Validation Provider",
+        "max_output_tokens": 4096,
+        "metadata_json": {
+          "fixture": true
+        },
+        "model_id": "gpt-fixture",
+        "protocol": "chat_completions",
+        "provider_kind": "openai-compatible",
+        "reasoning_effort": "medium",
+        "reasoning_format": "summary",
+        "revision": 5,
+        "status": "active",
+        "temperature_milli": 500,
+        "updated_at": "2026-07-02T00:00:00.000Z"
+      }
+    }
+  ]
+}

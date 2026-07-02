@@ -6,3 +6,6 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

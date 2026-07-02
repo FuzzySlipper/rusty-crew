@@ -12,7 +12,6 @@
 [manifest]
 version = 1
 owning_crate = "rusty-crew-core-bridge-api"
-facade_package = "@rusty-crew/core-bridge"
 native_package = "@rusty-crew/native-bridge"
 contracts_package = "@rusty-crew/contracts"
 error_type = "CoreError"

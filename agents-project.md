@@ -79,8 +79,7 @@ not the current planning queue.
   /ts
     /packages
       /contracts          # TypeScript contracts until codegen owns this
-      /core-bridge        # TS bridge facade
-      /native-bridge      # native addon loader
+      /native-bridge      # native addon loader and TS bridge facade
       /brain-island       # pi Agent brain boundary and tool/profile assembly
       /adapter-den        # Den data + observability adapter
       /adapter-*          # remaining adapter boundaries

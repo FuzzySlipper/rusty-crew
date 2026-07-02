@@ -10,6 +10,9 @@
     "build:native": "npm run build:native -w @rusty-crew/native-bridge",
     "build": "npm run typecheck",
     "measure:napi": "npm run measure:napi -w @rusty-crew/native-bridge",
+    "codegen:bridge-fixtures": "cargo run -p rusty-crew-core-bridge-codegen -- emit-fixtures > ts/packages/native-bridge/bridge-validation-rust-fixtures.json",
+    "smoke:bridge-fixture-drift": "cargo run -p rusty-crew-core-bridge-codegen -- check-fixtures ts/packages/native-bridge/bridge-validation-rust-fixtures.json",
+    "smoke:bridge-validation": "npm run smoke:bridge-validation -w @rusty-crew/native-bridge",
     "smoke:brain": "npm run smoke:wake -w @rusty-crew/brain-island",
     "smoke:bridge-wake": "npm run smoke:bridge-wake -w @rusty-crew/brain-island",
     "smoke:registered-bridge-wake": "npm run smoke:registered-bridge-wake -w @rusty-crew/brain-island",
@@ -123,7 +126,7 @@
     "smoke:debug-tui": "npm run smoke:debug-tui -w @rusty-crew/adapter-tui",
     "smoke:operator-surfaces-e2e": "tsx ts/smokes/operator-surfaces-e2e.ts",
     "smoke:mid-turn": "npm run smoke:mid-turn -w @rusty-crew/brain-island",
-    "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/core-bridge && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui",
+    "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui",
     "generate:tool-registry-artifact": "npm run generate:tool-registry-artifact -w @rusty-crew/brain-island",
     "format": "prettier --check .",
     "format:fix": "prettier --write ."

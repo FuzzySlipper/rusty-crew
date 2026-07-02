@@ -91,7 +91,7 @@ simulation engine).
 | Native transport | `bridge/native-bridge/` (napi-rs) | `engine-rs/crates/bridge/core-bridge-node/` |
 | Mock transport | (test crate) | `engine-rs/crates/bridge/core-bridge-mock/` |
 | Codegen | `harness/codegen/bridge-emit.py` | `engine-rs/crates/bridge/core-bridge-codegen/` |
-| TS facade | `ts/packages/runtime-bridge` | `ts/packages/core-bridge` |
+| TS bridge facade/loader | `ts/packages/runtime-bridge` | `ts/packages/native-bridge` |
 | Generated contracts | `ts/packages/contracts` | `ts/packages/contracts` |
 | TS loaders | `ts/packages/native-bridge` | `ts/packages/native-bridge` |
 
@@ -113,8 +113,7 @@ The initial repo scaffold now exists in `/home/dev/rusty-crew` and
   placeholder. `crates/bridge/core-bridge-api/bridge-manifest.toml` is the
   active unified manifest scaffold.
 - `ts/packages/contracts` — generated-contract placeholder.
-- `ts/packages/core-bridge` and `ts/packages/native-bridge` — TS bridge facade
-  and loader placeholder.
+- `ts/packages/native-bridge` — TS bridge facade and native addon loader.
 - `ts/packages/brain-island` — current pi package brain boundary.
 - `ts/packages/adapter-*` — platform adapter placeholders.
 

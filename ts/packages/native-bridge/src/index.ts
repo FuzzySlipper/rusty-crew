@@ -1,6 +1,28 @@
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
+import {
+  validateBridgeJsonText,
+  validateBridgeValue,
+} from "./bridge-validation.js";
+import {
+  actionBatchReceiptSchema,
+  brainActionBatchSchema,
+  brainEventEnvelopeSchema,
+  brainWakeAcceptedSchema,
+  brainWakeRequestSchema,
+  eventReceiptSchema,
+  openAiResponsesBrainRunInputSchema,
+  providerStateDiagnosticArraySchema,
+  rawBodyStateSchema,
+  rawModelProviderRecordArraySchema,
+  rawModelProviderRecordSchema,
+  rawOpenAiResponsesBrainRunResultSchema,
+  rawProfileRegistryRecordArraySchema,
+  rawProfileRegistryRecordSchema,
+  rawSessionStateArraySchema,
+} from "./bridge-validation-schemas.js";
+
 import type {
   ActionBatchReceipt,
   AdapterId,
@@ -2444,16 +2466,22 @@ function createNativeBridgeModule(
       return {};
     },
     wakeBrain: async (request) => {
-      const executor = wakeExecutors.get(request.brain);
+      const validatedRequest = validateBridgeValue<BrainWakeRequest>({
+        operation: "wake_brain",
+        direction: "ts_to_rust",
+        schema: brainWakeRequestSchema,
+        value: request,
+      });
+      const executor = wakeExecutors.get(validatedRequest.brain);
       if (!executor) {
         throw new Error(
-          `brain implementation handle ${request.brain} is not registered in the TS runtime`,
+          `brain implementation handle ${validatedRequest.brain} is not registered in the TS runtime`,
         );
       }
 
-      const result = await executor.wake(request, module);
+      const result = await executor.wake(validatedRequest, module);
       for (const item of brainWakeStreamItemsFromExecutionResult(
-        request,
+        validatedRequest,
         result,
       )) {
         switch (item.type) {
@@ -2472,21 +2500,21 @@ function createNativeBridgeModule(
       if (result.providerState !== undefined) {
         try {
           binding.applyBrainProviderStateOutputJson(
-            request.brain,
-            request.sessionId,
-            request.wakeId,
+            validatedRequest.brain,
+            validatedRequest.sessionId,
+            validatedRequest.wakeId,
             JSON.stringify(result.providerState),
           );
         } catch (error) {
           observeProviderStateFailure(
             providerStateObservations,
-            request,
-            brainRegistrations.get(request.brain),
+            validatedRequest,
+            brainRegistrations.get(validatedRequest.brain),
             "save_failed",
           );
           await module.submitBrainEvent({
-            wakeId: request.wakeId,
-            sessionId: request.sessionId,
+            wakeId: validatedRequest.wakeId,
+            sessionId: validatedRequest.sessionId,
             event: {
               type: "provider_status",
               level: "degraded",
@@ -2495,35 +2523,62 @@ function createNativeBridgeModule(
           });
         }
       }
-      return { wakeId: request.wakeId, accepted: true };
+      return validateBridgeValue<BrainWakeAccepted>({
+        operation: "wake_brain",
+        direction: "rust_to_ts",
+        schema: brainWakeAcceptedSchema,
+        value: { wakeId: validatedRequest.wakeId, accepted: true },
+      });
     },
     submitBrainEvent: async (event) => {
-      const nativeEvent = toNativeBrainEvent(event.event);
-      return binding.submitBrainEvent(
-        event.wakeId,
-        event.sessionId,
-        nativeEvent.eventType,
-        nativeEvent.text,
-        nativeEvent.toolName,
-        nativeEvent.isError,
-        nativeEvent.metadataJson,
-      );
+      const validatedEvent = validateBridgeValue<BrainEventEnvelope>({
+        operation: "submit_brain_event",
+        direction: "ts_to_rust",
+        schema: brainEventEnvelopeSchema,
+        value: event,
+      });
+      const nativeEvent = toNativeBrainEvent(validatedEvent.event);
+      return validateBridgeValue<EventReceipt>({
+        operation: "submit_brain_event",
+        direction: "rust_to_ts",
+        schema: eventReceiptSchema,
+        value: binding.submitBrainEvent(
+          validatedEvent.wakeId,
+          validatedEvent.sessionId,
+          nativeEvent.eventType,
+          nativeEvent.text,
+          nativeEvent.toolName,
+          nativeEvent.isError,
+          nativeEvent.metadataJson,
+        ),
+      });
     },
     submitBrainActions: async (batch) => {
+      const validatedBatch = validateBridgeValue<BrainActionBatch>({
+        operation: "submit_brain_actions",
+        direction: "ts_to_rust",
+        schema: brainActionBatchSchema,
+        value: batch,
+      });
       const receipt = binding.submitBrainActionsJson(
-        batch.wakeId,
-        batch.sessionId,
+        validatedBatch.wakeId,
+        validatedBatch.sessionId,
         new TextEncoder().encode(
-          JSON.stringify(batch.actions.map(toNativeBrainAction)),
+          JSON.stringify(validatedBatch.actions.map(toNativeBrainAction)),
         ),
       );
-      return {
-        wakeId: receipt.wakeId,
-        acceptedActions: receipt.acceptedActions,
-        rejectedActions: JSON.parse(
-          receipt.rejectedActionsJson,
-        ) as ActionBatchReceipt["rejectedActions"],
-      };
+      return validateBridgeValue<ActionBatchReceipt>({
+        operation: "submit_brain_actions",
+        direction: "rust_to_ts",
+        schema: actionBatchReceiptSchema,
+        value: {
+          wakeId: receipt.wakeId,
+          acceptedActions: receipt.acceptedActions,
+          rejectedActions: JSON.parse(
+            receipt.rejectedActionsJson,
+          ) as ActionBatchReceipt["rejectedActions"],
+        },
+      });
     },
     registerPlatformAdapter: async (registration) =>
       binding.registerPlatformAdapter({
@@ -2580,9 +2635,12 @@ function createNativeBridgeModule(
         ) as RawDelegatedSessionRuntimeStatus,
       ),
     listSessions: async () =>
-      (JSON.parse(binding.listSessionsJson()) as RawSessionState[]).map(
-        toSessionState,
-      ),
+      validateBridgeValue<RawSessionState[]>({
+        operation: "list_sessions",
+        direction: "rust_to_ts",
+        schema: rawSessionStateArraySchema,
+        value: JSON.parse(binding.listSessionsJson()),
+      }).map(toSessionState),
     subscribeEvents: async (subscription) =>
       binding.subscribeEvents({
         eventKinds: subscription.eventKinds,
@@ -2721,6 +2779,12 @@ function createNativeBridgeModule(
         wakeId: input.wakeId,
         ...providerStateFromBufferedWake(buffered),
       };
+      validateBridgeValue<BrainWakeRequest>({
+        operation: "build_brain_wake_request",
+        direction: "rust_to_ts",
+        schema: brainWakeRequestSchema,
+        value: request,
+      });
       observeProviderStateWake(
         providerStateObservations,
         request,
@@ -2745,6 +2809,12 @@ function createNativeBridgeModule(
         wakeId: input.wakeId,
         ...providerStateFromBufferedWake(buffered),
       };
+      validateBridgeValue<BrainWakeRequest>({
+        operation: "build_brain_wake_request_for_session",
+        direction: "rust_to_ts",
+        schema: brainWakeRequestSchema,
+        value: request,
+      });
       observeProviderStateWake(
         providerStateObservations,
         request,
@@ -2752,9 +2822,23 @@ function createNativeBridgeModule(
       );
       return request;
     },
-    diagnosticProjectBodyStateJson: async (sessionId) =>
-      binding.projectBodyStateJson(sessionId),
+    diagnosticProjectBodyStateJson: async (sessionId) => {
+      const bytes = binding.projectBodyStateJson(sessionId);
+      validateBridgeJsonText({
+        operation: "project_body_state_json",
+        direction: "rust_to_ts",
+        schema: rawBodyStateSchema,
+        text: new TextDecoder().decode(bytes),
+      });
+      return bytes;
+    },
     diagnosticSubmitBrainActionsJson: async (wakeId, sessionId, actions) => {
+      validateBridgeValue<BrainActionBatch>({
+        operation: "diagnostic_submit_brain_actions_json",
+        direction: "ts_to_rust",
+        schema: brainActionBatchSchema,
+        value: { wakeId, sessionId, actions },
+      });
       const receipt = binding.submitBrainActionsJson(
         wakeId,
         sessionId,
@@ -2762,11 +2846,16 @@ function createNativeBridgeModule(
           JSON.stringify(actions.map(toNativeBrainAction)),
         ),
       );
-      return {
-        wakeId: receipt.wakeId,
-        acceptedActions: receipt.acceptedActions,
-        rejectedActions: JSON.parse(receipt.rejectedActionsJson) as [],
-      };
+      return validateBridgeValue<ActionBatchReceipt>({
+        operation: "diagnostic_submit_brain_actions_json",
+        direction: "rust_to_ts",
+        schema: actionBatchReceiptSchema,
+        value: {
+          wakeId: receipt.wakeId,
+          acceptedActions: receipt.acceptedActions,
+          rejectedActions: JSON.parse(receipt.rejectedActionsJson) as [],
+        },
+      });
     },
     diagnosticCountRows: async (table) => binding.countRows(table),
     databaseSize: async () => binding.databaseSize(),
@@ -2774,55 +2863,94 @@ function createNativeBridgeModule(
     storageSchema: async () => binding.storageSchema(),
     createProfileRegistryRecord: async (write) =>
       toNativeProfileRegistryRecord(
-        JSON.parse(
-          binding.createProfileRegistryRecordJson(
-            JSON.stringify(toRawProfileRegistryWrite(write)),
+        validateBridgeValue<RawProfileRegistryRecord>({
+          operation: "create_profile_registry_record",
+          direction: "rust_to_ts",
+          schema: rawProfileRegistryRecordSchema,
+          value: JSON.parse(
+            binding.createProfileRegistryRecordJson(
+              JSON.stringify(toRawProfileRegistryWrite(write)),
+            ),
           ),
-        ) as RawProfileRegistryRecord,
+        }),
       ),
     updateProfileRegistryRecord: async (update) =>
       toNativeProfileRegistryRecord(
-        JSON.parse(
-          binding.updateProfileRegistryRecordJson(
-            JSON.stringify(toRawProfileRegistryUpdate(update)),
+        validateBridgeValue<RawProfileRegistryRecord>({
+          operation: "update_profile_registry_record",
+          direction: "rust_to_ts",
+          schema: rawProfileRegistryRecordSchema,
+          value: JSON.parse(
+            binding.updateProfileRegistryRecordJson(
+              JSON.stringify(toRawProfileRegistryUpdate(update)),
+            ),
           ),
-        ) as RawProfileRegistryRecord,
+        }),
       ),
     listProfileRegistryRecords: async (query = {}) =>
-      (
-        JSON.parse(
+      validateBridgeValue<RawProfileRegistryRecord[]>({
+        operation: "list_profile_registry_records",
+        direction: "rust_to_ts",
+        schema: rawProfileRegistryRecordArraySchema,
+        value: JSON.parse(
           binding.listProfileRegistryRecordsJson(
             JSON.stringify(toRawProfileRegistryQuery(query)),
           ),
-        ) as RawProfileRegistryRecord[]
-      ).map(toNativeProfileRegistryRecord),
+        ),
+      }).map(toNativeProfileRegistryRecord),
     getProfileRegistryRecord: async (profileId) => {
       const raw = JSON.parse(
         binding.getProfileRegistryRecordJson(profileId),
       ) as RawProfileRegistryRecord | null;
-      return raw ? toNativeProfileRegistryRecord(raw) : undefined;
+      return raw
+        ? toNativeProfileRegistryRecord(
+            validateBridgeValue<RawProfileRegistryRecord>({
+              operation: "get_profile_registry_record",
+              direction: "rust_to_ts",
+              schema: rawProfileRegistryRecordSchema,
+              value: raw,
+            }),
+          )
+        : undefined;
     },
     upsertModelProvider: async (write) =>
       toNativeModelProviderRecord(
-        JSON.parse(
-          binding.upsertModelProviderJson(
-            JSON.stringify(toRawModelProviderWrite(write)),
+        validateBridgeValue<RawModelProviderRecord>({
+          operation: "upsert_model_provider",
+          direction: "rust_to_ts",
+          schema: rawModelProviderRecordSchema,
+          value: JSON.parse(
+            binding.upsertModelProviderJson(
+              JSON.stringify(toRawModelProviderWrite(write)),
+            ),
           ),
-        ) as RawModelProviderRecord,
+        }),
       ),
     listModelProviders: async (query = {}) =>
-      (
-        JSON.parse(
+      validateBridgeValue<RawModelProviderRecord[]>({
+        operation: "list_model_providers",
+        direction: "rust_to_ts",
+        schema: rawModelProviderRecordArraySchema,
+        value: JSON.parse(
           binding.listModelProvidersJson(
             JSON.stringify(toRawModelProviderQuery(query)),
           ),
-        ) as RawModelProviderRecord[]
-      ).map(toNativeModelProviderRecord),
+        ),
+      }).map(toNativeModelProviderRecord),
     getModelProvider: async (alias) => {
       const raw = JSON.parse(
         binding.getModelProviderJson(alias),
       ) as RawModelProviderRecord | null;
-      return raw ? toNativeModelProviderRecord(raw) : undefined;
+      return raw
+        ? toNativeModelProviderRecord(
+            validateBridgeValue<RawModelProviderRecord>({
+              operation: "get_model_provider",
+              direction: "rust_to_ts",
+              schema: rawModelProviderRecordSchema,
+              value: raw,
+            }),
+          )
+        : undefined;
     },
     getModelProviderSecret: async (alias) =>
       (JSON.parse(binding.getModelProviderSecretJson(alias)) as
@@ -3068,17 +3196,35 @@ function createNativeBridgeModule(
       const stored = binding
         .providerStateDiagnostics(limit)
         .map(toNativeProviderStateDiagnostic);
-      return mergeProviderStateDiagnostics([
-        ...providerStateObservations.values(),
-        ...stored,
-      ]).slice(0, limit);
+      return validateBridgeValue<NativeProviderStateDiagnostic[]>({
+        operation: "provider_state_diagnostics",
+        direction: "rust_to_ts",
+        schema: providerStateDiagnosticArraySchema,
+        value: mergeProviderStateDiagnostics([
+          ...providerStateObservations.values(),
+          ...stored,
+        ]).slice(0, limit),
+      });
     },
     runOpenAiResponsesBrain: async (input) => {
-      const raw = JSON.parse(
-        await binding.runOpenaiResponsesBrainJson(
-          JSON.stringify(toNativeOpenAiResponsesBrainRunInput(input)),
+      const validatedInput = validateBridgeValue<OpenAiResponsesBrainRunInput>({
+        operation: "run_openai_responses_brain",
+        direction: "ts_to_rust",
+        schema: openAiResponsesBrainRunInputSchema,
+        value: input,
+      });
+      const raw = validateBridgeValue<RawOpenAiResponsesBrainRunResult>({
+        operation: "run_openai_responses_brain",
+        direction: "rust_to_ts",
+        schema: rawOpenAiResponsesBrainRunResultSchema,
+        value: JSON.parse(
+          await binding.runOpenaiResponsesBrainJson(
+            JSON.stringify(
+              toNativeOpenAiResponsesBrainRunInput(validatedInput),
+            ),
+          ),
         ),
-      ) as RawOpenAiResponsesBrainRunResult;
+      });
       return {
         stream: raw.stream.map(toBrainWakeStreamItem),
         events: [],

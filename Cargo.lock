@@ -1200,6 +1200,9 @@ name = "rusty-crew-core-bridge-codegen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rusty-crew-core-bridge-api",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

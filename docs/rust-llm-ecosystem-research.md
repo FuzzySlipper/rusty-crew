@@ -77,7 +77,7 @@ The pi-crew manifest's "Structural model" section (per `README.md` §"Structural
 | `runtime` | `engine-rs/crates/bridge/core-bridge-api/` | 16 internal modules = roughly the right size. Per the description, "core engine — bash execution, config, conversation loop, file ops, MCP, permissions, sessions." The `permissions` and `sessions` modules are direct analogs to the manifest's `WorkerPolicy` and `SessionHandle`. |
 | `tools` | `engine-rs/crates/bridge/core-bridge-api/src/tool.rs` | 19 tool specs with JSON schemas + unified `execute_tool` dispatch. The dispatch function being a single verb is the pattern. |
 | `commands` | (out of scope — TS-side in pi-crew) | |
-| `compat-harness` | `ts/packages/core-bridge` | TypeScript compatibility layer. This is the *kind of crate* that bridges the Rust core to the existing TS front-end. Read this to understand how the boundary gets exercised. |
+| `compat-harness` | `ts/packages/native-bridge` | TypeScript/native compatibility layer. This is the package that bridges the Rust core to the existing TS front-end. Read this to understand how the boundary gets exercised. |
 | `rusty-claude-cli` | (out of scope — TS-side in pi-crew) | |
 
 **Key things to lift from Claw Code:**

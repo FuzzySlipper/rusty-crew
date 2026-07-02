@@ -10,10 +10,12 @@
   },
   "scripts": {
     "build:native": "napi build --manifest-path ../../../crates/bridge/core-bridge-node/Cargo.toml --release --platform --output-dir native",
-    "measure:napi": "tsx src/measure-napi-throughput.ts"
+    "measure:napi": "tsx src/measure-napi-throughput.ts",
+    "smoke:bridge-validation": "tsx src/smoke-bridge-validation.ts"
   },
   "dependencies": {
-    "@rusty-crew/contracts": "0.1.0"
+    "@rusty-crew/contracts": "0.1.0",
+    "typebox": "1.1.38"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.7.2"
