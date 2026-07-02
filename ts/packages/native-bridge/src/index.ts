@@ -166,6 +166,7 @@ interface NativeBridgeBinding {
     outputJson: string,
   ): void;
   runOpenaiResponsesBrainJson(inputJson: string): Promise<string>;
+  exchangeOpenaiOauthCodeJson(inputJson: string): Promise<string>;
   startOpenaiResponsesBrainJson(inputJson: string): string;
   drainOpenaiResponsesBrainStreamJson(
     wakeId: string,
@@ -494,6 +495,45 @@ export interface OpenAiResponsesCredentialSecretUpdate {
   providerAlias: string;
   secret: string;
 }
+
+export interface NativeOpenAiOauthCodeExchangeInput {
+  issuer: string;
+  clientId: string;
+  redirectUri: string;
+  code: string;
+  codeVerifier: string;
+  now?: string;
+}
+
+export interface NativeOpenAiOauthCredentialSummary {
+  kind: NativeModelProviderCredentialKind;
+  version: number;
+  hasSecret: boolean;
+  accountId?: string;
+  email?: string;
+  planType?: string;
+  isFedrampAccount: boolean;
+  accessTokenExpiresAt?: string;
+}
+
+export interface NativeOpenAiOauthExchangeError {
+  code: string;
+  reasonCode: string;
+  status?: number;
+  message: string;
+  retryable: boolean;
+}
+
+export type NativeOpenAiOauthCodeExchangeResult =
+  | {
+      ok: true;
+      secret: string;
+      summary: NativeOpenAiOauthCredentialSummary;
+    }
+  | {
+      ok: false;
+      error: NativeOpenAiOauthExchangeError;
+    };
 
 export interface OpenAiResponsesBrainRunInput {
   wakeId: string;
@@ -1750,6 +1790,9 @@ export interface NativeBridgeModule {
   runOpenAiResponsesBrain(
     input: OpenAiResponsesBrainRunInput,
   ): Promise<BrainWakeExecutionResult>;
+  exchangeOpenAiOauthCode(
+    input: NativeOpenAiOauthCodeExchangeInput,
+  ): Promise<NativeOpenAiOauthCodeExchangeResult>;
   startOpenAiResponsesBrain(input: OpenAiResponsesBrainRunInput): Promise<{
     wakeId: string;
   }>;
@@ -2046,6 +2089,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     removeDataBankScope: unavailable("remove_data_bank_scope"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     runOpenAiResponsesBrain: unavailable("wake_brain"),
+    exchangeOpenAiOauthCode: unavailable("wake_brain"),
     startOpenAiResponsesBrain: unavailable("wake_brain"),
     drainOpenAiResponsesBrainStream: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
@@ -3048,6 +3092,38 @@ function createNativeBridgeModule(
               secret: raw.credential_secret_update.secret,
             }
           : undefined,
+      };
+    },
+    exchangeOpenAiOauthCode: async (input) => {
+      const raw = JSON.parse(
+        await binding.exchangeOpenaiOauthCodeJson(
+          JSON.stringify({
+            issuer: input.issuer,
+            clientId: input.clientId,
+            redirectUri: input.redirectUri,
+            code: input.code,
+            codeVerifier: input.codeVerifier,
+            now: input.now,
+          }),
+        ),
+      ) as RawOpenAiOauthCodeExchangeResult;
+      if (!raw.ok) {
+        return raw;
+      }
+      return {
+        ok: true,
+        secret: raw.secret,
+        summary: {
+          kind: raw.summary.kind,
+          version: raw.summary.version,
+          hasSecret: raw.summary.has_secret,
+          accountId: raw.summary.account_id ?? undefined,
+          email: raw.summary.email ?? undefined,
+          planType: raw.summary.plan_type ?? undefined,
+          isFedrampAccount: raw.summary.is_fedramp_account,
+          accessTokenExpiresAt:
+            raw.summary.access_token_expires_at ?? undefined,
+        },
       };
     },
     startOpenAiResponsesBrain: async (input) => {
@@ -5007,6 +5083,28 @@ interface RawOpenAiResponsesCredentialSecretUpdate {
   provider_alias: string;
   secret: string;
 }
+
+interface RawOpenAiOauthCredentialSummary {
+  kind: NativeModelProviderCredentialKind;
+  version: number;
+  has_secret: boolean;
+  account_id?: string | null;
+  email?: string | null;
+  plan_type?: string | null;
+  is_fedramp_account: boolean;
+  access_token_expires_at?: string | null;
+}
+
+type RawOpenAiOauthCodeExchangeResult =
+  | {
+      ok: true;
+      secret: string;
+      summary: RawOpenAiOauthCredentialSummary;
+    }
+  | {
+      ok: false;
+      error: NativeOpenAiOauthExchangeError;
+    };
 
 interface RawOpenAiResponsesBufferedStartResult {
   wake_id: string;

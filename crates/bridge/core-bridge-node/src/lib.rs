@@ -61,8 +61,9 @@ use rusty_crew_core_protocol::{
     ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_openai_responses_brain::{
-    resolve_openai_oauth_bearer, FakeResponsesClient, LiveResponsesClient, NeutralBrainTool,
-    NeutralToolExecutor, NeutralToolOutput, OpenAiOauthClient, OpenAiOauthRefreshPolicy,
+    openai_oauth_envelope_from_exchange_result, resolve_openai_oauth_bearer, FakeResponsesClient,
+    LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor, NeutralToolOutput,
+    OpenAiOauthClient, OpenAiOauthCodeExchangeRequest, OpenAiOauthError, OpenAiOauthRefreshPolicy,
     OpenAiOauthSecretStore, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
@@ -71,6 +72,7 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, OnceLock};
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -2208,6 +2210,22 @@ pub struct OpenAiResponsesBrainRunTask {
     input_json: String,
 }
 
+pub struct OpenAiOauthCodeExchangeTask {
+    input_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsOpenAiOauthCodeExchangeInput {
+    issuer: String,
+    client_id: String,
+    redirect_uri: String,
+    code: String,
+    code_verifier: String,
+    #[serde(default)]
+    now: Option<String>,
+}
+
 struct OpenAiResponsesBrainRunOutput {
     stream: Vec<BrainWakeStreamItem>,
     provider_state: Option<BrainWakeProviderStateOutput>,
@@ -2295,6 +2313,19 @@ impl napi::Task for OpenAiResponsesBrainRunTask {
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
         run_openai_responses_brain_json_blocking(std::mem::take(&mut self.input_json))
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+impl napi::Task for OpenAiOauthCodeExchangeTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        exchange_openai_oauth_code_json_blocking(std::mem::take(&mut self.input_json))
     }
 
     fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -2631,6 +2662,16 @@ impl NativeBridgeBinding {
         // Running it as a napi task keeps the Node event loop available for
         // admin APIs, adapters, and SSE while this worker-thread task drains.
         napi::bindgen_prelude::AsyncTask::new(OpenAiResponsesBrainRunTask { input_json })
+    }
+
+    #[napi]
+    pub fn exchange_openai_oauth_code_json(
+        &self,
+        input_json: String,
+    ) -> napi::bindgen_prelude::AsyncTask<OpenAiOauthCodeExchangeTask> {
+        // OAuth code exchange performs blocking provider I/O. Keep it off the
+        // Node event loop just like the live Responses wake path.
+        napi::bindgen_prelude::AsyncTask::new(OpenAiOauthCodeExchangeTask { input_json })
     }
 
     #[napi]
@@ -5257,6 +5298,92 @@ fn run_openai_responses_brain_json_blocking(input_json: String) -> napi::Result<
     });
     serde_json::to_string(&output)
         .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+}
+
+fn exchange_openai_oauth_code_json_blocking(input_json: String) -> napi::Result<String> {
+    let input: JsOpenAiOauthCodeExchangeInput =
+        serde_json::from_str(&input_json).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid OpenAI OAuth code exchange input JSON: {error}"),
+            )
+        })?;
+    let now = match input.now.as_deref() {
+        Some(value) => OffsetDateTime::parse(value, &Rfc3339).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid OpenAI OAuth code exchange now timestamp: {error}"),
+            )
+        })?,
+        None => OffsetDateTime::now_utc(),
+    };
+    let client = OpenAiOauthClient::new()
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?;
+    let result = client.exchange_authorization_code(&OpenAiOauthCodeExchangeRequest {
+        issuer: input.issuer.clone(),
+        client_id: input.client_id.clone(),
+        redirect_uri: input.redirect_uri,
+        code: input.code,
+        code_verifier: input.code_verifier,
+    });
+    let output = match result {
+        Ok(result) => {
+            let envelope = openai_oauth_envelope_from_exchange_result(
+                result,
+                input.issuer,
+                input.client_id,
+                now,
+            );
+            let secret = envelope
+                .to_storage_text()
+                .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error.to_string()))?;
+            json!({
+                "ok": true,
+                "secret": secret,
+                "summary": envelope.redacted_summary(),
+            })
+        }
+        Err(error) => json!({
+            "ok": false,
+            "error": openai_oauth_exchange_error_json(error),
+        }),
+    };
+    serde_json::to_string(&output)
+        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+}
+
+fn openai_oauth_exchange_error_json(error: OpenAiOauthError) -> serde_json::Value {
+    match error {
+        OpenAiOauthError::Status {
+            status,
+            reason_code,
+            message,
+        } => json!({
+            "code": "upstream_status",
+            "reasonCode": reason_code.unwrap_or_else(|| "openai_oauth_upstream_status".to_string()),
+            "status": status,
+            "message": format!("OpenAI OAuth endpoint returned status {status}: {message}"),
+            "retryable": status >= 500,
+        }),
+        OpenAiOauthError::Transport => json!({
+            "code": "transport",
+            "reasonCode": "openai_oauth_transport",
+            "message": "OpenAI OAuth request transport failed",
+            "retryable": true,
+        }),
+        OpenAiOauthError::MalformedResponse(message) => json!({
+            "code": "malformed_response",
+            "reasonCode": "openai_oauth_malformed_response",
+            "message": format!("OpenAI OAuth endpoint returned malformed JSON: {message}"),
+            "retryable": false,
+        }),
+        other => json!({
+            "code": "credential_error",
+            "reasonCode": "openai_oauth_credential_error",
+            "message": other.to_string(),
+            "retryable": false,
+        }),
+    }
 }
 
 fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponsesBrainRunOutput> {

@@ -2356,11 +2356,56 @@ async function handleOpenAiOauthProviderAdminRequest(
         retryable: false,
       });
     }
-    const credentialSecret = openAiOauthCredentialSecretFromFakeCompletion(
-      pending,
-      body,
-      state.now(),
-    );
+    const fakeTokenResponse =
+      body.fakeTokenResponse ?? body.fake_token_response;
+    let completionMode: "real" | "test";
+    let credentialSecret: Record<string, unknown> | string;
+    let oauthSummary: unknown;
+    if (fakeTokenResponse !== undefined) {
+      if (
+        optionalBoolean(body.testMode ?? body.test_mode) !== true &&
+        optionalBoolean(body.allowFakeTokenResponse) !== true
+      ) {
+        return failure(400, request.requestId, {
+          code: "invalid_input",
+          reason_code: "openai_oauth_test_mode_required",
+          message:
+            "OpenAI OAuth fakeTokenResponse completion requires explicit testMode=true",
+          retryable: false,
+        });
+      }
+      completionMode = "test";
+      credentialSecret = openAiOauthCredentialSecretFromFakeCompletion(
+        pending,
+        body,
+        state.now(),
+      );
+    } else {
+      completionMode = "real";
+      const code = requiredString(body.code, "OpenAI OAuth code");
+      const exchange = await state.bridge.exchangeOpenAiOauthCode({
+        issuer: pending.issuer,
+        clientId: pending.clientId,
+        redirectUri: pending.redirectUri,
+        code,
+        codeVerifier: pending.codeVerifier,
+        now: state.now(),
+      });
+      if (!exchange.ok) {
+        return failure(
+          exchange.error.retryable ? 502 : 400,
+          request.requestId,
+          {
+            code: exchange.error.retryable ? "internal_error" : "invalid_input",
+            reason_code: exchange.error.reasonCode,
+            message: exchange.error.message,
+            retryable: exchange.error.retryable,
+          },
+        );
+      }
+      credentialSecret = exchange.secret;
+      oauthSummary = exchange.summary;
+    }
     const updated = await upsertModelProviderCredentialSecret({
       state,
       provider,
@@ -2374,6 +2419,8 @@ async function handleOpenAiOauthProviderAdminRequest(
     return successRoute(request.requestId, {
       provider: modelProviderApiRecord(updated),
       credential: updated.credential,
+      completionMode,
+      oauthSummary,
       pendingLoginId,
     });
   }
@@ -2494,7 +2541,6 @@ function redactedOpenAiOauthPendingLogin(pending: OpenAiOauthPendingLogin): {
   clientId: string;
   redirectUri: string;
   scopes: string[];
-  state: string;
   codeChallenge: string;
   authorizationUrl: string;
   createdAt: string;
@@ -2507,7 +2553,6 @@ function redactedOpenAiOauthPendingLogin(pending: OpenAiOauthPendingLogin): {
     clientId: pending.clientId,
     redirectUri: pending.redirectUri,
     scopes: pending.scopes,
-    state: pending.state,
     codeChallenge: pending.codeChallenge,
     authorizationUrl: pending.authorizationUrl,
     createdAt: pending.createdAt,
@@ -2588,13 +2633,16 @@ function openAiOauthCredentialSecretFromFakeCompletion(
 async function upsertModelProviderCredentialSecret(input: {
   state: ServiceState;
   provider: NativeModelProviderRecord;
-  credentialSecret: Record<string, unknown>;
+  credentialSecret: Record<string, unknown> | string;
   expectedRevision: number | undefined;
   now: string;
 }): Promise<NativeModelProviderRecord> {
   return input.state.bridge.upsertModelProvider({
     ...modelProviderWriteFromRecord(input.provider, input.now),
-    secret: JSON.stringify(input.credentialSecret),
+    secret:
+      typeof input.credentialSecret === "string"
+        ? input.credentialSecret
+        : JSON.stringify(input.credentialSecret),
     expectedRevision: input.expectedRevision ?? input.provider.revision,
   });
 }

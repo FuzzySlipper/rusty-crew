@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from "node:http";
+import {
   existsSync,
   mkdirSync,
   readFileSync,
@@ -7,7 +13,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { mkdtempSync } from "node:fs";
-import { connect, createServer } from "node:net";
+import {
+  connect,
+  createServer as createNetServer,
+  type AddressInfo,
+} from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -744,6 +754,14 @@ try {
       Object.hasOwn(oauthStart.body.data.pendingLogin, "codeVerifier"),
       false,
     );
+    assert.equal(
+      Object.hasOwn(oauthStart.body.data.pendingLogin, "state"),
+      false,
+    );
+    const oauthCallbackState = new URL(
+      oauthStart.body.data.pendingLogin.authorizationUrl,
+    ).searchParams.get("state");
+    assert.equal(typeof oauthCallbackState, "string");
 
     const oauthStatusWithPending = await get(
       "/v1/admin/model-providers/openai-oauth/oauth/openai/status",
@@ -752,13 +770,18 @@ try {
     );
     assert.equal(oauthStatusWithPending.status, 200);
     assert.equal(oauthStatusWithPending.body.data.pendingLogins.length, 1);
+    assert.equal(
+      Object.hasOwn(oauthStatusWithPending.body.data.pendingLogins[0], "state"),
+      false,
+    );
 
     const oauthComplete = await post(
       "/v1/admin/model-providers/openai-oauth/oauth/openai/complete",
       undefined,
       {
         pendingLoginId: oauthStart.body.data.pendingLogin.pendingLoginId,
-        state: oauthStart.body.data.pendingLogin.state,
+        state: oauthCallbackState,
+        testMode: true,
         fakeTokenResponse: {
           idToken: "id.jwt.token",
           accessToken: "access.jwt.token",
@@ -795,6 +818,74 @@ try {
     );
     assert.equal(oauthClear.status, 200);
     assert.equal(oauthClear.body.data.credential.hasSecret, false);
+
+    const fakeOauth = await startFakeOpenAiOauthServer();
+    try {
+      const realOauthProvider = await post(
+        "/v1/admin/model-providers",
+        undefined,
+        {
+          alias: "openai-oauth-real",
+          displayName: "OpenAI OAuth Real Shape",
+          protocol: "responses",
+          providerKind: "openai",
+          modelId: "gpt-5",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+        },
+        noAuthPort,
+      );
+      assert.equal(realOauthProvider.status, 200);
+      const realOauthStart = await post(
+        "/v1/admin/model-providers/openai-oauth-real/oauth/openai/start",
+        undefined,
+        {
+          issuer: fakeOauth.issuer,
+          clientId: "client-smoke",
+          redirectUri: "http://localhost:1455/auth/callback",
+          originator: "rusty_crew_smoke",
+        },
+        noAuthPort,
+      );
+      assert.equal(realOauthStart.status, 200);
+      const realOauthState = new URL(
+        realOauthStart.body.data.pendingLogin.authorizationUrl,
+      ).searchParams.get("state");
+      assert.equal(typeof realOauthState, "string");
+      const realOauthComplete = await post(
+        "/v1/admin/model-providers/openai-oauth-real/oauth/openai/complete",
+        undefined,
+        {
+          pendingLoginId: realOauthStart.body.data.pendingLogin.pendingLoginId,
+          state: realOauthState,
+          code: "authorization-code-smoke",
+        },
+        noAuthPort,
+      );
+      assert.equal(realOauthComplete.status, 200);
+      assert.equal(realOauthComplete.body.data.completionMode, "real");
+      assert.equal(realOauthComplete.body.data.credential.kind, "openai_oauth");
+      assert.equal(
+        realOauthComplete.body.data.oauthSummary.accountId,
+        "acct-smoke",
+      );
+      assert.equal(
+        realOauthComplete.body.data.oauthSummary.email,
+        "oauth@example.test",
+      );
+      const realOauthBody = JSON.stringify(realOauthComplete.body);
+      assert.doesNotMatch(realOauthBody, /authorization-code-smoke/);
+      assert.doesNotMatch(realOauthBody, /pkce/);
+      assert.doesNotMatch(realOauthBody, /refresh-smoke/);
+      assert.doesNotMatch(realOauthBody, /exchanged-api-token-smoke/);
+      const fakeOauthRequests = fakeOauth.requests();
+      assert.equal(fakeOauthRequests.length, 2);
+      assert.match(fakeOauthRequests[0].body, /grant_type=authorization_code/);
+      assert.match(fakeOauthRequests[0].body, /code=authorization-code-smoke/);
+      assert.match(fakeOauthRequests[0].body, /code_verifier=/);
+      assert.match(fakeOauthRequests[1].body, /requested_token=openai-api-key/);
+    } finally {
+      await fakeOauth.stop();
+    }
 
     const alternateRevision = alternateProvider.body.data.provider.revision;
     const updatedAlternateProvider = await patch(
@@ -871,7 +962,13 @@ try {
       providers.body.data.items
         .map((item: { alias: string }) => item.alias)
         .sort(),
-      ["alternate", "custom-chat", "default", "openai-oauth"],
+      [
+        "alternate",
+        "custom-chat",
+        "default",
+        "openai-oauth",
+        "openai-oauth-real",
+      ],
     );
 
     const localToolProfiles = await get(
@@ -1929,9 +2026,129 @@ async function del(
   };
 }
 
+interface FakeOpenAiOauthRequest {
+  method: string;
+  url: string;
+  body: string;
+}
+
+async function startFakeOpenAiOauthServer(): Promise<{
+  issuer: string;
+  requests: () => FakeOpenAiOauthRequest[];
+  stop: () => Promise<void>;
+}> {
+  const requests: FakeOpenAiOauthRequest[] = [];
+  const server = createHttpServer(
+    async (request: IncomingMessage, response: ServerResponse) => {
+      const body = await readIncomingBody(request);
+      requests.push({
+        method: request.method ?? "",
+        url: request.url ?? "",
+        body,
+      });
+      if (request.method !== "POST" || request.url !== "/oauth/token") {
+        writeJson(response, 404, { error: "not_found" });
+        return;
+      }
+      const form = new URLSearchParams(body);
+      const grantType = form.get("grant_type");
+      if (grantType === "authorization_code") {
+        assert.equal(form.get("client_id"), "client-smoke");
+        assert.equal(
+          form.get("redirect_uri"),
+          "http://localhost:1455/auth/callback",
+        );
+        assert.equal(form.get("code"), "authorization-code-smoke");
+        assert.ok(form.get("code_verifier"));
+        writeJson(response, 200, {
+          id_token: fakeJwt({
+            email: "oauth@example.test",
+            "https://api.openai.com/auth": {
+              chatgpt_account_id: "acct-smoke",
+              chatgpt_plan_type: "pro",
+              chatgpt_account_is_fedramp: false,
+            },
+          }),
+          access_token: fakeJwt({
+            exp: Math.floor(Date.now() / 1000) + 3600,
+          }),
+          refresh_token: "refresh-smoke",
+        });
+        return;
+      }
+      if (grantType === "urn:ietf:params:oauth:grant-type:token-exchange") {
+        assert.equal(form.get("client_id"), "client-smoke");
+        assert.equal(form.get("requested_token"), "openai-api-key");
+        assert.ok(form.get("subject_token"));
+        writeJson(response, 200, {
+          access_token: "exchanged-api-token-smoke",
+        });
+        return;
+      }
+      writeJson(response, 400, {
+        error: {
+          code: "unsupported_grant_type",
+          message: "unsupported grant_type",
+        },
+      });
+    },
+  );
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    issuer: `http://127.0.0.1:${address.port}`,
+    requests: () => [...requests],
+    stop: () =>
+      new Promise<void>((resolveStop, rejectStop) => {
+        server.close((error?: Error) => {
+          if (error) rejectStop(error);
+          else resolveStop();
+        });
+      }),
+  };
+}
+
+function readIncomingBody(request: IncomingMessage): Promise<string> {
+  return new Promise((resolveBody, rejectBody) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => {
+      body += chunk;
+    });
+    request.once("error", rejectBody);
+    request.on("end", () => resolveBody(body));
+  });
+}
+
+function writeJson(
+  response: ServerResponse,
+  status: number,
+  body: Record<string, unknown>,
+): void {
+  response.writeHead(status, { "content-type": "application/json" });
+  response.end(JSON.stringify(body));
+}
+
+function fakeJwt(payload: Record<string, unknown>): string {
+  return `${base64UrlJson({ alg: "none", typ: "JWT" })}.${base64UrlJson(
+    payload,
+  )}.`;
+}
+
+function base64UrlJson(value: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify(value))
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
 function openPort(): Promise<number> {
   return new Promise((resolveOpenPort, rejectOpenPort) => {
-    const server = createServer();
+    const server = createNetServer();
     server.once("error", rejectOpenPort);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
