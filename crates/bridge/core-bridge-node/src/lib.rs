@@ -61,8 +61,9 @@ use rusty_crew_core_protocol::{
     ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_openai_responses_brain::{
-    FakeResponsesClient, LiveResponsesClient, NeutralBrainTool, NeutralToolExecutor,
-    NeutralToolOutput, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
+    resolve_openai_oauth_bearer, FakeResponsesClient, LiveResponsesClient, NeutralBrainTool,
+    NeutralToolExecutor, NeutralToolOutput, OpenAiOauthClient, OpenAiOauthRefreshPolicy,
+    OpenAiOauthSecretStore, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -70,6 +71,7 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, OnceLock};
+use time::OffsetDateTime;
 
 #[derive(Debug)]
 pub struct NativeBridge {
@@ -2189,6 +2191,12 @@ enum JsOpenAiResponsesClientConfig {
         base_url: String,
         #[serde(default)]
         api_key: Option<String>,
+        #[serde(default)]
+        auth_kind: Option<String>,
+        #[serde(default)]
+        provider_alias: Option<String>,
+        #[serde(default)]
+        oauth_credential_secret: Option<String>,
     },
 }
 
@@ -2204,6 +2212,13 @@ struct OpenAiResponsesBrainRunOutput {
     stream: Vec<BrainWakeStreamItem>,
     provider_state: Option<BrainWakeProviderStateOutput>,
     transport_metrics: ResponsesTransportMetrics,
+    credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OpenAiResponsesCredentialSecretUpdate {
+    provider_alias: String,
+    secret: String,
 }
 
 #[derive(Debug, Default)]
@@ -2212,7 +2227,58 @@ struct BufferedOpenAiResponsesRun {
     terminal: bool,
     provider_state: Option<BrainWakeProviderStateOutput>,
     transport_metrics: Option<ResponsesTransportMetrics>,
+    credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
     error: Option<String>,
+}
+
+struct OneShotOpenAiOauthSecretStore {
+    provider_alias: String,
+    secret: Option<String>,
+    saved_secret: Option<String>,
+}
+
+impl OneShotOpenAiOauthSecretStore {
+    fn new(provider_alias: String, secret: String) -> Self {
+        Self {
+            provider_alias,
+            secret: Some(secret),
+            saved_secret: None,
+        }
+    }
+
+    fn credential_update(&self) -> Option<OpenAiResponsesCredentialSecretUpdate> {
+        self.saved_secret
+            .as_ref()
+            .map(|secret| OpenAiResponsesCredentialSecretUpdate {
+                provider_alias: self.provider_alias.clone(),
+                secret: secret.clone(),
+            })
+    }
+}
+
+impl OpenAiOauthSecretStore for OneShotOpenAiOauthSecretStore {
+    fn load_openai_oauth_secret(&mut self, provider_alias: &str) -> CoreResult<Option<String>> {
+        if provider_alias != self.provider_alias {
+            return Ok(None);
+        }
+        Ok(self.secret.clone())
+    }
+
+    fn save_openai_oauth_secret(
+        &mut self,
+        provider_alias: &str,
+        secret_storage_text: String,
+    ) -> CoreResult<()> {
+        if provider_alias != self.provider_alias {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("OpenAI OAuth provider alias mismatch for {provider_alias}"),
+            ));
+        }
+        self.secret = Some(secret_storage_text.clone());
+        self.saved_secret = Some(secret_storage_text);
+        Ok(())
+    }
 }
 
 static OPENAI_RESPONSES_BUFFERED_RUNS: OnceLock<
@@ -2257,6 +2323,7 @@ fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
         Ok(output) => {
             run.provider_state = output.provider_state;
             run.transport_metrics = Some(output.transport_metrics);
+            run.credential_secret_update = output.credential_secret_update;
         }
         Err(error) => {
             run.error = Some(error.to_string());
@@ -2647,6 +2714,7 @@ impl NativeBridgeBinding {
             "terminal": terminal,
             "provider_state": terminal.then(|| run.provider_state.clone()).flatten(),
             "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
+            "credential_secret_update": terminal.then(|| run.credential_secret_update.clone()).flatten(),
             "error": terminal.then(|| run.error.clone()).flatten(),
         });
         if terminal {
@@ -5185,6 +5253,7 @@ fn run_openai_responses_brain_json_blocking(input_json: String) -> napi::Result<
         "stream": output.stream,
         "provider_state": output.provider_state,
         "transport_metrics": output.transport_metrics,
+        "credential_secret_update": output.credential_secret_update,
     });
     serde_json::to_string(&output)
         .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
@@ -5245,26 +5314,76 @@ fn run_openai_responses_brain_internal(
             .transpose()
             .map_err(to_napi_error)?,
     };
+    let mut credential_secret_update = None;
     let result = match input.client {
         JsOpenAiResponsesClientConfig::Fake => {
             let client = fake_responses_client_for_body(&input.body_state);
             let mut brain =
                 ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
-            if let Some(sink) = sink.as_deref_mut() {
-                brain.wake_with_history_and_stream_sink(request, history, sink)
+            if let Some(sink) = &mut sink {
+                brain.wake_with_history_and_stream_sink(request, history, *sink)
             } else {
                 brain.wake_with_history(request, history)
             }
         }
-        JsOpenAiResponsesClientConfig::Live { base_url, api_key } => {
-            let client = LiveResponsesClient::new(base_url, api_key, config.stream_idle_timeout_ms)
-                .map_err(|error| {
-                    napi::Error::new(napi::Status::GenericFailure, error.to_string())
-                })?;
+        JsOpenAiResponsesClientConfig::Live {
+            base_url,
+            api_key,
+            auth_kind,
+            provider_alias,
+            oauth_credential_secret,
+        } => {
+            let (bearer_token, account_id, is_fedramp_account) =
+                if auth_kind.as_deref() == Some("openai_oauth") {
+                    let provider_alias = provider_alias.ok_or_else(|| {
+                        napi::Error::new(
+                            napi::Status::InvalidArg,
+                            "openai_oauth Responses client requires provider_alias",
+                        )
+                    })?;
+                    let oauth_credential_secret = oauth_credential_secret.ok_or_else(|| {
+                        napi::Error::new(
+                            napi::Status::InvalidArg,
+                            "openai_oauth Responses client requires oauth_credential_secret",
+                        )
+                    })?;
+                    let mut secret_store = OneShotOpenAiOauthSecretStore::new(
+                        provider_alias.clone(),
+                        oauth_credential_secret,
+                    );
+                    let resolution = resolve_openai_oauth_bearer(
+                        &provider_alias,
+                        &mut secret_store,
+                        &OpenAiOauthClient::new().map_err(|error| {
+                            napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                        })?,
+                        OffsetDateTime::now_utc(),
+                        &OpenAiOauthRefreshPolicy::default(),
+                    )
+                    .map_err(|error| {
+                        napi::Error::new(napi::Status::GenericFailure, error.to_string())
+                    })?;
+                    credential_secret_update = secret_store.credential_update();
+                    (
+                        Some(resolution.bearer_token),
+                        resolution.account_id,
+                        resolution.is_fedramp_account,
+                    )
+                } else {
+                    (api_key, None, false)
+                };
+            let client = LiveResponsesClient::new_with_bearer_metadata(
+                base_url,
+                bearer_token,
+                account_id,
+                is_fedramp_account,
+                config.stream_idle_timeout_ms,
+            )
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?;
             let mut brain =
                 ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
-            if let Some(sink) = sink.as_deref_mut() {
-                brain.wake_with_history_and_stream_sink(request, history, sink)
+            if let Some(sink) = &mut sink {
+                brain.wake_with_history_and_stream_sink(request, history, *sink)
             } else {
                 brain.wake_with_history(request, history)
             }
@@ -5278,6 +5397,7 @@ fn run_openai_responses_brain_internal(
             .map_err(to_napi_error)?,
         provider_state: result.provider_state,
         transport_metrics: result.transport_metrics,
+        credential_secret_update,
     })
 }
 
@@ -5468,6 +5588,13 @@ mod tests {
         CoreEventKind, EventSubscription, ProfileId, ProviderStateMode, ResourceLimits,
         SessionConfig, SessionId, SessionKind, ShutdownRequest, ToolDescriptor, ToolProfile,
     };
+    use rusty_crew_core_protocol::{
+        ModelProviderSecretEnvelope, MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+    };
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
 
     #[test]
     fn native_bridge_exposes_the_current_manifest_surface() {
@@ -5481,6 +5608,92 @@ mod tests {
             bridge.manifest_summary().native_package,
             "@rusty-crew/native-bridge"
         );
+    }
+
+    #[test]
+    fn openai_responses_bridge_uses_oauth_bearer_and_headers_without_secret_update() {
+        let server = FakeResponsesServer::new();
+        let mut bridge = NativeBridge::new();
+        bridge
+            .initialize_engine(EngineConfig {
+                engine_data_dir: std::env::temp_dir()
+                    .join(format!(
+                        "rusty-crew-native-openai-oauth-{}",
+                        std::process::id()
+                    ))
+                    .to_string_lossy()
+                    .to_string(),
+                clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                    at: "2026-07-02T00:00:00Z".to_string(),
+                },
+                default_turn_budget: 3,
+                default_idle_timeout_ms: 1000,
+                storage: None,
+            })
+            .unwrap();
+        bridge
+            .create_session(SessionConfig {
+                session_id: SessionId::new("responses-session"),
+                agent_id: AgentId::new("responses-agent"),
+                profile_id: ProfileId::new("responses-profile"),
+                kind: SessionKind::Full,
+                delegation: None,
+                resource_limits: ResourceLimits {
+                    workdir: None,
+                    max_duration_ms: None,
+                    max_delegation_depth: None,
+                },
+                tool_profile: ToolProfile { tools: Vec::new() },
+                history_window: None,
+            })
+            .unwrap();
+        let body_state: serde_json::Value = serde_json::from_slice(
+            &bridge
+                .project_body_state_json(SessionId::new("responses-session"))
+                .unwrap(),
+        )
+        .unwrap();
+        let secret = ModelProviderSecretEnvelope::OpenAiOauth {
+            version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+            issuer: "http://127.0.0.1:9".to_string(),
+            client_id: "client".to_string(),
+            id_token: test_jwt(4_102_444_800, serde_json::json!({})),
+            access_token: test_jwt(4_102_444_800, serde_json::json!({})),
+            refresh_token: "refresh-secret".to_string(),
+            exchanged_api_token: None,
+            last_refresh_at: Some("2026-07-02T00:00:00Z".to_string()),
+            account_id: Some("account-1".to_string()),
+            email: None,
+            plan_type: None,
+            is_fedramp_account: true,
+            access_token_expires_at: None,
+        };
+        let input = json!({
+            "wakeId": "wake-oauth",
+            "sessionId": "responses-session",
+            "bodyState": body_state,
+            "config": {"model": "gpt-5", "instructions": "say ok"},
+            "client": {
+                "mode": "live",
+                "base_url": server.base_url(),
+                "auth_kind": "openai_oauth",
+                "provider_alias": "gpt",
+                "oauth_credential_secret": secret.to_storage_text().unwrap()
+            }
+        });
+
+        let output: serde_json::Value = serde_json::from_str(
+            &run_openai_responses_brain_json_blocking(input.to_string()).unwrap(),
+        )
+        .unwrap();
+
+        assert!(output.get("credential_secret_update").unwrap().is_null());
+        let captured = server.captured();
+        assert!(captured.contains("post /responses http/1.1"));
+        assert!(captured.contains("authorization: bearer "));
+        assert!(captured.contains("chatgpt-account-id: account-1"));
+        assert!(captured.contains("x-openai-fedramp: true"));
+        assert!(!captured.contains("refresh-secret"));
     }
 
     #[test]
@@ -6093,5 +6306,118 @@ mod tests {
             tool_profile: ToolProfile { tools: Vec::new() },
             history_window: None,
         }
+    }
+
+    struct FakeResponsesServer {
+        addr: String,
+        captured: Arc<Mutex<Option<String>>>,
+    }
+
+    impl FakeResponsesServer {
+        fn new() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap().to_string();
+            let captured = Arc::new(Mutex::new(None));
+            let captured_for_thread = Arc::clone(&captured);
+            thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = Vec::new();
+                let mut chunk = [0_u8; 4096];
+                loop {
+                    let read = stream.read(&mut chunk).unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    buffer.extend_from_slice(&chunk[..read]);
+                    if request_complete(&buffer) {
+                        break;
+                    }
+                }
+                let request_text = String::from_utf8_lossy(&buffer).to_lowercase();
+                *captured_for_thread.lock().unwrap() = Some(request_text);
+                let body = concat!(
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-test\",\"usage\":{\"input_tokens\":1,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens\":1,\"output_tokens_details\":{\"reasoning_tokens\":0},\"total_tokens\":2}}}\n\n",
+                    "data: [DONE]\n\n"
+                );
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            });
+            Self { addr, captured }
+        }
+
+        fn base_url(&self) -> String {
+            format!("http://{}", self.addr)
+        }
+
+        fn captured(&self) -> String {
+            for _ in 0..100 {
+                if let Some(captured) = self.captured.lock().unwrap().clone() {
+                    return captured;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("fake responses server did not capture a request");
+        }
+    }
+
+    fn request_complete(buffer: &[u8]) -> bool {
+        let text = String::from_utf8_lossy(buffer);
+        let Some((headers, body)) = text.split_once("\r\n\r\n") else {
+            return false;
+        };
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("content-length:")
+                    .or_else(|| line.strip_prefix("Content-Length:"))
+            })
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        body.len() >= content_length
+    }
+
+    fn test_jwt(exp: i64, extra: serde_json::Value) -> String {
+        let mut payload = serde_json::json!({"exp": exp});
+        let serde_json::Value::Object(payload_map) = &mut payload else {
+            unreachable!();
+        };
+        if let serde_json::Value::Object(extra_map) = extra {
+            for (key, value) in extra_map {
+                payload_map.insert(key, value);
+            }
+        }
+        format!(
+            "{}.{}.{}",
+            base64_url(r#"{"alg":"none"}"#.as_bytes()),
+            base64_url(serde_json::to_string(&payload).unwrap().as_bytes()),
+            "sig"
+        )
+    }
+
+    fn base64_url(bytes: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut output = String::new();
+        let mut index = 0;
+        while index < bytes.len() {
+            let a = bytes[index];
+            let b = bytes.get(index + 1).copied().unwrap_or(0);
+            let c = bytes.get(index + 2).copied().unwrap_or(0);
+            output.push(TABLE[(a >> 2) as usize] as char);
+            output.push(TABLE[(((a & 0b0000_0011) << 4) | (b >> 4)) as usize] as char);
+            if index + 1 < bytes.len() {
+                output.push(TABLE[(((b & 0b0000_1111) << 2) | (c >> 6)) as usize] as char);
+            }
+            if index + 2 < bytes.len() {
+                output.push(TABLE[(c & 0b0011_1111) as usize] as char);
+            }
+            index += 3;
+        }
+        output
     }
 }

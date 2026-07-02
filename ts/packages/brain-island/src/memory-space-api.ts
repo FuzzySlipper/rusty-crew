@@ -276,7 +276,9 @@ export async function readMemorySpaceRecord(
             await context.bridge.querySessionMemoryRecords({
               session_id:
                 query.sessionId ??
-                missing("sessionId is required for session_memory record reads"),
+                missing(
+                  "sessionId is required for session_memory record reads",
+                ),
               include_archived: true,
               include_superseded: true,
               page: { limit: MAX_LIMIT, offset: 0 },
@@ -545,9 +547,12 @@ async function listMemorySpaceRecordItems(
     const sessionId =
       query.sessionId ??
       missing("sessionId is required for session_memory record reads");
-    if (query.promptContextOnly === true || query.activeBranchId !== undefined) {
-      const contextResult = await context.bridge.buildSessionMemoryPromptContext(
-        {
+    if (
+      query.promptContextOnly === true ||
+      query.activeBranchId !== undefined
+    ) {
+      const contextResult =
+        await context.bridge.buildSessionMemoryPromptContext({
           session_id: sessionId,
           active_branch_id: query.activeBranchId,
           include_ancestors: query.includeAncestors ?? true,
@@ -555,8 +560,7 @@ async function listMemorySpaceRecordItems(
           shape_id: query.shapeId,
           prompt_context_only: query.promptContextOnly ?? true,
           page: { limit: query.limit, offset: query.offset },
-        },
-      );
+        });
       return {
         items: contextResult.records,
         diagnostics: contextResult.diagnostics,
@@ -629,7 +633,9 @@ function parseProfileDenseQuery(
   };
 }
 
-function parseSessionMemoryQuery(params: URLSearchParams): MemorySpaceRecordQuery {
+function parseSessionMemoryQuery(
+  params: URLSearchParams,
+): MemorySpaceRecordQuery {
   return {
     sessionId: requiredQueryString(params, "sessionId"),
     branchId: optionalQueryString(params, "branchId"),

@@ -845,6 +845,9 @@ function modelConfigFromProfileObject(
     baseUrl: optionalString(modelConfig.baseUrl),
     api: optionalString(modelConfig.api),
     apiKeyEnv: optionalString(modelConfig.apiKeyEnv),
+    credentialKind: optionalString(modelConfig.credentialKind) as
+      | BrainModelConfig["credentialKind"]
+      | undefined,
     temperatureMilli,
     maxOutputTokens:
       optionalNumber(modelConfig.maxOutputTokens) ??

@@ -62,15 +62,15 @@ try {
   assert.equal(envelope.data?.postgres?.bootMode, "active");
   assert.equal(envelope.data?.postgres?.implementationStatus, "active");
   assert.equal(envelope.data?.postgres?.productionReadiness?.ready, true);
-  assert.equal(
-    envelope.data?.postgres?.productionReadiness?.status,
-    "ready",
-  );
+  assert.equal(envelope.data?.postgres?.productionReadiness?.status, "ready");
 
-  const profileCreate = await postJson(`${host.url}/v1/admin/control/profiles`, {
-    profileId: "postgres-created-profile",
-    displayName: "Postgres Created Profile",
-  });
+  const profileCreate = await postJson(
+    `${host.url}/v1/admin/control/profiles`,
+    {
+      profileId: "postgres-created-profile",
+      displayName: "Postgres Created Profile",
+    },
+  );
   assert.equal(profileCreate.status, 200, JSON.stringify(profileCreate.body));
   const profileCreateEnvelope = profileCreate.body as {
     ok: boolean;
@@ -111,7 +111,9 @@ try {
     1,
   );
   assert.equal(
-    existsSync(join(root, "config", "profiles", "postgres-created-profile.json")),
+    existsSync(
+      join(root, "config", "profiles", "postgres-created-profile.json"),
+    ),
     true,
   );
   const createdProfileConfig = JSON.parse(

@@ -1224,6 +1224,7 @@ dependencies = [
  "rusty-crew-openai-responses-brain",
  "serde",
  "serde_json",
+ "time",
 ]
 
 [[package]]
@@ -1300,6 +1301,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "time",
 ]
 
 [[package]]

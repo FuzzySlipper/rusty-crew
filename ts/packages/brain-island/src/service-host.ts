@@ -4,6 +4,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import {
@@ -355,6 +356,7 @@ interface ServiceState {
     string,
     ChannelAdapterBindingDiagnostics
   >;
+  readonly openAiOauthPendingLogins: Map<string, OpenAiOauthPendingLogin>;
   readonly channelProjectionFailures: ChannelProjectionFailureRecord[];
   profileChannelWakePolicies: Map<string, ChannelWakePolicy>;
   mcpManager: McpSurfaceManager;
@@ -375,6 +377,21 @@ interface ServiceState {
   readonly now: () => string;
   nextWakeSequence: number;
   stopping: boolean;
+}
+
+interface OpenAiOauthPendingLogin {
+  pendingLoginId: string;
+  providerAlias: string;
+  issuer: string;
+  clientId: string;
+  redirectUri: string;
+  scopes: string[];
+  state: string;
+  codeVerifier: string;
+  codeChallenge: string;
+  authorizationUrl: string;
+  createdAt: string;
+  expiresAt: string;
 }
 
 interface DenConversationChannelResolution {
@@ -516,6 +533,7 @@ export async function startRustyCrewServiceHost(
       denConversationChannelIdsByExternalId: new Map(),
       denConversationMembershipsByBindingId: new Map(),
       dynamicDenChannelBindings: new Map(),
+      openAiOauthPendingLogins: new Map(),
       channelProjectionFailures: [],
       profileChannelWakePolicies,
       curator,
@@ -2169,9 +2187,28 @@ async function handleModelProviderAdminRequest(
 ): Promise<AdminRouteResult> {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
-  const alias = decodeURIComponent(
-    url.pathname.replace(/^\/v1\/admin\/model-providers\/?/, ""),
-  ).trim();
+  const relativePath = url.pathname.replace(
+    /^\/v1\/admin\/model-providers\/?/,
+    "",
+  );
+  const segments = relativePath
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => decodeURIComponent(segment));
+  const alias = segments[0] ?? "";
+
+  if (alias && segments[1] === "oauth" && segments[2] === "openai") {
+    return handleOpenAiOauthProviderAdminRequest(
+      {
+        method,
+        alias,
+        action: segments[3] ?? "status",
+        body: request.body,
+        requestId: request.requestId,
+      },
+      state,
+    );
+  }
 
   if (method === "GET" && !alias) {
     const status = modelProviderStatusParam(url.searchParams.get("status"));
@@ -2253,6 +2290,350 @@ async function handleModelProviderAdminRequest(
       "model provider routes support GET list/get, POST create/upsert, and PATCH update",
     retryable: false,
   });
+}
+
+async function handleOpenAiOauthProviderAdminRequest(
+  request: {
+    method: string;
+    alias: string;
+    action: string;
+    body?: unknown;
+    requestId: string;
+  },
+  state: ServiceState,
+): Promise<AdminRouteResult> {
+  const provider = await state.bridge.getModelProvider(request.alias);
+  if (!provider) {
+    return failure(404, request.requestId, {
+      code: "not_found",
+      reason_code: "model_provider_not_found",
+      message: `model provider ${request.alias} was not found`,
+      retryable: false,
+    });
+  }
+
+  if (request.action === "status" && request.method === "GET") {
+    return successRoute(
+      request.requestId,
+      openAiOauthProviderStatus(provider, state),
+    );
+  }
+
+  if (request.action === "start" && request.method === "POST") {
+    const body = optionalRecord(request.body) ?? {};
+    const pending = startOpenAiOauthLogin(provider, state, body);
+    state.openAiOauthPendingLogins.set(pending.pendingLoginId, pending);
+    return successRoute(request.requestId, {
+      provider: modelProviderApiRecord(provider),
+      pendingLogin: redactedOpenAiOauthPendingLogin(pending),
+    });
+  }
+
+  if (request.action === "complete" && request.method === "POST") {
+    const body = requiredRecord(
+      request.body,
+      "OpenAI OAuth complete request body",
+    );
+    const pendingLoginId = requiredString(
+      body.pendingLoginId ?? body.pending_login_id,
+      "OpenAI OAuth pendingLoginId",
+    );
+    const pending = state.openAiOauthPendingLogins.get(pendingLoginId);
+    if (!pending || pending.providerAlias !== provider.alias) {
+      return failure(404, request.requestId, {
+        code: "not_found",
+        reason_code: "openai_oauth_pending_login_not_found",
+        message: `OpenAI OAuth pending login ${pendingLoginId} was not found`,
+        retryable: false,
+      });
+    }
+    const stateValue = requiredString(body.state, "OpenAI OAuth state");
+    if (stateValue !== pending.state) {
+      return failure(400, request.requestId, {
+        code: "invalid_input",
+        reason_code: "openai_oauth_state_mismatch",
+        message: "OpenAI OAuth callback state did not match the pending login",
+        retryable: false,
+      });
+    }
+    const credentialSecret = openAiOauthCredentialSecretFromFakeCompletion(
+      pending,
+      body,
+      state.now(),
+    );
+    const updated = await upsertModelProviderCredentialSecret({
+      state,
+      provider,
+      credentialSecret,
+      expectedRevision: optionalNumber(
+        body.expectedRevision ?? body.expected_revision,
+      ),
+      now: state.now(),
+    });
+    state.openAiOauthPendingLogins.delete(pendingLoginId);
+    return successRoute(request.requestId, {
+      provider: modelProviderApiRecord(updated),
+      credential: updated.credential,
+      pendingLoginId,
+    });
+  }
+
+  if (request.action === "clear" && request.method === "POST") {
+    const body = optionalRecord(request.body) ?? {};
+    const updated = await clearModelProviderCredential({
+      state,
+      provider,
+      expectedRevision: optionalNumber(
+        body.expectedRevision ?? body.expected_revision,
+      ),
+      now: state.now(),
+    });
+    for (const [pendingLoginId, pending] of state.openAiOauthPendingLogins) {
+      if (pending.providerAlias === provider.alias) {
+        state.openAiOauthPendingLogins.delete(pendingLoginId);
+      }
+    }
+    return successRoute(request.requestId, {
+      provider: modelProviderApiRecord(updated),
+      credential: updated.credential,
+    });
+  }
+
+  return failure(405, request.requestId, {
+    code: "method_not_allowed",
+    reason_code: "openai_oauth_provider_method_not_allowed",
+    message:
+      "OpenAI OAuth provider routes support GET status and POST start/complete/clear",
+    retryable: false,
+  });
+}
+
+function openAiOauthProviderStatus(
+  provider: NativeModelProviderRecord,
+  state: ServiceState,
+): {
+  provider: NativeModelProviderRecord & { temperature?: number };
+  credential: NativeModelProviderRecord["credential"];
+  pendingLogins: Array<ReturnType<typeof redactedOpenAiOauthPendingLogin>>;
+} {
+  return {
+    provider: modelProviderApiRecord(provider),
+    credential: provider.credential,
+    pendingLogins: [...state.openAiOauthPendingLogins.values()]
+      .filter((pending) => pending.providerAlias === provider.alias)
+      .map(redactedOpenAiOauthPendingLogin),
+  };
+}
+
+function startOpenAiOauthLogin(
+  provider: NativeModelProviderRecord,
+  state: ServiceState,
+  body: Record<string, unknown>,
+): OpenAiOauthPendingLogin {
+  const issuer = optionalString(body.issuer) ?? "https://auth.openai.com";
+  const clientId =
+    optionalString(body.clientId ?? body.client_id) ??
+    "app_EMoamEEZ73f0CkXaXp7hrann";
+  const redirectUri =
+    optionalString(body.redirectUri ?? body.redirect_uri) ??
+    "http://localhost:1455/auth/callback";
+  const scopes = optionalStringArray(
+    body.scopes,
+    [
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "api.connectors.read",
+      "api.connectors.invoke",
+    ],
+    "OpenAI OAuth scopes",
+  );
+  const stateValue = randomBase64Url(32);
+  const codeVerifier = randomBase64Url(64);
+  const codeChallenge = base64Url(
+    createHash("sha256").update(codeVerifier).digest(),
+  );
+  const createdAt = state.now();
+  const expiresAt = addMilliseconds(createdAt, 10 * 60 * 1000);
+  const pendingLoginId = `openai-oauth:${provider.alias}:${randomBase64Url(18)}`;
+  const authorizationUrl = openAiOauthAuthorizationUrl({
+    issuer,
+    clientId,
+    redirectUri,
+    scopes,
+    state: stateValue,
+    codeChallenge,
+    allowedWorkspaceIds: optionalStringArray(
+      body.allowedWorkspaceIds ?? body.allowed_workspace_ids,
+      [],
+      "OpenAI OAuth allowedWorkspaceIds",
+    ),
+    originator: optionalString(body.originator) ?? "rusty_crew",
+  });
+  return {
+    pendingLoginId,
+    providerAlias: provider.alias,
+    issuer,
+    clientId,
+    redirectUri,
+    scopes,
+    state: stateValue,
+    codeVerifier,
+    codeChallenge,
+    authorizationUrl,
+    createdAt,
+    expiresAt,
+  };
+}
+
+function redactedOpenAiOauthPendingLogin(pending: OpenAiOauthPendingLogin): {
+  pendingLoginId: string;
+  providerAlias: string;
+  issuer: string;
+  clientId: string;
+  redirectUri: string;
+  scopes: string[];
+  state: string;
+  codeChallenge: string;
+  authorizationUrl: string;
+  createdAt: string;
+  expiresAt: string;
+} {
+  return {
+    pendingLoginId: pending.pendingLoginId,
+    providerAlias: pending.providerAlias,
+    issuer: pending.issuer,
+    clientId: pending.clientId,
+    redirectUri: pending.redirectUri,
+    scopes: pending.scopes,
+    state: pending.state,
+    codeChallenge: pending.codeChallenge,
+    authorizationUrl: pending.authorizationUrl,
+    createdAt: pending.createdAt,
+    expiresAt: pending.expiresAt,
+  };
+}
+
+function openAiOauthAuthorizationUrl(input: {
+  issuer: string;
+  clientId: string;
+  redirectUri: string;
+  scopes: string[];
+  state: string;
+  codeChallenge: string;
+  allowedWorkspaceIds: string[];
+  originator: string;
+}): string {
+  const url = new URL("/oauth/authorize", input.issuer);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", input.clientId);
+  url.searchParams.set("redirect_uri", input.redirectUri);
+  url.searchParams.set("scope", input.scopes.join(" "));
+  url.searchParams.set("code_challenge", input.codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("id_token_add_organizations", "true");
+  url.searchParams.set("codex_cli_simplified_flow", "true");
+  url.searchParams.set("state", input.state);
+  url.searchParams.set("originator", input.originator);
+  if (input.allowedWorkspaceIds.length > 0) {
+    url.searchParams.set(
+      "allowed_workspace_id",
+      input.allowedWorkspaceIds.join(","),
+    );
+  }
+  return url.toString();
+}
+
+function openAiOauthCredentialSecretFromFakeCompletion(
+  pending: OpenAiOauthPendingLogin,
+  body: Record<string, unknown>,
+  now: string,
+): Record<string, unknown> {
+  const fake = requiredRecord(
+    body.fakeTokenResponse ?? body.fake_token_response,
+    "OpenAI OAuth fakeTokenResponse",
+  );
+  return {
+    kind: "openai_oauth",
+    version: 1,
+    issuer: pending.issuer,
+    client_id: pending.clientId,
+    id_token: requiredString(fake.idToken ?? fake.id_token, "fake idToken"),
+    access_token: requiredString(
+      fake.accessToken ?? fake.access_token,
+      "fake accessToken",
+    ),
+    refresh_token: requiredString(
+      fake.refreshToken ?? fake.refresh_token,
+      "fake refreshToken",
+    ),
+    exchanged_api_token: optionalString(
+      fake.exchangedApiToken ?? fake.exchanged_api_token,
+    ),
+    last_refresh_at:
+      optionalString(fake.lastRefreshAt ?? fake.last_refresh_at) ?? now,
+    account_id: optionalString(fake.accountId ?? fake.account_id),
+    email: optionalString(fake.email),
+    plan_type: optionalString(fake.planType ?? fake.plan_type),
+    is_fedramp_account:
+      optionalBoolean(fake.isFedrampAccount ?? fake.is_fedramp_account) ??
+      false,
+    access_token_expires_at: optionalString(
+      fake.accessTokenExpiresAt ?? fake.access_token_expires_at,
+    ),
+  };
+}
+
+async function upsertModelProviderCredentialSecret(input: {
+  state: ServiceState;
+  provider: NativeModelProviderRecord;
+  credentialSecret: Record<string, unknown>;
+  expectedRevision: number | undefined;
+  now: string;
+}): Promise<NativeModelProviderRecord> {
+  return input.state.bridge.upsertModelProvider({
+    ...modelProviderWriteFromRecord(input.provider, input.now),
+    secret: JSON.stringify(input.credentialSecret),
+    expectedRevision: input.expectedRevision ?? input.provider.revision,
+  });
+}
+
+async function clearModelProviderCredential(input: {
+  state: ServiceState;
+  provider: NativeModelProviderRecord;
+  expectedRevision: number | undefined;
+  now: string;
+}): Promise<NativeModelProviderRecord> {
+  return input.state.bridge.upsertModelProvider({
+    ...modelProviderWriteFromRecord(input.provider, input.now),
+    clearSecret: true,
+    expectedRevision: input.expectedRevision ?? input.provider.revision,
+  });
+}
+
+function modelProviderWriteFromRecord(
+  provider: NativeModelProviderRecord,
+  now: string,
+): NativeModelProviderWrite {
+  return {
+    alias: provider.alias,
+    status: provider.status,
+    protocol: provider.protocol,
+    providerKind: provider.providerKind,
+    displayName: provider.displayName,
+    description: provider.description,
+    baseUrl: provider.baseUrl,
+    modelId: provider.modelId,
+    contextWindowTokens: provider.contextWindowTokens,
+    maxOutputTokens: provider.maxOutputTokens,
+    temperatureMilli: provider.temperatureMilli,
+    reasoningEffort: provider.reasoningEffort,
+    reasoningFormat: provider.reasoningFormat,
+    clearSecret: false,
+    metadataJson: provider.metadataJson,
+    now,
+  };
 }
 
 type ModelProviderRefreshMode = "none" | "plan" | "apply";
@@ -7236,6 +7617,14 @@ function stringArray(value: unknown, fieldName: string): string[] {
   });
 }
 
+function optionalStringArray(
+  value: unknown,
+  fallback: string[],
+  fieldName: string,
+): string[] {
+  return value === undefined ? fallback : stringArray(value, fieldName);
+}
+
 function requiredString(value: unknown, fieldName: string): string {
   const text = optionalString(value);
   if (!text) throw new Error(`${fieldName} is required`);
@@ -11848,6 +12237,88 @@ function modelProviderProtocolFromBody(
   );
 }
 
+function modelProviderSecretFromBody(
+  body: Record<string, unknown>,
+): string | undefined {
+  const credentialSecret = body.credentialSecret ?? body.credential_secret;
+  if (credentialSecret !== undefined) {
+    return JSON.stringify(
+      modelProviderCredentialSecretEnvelope(credentialSecret),
+    );
+  }
+  return optionalString(body.secret ?? body.apiKey);
+}
+
+function modelProviderCredentialSecretEnvelope(
+  value: unknown,
+): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error("model provider credentialSecret must be an object");
+  }
+  const kind = requiredString(
+    value.kind,
+    "model provider credentialSecret.kind",
+  );
+  const version = optionalNumber(value.version) ?? 1;
+  if (version !== 1) {
+    throw new Error("model provider credentialSecret.version must be 1");
+  }
+  if (kind === "api_key") {
+    return {
+      kind,
+      version,
+      value: requiredString(
+        value.value ?? value.apiKey ?? value.api_key,
+        "model provider credentialSecret.value",
+      ),
+    };
+  }
+  if (kind === "openai_oauth") {
+    return {
+      kind,
+      version,
+      issuer: requiredString(
+        value.issuer,
+        "model provider credentialSecret.issuer",
+      ),
+      client_id: requiredString(
+        value.clientId ?? value.client_id,
+        "model provider credentialSecret.clientId",
+      ),
+      id_token: requiredString(
+        value.idToken ?? value.id_token,
+        "model provider credentialSecret.idToken",
+      ),
+      access_token: requiredString(
+        value.accessToken ?? value.access_token,
+        "model provider credentialSecret.accessToken",
+      ),
+      refresh_token: requiredString(
+        value.refreshToken ?? value.refresh_token,
+        "model provider credentialSecret.refreshToken",
+      ),
+      exchanged_api_token: optionalString(
+        value.exchangedApiToken ?? value.exchanged_api_token,
+      ),
+      last_refresh_at: optionalString(
+        value.lastRefreshAt ?? value.last_refresh_at,
+      ),
+      account_id: optionalString(value.accountId ?? value.account_id),
+      email: optionalString(value.email),
+      plan_type: optionalString(value.planType ?? value.plan_type),
+      is_fedramp_account:
+        optionalBoolean(value.isFedrampAccount ?? value.is_fedramp_account) ??
+        false,
+      access_token_expires_at: optionalString(
+        value.accessTokenExpiresAt ?? value.access_token_expires_at,
+      ),
+    };
+  }
+  throw new Error(
+    "model provider credentialSecret.kind must be api_key or openai_oauth",
+  );
+}
+
 function modelProviderWriteFromBody(
   body: unknown,
   pathAlias: string | undefined,
@@ -11880,7 +12351,7 @@ function modelProviderWriteFromBody(
     temperatureMilli: optionalTemperatureMilli(body),
     reasoningEffort: optionalString(body.reasoningEffort),
     reasoningFormat: optionalString(body.reasoningFormat),
-    secret: optionalString(body.secret ?? body.apiKey),
+    secret: modelProviderSecretFromBody(body),
     clearSecret: optionalBoolean(body.clearSecret),
     metadataJson: isRecord(body.metadataJson) ? body.metadataJson : {},
     expectedRevision: optionalNumber(body.expectedRevision),
@@ -11911,12 +12382,16 @@ function modelProviderToBrainModelConfig(
   provider: NativeModelProviderRecord,
   secret: string | undefined,
 ): BrainModelConfig {
+  const apiKey = modelProviderApiKeySecret(provider, secret);
+  const credentialKind =
+    provider.credential.kind ??
+    (apiKey === undefined ? undefined : "legacy_raw_api_key");
   const apiKeyEnv =
-    secret === undefined
+    apiKey === undefined
       ? undefined
       : modelProviderSecretEnvName(provider.alias);
   if (apiKeyEnv !== undefined) {
-    process.env[apiKeyEnv] = secret;
+    process.env[apiKeyEnv] = apiKey;
   }
   return {
     provider: provider.providerKind,
@@ -11927,9 +12402,38 @@ function modelProviderToBrainModelConfig(
         ? "openai-responses"
         : "openai-completions",
     apiKeyEnv,
+    credentialKind,
     temperatureMilli: provider.temperatureMilli,
     maxOutputTokens: provider.maxOutputTokens,
   };
+}
+
+function modelProviderApiKeySecret(
+  provider: NativeModelProviderRecord,
+  secret: string | undefined,
+): string | undefined {
+  if (secret === undefined) {
+    return undefined;
+  }
+  const trimmed = secret.trim();
+  if (!trimmed.startsWith("{")) {
+    return secret;
+  }
+  const envelope = JSON.parse(trimmed) as unknown;
+  if (!isRecord(envelope)) {
+    throw new Error(
+      `model provider ${provider.alias} secret envelope is invalid`,
+    );
+  }
+  if (envelope.kind === "api_key" && typeof envelope.value === "string") {
+    return envelope.value;
+  }
+  if (envelope.kind === "openai_oauth") {
+    return undefined;
+  }
+  throw new Error(
+    `model provider ${provider.alias} secret envelope kind is unsupported`,
+  );
 }
 
 function modelProviderSecretEnvName(alias: string): string {
@@ -11986,6 +12490,35 @@ function optionalRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function requiredRecord(
+  value: unknown,
+  fieldName: string,
+): Record<string, unknown> {
+  const record = optionalRecord(value);
+  if (record === undefined) {
+    throw new Error(`${fieldName} must be an object`);
+  }
+  return record;
+}
+
+function randomBase64Url(byteLength: number): string {
+  return base64Url(randomBytes(byteLength));
+}
+
+function base64Url(bytes: Buffer): string {
+  return bytes
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function addMilliseconds(isoTimestamp: string, milliseconds: number): string {
+  const parsed = Date.parse(isoTimestamp);
+  const base = Number.isFinite(parsed) ? parsed : Date.now();
+  return new Date(base + milliseconds).toISOString();
 }
 
 function compactRecord(

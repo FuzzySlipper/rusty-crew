@@ -650,7 +650,15 @@ function sessionMemoryDescriptor(): MemorySpaceDescriptor {
       ],
     },
     conflict_policy: "supersession",
-    operations: ["read", "list", "add", "replace", "merge", "supersede", "archive"],
+    operations: [
+      "read",
+      "list",
+      "add",
+      "replace",
+      "merge",
+      "supersede",
+      "archive",
+    ],
     provenance_policy: {
       required_evidence: ["wake"],
       source_required: true,

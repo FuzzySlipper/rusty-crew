@@ -44,8 +44,8 @@ use rusty_crew_core_protocol::{
     MemoryRetrievalStrategy, MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor,
     MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, MessageBlockId, MessageId,
     MessageSlotId, MessageVariantId, ModelProviderCredential, ModelProviderProtocol,
-    ModelProviderQuery, ModelProviderRecord, ModelProviderStatus, ModelProviderWrite,
-    ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus,
+    ModelProviderWrite, ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
     ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryUpdate,
     ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason, ResourceLimits, RunId,
     SessionActivityDigest, SessionActivityDigestQuery, SessionConfig, SessionHandle,
@@ -15775,6 +15775,11 @@ fn upsert_model_provider_in_tx(
     write: &ModelProviderWrite,
     existing: Option<&ModelProviderRecord>,
 ) -> CoreResult<()> {
+    let incoming_secret = write
+        .secret
+        .as_deref()
+        .map(ModelProviderSecretEnvelope::normalize_storage_text)
+        .transpose()?;
     let revision = existing.map_or(1, |record| record.revision + 1);
     let created_at = existing
         .map(|record| record.created_at.clone())
@@ -15782,7 +15787,7 @@ fn upsert_model_provider_in_tx(
     let secret_ciphertext = if write.clear_secret {
         None
     } else {
-        write.secret.clone().or_else(|| {
+        incoming_secret.or_else(|| {
             existing.and_then(|record| {
                 record
                     .credential
@@ -15907,12 +15912,23 @@ fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProvi
                 )
             }),
             updated_at: row.get(14)?,
+            kind: secret_ciphertext
+                .as_deref()
+                .and_then(model_provider_secret_kind_from_storage),
         },
         metadata_json: from_json_text(&metadata_json).map_err(to_sql_error)?,
         revision: row.get::<_, i64>(16)? as u64,
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
     })
+}
+
+fn model_provider_secret_kind_from_storage(
+    raw: &str,
+) -> Option<rusty_crew_core_protocol::ModelProviderCredentialKind> {
+    ModelProviderSecretEnvelope::from_storage_text(raw)
+        .ok()
+        .map(|secret| secret.kind())
 }
 
 fn model_provider_status_as_str(status: &ModelProviderStatus) -> &'static str {
@@ -21822,8 +21838,9 @@ mod tests {
         MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor, MemoryRecordShapeId,
         MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy, MemoryScope,
         MemoryScopeModel, MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy,
-        ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
-        ProfileRegistrySourceAssetRef, ToolDescriptor,
+        ModelProviderCredentialKind, ProfileRegistryDerivedRuntimeRef,
+        ProfileRegistryImportExportMetadata, ProfileRegistrySourceAssetRef, ToolDescriptor,
+        MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
     };
     use serde_json::json;
     use std::{
@@ -21890,6 +21907,7 @@ mod tests {
             runtime_search_contract(backend);
             conversation_branch_message_contract(backend);
             provider_wire_state_expiry_contract(backend);
+            model_provider_secret_envelope_contract(backend);
         }
 
         fn page() -> QueryPage {
@@ -22590,6 +22608,76 @@ mod tests {
                     .expire_provider_wire_states_at(&"2026-06-20T00:00:10Z".to_string())
                     .unwrap()
                     .is_empty());
+            });
+        }
+
+        fn model_provider_secret_envelope_contract<B: RepositoryConformanceBackend>(backend: &B) {
+            backend.with_store("model-provider-secret-envelope", |store| {
+                let api_key = store
+                    .upsert_model_provider(&model_provider_write(
+                        "deepseek-flash",
+                        ModelProviderProtocol::ChatCompletions,
+                        "deepseek",
+                        "deepseek-chat",
+                        Some("sk-legacy-api-key"),
+                    ))
+                    .unwrap();
+                assert_eq!(
+                    api_key.credential.kind,
+                    Some(ModelProviderCredentialKind::ApiKey)
+                );
+                let stored_api_key = store
+                    .get_model_provider_secret("deepseek-flash")
+                    .unwrap()
+                    .expect("stored API key secret");
+                assert_ne!(stored_api_key, "sk-legacy-api-key");
+                let api_key_envelope =
+                    ModelProviderSecretEnvelope::from_storage_text(&stored_api_key).unwrap();
+                assert_eq!(api_key_envelope.api_key_value(), Some("sk-legacy-api-key"));
+
+                let oauth_secret = ModelProviderSecretEnvelope::OpenAiOauth {
+                    version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+                    issuer: "https://auth.openai.com".to_string(),
+                    client_id: "app-client".to_string(),
+                    id_token: "id.jwt.token".to_string(),
+                    access_token: "access.jwt.token".to_string(),
+                    refresh_token: "refresh-token".to_string(),
+                    exchanged_api_token: Some("exchanged-token".to_string()),
+                    last_refresh_at: Some("2026-07-02T00:00:00Z".to_string()),
+                    account_id: Some("account-1".to_string()),
+                    email: Some("agent@example.test".to_string()),
+                    plan_type: Some("pro".to_string()),
+                    is_fedramp_account: false,
+                    access_token_expires_at: Some("2026-07-02T01:00:00Z".to_string()),
+                }
+                .to_storage_text()
+                .unwrap();
+                let oauth = store
+                    .upsert_model_provider(&model_provider_write(
+                        "gpt-oauth",
+                        ModelProviderProtocol::Responses,
+                        "openai",
+                        "gpt-5",
+                        Some(&oauth_secret),
+                    ))
+                    .unwrap();
+                assert_eq!(
+                    oauth.credential.kind,
+                    Some(ModelProviderCredentialKind::OpenAiOauth)
+                );
+                let stored_oauth = store
+                    .get_model_provider_secret("gpt-oauth")
+                    .unwrap()
+                    .expect("stored OAuth secret");
+                let oauth_envelope =
+                    ModelProviderSecretEnvelope::from_storage_text(&stored_oauth).unwrap();
+                assert_eq!(
+                    oauth_envelope.kind(),
+                    ModelProviderCredentialKind::OpenAiOauth
+                );
+                assert!(!serde_json::to_string(&oauth.credential)
+                    .unwrap()
+                    .contains("refresh-token"));
             });
         }
     }
@@ -28861,6 +28949,35 @@ mod tests {
             governance_mode: MemoryGovernanceMode::Candidate,
             requires_expected_revision,
             min_confidence: None,
+        }
+    }
+
+    fn model_provider_write(
+        alias: &str,
+        protocol: ModelProviderProtocol,
+        provider_kind: &str,
+        model_id: &str,
+        secret: Option<&str>,
+    ) -> ModelProviderWrite {
+        ModelProviderWrite {
+            alias: alias.to_string(),
+            status: ModelProviderStatus::Active,
+            protocol,
+            provider_kind: provider_kind.to_string(),
+            display_name: Some(alias.to_string()),
+            description: None,
+            base_url: Some("http://127.0.0.1:18082".to_string()),
+            model_id: model_id.to_string(),
+            context_window_tokens: Some(128_000),
+            max_output_tokens: Some(4_096),
+            temperature_milli: Some(500),
+            reasoning_effort: None,
+            reasoning_format: None,
+            secret: secret.map(ToString::to_string),
+            clear_secret: false,
+            metadata_json: json!({"fixture": "model_provider_secret_envelope"}),
+            expected_revision: None,
+            now: "2026-07-02T00:00:00Z".to_string(),
         }
     }
 

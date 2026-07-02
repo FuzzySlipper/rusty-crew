@@ -4,6 +4,15 @@
 //! contract. It owns provider request/event shapes and fake-client tests, but
 //! it does not reach into Rusty Crew coordination internals.
 
+mod openai_oauth;
+
+pub use openai_oauth::{
+    openai_oauth_envelope_from_exchange_result, resolve_openai_oauth_bearer,
+    OpenAiOauthBearerResolution, OpenAiOauthClient, OpenAiOauthCodeExchangeRequest,
+    OpenAiOauthError, OpenAiOauthRefreshPolicy, OpenAiOauthSecretStore,
+    OpenAiOauthTokenExchangeResult,
+};
+
 use reqwest::blocking::Client as HttpClient;
 use rusty_crew_core_bridge_api::{BrainWakeStream, BrainWakeStreamProducer};
 use rusty_crew_core_protocol::{
@@ -1033,7 +1042,9 @@ fn duration_ms(duration: Duration) -> u64 {
 pub struct LiveResponsesClient {
     client: HttpClient,
     endpoint: String,
-    api_key: Option<String>,
+    bearer_token: Option<String>,
+    account_id: Option<String>,
+    is_fedramp_account: bool,
 }
 
 impl LiveResponsesClient {
@@ -1052,8 +1063,23 @@ impl LiveResponsesClient {
         Ok(Self {
             client,
             endpoint,
-            api_key,
+            bearer_token: api_key,
+            account_id: None,
+            is_fedramp_account: false,
         })
+    }
+
+    pub fn new_with_bearer_metadata(
+        base_url: impl Into<String>,
+        bearer_token: Option<String>,
+        account_id: Option<String>,
+        is_fedramp_account: bool,
+        idle_timeout_ms: u64,
+    ) -> Result<Self, ResponsesStreamError> {
+        let mut client = Self::new(base_url, bearer_token, idle_timeout_ms)?;
+        client.account_id = account_id;
+        client.is_fedramp_account = is_fedramp_account;
+        Ok(client)
     }
 }
 
@@ -1071,8 +1097,14 @@ impl ResponsesClient for LiveResponsesClient {
         on_event: &mut dyn FnMut(&ResponsesEvent),
     ) -> Result<Vec<ResponsesEvent>, ResponsesStreamError> {
         let mut request = self.client.post(&self.endpoint).json(&request);
-        if let Some(api_key) = &self.api_key {
-            request = request.bearer_auth(api_key);
+        if let Some(bearer_token) = &self.bearer_token {
+            request = request.bearer_auth(bearer_token);
+        }
+        if let Some(account_id) = &self.account_id {
+            request = request.header("ChatGPT-Account-ID", account_id);
+        }
+        if self.is_fedramp_account {
+            request = request.header("X-OpenAI-Fedramp", "true");
         }
         let mut response = request.send().map_err(transport_error)?;
         let status = response.status();
@@ -1150,7 +1182,7 @@ fn handle_sse_line(
 fn flush_sse_data(
     data_lines: &mut Vec<String>,
     events: &mut Vec<ResponsesEvent>,
-    mut on_event: Option<&mut dyn FnMut(&ResponsesEvent)>,
+    on_event: Option<&mut dyn FnMut(&ResponsesEvent)>,
 ) -> Result<(), ResponsesStreamError> {
     if data_lines.is_empty() {
         return Ok(());
@@ -1163,7 +1195,7 @@ fn flush_sse_data(
     let value: Value = serde_json::from_str(&data)
         .map_err(|error| ResponsesStreamError::Transport(format!("invalid SSE JSON: {error}")))?;
     if let Some(event) = event_from_provider_value(value)? {
-        if let Some(on_event) = on_event.as_deref_mut() {
+        if let Some(on_event) = on_event {
             on_event(&event);
         }
         events.push(event);
@@ -1365,10 +1397,9 @@ fn streaming_item_from_provider_event(
     provider_event: &ResponsesEvent,
 ) -> Option<BrainWakeStreamItem> {
     match provider_event {
-        ResponsesEvent::TextDelta(text) => Some(event(
-            request,
-            BrainEvent::TextDelta { text: text.clone() },
-        )),
+        ResponsesEvent::TextDelta(text) => {
+            Some(event(request, BrainEvent::TextDelta { text: text.clone() }))
+        }
         ResponsesEvent::ReasoningDelta(text) => Some(event(
             request,
             BrainEvent::ReasoningDelta {
@@ -1436,11 +1467,7 @@ where
     ) -> CoreResult<ResponsesBrainWakeResult> {
         let mut metrics = ResponsesTransportMetricsBuilder::new(&self.request_builder.config);
         let mut items = Vec::new();
-        push_stream_item(
-            &mut items,
-            event(&request, BrainEvent::Started),
-            &mut sink,
-        );
+        push_stream_item(&mut items, event(&request, BrainEvent::Started), &mut sink);
         if let Some(absence) = &request.provider_state_absence {
             if matches!(
                 absence,
@@ -1754,8 +1781,8 @@ where
                 event(
                     request,
                     BrainEvent::ToolCallStarted {
-                    tool_name: call.name.clone(),
-                    metadata: Some(tool_metadata(&call)),
+                        tool_name: call.name.clone(),
+                        metadata: Some(tool_metadata(&call)),
                     },
                 ),
                 sink,
@@ -1766,9 +1793,9 @@ where
                 event(
                     request,
                     BrainEvent::ToolCallFinished {
-                    tool_name: call.name.clone(),
-                    is_error: output.is_error,
-                    metadata: Some(tool_metadata(&call)),
+                        tool_name: call.name.clone(),
+                        is_error: output.is_error,
+                        metadata: Some(tool_metadata(&call)),
                     },
                 ),
                 sink,

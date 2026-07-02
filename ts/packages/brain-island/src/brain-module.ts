@@ -9,7 +9,12 @@ import type {
   ProviderStateMode,
   SessionId,
 } from "@rusty-crew/contracts";
-import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
+import type {
+  NativeBridgeModule,
+  NativeModelProviderRecord,
+  OpenAiResponsesCredentialSecretUpdate,
+  OpenAiResponsesBrainRunInput,
+} from "@rusty-crew/native-bridge";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
 import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
@@ -338,11 +343,40 @@ export function openAiResponsesStreamIdleTimeoutMs(
   return openAiResponsesClientMode(env) === "live" ? 120_000 : 30_000;
 }
 
-function openAiResponsesClientConfig(
+type OpenAiResponsesClientConfig = NonNullable<
+  OpenAiResponsesBrainRunInput["client"]
+>;
+
+async function openAiResponsesClientConfig(
   context: BrainModuleContext,
-): { mode: "fake" } | { mode: "live"; baseUrl: string; apiKey?: string } {
+): Promise<OpenAiResponsesClientConfig> {
   if (openAiResponsesClientMode() !== "live") {
     return { mode: "fake" };
+  }
+  if (context.profile.profile.modelConfig.credentialKind === "openai_oauth") {
+    const bridge = context.bridge;
+    const providerAlias = context.profile.profile.providerAlias;
+    if (bridge === undefined || providerAlias === undefined) {
+      throw new Error(
+        "openai-responses OAuth live client requires native bridge and providerAlias",
+      );
+    }
+    const oauthCredentialSecret =
+      await bridge.getModelProviderSecret(providerAlias);
+    if (oauthCredentialSecret === undefined) {
+      throw new Error(
+        `openai-responses OAuth live client requested but provider ${providerAlias} has no credential secret`,
+      );
+    }
+    return {
+      mode: "live",
+      baseUrl:
+        context.profile.profile.modelConfig.baseUrl ??
+        "https://chatgpt.com/backend-api/codex",
+      authKind: "openai_oauth",
+      providerAlias,
+      oauthCredentialSecret,
+    };
   }
   const keyEnv =
     context.profile.profile.modelConfig.apiKeyEnv ?? "OPENAI_API_KEY";
@@ -357,7 +391,65 @@ function openAiResponsesClientConfig(
     baseUrl:
       context.profile.profile.modelConfig.baseUrl ??
       "https://api.openai.com/v1",
+    authKind: "api_key",
     ...(apiKey ? { apiKey } : {}),
+  };
+}
+
+async function persistOpenAiResponsesCredentialSecretUpdate(
+  context: BrainModuleContext,
+  currentConfig: OpenAiResponsesClientConfig,
+  update: OpenAiResponsesCredentialSecretUpdate | undefined,
+): Promise<OpenAiResponsesClientConfig> {
+  if (update === undefined) {
+    return currentConfig;
+  }
+  const bridge = context.bridge;
+  if (bridge === undefined) {
+    throw new Error("OpenAI Responses credential update requires bridge");
+  }
+  const provider = await bridge.getModelProvider(update.providerAlias);
+  if (provider === undefined) {
+    throw new Error(
+      `OpenAI Responses credential update provider ${update.providerAlias} was not found`,
+    );
+  }
+  await bridge.upsertModelProvider({
+    ...modelProviderWriteFromRecord(provider),
+    secret: update.secret,
+    expectedRevision: provider.revision,
+    now: new Date().toISOString(),
+  });
+  if (
+    currentConfig.mode === "live" &&
+    currentConfig.authKind === "openai_oauth" &&
+    currentConfig.providerAlias === update.providerAlias
+  ) {
+    return {
+      ...currentConfig,
+      oauthCredentialSecret: update.secret,
+    };
+  }
+  return currentConfig;
+}
+
+function modelProviderWriteFromRecord(provider: NativeModelProviderRecord) {
+  return {
+    alias: provider.alias,
+    status: provider.status,
+    protocol: provider.protocol,
+    providerKind: provider.providerKind,
+    displayName: provider.displayName,
+    description: provider.description,
+    baseUrl: provider.baseUrl,
+    modelId: provider.modelId,
+    contextWindowTokens: provider.contextWindowTokens,
+    maxOutputTokens: provider.maxOutputTokens,
+    temperatureMilli: provider.temperatureMilli,
+    reasoningEffort: provider.reasoningEffort,
+    reasoningFormat: provider.reasoningFormat,
+    clearSecret: false,
+    metadataJson: provider.metadataJson,
   };
 }
 
@@ -398,6 +490,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
+  credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
 }> {
   const bridge = context.bridge;
   if (bridge === undefined) {
@@ -426,6 +519,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
         events: [],
         actions,
         providerState: drained.providerState,
+        credentialSecretUpdate: drained.credentialSecretUpdate,
       };
     }
     await delay(25);
@@ -519,12 +613,14 @@ export const openAiResponsesBrainModule: BrainModule = {
     toolAdapterStatus: "native_neutral_tools",
   },
   async createBrain(context) {
+    let responsesClientConfig = await openAiResponsesClientConfig(context);
     return {
       async wake(wake): Promise<{
         events: BrainEventEnvelope[];
         actions: BrainAction[];
         providerState?: BrainWakeProviderStateOutput;
         stream?: import("@rusty-crew/contracts").BrainWakeStreamItem[];
+        credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
       }> {
         if (context.bridge?.runOpenAiResponsesBrain !== undefined) {
           try {
@@ -539,12 +635,19 @@ export const openAiResponsesBrainModule: BrainModule = {
                 instructions: wake.systemPrompt,
                 streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
               },
-              client: openAiResponsesClientConfig(context),
+              client: responsesClientConfig,
             };
-            return withOpenAiResponsesProviderStateScope(
-              await runOpenAiResponsesBrainWithIncrementalDrain(context, input),
+            const result = await runOpenAiResponsesBrainWithIncrementalDrain(
               context,
+              input,
             );
+            responsesClientConfig =
+              await persistOpenAiResponsesCredentialSecretUpdate(
+                context,
+                responsesClientConfig,
+                result.credentialSecretUpdate,
+              );
+            return withOpenAiResponsesProviderStateScope(result, context);
           } catch (error) {
             if (
               process.env.RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE === "1"
@@ -552,22 +655,26 @@ export const openAiResponsesBrainModule: BrainModule = {
               throw error;
             }
             try {
-              return withOpenAiResponsesProviderStateScope(
-                await context.bridge.runOpenAiResponsesBrain({
-                  wakeId: wake.wakeId,
-                  sessionId: wake.sessionId,
-                  bodyState: wake.state,
-                  providerState: wake.providerState,
-                  providerStateAbsence: wake.providerStateAbsence,
-                  config: {
-                    model: context.profile.profile.modelConfig.modelName,
-                    instructions: wake.systemPrompt,
-                    streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
-                  },
-                  client: openAiResponsesClientConfig(context),
-                }),
-                context,
-              );
+              const result = await context.bridge.runOpenAiResponsesBrain({
+                wakeId: wake.wakeId,
+                sessionId: wake.sessionId,
+                bodyState: wake.state,
+                providerState: wake.providerState,
+                providerStateAbsence: wake.providerStateAbsence,
+                config: {
+                  model: context.profile.profile.modelConfig.modelName,
+                  instructions: wake.systemPrompt,
+                  streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
+                },
+                client: responsesClientConfig,
+              });
+              responsesClientConfig =
+                await persistOpenAiResponsesCredentialSecretUpdate(
+                  context,
+                  responsesClientConfig,
+                  result.credentialSecretUpdate,
+                );
+              return withOpenAiResponsesProviderStateScope(result, context);
             } catch {
               // Fall through to the deterministic TS scaffold below. This
               // preserves the existing non-required-native behavior while the

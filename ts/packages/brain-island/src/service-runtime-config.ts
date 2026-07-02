@@ -878,12 +878,16 @@ function modelProviderToBrainModelConfig(
   provider: NativeModelProviderRecord,
   secret: string | undefined,
 ): BrainModelConfig {
+  const apiKey = modelProviderApiKeySecret(provider, secret);
+  const credentialKind =
+    provider.credential.kind ??
+    (apiKey === undefined ? undefined : "legacy_raw_api_key");
   const apiKeyEnv =
-    secret === undefined
+    apiKey === undefined
       ? undefined
       : modelProviderSecretEnvName(provider.alias);
   if (apiKeyEnv !== undefined) {
-    process.env[apiKeyEnv] = secret;
+    process.env[apiKeyEnv] = apiKey;
   }
   return {
     provider: provider.providerKind,
@@ -894,9 +898,38 @@ function modelProviderToBrainModelConfig(
         ? "openai-responses"
         : "openai-completions",
     apiKeyEnv,
+    credentialKind,
     temperatureMilli: provider.temperatureMilli,
     maxOutputTokens: provider.maxOutputTokens,
   };
+}
+
+function modelProviderApiKeySecret(
+  provider: NativeModelProviderRecord,
+  secret: string | undefined,
+): string | undefined {
+  if (secret === undefined) {
+    return undefined;
+  }
+  const trimmed = secret.trim();
+  if (!trimmed.startsWith("{")) {
+    return secret;
+  }
+  const envelope = JSON.parse(trimmed) as unknown;
+  if (!isRuntimeRecord(envelope)) {
+    throw new Error(
+      `model provider ${provider.alias} secret envelope is invalid`,
+    );
+  }
+  if (envelope.kind === "api_key" && typeof envelope.value === "string") {
+    return envelope.value;
+  }
+  if (envelope.kind === "openai_oauth") {
+    return undefined;
+  }
+  throw new Error(
+    `model provider ${provider.alias} secret envelope kind is unsupported`,
+  );
 }
 
 function modelProviderSecretEnvName(alias: string): string {
@@ -904,6 +937,10 @@ function modelProviderSecretEnvName(alias: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")}`;
+}
+
+function isRuntimeRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function rebuildConfiguredBrainRuntime(input: {
@@ -1237,11 +1274,18 @@ function brainModuleDiagnostics(input: {
               input.profile.profile.modelConfig.temperatureMilli,
           }),
       ...(input.profile.profile.modelConfig.apiKeyEnv === undefined
-        ? { credential: { hasSecret: false } }
+        ? {
+            credential: {
+              hasSecret:
+                input.profile.profile.modelConfig.credentialKind !== undefined,
+              kind: input.profile.profile.modelConfig.credentialKind,
+            },
+          }
         : {
             credential: {
               hasSecret: true,
               secretRef: input.profile.profile.modelConfig.apiKeyEnv,
+              kind: input.profile.profile.modelConfig.credentialKind,
             },
           }),
     },

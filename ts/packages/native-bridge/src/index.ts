@@ -487,6 +487,12 @@ export interface BrainWakeExecutionResult {
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
   stream?: BrainWakeStreamItem[];
+  credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
+}
+
+export interface OpenAiResponsesCredentialSecretUpdate {
+  providerAlias: string;
+  secret: string;
 }
 
 export interface OpenAiResponsesBrainRunInput {
@@ -502,7 +508,14 @@ export interface OpenAiResponsesBrainRunInput {
   };
   client?:
     | { mode: "fake" }
-    | { mode: "live"; baseUrl: string; apiKey?: string };
+    | {
+        mode: "live";
+        baseUrl: string;
+        apiKey?: string;
+        authKind?: "api_key" | "openai_oauth";
+        providerAlias?: string;
+        oauthCredentialSecret?: string;
+      };
 }
 
 interface NativeBrainWakeProviderStateInput {
@@ -723,11 +736,16 @@ export interface NativeProfileRegistryQuery {
 
 export type NativeModelProviderStatus = "active" | "disabled" | "archived";
 export type NativeModelProviderProtocol = "responses" | "chat_completions";
+export type NativeModelProviderCredentialKind =
+  | "api_key"
+  | "openai_oauth"
+  | "legacy_raw_api_key";
 
 export interface NativeModelProviderCredential {
   hasSecret: boolean;
   secretRef?: string;
   updatedAt?: string;
+  kind?: NativeModelProviderCredentialKind;
 }
 
 export interface NativeModelProviderRecord {
@@ -1743,6 +1761,7 @@ export interface NativeBridgeModule {
     items: BrainWakeStreamItem[];
     terminal: boolean;
     providerState?: BrainWakeProviderStateOutput;
+    credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
     error?: string;
   }>;
   listProfileMemory(
@@ -3023,6 +3042,12 @@ function createNativeBridgeModule(
         providerState: raw.provider_state
           ? toBrainWakeProviderStateOutput(raw.provider_state)
           : undefined,
+        credentialSecretUpdate: raw.credential_secret_update
+          ? {
+              providerAlias: raw.credential_secret_update.provider_alias,
+              secret: raw.credential_secret_update.secret,
+            }
+          : undefined,
       };
     },
     startOpenAiResponsesBrain: async (input) => {
@@ -3046,6 +3071,12 @@ function createNativeBridgeModule(
         terminal: raw.terminal,
         providerState: raw.provider_state
           ? toBrainWakeProviderStateOutput(raw.provider_state)
+          : undefined,
+        credentialSecretUpdate: raw.credential_secret_update
+          ? {
+              providerAlias: raw.credential_secret_update.provider_alias,
+              secret: raw.credential_secret_update.secret,
+            }
           : undefined,
         error: typeof raw.error === "string" ? raw.error : undefined,
       };
@@ -3162,6 +3193,9 @@ function toNativeOpenAiResponsesBrainRunInput(
             mode: "live",
             base_url: input.client.baseUrl,
             api_key: input.client.apiKey,
+            auth_kind: input.client.authKind,
+            provider_alias: input.client.providerAlias,
+            oauth_credential_secret: input.client.oauthCredentialSecret,
           }
         : { mode: "fake" },
   };
@@ -3893,6 +3927,7 @@ function toNativeModelProviderRecord(
       hasSecret: record.credential.has_secret,
       secretRef: record.credential.secret_ref ?? undefined,
       updatedAt: record.credential.updated_at ?? undefined,
+      kind: record.credential.kind ?? undefined,
     },
     metadataJson: record.metadata_json,
     revision: record.revision,
@@ -4738,6 +4773,7 @@ interface RawModelProviderCredential {
   has_secret: boolean;
   secret_ref?: string | null;
   updated_at?: string | null;
+  kind?: NativeModelProviderCredentialKind | null;
 }
 
 interface RawModelProviderRecord {
@@ -4964,6 +5000,12 @@ interface RawAgentMessage {
 interface RawOpenAiResponsesBrainRunResult {
   stream: RawBrainWakeStreamItem[];
   provider_state?: RawBrainWakeProviderStateOutput;
+  credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
+}
+
+interface RawOpenAiResponsesCredentialSecretUpdate {
+  provider_alias: string;
+  secret: string;
 }
 
 interface RawOpenAiResponsesBufferedStartResult {
@@ -4975,6 +5017,7 @@ interface RawOpenAiResponsesBufferedDrainResult {
   items: RawBrainWakeStreamItem[];
   terminal: boolean;
   provider_state?: RawBrainWakeProviderStateOutput;
+  credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
   error?: string | null;
 }
 

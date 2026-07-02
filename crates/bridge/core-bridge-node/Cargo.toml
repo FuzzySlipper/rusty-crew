@@ -25,3 +25,4 @@ rusty-crew-core-protocol = { path = "../../core/core-protocol" }
 rusty-crew-openai-responses-brain = { path = "../../brains/openai-responses" }
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true

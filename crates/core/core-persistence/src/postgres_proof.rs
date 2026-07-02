@@ -39,14 +39,15 @@ use crate::{
     MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId,
     MessageVariantQuery, MessageVariantRecord, MessageVariantSource, MessageVariantStatus,
     MessageVariantWrite, ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery,
-    ModelProviderRecord, ModelProviderStatus, ModelProviderWrite, PersistedEvent, ProfileId,
-    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryLifecycleStatus,
-    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
-    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
-    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
-    QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite,
+    PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
+    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
+    ProfileRegistryLifecycleStatus, ProfileRegistryQuery, ProfileRegistryRecord,
+    ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
+    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
+    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
     RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
     RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
     RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
@@ -11435,6 +11436,11 @@ fn upsert_model_provider_in_tx(
     write: &ModelProviderWrite,
     existing: Option<&ModelProviderRecord>,
 ) -> CoreResult<()> {
+    let incoming_secret = write
+        .secret
+        .as_deref()
+        .map(ModelProviderSecretEnvelope::normalize_storage_text)
+        .transpose()?;
     let revision = existing.map_or(1, |record| record.revision + 1);
     let created_at = existing
         .map(|record| record.created_at.clone())
@@ -11456,7 +11462,7 @@ fn upsert_model_provider_in_tx(
     let secret_ciphertext = if write.clear_secret {
         None
     } else {
-        write.secret.clone().or(current_secret)
+        incoming_secret.or(current_secret)
     };
     let secret_updated_at = if write.clear_secret {
         None
@@ -11485,6 +11491,9 @@ fn upsert_model_provider_in_tx(
                 .as_ref()
                 .map(|_| format!("db://model_providers/{}/secret", write.alias)),
             updated_at: secret_updated_at.clone(),
+            kind: secret_ciphertext
+                .as_deref()
+                .and_then(model_provider_secret_kind_from_storage),
         },
         metadata_json: write.metadata_json.clone(),
         revision,
@@ -11542,8 +11551,19 @@ fn row_to_model_provider(row: &Row) -> CoreResult<ModelProviderRecord> {
             .as_ref()
             .map(|_| format!("db://model_providers/{}/secret", record.alias)),
         updated_at: secret_updated_at,
+        kind: secret_ciphertext
+            .as_deref()
+            .and_then(model_provider_secret_kind_from_storage),
     };
     Ok(record)
+}
+
+fn model_provider_secret_kind_from_storage(
+    raw: &str,
+) -> Option<rusty_crew_core_protocol::ModelProviderCredentialKind> {
+    ModelProviderSecretEnvelope::from_storage_text(raw)
+        .ok()
+        .map(|secret| secret.kind())
 }
 
 fn model_provider_status_as_str(status: ModelProviderStatus) -> &'static str {
@@ -13384,8 +13404,9 @@ mod tests {
     };
     use rusty_crew_core_protocol::{
         AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource,
-        ProfileRegistryImportExportMetadata, ResourceLimits, SessionHandle, ToolCallMetadata,
-        ToolCallSource, ToolDescriptor, ToolProfile,
+        ModelProviderCredentialKind, ProfileRegistryImportExportMetadata, ResourceLimits,
+        SessionHandle, ToolCallMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
+        MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
     };
     use serde_json::json;
     use std::fs;
@@ -13545,6 +13566,14 @@ mod tests {
             &self,
             limit: u32,
         ) -> CoreResult<Vec<ProviderWireStateDiagnostic>>;
+    }
+
+    trait ModelProviderConformanceStore {
+        fn upsert_model_provider(
+            &self,
+            write: &ModelProviderWrite,
+        ) -> CoreResult<ModelProviderRecord>;
+        fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>>;
     }
 
     trait ConversationConformanceStore {
@@ -13974,6 +14003,19 @@ mod tests {
             limit: u32,
         ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
             CoordinationStore::list_provider_wire_state_diagnostics(self, limit)
+        }
+    }
+
+    impl ModelProviderConformanceStore for CoordinationStore {
+        fn upsert_model_provider(
+            &self,
+            write: &ModelProviderWrite,
+        ) -> CoreResult<ModelProviderRecord> {
+            CoordinationStore::upsert_model_provider(self, write)
+        }
+
+        fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+            CoordinationStore::get_model_provider_secret(self, alias)
         }
     }
 
@@ -14505,6 +14547,19 @@ mod tests {
         }
     }
 
+    impl ModelProviderConformanceStore for PostgresRuntimeCounterProofStore {
+        fn upsert_model_provider(
+            &self,
+            write: &ModelProviderWrite,
+        ) -> CoreResult<ModelProviderRecord> {
+            PostgresRuntimeCounterProofStore::upsert_model_provider(self, write)
+        }
+
+        fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
+            PostgresRuntimeCounterProofStore::get_model_provider_secret(self, alias)
+        }
+    }
+
     impl ConversationConformanceStore for PostgresRuntimeCounterProofStore {
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
             PostgresRuntimeCounterProofStore::save_message_slot(self, slot)
@@ -14880,6 +14935,14 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_model_provider_secret_envelope_matches_postgres_proof_contract() {
+        let db_path = temp_sqlite_path("sqlite-model-provider-secret-envelope");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        model_provider_secret_envelope_conformance(&store);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
     fn postgres_session_event_proof_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
@@ -14889,6 +14952,21 @@ mod tests {
         let schema = unique_schema("rusty_crew_session_event_proof");
         let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
         session_event_conformance(&store);
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_model_provider_secret_envelope_matches_sqlite_conformance_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!(
+                "skipping PostgreSQL model-provider secret proof; no database URL env is set"
+            );
+            return;
+        };
+        let schema = unique_schema("rusty_crew_model_provider_secret_proof");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        model_provider_secret_envelope_conformance(&store);
         store.drop_schema_for_test().unwrap();
     }
 
@@ -18163,6 +18241,73 @@ mod tests {
         assert_eq!(with_tombstoned.len(), 2);
     }
 
+    fn model_provider_secret_envelope_conformance(store: &dyn ModelProviderConformanceStore) {
+        let api_key = store
+            .upsert_model_provider(&model_provider_write(
+                "deepseek-flash",
+                ModelProviderProtocol::ChatCompletions,
+                "deepseek",
+                "deepseek-chat",
+                Some("sk-legacy-api-key"),
+            ))
+            .unwrap();
+        assert_eq!(
+            api_key.credential.kind,
+            Some(ModelProviderCredentialKind::ApiKey)
+        );
+        let stored_api_key = store
+            .get_model_provider_secret("deepseek-flash")
+            .unwrap()
+            .expect("stored API key secret");
+        assert_ne!(stored_api_key, "sk-legacy-api-key");
+        let api_key_envelope =
+            ModelProviderSecretEnvelope::from_storage_text(&stored_api_key).unwrap();
+        assert_eq!(api_key_envelope.api_key_value(), Some("sk-legacy-api-key"));
+
+        let oauth_secret = ModelProviderSecretEnvelope::OpenAiOauth {
+            version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+            issuer: "https://auth.openai.com".to_string(),
+            client_id: "app-client".to_string(),
+            id_token: "id.jwt.token".to_string(),
+            access_token: "access.jwt.token".to_string(),
+            refresh_token: "refresh-token".to_string(),
+            exchanged_api_token: Some("exchanged-token".to_string()),
+            last_refresh_at: Some("2026-07-02T00:00:00Z".to_string()),
+            account_id: Some("account-1".to_string()),
+            email: Some("agent@example.test".to_string()),
+            plan_type: Some("pro".to_string()),
+            is_fedramp_account: false,
+            access_token_expires_at: Some("2026-07-02T01:00:00Z".to_string()),
+        }
+        .to_storage_text()
+        .unwrap();
+        let oauth = store
+            .upsert_model_provider(&model_provider_write(
+                "gpt-oauth",
+                ModelProviderProtocol::Responses,
+                "openai",
+                "gpt-5",
+                Some(&oauth_secret),
+            ))
+            .unwrap();
+        assert_eq!(
+            oauth.credential.kind,
+            Some(ModelProviderCredentialKind::OpenAiOauth)
+        );
+        let stored_oauth = store
+            .get_model_provider_secret("gpt-oauth")
+            .unwrap()
+            .expect("stored OAuth secret");
+        let oauth_envelope = ModelProviderSecretEnvelope::from_storage_text(&stored_oauth).unwrap();
+        assert_eq!(
+            oauth_envelope.kind(),
+            ModelProviderCredentialKind::OpenAiOauth
+        );
+        assert!(!serde_json::to_string(&oauth.credential)
+            .unwrap()
+            .contains("refresh-token"));
+    }
+
     fn provider_wire_state_conformance(store: &dyn ProviderWireStateConformanceStore) {
         let key = provider_wire_state_key("session-alpha", "openai-responses", "replay");
         let first = store
@@ -18534,6 +18679,35 @@ mod tests {
             now: input.now.to_string(),
             expires_at: input.expires_at.map(ToString::to_string),
             last_wake_id: input.last_wake_id.map(ToString::to_string),
+        }
+    }
+
+    fn model_provider_write(
+        alias: &str,
+        protocol: ModelProviderProtocol,
+        provider_kind: &str,
+        model_id: &str,
+        secret: Option<&str>,
+    ) -> ModelProviderWrite {
+        ModelProviderWrite {
+            alias: alias.to_string(),
+            status: ModelProviderStatus::Active,
+            protocol,
+            provider_kind: provider_kind.to_string(),
+            display_name: Some(alias.to_string()),
+            description: None,
+            base_url: Some("http://127.0.0.1:18082".to_string()),
+            model_id: model_id.to_string(),
+            context_window_tokens: Some(128_000),
+            max_output_tokens: Some(4_096),
+            temperature_milli: Some(500),
+            reasoning_effort: None,
+            reasoning_format: None,
+            secret: secret.map(ToString::to_string),
+            clear_secret: false,
+            metadata_json: json!({"fixture": "model_provider_secret_envelope"}),
+            expected_revision: None,
+            now: "2026-07-02T00:00:00Z".to_string(),
         }
     }
 

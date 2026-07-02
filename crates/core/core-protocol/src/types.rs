@@ -1073,11 +1073,211 @@ pub enum ModelProviderProtocol {
     ChatCompletions,
 }
 
+pub const MODEL_PROVIDER_SECRET_ENVELOPE_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderCredentialKind {
+    ApiKey,
+    #[serde(rename = "openai_oauth")]
+    OpenAiOauth,
+    LegacyRawApiKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
+pub enum ModelProviderSecretEnvelope {
+    ApiKey {
+        version: u32,
+        value: String,
+    },
+    #[serde(rename = "openai_oauth")]
+    OpenAiOauth {
+        version: u32,
+        issuer: String,
+        client_id: String,
+        id_token: String,
+        access_token: String,
+        refresh_token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exchanged_api_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_refresh_at: Option<IsoTimestamp>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        email: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan_type: Option<String>,
+        #[serde(default)]
+        is_fedramp_account: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access_token_expires_at: Option<IsoTimestamp>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderSecretSummary {
+    pub kind: ModelProviderCredentialKind,
+    pub version: u32,
+    pub has_secret: bool,
+    pub account_id: Option<String>,
+    pub email: Option<String>,
+    pub plan_type: Option<String>,
+    pub is_fedramp_account: bool,
+    pub access_token_expires_at: Option<IsoTimestamp>,
+}
+
+impl ModelProviderSecretEnvelope {
+    pub fn api_key(value: impl Into<String>) -> Self {
+        Self::ApiKey {
+            version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+            value: value.into(),
+        }
+    }
+
+    pub fn from_storage_text(raw: &str) -> CoreResult<Self> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "model provider secret must be non-empty",
+            ));
+        }
+        match serde_json::from_str::<Self>(trimmed) {
+            Ok(envelope) => {
+                envelope.validate()?;
+                Ok(envelope)
+            }
+            Err(error) => {
+                if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        format!("invalid model provider secret envelope: {error}"),
+                    ));
+                }
+                Ok(Self::api_key(raw.to_string()))
+            }
+        }
+    }
+
+    pub fn normalize_storage_text(raw: &str) -> CoreResult<String> {
+        Self::from_storage_text(raw)?.to_storage_text()
+    }
+
+    pub fn to_storage_text(&self) -> CoreResult<String> {
+        self.validate()?;
+        serde_json::to_string(self).map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("serialize model provider secret envelope: {error}"),
+            )
+        })
+    }
+
+    pub fn kind(&self) -> ModelProviderCredentialKind {
+        match self {
+            Self::ApiKey { .. } => ModelProviderCredentialKind::ApiKey,
+            Self::OpenAiOauth { .. } => ModelProviderCredentialKind::OpenAiOauth,
+        }
+    }
+
+    pub fn api_key_value(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey { value, .. } => Some(value.as_str()),
+            Self::OpenAiOauth { .. } => None,
+        }
+    }
+
+    pub fn redacted_summary(&self) -> ModelProviderSecretSummary {
+        match self {
+            Self::ApiKey { version, .. } => ModelProviderSecretSummary {
+                kind: ModelProviderCredentialKind::ApiKey,
+                version: *version,
+                has_secret: true,
+                account_id: None,
+                email: None,
+                plan_type: None,
+                is_fedramp_account: false,
+                access_token_expires_at: None,
+            },
+            Self::OpenAiOauth {
+                version,
+                account_id,
+                email,
+                plan_type,
+                is_fedramp_account,
+                access_token_expires_at,
+                ..
+            } => ModelProviderSecretSummary {
+                kind: ModelProviderCredentialKind::OpenAiOauth,
+                version: *version,
+                has_secret: true,
+                account_id: account_id.clone(),
+                email: email.clone(),
+                plan_type: plan_type.clone(),
+                is_fedramp_account: *is_fedramp_account,
+                access_token_expires_at: access_token_expires_at.clone(),
+            },
+        }
+    }
+
+    pub fn validate(&self) -> CoreResult<()> {
+        match self {
+            Self::ApiKey { version, value } => {
+                validate_secret_envelope_version(*version)?;
+                validate_secret_text("model provider API key", value)
+            }
+            Self::OpenAiOauth {
+                version,
+                issuer,
+                client_id,
+                id_token,
+                access_token,
+                refresh_token,
+                ..
+            } => {
+                validate_secret_envelope_version(*version)?;
+                validate_secret_text("OpenAI OAuth issuer", issuer)?;
+                validate_secret_text("OpenAI OAuth client_id", client_id)?;
+                validate_secret_text("OpenAI OAuth id_token", id_token)?;
+                validate_secret_text("OpenAI OAuth access_token", access_token)?;
+                validate_secret_text("OpenAI OAuth refresh_token", refresh_token)
+            }
+        }
+    }
+}
+
+fn validate_secret_envelope_version(version: u32) -> CoreResult<()> {
+    if version == MODEL_PROVIDER_SECRET_ENVELOPE_VERSION {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        CoreErrorKind::InvalidInput,
+        format!(
+            "unsupported model provider secret envelope version {version}; expected {MODEL_PROVIDER_SECRET_ENVELOPE_VERSION}"
+        ),
+    ))
+}
+
+fn validate_secret_text(context: &str, value: &str) -> CoreResult<()> {
+    if value.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{context} must be non-empty"),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProviderCredential {
     pub has_secret: bool,
     pub secret_ref: Option<String>,
     pub updated_at: Option<IsoTimestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ModelProviderCredentialKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1249,5 +1449,78 @@ mod tests {
             actions: Vec::new(),
         });
         assert!(terminal.is_terminal());
+    }
+
+    #[test]
+    fn model_provider_secret_envelopes_normalize_legacy_api_keys() {
+        let normalized =
+            ModelProviderSecretEnvelope::normalize_storage_text("sk-test-secret").unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&normalized).expect("normalized API key envelope");
+        assert_eq!(json["kind"], "api_key");
+        assert_eq!(json["version"], MODEL_PROVIDER_SECRET_ENVELOPE_VERSION);
+
+        let envelope = ModelProviderSecretEnvelope::from_storage_text(&normalized).unwrap();
+        assert_eq!(envelope.kind(), ModelProviderCredentialKind::ApiKey);
+        assert_eq!(envelope.api_key_value(), Some("sk-test-secret"));
+        assert_eq!(
+            envelope.redacted_summary(),
+            ModelProviderSecretSummary {
+                kind: ModelProviderCredentialKind::ApiKey,
+                version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+                has_secret: true,
+                account_id: None,
+                email: None,
+                plan_type: None,
+                is_fedramp_account: false,
+                access_token_expires_at: None,
+            }
+        );
+    }
+
+    #[test]
+    fn model_provider_openai_oauth_envelope_round_trips_redacted_summary() {
+        let envelope = ModelProviderSecretEnvelope::OpenAiOauth {
+            version: MODEL_PROVIDER_SECRET_ENVELOPE_VERSION,
+            issuer: "https://auth.openai.com".to_string(),
+            client_id: "app-client".to_string(),
+            id_token: "id.jwt.token".to_string(),
+            access_token: "access.jwt.token".to_string(),
+            refresh_token: "refresh-token".to_string(),
+            exchanged_api_token: Some("exchanged-token".to_string()),
+            last_refresh_at: Some("2026-07-02T00:00:00Z".to_string()),
+            account_id: Some("account-1".to_string()),
+            email: Some("agent@example.test".to_string()),
+            plan_type: Some("pro".to_string()),
+            is_fedramp_account: false,
+            access_token_expires_at: Some("2026-07-02T01:00:00Z".to_string()),
+        };
+
+        let storage = envelope.to_storage_text().unwrap();
+        assert!(storage.contains("openai_oauth"));
+        let round_trip = ModelProviderSecretEnvelope::from_storage_text(&storage).unwrap();
+        assert_eq!(round_trip, envelope);
+
+        let summary = round_trip.redacted_summary();
+        assert_eq!(summary.kind, ModelProviderCredentialKind::OpenAiOauth);
+        assert_eq!(summary.account_id.as_deref(), Some("account-1"));
+        assert_eq!(summary.email.as_deref(), Some("agent@example.test"));
+        assert_eq!(summary.plan_type.as_deref(), Some("pro"));
+        assert!(!serde_json::to_string(&summary)
+            .unwrap()
+            .contains("refresh-token"));
+        assert!(!serde_json::to_string(&summary)
+            .unwrap()
+            .contains("access.jwt.token"));
+    }
+
+    #[test]
+    fn model_provider_secret_envelope_rejects_malformed_json_secret() {
+        let error = ModelProviderSecretEnvelope::normalize_storage_text("{\"kind\":\"api_key\"}")
+            .expect_err("malformed envelope should fail");
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+        assert!(error
+            .message
+            .contains("invalid model provider secret envelope"));
     }
 }

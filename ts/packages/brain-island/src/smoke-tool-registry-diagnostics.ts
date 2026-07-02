@@ -19,7 +19,10 @@ const report = buildToolRegistryDiagnostics({
   },
 });
 
-assert.equal(report.summary.registeredTools, defaultToolRegistry.entries.length);
+assert.equal(
+  report.summary.registeredTools,
+  defaultToolRegistry.entries.length,
+);
 assert.equal(report.summary.selectedTools, 4);
 assert.equal(report.summary.deniedTools, 3);
 assert.equal(report.summary.missingTools, 1);

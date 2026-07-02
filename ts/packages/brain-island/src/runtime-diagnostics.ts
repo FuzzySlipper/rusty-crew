@@ -206,6 +206,7 @@ export interface RuntimeBrainModuleDiagnostics {
     credential?: {
       hasSecret: boolean;
       secretRef?: string;
+      kind?: string;
     };
   };
   providerStateMode?: string;

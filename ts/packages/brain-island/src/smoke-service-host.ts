@@ -703,6 +703,99 @@ try {
       JSON.stringify(alternateProvider.body),
       /alternate-secret-smoke/,
     );
+
+    const oauthProvider = await post(
+      "/v1/admin/model-providers",
+      undefined,
+      {
+        alias: "openai-oauth",
+        displayName: "OpenAI OAuth",
+        protocol: "responses",
+        providerKind: "openai",
+        modelId: "gpt-5",
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+      },
+      noAuthPort,
+    );
+    assert.equal(oauthProvider.status, 200);
+    const oauthStart = await post(
+      "/v1/admin/model-providers/openai-oauth/oauth/openai/start",
+      undefined,
+      {
+        redirectUri: "http://localhost:1455/auth/callback",
+        originator: "rusty_crew_smoke",
+      },
+      noAuthPort,
+    );
+    assert.equal(oauthStart.status, 200);
+    assert.match(
+      oauthStart.body.data.pendingLogin.authorizationUrl,
+      /https:\/\/auth\.openai\.com\/oauth\/authorize/,
+    );
+    assert.match(
+      oauthStart.body.data.pendingLogin.authorizationUrl,
+      /code_challenge_method=S256/,
+    );
+    assert.equal(
+      oauthStart.body.data.pendingLogin.providerAlias,
+      "openai-oauth",
+    );
+    assert.equal(
+      Object.hasOwn(oauthStart.body.data.pendingLogin, "codeVerifier"),
+      false,
+    );
+
+    const oauthStatusWithPending = await get(
+      "/v1/admin/model-providers/openai-oauth/oauth/openai/status",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(oauthStatusWithPending.status, 200);
+    assert.equal(oauthStatusWithPending.body.data.pendingLogins.length, 1);
+
+    const oauthComplete = await post(
+      "/v1/admin/model-providers/openai-oauth/oauth/openai/complete",
+      undefined,
+      {
+        pendingLoginId: oauthStart.body.data.pendingLogin.pendingLoginId,
+        state: oauthStart.body.data.pendingLogin.state,
+        fakeTokenResponse: {
+          idToken: "id.jwt.token",
+          accessToken: "access.jwt.token",
+          refreshToken: "refresh-token",
+          exchangedApiToken: "exchanged-token",
+          accountId: "account-smoke",
+          email: "smoke@example.test",
+          planType: "pro",
+          accessTokenExpiresAt: "2026-07-02T01:00:00Z",
+        },
+      },
+      noAuthPort,
+    );
+    assert.equal(oauthComplete.status, 200);
+    assert.equal(oauthComplete.body.data.credential.kind, "openai_oauth");
+    assert.equal(oauthComplete.body.data.credential.hasSecret, true);
+    assert.doesNotMatch(JSON.stringify(oauthComplete.body), /refresh-token/);
+    assert.doesNotMatch(JSON.stringify(oauthComplete.body), /access\.jwt/);
+
+    const oauthStatus = await get(
+      "/v1/admin/model-providers/openai-oauth/oauth/openai/status",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(oauthStatus.status, 200);
+    assert.equal(oauthStatus.body.data.credential.kind, "openai_oauth");
+    assert.equal(oauthStatus.body.data.pendingLogins.length, 0);
+
+    const oauthClear = await post(
+      "/v1/admin/model-providers/openai-oauth/oauth/openai/clear",
+      undefined,
+      {},
+      noAuthPort,
+    );
+    assert.equal(oauthClear.status, 200);
+    assert.equal(oauthClear.body.data.credential.hasSecret, false);
+
     const alternateRevision = alternateProvider.body.data.provider.revision;
     const updatedAlternateProvider = await patch(
       "/v1/admin/model-providers/alternate",
@@ -778,7 +871,7 @@ try {
       providers.body.data.items
         .map((item: { alias: string }) => item.alias)
         .sort(),
-      ["alternate", "custom-chat", "default"],
+      ["alternate", "custom-chat", "default", "openai-oauth"],
     );
 
     const localToolProfiles = await get(
