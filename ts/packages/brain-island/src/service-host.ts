@@ -9829,10 +9829,11 @@ function listChatEventsAfterCursor(
   cursor: string | undefined,
   limit: number,
 ): readonly ChatEvent[] {
+  if (limit <= 0) return [];
+  const events = state.chatEventsBySession.get(session.sessionId) ?? [];
+  if (cursor === undefined) return events.slice(Math.max(0, events.length - limit));
   const after = cursorSequence(cursor, session.sessionId);
-  return (state.chatEventsBySession.get(session.sessionId) ?? [])
-    .filter((event) => event.sequence_id > after)
-    .slice(0, limit);
+  return events.filter((event) => event.sequence_id > after).slice(0, limit);
 }
 
 function streamReplayEvents(
@@ -9849,7 +9850,7 @@ function streamReplayEvents(
     cursor,
     Math.min(Math.max(limit, 1), 1_000),
   );
-  if (after > 0) return events;
+  if (after > 0 || cursor === undefined) return events;
   return [
     {
       event_id: `${session.sessionId}:0`,

@@ -2002,7 +2002,11 @@ async function openSessionResult(
   const now = context.now?.() ?? new Date().toISOString();
   const pendingMessages = await pendingMessagesForSession(session, context);
   const stats = chatEventStats(session, context);
-  const loggedEvents = context.listChatEvents?.(session, cursor, limit) ?? [];
+  const eventLimit = Math.max(0, limit - 1);
+  const loggedEvents =
+    eventLimit === 0
+      ? []
+      : (context.listChatEvents?.(session, cursor, eventLimit) ?? []);
   const messageSlots = await context
     .listMessageSlots?.({
       session,
@@ -2043,6 +2047,9 @@ async function openSessionResult(
           )),
   ].slice(0, limit);
   const latestSequence = events.at(-1)?.sequence_id ?? 0;
+  const hasMoreBefore =
+    cursor === undefined &&
+    (loggedEvents.at(0)?.sequence_id ?? Number.POSITIVE_INFINITY) > 1;
   return {
     session: sessionSummary(session, {
       messageCount: stats.hasLoggedEvents
@@ -2053,7 +2060,7 @@ async function openSessionResult(
     events,
     ...(messageSlots === undefined ? {} : { message_slots: messageSlots }),
     latest_cursor: cursorFor(session.sessionId, latestSequence),
-    has_more_before: false,
+    has_more_before: hasMoreBefore,
   };
 }
 

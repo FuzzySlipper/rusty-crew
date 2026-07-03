@@ -58,9 +58,15 @@ export async function startRustyCrewServiceHost(
       ...options.adapterFactories,
     },
   });
-  const server = createServer((request, response) =>
-    app.handle(request, response),
-  );
+  const server = createServer((request, response) => {
+    applyCorsHeaders(request, response);
+    if ((request.method ?? "GET").toUpperCase() === "OPTIONS") {
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+    app.handle(request, response);
+  });
 
   try {
     await listen(server, app.adminPort, app.adminHost);
@@ -148,4 +154,31 @@ function closeServer(server: Server): Promise<void> {
     }
     server.close((error) => (error ? rejectClose(error) : resolveClose()));
   });
+}
+
+function applyCorsHeaders(
+  request: IncomingMessage,
+  response: ServerResponse,
+): void {
+  const origin = headerValue(request, "origin") ?? "*";
+  response.setHeader("access-control-allow-origin", origin);
+  response.setHeader(
+    "access-control-allow-methods",
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  );
+  response.setHeader(
+    "access-control-allow-headers",
+    "authorization,content-type,idempotency-key,last-event-id,x-request-id",
+  );
+  response.setHeader("access-control-expose-headers", "content-type");
+  response.setHeader("access-control-max-age", "600");
+  response.setHeader("vary", "Origin");
+}
+
+function headerValue(
+  request: IncomingMessage,
+  name: string,
+): string | undefined {
+  const value = request.headers[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] : value;
 }

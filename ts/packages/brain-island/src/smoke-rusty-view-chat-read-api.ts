@@ -49,8 +49,11 @@ try {
     "/v1/admin/diagnostics",
     "http://rusty-view.local",
   );
-  assert.equal(adminPreflight.status, 401);
-  assert.equal(adminPreflight.headers.get("access-control-allow-origin"), null);
+  assert.equal(adminPreflight.status, 204);
+  assert.equal(
+    adminPreflight.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
 
   const page = await get("/v1/chat/sessions", token, {
     origin: "http://rusty-view.local",
@@ -268,6 +271,29 @@ try {
     retainedReplay.body.data.items[1]?.payload?.text,
     " retained-delta-0",
     "chat event retention should preserve early deltas from long streamed wakes",
+  );
+  const retainedOpen = await get(
+    "/v1/chat/sessions/chat-retention-session",
+    token,
+  );
+  assert.equal(retainedOpen.status, 200);
+  assert.equal(retainedOpen.body.data.has_more_before, true);
+  assert.equal(
+    retainedOpen.body.data.events[1]?.kind,
+    "assistant_text_delta",
+    "fresh session opens should return the latest retained event window",
+  );
+  assert.notEqual(
+    retainedOpen.body.data.events[1]?.payload?.text,
+    " retained-delta-0",
+    "fresh session opens should not pin the transcript to the oldest retained event",
+  );
+  assert.equal(
+    retainedOpen.body.data.events.some(
+      (event: { kind: string }) => event.kind === "assistant_message_completed",
+    ),
+    true,
+    "fresh session opens should include the terminal assistant message event",
   );
 
   const failStreamAbort = new AbortController();
