@@ -57,6 +57,8 @@ export interface NewSessionLifecycleOptions {
   ): string;
   archiveSession(input: {
     sessionId: string;
+    newSessionId: string;
+    template: NewSessionTemplate;
     reason: string;
     reasonCode: string;
     command: AdminControlCommand;
@@ -139,6 +141,8 @@ export function createNewSessionLifecycleExecutor(
     });
     await options.archiveSession({
       sessionId: oldSessionId,
+      newSessionId,
+      template,
       reason,
       reasonCode,
       command,

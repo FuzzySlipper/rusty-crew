@@ -5150,6 +5150,23 @@ async function planServiceRuntimeConfigDraft(
   command: AdminControlCommand,
 ): Promise<RuntimeConfigDraftPlan> {
   const runtimeConfig = runtimeConfigDraftFromCommand(state, command);
+  return planRuntimeConfigValue(state, runtimeConfig);
+}
+
+async function planRuntimeConfigFileValue(
+  state: ServiceState,
+  value: Record<string, unknown>,
+): Promise<RuntimeConfigDraftPlan> {
+  return planRuntimeConfigValue(
+    state,
+    runtimeConfigDraftFromFileValue(state, value),
+  );
+}
+
+async function planRuntimeConfigValue(
+  state: ServiceState,
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Promise<RuntimeConfigDraftPlan> {
   const loaded = await loadRuntimeConfigProfilesForDraft(runtimeConfig);
   const diagnostics: RuntimeConfigDraftPlan["diagnostics"] =
     loaded.diagnostics.map((diagnostic) => ({
@@ -5187,6 +5204,21 @@ async function planServiceRuntimeConfigDraft(
     },
     runtimePlan,
   };
+}
+
+function assertRuntimeConfigDraftPlanOk(plan: RuntimeConfigDraftPlan): void {
+  const errors = plan.diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (errors.length === 0) return;
+  const first = errors[0]!;
+  const suffix =
+    errors.length === 1
+      ? ""
+      : ` (${errors.length - 1} additional diagnostic${errors.length === 2 ? "" : "s"})`;
+  throw new Error(
+    `${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`,
+  );
 }
 
 async function applyServiceRuntimeConfigDraft(
@@ -5810,6 +5842,35 @@ function runtimeConfigDraftFromCommand(
   };
 }
 
+function runtimeConfigDraftFromFileValue(
+  state: ServiceState,
+  draft: Record<string, unknown>,
+): RustyCrewRuntimeConfig {
+  return {
+    profilesDir:
+      optionalString(draft.profilesDir) ?? state.runtimeConfig.profilesDir,
+    ...(optionalString(draft.skillsDir) === undefined
+      ? {}
+      : { skillsDir: optionalString(draft.skillsDir) }),
+    storage: state.runtimeConfig.storage,
+    denObservation: state.runtimeConfig.denObservation,
+    brains: arrayValue(draft.brains).map((brain, index) =>
+      runtimeConfigBrainDraft(brain, index),
+    ),
+    sessions: arrayValue(draft.sessions) as RustyCrewRuntimeConfig["sessions"],
+    scheduledJobs: arrayValue(
+      draft.scheduledJobs,
+    ) as RustyCrewRuntimeConfig["scheduledJobs"],
+    channelBindings: arrayValue(
+      draft.channelBindings,
+    ) as RustyCrewRuntimeConfig["channelBindings"],
+    mcpServers: state.runtimeConfig.mcpServers,
+    mcpBindings: arrayValue(
+      draft.mcpBindings,
+    ) as RustyCrewRuntimeConfig["mcpBindings"],
+  };
+}
+
 function runtimeConfigBrainDraft(
   value: unknown,
   index: number,
@@ -6157,94 +6218,131 @@ function createServiceControlExecutor(
         result: session,
       };
     },
-    newSession: createNewSessionLifecycleExecutor({
-      loadTemplate: async (currentSessionId) => {
-        const session = await serviceSessionById(state, currentSessionId);
-        const channelBinding = channelBindingForSession(
-          state,
-          currentSessionId,
-        );
-        return {
-          agentId: session.agentId,
-          profileId: session.profileId,
-          kind: session.kind,
-          channelBindingId: channelBinding?.bindingId,
-          channelId: channelBinding?.externalChannelId,
-          toolProfileKey: mcpBindingForSession(state, currentSessionId)
-            ?.toolProfileKey,
-          sessionConfig: {
-            resourceLimits: session.resourceLimits,
-            toolProfile: session.toolProfile,
-            historyWindow: session.historyWindow,
-          },
-        };
-      },
-      generateSessionId: (template) => {
-        state.nextWakeSequence += 1;
-        return [
-          template.agentId,
-          "session",
-          state
-            .now()
-            .replace(/[^0-9A-Za-z]/g, "")
-            .slice(0, 17),
-          state.nextWakeSequence,
-        ].join("-");
-      },
-      archiveSession: async ({ sessionId }) => {
-        await state.bridge.archiveSession(sessionId as SessionId);
-      },
-      createSession: async ({ sessionId, template, command }) => {
-        const sessionConfig = optionalRecord(template.sessionConfig) ?? {};
-        await state.bridge.createSession({
-          sessionId,
-          agentId: template.agentId,
-          profileId: template.profileId,
-          kind: template.kind,
-          resourceLimits: compactRecord(
-            optionalRecord(sessionConfig.resourceLimits) ?? {},
-          ),
-          toolProfile:
-            optionalRecord(sessionConfig.toolProfile) === undefined
-              ? undefined
-              : (sessionConfig.toolProfile as never),
-          historyWindow:
-            optionalRecord(sessionConfig.historyWindow) === undefined
-              ? undefined
-              : (compactRecord(sessionConfig.historyWindow as never) as never),
-        });
-        const oldSessionId = command.target.sessionId;
-        if (oldSessionId !== undefined) {
-          const oldSession = await serviceSessionById(state, oldSessionId);
-          await replaceRuntimeSessionInConfig(
+    newSession: (() => {
+      const pendingRuntimeConfigReplacements = new Map<
+        string,
+        { oldSession: SessionState; plan: ServiceRuntimeReplacementConfigPlan }
+      >();
+      return createNewSessionLifecycleExecutor({
+        loadTemplate: async (currentSessionId) => {
+          const session = await serviceSessionById(state, currentSessionId);
+          const channelBinding = channelBindingForSession(
+            state,
+            currentSessionId,
+          );
+          return {
+            agentId: session.agentId,
+            profileId: session.profileId,
+            kind: session.kind,
+            channelBindingId: channelBinding?.bindingId,
+            channelId: channelBinding?.externalChannelId,
+            toolProfileKey: mcpBindingForSession(state, currentSessionId)
+              ?.toolProfileKey,
+            sessionConfig: {
+              resourceLimits: session.resourceLimits,
+              toolProfile: session.toolProfile,
+              historyWindow: session.historyWindow,
+            },
+          };
+        },
+        generateSessionId: (template) => {
+          state.nextWakeSequence += 1;
+          return [
+            template.agentId,
+            "session",
+            state
+              .now()
+              .replace(/[^0-9A-Za-z]/g, "")
+              .slice(0, 17),
+            state.nextWakeSequence,
+          ].join("-");
+        },
+        archiveSession: async ({ sessionId, newSessionId }) => {
+          const oldSession = await serviceSessionById(state, sessionId);
+          const plan = await planRuntimeSessionReplacementInConfig(
             state,
             oldSession,
-            sessionId,
+            newSessionId,
             "move",
           );
-          await applyServiceRuntimeConfigFromDisk(state, {
-            createMissingSessions: false,
-            eventType: "new_session_runtime_config_moved",
-            summaryPrefix: `New session moved runtime config from ${oldSessionId}`,
+          pendingRuntimeConfigReplacements.set(newSessionId, {
+            oldSession,
+            plan,
           });
-          recordServiceEvent(state, {
-            source: "service-host",
-            eventType: "new_session_runtime_config_moved",
-            summary: `New session moved runtime config from ${oldSessionId} to ${sessionId}.`,
-          });
-        }
-      },
-      auditSink: {
-        writeNewSessionLifecycleAudit(event) {
-          recordServiceEvent(state, {
-            source: "service-host",
-            eventType: `new_session_${event.phase}`,
-            summary: `New-session lifecycle ${event.phase} for ${event.oldSessionId}.`,
-          });
+          await state.bridge.archiveSession(sessionId as SessionId);
         },
-      },
-      now: state.now,
-    }),
+        createSession: async ({ sessionId, template, command }) => {
+          const sessionConfig = optionalRecord(template.sessionConfig) ?? {};
+          await state.bridge.createSession({
+            sessionId,
+            agentId: template.agentId,
+            profileId: template.profileId,
+            kind: template.kind,
+            resourceLimits: compactRecord(
+              optionalRecord(sessionConfig.resourceLimits) ?? {},
+            ),
+            toolProfile:
+              optionalRecord(sessionConfig.toolProfile) === undefined
+                ? undefined
+                : (sessionConfig.toolProfile as never),
+            historyWindow:
+              optionalRecord(sessionConfig.historyWindow) === undefined
+                ? undefined
+                : (compactRecord(
+                    sessionConfig.historyWindow as never,
+                  ) as never),
+          });
+          const oldSessionId = command.target.sessionId;
+          if (oldSessionId !== undefined) {
+            const pending =
+              pendingRuntimeConfigReplacements.get(sessionId) ?? undefined;
+            const oldSession =
+              pending?.oldSession ??
+              (await serviceSessionById(state, oldSessionId));
+            const replacement =
+              pending === undefined
+                ? await replaceRuntimeSessionInConfig(
+                    state,
+                    oldSession,
+                    sessionId,
+                    "move",
+                  )
+                : await commitRuntimeSessionReplacementInConfig(
+                    state,
+                    oldSession,
+                    pending.plan,
+                  );
+            pendingRuntimeConfigReplacements.delete(sessionId);
+            await applyServiceRuntimeConfigFromDisk(state, {
+              createMissingSessions: false,
+              eventType: "new_session_runtime_config_moved",
+              summaryPrefix: `New session moved runtime config from ${oldSessionId}`,
+            });
+            recordServiceEvent(state, {
+              source: "service-host",
+              eventType: "new_session_runtime_config_moved",
+              summary: `New session moved runtime config from ${oldSessionId} to ${sessionId}.`,
+            });
+            recordServiceEvent(state, {
+              source: "service-host",
+              eventType: "new_session_runtime_config_bindings_moved",
+              summary: `New session moved ${replacement.channelBindings.bindingIds.length} channel binding(s), ${replacement.mcpBindings.bindingIds.length} MCP binding(s), and ${replacement.scheduledJobs.jobIds.length} scheduled job(s).`,
+            });
+          }
+        },
+        rebindChannel: () => undefined,
+        auditSink: {
+          writeNewSessionLifecycleAudit(event) {
+            recordServiceEvent(state, {
+              source: "service-host",
+              eventType: `new_session_${event.phase}`,
+              summary: `New-session lifecycle ${event.phase} for ${event.oldSessionId}.`,
+            });
+          },
+        },
+        now: state.now,
+      });
+    })(),
     pauseRuntime: async (command) => pauseRuntimeTarget(state, command),
     resumeRuntime: async (command) => resumeRuntimeTarget(state, command),
     reloadMcp: createServiceReloadMcpExecutor(state),
@@ -6923,6 +7021,16 @@ interface ServiceRuntimeReplacementSessionResult {
   };
 }
 
+interface ServiceRuntimeReplacementConfigPlan {
+  oldSessionId: string;
+  newSessionId: string;
+  runtimeConfigFile: RuntimeConfigFileForMutation;
+  validation: RuntimeConfigDraftPlan;
+  channelBindings: ServiceRuntimeReplacementSessionResult["channelBindings"];
+  mcpBindings: ServiceRuntimeReplacementSessionResult["mcpBindings"];
+  scheduledJobs: ServiceRuntimeReplacementSessionResult["scheduledJobs"];
+}
+
 async function planServiceRuntimeRebuild(
   state: ServiceState,
   command: AdminControlCommand,
@@ -7358,6 +7466,21 @@ async function replaceRuntimeSessionInConfig(
   newSessionId: string,
   channelBindingAction: "move" | "unchanged",
 ): Promise<ServiceRuntimeReplacementSessionResult> {
+  const plan = await planRuntimeSessionReplacementInConfig(
+    state,
+    oldSession,
+    newSessionId,
+    channelBindingAction,
+  );
+  return commitRuntimeSessionReplacementInConfig(state, oldSession, plan);
+}
+
+async function planRuntimeSessionReplacementInConfig(
+  state: ServiceState,
+  oldSession: SessionState,
+  newSessionId: string,
+  channelBindingAction: "move" | "unchanged",
+): Promise<ServiceRuntimeReplacementConfigPlan> {
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(newSessionId)) {
     throw new Error("replacement session id contains unsupported characters");
   }
@@ -7409,19 +7532,17 @@ async function replaceRuntimeSessionInConfig(
     "id",
   );
 
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
+  const validation = await planRuntimeConfigFileValue(
+    state,
     runtimeConfigFile.value,
   );
-  const profileRegistry = await replaceProfileRegistrySessionRefs(
-    state,
-    oldSession,
-    newSessionId,
-  );
+  assertRuntimeConfigDraftPlanOk(validation);
+
   return {
     oldSessionId: oldSession.sessionId,
     newSessionId,
-    profileRegistry,
+    runtimeConfigFile,
+    validation,
     channelBindings: {
       action:
         channelBindingAction === "move"
@@ -7437,6 +7558,30 @@ async function replaceRuntimeSessionInConfig(
       action: "move_to_replacement_session",
       jobIds: scheduledJobIds,
     },
+  };
+}
+
+async function commitRuntimeSessionReplacementInConfig(
+  state: ServiceState,
+  oldSession: SessionState,
+  plan: ServiceRuntimeReplacementConfigPlan,
+): Promise<ServiceRuntimeReplacementSessionResult> {
+  await writeJsonFileAtomic(
+    state.config.paths.serviceConfigFile,
+    plan.runtimeConfigFile.value,
+  );
+  const profileRegistry = await replaceProfileRegistrySessionRefs(
+    state,
+    oldSession,
+    plan.newSessionId,
+  );
+  return {
+    oldSessionId: oldSession.sessionId,
+    newSessionId: plan.newSessionId,
+    profileRegistry,
+    channelBindings: plan.channelBindings,
+    mcpBindings: plan.mcpBindings,
+    scheduledJobs: plan.scheduledJobs,
     queuedMessages: {
       action: "start_replacement_session_with_empty_queue",
       oldSessionQueuePreserved: true,
