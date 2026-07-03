@@ -7,6 +7,7 @@
     { "path": "./ts/packages/adapter-den" },
     { "path": "./ts/packages/adapter-telegram" },
     { "path": "./ts/packages/adapter-mcp" },
-    { "path": "./ts/packages/adapter-tui" }
+    { "path": "./ts/packages/adapter-tui" },
+    { "path": "./ts/packages/service-host" }
   ]
 }

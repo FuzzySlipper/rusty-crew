@@ -10,7 +10,7 @@ import {
   type BrainWakeExecutor,
   type NativeBridgeModule,
 } from "@rusty-crew/native-bridge";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-read-api-"));
 const port = await openPort();

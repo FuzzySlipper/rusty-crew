@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { createDebugApiClient } from "./debug-api-client.js";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const tmpRoot = join(tmpdir(), "rusty-crew");
 mkdirSync(tmpRoot, { recursive: true });

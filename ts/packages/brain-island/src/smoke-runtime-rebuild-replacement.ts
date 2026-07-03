@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentId, SessionId } from "@rusty-crew/contracts";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-rebuild-replacement-"));
 const port = await openPort();

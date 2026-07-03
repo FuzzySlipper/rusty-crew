@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChatEvent } from "./rusty-view-chat-api.js";
 import { createDebugApiClient } from "./debug-api-client.js";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-responses-field-"));
 const port = await openPort();

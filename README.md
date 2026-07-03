@@ -39,6 +39,10 @@ field-test configuration under `/home/system/rusty-crew`.
 - `ts/packages/brain-island` owns profile loading, role assembly, pi-agent
   integration, model-callable tools, service runtime config, admin/debug APIs,
   and production brain wake wiring.
+- `ts/packages/service-host` is the service composition root. It owns service
+  startup scripts now and is the landing zone for HTTP listener, route wiring,
+  adapter injection, scheduler/drain loops, and service-host smokes during the
+  phase-5 extraction.
 - `crates/brains/*` contains direct Rust brain modules that implement provider
   loops behind the neutral wake/stream/action/provider-state contract. These
   crates may not reach into Rust coordination internals.

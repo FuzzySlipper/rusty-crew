@@ -81,6 +81,7 @@ not the current planning queue.
       /contracts          # TypeScript contracts until codegen owns this
       /native-bridge      # native addon loader and TS bridge facade
       /brain-island       # pi Agent brain boundary and tool/profile assembly
+      /service-host       # service process composition root
       /adapter-den        # Den data + observability adapter
       /adapter-*          # remaining adapter boundaries
 ```
@@ -128,6 +129,7 @@ cargo run --release -p rusty-crew-core-bridge-node --bin measure_brain_event_thr
 | rust-brain       | Rust     | `crates/brains/*`                                            | Depend on coordination internals, persistence, adapters, service-host, or config |
 | bridge-native    | Rust/TS  | `crates/bridge/*`, `ts/packages/*bridge*`                    | Expand manifest surface for convenience-only behavior                            |
 | ts-brain         | TS       | `ts/packages/brain-island`                                   | Route coordination around Rust or own service-host/adapters as hidden globals    |
+| ts-service-host  | TS       | `ts/packages/service-host`                                   | Own brain logic, tool execution semantics, or adapter implementation internals   |
 | ts-adapter       | TS       | `ts/packages/adapter-*`                                      | Make coordination decisions or block internal routing on observability failures  |
 | contract-steward | Rust/TS  | `crates/bridge/core-bridge-api`, `ts/packages/contracts`     | Hand-edit generated artifacts once codegen owns them                             |
 

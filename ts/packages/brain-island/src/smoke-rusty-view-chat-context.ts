@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import type { SessionId } from "@rusty-crew/contracts";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-context-"));
 const port = await openPort();

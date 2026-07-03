@@ -106,7 +106,7 @@
     "smoke:pi-agent-brain-events": "npm run smoke:pi-agent-brain-events -w @rusty-crew/brain-island",
     "service:debug-turn": "npm run service:debug-turn -w @rusty-crew/brain-island --",
     "cron": "npm run cron -w @rusty-crew/brain-island --",
-    "service:start": "npm run service:start -w @rusty-crew/brain-island",
+    "service:start": "npm run service:start -w @rusty-crew/service-host",
     "smoke:den": "npm run smoke -w @rusty-crew/adapter-den",
     "smoke:den-router-metadata": "npm run smoke:router-metadata -w @rusty-crew/adapter-den",
     "smoke:den-completion-evidence": "npm run smoke:completion-evidence -w @rusty-crew/adapter-den",
@@ -128,7 +128,7 @@
     "smoke:operator-surfaces-e2e": "tsx ts/smokes/operator-surfaces-e2e.ts",
     "smoke:mid-turn": "npm run smoke:mid-turn -w @rusty-crew/brain-island",
     "test:unit": "npm run test:unit -w @rusty-crew/brain-island",
-    "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui",
+    "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui && tsc --noEmit -p ts/packages/service-host",
     "generate:tool-registry-artifact": "npm run generate:tool-registry-artifact -w @rusty-crew/brain-island",
     "format": "prettier --check .",
     "format:fix": "prettier --write ."

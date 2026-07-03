@@ -10,7 +10,7 @@ import {
   loadNativeBridge,
   type NativeBridgeModule,
 } from "@rusty-crew/native-bridge";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-den-successor-service-"));
 const adminPort = await openPort();

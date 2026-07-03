@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentId, CoreEvent } from "@rusty-crew/contracts";
 import { createDebugApiClient } from "./debug-api-client.js";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 if (process.env.RUSTY_CREW_COORDINATION_LIVE !== "1") {
   console.log(

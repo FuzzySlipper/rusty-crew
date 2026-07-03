@@ -1,0 +1,22 @@
+{
+  "name": "@rusty-crew/service-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "service:start": "tsx src/start.ts"
+  },
+  "dependencies": {
+    "@rusty-crew/adapter-den": "0.1.0",
+    "@rusty-crew/adapter-mcp": "0.1.0",
+    "@rusty-crew/adapter-telegram": "0.1.0",
+    "@rusty-crew/brain-island": "0.1.0",
+    "@rusty-crew/contracts": "0.1.0",
+    "@rusty-crew/native-bridge": "0.1.0"
+  }
+}

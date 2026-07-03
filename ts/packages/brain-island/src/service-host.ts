@@ -1,9 +1,4 @@
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
@@ -16,7 +11,6 @@ import {
   resolve,
   sep,
 } from "node:path";
-import { fileURLToPath } from "node:url";
 import type {
   BrainEvent,
   BrainImplementationId,
@@ -314,19 +308,21 @@ import { buildBuiltInToolCatalog } from "./tool-registry.js";
 
 const CHAT_EVENT_RETENTION_LIMIT = 50_000;
 
-export interface RustyCrewServiceHostOptions {
+export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
   config?: RustyCrewServiceConfig;
   bridge?: NativeBridgeModule;
   now?: () => string;
 }
 
-export interface RustyCrewServiceHost {
+export interface RustyCrewServiceApp {
   readonly config: RustyCrewServiceConfig;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
-  readonly server: Server;
+  readonly adminHost: string;
+  readonly adminPort: number;
   readonly url: string;
+  handle(request: IncomingMessage, response: ServerResponse): void;
   stop(): Promise<void>;
 }
 
@@ -475,9 +471,9 @@ type ServiceRouteResult =
 const CONTROL_ROUTE_PREFIX = "/v1/admin/control/";
 const DEV_NO_AUTH_CONTROL_TOKEN = "__rusty_crew_dev_no_auth__";
 
-export async function startRustyCrewServiceHost(
-  options: RustyCrewServiceHostOptions = {},
-): Promise<RustyCrewServiceHost> {
+export async function createRustyCrewServiceApp(
+  options: RustyCrewServiceAppOptions = {},
+): Promise<RustyCrewServiceApp> {
   const serviceEnv = options.env ?? process.env;
   const config = options.config ?? loadRustyCrewServiceConfig(serviceEnv);
 
@@ -485,7 +481,6 @@ export async function startRustyCrewServiceHost(
   const lock = acquireRustyCrewServiceLock(config);
   const bridge = options.bridge ?? (await loadNativeBridge());
   let engine: EngineHandle | undefined;
-  let server: Server | undefined;
 
   try {
     const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
@@ -569,36 +564,32 @@ export async function startRustyCrewServiceHost(
     await ensureDenConversationChannels(state);
     await startTelegramConnector(state);
     startServiceBackgroundLoops(state);
-    server = createServer((request, response) => {
-      void handleHttpRequest(request, state)
-        .then((result) => writeJsonResponse(response, result))
-        .catch((error) =>
-          writeJsonResponse(
-            response,
-            failure(500, requestId(request), {
-              code: "internal_error",
-              reason_code: "service_host_error",
-              message: errorMessage(error, "service host request failed"),
-              retryable: false,
-            }),
-          ),
-        );
-    });
-
-    await listen(server, config.admin.port, config.admin.host);
 
     return {
       config,
       bridge,
       engine,
-      server,
+      adminHost: config.admin.host,
+      adminPort: config.admin.port,
       url: `http://${config.admin.host}:${config.admin.port}`,
-      stop: () => stopService(state, server),
+      handle: (request, response) => {
+        void handleHttpRequest(request, state)
+          .then((result) => writeJsonResponse(response, result))
+          .catch((error) =>
+            writeJsonResponse(
+              response,
+              failure(500, requestId(request), {
+                code: "internal_error",
+                reason_code: "service_host_error",
+                message: errorMessage(error, "service host request failed"),
+                retryable: false,
+              }),
+            ),
+          );
+      },
+      stop: () => stopService(state),
     };
   } catch (error) {
-    if (server) {
-      await closeServer(server).catch(() => undefined);
-    }
     if (engine !== undefined) {
       await bridge
         .shutdownEngine({ engine, drainTimeoutMs: 2_000 })
@@ -11445,15 +11436,11 @@ function recordServiceEvent(
   state.recentEvents.splice(50);
 }
 
-async function stopService(
-  state: ServiceState,
-  server?: Server,
-): Promise<void> {
+async function stopService(state: ServiceState): Promise<void> {
   if (state.stopping) return;
   state.stopping = true;
   for (const timer of state.timers) clearInterval(timer);
   state.timers.clear();
-  if (server) await closeServer(server);
   try {
     await stopTelegramConnector(state);
     if (state.denObservationSubscription !== undefined) {
@@ -11473,32 +11460,6 @@ async function stopService(
   } finally {
     state.lock.release();
   }
-}
-
-function listen(server: Server, port: number, host: string): Promise<void> {
-  return new Promise((resolveListen, rejectListen) => {
-    const onError = (error: Error) => {
-      server.off("listening", onListening);
-      rejectListen(error);
-    };
-    const onListening = () => {
-      server.off("error", onError);
-      resolveListen();
-    };
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(port, host);
-  });
-}
-
-function closeServer(server: Server): Promise<void> {
-  return new Promise((resolveClose, rejectClose) => {
-    if (!server.listening) {
-      resolveClose();
-      return;
-    }
-    server.close((error) => (error ? rejectClose(error) : resolveClose()));
-  });
 }
 
 function writeJsonResponse(
@@ -12769,21 +12730,4 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
-}
-
-async function main(): Promise<void> {
-  const host = await startRustyCrewServiceHost();
-  console.log(`rusty-crew service listening on ${host.url}`);
-  const shutdown = () => {
-    void host.stop().finally(() => process.exit(0));
-  };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
-}
-
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  void main().catch((error) => {
-    console.error(errorMessage(error, "rusty-crew service failed"));
-    process.exit(1);
-  });
 }

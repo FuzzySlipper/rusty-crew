@@ -29,7 +29,7 @@ import type {
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { createDebugApiClient } from "./debug-api-client.js";
-import { startRustyCrewServiceHost } from "./service-host.js";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const blockedPostgresRoot = mkdtempSync(
   join(tmpdir(), "rusty-crew-service-host-postgres-blocked-"),
