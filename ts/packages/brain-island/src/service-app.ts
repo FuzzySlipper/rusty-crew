@@ -295,6 +295,7 @@ import {
 } from "./wake-timeout.js";
 import { buildBuiltInToolCatalog } from "./tool-registry.js";
 import type { ServiceAdapterFactories } from "./service-adapter-ports.js";
+import { ChatEventStore } from "./chat-event-store.js";
 
 const CHAT_EVENT_RETENTION_LIMIT = 50_000;
 
@@ -358,6 +359,7 @@ interface ServiceState {
   readonly unmatchedDeliveryIntentIds: Set<number>;
   readonly directDispatchSessions: Set<SessionId>;
   readonly chatMessageReceipts: Map<string, SendChatMessageResult>;
+  readonly chatEventStore: ChatEventStore;
   readonly chatEventsBySession: Map<SessionId, ChatEvent[]>;
   readonly chatSequencesBySession: Map<SessionId, number>;
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
@@ -543,6 +545,9 @@ export async function createRustyCrewServiceApp(
       unmatchedDeliveryIntentIds: new Set(),
       directDispatchSessions: new Set(),
       chatMessageReceipts: new Map(),
+      chatEventStore: new ChatEventStore(
+        join(config.paths.dataDir, "data", "chat-events"),
+      ),
       chatEventsBySession: new Map(),
       chatSequencesBySession: new Map(),
       chatSubscribersBySession: new Map(),
@@ -9865,7 +9870,11 @@ function appendChatEvent(
   sessionId: SessionId,
   event: Pick<ChatEvent, "kind" | "payload">,
 ): ChatEvent {
-  const sequence = (state.chatSequencesBySession.get(sessionId) ?? 0) + 1;
+  const sequence =
+    Math.max(
+      state.chatSequencesBySession.get(sessionId) ?? 0,
+      state.chatEventStore.latestSequence(sessionId) ?? 0,
+    ) + 1;
   state.chatSequencesBySession.set(sessionId, sequence);
   const chatEvent: ChatEvent = {
     event_id: `${sessionId}:${sequence}`,
@@ -9881,6 +9890,7 @@ function appendChatEvent(
     events.splice(0, events.length - CHAT_EVENT_RETENTION_LIMIT);
   }
   state.chatEventsBySession.set(sessionId, events);
+  state.chatEventStore.append(chatEvent);
   const subscribers = state.chatSubscribersBySession.get(sessionId);
   if (subscribers !== undefined) {
     for (const subscriber of subscribers) {
@@ -9986,10 +9996,43 @@ function listChatEventsAfterCursor(
 ): readonly ChatEvent[] {
   if (limit <= 0) return [];
   const events = state.chatEventsBySession.get(session.sessionId) ?? [];
+  const storedEvents = state.chatEventStore.listAfterCursor(
+    session.sessionId,
+    cursor,
+    limit,
+  );
+  if (storedEvents.length > 0) {
+    const mergedEvents = mergeChatEventPages(
+      storedEvents,
+      events,
+      session.sessionId,
+      cursor,
+    );
+    return cursor === undefined
+      ? mergedEvents.slice(Math.max(0, mergedEvents.length - limit))
+      : mergedEvents.slice(0, limit);
+  }
   if (cursor === undefined)
     return events.slice(Math.max(0, events.length - limit));
   const after = cursorSequence(cursor, session.sessionId);
   return events.filter((event) => event.sequence_id > after).slice(0, limit);
+}
+
+function mergeChatEventPages(
+  storedEvents: readonly ChatEvent[],
+  memoryEvents: readonly ChatEvent[],
+  sessionId: SessionId,
+  cursor: string | undefined,
+): readonly ChatEvent[] {
+  const after = cursorSequence(cursor, sessionId);
+  const eventsBySequence = new Map<number, ChatEvent>();
+  for (const event of [...storedEvents, ...memoryEvents]) {
+    if (event.session_id !== sessionId || event.sequence_id <= after) continue;
+    eventsBySequence.set(event.sequence_id, event);
+  }
+  return [...eventsBySequence.values()].sort(
+    (left, right) => left.sequence_id - right.sequence_id,
+  );
 }
 
 function streamReplayEvents(
@@ -10029,7 +10072,11 @@ function latestChatCursor(
   state: ServiceState,
   sessionId: SessionId,
 ): string | undefined {
-  return state.chatEventsBySession.get(sessionId)?.at(-1)?.event_id;
+  const latestSequence = Math.max(
+    state.chatEventStore.latestSequence(sessionId) ?? 0,
+    state.chatEventsBySession.get(sessionId)?.at(-1)?.sequence_id ?? 0,
+  );
+  return latestSequence > 0 ? `${sessionId}:${latestSequence}` : undefined;
 }
 
 function chatSubscribers(
@@ -11148,7 +11195,7 @@ async function drainSubscriptionEventsUntilIdle(
   subscription: SubscriptionHandle,
 ): Promise<CoreEvent[]> {
   const chunkSize = 128;
-  const maxEvents = 2_048;
+  const maxEvents = 65_536;
   const events: CoreEvent[] = [];
   while (events.length < maxEvents) {
     const chunk = await bridge.drainSubscriptionEvents(subscription, chunkSize);
@@ -11441,6 +11488,7 @@ async function stopService(state: ServiceState): Promise<void> {
     await state.bridge
       .unsubscribeEvents(state.wakeSubscription)
       .catch(() => undefined);
+    await state.chatEventStore.flush();
     await state.mcpManager.shutdown();
     await state.bridge.shutdownEngine({
       engine: state.engine,

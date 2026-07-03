@@ -16,6 +16,7 @@ const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-read-api-"));
 const port = await openPort();
 const mcpPort = await openPort();
 const token = "rusty-view-chat-token";
+const retainedDeltaCount = 7_300;
 writeRuntimeConfig(root, mcpPort);
 const mcpServer = await startMcpServer(mcpPort);
 let host = await startHost();
@@ -276,7 +277,7 @@ try {
     "/v1/chat/sessions/chat-retention-session",
     token,
   );
-  assert.equal(retainedOpen.status, 200);
+  assert.equal(retainedOpen.status, 200, JSON.stringify(retainedOpen.body));
   assert.equal(retainedOpen.body.data.has_more_before, true);
   assert.equal(
     retainedOpen.body.data.events[1]?.kind,
@@ -728,6 +729,35 @@ try {
   await host.stop();
   host = await startHost();
 
+  const persistedRetainedReplay = await get(
+    "/v1/chat/sessions/chat-retention-session/events?cursor=chat-retention-session:0&limit=10",
+    token,
+  );
+  assert.equal(persistedRetainedReplay.status, 200);
+  assert.deepEqual(
+    persistedRetainedReplay.body.data.items
+      .slice(0, 3)
+      .map((event: { kind: string }) => event.kind),
+    ["message_created", "assistant_turn_started", "assistant_text_delta"],
+    "durable chat event replay should preserve the beginning of a long wake after restart",
+  );
+  assert.equal(
+    persistedRetainedReplay.body.data.items[2]?.payload?.text,
+    " retained-delta-0",
+  );
+
+  const persistedRetainedEvents = await readAllChatEvents(
+    "chat-retention-session",
+  );
+  assert.ok(
+    persistedRetainedEvents.length > retainedDeltaCount,
+    `durable chat event replay should page through the whole long wake after restart, got ${persistedRetainedEvents.length}`,
+  );
+  assert.ok(
+    (persistedRetainedEvents.at(-1)?.sequence_id ?? 0) >= 7_281,
+    "durable chat event cursors should survive past the prior 7k live failure shape",
+  );
+
   const persistedScopeAttachments = await get(
     "/v1/chat/sessions/chat-session/data-bank/scopes/scope%3Areference-pack/attachments",
     token,
@@ -1093,6 +1123,22 @@ async function startHost(extraEnv: Record<string, string> = {}) {
   });
 }
 
+async function readAllChatEvents(sessionId: string): Promise<SseEvent[]> {
+  const events: SseEvent[] = [];
+  let cursor = `${sessionId}:0`;
+  for (;;) {
+    const page = await get(
+      `/v1/chat/sessions/${encodeURIComponent(sessionId)}/events?cursor=${encodeURIComponent(cursor)}&limit=500`,
+      token,
+    );
+    assert.equal(page.status, 200);
+    events.push(...page.body.data.items);
+    if (!page.body.data.has_more) return events;
+    cursor = page.body.data.latest_cursor;
+    assert.ok(cursor, "paged chat event replay should return latest_cursor");
+  }
+}
+
 async function get(
   path: string,
   bearer?: string,
@@ -1297,7 +1343,7 @@ function withLiveWakeEventsBridge(
                 event: { type: "started" },
               },
             ];
-            for (let index = 0; index < 1_100; index += 1) {
+            for (let index = 0; index < retainedDeltaCount; index += 1) {
               retentionEvents.push({
                 wakeId: request.wakeId,
                 sessionId: request.sessionId,
