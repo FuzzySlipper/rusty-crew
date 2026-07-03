@@ -1,7 +1,9 @@
 import type { McpBindingRecord } from "@rusty-crew/contracts";
-import type { McpToolDiscoveryClient } from "@rusty-crew/adapter-mcp";
 import type { ToolInventoryRequest } from "./tool-registry.js";
-import type { McpSurfaceManager } from "@rusty-crew/adapter-mcp";
+import type {
+  McpSurfaceManagerPort,
+  McpToolDiscoveryClient,
+} from "./service-adapter-ports.js";
 import {
   adapterActivity,
   type AgentActivityObservationProducer,
@@ -43,7 +45,7 @@ export interface ReloadMcpControlOptions {
     sessionId: string,
     command: AdminControlCommand,
   ): Promise<McpBindingRecord | undefined> | McpBindingRecord | undefined;
-  manager: McpSurfaceManager;
+  manager: McpSurfaceManagerPort;
   discoveryClient: McpToolDiscoveryClient;
   discoveryClientForBinding?(
     binding: McpBindingRecord,

@@ -1,10 +1,10 @@
-import type { McpRegistryCandidate } from "@rusty-crew/adapter-mcp";
 import type {
   BrainEvent,
   McpBindingRecord,
   ToolCallMetadata,
   ToolDescriptor,
 } from "@rusty-crew/contracts";
+import type { McpRegistryCandidate } from "./service-adapter-ports.js";
 
 export type McpResourceDenialReason =
   | "tool_profile_denied"

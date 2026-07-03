@@ -21,10 +21,10 @@ import type {
   SessionKind,
   ToolProfile,
 } from "@rusty-crew/contracts";
-import {
-  createDenMemoryClient,
-  type DenMemoryClient,
-} from "@rusty-crew/adapter-den";
+import type {
+  DenMemoryClient,
+  ServiceAdapterFactories,
+} from "./service-adapter-ports.js";
 import type {
   BrainWakeExecutor,
   NativeBridgeModule,
@@ -703,6 +703,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+  adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   coordinationRuntime?: CoordinationToolRuntime;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await expandRuntimeConfigFromProfiles(
@@ -796,6 +797,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             curatorExecutor: input.curatorExecutor,
             mcpToolCatalog,
             mcpToolExecutorFactory: input.mcpToolExecutorFactory,
+            adapterFactories: input.adapterFactories,
             coordinationRuntime: input.coordinationRuntime,
           }),
         ),
@@ -1316,6 +1318,7 @@ async function createConfiguredBrain(
     curatorExecutor?: CuratorExecuteContext["executor"];
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+    adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     coordinationRuntime?: CoordinationToolRuntime;
   } = {},
 ): Promise<BrainImplementation> {
@@ -1350,6 +1353,7 @@ function createServiceToolResolver(
     curatorExecutor?: CuratorExecuteContext["executor"];
     mcpToolCatalog?: ServiceMcpToolCatalog;
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+    adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     coordinationRuntime?: CoordinationToolRuntime;
   },
 ): BrainToolResolver {
@@ -1409,9 +1413,13 @@ function createMemoryToolResolver(
   options: {
     bridge?: NativeBridgeModule;
     serviceConfig?: RustyCrewServiceConfig;
+    adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   },
 ): BrainToolResolver {
-  const denMemoryClient = createServiceDenMemoryClient(options.serviceConfig);
+  const denMemoryClient = createServiceDenMemoryClient(
+    options.serviceConfig,
+    options.adapterFactories,
+  );
   const memorySpaceResolver = options.bridge
     ? createMemorySpaceToolResolver({ bridge: options.bridge })
     : undefined;
@@ -1442,10 +1450,13 @@ function createMemoryToolResolver(
 
 function createServiceDenMemoryClient(
   serviceConfig: RustyCrewServiceConfig | undefined,
+  adapterFactories:
+    | Pick<ServiceAdapterFactories, "createDenMemoryClient">
+    | undefined,
 ): DenMemoryClient | undefined {
   const config = serviceConfig?.denMemory;
-  if (!config?.baseUrl) return undefined;
-  return createDenMemoryClient({
+  if (!config?.baseUrl || adapterFactories === undefined) return undefined;
+  return adapterFactories.createDenMemoryClient({
     baseUrl: config.baseUrl,
     bearerToken: config.bearerToken,
     apiMode: config.apiMode,

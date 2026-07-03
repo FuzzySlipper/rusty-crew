@@ -1,5 +1,5 @@
-import type { McpRegistryCandidate } from "@rusty-crew/adapter-mcp";
 import type { ExternalEventPayload } from "@rusty-crew/contracts";
+import type { McpRegistryCandidate } from "./service-adapter-ports.js";
 import {
   buildToolInventory,
   createToolRegistry,

@@ -26,10 +26,7 @@ import type {
   EngineStorageConfig,
   McpBindingRecord,
   ProfileId,
-  ScheduledJobStatus,
   ScheduledRunSummary,
-  ScheduledRunStatus,
-  ScheduledRunTrigger,
   SessionId,
   SessionKind,
   SessionState,
@@ -49,28 +46,16 @@ import {
   type NativeProfileRegistryRecord,
   type NativeProfileRegistryWrite,
 } from "@rusty-crew/native-bridge";
-import {
-  McpSurfaceManager,
-  createSimulatedMcpTransportFactory,
-} from "@rusty-crew/adapter-mcp";
-import {
-  createDenSuccessorGatewayClient,
-  dispatchChannelMessageProjection,
-  ingestChannelInboundMessage,
-  projectAgentMessageToChannel,
-  type DenSuccessorAgentIdentity,
-  type DenSuccessorConversationChannel,
-  type DenSuccessorConversationMembership,
-  type DenSuccessorDeliveryIntent,
-  type DenSuccessorGatewayClient,
-  type ChannelBindingDiagnostics,
-} from "@rusty-crew/adapter-den";
-import {
-  createTelegramAdapterRegistration,
-  createTelegramBotApiHttpClient,
-  FileTelegramUpdateOffsetStore,
-  TelegramChannelConnector,
-} from "@rusty-crew/adapter-telegram";
+import type {
+  ChannelBindingDiagnostics,
+  DenSuccessorAgentIdentity,
+  DenSuccessorConversationChannel,
+  DenSuccessorConversationMembership,
+  DenSuccessorDeliveryIntent,
+  DenSuccessorGatewayClient,
+  McpSurfaceManagerPort,
+  TelegramChannelConnectorPort,
+} from "./service-adapter-ports.js";
 import {
   AgentActivityObservationProducer,
   type AgentActivityEventInput,
@@ -114,6 +99,11 @@ import {
   type MemorySpaceDiagnosticsProjection,
   type AdminRouteResult,
 } from "./admin-diagnostics-api.js";
+import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
+import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
+import { failure, successRoute } from "./service-route-results.js";
+import { handleSchedulerReadRequest } from "./service-scheduler-routes.js";
+import { handleAdminToolsCatalogRequest } from "./service-tool-catalog-routes.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
@@ -272,7 +262,6 @@ import {
   acquireRustyCrewServiceLock,
   ensureRustyCrewServiceDirectories,
   loadRustyCrewServiceConfig,
-  type RustyCrewMcpServerConfig,
   type RustyCrewServiceConfig,
   type RustyCrewServiceEnv,
   type RustyCrewServiceLock,
@@ -305,6 +294,7 @@ import {
   withWakeTimeout,
 } from "./wake-timeout.js";
 import { buildBuiltInToolCatalog } from "./tool-registry.js";
+import type { ServiceAdapterFactories } from "./service-adapter-ports.js";
 
 const CHAT_EVENT_RETENTION_LIMIT = 50_000;
 
@@ -312,6 +302,7 @@ export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
   config?: RustyCrewServiceConfig;
   bridge?: NativeBridgeModule;
+  adapterFactories: ServiceAdapterFactories;
   now?: () => string;
 }
 
@@ -332,12 +323,13 @@ interface ServiceState {
   readonly engine: EngineHandle;
   readonly lock: RustyCrewServiceLock;
   readonly auditSink: ReturnType<typeof createMemoryAdminControlAuditSink>;
+  readonly adapterFactories: ServiceAdapterFactories;
   runtimeConfig: RustyCrewRuntimeConfig;
   runtimeConfigApplyResult: RustyCrewRuntimeConfigApplyResult;
   denGatewayClient?: DenSuccessorGatewayClient;
   denGatewayStartupReport?: DenSuccessorGatewayStartupReport;
   denObservationSubscription?: SubscriptionHandle;
-  telegramConnector?: TelegramChannelConnector;
+  telegramConnector?: TelegramChannelConnectorPort;
   telegramOutboundSubscription?: SubscriptionHandle;
   readonly curator: ServiceCuratorRuntime;
   readonly backgroundReview: ServiceBackgroundReviewRuntime;
@@ -357,7 +349,7 @@ interface ServiceState {
   readonly openAiOauthPendingLogins: Map<string, OpenAiOauthPendingLogin>;
   readonly channelProjectionFailures: ChannelProjectionFailureRecord[];
   profileChannelWakePolicies: Map<string, ChannelWakePolicy>;
-  mcpManager: McpSurfaceManager;
+  mcpManager: McpSurfaceManagerPort;
   readonly wakeSubscription: SubscriptionHandle;
   readonly timers: Set<NodeJS.Timeout>;
   readonly inFlightWakes: Set<SessionId>;
@@ -472,7 +464,7 @@ const CONTROL_ROUTE_PREFIX = "/v1/admin/control/";
 const DEV_NO_AUTH_CONTROL_TOKEN = "__rusty_crew_dev_no_auth__";
 
 export async function createRustyCrewServiceApp(
-  options: RustyCrewServiceAppOptions = {},
+  options: RustyCrewServiceAppOptions,
 ): Promise<RustyCrewServiceApp> {
   const serviceEnv = options.env ?? process.env;
   const config = options.config ?? loadRustyCrewServiceConfig(serviceEnv);
@@ -494,7 +486,10 @@ export async function createRustyCrewServiceApp(
     });
     const profileChannelWakePolicies =
       await loadProfileChannelWakePolicies(runtimeConfig);
-    const mcpManager = await createServiceMcpManager(runtimeConfig);
+    const mcpManager = await createServiceMcpManager(
+      runtimeConfig,
+      options.adapterFactories,
+    );
     const curator = createServiceCuratorRuntime({
       config,
       runtimeConfig,
@@ -508,6 +503,7 @@ export async function createRustyCrewServiceApp(
       bridge,
       curatorExecutor: curator.executor,
       mcpSurfaceDiagnostics: mcpManager.diagnostics(),
+      adapterFactories: options.adapterFactories,
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
     });
     const wakeSubscription = await bridge.subscribeEvents({
@@ -520,12 +516,15 @@ export async function createRustyCrewServiceApp(
       engine,
       lock,
       auditSink: createMemoryAdminControlAuditSink(),
+      adapterFactories: options.adapterFactories,
       runtimeConfig,
       runtimeConfigApplyResult,
       denGatewayClient:
         config.denSuccessorGateway === undefined
           ? undefined
-          : createDenSuccessorGatewayClient(config.denSuccessorGateway),
+          : options.adapterFactories.createDenSuccessorGatewayClient(
+              config.denSuccessorGateway,
+            ),
       denConversationChannelResolutionsByBindingId: new Map(),
       denConversationChannelIdsByExternalId: new Map(),
       denConversationMembershipsByBindingId: new Map(),
@@ -785,25 +784,44 @@ async function handleHttpRequest(
   }
 
   if (url.pathname.startsWith("/v1/admin/scheduler/")) {
-    return handleSchedulerReadRequest(request, url, state);
+    return handleSchedulerReadRequest(
+      {
+        method: request.method ?? "GET",
+        url,
+        requestId: requestId(request),
+      },
+      {
+        listScheduledJobs: (input) => state.bridge.listScheduledJobs(input),
+        listScheduledRuns: (input) => state.bridge.listScheduledRuns(input),
+      },
+    );
   }
 
   if (
     url.pathname === "/v1/admin/mcp/servers" ||
     url.pathname === "/v1/admin/mcp/catalog"
   ) {
-    return handleAdminMcpCatalogRequest(request, state);
+    return handleAdminMcpCatalogRequest(
+      { method: request.method ?? "GET", requestId: requestId(request) },
+      { config: state.config, runtimeConfig: state.runtimeConfig },
+    );
   }
 
   if (
     url.pathname === "/v1/admin/tools/catalog" ||
     url.pathname === "/v1/admin/tool-policy/catalog"
   ) {
-    return handleAdminToolsCatalogRequest(request);
+    return handleAdminToolsCatalogRequest({
+      method: request.method ?? "GET",
+      requestId: requestId(request),
+    });
   }
 
   if (url.pathname === "/v1/admin/context-strategies") {
-    return handleAdminContextStrategiesRequest(request);
+    return handleAdminContextStrategiesRequest({
+      method: request.method ?? "GET",
+      requestId: requestId(request),
+    });
   }
 
   if (
@@ -898,170 +916,6 @@ async function handleHttpRequest(
     message: `unknown service route ${url.pathname}`,
     retryable: false,
   });
-}
-
-async function handleSchedulerReadRequest(
-  request: IncomingMessage,
-  url: URL,
-  state: ServiceState,
-): Promise<AdminRouteResult> {
-  const requestIdValue = requestId(request);
-  if ((request.method ?? "GET").toUpperCase() !== "GET") {
-    return failure(405, requestIdValue, {
-      code: "method_not_allowed",
-      reason_code: "read_only_route",
-      message: "scheduler diagnostics routes only support GET",
-      retryable: false,
-    });
-  }
-
-  if (url.pathname === "/v1/admin/scheduler/jobs") {
-    const status = scheduledJobStatusParam(url.searchParams.get("status"));
-    if (status === "invalid") {
-      return invalidSchedulerFilter(requestIdValue, "status");
-    }
-    const jobKind = stringParam(url, "jobKind");
-    const jobs = await state.bridge.listScheduledJobs({
-      ...(status === undefined ? {} : { status }),
-      ...(jobKind === undefined ? {} : { jobKind }),
-      ...pageParams(url),
-    });
-    return successRoute(requestIdValue, { jobs });
-  }
-
-  if (url.pathname === "/v1/admin/scheduler/runs") {
-    const status = scheduledRunStatusParam(url.searchParams.get("status"));
-    if (status === "invalid") {
-      return invalidSchedulerFilter(requestIdValue, "status");
-    }
-    const trigger = scheduledRunTriggerParam(url.searchParams.get("trigger"));
-    if (trigger === "invalid") {
-      return invalidSchedulerFilter(requestIdValue, "trigger");
-    }
-    const jobId = stringParam(url, "jobId");
-    const targetSessionId = stringParam(url, "targetSessionId");
-    const runs = await state.bridge.listScheduledRuns({
-      ...(jobId === undefined ? {} : { jobId }),
-      ...(status === undefined ? {} : { status }),
-      ...(trigger === undefined ? {} : { trigger }),
-      ...(targetSessionId === undefined
-        ? {}
-        : { targetSessionId: targetSessionId as never }),
-      ...pageParams(url),
-    });
-    return successRoute(requestIdValue, { runs });
-  }
-
-  return failure(404, requestIdValue, {
-    code: "not_found",
-    reason_code: "unknown_scheduler_diagnostics_route",
-    message: `unknown scheduler diagnostics route ${url.pathname}`,
-    retryable: false,
-  });
-}
-
-async function handleAdminMcpCatalogRequest(
-  request: IncomingMessage,
-  state: ServiceState,
-): Promise<AdminRouteResult> {
-  const requestIdValue = requestId(request);
-  if ((request.method ?? "GET").toUpperCase() !== "GET") {
-    return failure(405, requestIdValue, {
-      code: "method_not_allowed",
-      reason_code: "mcp_catalog_read_only",
-      message: "MCP catalog routes only support GET",
-      retryable: false,
-    });
-  }
-
-  const serverCatalog = mcpServerCatalogEntries(state);
-  const serverIds = new Set(serverCatalog.map((server) => server.id));
-  const compatibilityServerId = state.config.mcp.baseUrl
-    ? state.config.mcp.servers[0]?.id
-    : undefined;
-  const bindings = state.runtimeConfig.mcpBindings.map((binding) => {
-    const endpointServerId = mcpServerIdFromEndpointRef(binding.endpointRef);
-    const resolvedServerId =
-      endpointServerId && serverIds.has(endpointServerId)
-        ? endpointServerId
-        : endpointServerId && compatibilityServerId
-          ? compatibilityServerId
-          : undefined;
-    return {
-      bindingId: binding.bindingId,
-      adapterId: binding.adapterId,
-      agentId: binding.agentId,
-      sessionId: binding.sessionId,
-      profileId: binding.profileId,
-      endpointRef: binding.endpointRef,
-      endpointServerId,
-      resolvedServerId,
-      transport: binding.transport,
-      toolProfileKey: binding.toolProfileKey,
-      serverNames: binding.serverNames,
-      status: binding.status,
-      degradedReason: binding.degradedReason,
-    };
-  });
-  const bindingCounts = new Map<string, number>();
-  for (const binding of bindings) {
-    if (!binding.resolvedServerId) continue;
-    bindingCounts.set(
-      binding.resolvedServerId,
-      (bindingCounts.get(binding.resolvedServerId) ?? 0) + 1,
-    );
-  }
-  const servers = serverCatalog.map((server) => ({
-    id: server.id,
-    label: server.label,
-    baseUrl: server.baseUrl,
-    transport: server.transport,
-    requestTimeoutMs: server.requestTimeoutMs,
-    source: server.source,
-    configuredBindingCount: bindingCounts.get(server.id) ?? 0,
-  }));
-  const toolProfiles = [
-    ...new Set(bindings.map((binding) => binding.toolProfileKey)),
-  ].sort();
-  return successRoute(requestIdValue, {
-    schemaVersion: 1,
-    compatibilityBaseUrlConfigured: Boolean(state.config.mcp.baseUrl),
-    servers,
-    toolProfiles,
-    bindings,
-  });
-}
-
-async function handleAdminToolsCatalogRequest(
-  request: IncomingMessage,
-): Promise<AdminRouteResult> {
-  const requestIdValue = requestId(request);
-  if ((request.method ?? "GET").toUpperCase() !== "GET") {
-    return failure(405, requestIdValue, {
-      code: "method_not_allowed",
-      reason_code: "tool_catalog_read_only",
-      message: "built-in tool catalog routes only support GET",
-      retryable: false,
-    });
-  }
-
-  return successRoute(requestIdValue, buildBuiltInToolCatalog());
-}
-
-async function handleAdminContextStrategiesRequest(
-  request: IncomingMessage,
-): Promise<AdminRouteResult> {
-  const requestIdValue = requestId(request);
-  if ((request.method ?? "GET").toUpperCase() !== "GET") {
-    return failure(405, requestIdValue, {
-      code: "method_not_allowed",
-      reason_code: "context_strategy_catalog_read_only",
-      message: "context strategy catalog routes only support GET",
-      retryable: false,
-    });
-  }
-
-  return successRoute(requestIdValue, contextStrategyCatalog());
 }
 
 async function handleAdminLocalToolProfilesRequest(
@@ -4027,46 +3881,22 @@ function buildServiceAdapterDiagnostics(
 
 async function createServiceMcpManager(
   runtimeConfig: RustyCrewRuntimeConfig,
-): Promise<McpSurfaceManager> {
-  const manager = new McpSurfaceManager({
+  adapterFactories: Pick<
+    ServiceAdapterFactories,
+    "createMcpSurfaceManager" | "createSimulatedMcpTransportFactory"
+  >,
+): Promise<McpSurfaceManagerPort> {
+  const manager = adapterFactories.createMcpSurfaceManager({
     transports: [
-      createSimulatedMcpTransportFactory("stdio"),
-      createSimulatedMcpTransportFactory("streamable_http"),
-      createSimulatedMcpTransportFactory("websocket"),
+      adapterFactories.createSimulatedMcpTransportFactory("stdio"),
+      adapterFactories.createSimulatedMcpTransportFactory("streamable_http"),
+      adapterFactories.createSimulatedMcpTransportFactory("websocket"),
     ],
   });
   for (const binding of runtimeConfig.mcpBindings) {
     await manager.connect(binding);
   }
   return manager;
-}
-
-function mcpServerCatalogEntries(
-  state: ServiceState,
-): RustyCrewMcpServerConfig[] {
-  const byId = new Map<string, RustyCrewMcpServerConfig>();
-  for (const server of state.config.mcp.servers) {
-    byId.set(server.id, server);
-  }
-  for (const server of state.runtimeConfig.mcpServers ?? []) {
-    byId.set(server.id, server);
-  }
-  return [...byId.values()].sort((left, right) =>
-    left.id.localeCompare(right.id),
-  );
-}
-
-function mcpServerIdFromEndpointRef(endpointRef: string): string | undefined {
-  try {
-    const url = new URL(endpointRef);
-    if (url.protocol !== "config:" || url.hostname !== "mcp") {
-      return undefined;
-    }
-    const serverId = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
-    return serverId.length > 0 ? serverId : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 async function loadProfileChannelWakePolicies(
@@ -4752,7 +4582,7 @@ async function startTelegramConnector(state: ServiceState): Promise<void> {
   const adapterId = state.config.telegram.adapterId as never;
   try {
     await state.bridge.registerPlatformAdapter(
-      createTelegramAdapterRegistration(adapterId),
+      state.adapterFactories.createTelegramAdapterRegistration(adapterId),
     );
   } catch (error) {
     recordServiceEvent(state, {
@@ -4763,21 +4593,15 @@ async function startTelegramConnector(state: ServiceState): Promise<void> {
     });
   }
 
-  const connector = new TelegramChannelConnector({
+  const connector = state.adapterFactories.createTelegramConnector({
     adapterId,
-    bot: createTelegramBotApiHttpClient({
-      token,
-      baseUrl: state.config.telegram.apiBaseUrl,
-      timeoutMs:
-        Math.max(1, state.config.telegram.pollTimeoutSeconds) * 1_000 + 5_000,
-    }),
-    offsetStore: new FileTelegramUpdateOffsetStore(
-      join(
-        state.config.paths.dataDir,
-        "data",
-        "telegram",
-        `${state.config.telegram.adapterId}-offset.json`,
-      ),
+    botToken: token,
+    apiBaseUrl: state.config.telegram.apiBaseUrl,
+    offsetStorePath: join(
+      state.config.paths.dataDir,
+      "data",
+      "telegram",
+      `${state.config.telegram.adapterId}-offset.json`,
     ),
     bindings: () =>
       activeTelegramChannelBindings(
@@ -4789,8 +4613,8 @@ async function startTelegramConnector(state: ServiceState): Promise<void> {
     pollTimeoutSeconds: state.config.telegram.pollTimeoutSeconds,
     updateLimit: state.config.telegram.updateLimit,
     now: state.now,
-    ingest: async (message) =>
-      ingestChannelInboundMessage(message, {
+    onInbound: async (message) => {
+      await state.adapterFactories.ingestChannelInboundMessage(message, {
         bridge: {
           injectExternalEvent: (event) =>
             state.bridge.injectExternalEvent(event),
@@ -4810,7 +4634,8 @@ async function startTelegramConnector(state: ServiceState): Promise<void> {
             binding,
           }),
         now: state.now(),
-      }),
+      });
+    },
   });
   const outboundSubscription = await state.bridge.subscribeEvents({
     eventKinds: ["agent_message_routed"],
@@ -4863,7 +4688,7 @@ async function drainTelegramOutboundMessages(
   const events = await state.bridge.drainSubscriptionEvents(subscription, 128);
   for (const event of events) {
     if (event.type !== "agent_message_routed") continue;
-    const projection = projectAgentMessageToChannel(
+    const projection = state.adapterFactories.projectAgentMessageToChannel(
       event.message,
       activeTelegramChannelBindings(
         state.runtimeConfig.channelBindings,
@@ -4872,13 +4697,16 @@ async function drainTelegramOutboundMessages(
       { now: state.now() },
     );
     if (projection.status === "projected") {
-      const dispatch = await dispatchChannelMessageProjection(
-        {
-          sendMessage: (message) => connector.sendOutbound(message),
-          sendActivity: () => undefined,
-        },
-        projection.message,
-      );
+      const dispatch =
+        await state.adapterFactories.dispatchChannelMessageProjection(
+          {
+            sendMessage: async (message) => {
+              await connector.sendOutbound(message);
+            },
+            sendActivity: async () => undefined,
+          },
+          projection.message,
+        );
       if (!dispatch.accepted) {
         recordChannelProjectionFailure(
           state,
@@ -5072,7 +4900,10 @@ async function applyServiceRuntimeConfigFromDisk(
   );
   const nextProfileChannelWakePolicies =
     await loadProfileChannelWakePolicies(nextRuntimeConfig);
-  const nextMcpManager = await createServiceMcpManager(nextRuntimeConfig);
+  const nextMcpManager = await createServiceMcpManager(
+    nextRuntimeConfig,
+    state.adapterFactories,
+  );
   const nextApplyResult = await applyRustyCrewRuntimeConfig({
     serviceConfig: state.config,
     runtimeConfig: nextRuntimeConfig,
@@ -5082,6 +4913,7 @@ async function applyServiceRuntimeConfigFromDisk(
     createMissingSessions: options.createMissingSessions,
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: nextMcpManager.diagnostics(),
+    adapterFactories: state.adapterFactories,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
   });
   const previousMcpManager = state.mcpManager;
@@ -10288,7 +10120,7 @@ async function deliveryIntentBody(
     );
     if (message !== undefined) {
       return {
-        body: message.body,
+        body: message.body ?? "",
         channelId: message.channel_id,
         sourceMessageId: message.id,
       };
@@ -12249,89 +12081,6 @@ function adminPanelHtml(authRequired: boolean): string {
   </script>
 </body>
 </html>`;
-}
-
-function failure(
-  status: number,
-  requestIdValue: string,
-  error: {
-    code:
-      | "unauthorized"
-      | "forbidden"
-      | "method_not_allowed"
-      | "not_found"
-      | "invalid_input"
-      | "failed_precondition"
-      | "conflict"
-      | "internal_error";
-    reason_code: string;
-    message: string;
-    retryable: boolean;
-  },
-): AdminRouteResult {
-  return {
-    status,
-    headers: { "content-type": "application/json" },
-    body: {
-      ok: false,
-      error,
-      meta: { request_id: requestIdValue, schema_version: 1 },
-    },
-  };
-}
-
-function successRoute<T>(requestIdValue: string, data: T): AdminRouteResult<T> {
-  return {
-    status: 200,
-    headers: { "content-type": "application/json" },
-    body: {
-      ok: true,
-      data,
-      meta: { request_id: requestIdValue, schema_version: 1 },
-    },
-  };
-}
-
-function invalidSchedulerFilter(
-  requestIdValue: string,
-  key: string,
-): AdminRouteResult {
-  return failure(400, requestIdValue, {
-    code: "invalid_input",
-    reason_code: "invalid_scheduler_filter",
-    message: `invalid scheduler ${key} filter`,
-    retryable: false,
-  });
-}
-
-function scheduledJobStatusParam(
-  value: string | null,
-): ScheduledJobStatus | "invalid" | undefined {
-  if (value === null || value.trim() === "") return undefined;
-  return value === "active" || value === "paused" || value === "archived"
-    ? value
-    : "invalid";
-}
-
-function scheduledRunStatusParam(
-  value: string | null,
-): ScheduledRunStatus | "invalid" | undefined {
-  if (value === null || value.trim() === "") return undefined;
-  return value === "claimed" ||
-    value === "completed" ||
-    value === "skipped" ||
-    value === "failed" ||
-    value === "expired" ||
-    value === "cancelled"
-    ? value
-    : "invalid";
-}
-
-function scheduledRunTriggerParam(
-  value: string | null,
-): ScheduledRunTrigger | "invalid" | undefined {
-  if (value === null || value.trim() === "") return undefined;
-  return value === "due" || value === "manual" ? value : "invalid";
 }
 
 function stringParam(url: URL, key: string): string | undefined {

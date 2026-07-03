@@ -1053,3 +1053,4 @@ export type {
   ContextCompactionTriggerDecision,
   ContextCompactionTriggerInput,
 } from "./context-compaction-trigger.js";
+export type { ServiceAdapterFactories } from "./service-adapter-ports.js";

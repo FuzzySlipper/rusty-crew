@@ -7,13 +7,36 @@ import {
 
 import {
   createRustyCrewServiceApp,
+  type ServiceAdapterFactories,
   type RustyCrewServiceApp,
   type RustyCrewServiceAppOptions,
 } from "@rusty-crew/brain-island";
-import type { EngineHandle } from "@rusty-crew/contracts";
+import {
+  createDenMemoryClient,
+  createDenSuccessorGatewayClient,
+  dispatchChannelMessageProjection,
+  ingestChannelInboundMessage,
+  projectAgentMessageToChannel,
+} from "@rusty-crew/adapter-den";
+import {
+  createSimulatedMcpTransportFactory,
+  McpSurfaceManager,
+} from "@rusty-crew/adapter-mcp";
+import {
+  createTelegramAdapterRegistration,
+  createTelegramBotApiHttpClient,
+  FileTelegramUpdateOffsetStore,
+  TelegramChannelConnector,
+} from "@rusty-crew/adapter-telegram";
+import type { AdapterId, EngineHandle } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
-export interface RustyCrewServiceHostOptions extends RustyCrewServiceAppOptions {}
+export interface RustyCrewServiceHostOptions extends Omit<
+  RustyCrewServiceAppOptions,
+  "adapterFactories"
+> {
+  adapterFactories?: Partial<ServiceAdapterFactories>;
+}
 
 export interface RustyCrewServiceHost {
   readonly app: RustyCrewServiceApp;
@@ -28,7 +51,13 @@ export interface RustyCrewServiceHost {
 export async function startRustyCrewServiceHost(
   options: RustyCrewServiceHostOptions = {},
 ): Promise<RustyCrewServiceHost> {
-  const app = await createRustyCrewServiceApp(options);
+  const app = await createRustyCrewServiceApp({
+    ...options,
+    adapterFactories: {
+      ...defaultServiceAdapterFactories(),
+      ...options.adapterFactories,
+    },
+  });
   const server = createServer((request, response) =>
     app.handle(request, response),
   );
@@ -60,6 +89,40 @@ export type RustyCrewServiceRequestHandler = (
   request: IncomingMessage,
   response: ServerResponse,
 ) => void;
+
+function defaultServiceAdapterFactories(): ServiceAdapterFactories {
+  return {
+    createDenSuccessorGatewayClient,
+    createDenMemoryClient,
+    createMcpSurfaceManager: (input) => new McpSurfaceManager(input),
+    createSimulatedMcpTransportFactory,
+    createTelegramAdapterRegistration: (adapterId: AdapterId) =>
+      createTelegramAdapterRegistration(adapterId),
+    createTelegramConnector: (input) =>
+      new TelegramChannelConnector({
+        adapterId: input.adapterId,
+        bot: createTelegramBotApiHttpClient({
+          token: input.botToken,
+          baseUrl: input.apiBaseUrl,
+          timeoutMs: Math.max(1, input.pollTimeoutSeconds) * 1_000 + 5_000,
+        }),
+        offsetStore: new FileTelegramUpdateOffsetStore(input.offsetStorePath),
+        bindings: input.bindings,
+        ttlMs: input.ttlMs,
+        pollIntervalMs: input.pollIntervalMs,
+        pollTimeoutSeconds: input.pollTimeoutSeconds,
+        updateLimit: input.updateLimit,
+        now: input.now,
+        ingest: async (message) => {
+          await input.onInbound(message);
+          return { status: "routed" };
+        },
+      }),
+    ingestChannelInboundMessage,
+    projectAgentMessageToChannel,
+    dispatchChannelMessageProjection,
+  };
+}
 
 function listen(server: Server, port: number, host: string): Promise<void> {
   return new Promise((resolveListen, rejectListen) => {

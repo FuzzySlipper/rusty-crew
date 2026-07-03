@@ -1,12 +1,14 @@
 import {
   createMcpBrainTool,
   discoverMcpToolCandidates,
-  type McpDiscoveryReport,
-  type McpRegistryCandidate,
-  type McpToolDiscoveryClient,
-  type McpToolExecutionResult,
-  type McpToolExecutor,
-} from "@rusty-crew/adapter-mcp";
+} from "./mcp-brain-tools.js";
+import type {
+  McpDiscoveryReport,
+  McpRegistryCandidate,
+  McpToolDiscoveryClient,
+  McpToolExecutionResult,
+  McpToolExecutor,
+} from "./service-adapter-ports.js";
 import type {
   McpBindingRecord,
   McpSurfaceDiagnostics,

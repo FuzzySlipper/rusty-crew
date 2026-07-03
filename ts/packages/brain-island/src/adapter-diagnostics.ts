@@ -1,7 +1,7 @@
 import type {
   ChannelBindingDiagnostics,
   DenAdapterStatus,
-} from "@rusty-crew/adapter-den";
+} from "./service-adapter-ports.js";
 import type {
   ChannelBindingRecord,
   McpBindingRecord,

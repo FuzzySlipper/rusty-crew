@@ -37,12 +37,12 @@ field-test configuration under `/home/system/rusty-crew`.
 - `ts/packages/native-bridge` loads the native bridge and maps Rust wire shapes
   into TypeScript.
 - `ts/packages/brain-island` owns profile loading, role assembly, pi-agent
-  integration, model-callable tools, service runtime config, admin/debug APIs,
-  and production brain wake wiring.
+  integration, model-callable tools, brain wake wiring, and adapter-neutral
+  ports consumed by the service.
 - `ts/packages/service-host` is the service composition root. It owns service
-  startup scripts now and is the landing zone for HTTP listener, route wiring,
-  adapter injection, scheduler/drain loops, and service-host smokes during the
-  phase-5 extraction.
+  startup scripts, concrete adapter injection, and service-host smoke
+  entrypoints; during phase-5 extraction it is the landing zone for the
+  remaining HTTP listener, route wiring, and drain-loop ownership.
 - `crates/brains/*` contains direct Rust brain modules that implement provider
   loops behind the neutral wake/stream/action/provider-state contract. These
   crates may not reach into Rust coordination internals.
@@ -119,6 +119,7 @@ cargo test --workspace
 npm install
 npm run test:unit
 npm run typecheck
+npm run smoke:ts-package-boundaries
 npm run format
 ```
 

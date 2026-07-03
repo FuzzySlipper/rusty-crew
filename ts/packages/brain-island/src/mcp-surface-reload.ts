@@ -2,11 +2,11 @@ import type {
   McpBindingRecord,
   McpSurfaceDiagnostics,
 } from "@rusty-crew/contracts";
-import type { McpToolDiscoveryClient } from "@rusty-crew/adapter-mcp";
-import {
-  discoverMcpToolCandidates,
-  type McpSurfaceManager,
-} from "@rusty-crew/adapter-mcp";
+import { discoverMcpToolCandidates } from "./mcp-brain-tools.js";
+import type {
+  McpSurfaceManagerPort,
+  McpToolDiscoveryClient,
+} from "./service-adapter-ports.js";
 import type { ToolInventoryRequest } from "./tool-registry.js";
 import {
   integrateMcpToolsWithRegistry,
@@ -15,7 +15,7 @@ import {
 
 export interface McpSurfaceReloadInput {
   binding: McpBindingRecord;
-  manager: McpSurfaceManager;
+  manager: McpSurfaceManagerPort;
   discoveryClient: McpToolDiscoveryClient;
   catalogId: string;
   previousToolNames?: readonly string[];
@@ -60,7 +60,9 @@ export async function reloadMcpSurface(
   const startedMs = Date.parse(startedAt);
   const oldTools = [...(input.previousToolNames ?? [])].sort();
   const connect = await input.manager.reload(input.binding);
-  const diagnostics = input.manager.diagnostics(input.binding.bindingId);
+  const diagnostics =
+    input.manager.diagnostics(input.binding.bindingId) ??
+    fallbackMcpDiagnostics(input.binding, connect.degradedReason);
 
   if (connect.status !== "active") {
     const finishedAt = now();
@@ -121,6 +123,23 @@ export async function reloadMcpSurface(
     degradedReason: registry.validation.ok
       ? undefined
       : "MCP registry validation failed after reload",
+  };
+}
+
+function fallbackMcpDiagnostics(
+  binding: McpBindingRecord,
+  lastError: string | undefined,
+): McpSurfaceDiagnostics {
+  return {
+    bindingId: binding.bindingId,
+    status: "degraded",
+    transport: binding.transport,
+    serverNames: [...binding.serverNames],
+    endpointRef: binding.endpointRef,
+    toolProfileKey: binding.toolProfileKey,
+    reconnectAttempts: 0,
+    optional: binding.diagnostics.notes?.includes("optional") ?? false,
+    lastError,
   };
 }
 

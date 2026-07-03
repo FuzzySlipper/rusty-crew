@@ -1,10 +1,10 @@
 import type {
   DenMemoryClient,
-  DenMemoryClientError,
+  DenMemoryClientErrorLike,
   DenMemoryRuntimeContext,
   DenMemoryScope,
   DenMemorySourceRef,
-} from "@rusty-crew/adapter-den";
+} from "./service-adapter-ports.js";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { SessionState } from "@rusty-crew/contracts";
 import { Type, type Static } from "typebox";
@@ -380,7 +380,7 @@ function errorResult(
   context: DenMemoryToolContext,
   error: unknown,
 ): BrainToolResult<DenMemoryToolDetails> {
-  const memoryError = error as Partial<DenMemoryClientError>;
+  const memoryError = error as DenMemoryClientErrorLike;
   const details = {
     ok: false,
     operation,

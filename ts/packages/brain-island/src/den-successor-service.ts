@@ -2,7 +2,7 @@ import { hostname } from "node:os";
 import type {
   DenSuccessorGatewayClient,
   DenSuccessorGatewayHealth,
-} from "@rusty-crew/adapter-den";
+} from "./service-adapter-ports.js";
 import type { RustyCrewConfiguredSession } from "./service-runtime-config.js";
 
 export interface DenSuccessorGatewayStartupReport {

@@ -9,13 +9,13 @@ import {
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import {
-  loadDenSuccessorGatewayConfig,
-  type DenSuccessorGatewayConfig,
-  type DenSuccessorGatewayEnv,
-  type DenMemoryApiMode,
-  type DenMemoryClientPaths,
-} from "@rusty-crew/adapter-den";
+import type {
+  DenMemoryApiMode,
+  DenMemoryClientPaths,
+  DenSuccessorGatewayConfig,
+  DenSuccessorGatewayEnv,
+  DenSuccessorGatewayTokens,
+} from "./service-adapter-ports.js";
 
 export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   [key: string]: string | undefined;
@@ -191,6 +191,8 @@ export const RUSTY_CREW_DEFAULT_DATA_DIR = "/home/agents/rusty-crew";
 export const RUSTY_CREW_DEFAULT_WORKDIR = "/home";
 export const RUSTY_CREW_DEFAULT_ADMIN_HOST = "0.0.0.0";
 export const RUSTY_CREW_DEFAULT_ADMIN_PORT = 9347;
+export const RUSTY_CREW_DEFAULT_DEN_SUCCESSOR_GATEWAY_URL =
+  "http://192.168.1.10:8079";
 export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ISSUER = "https://auth.openai.com";
 export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_CLIENT_ID =
   "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -321,6 +323,43 @@ export function loadRustyCrewServiceConfig(
     telegram,
     storage,
     denSuccessorGateway,
+  };
+}
+
+export function loadDenSuccessorGatewayConfig(
+  env: DenSuccessorGatewayEnv = process.env,
+): DenSuccessorGatewayConfig | undefined {
+  const tokens: DenSuccessorGatewayTokens = {
+    delivery:
+      normalizeOptional(env.DEN_SUCCESSOR_DELIVERY_TOKEN) ??
+      normalizeOptional(env.DEN_GATEWAY_SERVICE_TOKEN),
+    runtime:
+      normalizeOptional(env.DEN_SUCCESSOR_RUNTIME_TOKEN) ??
+      normalizeOptional(env.DEN_GATEWAY_RUNTIME_CALLER_TOKEN),
+    observationWrite:
+      normalizeOptional(env.DEN_SUCCESSOR_OBSERVATION_WRITE_TOKEN) ??
+      normalizeOptional(env.DEN_GATEWAY_OBSERVATION_WRITE_TOKEN),
+    observationRead:
+      normalizeOptional(env.DEN_SUCCESSOR_OBSERVATION_READ_TOKEN) ??
+      normalizeOptional(env.DEN_GATEWAY_OBSERVATION_READ_TOKEN),
+    conversationWrite:
+      normalizeOptional(env.DEN_SUCCESSOR_CONVERSATION_WRITE_TOKEN) ??
+      normalizeOptional(env.DEN_GATEWAY_CONVERSATION_WRITE_TOKEN),
+    conversationRead:
+      normalizeOptional(env.DEN_SUCCESSOR_CONVERSATION_READ_TOKEN) ??
+      normalizeOptional(env.DEN_GATEWAY_CONVERSATION_READ_TOKEN),
+    timelineRead:
+      normalizeOptional(env.DEN_SUCCESSOR_TIMELINE_READ_TOKEN) ??
+      normalizeOptional(env.DEN_GATEWAY_TIMELINE_READ_TOKEN),
+  };
+  if (!Object.values(tokens).some((token) => token !== undefined)) {
+    return undefined;
+  }
+  return {
+    gatewayUrl:
+      normalizeOptional(env.DEN_SUCCESSOR_GATEWAY_URL) ??
+      RUSTY_CREW_DEFAULT_DEN_SUCCESSOR_GATEWAY_URL,
+    tokens,
   };
 }
 

@@ -114,8 +114,12 @@ The initial repo scaffold now exists in `/home/dev/rusty-crew` and
   active unified manifest scaffold.
 - `ts/packages/contracts` — generated-contract placeholder.
 - `ts/packages/native-bridge` — TS bridge facade and native addon loader.
-- `ts/packages/brain-island` — current pi package brain boundary.
-- `ts/packages/adapter-*` — platform adapter placeholders.
+- `ts/packages/brain-island` — current pi package brain boundary, tool/profile
+  assembly, and adapter-neutral service ports.
+- `ts/packages/service-host` — service process composition root, concrete
+  adapter injection, startup entrypoint, and service-host smoke entrypoints.
+- `ts/packages/adapter-*` — platform adapter boundaries for Den, MCP,
+  Telegram, and operator surfaces.
 
 First checks:
 
@@ -124,6 +128,7 @@ cargo fmt --all --check
 cargo test --workspace
 npm install
 npm run typecheck
+npm run smoke:ts-package-boundaries
 npm run format
 ```
 
