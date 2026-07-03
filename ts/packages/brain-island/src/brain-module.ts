@@ -14,6 +14,7 @@ import type {
   NativeModelProviderRecord,
   OpenAiResponsesCredentialSecretUpdate,
   OpenAiResponsesBrainRunInput,
+  OpenAiResponsesTransportMetrics,
 } from "@rusty-crew/native-bridge";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
@@ -495,6 +496,9 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   events: BrainEventEnvelope[];
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
+  transportMetrics?: OpenAiResponsesTransportMetrics;
+  brainEventCounts?: Record<string, number>;
+  brainStreamItemCounts?: Record<string, number>;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
 }> {
   const bridge = context.bridge;
@@ -505,6 +509,8 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   }
   const started = await bridge.startOpenAiResponsesBrain(input);
   const actions: BrainAction[] = [];
+  const brainEventCounts: Record<string, number> = {};
+  const brainStreamItemCounts: Record<string, number> = {};
 
   for (;;) {
     const drained = await bridge.drainOpenAiResponsesBrainStream({
@@ -512,6 +518,10 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
       maxItems: 32,
     });
     for (const item of drained.items) {
+      incrementCount(brainStreamItemCounts, item.type);
+      if (item.type === "event") {
+        incrementCount(brainEventCounts, item.event.event.type);
+      }
       await handleDrainedOpenAiResponsesStreamItem(bridge, item, actions);
     }
     if (drained.error !== undefined) {
@@ -524,6 +534,9 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
         events: [],
         actions,
         providerState: drained.providerState,
+        transportMetrics: drained.transportMetrics,
+        brainEventCounts,
+        brainStreamItemCounts,
         credentialSecretUpdate: drained.credentialSecretUpdate,
       };
     }
@@ -548,6 +561,10 @@ async function handleDrainedOpenAiResponsesStreamItem(
         `OpenAI Responses wake ${item.failure.wakeId} failed: ${item.failure.message}`,
       );
   }
+}
+
+function incrementCount(counts: Record<string, number>, key: string): void {
+  counts[key] = (counts[key] ?? 0) + 1;
 }
 
 async function delay(delayMs: number): Promise<void> {
@@ -624,6 +641,7 @@ export const openAiResponsesBrainModule: BrainModule = {
         events: BrainEventEnvelope[];
         actions: BrainAction[];
         providerState?: BrainWakeProviderStateOutput;
+        transportMetrics?: OpenAiResponsesTransportMetrics;
         stream?: import("@rusty-crew/contracts").BrainWakeStreamItem[];
         credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
       }> {

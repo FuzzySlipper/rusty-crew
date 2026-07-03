@@ -56,6 +56,20 @@ try {
     firstState.providerState.sessions[0]?.payloadVersion,
     "openai-responses-state-v1",
   );
+  const firstMetrics = latestResponsesMetric(firstState);
+  assert.equal(firstMetrics.selectedStrategyId, "replay");
+  assert.equal(firstMetrics.effectiveStrategyId, "replay");
+  assert.equal(firstMetrics.effectiveTransport, "http-sse");
+  assert.equal(firstMetrics.providerRequestCount >= 1, true);
+  assert.equal(firstMetrics.providerRequestPayloadBytes > 0, true);
+  assert.equal(
+    Object.values(firstMetrics.providerEventCounts).some((count) => count > 0),
+    true,
+  );
+  assert.equal(
+    Object.values(firstMetrics.brainEventCounts).some((count) => count > 0),
+    true,
+  );
 
   const firstEvents = await chatEvents();
   assertChatKinds(firstEvents, expectedChatKinds());
@@ -94,6 +108,12 @@ try {
     secondState.providerState.sessions[0]?.lastWakeId,
     secondTurn.wakeId,
   );
+  const secondMetrics = latestResponsesMetric(secondState);
+  assert.equal(secondMetrics.wakeId, secondTurn.wakeId);
+  assert.equal(secondMetrics.selectedStrategyId, "replay");
+  assert.equal(secondMetrics.effectiveTransport, "http-sse");
+  assert.equal(secondMetrics.providerRequestCount >= 1, true);
+  assert.equal(secondMetrics.providerRequestPayloadBytes > 0, true);
 
   const secondEvents = await chatEvents();
   assertChatKinds(secondEvents, expectedChatKinds());
@@ -110,6 +130,10 @@ try {
         providerStateStatus: secondState.providerState.status,
         providerStateLastWakeId:
           secondState.providerState.sessions[0]?.lastWakeId,
+        responsesMetrics: {
+          first: summarizedMetric(firstMetrics),
+          second: summarizedMetric(secondMetrics),
+        },
         chatKinds: [...new Set(secondEvents.map((event) => event.kind))],
         liveProvider: process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE === "1",
       },
@@ -148,6 +172,7 @@ async function providerStateDiagnostics(): Promise<{
   modelProvider: {
     clientMode: string;
   };
+  responsesWakeMetrics: ResponsesWakeMetric[];
   providerState: {
     status: string;
     sessions: Array<{
@@ -170,6 +195,7 @@ async function providerStateDiagnostics(): Promise<{
       modelProvider: {
         clientMode: string;
       };
+      responsesWakeMetrics?: ResponsesWakeMetric[];
       providerState: {
         status: string;
         sessions: Array<{
@@ -185,7 +211,52 @@ async function providerStateDiagnostics(): Promise<{
     (candidate) => candidate.profileId === "responses-profile",
   );
   assert.ok(state, "responses profile provider-state diagnostics should exist");
-  return state;
+  return { ...state, responsesWakeMetrics: state.responsesWakeMetrics ?? [] };
+}
+
+interface ResponsesWakeMetric {
+  profileId: string;
+  sessionId: string;
+  wakeId: string;
+  observedAt: string;
+  effectiveTransport: string;
+  selectedStrategyId: string;
+  effectiveStrategyId: string;
+  fallbackReason?: string | null;
+  providerRequestCount: number;
+  continuationRoundCount: number;
+  providerRequestPayloadBytes: number;
+  providerEventCounts: Record<string, number>;
+  brainEventCounts: Record<string, number>;
+  brainStreamItemCounts: Record<string, number>;
+  firstTextDeltaLatencyMs?: number | null;
+  totalTurnDurationMs: number;
+}
+
+function latestResponsesMetric(input: {
+  responsesWakeMetrics: ResponsesWakeMetric[];
+}): ResponsesWakeMetric {
+  const metric = input.responsesWakeMetrics[0];
+  assert.ok(metric, "responses wake metrics should be reported");
+  return metric;
+}
+
+function summarizedMetric(metric: ResponsesWakeMetric) {
+  return {
+    wakeId: metric.wakeId,
+    effectiveTransport: metric.effectiveTransport,
+    selectedStrategyId: metric.selectedStrategyId,
+    effectiveStrategyId: metric.effectiveStrategyId,
+    fallbackReason: metric.fallbackReason ?? null,
+    providerRequestCount: metric.providerRequestCount,
+    continuationRoundCount: metric.continuationRoundCount,
+    providerRequestPayloadBytes: metric.providerRequestPayloadBytes,
+    providerEventCounts: metric.providerEventCounts,
+    brainEventCounts: metric.brainEventCounts,
+    brainStreamItemCounts: metric.brainStreamItemCounts,
+    firstTextDeltaLatencyMs: metric.firstTextDeltaLatencyMs ?? null,
+    totalTurnDurationMs: metric.totalTurnDurationMs,
+  };
 }
 
 async function chatEvents(): Promise<ChatEvent[]> {

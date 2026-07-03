@@ -510,7 +510,21 @@ export interface BrainWakeExecutionResult {
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
   stream?: BrainWakeStreamItem[];
+  transportMetrics?: OpenAiResponsesTransportMetrics;
   credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
+}
+
+export interface OpenAiResponsesTransportMetrics {
+  effectiveTransport: string;
+  selectedStrategyId: string;
+  effectiveStrategyId: string;
+  fallbackReason?: string | null;
+  providerRequestCount: number;
+  continuationRoundCount: number;
+  providerRequestPayloadBytes: number;
+  providerEventCounts: Record<string, number>;
+  firstTextDeltaLatencyMs?: number | null;
+  totalTurnDurationMs: number;
 }
 
 export interface OpenAiResponsesCredentialSecretUpdate {
@@ -1826,6 +1840,7 @@ export interface NativeBridgeModule {
     items: BrainWakeStreamItem[];
     terminal: boolean;
     providerState?: BrainWakeProviderStateOutput;
+    transportMetrics?: OpenAiResponsesTransportMetrics;
     credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
     error?: string;
   }>;
@@ -3232,6 +3247,7 @@ function createNativeBridgeModule(
         providerState: raw.provider_state
           ? toBrainWakeProviderStateOutput(raw.provider_state)
           : undefined,
+        transportMetrics: raw.transport_metrics,
         credentialSecretUpdate: raw.credential_secret_update
           ? {
               providerAlias: raw.credential_secret_update.provider_alias,
@@ -3294,6 +3310,7 @@ function createNativeBridgeModule(
         providerState: raw.provider_state
           ? toBrainWakeProviderStateOutput(raw.provider_state)
           : undefined,
+        transportMetrics: raw.transport_metrics,
         credentialSecretUpdate: raw.credential_secret_update
           ? {
               providerAlias: raw.credential_secret_update.provider_alias,
@@ -5222,6 +5239,7 @@ interface RawAgentMessage {
 interface RawOpenAiResponsesBrainRunResult {
   stream: RawBrainWakeStreamItem[];
   provider_state?: RawBrainWakeProviderStateOutput;
+  transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
 }
 
@@ -5261,6 +5279,7 @@ interface RawOpenAiResponsesBufferedDrainResult {
   items: RawBrainWakeStreamItem[];
   terminal: boolean;
   provider_state?: RawBrainWakeProviderStateOutput;
+  transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
   error?: string | null;
 }

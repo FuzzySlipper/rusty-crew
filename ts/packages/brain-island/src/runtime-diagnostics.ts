@@ -125,6 +125,7 @@ export interface RuntimeDiagnosticsInput {
   observation?: ObservationDiagnosticsInput;
   brainModules?: readonly RuntimeBrainModuleDiagnostics[];
   providerStates?: readonly RuntimeProviderStateSessionDiagnostics[];
+  responsesWakeMetrics?: readonly RuntimeResponsesWakeMetrics[];
   runtimePauses?: readonly RuntimePauseDiagnostics[];
   recentErrors?: readonly RuntimeDiagnosticError[];
   staleSessionMs?: number;
@@ -158,6 +159,7 @@ export interface RuntimeDiagnosticsProjection {
   runtime: {
     counters?: RuntimeCounterSummary;
     brainModules: RuntimeBrainModuleDiagnostics[];
+    responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
     sessions: RuntimeSessionDiagnostics[];
     delegatedSessions: RuntimeDelegationDiagnostics[];
     runtimePauses: RuntimePauseDiagnostics[];
@@ -213,6 +215,7 @@ export interface RuntimeBrainModuleDiagnostics {
   providerStateRebuild?: BrainModuleProviderStateRebuildPolicy;
   providerState?: RuntimeProviderStateDiagnostics;
   strategyDiagnostics?: BrainModuleStrategyDiagnosticsMetadata;
+  responsesWakeMetrics?: RuntimeResponsesWakeMetrics[];
   selectedToolCount: number;
   selectedToolSource: string;
   toolAdapterStatus: string;
@@ -220,6 +223,25 @@ export interface RuntimeBrainModuleDiagnostics {
 
 export type RuntimePreviousResponseChainFallbackReason =
   PreviousResponseChainFallbackReason;
+
+export interface RuntimeResponsesWakeMetrics {
+  profileId: ProfileId | string;
+  sessionId: SessionId | string;
+  wakeId: string;
+  observedAt: string;
+  effectiveTransport: string;
+  selectedStrategyId: string;
+  effectiveStrategyId: string;
+  fallbackReason?: string | null;
+  providerRequestCount: number;
+  continuationRoundCount: number;
+  providerRequestPayloadBytes: number;
+  providerEventCounts: Record<string, number>;
+  brainEventCounts: Record<string, number>;
+  brainStreamItemCounts: Record<string, number>;
+  firstTextDeltaLatencyMs?: number | null;
+  totalTurnDurationMs: number;
+}
 
 export interface RuntimeSessionEffectiveDefaults {
   ownerId?: string;
@@ -448,6 +470,7 @@ export function buildRuntimeDiagnosticsProjection(
     input.brainModules ?? [],
     sessions,
     input.providerStates ?? [],
+    input.responsesWakeMetrics ?? [],
   );
 
   const issues = [
@@ -490,6 +513,7 @@ export function buildRuntimeDiagnosticsProjection(
     runtime: {
       counters: input.runtimeSummary,
       brainModules,
+      responsesWakeMetrics: [...(input.responsesWakeMetrics ?? [])],
       sessions,
       delegatedSessions,
       runtimePauses: [...(input.runtimePauses ?? [])],
@@ -507,6 +531,7 @@ function brainModuleDiagnostics(
   modules: readonly RuntimeBrainModuleDiagnostics[],
   sessions: readonly RuntimeSessionDiagnostics[],
   providerStates: readonly RuntimeProviderStateSessionDiagnostics[],
+  responsesWakeMetrics: readonly RuntimeResponsesWakeMetrics[],
 ): RuntimeBrainModuleDiagnostics[] {
   return modules.map((module) => {
     const providerState = providerStateDiagnosticsForModule(
@@ -514,7 +539,16 @@ function brainModuleDiagnostics(
       sessions.filter((session) => session.profileId === module.profileId),
       providerStates,
     );
-    return providerState === undefined ? module : { ...module, providerState };
+    const moduleMetrics = responsesWakeMetrics.filter(
+      (metric) => metric.profileId === module.profileId,
+    );
+    return {
+      ...module,
+      ...(providerState === undefined ? {} : { providerState }),
+      ...(moduleMetrics.length === 0
+        ? {}
+        : { responsesWakeMetrics: moduleMetrics }),
+    };
   });
 }
 

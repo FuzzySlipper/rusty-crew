@@ -517,6 +517,24 @@ const openAiResponsesClientSchema = Type.Union([
   ),
 ]);
 
+const openAiResponsesTransportMetricsSchema = Type.Object(
+  {
+    effectiveTransport: Type.String(),
+    selectedStrategyId: Type.String(),
+    effectiveStrategyId: Type.String(),
+    fallbackReason: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    providerRequestCount: Type.Number(),
+    continuationRoundCount: Type.Number(),
+    providerRequestPayloadBytes: Type.Number(),
+    providerEventCounts: Type.Record(Type.String(), Type.Number()),
+    firstTextDeltaLatencyMs: Type.Optional(
+      Type.Union([Type.Number(), Type.Null()]),
+    ),
+    totalTurnDurationMs: Type.Number(),
+  },
+  { additionalProperties: true },
+);
+
 export const openAiResponsesBrainRunInputSchema = Type.Object(
   {
     wakeId: Type.String(),
@@ -724,6 +742,7 @@ export const rawOpenAiResponsesBrainRunResultSchema = Type.Object(
   {
     stream: Type.Array(rawBrainWakeStreamItemSchema),
     provider_state: Type.Optional(rawProviderStateOutputSchema),
+    transport_metrics: Type.Optional(openAiResponsesTransportMetricsSchema),
     credential_secret_update: Type.Optional(
       Type.Object(
         {

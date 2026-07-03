@@ -239,6 +239,7 @@ export function handleAdminDiagnosticsRequest(
           modelProvider: module.modelProvider,
           providerStateMode: module.providerStateMode,
           providerState: module.providerState,
+          responsesWakeMetrics: module.responsesWakeMetrics ?? [],
         })),
       );
     case "/v1/admin/diagnostics/observation":

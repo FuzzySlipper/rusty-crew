@@ -157,6 +157,7 @@ import {
   buildRuntimeDiagnosticsProjection,
   type RuntimeSessionEffectiveDefaults,
   type RuntimePauseDiagnostics,
+  type RuntimeResponsesWakeMetrics,
   type StorageDiagnosticsProjection,
 } from "./runtime-diagnostics.js";
 import {
@@ -279,6 +280,7 @@ import {
   type RustyCrewConfiguredSession,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
+  type ServiceBrainWakeResultObservation,
 } from "./service-runtime-config.js";
 import { createRuntimeActivityObserver } from "./runtime-activity-observer.js";
 import {
@@ -363,6 +365,7 @@ interface ServiceState {
   readonly chatEventsBySession: Map<SessionId, ChatEvent[]>;
   readonly chatSequencesBySession: Map<SessionId, number>;
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
+  readonly responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
   schedulerHeartbeat: ServiceSchedulerHeartbeatState;
@@ -507,6 +510,11 @@ export async function createRustyCrewServiceApp(
       mcpSurfaceDiagnostics: mcpManager.diagnostics(),
       adapterFactories: options.adapterFactories,
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
+      onBrainWakeResult: (observation) => {
+        const state = liveState;
+        if (state === undefined) return;
+        recordResponsesWakeMetrics(state, observation);
+      },
     });
     const wakeSubscription = await bridge.subscribeEvents({
       eventKinds: ["brain_wake_requested"],
@@ -551,6 +559,7 @@ export async function createRustyCrewServiceApp(
       chatEventsBySession: new Map(),
       chatSequencesBySession: new Map(),
       chatSubscribersBySession: new Map(),
+      responsesWakeMetrics: [],
       suppressedWakeEvents: new Map(),
       recentEvents: [],
       schedulerHeartbeat: {
@@ -3140,6 +3149,7 @@ async function buildDiagnosticsContext(
     delegatedSessions: [],
     brainModules: brainModuleDiagnostics(state),
     providerStates,
+    responsesWakeMetrics: state.responsesWakeMetrics,
     adapters: buildServiceAdapterDiagnostics(state, now),
     persistence: {
       tableCounts: tableCountMap(storage),
@@ -3627,6 +3637,72 @@ function brainModuleDiagnostics(
       toolAdapterStatus: "unknown",
     };
   });
+}
+
+function recordResponsesWakeMetrics(
+  state: ServiceState,
+  observation: ServiceBrainWakeResultObservation,
+): void {
+  const metrics = observation.result.transportMetrics;
+  if (metrics === undefined) return;
+  const brainEventCounts =
+    observation.result.brainEventCounts ?? countBrainEvents(observation.result);
+  const brainStreamItemCounts =
+    observation.result.brainStreamItemCounts ??
+    countBrainStreamItems(observation.result);
+  state.responsesWakeMetrics.unshift({
+    profileId: observation.profileId,
+    sessionId: observation.sessionId,
+    wakeId: observation.wakeId,
+    observedAt: state.now(),
+    effectiveTransport: metrics.effectiveTransport,
+    selectedStrategyId: metrics.selectedStrategyId,
+    effectiveStrategyId: metrics.effectiveStrategyId,
+    fallbackReason: metrics.fallbackReason,
+    providerRequestCount: metrics.providerRequestCount,
+    continuationRoundCount: metrics.continuationRoundCount,
+    providerRequestPayloadBytes: metrics.providerRequestPayloadBytes,
+    providerEventCounts: metrics.providerEventCounts,
+    brainEventCounts,
+    brainStreamItemCounts,
+    firstTextDeltaLatencyMs: metrics.firstTextDeltaLatencyMs,
+    totalTurnDurationMs: metrics.totalTurnDurationMs,
+  });
+  state.responsesWakeMetrics.splice(50);
+}
+
+function countBrainEvents(
+  result: ServiceBrainWakeResultObservation["result"],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const event of result.events) {
+    incrementRecordCount(counts, event.event.type);
+  }
+  for (const item of result.stream ?? []) {
+    if (item.type === "event") {
+      incrementRecordCount(counts, item.event.event.type);
+    }
+  }
+  return counts;
+}
+
+function countBrainStreamItems(
+  result: ServiceBrainWakeResultObservation["result"],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of result.stream ?? []) {
+    incrementRecordCount(counts, item.type);
+  }
+  if (result.events.length > 0) incrementRecordCount(counts, "event");
+  if (result.actions.length > 0) incrementRecordCount(counts, "actions");
+  return counts;
+}
+
+function incrementRecordCount(
+  counts: Record<string, number>,
+  key: string,
+): void {
+  counts[key] = (counts[key] ?? 0) + 1;
 }
 
 async function effectiveSessionDefaultsById(
@@ -7273,6 +7349,8 @@ async function applyServiceRuntimeRebuild(
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    onBrainWakeResult: (observation) =>
+      recordResponsesWakeMetrics(state, observation),
   });
   state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId] =
     rebuild.handle;
@@ -7379,6 +7457,8 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    onBrainWakeResult: (observation) =>
+      recordResponsesWakeMetrics(state, observation),
   });
   state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId] =
     rebuild.handle;
