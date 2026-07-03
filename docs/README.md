@@ -128,6 +128,7 @@ cargo fmt --all --check
 cargo test --workspace
 npm install
 npm run typecheck
+npm run smoke:architecture-boundaries
 npm run smoke:ts-package-boundaries
 npm run format
 ```

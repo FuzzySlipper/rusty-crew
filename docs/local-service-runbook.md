@@ -83,6 +83,73 @@ Enter the local admin token from
 `RUSTY_CREW_ADMIN_AUTH_MODE=none`, the token box is hidden and the page reads
 diagnostics directly.
 
+## Reset And Recreate Local Test State
+
+During the architecture-remediation window, local Rusty Crew state is disposable
+test data. Prefer resetting current-shape state and recreating it through the
+official APIs over preserving old `/home/agents/rusty-crew` data or adding
+compatibility fallback reads.
+
+Stop the service first:
+
+```bash
+systemctl --user stop rusty-crew.service
+```
+
+If using direct-run testing, stop the foreground process with `Ctrl-C`.
+
+For SQLite test roots, archive or remove only stopped-service mutable state:
+
+```bash
+mv /home/system/rusty-crew/data \
+  /home/system/rusty-crew/data.reset.$(date +%Y%m%d%H%M%S)
+rm -rf /home/system/rusty-crew/run/*
+```
+
+For the shared local PostgreSQL service, reset the configured disposable schema
+instead of trying to migrate scratch data. Source the local secret env only in
+the shell where you run `psql`; do not copy the URL into docs or commits.
+
+```bash
+set -a
+. /home/system/database/rusty-crew-postgres.env
+. /home/system/rusty-crew/config/service.env
+set +a
+psql "$RUSTY_CREW_DATABASE_URL" \
+  -v schema="${RUSTY_CREW_POSTGRES_SCHEMA:-rusty_crew}" \
+  -c 'DROP SCHEMA IF EXISTS :"schema" CASCADE;' \
+  -c 'CREATE SCHEMA :"schema";'
+rm -rf /home/system/rusty-crew/run/*
+```
+
+Restart after the reset:
+
+```bash
+systemctl --user start rusty-crew.service
+```
+
+Recreate runtime state through API/UI paths:
+
+- model providers: `POST /v1/admin/model-providers?refresh=apply`;
+- local tool profiles: read/seed through `GET /v1/admin/local-tool-profiles`;
+- profiles/sessions/brain registration:
+  `POST /v1/admin/control/profiles`;
+- MCP bindings: configure through the profile/control API path rather than
+  hand-editing old service files;
+- live test profile: follow `docs/live-test-profile-setup.md`.
+
+After recreation, verify the service and Rusty View see current state:
+
+```bash
+curl http://127.0.0.1:9347/v1/admin/healthz
+curl -H "authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
+  http://127.0.0.1:9347/v1/admin/readyz
+curl -H "authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
+  http://127.0.0.1:9347/v1/admin/diagnostics
+```
+
+In `RUSTY_CREW_ADMIN_AUTH_MODE=none`, omit the authorization header.
+
 ## Static Frontend
 
 Rusty Crew can serve a static frontend from the same origin as the service API.

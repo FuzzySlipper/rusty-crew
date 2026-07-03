@@ -47,7 +47,8 @@ Recommended SQLite posture for small roleplay/container deployments:
 
 - run one Rusty Crew service process as the SQLite writer;
 - store the database in the service data directory, for example
-  `/home/agents/rusty-crew/data/engine/coordination.sqlite3`;
+  `/home/system/rusty-crew/data/engine/coordination.sqlite3` for the local
+  system install;
 - keep WAL enabled unless there is a specific filesystem reason not to;
 - expose storage diagnostics in the admin UI so WAL bytes, search health,
   maintenance capability, and table counts stay visible;

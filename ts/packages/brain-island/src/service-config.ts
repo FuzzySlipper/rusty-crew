@@ -187,7 +187,7 @@ export interface RustyCrewServiceLock {
   release(): void;
 }
 
-export const RUSTY_CREW_DEFAULT_DATA_DIR = "/home/agents/rusty-crew";
+export const RUSTY_CREW_DEFAULT_DATA_DIR = "/home/system/rusty-crew";
 export const RUSTY_CREW_DEFAULT_WORKDIR = "/home";
 export const RUSTY_CREW_DEFAULT_ADMIN_HOST = "0.0.0.0";
 export const RUSTY_CREW_DEFAULT_ADMIN_PORT = 9347;

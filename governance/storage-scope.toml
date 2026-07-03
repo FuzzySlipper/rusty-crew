@@ -10,6 +10,8 @@ label = "Storage Admin"
 owns = [
   "schema_migrations",
   "runtime_import_batches",
+  "legacy_id_mappings",
+  "rusty_crew_storage_metadata",
 ]
 notes = "Migrations, backend diagnostics, maintenance, logical import/export batch metadata."
 
@@ -18,9 +20,11 @@ id = "sessions_identities"
 label = "Sessions And Identities"
 owns = [
   "agents",
+  "agent_identities",
   "agent_instances",
   "sessions",
   "session_identity",
+  "session_identities",
   "session_configs",
 ]
 notes = "Durable agent, instance, session, and immutable session config records."
@@ -30,6 +34,12 @@ id = "events_projections"
 label = "Events And Body Projections"
 owns = [
   "event_history",
+  "event_index",
+  "event_session_index",
+  "event_agent_index",
+  "event_instance_index",
+  "event_correlation_index",
+  "event_wake_index",
   "body_projections",
 ]
 notes = "Append-only events and restart hydration projections."
@@ -57,10 +67,14 @@ id = "worker_runs_completions"
 label = "Worker Runs And Completions"
 owns = [
   "worker_runs",
+  "worker_pool_members",
+  "worker_pool_work_items",
+  "worker_pool_leases",
+  "worker_pool_events",
   "completion_packets",
   "delegated_fan_out_groups",
 ]
-notes = "Worker/delegated run state, completion packets, delegation lineage, fan-out groups."
+notes = "Worker/delegated run state, worker pool state, completion packets, delegation lineage, fan-out groups."
 
 [[scope]]
 id = "provider_state"
@@ -93,10 +107,14 @@ id = "conversations_attachments"
 label = "Conversations And Attachments"
 owns = [
   "message_slots",
+  "messages",
+  "message_blocks",
   "message_variants",
   "conversation_branches",
+  "conversation_branch_state",
   "conversation_snapshots",
   "attachments",
+  "attachment_links",
   "data_bank_scopes",
 ]
 notes = "Transcripts, branch state, message variants, attachments, and data-bank scopes."
@@ -108,7 +126,10 @@ owns = [
   "profile_memories",
   "memory_spaces",
   "memory_proposals",
+  "memory_governance_decisions",
+  "session_memory_records",
   "module_schema_registry",
+  "module_schema_versions",
 ]
 generated_prefixes = [
   "module_",
@@ -123,6 +144,7 @@ label = "Telemetry And Search"
 owns = [
   "runtime_counters",
   "runtime_search_fts",
+  "runtime_search_entries",
   "tool_call_history",
   "session_activity_digests",
   "context_compaction_artifacts",
@@ -136,4 +158,6 @@ den_as_crew_storage = "forbidden"
 dynamic_physical_names = "must_be_whitelisted_or_descriptor_generated"
 module_tables = "must_use_module_schema_registry_descriptors"
 queue_import = "must_not_resurrect_expired_or_terminal_work"
-
+test_only_tables = [
+  "partial_migration_marker",
+]

@@ -1,6 +1,6 @@
 # Storage Scope Governance
 
-Status: initial governance design for task 3909
+Status: active governance map with first mechanical boundary check
 
 Date: 2026-07-01
 
@@ -8,10 +8,12 @@ Date: 2026-07-01
 
 Rusty Crew owns Crew service storage, but ownership must be partitioned. This
 document defines the storage-scope groups that should guide the
-`core-persistence` split and future boundary smokes.
+`core-persistence` split and boundary smokes.
 
-This is a planning and governance document. It does not migrate tables by
-itself.
+This is a governance document. It does not migrate tables by itself. The
+companion machine-readable map is enforced by `npm run smoke:storage-scope`;
+architecture boundary work can run the broader
+`npm run smoke:architecture-boundaries` alias.
 
 ## Scope Groups
 
@@ -106,20 +108,26 @@ not become a physical table/index name.
 - Backend-specific features are hidden behind repository contracts and
   capability diagnostics.
 
-## Mechanical Checks To Add
+## Mechanical Checks
 
-Future boundary smokes should be able to check:
+The first boundary smoke checks:
 
-1. Every raw table in migrations is assigned to one storage scope group.
-2. Every generated `module_` table belongs to a registered module descriptor.
-3. No SQL-like dependency leaks outside `crates/core/core-persistence` or a
+- Every raw table created in Rust persistence code is assigned to one storage
+  scope group or uses an approved generated module prefix.
+- SQL-like Rust code stays under `crates/core/core-persistence`.
+- TypeScript packages do not issue raw SQL.
+
+Future boundary smokes should grow to check:
+
+1. Every generated `module_` table belongs to a registered module descriptor.
+2. No SQL-like dependency leaks outside `crates/core/core-persistence` or a
    future approved storage crate.
-4. Dynamic SQL helpers use whitelisted table/index names.
-5. `governance/storage-scope.toml` agrees with repository diagnostics exposed by
+3. Dynamic SQL helpers use whitelisted table/index names.
+4. `governance/storage-scope.toml` agrees with repository diagnostics exposed by
    `repositories.rs`.
-6. TypeScript packages do not import SQLite/Postgres client libraries or shell
+5. TypeScript packages do not import SQLite/Postgres client libraries or shell
    out to inspect the Crew DB.
-7. Bridge operation additions that expose storage data point at a typed
+6. Bridge operation additions that expose storage data point at a typed
    repository/query-catalog contract.
 
 ## Implementation Notes
@@ -128,4 +136,3 @@ The first implementation task should use this document to turn
 `repositories.rs` into a concrete module split map. The check can start
 lightweight: inventory tables and fail on unassigned raw names. It can grow as
 the repository modules become real.
-

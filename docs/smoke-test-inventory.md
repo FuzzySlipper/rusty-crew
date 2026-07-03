@@ -26,6 +26,15 @@ aliases such as `npm run smoke:brain`, `npm run smoke:den`,
 `npm run smoke:bridge-wake`, `npm run smoke:delegated-slice`, and
 `npm run smoke:mid-turn` remain valid during the transition.
 
+Architecture boundary work should also run:
+
+```sh
+npm run smoke:architecture-boundaries
+```
+
+That alias runs the Rust crate dependency firewall, TypeScript package boundary
+check, and storage-scope ownership check together.
+
 ## Categories
 
 Use these categories when adding or reclassifying smokes.

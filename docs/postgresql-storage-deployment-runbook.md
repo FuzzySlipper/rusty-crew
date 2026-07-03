@@ -21,7 +21,7 @@ Use SQLite when:
 The expected local file lives under the service data directory, for example:
 
 ```text
-/home/agents/rusty-crew/data/engine/coordination.sqlite3
+/home/system/rusty-crew/data/engine/coordination.sqlite3
 ```
 
 SQLite WAL mode also creates `coordination.sqlite3-wal` and

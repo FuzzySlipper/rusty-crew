@@ -97,6 +97,7 @@ cargo test --workspace
 # TypeScript and docs formatting
 npm run format
 npm run typecheck
+npm run smoke:architecture-boundaries
 npm run smoke:ts-package-boundaries
 
 # Native bridge
