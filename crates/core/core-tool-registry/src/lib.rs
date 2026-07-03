@@ -41,6 +41,7 @@ pub enum ToolCategory {
     Storage,
     Skills,
     Mcp,
+    Coordination,
     Delegation,
     Planning,
     Diagnostics,
@@ -63,6 +64,7 @@ pub enum ToolSafetyFlag {
     ReadOnly,
     WritesFiles,
     ExecutesProcess,
+    WorkdirScoped,
     NetworkAccess,
     ExternalWrite,
     CoordinationAction,
@@ -456,7 +458,7 @@ mod tests {
 
         assert_eq!(artifact.schema_version, 1);
         assert_eq!(artifact.catalog_id, "default-local-tools");
-        assert_eq!(artifact.tools.len(), 41);
+        assert_eq!(artifact.tools.len(), 52);
 
         let result = validate_tool_metadata_list(&artifact.tools);
 

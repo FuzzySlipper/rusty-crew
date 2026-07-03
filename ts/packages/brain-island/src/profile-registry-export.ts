@@ -117,10 +117,7 @@ function generatedProfileYaml(
   return {
     targetPath: "profile.yaml",
     kind: "generated_profile_yaml",
-    source:
-      record.source === "registry"
-        ? "registry_active_state"
-        : "generated_metadata",
+    source: "registry_active_state",
     contentJson: stripUndefined({
       profileId: record.profileId,
       displayName: record.displayName,
@@ -133,9 +130,7 @@ function generatedProfileYaml(
       fallbackStatus: record.fallbackStatus,
     }),
     notes: [
-      record.source === "registry"
-        ? "generated from DB-backed registry state; prompt text is DB-backed and exported as markdown entries"
-        : "generated from file-backed fallback projection; import into registry before treating this as active DB state",
+      "generated from DB-backed registry state; prompt text is DB-backed and exported as markdown entries",
     ],
   };
 }
@@ -342,11 +337,6 @@ function exportWarnings(
   entries: readonly ProfileBundleExportEntry[],
 ): string[] {
   const warnings: string[] = [];
-  if (record.source === "file_fallback") {
-    warnings.push(
-      "profile is exported from file-backed fallback projection, not DB-authoritative registry state",
-    );
-  }
   if (entries.some((entry) => entry.assetStatus === "changed")) {
     warnings.push(
       "one or more source asset fingerprints differ from the registry snapshot",

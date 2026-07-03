@@ -48,7 +48,7 @@ service applies changes.
 - loads skills and prompt fragments;
 - builds profile context and tool selection inputs.
 
-`service-host.ts` currently:
+`service-app.ts` currently:
 
 - implements admin create-profile plumbing;
 - validates component ids with a local regex;

@@ -63,7 +63,7 @@ to request compaction.
 ## Wake Hook
 
 The central hook is `dispatchWakeForSession` in
-`ts/packages/brain-island/src/service-host.ts`.
+`ts/packages/brain-island/src/service-app.ts`.
 
 Current high-level flow:
 

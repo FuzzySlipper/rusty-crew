@@ -271,7 +271,7 @@ export function handleAdminDiagnosticsRequest(
                 generatedAt: new Date(0).toISOString(),
                 records: [],
                 registryCount: 0,
-                fileFallbackCount: 0,
+                missingRegistryRefCount: 0,
                 driftCount: 0,
                 missingAssetCount: 0,
                 diagnostics: [],

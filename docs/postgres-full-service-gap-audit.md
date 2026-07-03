@@ -1,6 +1,10 @@
 # PostgreSQL Full-Service Gap Audit
 
-Status: audit for task 3502
+Status: historical audit for task 3502. This file records the state observed
+before the `/home/system/rusty-crew` PostgreSQL cutover work landed. Do not use
+the "Current Live Deployment" section as current operational truth; use
+`README.md`, `docs/local-service-runbook.md`,
+`docs/system-rusty-crew-install-layout.md`, and live diagnostics instead.
 
 Date: 2026-06-27
 

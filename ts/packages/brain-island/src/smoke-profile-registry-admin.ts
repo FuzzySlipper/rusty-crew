@@ -30,19 +30,6 @@ modelConfig:
   const originalHash =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
-  const fallbackDir = join(profilesDir, "file-only");
-  mkdirSync(fallbackDir, { recursive: true });
-  writeFileSync(
-    join(fallbackDir, "profile.yaml"),
-    `profileIdentity: file-only
-displayName: File Only
-modelConfig:
-  provider: den-router
-  model: local-deterministic
-`,
-  );
-  writeFileSync(join(fallbackDir, "soul.md"), "Do useful fallback work.");
-
   const registryRecords: NativeProfileRegistryRecord[] = [
     {
       profileId: "registered",
@@ -109,8 +96,14 @@ modelConfig:
   });
 
   assert.equal(diagnostics.registryCount, 2);
-  assert.equal(diagnostics.fileFallbackCount, 1);
+  assert.equal(diagnostics.missingRegistryRefCount, 1);
   assert.equal(diagnostics.driftCount, 1);
+  assert.equal(
+    diagnostics.diagnostics.find(
+      (diagnostic) => diagnostic.code === "profile_registry_record_missing",
+    )?.path,
+    "profiles.file-only",
+  );
   assert.equal(
     diagnostics.records.find((record) => record.profileId === "registered")
       ?.sourceAssetStatuses[0]?.status,
@@ -119,18 +112,7 @@ modelConfig:
   assert.equal(
     diagnostics.records.find((record) => record.profileId === "file-only")
       ?.source,
-    "file_fallback",
-  );
-  assert.equal(
-    diagnostics.records
-      .find((record) => record.profileId === "file-only")
-      ?.sourceAssetStatuses.some((asset) => asset.assetKind === "soul_md"),
-    true,
-  );
-  assert.equal(
-    diagnostics.records.find((record) => record.profileId === "file-only")
-      ?.promptSoulMarkdown,
-    "Do useful fallback work.",
+    undefined,
   );
   assert.equal(
     diagnostics.records.find((record) => record.profileId === "registered")
@@ -152,7 +134,7 @@ modelConfig:
     JSON.stringify(
       {
         registryCount: diagnostics.registryCount,
-        fileFallbackCount: diagnostics.fileFallbackCount,
+        missingRegistryRefCount: diagnostics.missingRegistryRefCount,
         driftCount: diagnostics.driftCount,
       },
       null,

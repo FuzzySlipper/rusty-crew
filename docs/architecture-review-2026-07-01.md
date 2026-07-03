@@ -3,6 +3,13 @@
 Read-only examination of the repository as of commit `de2a31a`. Companion
 implementation plan: `architecture-remediation-plan.md`.
 
+Status note (2026-07-03): this is a historical review input, not current
+architecture truth. Several findings have since been addressed or converted
+into ADRs/tasks, including first-class Rust brain modules, Crew-owned service
+storage, bridge streaming responsiveness, service-host extraction, storage
+scope governance, and live deliverable certification. Use current ADRs,
+`README.md`, `agents-project.md`, and Den guidance for active policy.
+
 ## Overall assessment
 
 The macro-architecture is well-conceived and well-documented: a deterministic

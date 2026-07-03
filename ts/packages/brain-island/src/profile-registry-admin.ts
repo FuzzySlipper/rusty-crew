@@ -6,16 +6,14 @@ import type {
   NativeProfileRegistryRecord,
 } from "@rusty-crew/native-bridge";
 import type { McpBindingRecord, ProfileId } from "@rusty-crew/contracts";
-import { buildProfileRegistryImportPlan } from "./profile-registry-import.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { NativeRuntimeConfigDiagnostic } from "@rusty-crew/native-bridge";
-import { loadProfileConfig, type ProfileConfig } from "./profile-loading.js";
 import {
   contextStrategyPolicyFromUnknown,
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
 
-export type AdminProfileRegistrySource = "registry" | "file_fallback";
+export type AdminProfileRegistrySource = "registry";
 export type AdminProfileAssetStatus =
   | "tracked"
   | "missing"
@@ -68,14 +66,14 @@ export interface AdminProfileRegistryRecord {
   sourceAssetRefs: NativeProfileRegistryRecord["sourceAssetRefs"];
   sourceAssetStatuses: AdminProfileRegistryAssetStatus[];
   diagnostics: NativeRuntimeConfigDiagnostic[];
-  fallbackStatus: "registry_authoritative" | "file_backed_fallback";
+  fallbackStatus: "registry_authoritative";
 }
 
 export interface AdminProfileRegistryDiagnostics {
   generatedAt: string;
   records: AdminProfileRegistryRecord[];
   registryCount: number;
-  fileFallbackCount: number;
+  missingRegistryRefCount: number;
   driftCount: number;
   missingAssetCount: number;
   diagnostics: NativeRuntimeConfigDiagnostic[];
@@ -99,52 +97,33 @@ export async function buildAdminProfileRegistryDiagnostics(
   );
   const configuredProfileIds =
     input.profileIds ?? profileIdsFromRuntimeConfig(input.runtimeConfig);
-  const fallbackPlans = await Promise.all(
-    configuredProfileIds
-      .filter((profileId) => !registryProfileIds.has(profileId))
-      .map(async (profileId) => {
-        try {
-          return await buildProfileRegistryImportPlan({
-            profilesDir: input.runtimeConfig.profilesDir,
-            profileId,
-            now: input.now,
-          });
-        } catch (error) {
-          return {
-            profileId,
-            error,
-          };
-        }
+  const missingRegistryDiagnostics = configuredProfileIds
+    .filter((profileId) => !registryProfileIds.has(profileId))
+    .map(
+      (profileId): NativeRuntimeConfigDiagnostic => ({
+        severity: "error",
+        code: "profile_registry_record_missing",
+        path: `profiles.${profileId}`,
+        message:
+          "profile is referenced by runtime config but has no DB-backed profile registry record",
       }),
-  );
-  const records = [
-    ...(await Promise.all(
+    );
+  const records = (
+    await Promise.all(
       registryRecords.map((record) =>
         registryAdminRecord(record, input.runtimeConfig),
       ),
-    )),
-    ...(await Promise.all(
-      fallbackPlans.flatMap((fallback) =>
-        "registryWrite" in fallback
-          ? [fallbackAdminRecord(fallback)]
-          : [
-              missingFallbackRecord(
-                fallback.profileId,
-                fallback.error,
-                input.now,
-              ),
-            ],
-      ),
-    )),
-  ].sort((left, right) => left.profileId.localeCompare(right.profileId));
-  const diagnostics = records.flatMap((record) => record.diagnostics);
+    )
+  ).sort((left, right) => left.profileId.localeCompare(right.profileId));
+  const diagnostics = [
+    ...missingRegistryDiagnostics,
+    ...records.flatMap((record) => record.diagnostics),
+  ];
   return {
     generatedAt: input.now,
     records,
     registryCount: registryRecords.length,
-    fileFallbackCount: records.filter(
-      (record) => record.source === "file_fallback",
-    ).length,
+    missingRegistryRefCount: missingRegistryDiagnostics.length,
     driftCount: records.filter((record) =>
       record.sourceAssetStatuses.some((asset) => asset.status === "changed"),
     ).length,
@@ -179,15 +158,7 @@ async function registryAdminRecord(
     record.sourceAssetRefs,
     runtimeConfig.profilesDir,
   );
-  const profile = await loadProfileConfig(
-    runtimeConfig.profilesDir,
-    record.profileId as ProfileId,
-  ).catch(() => undefined);
-  const runtime = runtimeConfigReadbackFromRegistry(
-    record,
-    runtimeConfig,
-    profile,
-  );
+  const runtime = runtimeConfigReadbackFromRegistry(record, runtimeConfig);
   return {
     source: "registry",
     profileId: record.profileId,
@@ -217,62 +188,9 @@ async function registryAdminRecord(
   };
 }
 
-async function fallbackAdminRecord(
-  plan: Awaited<ReturnType<typeof buildProfileRegistryImportPlan>>,
-): Promise<AdminProfileRegistryRecord> {
-  const sourceAssetStatuses = await assetStatuses(
-    plan.registryWrite.sourceAssetRefs.map((ref) => ({
-      assetKind: ref.assetKind,
-      path: ref.path,
-      contentHash: ref.contentHash,
-      lastSeenAt: ref.lastSeenAt,
-      metadataJson: ref.metadataJson,
-    })),
-  );
-  return {
-    source: "file_fallback",
-    profileId: plan.profile.profileId,
-    lifecycleStatus: plan.registryWrite.lifecycleStatus,
-    displayName: plan.registryWrite.displayName,
-    summary: plan.registryWrite.summary,
-    defaultSessionKind: plan.registryWrite.defaultSessionKind,
-    agentId: plan.registryWrite.agentId,
-    ownerId: plan.registryWrite.ownerId,
-    providerAlias: plan.profile.providerAlias,
-    localToolProfileId: plan.profile.localToolProfileId,
-    toolPolicy: adminToolPolicy(plan.profile.toolPolicy),
-    contextPolicy: plan.profile.contextPolicy,
-    promptSoulMarkdown: plan.registryWrite.promptSoulMarkdown,
-    promptMemoryMarkdown: plan.registryWrite.promptMemoryMarkdown,
-    importedFrom: plan.registryWrite.importExport.importedFrom,
-    importedAt: plan.registryWrite.importExport.importedAt,
-    activeRuntimeRefs: plan.registryWrite.derivedRuntimeRefs,
-    sourceAssetRefs: plan.registryWrite.sourceAssetRefs.map((ref) => ({
-      assetKind: ref.assetKind,
-      path: ref.path,
-      contentHash: ref.contentHash,
-      lastSeenAt: ref.lastSeenAt,
-      metadataJson: ref.metadataJson,
-    })),
-    sourceAssetStatuses,
-    diagnostics: [
-      {
-        severity: "info",
-        code: "file_backed_profile_fallback",
-        path: `profiles.${plan.profile.profileId}`,
-        message:
-          "profile is currently available through file-backed compatibility loading and has no DB registry record",
-      },
-      ...plan.diagnostics,
-    ],
-    fallbackStatus: "file_backed_fallback",
-  };
-}
-
 function runtimeConfigReadbackFromRegistry(
   record: NativeProfileRegistryRecord,
   runtimeConfig: RustyCrewRuntimeConfig,
-  profile?: ProfileConfig,
 ): {
   providerAlias?: string;
   localToolProfileId?: string;
@@ -289,23 +207,18 @@ function runtimeConfigReadbackFromRegistry(
     providerAlias:
       stringValue(settings.providerAlias) ??
       stringValue(settings.provider_alias) ??
-      profile?.providerAlias ??
       settingsProfile.providerAlias,
     localToolProfileId:
       stringValue(settings.localToolProfileId) ??
       stringValue(settings.local_tool_profile_id) ??
-      profile?.localToolProfileId ??
       settingsProfile.localToolProfileId,
     toolPolicy:
-      adminToolPolicy(profile?.toolPolicy) ??
       toolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy) ??
-      adminToolPolicy(settingsProfile.toolPolicy),
+      settingsProfile.toolPolicy,
     contextPolicy:
-      profile?.contextPolicy ??
       contextStrategyPolicyFromUnknown(
         settings.contextPolicy ?? settings.context_policy,
-      ) ??
-      settingsProfile.contextPolicy,
+      ) ?? settingsProfile.contextPolicy,
     mcpBindings:
       mcpBindings.length > 0
         ? mcpBindings
@@ -315,12 +228,12 @@ function runtimeConfigReadbackFromRegistry(
   };
 }
 
-function profileConfigFromRegistrySettings(
-  settings: Record<string, unknown>,
-): Pick<
-  ProfileConfig,
-  "providerAlias" | "localToolProfileId" | "toolPolicy" | "contextPolicy"
-> {
+function profileConfigFromRegistrySettings(settings: Record<string, unknown>): {
+  providerAlias?: string;
+  localToolProfileId?: string;
+  toolPolicy?: AdminProfileRegistryRecord["toolPolicy"];
+  contextPolicy?: ContextStrategyPolicy;
+} {
   const profile = recordValue(settings.profile);
   return {
     providerAlias: stringValue(profile.providerAlias),
@@ -400,25 +313,6 @@ function toolPolicyFromUnknown(
   };
 }
 
-function adminToolPolicy(
-  policy: ProfileConfig["toolPolicy"],
-): AdminProfileRegistryRecord["toolPolicy"] | undefined {
-  if (policy === undefined) return undefined;
-  return {
-    requestedToolsets:
-      policy.requestedToolsets === undefined
-        ? undefined
-        : [...policy.requestedToolsets],
-    requestedTools:
-      policy.requestedTools === undefined
-        ? undefined
-        : [...policy.requestedTools],
-    deniedTools:
-      policy.deniedTools === undefined ? undefined : [...policy.deniedTools],
-    includeDeprecated: policy.includeDeprecated,
-  };
-}
-
 function recordValue(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
@@ -436,31 +330,6 @@ function stringList(value: unknown): string[] | undefined {
   return value.filter(
     (item): item is string => typeof item === "string" && item.trim() !== "",
   );
-}
-
-async function missingFallbackRecord(
-  profileId: ProfileId,
-  error: unknown,
-  now: string,
-): Promise<AdminProfileRegistryRecord> {
-  return {
-    source: "file_fallback",
-    profileId,
-    lifecycleStatus: "missing",
-    activeRuntimeRefs: [],
-    sourceAssetRefs: [],
-    sourceAssetStatuses: [],
-    diagnostics: [
-      {
-        severity: "error",
-        code: "file_backed_profile_missing",
-        path: `profiles.${profileId}`,
-        message: error instanceof Error ? error.message : String(error),
-      },
-    ],
-    fallbackStatus: "file_backed_fallback",
-    updatedAt: now,
-  };
 }
 
 async function assetStatuses(

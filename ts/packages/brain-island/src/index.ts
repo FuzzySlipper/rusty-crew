@@ -145,11 +145,11 @@ export type {
   RustyCrewServiceLock,
   RustyCrewServicePaths,
 } from "./service-config.js";
-export { createRustyCrewServiceApp } from "./service-host.js";
+export { createRustyCrewServiceApp } from "./service-app.js";
 export type {
   RustyCrewServiceApp,
   RustyCrewServiceAppOptions,
-} from "./service-host.js";
+} from "./service-app.js";
 export {
   combineResolvers,
   resolveToolSession,

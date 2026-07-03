@@ -41,8 +41,7 @@ field-test configuration under `/home/system/rusty-crew`.
   ports consumed by the service.
 - `ts/packages/service-host` is the service composition root. It owns service
   startup scripts, concrete adapter injection, and service-host smoke
-  entrypoints; during phase-5 extraction it is the landing zone for the
-  remaining HTTP listener, route wiring, and drain-loop ownership.
+  entrypoints, HTTP listener, route wiring, and drain-loop ownership.
 - `crates/brains/*` contains direct Rust brain modules that implement provider
   loops behind the neutral wake/stream/action/provider-state contract. These
   crates may not reach into Rust coordination internals.

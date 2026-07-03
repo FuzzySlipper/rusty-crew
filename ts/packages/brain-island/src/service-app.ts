@@ -1052,11 +1052,13 @@ async function handleProfileRegistryWriteRequest(
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message.includes("was not found; import file-backed profiles")
+      error.message.includes(
+        "was not found; create or import a DB-backed profile",
+      )
     ) {
       return failure(404, request.requestId, {
         code: "not_found",
-        reason_code: "profile_registry_requires_import",
+        reason_code: "profile_registry_record_missing",
         message: error.message,
         retryable: false,
       });
@@ -1200,7 +1202,7 @@ async function planProfileRegistryWrite(
   const current = await state.bridge.getProfileRegistryRecord(route.profileId);
   if (current === undefined) {
     throw new Error(
-      `profile registry record ${route.profileId} was not found; import file-backed profiles before registry mutation`,
+      `profile registry record ${route.profileId} was not found; create or import a DB-backed profile before registry mutation`,
     );
   }
   const expectedRevision = requiredRevision(body);
@@ -1261,7 +1263,7 @@ async function planProfileRegistryRuntimeConfigWrite(
   const current = await state.bridge.getProfileRegistryRecord(route.profileId);
   if (current === undefined) {
     throw new Error(
-      `profile registry record ${route.profileId} was not found; import file-backed profiles before registry mutation`,
+      `profile registry record ${route.profileId} was not found; create or import a DB-backed profile before registry mutation`,
     );
   }
   const expectedRevision = requiredRevision(body);
@@ -5428,8 +5430,32 @@ async function createServiceProfile(
           bridge: state.bridge,
           now: state.now,
         }).resolve(localToolProfileId);
-  const registryRecord = plan.registryWrite
-    ? await state.bridge.createProfileRegistryRecord(plan.registryWrite)
+  const registryRuntimeSettings =
+    plan.registryWrite === undefined
+      ? {}
+      : (optionalRecord(plan.registryWrite.activeRuntimeSettingsJson) ?? {});
+  const registryWrite =
+    plan.registryWrite === undefined
+      ? undefined
+      : {
+          ...plan.registryWrite,
+          activeRuntimeSettingsJson: {
+            ...registryRuntimeSettings,
+            ...(localToolProfile === undefined
+              ? {}
+              : {
+                  localToolProfileId: localToolProfile.id,
+                  toolPolicy: localToolProfile.toolPolicy,
+                  profile: {
+                    ...(optionalRecord(registryRuntimeSettings.profile) ?? {}),
+                    localToolProfileId: localToolProfile.id,
+                    toolPolicy: localToolProfile.toolPolicy,
+                  },
+                }),
+          },
+        };
+  const registryRecord = registryWrite
+    ? await state.bridge.createProfileRegistryRecord(registryWrite)
     : undefined;
 
   await mkdir(state.runtimeConfig.profilesDir, { recursive: true });
@@ -5473,7 +5499,7 @@ async function createServiceProfile(
     implementationId: runtimeBrain.implementationId,
     profilePath: plannedProfilePath,
     runtimeConfigPath: state.config.paths.serviceConfigFile,
-    registryWrite: plan.registryWrite,
+    registryWrite,
     registryRecord,
     localToolProfileId: localToolProfile?.id,
     fileAssetActions: plan.fileAssetActions,
@@ -8208,23 +8234,12 @@ async function rustyViewSessionContextUsage(
       });
       return undefined;
     });
-  const profile = await loadProfileConfig(
-    state.runtimeConfig.profilesDir,
-    input.session.profileId as ProfileId,
-  ).catch((error) => {
-    diagnostics.push({
-      severity: "warning",
-      code: "profile_file_read_failed",
-      message: errorMessage(error, "profile file read failed"),
-    });
-    return undefined;
-  });
   if (registryRecord === undefined) {
     diagnostics.push({
       severity: "warning",
       code: "profile_registry_record_missing",
       message:
-        "profile registry record is missing; model diagnostics used profile file fallback where available",
+        "profile registry record is missing; model diagnostics may be incomplete until the profile is created through the DB-backed profile API",
     });
   }
 
@@ -8233,7 +8248,6 @@ async function rustyViewSessionContextUsage(
   const providerAlias =
     optionalString(settings.providerAlias) ??
     optionalString(settings.provider_alias) ??
-    profile?.providerAlias ??
     "default";
   const provider = await state.bridge
     .getModelProvider(providerAlias)
@@ -8261,22 +8275,18 @@ async function rustyViewSessionContextUsage(
 
   const brain =
     brainMetadataFromUnknown(settings.brain) ??
-    profile?.brain ??
     (provider === undefined
       ? undefined
       : defaultProfileBrainForModelProvider(provider));
-  const toolPolicy =
-    profileToolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy) ??
-    profile?.toolPolicy;
-  const contextPolicy =
-    profile?.contextPolicy ??
-    contextStrategyPolicyFromUnknown(
-      settings.contextPolicy ?? settings.context_policy,
-    );
+  const toolPolicy = profileToolPolicyFromUnknown(
+    settings.toolPolicy ?? settings.tool_policy,
+  );
+  const contextPolicy = contextStrategyPolicyFromUnknown(
+    settings.contextPolicy ?? settings.context_policy,
+  );
   const localToolProfileId =
     optionalString(settings.localToolProfileId) ??
-    optionalString(settings.local_tool_profile_id) ??
-    profile?.localToolProfileId;
+    optionalString(settings.local_tool_profile_id);
   const mcpBindings = state.runtimeConfig.mcpBindings.filter(
     (binding) =>
       String(binding.profileId) === input.session.profileId ||
@@ -9831,7 +9841,8 @@ function listChatEventsAfterCursor(
 ): readonly ChatEvent[] {
   if (limit <= 0) return [];
   const events = state.chatEventsBySession.get(session.sessionId) ?? [];
-  if (cursor === undefined) return events.slice(Math.max(0, events.length - limit));
+  if (cursor === undefined)
+    return events.slice(Math.max(0, events.length - limit));
   const after = cursorSequence(cursor, session.sessionId);
   return events.filter((event) => event.sequence_id > after).slice(0, limit);
 }

@@ -558,7 +558,8 @@ function processLooksLikeRustyCrewService(pid: number): boolean {
     );
     return (
       cmdline.includes("rusty-crew") &&
-      (cmdline.includes("service-host.ts") || cmdline.includes("service:start"))
+      (cmdline.includes("service-host/src/start.ts") ||
+        cmdline.includes("service:start"))
     );
   } catch {
     return true;

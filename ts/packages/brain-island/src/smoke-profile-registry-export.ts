@@ -36,20 +36,6 @@ modelConfig:
   );
   writeFileSync(registeredSoulPath, "Registered hidden soul text.");
 
-  const fallbackDir = join(profilesDir, "file-only");
-  mkdirSync(fallbackDir, { recursive: true });
-  writeFileSync(
-    join(fallbackDir, "profile.yaml"),
-    `profileIdentity: file-only
-displayName: File Only
-modelConfig:
-  provider: den-router
-  model: local-deterministic
-`,
-  );
-  writeFileSync(join(fallbackDir, "soul.md"), "Fallback hidden soul text.");
-  writeFileSync(join(fallbackDir, "memory.md"), "Fallback static memory.");
-
   const registryRecords: NativeProfileRegistryRecord[] = [
     {
       profileId: "registered",
@@ -138,18 +124,13 @@ modelConfig:
   );
   assert.equal(JSON.stringify(registryPlan).includes("must-not-export"), false);
 
-  const fallbackPlan = buildProfileBundleExportPlan({
-    profileId: "file-only",
-    diagnostics,
-  });
-  assert.equal(fallbackPlan.source, "file_fallback");
-  assert(
-    fallbackPlan.warnings.some((warning) => warning.includes("file-backed")),
-  );
-  assert(fallbackPlan.fileAssetEntries.includes("memory.md"));
-  assert.equal(
-    JSON.stringify(fallbackPlan).includes("Fallback hidden soul text"),
-    false,
+  assert.throws(
+    () =>
+      buildProfileBundleExportPlan({
+        profileId: "file-only",
+        diagnostics,
+      }),
+    /profile file-only was not found in profile registry diagnostics/,
   );
 
   const route = handleAdminDiagnosticsRequest(
@@ -178,7 +159,7 @@ modelConfig:
     JSON.stringify(
       {
         registryEntries: registryPlan.entries.length,
-        fallbackEntries: fallbackPlan.entries.length,
+        missingRegistryRefCount: diagnostics.missingRegistryRefCount,
       },
       null,
       2,

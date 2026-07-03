@@ -7,6 +7,13 @@ agent lanes. Every phase ends with the existing gates green:
 `cargo fmt --all --check`, `cargo test --workspace`, `npm run typecheck`,
 `npm run build:native`, and the smokes named in each phase.
 
+Status note (2026-07-03): this plan is now an execution record and task-series
+map. Do not treat early-phase wording as current policy when it conflicts with
+landed ADRs or code. In particular, ADR 0021 makes Rust brain modules
+first-class behind the neutral wake contract, ADR 0022 makes Crew-owned service
+storage explicit, and phase 5 extracted `ts/packages/service-host` as the
+composition root.
+
 Guiding constraint throughout: **behavior-preserving refactors first, then
 decisions, then new mechanisms.** No phase below changes wire shapes and
 coordination semantics at the same time.

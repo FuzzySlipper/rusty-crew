@@ -1,6 +1,10 @@
 # ADR 0019: DB-Backed Profile Registry And File Assets
 
-Status: Proposed for task 3375
+Status: Accepted direction for DB-backed active profiles. Historical migration
+compatibility notes in this ADR are superseded by the phase-6 clean-break
+cleanup: active admin/readback paths should not synthesize file-backed fallback
+profile records. File assets remain starter/import/export material, not active
+runtime fallback state.
 
 Date: 2026-06-25
 

@@ -626,10 +626,17 @@ assert.equal(
 const profileRegistry: AdminProfileRegistryDiagnostics = {
   generatedAt: now,
   registryCount: 2,
-  fileFallbackCount: 1,
+  missingRegistryRefCount: 1,
   driftCount: 1,
   missingAssetCount: 1,
   diagnostics: [
+    {
+      severity: "error",
+      code: "profile_registry_record_missing",
+      path: "profiles.file-only",
+      message:
+        "profile is referenced by runtime config but has no DB-backed profile registry record",
+    },
     {
       severity: "warning",
       code: "profile_registry_asset_drift",
@@ -717,39 +724,6 @@ const profileRegistry: AdminProfileRegistryDiagnostics = {
       ],
       fallbackStatus: "registry_authoritative",
     },
-    {
-      source: "file_fallback",
-      profileId: "file-only",
-      lifecycleStatus: "paused",
-      displayName: "File Only",
-      activeRuntimeRefs: [],
-      sourceAssetRefs: [
-        {
-          assetKind: "profile_json",
-          path: "/profiles/file-only.json",
-          contentHash: "sha256:file",
-          metadataJson: {},
-        },
-      ],
-      sourceAssetStatuses: [
-        {
-          assetKind: "profile_json",
-          path: "/profiles/file-only.json",
-          contentHash: "sha256:file",
-          currentContentHash: "sha256:file",
-          status: "tracked",
-        },
-      ],
-      diagnostics: [
-        {
-          severity: "info",
-          code: "file_backed_profile_fallback",
-          path: "profiles.file-only",
-          message: "profile is currently file backed",
-        },
-      ],
-      fallbackStatus: "file_backed_fallback",
-    },
   ],
 };
 
@@ -759,9 +733,9 @@ const profileDiagnosticsRoute = handleAdminDiagnosticsRequest(
 );
 assert.equal(profileDiagnosticsRoute.status, 200);
 assert.equal(
-  okData<{ driftCount: number; fileFallbackCount: number }>(
+  okData<{ driftCount: number; missingRegistryRefCount: number }>(
     profileDiagnosticsRoute,
-  ).driftCount,
+  ).missingRegistryRefCount,
   1,
 );
 
@@ -778,16 +752,6 @@ const profileRegistryPage =
   );
 assert.equal(profileRegistryPage.total, 1);
 assert.equal(profileRegistryPage.items[0]?.profileId, "archived-profile");
-
-const fallbackProfiles = handleAdminDiagnosticsRequest(
-  { method: "GET", url: "/v1/admin/profiles/registry?source=file_fallback" },
-  { diagnostics, profileRegistry },
-);
-assert.equal(
-  okData<AdminPage<{ profileId: string }>>(fallbackProfiles).items[0]
-    ?.profileId,
-  "file-only",
-);
 
 const decommissionedProfile = handleAdminDiagnosticsRequest(
   {

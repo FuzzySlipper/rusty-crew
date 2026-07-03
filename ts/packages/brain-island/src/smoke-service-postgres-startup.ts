@@ -64,6 +64,39 @@ try {
   assert.equal(envelope.data?.postgres?.productionReadiness?.ready, true);
   assert.equal(envelope.data?.postgres?.productionReadiness?.status, "ready");
 
+  const defaultProvider = await postJson(
+    `${host.url}/v1/admin/model-providers`,
+    {
+      alias: "default",
+      displayName: "Default Local",
+      protocol: "chat_completions",
+      providerKind: "local",
+      modelId: "deterministic",
+      contextWindowTokens: 8192,
+      maxOutputTokens: 512,
+      temperature: 0.5,
+    },
+  );
+  assert.equal(
+    defaultProvider.status,
+    200,
+    JSON.stringify(defaultProvider.body),
+  );
+  const defaultProviderEnvelope = defaultProvider.body as {
+    ok: boolean;
+    data?: {
+      provider?: {
+        alias?: string;
+        temperatureMilli?: number;
+        temperature?: number;
+      };
+    };
+  };
+  assert.equal(defaultProviderEnvelope.ok, true);
+  assert.equal(defaultProviderEnvelope.data?.provider?.alias, "default");
+  assert.equal(defaultProviderEnvelope.data?.provider?.temperatureMilli, 500);
+  assert.equal(defaultProviderEnvelope.data?.provider?.temperature, 0.5);
+
   const profileCreate = await postJson(
     `${host.url}/v1/admin/control/profiles`,
     {
@@ -92,14 +125,17 @@ try {
   assert.equal(
     profileCreateEnvelope.data?.outcome?.result?.profileId,
     "postgres-created-profile",
+    JSON.stringify(profileCreate.body),
   );
   assert.equal(
     profileCreateEnvelope.data?.outcome?.result?.sessionId,
     "postgres-created-profile-session",
+    JSON.stringify(profileCreate.body),
   );
   assert.equal(
     profileCreateEnvelope.data?.outcome?.result?.registryRecord?.profileId,
     "postgres-created-profile",
+    JSON.stringify(profileCreate.body),
   );
   assert.equal(
     profileCreateEnvelope.data?.outcome?.result?.registryRecord
@@ -121,12 +157,14 @@ try {
       join(root, "config", "profiles", "postgres-created-profile.json"),
       "utf8",
     ),
-  ) as { displayName?: string; mcpConfig?: { toolProfile?: string } };
+  ) as {
+    displayName?: string;
+    providerAlias?: string;
+    mcpConfig?: { toolProfile?: string };
+  };
   assert.equal(createdProfileConfig.displayName, "Postgres Created Profile");
-  assert.equal(
-    createdProfileConfig.mcpConfig?.toolProfile,
-    "postgres-created-profile",
-  );
+  assert.equal(createdProfileConfig.providerAlias, "default");
+  assert.equal(createdProfileConfig.mcpConfig, undefined);
 
   const registryResponse = await fetch(
     `${host.url}/v1/admin/profiles/registry?limit=10`,

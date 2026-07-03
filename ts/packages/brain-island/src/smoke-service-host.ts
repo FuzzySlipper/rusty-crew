@@ -1612,19 +1612,19 @@ try {
       registryMismatch.body.data.diagnostics[0]?.code,
       "profile_registry_revision_mismatch",
     );
-    const fallbackRegistryUpdate = await post(
+    const missingRegistryUpdate = await post(
       "/v1/admin/profiles/registry/field-profile/update/plan",
       undefined,
       {
         expectedRevision: 1,
-        displayName: "File Fallback Should Import First",
+        displayName: "Missing Registry Record Should Fail",
       },
       noAuthPort,
     );
-    assert.equal(fallbackRegistryUpdate.status, 404);
+    assert.equal(missingRegistryUpdate.status, 404);
     assert.equal(
-      fallbackRegistryUpdate.body.error.reason_code,
-      "profile_registry_requires_import",
+      missingRegistryUpdate.body.error.reason_code,
+      "profile_registry_record_missing",
     );
 
     const currentCreatedProfileConfig = JSON.parse(
