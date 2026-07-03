@@ -113,9 +113,30 @@ cargo fmt --all --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
 npm install
+npm run test:unit
 npm run typecheck
 npm run format
 ```
+
+TypeScript unit tests use Node's built-in `node:test` runner through `tsx`.
+Add package-local tests under `ts/packages/<package>/test/*.test.ts` for pure
+logic that should not require a native build, service startup, Den, Rusty View,
+or live providers. Use smokes for broader integration paths, and use Rusty
+View live certification for substantial chat/runtime deliverables where the
+user-visible path matters. The Crew-side live evidence rule and completion
+template are documented in `docs/live-deliverable-certification.md`.
+
+Use the smoke runner to inspect and run integration proofs without adding more
+one-off root aliases:
+
+```sh
+npm run smoke -- --list
+npm run smoke -- --list --package brain-island
+npm run smoke -- brain
+```
+
+Smoke categories, environment-requirement flags, and the rule for moving new
+smokes out of package `src/` are documented in `docs/smoke-test-inventory.md`.
 
 Common focused checks:
 

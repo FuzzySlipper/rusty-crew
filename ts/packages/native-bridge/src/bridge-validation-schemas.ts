@@ -211,7 +211,10 @@ const agentMessageSchema = Type.Object(
 );
 
 const brainEventSchema = Type.Union([
-  Type.Object({ type: Type.Literal("started") }, { additionalProperties: true }),
+  Type.Object(
+    { type: Type.Literal("started") },
+    { additionalProperties: true },
+  ),
   Type.Object(
     { type: Type.Literal("text_delta"), text: Type.String() },
     { additionalProperties: true },
@@ -413,7 +416,9 @@ export const rawProfileRegistryRecordSchema = Type.Object(
     lifecycle_status: profileRegistryLifecycleStatusSchema,
     display_name: Type.Optional(nullableString),
     summary: Type.Optional(nullableString),
-    default_session_kind: Type.Optional(Type.Union([sessionKindSchema, Type.Null()])),
+    default_session_kind: Type.Optional(
+      Type.Union([sessionKindSchema, Type.Null()]),
+    ),
     agent_id: Type.Optional(nullableString),
     owner_id: Type.Optional(nullableString),
     prompt_soul_markdown: Type.Optional(nullableString),
@@ -555,7 +560,10 @@ const nativeProviderStateInputSchema = Type.Object(
 );
 
 const rawBrainEventSchema = Type.Union([
-  Type.Object({ type: Type.Literal("started") }, { additionalProperties: true }),
+  Type.Object(
+    { type: Type.Literal("started") },
+    { additionalProperties: true },
+  ),
   Type.Object(
     { type: Type.Literal("text_delta"), text: Type.String() },
     { additionalProperties: true },

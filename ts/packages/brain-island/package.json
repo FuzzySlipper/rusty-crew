@@ -122,6 +122,7 @@
     "smoke:service-postgres-startup": "tsx src/smoke-service-postgres-startup.ts",
     "smoke:service-den-router-tools": "tsx src/smoke-service-den-router-tools.ts",
     "smoke:pi-agent-brain-events": "tsx src/smoke-pi-agent-brain-events.ts",
+    "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "service:debug-turn": "tsx src/service-debug-turn-cli.ts",
     "cron": "tsx src/cron-cli.ts",
     "service:start": "tsx src/service-host.ts",
