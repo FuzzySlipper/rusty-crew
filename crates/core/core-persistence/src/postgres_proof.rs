@@ -13397,6 +13397,9 @@ fn postgres_error(context: &str, error: postgres::Error) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repos::attachments::conformance::{
+        run_attachment_data_bank_conformance, AttachmentDataBankConformanceStore,
+    };
     use crate::{
         CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
         RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
@@ -13627,29 +13630,6 @@ mod tests {
             &self,
             request: &ConversationJumpRequest,
         ) -> CoreResult<ConversationJumpResult>;
-    }
-
-    trait AttachmentDataBankConformanceStore {
-        fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord>;
-        fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>>;
-        fn remove_attachment(
-            &self,
-            attachment_id: &AttachmentId,
-            updated_at: &IsoTimestamp,
-        ) -> CoreResult<AttachmentRecord>;
-        fn save_data_bank_scope(
-            &self,
-            scope: &DataBankScopeWrite,
-        ) -> CoreResult<DataBankScopeRecord>;
-        fn query_data_bank_scopes(
-            &self,
-            query: &DataBankScopeQuery,
-        ) -> CoreResult<Vec<DataBankScopeRecord>>;
-        fn remove_data_bank_scope(
-            &self,
-            scope_id: &DataBankScopeId,
-            updated_at: &IsoTimestamp,
-        ) -> CoreResult<DataBankScopeRecord>;
     }
 
     trait ProfileMemoryConformanceStore {
@@ -14107,46 +14087,6 @@ mod tests {
             request: &ConversationJumpRequest,
         ) -> CoreResult<ConversationJumpResult> {
             CoordinationStore::resolve_conversation_jump(self, request)
-        }
-    }
-
-    impl AttachmentDataBankConformanceStore for CoordinationStore {
-        fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
-            CoordinationStore::save_attachment(self, attachment)
-        }
-
-        fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
-            CoordinationStore::query_attachments(self, query)
-        }
-
-        fn remove_attachment(
-            &self,
-            attachment_id: &AttachmentId,
-            updated_at: &IsoTimestamp,
-        ) -> CoreResult<AttachmentRecord> {
-            CoordinationStore::remove_attachment(self, attachment_id, updated_at)
-        }
-
-        fn save_data_bank_scope(
-            &self,
-            scope: &DataBankScopeWrite,
-        ) -> CoreResult<DataBankScopeRecord> {
-            CoordinationStore::save_data_bank_scope(self, scope)
-        }
-
-        fn query_data_bank_scopes(
-            &self,
-            query: &DataBankScopeQuery,
-        ) -> CoreResult<Vec<DataBankScopeRecord>> {
-            CoordinationStore::query_data_bank_scopes(self, query)
-        }
-
-        fn remove_data_bank_scope(
-            &self,
-            scope_id: &DataBankScopeId,
-            updated_at: &IsoTimestamp,
-        ) -> CoreResult<DataBankScopeRecord> {
-            CoordinationStore::remove_data_bank_scope(self, scope_id, updated_at)
         }
     }
 
@@ -14907,14 +14847,6 @@ mod tests {
         let db_path = temp_sqlite_path("sqlite-conversation-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         conversation_conformance(&store);
-        let _ = fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn sqlite_attachment_data_bank_conformance_matches_postgres_proof_contract() {
-        let db_path = temp_sqlite_path("sqlite-attachment-data-bank-conformance");
-        let store = CoordinationStore::open_file(&db_path).unwrap();
-        attachment_data_bank_conformance(&store);
         let _ = fs::remove_file(db_path);
     }
 
@@ -15695,7 +15627,7 @@ mod tests {
         };
         let schema = unique_schema("rusty_crew_attachment_data_bank_proof");
         let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
-        attachment_data_bank_conformance(&store);
+        run_attachment_data_bank_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
         assert_eq!(
@@ -17431,304 +17363,6 @@ mod tests {
             created_at: "2026-06-26T02:00:00Z".to_string(),
             updated_at: "2026-06-26T02:00:00Z".to_string(),
         }
-    }
-
-    fn attachment_data_bank_conformance(store: &dyn AttachmentDataBankConformanceStore) {
-        let session = SessionId::new("session-attachments");
-        let other_session = SessionId::new("session-attachments-other");
-        let scope = DataBankScopeId::new("scope-reference");
-        let removed_scope = DataBankScopeId::new("scope-removed");
-        let message = MessageId::new("message-reference");
-        let block = crate::MessageBlockId::new("block-reference");
-
-        store
-            .save_data_bank_scope(&DataBankScopeWrite {
-                scope_id: scope.clone(),
-                session_id: session.clone(),
-                status: DataBankScopeStatus::Active,
-                label: Some("Reference".to_string()),
-                description: Some("Reusable reference files".to_string()),
-                metadata_json: json!({"kind": "reference"}),
-                created_at: "2026-06-26T04:00:00Z".to_string(),
-                updated_at: "2026-06-26T04:00:00Z".to_string(),
-            })
-            .unwrap();
-        store
-            .save_data_bank_scope(&DataBankScopeWrite {
-                scope_id: removed_scope.clone(),
-                session_id: session.clone(),
-                status: DataBankScopeStatus::Active,
-                label: Some("Removed".to_string()),
-                description: None,
-                metadata_json: json!({"kind": "temporary"}),
-                created_at: "2026-06-26T04:00:01Z".to_string(),
-                updated_at: "2026-06-26T04:00:01Z".to_string(),
-            })
-            .unwrap();
-
-        let saved = store
-            .save_attachment(&AttachmentWrite {
-                attachment_id: AttachmentId::new("attachment-reference"),
-                session_id: session.clone(),
-                status: AttachmentStatus::Active,
-                filename: "reference.txt".to_string(),
-                mime_type: "text/plain".to_string(),
-                byte_size: 42,
-                storage_url: Some("file:///store/reference.txt".to_string()),
-                download_url: Some("/attachments/reference".to_string()),
-                thumbnail_url: None,
-                extracted_text: Some("bounded reference text".to_string()),
-                extracted_text_truncated: true,
-                metadata_json: json!({"source": "conformance"}),
-                created_at: "2026-06-26T04:01:00Z".to_string(),
-                updated_at: "2026-06-26T04:01:00Z".to_string(),
-                expires_at: Some("2026-06-26T05:00:00Z".to_string()),
-                link: Some(AttachmentLinkWrite {
-                    link_id: AttachmentLinkId::new("attachment-link-reference"),
-                    attachment_id: AttachmentId::new("attachment-reference"),
-                    session_id: session.clone(),
-                    message_id: Some(message.clone()),
-                    block_id: Some(block.clone()),
-                    scope_id: Some(scope.clone()),
-                    metadata_json: json!({"linked_by": "conformance"}),
-                    created_at: "2026-06-26T04:01:00Z".to_string(),
-                }),
-            })
-            .unwrap();
-        assert_eq!(saved.links.len(), 1);
-        assert_eq!(saved.links[0].message_id, Some(message.clone()));
-        assert_eq!(saved.links[0].block_id, Some(block.clone()));
-        assert_eq!(saved.links[0].scope_id, Some(scope.clone()));
-        assert!(saved.extracted_text_truncated);
-
-        store
-            .save_attachment(&AttachmentWrite {
-                attachment_id: AttachmentId::new("attachment-expired"),
-                session_id: session.clone(),
-                status: AttachmentStatus::Active,
-                filename: "expired.txt".to_string(),
-                mime_type: "text/plain".to_string(),
-                byte_size: 7,
-                storage_url: None,
-                download_url: None,
-                thumbnail_url: None,
-                extracted_text: Some("expired".to_string()),
-                extracted_text_truncated: false,
-                metadata_json: json!({"source": "expired"}),
-                created_at: "2026-06-26T04:02:00Z".to_string(),
-                updated_at: "2026-06-26T04:02:00Z".to_string(),
-                expires_at: Some("2026-06-26T04:30:00Z".to_string()),
-                link: Some(AttachmentLinkWrite {
-                    link_id: AttachmentLinkId::new("attachment-link-expired"),
-                    attachment_id: AttachmentId::new("attachment-expired"),
-                    session_id: session.clone(),
-                    message_id: None,
-                    block_id: None,
-                    scope_id: Some(scope.clone()),
-                    metadata_json: json!({"linked_by": "expiry"}),
-                    created_at: "2026-06-26T04:02:00Z".to_string(),
-                }),
-            })
-            .unwrap();
-
-        store
-            .save_attachment(&AttachmentWrite {
-                attachment_id: AttachmentId::new("attachment-other-session"),
-                session_id: other_session,
-                status: AttachmentStatus::Active,
-                filename: "other.txt".to_string(),
-                mime_type: "text/plain".to_string(),
-                byte_size: 3,
-                storage_url: None,
-                download_url: None,
-                thumbnail_url: None,
-                extracted_text: None,
-                extracted_text_truncated: false,
-                metadata_json: json!({}),
-                created_at: "2026-06-26T04:03:00Z".to_string(),
-                updated_at: "2026-06-26T04:03:00Z".to_string(),
-                expires_at: None,
-                link: Some(AttachmentLinkWrite {
-                    link_id: AttachmentLinkId::new("attachment-link-other-session"),
-                    attachment_id: AttachmentId::new("attachment-other-session"),
-                    session_id: SessionId::new("session-attachments-other"),
-                    message_id: None,
-                    block_id: None,
-                    scope_id: None,
-                    metadata_json: json!({}),
-                    created_at: "2026-06-26T04:03:00Z".to_string(),
-                }),
-            })
-            .unwrap();
-
-        let by_message = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                message_id: Some(message.clone()),
-                now: Some("2026-06-26T04:10:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(by_message.len(), 1);
-        assert_eq!(
-            by_message[0].attachment_id,
-            AttachmentId::new("attachment-reference")
-        );
-
-        let by_block = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                block_id: Some(block),
-                now: Some("2026-06-26T04:10:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(by_block.len(), 1);
-        assert_eq!(
-            by_block[0].links[0].metadata_json["linked_by"],
-            "conformance"
-        );
-
-        let by_scope_before_expiry = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                scope_id: Some(scope.clone()),
-                now: Some("2026-06-26T04:10:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(
-            by_scope_before_expiry
-                .iter()
-                .map(|record| record.attachment_id.0.as_str())
-                .collect::<Vec<_>>(),
-            vec!["attachment-reference", "attachment-expired"]
-        );
-
-        let by_scope_after_expiry = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                scope_id: Some(scope.clone()),
-                now: Some("2026-06-26T04:31:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(
-            by_scope_after_expiry
-                .iter()
-                .map(|record| record.attachment_id.0.as_str())
-                .collect::<Vec<_>>(),
-            vec!["attachment-reference"]
-        );
-
-        let expired_only = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                scope_id: Some(scope.clone()),
-                expired_only: true,
-                now: Some("2026-06-26T04:31:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(expired_only.len(), 1);
-        assert_eq!(
-            expired_only[0].attachment_id,
-            AttachmentId::new("attachment-expired")
-        );
-
-        let include_expired = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                scope_id: Some(scope),
-                include_expired: true,
-                now: Some("2026-06-26T04:31:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(include_expired.len(), 2);
-
-        let removed_attachment = store
-            .remove_attachment(
-                &AttachmentId::new("attachment-reference"),
-                &"2026-06-26T04:40:00Z".to_string(),
-            )
-            .unwrap();
-        assert_eq!(removed_attachment.status, AttachmentStatus::Removed);
-        assert_eq!(removed_attachment.links.len(), 1);
-
-        let active_after_remove = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                include_expired: true,
-                now: Some("2026-06-26T04:41:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(
-            active_after_remove
-                .iter()
-                .map(|record| record.attachment_id.0.as_str())
-                .collect::<Vec<_>>(),
-            vec!["attachment-expired"]
-        );
-
-        let with_removed = store
-            .query_attachments(&AttachmentQuery {
-                session_id: Some(session.clone()),
-                status: Some(AttachmentStatus::Removed),
-                include_removed: true,
-                include_expired: true,
-                now: Some("2026-06-26T04:41:00Z".to_string()),
-                ..AttachmentQuery::default()
-            })
-            .unwrap();
-        assert_eq!(with_removed.len(), 1);
-        assert_eq!(
-            with_removed[0].attachment_id,
-            AttachmentId::new("attachment-reference")
-        );
-
-        let scopes = store
-            .query_data_bank_scopes(&DataBankScopeQuery {
-                session_id: Some(session.clone()),
-                status: Some(DataBankScopeStatus::Active),
-                include_removed: false,
-                page: None,
-            })
-            .unwrap();
-        assert_eq!(
-            scopes
-                .iter()
-                .map(|scope| scope.scope_id.0.as_str())
-                .collect::<Vec<_>>(),
-            vec!["scope-reference", "scope-removed"]
-        );
-        let removed = store
-            .remove_data_bank_scope(&removed_scope, &"2026-06-26T04:45:00Z".to_string())
-            .unwrap();
-        assert_eq!(removed.status, DataBankScopeStatus::Removed);
-        let active_scopes = store
-            .query_data_bank_scopes(&DataBankScopeQuery {
-                session_id: Some(session.clone()),
-                status: Some(DataBankScopeStatus::Active),
-                include_removed: false,
-                page: None,
-            })
-            .unwrap();
-        assert_eq!(active_scopes.len(), 1);
-        assert_eq!(
-            active_scopes[0].scope_id,
-            DataBankScopeId::new("scope-reference")
-        );
-        let all_scopes = store
-            .query_data_bank_scopes(&DataBankScopeQuery {
-                session_id: Some(session),
-                status: Some(DataBankScopeStatus::Removed),
-                include_removed: true,
-                page: None,
-            })
-            .unwrap();
-        assert_eq!(all_scopes.len(), 1);
     }
 
     fn profile_memory_conformance(store: &dyn ProfileMemoryConformanceStore) {
