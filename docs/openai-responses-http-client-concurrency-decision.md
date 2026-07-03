@@ -1,8 +1,9 @@
 # OpenAI Responses Rust Brain HTTP Client Concurrency Decision
 
-Status: phase-1 decision  
-Task: 3914  
+Status: measured phase-1 decision
+Tasks: 3914, 3950
 Date: 2026-07-02
+Updated: 2026-07-03
 
 ## Decision
 
@@ -80,4 +81,70 @@ blocking HTTP risky:
   completion through the buffered drain bridge;
 - existing responses provider-state field smoke still passes.
 
-Capacity/load validation remains future work.
+## Capacity Measurement
+
+Task 3950 added a focused fake/live-like capacity smoke:
+
+```bash
+npm run smoke:responses-concurrency-capacity
+```
+
+The smoke configures multiple full-agent sessions on the Rust
+`openai-responses` brain, opens Rusty View chat SSE streams for each session,
+posts chat messages concurrently, probes `/v1/admin/diagnostics` while the wakes
+are in flight, and records:
+
+- admin diagnostics latency;
+- first `assistant_text_delta` stream latency;
+- chat POST completion latency;
+- total wall time compared with the serialized fake-provider delay;
+- a simple `likelySerialized` saturation signal.
+
+The default local run on 2026-07-03 used four concurrent sessions with
+`RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS=600`:
+
+```json
+{
+  "sessionCount": 4,
+  "fakeDelayMs": 600,
+  "adminDurationMs": 8,
+  "firstDeltaLatencyMs": { "min": 649, "max": 655, "mean": 653 },
+  "postCompletionLatencyMs": { "min": 677, "max": 680, "mean": 679 },
+  "totalDurationMs": 680,
+  "serializedEquivalentMs": 2400,
+  "parallelismEstimate": 3.53,
+  "likelySerialized": false
+}
+```
+
+Interpretation:
+
+- the buffered Rust responses wake path did not serialize across sessions;
+- admin diagnostics stayed responsive during concurrent fake provider work;
+- chat SSE stream drain delivered first assistant deltas before POST
+  completion for all sessions;
+- no worker/thread saturation symptom was observed at this phase-1 concurrency
+  level.
+
+## Updated Decision After Measurement
+
+Keep blocking `reqwest` for the phase-1 Rust OpenAI Responses brain.
+
+The measured default capacity smoke supports the original decision: blocking
+provider I/O is isolated from the Node event loop, concurrent session wakes can
+progress in parallel through the buffered Rust wake path, and Rusty View-visible
+streaming remains responsive. Async `reqwest` should remain a future capacity
+project gated on field evidence from higher concurrent Rust responses load, not
+a current correctness requirement.
+
+For heavier local investigation, increase:
+
+```bash
+RUSTY_CREW_OPENAI_RESPONSES_CAPACITY_SESSIONS=12 \
+RUSTY_CREW_OPENAI_RESPONSES_CAPACITY_FAKE_DELAY_MS=1000 \
+npm run smoke:responses-concurrency-capacity
+```
+
+If higher-load runs begin reporting `likelySerialized: true`, delayed admin
+diagnostics, or poor stream-drain latency, revisit the async runtime-owner
+design before changing the HTTP client.

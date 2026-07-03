@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import type {
   AgentId,
+  BrainEventEnvelope,
   ProfileId,
   SessionHandle,
   SessionId,
@@ -166,6 +167,59 @@ class StreamingThenFinalMessageAgent {
   clearAllQueues(): void {}
 }
 
+class ControlledLiveSubmitAgent {
+  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
+  private readonly idle = deferred<void>();
+
+  subscribe(
+    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
+  ): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async prompt(
+    _input: PiAgentMessage | PiAgentMessage[] | string,
+  ): Promise<void> {
+    const signal = new AbortController().signal;
+    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
+    this.listener?.(
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "early" },
+      } as PiAgentEvent,
+      signal,
+    );
+  }
+
+  async waitForIdle(): Promise<void> {
+    await this.idle.promise;
+    const signal = new AbortController().signal;
+    this.listener?.(
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "early" }],
+        },
+      } as PiAgentEvent,
+      signal,
+    );
+    this.listener?.(
+      { type: "agent_end", messages: [] } as PiAgentEvent,
+      signal,
+    );
+  }
+
+  releaseIdle(): void {
+    this.idle.resolve();
+  }
+
+  clearAllQueues(): void {}
+}
+
 const textBrain = createPiAgentBrain({
   createAgent: (_options: PiAgentOptions) =>
     new FinalMessageOnlyAgent({
@@ -198,6 +252,42 @@ assert.deepEqual(
   ["started", "text_delta", "text_delta", "finished"],
 );
 assert.deepEqual(textDeltaTexts(streamedResult), ["streamed ", "answer"]);
+
+const liveSubmitAgent = new ControlledLiveSubmitAgent();
+const liveSubmittedEvents: BrainEventEnvelope[] = [];
+const liveSubmitBrain = createPiAgentBrain({
+  createAgent: (_options: PiAgentOptions) => liveSubmitAgent,
+  submitEvent: async (event) => {
+    liveSubmittedEvents.push(event);
+  },
+});
+let liveSubmitWakeSettled = false;
+const liveSubmitWake = wake(
+  liveSubmitBrain,
+  "pi-agent-brain-live-submit-events-wake",
+).finally(() => {
+  liveSubmitWakeSettled = true;
+});
+
+await waitUntil(() =>
+  liveSubmittedEvents.some((event) => event.event.type === "text_delta"),
+);
+assert.equal(
+  liveSubmitWakeSettled,
+  false,
+  "live submit should expose events before waitForIdle resolves",
+);
+assert.deepEqual(
+  liveSubmittedEvents.map((event) => event.event.type),
+  ["started", "text_delta"],
+);
+liveSubmitAgent.releaseIdle();
+const liveSubmitResult = await liveSubmitWake;
+assert.deepEqual(liveSubmitResult.events, []);
+assert.deepEqual(
+  liveSubmittedEvents.map((event) => event.event.type),
+  ["started", "text_delta", "finished"],
+);
 
 const reasoningFinalBrain = createPiAgentBrain({
   createAgent: (_options: PiAgentOptions) =>
@@ -557,4 +647,31 @@ function reasoningDeltaTexts(
   return result.events
     .map((event) => event.event)
     .flatMap((event) => (event.type === "reasoning_delta" ? [event.text] : []));
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitUntil(
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }

@@ -2182,6 +2182,12 @@ struct JsOpenAiResponsesBrainConfig {
     instructions: Option<String>,
     #[serde(default = "default_responses_stream_idle_timeout_ms")]
     stream_idle_timeout_ms: u64,
+    #[serde(default = "default_responses_wake_timeout_ms")]
+    wake_timeout_ms: u64,
+}
+
+fn default_responses_wake_timeout_ms() -> u64 {
+    300_000
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -2243,10 +2249,32 @@ struct OpenAiResponsesCredentialSecretUpdate {
 struct BufferedOpenAiResponsesRun {
     items: VecDeque<BrainWakeStreamItem>,
     terminal: bool,
+    started_at: OffsetDateTime,
+    wake_timeout_ms: u64,
     provider_state: Option<BrainWakeProviderStateOutput>,
     transport_metrics: Option<ResponsesTransportMetrics>,
     credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
     error: Option<String>,
+}
+
+impl BufferedOpenAiResponsesRun {
+    fn new(wake_timeout_ms: u64) -> Self {
+        Self {
+            items: VecDeque::new(),
+            terminal: false,
+            started_at: OffsetDateTime::now_utc(),
+            wake_timeout_ms,
+            provider_state: None,
+            transport_metrics: None,
+            credential_secret_update: None,
+            error: None,
+        }
+    }
+
+    fn is_timed_out(&self) -> bool {
+        let elapsed = OffsetDateTime::now_utc() - self.started_at;
+        elapsed.whole_milliseconds() as u64 > self.wake_timeout_ms
+    }
 }
 
 struct OneShotOpenAiOauthSecretStore {
@@ -2697,7 +2725,10 @@ impl NativeBridgeBinding {
                     format!("OpenAI Responses buffered wake {wake_id} already exists"),
                 ));
             }
-            runs.insert(wake_id.clone(), BufferedOpenAiResponsesRun::default());
+            runs.insert(
+                wake_id.clone(),
+                BufferedOpenAiResponsesRun::new(input.config.wake_timeout_ms),
+            );
         }
         let thread_wake_id = wake_id.clone();
         std::thread::spawn(move || run_openai_responses_brain_buffered(thread_wake_id, input_json));

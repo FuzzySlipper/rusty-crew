@@ -256,6 +256,11 @@ export const piAgentCoreBrainModule: BrainModule = {
       planActions: context.planActions,
       resolveTools: context.toolResolver,
       toolProfile: context.profile.toolSelection.toolProfile,
+      submitEvent: context.bridge
+        ? async (event) => {
+            await context.bridge?.submitBrainEvent(event);
+          }
+        : undefined,
     });
   },
 };

@@ -40,6 +40,7 @@ export interface PiAgentBrainOptions {
   planActions?: BrainActionPlanner;
   resolveTools?: BrainToolResolver;
   toolProfile?: ToolProfile;
+  submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
 }
 
 export function createPiAgentBrain(
@@ -53,13 +54,30 @@ export function createPiAgentBrain(
         buildAgentOptions(input, options, actions),
       );
       let sawTextDelta = false;
+      let submitQueue: Promise<void> = Promise.resolve();
+      let submitError: unknown;
+      const submitLiveEvent = (event: BrainEventEnvelope): void => {
+        if (!options.submitEvent) {
+          return;
+        }
+        submitQueue = submitQueue
+          .then(() => options.submitEvent?.(event))
+          .then(
+            () => undefined,
+            (error: unknown) => {
+              submitError ??= error;
+            },
+          );
+      };
       const unsubscribe = agent.subscribe((event) => {
         const mappedEvents = mapPiAgentEvent(event, { sawTextDelta });
         for (const mapped of mappedEvents) {
           if (mapped.type === "text_delta") {
             sawTextDelta = true;
           }
-          events.push(envelope(input, mapped));
+          const eventEnvelope = envelope(input, mapped);
+          events.push(eventEnvelope);
+          submitLiveEvent(eventEnvelope);
         }
       });
 
@@ -72,6 +90,10 @@ export function createPiAgentBrain(
         agent.clearAllQueues?.();
         unsubscribe();
       }
+      await submitQueue;
+      if (submitError !== undefined) {
+        throw submitError;
+      }
 
       const plannedActions = options.planActions
         ? await options.planActions({
@@ -81,7 +103,7 @@ export function createPiAgentBrain(
           })
         : [];
       return {
-        events,
+        events: options.submitEvent ? [] : events,
         actions: [...actions.actions, ...plannedActions],
       };
     },
