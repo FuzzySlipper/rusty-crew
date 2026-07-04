@@ -18,6 +18,7 @@ import {
   rawModelProviderRecordArraySchema,
   rawModelProviderRecordSchema,
   rawOpenAiResponsesBrainRunResultSchema,
+  rawProfilePurgeReportSchema,
   rawProfileRegistryRecordArraySchema,
   rawProfileRegistryRecordSchema,
   rawSessionStateArraySchema,
@@ -438,6 +439,7 @@ interface NativeBridgeBinding {
   updateProfileRegistryRecordJson(updateJson: string): string;
   listProfileRegistryRecordsJson(queryJson: string): string;
   getProfileRegistryRecordJson(profileId: string): string;
+  purgeProfileJson(profileId: string): string;
   upsertModelProviderJson(writeJson: string): string;
   listModelProvidersJson(queryJson: string): string;
   getModelProviderJson(alias: string): string;
@@ -808,6 +810,20 @@ export interface NativeProfileRegistryQuery {
   lifecycleStatus?: NativeProfileRegistryLifecycleStatus;
   limit?: number;
   offset?: number;
+}
+
+export interface NativeProfilePurgeTableCount {
+  table: string;
+  rowsDeleted: number;
+}
+
+export interface NativeProfilePurgeReport {
+  profileId: string;
+  profileRegistryDeleted: boolean;
+  sessionIds: string[];
+  agentIds: string[];
+  tableCounts: NativeProfilePurgeTableCount[];
+  rowsDeleted: number;
 }
 
 export type NativeModelProviderStatus = "active" | "disabled" | "archived";
@@ -1684,6 +1700,7 @@ export interface NativeBridgeModule {
   getProfileRegistryRecord(
     profileId: string,
   ): Promise<NativeProfileRegistryRecord | undefined>;
+  purgeProfile(profileId: string): Promise<NativeProfilePurgeReport>;
   upsertModelProvider(
     write: NativeModelProviderWrite,
   ): Promise<NativeModelProviderRecord>;
@@ -1948,6 +1965,7 @@ export const nativeManifestOperationNames = [
   "update_profile_registry_record",
   "list_profile_registry_records",
   "get_profile_registry_record",
+  "purge_profile",
   "upsert_model_provider",
   "list_model_providers",
   "get_model_provider",
@@ -2058,6 +2076,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     updateProfileRegistryRecord: unavailable("initialize_engine"),
     listProfileRegistryRecords: unavailable("initialize_engine"),
     getProfileRegistryRecord: unavailable("initialize_engine"),
+    purgeProfile: unavailable("initialize_engine"),
     upsertModelProvider: unavailable("initialize_engine"),
     listModelProviders: unavailable("initialize_engine"),
     getModelProvider: unavailable("initialize_engine"),
@@ -2928,6 +2947,15 @@ function createNativeBridgeModule(
           )
         : undefined;
     },
+    purgeProfile: async (profileId) =>
+      toNativeProfilePurgeReport(
+        validateBridgeValue<RawProfilePurgeReport>({
+          operation: "purge_profile",
+          direction: "rust_to_ts",
+          schema: rawProfilePurgeReportSchema,
+          value: JSON.parse(binding.purgeProfileJson(profileId)),
+        }),
+      ),
     upsertModelProvider: async (write) =>
       toNativeModelProviderRecord(
         validateBridgeValue<RawModelProviderRecord>({
@@ -3578,6 +3606,12 @@ function toNativeBrainEventForJson(event: BrainEvent): unknown {
         text: event.text,
         format: event.format,
       };
+    case "phase_change":
+      return {
+        type: event.type,
+        phase: event.phase,
+        message: event.message,
+      };
     case "tool_call_started":
       return {
         type: event.type,
@@ -4109,6 +4143,22 @@ function toNativeProfileRegistryRecord(
   };
 }
 
+function toNativeProfilePurgeReport(
+  report: RawProfilePurgeReport,
+): NativeProfilePurgeReport {
+  return {
+    profileId: report.profile_id,
+    profileRegistryDeleted: report.profile_registry_deleted,
+    sessionIds: report.session_ids,
+    agentIds: report.agent_ids,
+    tableCounts: report.table_counts.map((count) => ({
+      table: count.table,
+      rowsDeleted: count.rows_deleted,
+    })),
+    rowsDeleted: report.rows_deleted,
+  };
+}
+
 function toRawModelProviderQuery(
   query: NativeModelProviderQuery,
 ): RawModelProviderQuery {
@@ -4564,6 +4614,12 @@ function toBrainEvent(event: RawBrainEvent): BrainEvent {
         text: event.text,
         format: event.format,
       };
+    case "phase_change":
+      return {
+        type: event.type,
+        phase: event.phase,
+        message: event.message,
+      };
     case "tool_call_started":
       return {
         type: event.type,
@@ -4716,6 +4772,12 @@ function toNativeBrainEvent(event: BrainEvent): {
         text: event.text,
         toolName: event.format,
       };
+    case "phase_change":
+      return {
+        eventType: event.type,
+        text: event.message,
+        toolName: event.phase,
+      };
     case "tool_call_started":
       return {
         eventType: event.type,
@@ -4755,6 +4817,7 @@ function toToolCallMetadata(metadata: RawToolCallMetadata): ToolCallMetadata {
     toolProfileKey: metadata.tool_profile_key,
     sourceToolName: metadata.source_tool_name,
     catalogRevision: metadata.catalog_revision,
+    debugDetailId: metadata.debug_detail_id,
     policy: metadata.policy
       ? {
           allowed: metadata.policy.allowed,
@@ -4779,6 +4842,7 @@ function toRawToolCallMetadata(
     tool_profile_key: metadata.toolProfileKey,
     source_tool_name: metadata.sourceToolName,
     catalog_revision: metadata.catalogRevision,
+    debug_detail_id: metadata.debugDetailId,
     policy: metadata.policy
       ? {
           allowed: metadata.policy.allowed,
@@ -5006,6 +5070,18 @@ interface RawProfileRegistryRecord {
   revision: number;
   created_at: string;
   updated_at: string;
+}
+
+interface RawProfilePurgeReport {
+  profile_id: string;
+  profile_registry_deleted: boolean;
+  session_ids: string[];
+  agent_ids: string[];
+  table_counts: Array<{
+    table: string;
+    rows_deleted: number;
+  }>;
+  rows_deleted: number;
 }
 
 interface RawModelProviderCredential {
@@ -5367,6 +5443,11 @@ type RawBrainEvent =
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string; format?: string }
   | {
+      type: "phase_change";
+      phase: "idle" | "exploring" | "composing" | "reviewing";
+      message?: string;
+    }
+  | {
       type: "tool_call_started";
       tool_name: string;
       metadata?: RawToolCallMetadata;
@@ -5402,5 +5483,6 @@ interface RawToolCallMetadata {
   tool_profile_key?: string;
   source_tool_name?: string;
   catalog_revision?: string;
+  debug_detail_id?: string;
   policy?: RawToolCallPolicyMetadata;
 }

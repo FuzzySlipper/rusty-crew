@@ -233,6 +233,14 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     ["profile", "session", "config"],
   ),
   controlCapability(
+    "admin.control.profiles.delete",
+    "POST",
+    "/v1/admin/control/profiles/{profile_id}/delete",
+    "Hard-delete a profile by removing service plumbing, profile files, registry state, sessions, and profile-owned persisted data. Requires confirmProfileId in the request body.",
+    "delete_profile",
+    ["profile", "session", "config", "storage"],
+  ),
+  controlCapability(
     "admin.control.sessions.create",
     "POST",
     "/v1/admin/control/sessions",
@@ -570,6 +578,14 @@ export const API_CAPABILITIES = [
     "Stream chat events for a session.",
     "chat",
     ["chat", "session"],
+  ),
+  readCapability(
+    "chat.sessions.tool_calls.debug.get",
+    "GET",
+    "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}",
+    "Read bounded redacted raw tool-call debug detail for a session.",
+    "chat",
+    ["chat", "session", "diagnostics", "tool"],
   ),
   {
     id: "chat.sessions.messages.create",

@@ -11,7 +11,9 @@ if (!sessionId || !body) {
 }
 
 const baseUrl =
-  process.env.RUSTY_CREW_ADMIN_BASE_URL ?? "http://127.0.0.1:9347";
+  process.env.RUSTY_CREW_ADMIN_BASE_URL ??
+  process.env.RUSTY_CREW_DEBUG_ADMIN_BASE_URL ??
+  "http://127.0.0.1:9348";
 const bearerToken = process.env.RUSTY_CREW_ADMIN_TOKEN;
 const client = createDebugApiClient({
   baseUrl,

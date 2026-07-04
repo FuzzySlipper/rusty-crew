@@ -7,8 +7,12 @@
   },
   "servers": [
     {
+      "url": "http://127.0.0.1:9348",
+      "description": "Local Rusty Crew debug/test service"
+    },
+    {
       "url": "http://127.0.0.1:9347",
-      "description": "Local Rusty Crew service"
+      "description": "Local Rusty Crew live service"
     }
   ],
   "paths": {
@@ -181,6 +185,44 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}": {
+      "get": {
+        "operationId": "getChatToolCallDebugDetail",
+        "summary": "Read bounded raw tool-call debug detail",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "debug_detail_id",
+            "in": "path",
+            "required": true,
+            "description": "Debug detail id from a tool lifecycle event payload or metadata.debugDetailId.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Debug-only bounded/redacted tool-call detail for the session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ToolCallDebugDetail" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The session or debug detail id was not found."
           }
         }
       }
@@ -1475,6 +1517,8 @@
           "assistant_turn_started",
           "assistant_text_delta",
           "assistant_reasoning_delta",
+          "phase_change",
+          "provider_status",
           "assistant_message_completed",
           "assistant_turn_finished",
           "tool_call_started",
@@ -1588,8 +1632,69 @@
           "tool_name": { "type": "string" },
           "summary": { "type": "string" },
           "status": { "type": "string", "enum": ["started", "completed", "failed"] },
+          "debug_detail_id": { "type": "string" },
+          "metadata": { "type": "object", "additionalProperties": true },
           "result_ref": { "type": "object", "additionalProperties": true },
           "reason_code": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ToolCallDebugValue": {
+        "type": "object",
+        "required": ["value", "truncated", "redacted"],
+        "properties": {
+          "value": {},
+          "truncated": { "type": "boolean" },
+          "redacted": { "type": "boolean" },
+          "sha256": { "type": "string" },
+          "originalJsonChars": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "ToolCallDebugDetail": {
+        "type": "object",
+        "required": [
+          "debug_detail_id",
+          "tool_call_id",
+          "session_id",
+          "wake_id",
+          "tool_name",
+          "status",
+          "arguments",
+          "partial_updates",
+          "source_metadata",
+          "started_at",
+          "updated_at",
+          "expires_at",
+          "limits"
+        ],
+        "properties": {
+          "debug_detail_id": { "type": "string" },
+          "tool_call_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "wake_id": { "type": "string" },
+          "tool_name": { "type": "string" },
+          "status": { "type": "string", "enum": ["running", "completed", "failed"] },
+          "arguments": { "$ref": "#/components/schemas/ToolCallDebugValue" },
+          "partial_updates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["recorded_at", "partial_result"],
+              "properties": {
+                "recorded_at": { "type": "string", "format": "date-time" },
+                "partial_result": { "$ref": "#/components/schemas/ToolCallDebugValue" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "final_result": { "$ref": "#/components/schemas/ToolCallDebugValue" },
+          "error": { "type": "object", "additionalProperties": true },
+          "source_metadata": { "type": "object", "additionalProperties": true },
+          "started_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "limits": { "type": "object", "additionalProperties": true }
         },
         "additionalProperties": false
       },
@@ -1675,6 +1780,7 @@
           "wake_id": { "type": "string" },
           "correlation_id": { "type": "string" },
           "latest_cursor": { "type": "string" },
+          "summary": { "type": "string" },
           "reason_code": { "type": "string" }
         },
         "additionalProperties": false

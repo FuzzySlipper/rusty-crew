@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import {
   basename,
   dirname,
@@ -42,9 +42,13 @@ import {
   type NativeModelProviderQuery,
   type NativeModelProviderStatus,
   type NativeModelProviderWrite,
+  type NativeProfilePurgeReport,
   type NativeProfileRegistryLifecycleStatus,
   type NativeProfileRegistryRecord,
   type NativeProfileRegistryWrite,
+  type NativeRoleplayChatLayersWrite,
+  type NativeRoleplayLoreFactCapture,
+  type NativeRoleplayLoreLayerWrite,
 } from "@rusty-crew/native-bridge";
 import type {
   ChannelBindingDiagnostics,
@@ -212,6 +216,7 @@ import {
   type SendChatMessageResult,
   type ResolveConversationJumpInput,
   type SearchTranscriptInput,
+  type ToolCallDebugDetail,
   type TranscriptSearchResult,
   type TranscriptSearchResultPage,
   type UpdateConversationBranchHeadInput,
@@ -244,6 +249,10 @@ import {
 } from "./curator-lifecycle.js";
 import { runStructuredCaptureProvider } from "./capture-producer-provider.js";
 import { buildSessionActivityDigest } from "./session-activity-digest.js";
+import {
+  MemoryToolCallDebugStore,
+  type ToolCallDebugStore,
+} from "./tool-call-debug-store.js";
 import {
   listCuratorArchivedSkills,
   listCuratorPinnedSkills,
@@ -365,6 +374,7 @@ interface ServiceState {
   readonly chatEventsBySession: Map<SessionId, ChatEvent[]>;
   readonly chatSequencesBySession: Map<SessionId, number>;
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
+  readonly toolCallDebugStore: ToolCallDebugStore;
   readonly responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
@@ -502,6 +512,9 @@ export async function createRustyCrewServiceApp(
       now: options.now ?? (() => new Date().toISOString()),
     });
     let liveState: ServiceState | undefined;
+    const toolCallDebugStore = new MemoryToolCallDebugStore({
+      now: options.now,
+    });
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,
@@ -510,6 +523,7 @@ export async function createRustyCrewServiceApp(
       mcpSurfaceDiagnostics: mcpManager.diagnostics(),
       adapterFactories: options.adapterFactories,
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
+      toolCallDebugStore,
       onBrainWakeResult: (observation) => {
         const state = liveState;
         if (state === undefined) return;
@@ -559,6 +573,7 @@ export async function createRustyCrewServiceApp(
       chatEventsBySession: new Map(),
       chatSequencesBySession: new Map(),
       chatSubscribersBySession: new Map(),
+      toolCallDebugStore,
       responsesWakeMetrics: [],
       suppressedWakeEvents: new Map(),
       recentEvents: [],
@@ -749,6 +764,8 @@ async function handleHttpRequest(
           state.bridge.projectBodyStateJson(sessionId),
         listChatEvents: (session, cursor, limit) =>
           listChatEventsAfterCursor(state, session, cursor, limit),
+        getToolCallDebugDetail: (input) =>
+          rustyViewToolCallDebugDetail(state, input),
         executeCommand: (input) => executeRustyViewChatCommand(state, input),
         contextUsage: (input) => rustyViewSessionContextUsage(state, input),
         sendMessage: (input) => submitRustyViewChatMessage(state, input),
@@ -843,6 +860,10 @@ async function handleHttpRequest(
     url.pathname.startsWith("/v1/admin/local-tool-profiles/")
   ) {
     return handleAdminLocalToolProfilesRequest(request, state, url);
+  }
+
+  if (url.pathname.startsWith("/v1/admin/roleplay/lore/")) {
+    return handleAdminRoleplayLoreRequest(request, state, url);
   }
 
   if (url.pathname.startsWith("/v1/admin/storage/")) {
@@ -1024,6 +1045,140 @@ function localToolProfileIdFromPath(pathname: string): string | undefined {
   const rest = pathname.slice(prefix.length);
   if (!rest || rest.includes("/")) return undefined;
   return decodeURIComponent(rest);
+}
+
+async function handleAdminRoleplayLoreRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  try {
+    if (url.pathname === "/v1/admin/roleplay/lore/layers") {
+      if (method === "GET") {
+        const profileId = url.searchParams.get("profile_id");
+        if (!profileId) {
+          return failure(400, requestIdValue, {
+            code: "invalid_input",
+            reason_code: "roleplay_lore_profile_id_required",
+            message: "profile_id query parameter is required",
+            retryable: false,
+          });
+        }
+        return successRoute(requestIdValue, {
+          layers: await state.bridge.listLoreLayers(profileId),
+        });
+      }
+      if (method === "POST") {
+        const body = (await readJsonBody(
+          request,
+        )) as NativeRoleplayLoreLayerWrite;
+        return successRoute(requestIdValue, {
+          layer: await state.bridge.createLoreLayer(body),
+        });
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay lore layer collection supports GET and POST",
+      );
+    }
+
+    if (url.pathname === "/v1/admin/roleplay/lore/chat-layers/toggle") {
+      if (method !== "POST") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore chat layer toggle supports POST",
+        );
+      }
+      const body = recordBody(await readJsonBody(request));
+      const chatId = requiredRouteString(
+        optionalString(body.chatId) ?? optionalString(body.chat_id),
+        "chat_id",
+      );
+      const layerId = requiredRouteString(
+        optionalString(body.layerId) ?? optionalString(body.layer_id),
+        "layer_id",
+      );
+      const enabled =
+        typeof body.enabled === "boolean"
+          ? body.enabled
+          : requiredRouteBoolean(undefined, "enabled");
+      await state.bridge.toggleChatLayer({ chatId, layerId, enabled });
+      return successRoute(requestIdValue, { chatId, layerId, enabled });
+    }
+
+    if (url.pathname === "/v1/admin/roleplay/lore/chat-layers") {
+      if (method !== "POST") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore chat layers supports POST",
+        );
+      }
+      const body = (await readJsonBody(
+        request,
+      )) as NativeRoleplayChatLayersWrite;
+      await state.bridge.setChatLayers(body);
+      return successRoute(requestIdValue, { saved: true });
+    }
+
+    if (url.pathname === "/v1/admin/roleplay/lore/facts/capture") {
+      if (method !== "POST") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore fact capture supports POST",
+        );
+      }
+      const body = (await readJsonBody(
+        request,
+      )) as NativeRoleplayLoreFactCapture;
+      return successRoute(requestIdValue, {
+        entry: await state.bridge.captureLoreFact(body),
+      });
+    }
+
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "unknown_roleplay_lore_admin_route",
+      message: `unknown roleplay lore admin route ${url.pathname}`,
+      retryable: false,
+    });
+  } catch (error) {
+    return failure(400, requestIdValue, {
+      code: "invalid_input",
+      reason_code: "roleplay_lore_admin_failed",
+      message: errorMessage(error, "roleplay lore admin request failed"),
+      retryable: false,
+    });
+  }
+}
+
+function roleplayLoreMethodNotAllowed(
+  requestIdValue: string,
+  message: string,
+): AdminRouteResult {
+  return failure(405, requestIdValue, {
+    code: "method_not_allowed",
+    reason_code: "roleplay_lore_method_not_allowed",
+    message,
+    retryable: false,
+  });
+}
+
+function requiredRouteString(
+  value: string | undefined,
+  fieldName: string,
+): string {
+  if (!value) throw new Error(`${fieldName} is required`);
+  return value;
+}
+
+function requiredRouteBoolean(
+  value: boolean | undefined,
+  fieldName: string,
+): boolean {
+  if (value === undefined) throw new Error(`${fieldName} is required`);
+  return value;
 }
 
 async function handleProfileRegistryWriteRequest(
@@ -4998,6 +5153,7 @@ async function applyServiceRuntimeConfigFromDisk(
     mcpSurfaceDiagnostics: nextMcpManager.diagnostics(),
     adapterFactories: state.adapterFactories,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    toolCallDebugStore: state.toolCallDebugStore,
   });
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
@@ -5056,6 +5212,18 @@ interface DecommissionedServiceProfile {
   skipped: {
     profileDirectory: "preserved";
   };
+  applyResult: RustyCrewRuntimeConfigApplyResult;
+}
+
+interface DeletedServiceProfile {
+  profileId: string;
+  runtimeConfigPath: string;
+  profilePath?: string;
+  profileDirectoryDeleted: boolean;
+  sessionsDeleted: string[];
+  removed: DecommissionedServiceProfile["removed"];
+  brainHandle: DecommissionedServiceProfile["brainHandle"];
+  storagePurge: NativeProfilePurgeReport;
   applyResult: RustyCrewRuntimeConfigApplyResult;
 }
 
@@ -5444,6 +5612,140 @@ async function decommissionServiceProfile(
     skipped: {
       profileDirectory: "preserved",
     },
+    applyResult,
+  };
+}
+
+async function deleteServiceProfile(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<DeletedServiceProfile> {
+  const profileId = command.target.profileId;
+  if (!profileId) throw new Error("profile id is required");
+  const confirmProfileId = requiredBodyString(command, "confirmProfileId");
+  if (confirmProfileId !== profileId) {
+    throw new Error(
+      `profile delete confirmation mismatch: expected ${profileId}`,
+    );
+  }
+
+  const configuredSessionIds = state.runtimeConfig.sessions
+    .filter((session) => String(session.profileId) === profileId)
+    .map((session) => String(session.sessionId));
+  const activeSessions = await state.bridge.listSessions();
+  const activeSessionIds = activeSessions
+    .filter((session) => String(session.profileId) === profileId)
+    .map((session) => String(session.sessionId));
+  const sessionIds = [
+    ...new Set([...configuredSessionIds, ...activeSessionIds]),
+  ];
+  const inFlightSessionIds = sessionIds.filter((sessionId) =>
+    state.inFlightWakes.has(sessionId as SessionId),
+  );
+  if (inFlightSessionIds.length > 0) {
+    throw new Error(
+      `profile ${profileId} delete blocked by in-flight wake(s): ${inFlightSessionIds.join(", ")}`,
+    );
+  }
+
+  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
+  const removed = {
+    brains: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("brains"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
+    ),
+    sessions: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("sessions"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
+    ),
+    channelBindings: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("channelBindings"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
+        sessionIds.includes(
+          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
+        ),
+    ),
+    mcpBindings: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("mcpBindings"),
+      (entry) =>
+        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
+        sessionIds.includes(
+          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
+        ),
+    ),
+    scheduledJobs: removeRuntimeConfigEntries(
+      runtimeConfigFile.array("scheduledJobs"),
+      (entry) =>
+        sessionIds.includes(
+          runtimeEntryString(entry, "targetSessionId", "target_session_id") ??
+            "",
+        ),
+    ),
+  };
+
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
+  const registryRecord = await state.bridge.getProfileRegistryRecord(profileId);
+  const matchedRuntimeConfig =
+    removed.brains +
+      removed.sessions +
+      removed.channelBindings +
+      removed.mcpBindings +
+      removed.scheduledJobs >
+    0;
+  if (
+    !matchedRuntimeConfig &&
+    sessionIds.length === 0 &&
+    registryRecord === undefined &&
+    (profilePath === undefined || !existsSync(profilePath))
+  ) {
+    throw new Error(`profile ${profileId} was not found`);
+  }
+
+  await writeJsonFileAtomic(
+    state.config.paths.serviceConfigFile,
+    runtimeConfigFile.value,
+  );
+  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "profile_deleted",
+    summaryPrefix: `Profile ${profileId} deleted`,
+  });
+  const brainHandle = await unregisterServiceProfileBrain(state, profileId);
+
+  let profileDirectoryDeleted = false;
+  if (profilePath !== undefined && existsSync(profilePath)) {
+    await rm(profilePath, { recursive: true, force: true });
+    profileDirectoryDeleted = true;
+  }
+
+  const storagePurge = await state.bridge.purgeProfile(profileId);
+  const purgedSessionIds = new Set([
+    ...sessionIds,
+    ...storagePurge.sessionIds.map(String),
+  ]);
+  for (const sessionId of purgedSessionIds) {
+    state.directDispatchSessions.delete(sessionId as SessionId);
+    state.chatSubscribersBySession.delete(sessionId as SessionId);
+    state.chatEventsBySession.delete(sessionId as SessionId);
+    state.chatSequencesBySession.delete(sessionId as SessionId);
+    state.suppressedWakeEvents.delete(sessionId as SessionId);
+  }
+
+  return {
+    profileId,
+    runtimeConfigPath: state.config.paths.serviceConfigFile,
+    ...(profilePath === undefined ? {} : { profilePath }),
+    profileDirectoryDeleted,
+    sessionsDeleted: [...purgedSessionIds].sort(),
+    removed,
+    brainHandle,
+    storagePurge,
     applyResult,
   };
 }
@@ -6268,6 +6570,26 @@ function createServiceControlExecutor(
         affectedIds: {
           profileId: result.profileId,
           sessionsArchived: result.sessionsArchived.length,
+          brainsRemoved: result.removed.brains,
+          brainHandleRemoved: result.brainHandle.action === "removed" ? 1 : 0,
+          sessionsRemoved: result.removed.sessions,
+          channelBindingsRemoved: result.removed.channelBindings,
+          mcpBindingsRemoved: result.removed.mcpBindings,
+          scheduledJobsRemoved: result.removed.scheduledJobs,
+        },
+        result,
+      };
+    },
+    deleteProfile: async (command) => {
+      const result = await deleteServiceProfile(state, command);
+      return {
+        status: "completed",
+        summary: `profile ${result.profileId} deleted`,
+        affectedIds: {
+          profileId: result.profileId,
+          sessionsDeleted: result.sessionsDeleted.length,
+          rowsDeleted: result.storagePurge.rowsDeleted,
+          profileDirectoryDeleted: result.profileDirectoryDeleted ? 1 : 0,
           brainsRemoved: result.removed.brains,
           brainHandleRemoved: result.brainHandle.action === "removed" ? 1 : 0,
           sessionsRemoved: result.removed.sessions,
@@ -7349,6 +7671,7 @@ async function applyServiceRuntimeRebuild(
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    toolCallDebugStore: state.toolCallDebugStore,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -7457,6 +7780,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     curatorExecutor: state.curator.executor,
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    toolCallDebugStore: state.toolCallDebugStore,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -8443,6 +8767,7 @@ async function submitRustyViewChatMessage(
     correlation_id: correlationId,
     latest_cursor:
       latestChatCursor(state, input.session.sessionId) ?? inbound.event_id,
+    summary: wakeReport.summary,
     reason_code: wakeReport.reasonCode,
   };
   rememberChatMessageReceipt(state, receiptKey, result);
@@ -8649,6 +8974,34 @@ async function rustyViewSessionContextUsage(
           },
     degraded: diagnostics.some((diagnostic) => diagnostic.severity !== "info"),
     diagnostics,
+  };
+}
+
+async function rustyViewToolCallDebugDetail(
+  state: ServiceState,
+  input: { session: SessionState; debugDetailId: string; requestId: string },
+): Promise<ToolCallDebugDetail | undefined> {
+  const record = state.toolCallDebugStore.get({
+    sessionId: input.session.sessionId,
+    debugDetailId: input.debugDetailId,
+  });
+  if (!record) return undefined;
+  return {
+    debug_detail_id: record.debug_detail_id,
+    tool_call_id: record.tool_call_id,
+    session_id: record.session_id,
+    wake_id: record.wake_id,
+    tool_name: record.tool_name,
+    status: record.status,
+    arguments: record.arguments,
+    partial_updates: record.partial_updates,
+    final_result: record.final_result,
+    error: record.error,
+    source_metadata: record.source_metadata,
+    started_at: record.started_at,
+    updated_at: record.updated_at,
+    expires_at: record.expires_at,
+    limits: { ...record.limits },
   };
 }
 
@@ -9806,12 +10159,36 @@ function appendBrainEventToChatLog(
         },
       });
       return;
+    case "phase_change":
+      appendChatEvent(state, session.sessionId, {
+        kind: "phase_change",
+        payload: {
+          wake_id: wakeId,
+          phase: event.phase,
+          ...(event.message === undefined ? {} : { message: event.message }),
+        },
+      });
+      return;
+    case "provider_status":
+      appendChatEvent(state, session.sessionId, {
+        kind: "provider_status",
+        payload: {
+          wake_id: wakeId,
+          level: event.level,
+          message: event.message,
+          ...(event.metadataJson === undefined
+            ? {}
+            : { metadata_json: event.metadataJson }),
+        },
+      });
+      return;
     case "tool_call_started":
       appendChatEvent(state, session.sessionId, {
         kind: "tool_call_started",
         payload: {
           wake_id: wakeId,
           tool_name: event.toolName,
+          debug_detail_id: event.metadata?.debugDetailId,
           metadata: event.metadata,
         },
       });
@@ -9823,6 +10200,7 @@ function appendBrainEventToChatLog(
           wake_id: wakeId,
           tool_name: event.toolName,
           is_error: event.isError,
+          debug_detail_id: event.metadata?.debugDetailId,
           metadata: event.metadata,
         },
       });

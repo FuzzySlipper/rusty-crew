@@ -99,6 +99,44 @@ export interface ProfileChannelDefaultsConfig {
   wakePolicy?: "subscription" | "manual" | "disabled";
 }
 
+export type RoleplayNarratorTone =
+  | "whimsical"
+  | "dramatic"
+  | "matter_of_fact"
+  | "lush"
+  | "wry";
+
+export type RoleplayNarratorExplicitness =
+  | "implied"
+  | "suggestive"
+  | "romantic"
+  | "steamy";
+
+export type RoleplayNarratorPacing =
+  | "leisurely"
+  | "balanced"
+  | "rapid"
+  | "breathless";
+
+export type RoleplayNarratorMemoryDepth = "shallow" | "medium" | "deep";
+
+export interface RoleplayNarratorReviewConfig {
+  enabled: boolean;
+  maxReviewCycles: number;
+  checkGravityDrift: boolean;
+  checkCharacterVoice: boolean;
+  checkContinuity: boolean;
+}
+
+export interface RoleplayNarratorConfig {
+  tone: RoleplayNarratorTone;
+  explicitness: RoleplayNarratorExplicitness;
+  pacing: RoleplayNarratorPacing;
+  memoryDepth: RoleplayNarratorMemoryDepth;
+  exemplar?: string;
+  review: RoleplayNarratorReviewConfig;
+}
+
 export interface ProfileBrainConfig {
   module?: BrainModuleId;
   strategy?: string;
@@ -121,6 +159,7 @@ export interface ProfileConfig {
   mcpConfig?: ProfileMcpConfig;
   backgroundReview?: ProfileBackgroundReviewConfig;
   memoryConfig?: ProfileMemoryConfig;
+  roleplayNarrator?: RoleplayNarratorConfig;
   contextPolicy?: ContextStrategyPolicy;
   sessionDefaults?: ProfileSessionDefaultsConfig;
   channelDefaults?: ProfileChannelDefaultsConfig;
@@ -650,6 +689,9 @@ function validateProfileConfig(
     memoryConfig: isRecord(parsed.memoryConfig)
       ? profileMemoryConfig(parsed.memoryConfig)
       : undefined,
+    roleplayNarrator: isRecord(parsed.roleplayNarrator)
+      ? roleplayNarratorConfig(parsed.roleplayNarrator)
+      : undefined,
     contextPolicy: isRecord(parsed.contextPolicy)
       ? contextStrategyPolicyFromUnknown(parsed.contextPolicy)
       : isRecord(parsed.context_policy)
@@ -791,6 +833,73 @@ export function sessionMemoryPromptConfig(
         ? raw.includeSiblings
         : undefined,
   };
+}
+
+function roleplayNarratorConfig(
+  raw: Record<string, unknown>,
+): RoleplayNarratorConfig {
+  const review = isRecord(raw.review) ? raw.review : {};
+  return {
+    tone: narratorTone(raw.tone) ?? "lush",
+    explicitness: narratorExplicitness(raw.explicitness) ?? "romantic",
+    pacing: narratorPacing(raw.pacing) ?? "balanced",
+    memoryDepth: narratorMemoryDepth(raw.memoryDepth) ?? "medium",
+    exemplar: optionalString(raw.exemplar),
+    review: {
+      enabled: review.enabled === true,
+      maxReviewCycles: optionalNumber(review.maxReviewCycles) ?? 1,
+      checkGravityDrift:
+        typeof review.checkGravityDrift === "boolean"
+          ? review.checkGravityDrift
+          : true,
+      checkCharacterVoice:
+        typeof review.checkCharacterVoice === "boolean"
+          ? review.checkCharacterVoice
+          : true,
+      checkContinuity:
+        typeof review.checkContinuity === "boolean"
+          ? review.checkContinuity
+          : true,
+    },
+  };
+}
+
+function narratorTone(value: unknown): RoleplayNarratorTone | undefined {
+  return value === "whimsical" ||
+    value === "dramatic" ||
+    value === "matter_of_fact" ||
+    value === "lush" ||
+    value === "wry"
+    ? value
+    : undefined;
+}
+
+function narratorExplicitness(
+  value: unknown,
+): RoleplayNarratorExplicitness | undefined {
+  return value === "implied" ||
+    value === "suggestive" ||
+    value === "romantic" ||
+    value === "steamy"
+    ? value
+    : undefined;
+}
+
+function narratorPacing(value: unknown): RoleplayNarratorPacing | undefined {
+  return value === "leisurely" ||
+    value === "balanced" ||
+    value === "rapid" ||
+    value === "breathless"
+    ? value
+    : undefined;
+}
+
+function narratorMemoryDepth(
+  value: unknown,
+): RoleplayNarratorMemoryDepth | undefined {
+  return value === "shallow" || value === "medium" || value === "deep"
+    ? value
+    : undefined;
 }
 
 function wakePolicy(

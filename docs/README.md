@@ -106,8 +106,15 @@ so the rewrite inherits the same machine-checkable dependency rules.
 ## Current implementation map
 
 The repo lives at `/home/dev/rusty-crew` and
-`https://github.com/FuzzySlipper/rusty-crew`. The local deployed service root
-is `/home/system/rusty-crew`.
+`https://github.com/FuzzySlipper/rusty-crew`. The local deployed service roots
+are:
+
+- `/home/system/rusty-crew` on port `9347` with PostgreSQL for long-lived
+  agents;
+- `/home/system/rusty-crew-debug` on port `9348` with SQLite for smoke tests,
+  live certification, and disposable debug sessions.
+
+See `local-service-topology.md`.
 
 - `crates/core/core-protocol` — transport-free Rust protocol types.
 - `crates/core/core-bus` — in-process event bus.

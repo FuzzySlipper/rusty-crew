@@ -17,6 +17,7 @@ export type AdminControlCommandName =
   | "plan_profile_update"
   | "apply_profile_update"
   | "decommission_profile"
+  | "delete_profile"
   | "create_session"
   | "archive_session"
   | "new_session"
@@ -115,6 +116,9 @@ export interface AdminControlExecutor {
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   decommissionProfile?(
+    command: AdminControlCommand,
+  ): Promise<AdminControlOutcome> | AdminControlOutcome;
+  deleteProfile?(
     command: AdminControlCommand,
   ): Promise<AdminControlOutcome> | AdminControlOutcome;
   createSession?(
@@ -469,6 +473,26 @@ function parseControlCommand(
       command: {
         ...commandBase,
         name: "decommission_profile",
+        target: { profileId },
+      },
+    };
+  }
+
+  if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "control" &&
+    parts[3] === "profiles" &&
+    parts[5] === "delete"
+  ) {
+    const profileId = parts[4] ?? "";
+    if (!profileId) return invalidTarget(requestId, "missing_profile_id");
+    return {
+      ok: true,
+      command: {
+        ...commandBase,
+        name: "delete_profile",
         target: { profileId },
       },
     };
@@ -1002,6 +1026,8 @@ function executorForCommand(
       return executor.applyProfileUpdate;
     case "decommission_profile":
       return executor.decommissionProfile;
+    case "delete_profile":
+      return executor.deleteProfile;
     case "create_session":
       return executor.createSession;
     case "archive_session":

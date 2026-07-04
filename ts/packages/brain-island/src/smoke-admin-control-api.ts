@@ -186,6 +186,27 @@ const executor: AdminControlExecutor = {
       },
     };
   },
+  deleteProfile(command) {
+    return {
+      status: "completed",
+      summary: `Deleted ${command.target.profileId}.`,
+      affectedIds: {
+        profileId: command.target.profileId ?? "",
+        sessionsDeleted: 1,
+        rowsDeleted: 4,
+      },
+      result: {
+        profileId: command.target.profileId,
+        confirmProfileId: command.body.confirmProfileId,
+        profileDirectoryDeleted: true,
+        sessionsDeleted: ["session-alpha"],
+        storagePurge: {
+          profileId: command.target.profileId,
+          rowsDeleted: 4,
+        },
+      },
+    };
+  },
   cancelDelegation(command) {
     return {
       status: "completed",
@@ -528,6 +549,33 @@ assert.equal(
     }
   ).profileDirectoryPreserved,
   true,
+);
+
+const deleteProfile = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/profiles/prime/delete",
+    headers: authHeaders(),
+    body: {
+      reason: "operator hard-deleted profile",
+      confirmProfileId: "prime",
+    },
+  },
+  context,
+);
+assert.equal(deleteProfile.status, 200);
+const deleteProfileData = okData<AdminControlResponse>(deleteProfile);
+assert.equal(deleteProfileData.command.name, "delete_profile");
+assert.equal(deleteProfileData.command.target.profileId, "prime");
+assert.equal(deleteProfileData.outcome.status, "completed");
+assert.equal(
+  (
+    deleteProfileData.outcome.result as {
+      confirmProfileId?: string;
+      profileDirectoryDeleted?: boolean;
+    }
+  ).confirmProfileId,
+  "prime",
 );
 
 const rebuildSessionPlan = await handleAdminControlRequest(

@@ -89,6 +89,18 @@ impl CoordinationStore {
         query_profile_registry_records(&conn, query)
     }
 
+    pub fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
+        validate_profile_registry_id(profile_id)?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start purge profile", error))?;
+        let report = purge_profile_in_tx(&tx, profile_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit purge profile", error))?;
+        Ok(report)
+    }
+
     pub fn update_profile_registry_lifecycle(
         &self,
         update: &ProfileRegistryLifecycleUpdate,
@@ -201,6 +213,685 @@ impl CoordinationStore {
         let conn = self.conn()?;
         query_mcp_bindings(&conn, query)
     }
+}
+
+fn purge_profile_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    profile_id: &ProfileId,
+) -> CoreResult<ProfilePurgeReport> {
+    tx.execute_batch(
+        "
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_sessions;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_agents;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_events;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_messages;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_attachments;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_lore_records;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_lore_layers;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_worker_members;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_worker_items;
+
+        CREATE TEMP TABLE __rusty_profile_purge_sessions(session_id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_agents(agent_id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_events(sequence INTEGER PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_messages(message_id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_attachments(attachment_id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_lore_records(record_id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_lore_layers(layer_id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_worker_members(member_id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE __rusty_profile_purge_worker_items(work_item_id TEXT PRIMARY KEY);
+        ",
+    )
+    .map_err(|error| persistence_error("prepare profile purge temp tables", error))?;
+
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_sessions(session_id)
+         SELECT session_id FROM sessions WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile sessions from sessions", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_sessions(session_id)
+         SELECT session_id FROM session_configs WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile sessions from configs", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_sessions(session_id)
+         SELECT session_id FROM session_identity WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile sessions from identity", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_sessions(session_id)
+         SELECT session_id FROM channel_bindings WHERE profile_id = ?1 AND session_id IS NOT NULL",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile sessions from channel bindings", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_sessions(session_id)
+         SELECT session_id FROM mcp_bindings WHERE profile_id = ?1 AND session_id IS NOT NULL",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile sessions from mcp bindings", error))?;
+
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_agents(agent_id)
+         SELECT agent_id FROM agents WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile agents", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_agents(agent_id)
+         SELECT agent_id FROM agent_instances WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile instance agents", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_agents(agent_id)
+         SELECT agent_id FROM session_identity WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile session agents", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_agents(agent_id)
+         SELECT agent_id FROM sessions WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile session state agents", error))?;
+
+    let session_ids = purge_temp_strings(tx, "__rusty_profile_purge_sessions", "session_id")?
+        .into_iter()
+        .map(SessionId)
+        .collect::<Vec<_>>();
+    let agent_ids = purge_temp_strings(tx, "__rusty_profile_purge_agents", "agent_id")?
+        .into_iter()
+        .map(AgentId)
+        .collect::<Vec<_>>();
+
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_events(sequence)
+         SELECT sequence FROM event_session_index
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )
+    .map_err(|error| persistence_error("collect profile event sessions", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_events(sequence)
+         SELECT sequence FROM event_agent_index
+         WHERE agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        [],
+    )
+    .map_err(|error| persistence_error("collect profile event agents", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_messages(message_id)
+         SELECT message_id FROM messages
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )
+    .map_err(|error| persistence_error("collect profile messages", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_attachments(attachment_id)
+         SELECT attachment_id FROM attachments
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )
+    .map_err(|error| persistence_error("collect profile attachments", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_lore_layers(layer_id)
+         SELECT layer_id FROM module_roleplay_lore_layers WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile lore layers", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_lore_records(record_id)
+         SELECT record_id FROM module_roleplay_lore_records
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )
+    .map_err(|error| persistence_error("collect profile lore records by session", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_lore_records(record_id)
+         SELECT record_id FROM module_roleplay_lore_layer_entries
+         WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)",
+        [],
+    )
+    .map_err(|error| persistence_error("collect profile lore records by layer", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_worker_members(member_id)
+         SELECT member_id FROM worker_pool_members
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile worker members", error))?;
+    tx.execute(
+        "INSERT OR IGNORE INTO __rusty_profile_purge_worker_items(work_item_id)
+         SELECT work_item_id FROM worker_pool_work_items
+         WHERE requested_profile_id = ?1
+            OR claimed_by_member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)",
+        params![profile_id.0.as_str()],
+    )
+    .map_err(|error| persistence_error("collect profile worker items", error))?;
+
+    let mut counts = Vec::new();
+    purge_delete(
+        tx,
+        &mut counts,
+        "memory_governance_decisions",
+        "DELETE FROM memory_governance_decisions
+         WHERE proposal_id IN (
+             SELECT proposal_id FROM memory_proposals
+             WHERE scope_id = ?1
+                OR scope_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+         )",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "memory_proposals",
+        "DELETE FROM memory_proposals
+         WHERE scope_id = ?1
+            OR scope_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_lore_provenance_events",
+        "DELETE FROM module_roleplay_lore_provenance_events
+         WHERE record_id IN (SELECT record_id FROM __rusty_profile_purge_lore_records)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_lore_layer_entries",
+        "DELETE FROM module_roleplay_lore_layer_entries
+         WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)
+            OR record_id IN (SELECT record_id FROM __rusty_profile_purge_lore_records)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_chat_layers",
+        "DELETE FROM module_roleplay_chat_layers
+         WHERE chat_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_lore_layer_config",
+        "DELETE FROM module_roleplay_lore_layer_config
+         WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_lore_records",
+        "DELETE FROM module_roleplay_lore_records
+         WHERE record_id IN (SELECT record_id FROM __rusty_profile_purge_lore_records)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_lore_recall_traces",
+        "DELETE FROM module_roleplay_lore_recall_traces
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "module_roleplay_lore_layers",
+        "DELETE FROM module_roleplay_lore_layers
+         WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "message_blocks",
+        "DELETE FROM message_blocks
+         WHERE message_id IN (SELECT message_id FROM __rusty_profile_purge_messages)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "message_variants",
+        "DELETE FROM message_variants
+         WHERE message_id IN (SELECT message_id FROM __rusty_profile_purge_messages)
+            OR slot_id IN (
+                SELECT slot_id FROM message_slots
+                WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            )",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "message_slots",
+        "DELETE FROM message_slots
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "messages",
+        "DELETE FROM messages
+         WHERE message_id IN (SELECT message_id FROM __rusty_profile_purge_messages)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "conversation_snapshots",
+        "DELETE FROM conversation_snapshots
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "conversation_branch_state",
+        "DELETE FROM conversation_branch_state
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "conversation_branches",
+        "DELETE FROM conversation_branches
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "attachment_links",
+        "DELETE FROM attachment_links
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR attachment_id IN (SELECT attachment_id FROM __rusty_profile_purge_attachments)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "attachments",
+        "DELETE FROM attachments
+         WHERE attachment_id IN (SELECT attachment_id FROM __rusty_profile_purge_attachments)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "data_bank_scopes",
+        "DELETE FROM data_bank_scopes
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "provider_wire_states",
+        "DELETE FROM provider_wire_states
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "session_activity_digests",
+        "DELETE FROM session_activity_digests
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "context_compaction_artifacts",
+        "DELETE FROM context_compaction_artifacts
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "session_memory_records",
+        "DELETE FROM session_memory_records
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "profile_memories",
+        "DELETE FROM profile_memories WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "completion_packets",
+        "DELETE FROM completion_packets
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "tool_call_history",
+        "DELETE FROM tool_call_history
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "queued_messages",
+        "DELETE FROM queued_messages
+         WHERE owner_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR owner_agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+            OR from_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+            OR to_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "scheduled_job_runs",
+        "DELETE FROM scheduled_job_runs
+         WHERE target_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR job_id IN (
+                SELECT job_id FROM scheduled_jobs
+                WHERE target_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            )",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "scheduled_jobs",
+        "DELETE FROM scheduled_jobs
+         WHERE target_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "worker_pool_events",
+        "DELETE FROM worker_pool_events
+         WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)
+            OR work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)
+            OR lease_id IN (
+                SELECT lease_id FROM worker_pool_leases
+                WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)
+                   OR work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)
+            )",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "worker_pool_leases",
+        "DELETE FROM worker_pool_leases
+         WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)
+            OR work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "worker_pool_work_items",
+        "DELETE FROM worker_pool_work_items
+         WHERE work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "worker_pool_members",
+        "DELETE FROM worker_pool_members
+         WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "worker_runs",
+        "DELETE FROM worker_runs
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR delegated_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "agent_messages",
+        "DELETE FROM agent_messages
+         WHERE from_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+            OR to_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "runtime_search_fts",
+        "DELETE FROM runtime_search_fts
+         WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+            OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "runtime_counters",
+        "DELETE FROM runtime_counters
+         WHERE (scope_type = 'profile' AND scope_id = ?1)
+            OR (scope_type = 'session' AND scope_id IN (
+                SELECT session_id FROM __rusty_profile_purge_sessions
+            ))
+            OR (scope_type = 'agent' AND scope_id IN (
+                SELECT agent_id FROM __rusty_profile_purge_agents
+            ))",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "event_wake_index",
+        "DELETE FROM event_wake_index
+         WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "event_correlation_index",
+        "DELETE FROM event_correlation_index
+         WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "event_instance_index",
+        "DELETE FROM event_instance_index
+         WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "event_agent_index",
+        "DELETE FROM event_agent_index
+         WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)
+            OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "event_session_index",
+        "DELETE FROM event_session_index
+         WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "event_history",
+        "DELETE FROM event_history
+         WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)",
+        [],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "channel_bindings",
+        "DELETE FROM channel_bindings
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "mcp_bindings",
+        "DELETE FROM mcp_bindings
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "session_configs",
+        "DELETE FROM session_configs
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "session_identity",
+        "DELETE FROM session_identity
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "agent_instances",
+        "DELETE FROM agent_instances
+         WHERE profile_id = ?1
+            OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "agents",
+        "DELETE FROM agents
+         WHERE profile_id = ?1
+            OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)",
+        params![profile_id.0.as_str()],
+    )?;
+    purge_delete(
+        tx,
+        &mut counts,
+        "sessions",
+        "DELETE FROM sessions
+         WHERE profile_id = ?1
+            OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)",
+        params![profile_id.0.as_str()],
+    )?;
+    let profile_registry_deleted = purge_delete(
+        tx,
+        &mut counts,
+        "profile_registry",
+        "DELETE FROM profile_registry WHERE profile_id = ?1",
+        params![profile_id.0.as_str()],
+    )? > 0;
+
+    tx.execute_batch(
+        "
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_sessions;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_agents;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_events;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_messages;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_attachments;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_lore_records;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_lore_layers;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_worker_members;
+        DROP TABLE IF EXISTS temp.__rusty_profile_purge_worker_items;
+        ",
+    )
+    .map_err(|error| persistence_error("drop profile purge temp tables", error))?;
+
+    let rows_deleted = counts.iter().map(|count| count.rows_deleted).sum();
+    Ok(ProfilePurgeReport {
+        profile_id: profile_id.clone(),
+        profile_registry_deleted,
+        session_ids,
+        agent_ids,
+        table_counts: counts,
+        rows_deleted,
+    })
+}
+
+fn purge_temp_strings(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+) -> CoreResult<Vec<String>> {
+    let mut stmt = tx
+        .prepare(&format!(
+            "SELECT {column} FROM {table} ORDER BY {column} ASC"
+        ))
+        .map_err(|error| persistence_error("prepare profile purge temp read", error))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| persistence_error("query profile purge temp read", error))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| persistence_error("load profile purge temp read", error))
+}
+
+fn purge_delete<P>(
+    tx: &rusqlite::Transaction<'_>,
+    counts: &mut Vec<ProfilePurgeTableCount>,
+    table: &str,
+    sql: &str,
+    params: P,
+) -> CoreResult<u64>
+where
+    P: rusqlite::Params,
+{
+    let rows = tx
+        .execute(sql, params)
+        .map_err(|error| persistence_error(&format!("purge profile rows from {table}"), error))?
+        as u64;
+    if rows > 0 {
+        counts.push(ProfilePurgeTableCount {
+            table: table.to_string(),
+            rows_deleted: rows,
+        });
+    }
+    Ok(rows)
 }
 
 fn query_profile_registry_records(

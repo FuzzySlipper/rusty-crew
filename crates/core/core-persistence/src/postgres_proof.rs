@@ -42,12 +42,12 @@ use crate::{
     ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite,
     PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
     ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
-    ProfileRegistryLifecycleStatus, ProfileRegistryQuery, ProfileRegistryRecord,
-    ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
-    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
-    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
+    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
+    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
+    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
+    QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
     RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
     RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
     RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
@@ -452,6 +452,637 @@ impl PostgresRuntimeCounterProofStore {
                 parse_postgres_json(&record_json, "profile registry record_json")
             })
             .collect()
+    }
+
+    pub fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
+        crate::validate_profile_registry_id(profile_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL profile purge", error))?;
+        tx.batch_execute(
+            "
+            DROP TABLE IF EXISTS __rusty_profile_purge_sessions;
+            DROP TABLE IF EXISTS __rusty_profile_purge_agents;
+            DROP TABLE IF EXISTS __rusty_profile_purge_events;
+            DROP TABLE IF EXISTS __rusty_profile_purge_messages;
+            DROP TABLE IF EXISTS __rusty_profile_purge_attachments;
+            DROP TABLE IF EXISTS __rusty_profile_purge_lore_records;
+            DROP TABLE IF EXISTS __rusty_profile_purge_lore_layers;
+            DROP TABLE IF EXISTS __rusty_profile_purge_worker_members;
+            DROP TABLE IF EXISTS __rusty_profile_purge_worker_items;
+
+            CREATE TEMP TABLE __rusty_profile_purge_sessions(session_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_agents(agent_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_events(sequence BIGINT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_messages(message_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_attachments(attachment_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_lore_records(record_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_lore_layers(layer_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_worker_members(member_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            CREATE TEMP TABLE __rusty_profile_purge_worker_items(work_item_id TEXT PRIMARY KEY) ON COMMIT DROP;
+            ",
+        )
+        .map_err(|error| postgres_error("prepare PostgreSQL profile purge temp tables", error))?;
+
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_sessions(session_id)
+                 SELECT session_id FROM {schema}.sessions WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL profile sessions", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_sessions(session_id)
+                 SELECT session_id FROM {schema}.session_configs WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL profile session configs", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_sessions(session_id)
+                 SELECT session_id FROM {schema}.session_identities WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL profile session identities", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_sessions(session_id)
+                 SELECT session_id FROM {schema}.channel_bindings
+                 WHERE profile_id = $1 AND session_id IS NOT NULL
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL channel sessions", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_sessions(session_id)
+                 SELECT session_id FROM {schema}.mcp_bindings
+                 WHERE profile_id = $1 AND session_id IS NOT NULL
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL mcp sessions", error))?;
+
+        for sql in [
+            format!(
+                "INSERT INTO __rusty_profile_purge_agents(agent_id)
+                 SELECT agent_id FROM {schema}.agent_identities WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+            format!(
+                "INSERT INTO __rusty_profile_purge_agents(agent_id)
+                 SELECT agent_id FROM {schema}.agent_instances WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+            format!(
+                "INSERT INTO __rusty_profile_purge_agents(agent_id)
+                 SELECT agent_id FROM {schema}.session_identities WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+            format!(
+                "INSERT INTO __rusty_profile_purge_agents(agent_id)
+                 SELECT agent_id FROM {schema}.sessions WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+        ] {
+            tx.execute(&sql, &[&profile_id.0])
+                .map_err(|error| postgres_error("collect PostgreSQL profile agents", error))?;
+        }
+
+        let session_ids =
+            postgres_purge_temp_strings(&mut tx, "__rusty_profile_purge_sessions", "session_id")?
+                .into_iter()
+                .map(SessionId)
+                .collect::<Vec<_>>();
+        let agent_ids =
+            postgres_purge_temp_strings(&mut tx, "__rusty_profile_purge_agents", "agent_id")?
+                .into_iter()
+                .map(AgentId)
+                .collect::<Vec<_>>();
+
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_events(sequence)
+                 SELECT sequence FROM {schema}.event_index
+                 WHERE projection = 'session'
+                   AND value IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL profile session events", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_events(sequence)
+                 SELECT sequence FROM {schema}.event_index
+                 WHERE projection = 'agent'
+                   AND value IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL profile agent events", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_messages(message_id)
+                 SELECT message_id FROM {schema}.messages
+                 WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL profile messages", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_attachments(attachment_id)
+                 SELECT attachment_id FROM {schema}.attachments
+                 WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL profile attachments", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_lore_layers(layer_id)
+                 SELECT layer_id FROM {schema}.module_roleplay_lore_layers WHERE profile_id = $1
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL lore layers", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_lore_records(record_id)
+                 SELECT record_id FROM {schema}.module_roleplay_lore_records
+                 WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL lore records by session", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_lore_records(record_id)
+                 SELECT record_id FROM {schema}.module_roleplay_lore_layer_entries
+                 WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL lore records by layer", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_worker_members(member_id)
+                 SELECT member_id FROM {schema}.worker_pool_members
+                 WHERE profile_id = $1
+                    OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL worker members", error))?;
+        tx.execute(
+            &format!(
+                "INSERT INTO __rusty_profile_purge_worker_items(work_item_id)
+                 SELECT work_item_id FROM {schema}.worker_pool_work_items
+                 WHERE requested_profile_id = $1
+                    OR claimed_by_member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)
+                 ON CONFLICT DO NOTHING"
+            ),
+            &[&profile_id.0],
+        )
+        .map_err(|error| postgres_error("collect PostgreSQL worker items", error))?;
+
+        let mut counts = Vec::new();
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_lore_provenance_events",
+            &format!(
+                "DELETE FROM {schema}.module_roleplay_lore_provenance_events
+                 WHERE record_id IN (SELECT record_id FROM __rusty_profile_purge_lore_records)"
+            ),
+            &[],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_lore_layer_entries",
+            &format!(
+                "DELETE FROM {schema}.module_roleplay_lore_layer_entries
+                 WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)
+                    OR record_id IN (SELECT record_id FROM __rusty_profile_purge_lore_records)"
+            ),
+            &[],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_chat_layers",
+            &format!(
+                "DELETE FROM {schema}.module_roleplay_chat_layers
+                 WHERE chat_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                    OR layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)"
+            ),
+            &[],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_lore_layer_config",
+            &format!(
+                "DELETE FROM {schema}.module_roleplay_lore_layer_config
+                 WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)"
+            ),
+            &[],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_lore_records",
+            &format!(
+                "DELETE FROM {schema}.module_roleplay_lore_records
+                 WHERE record_id IN (SELECT record_id FROM __rusty_profile_purge_lore_records)"
+            ),
+            &[],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_lore_recall_traces",
+            &format!(
+                "DELETE FROM {schema}.module_roleplay_lore_recall_traces
+                 WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+            ),
+            &[],
+        )?;
+        postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "module_roleplay_lore_layers",
+            &format!(
+                "DELETE FROM {schema}.module_roleplay_lore_layers
+                 WHERE layer_id IN (SELECT layer_id FROM __rusty_profile_purge_lore_layers)"
+            ),
+            &[],
+        )?;
+
+        for (table, sql) in [
+            (
+                "message_blocks",
+                format!(
+                    "DELETE FROM {schema}.message_blocks
+                     WHERE message_id IN (SELECT message_id FROM __rusty_profile_purge_messages)"
+                ),
+            ),
+            (
+                "message_variants",
+                format!(
+                    "DELETE FROM {schema}.message_variants
+                     WHERE message_id IN (SELECT message_id FROM __rusty_profile_purge_messages)
+                        OR slot_id IN (
+                            SELECT slot_id FROM {schema}.message_slots
+                            WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                        )"
+                ),
+            ),
+            (
+                "message_slots",
+                format!(
+                    "DELETE FROM {schema}.message_slots
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "messages",
+                format!(
+                    "DELETE FROM {schema}.messages
+                     WHERE message_id IN (SELECT message_id FROM __rusty_profile_purge_messages)"
+                ),
+            ),
+            (
+                "conversation_snapshots",
+                format!(
+                    "DELETE FROM {schema}.conversation_snapshots
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "conversation_branch_state",
+                format!(
+                    "DELETE FROM {schema}.conversation_branch_state
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "conversation_branches",
+                format!(
+                    "DELETE FROM {schema}.conversation_branches
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "attachment_links",
+                format!(
+                    "DELETE FROM {schema}.attachment_links
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                        OR attachment_id IN (SELECT attachment_id FROM __rusty_profile_purge_attachments)"
+                ),
+            ),
+            (
+                "attachments",
+                format!(
+                    "DELETE FROM {schema}.attachments
+                     WHERE attachment_id IN (SELECT attachment_id FROM __rusty_profile_purge_attachments)"
+                ),
+            ),
+            (
+                "data_bank_scopes",
+                format!(
+                    "DELETE FROM {schema}.data_bank_scopes
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "provider_wire_states",
+                format!(
+                    "DELETE FROM {schema}.provider_wire_states
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "context_compaction_artifacts",
+                format!(
+                    "DELETE FROM {schema}.context_compaction_artifacts
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "session_memory_records",
+                format!(
+                    "DELETE FROM {schema}.session_memory_records
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "completion_packets",
+                format!(
+                    "DELETE FROM {schema}.completion_packets
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "tool_call_history",
+                format!(
+                    "DELETE FROM {schema}.tool_call_history
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+            ),
+            (
+                "worker_pool_events",
+                format!(
+                    "DELETE FROM {schema}.worker_pool_events
+                     WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)
+                        OR work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)
+                        OR lease_id IN (
+                            SELECT lease_id FROM {schema}.worker_pool_leases
+                            WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)
+                               OR work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)
+                        )"
+                ),
+            ),
+            (
+                "worker_pool_leases",
+                format!(
+                    "DELETE FROM {schema}.worker_pool_leases
+                     WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)
+                        OR work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)"
+                ),
+            ),
+            (
+                "worker_pool_work_items",
+                format!(
+                    "DELETE FROM {schema}.worker_pool_work_items
+                     WHERE work_item_id IN (SELECT work_item_id FROM __rusty_profile_purge_worker_items)"
+                ),
+            ),
+            (
+                "worker_pool_members",
+                format!(
+                    "DELETE FROM {schema}.worker_pool_members
+                     WHERE member_id IN (SELECT member_id FROM __rusty_profile_purge_worker_members)"
+                ),
+            ),
+            (
+                "agent_messages",
+                format!(
+                    "DELETE FROM {schema}.agent_messages
+                     WHERE from_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+                        OR to_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)"
+                ),
+            ),
+            (
+                "runtime_search_entries",
+                format!(
+                    "DELETE FROM {schema}.runtime_search_entries
+                     WHERE session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                        OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)"
+                ),
+            ),
+        ] {
+            postgres_purge_delete(&mut tx, &mut counts, table, &sql, &[])?;
+        }
+
+        for (table, sql, params) in [
+            (
+                "session_activity_digests",
+                format!(
+                    "DELETE FROM {schema}.session_activity_digests
+                     WHERE profile_id = $1
+                        OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "profile_memories",
+                format!("DELETE FROM {schema}.profile_memories WHERE profile_id = $1"),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "queued_messages",
+                format!(
+                    "DELETE FROM {schema}.queued_messages
+                     WHERE owner_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                        OR owner_agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+                        OR from_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)
+                        OR to_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)"
+                ),
+                Vec::new(),
+            ),
+            (
+                "scheduled_job_runs",
+                format!(
+                    "DELETE FROM {schema}.scheduled_job_runs
+                     WHERE target_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                        OR job_id IN (
+                            SELECT job_id FROM {schema}.scheduled_jobs
+                            WHERE target_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                        )"
+                ),
+                Vec::new(),
+            ),
+            (
+                "scheduled_jobs",
+                format!(
+                    "DELETE FROM {schema}.scheduled_jobs
+                     WHERE target_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                Vec::new(),
+            ),
+            (
+                "worker_runs",
+                format!(
+                    "DELETE FROM {schema}.worker_runs
+                     WHERE profile_id = $1
+                        OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)
+                        OR delegated_session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "runtime_counters",
+                format!(
+                    "DELETE FROM {schema}.runtime_counters
+                     WHERE (scope_type = 'profile' AND scope_id = $1)
+                        OR (scope_type = 'session' AND scope_id IN (
+                            SELECT session_id FROM __rusty_profile_purge_sessions
+                        ))
+                        OR (scope_type = 'agent' AND scope_id IN (
+                            SELECT agent_id FROM __rusty_profile_purge_agents
+                        ))"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "event_index",
+                format!(
+                    "DELETE FROM {schema}.event_index
+                     WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)
+                        OR (projection = 'session' AND value IN (
+                            SELECT session_id FROM __rusty_profile_purge_sessions
+                        ))
+                        OR (projection = 'agent' AND value IN (
+                            SELECT agent_id FROM __rusty_profile_purge_agents
+                        ))"
+                ),
+                Vec::new(),
+            ),
+            (
+                "event_history",
+                format!(
+                    "DELETE FROM {schema}.event_history
+                     WHERE sequence IN (SELECT sequence FROM __rusty_profile_purge_events)"
+                ),
+                Vec::new(),
+            ),
+            (
+                "channel_bindings",
+                format!(
+                    "DELETE FROM {schema}.channel_bindings
+                     WHERE profile_id = $1
+                        OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "mcp_bindings",
+                format!(
+                    "DELETE FROM {schema}.mcp_bindings
+                     WHERE profile_id = $1
+                        OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "session_configs",
+                format!(
+                    "DELETE FROM {schema}.session_configs
+                     WHERE profile_id = $1
+                        OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "session_identities",
+                format!(
+                    "DELETE FROM {schema}.session_identities
+                     WHERE profile_id = $1
+                        OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "agent_instances",
+                format!(
+                    "DELETE FROM {schema}.agent_instances
+                     WHERE profile_id = $1
+                        OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "agent_identities",
+                format!(
+                    "DELETE FROM {schema}.agent_identities
+                     WHERE profile_id = $1
+                        OR agent_id IN (SELECT agent_id FROM __rusty_profile_purge_agents)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+            (
+                "sessions",
+                format!(
+                    "DELETE FROM {schema}.sessions
+                     WHERE profile_id = $1
+                        OR session_id IN (SELECT session_id FROM __rusty_profile_purge_sessions)"
+                ),
+                vec![&profile_id.0 as &(dyn ToSql + Sync)],
+            ),
+        ] {
+            postgres_purge_delete(&mut tx, &mut counts, table, &sql, &params)?;
+        }
+
+        let profile_registry_deleted = postgres_purge_delete(
+            &mut tx,
+            &mut counts,
+            "profile_registry",
+            &format!("DELETE FROM {schema}.profile_registry WHERE profile_id = $1"),
+            &[&profile_id.0],
+        )? > 0;
+
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL profile purge", error))?;
+        let rows_deleted = counts.iter().map(|count| count.rows_deleted).sum();
+        Ok(ProfilePurgeReport {
+            profile_id: profile_id.clone(),
+            profile_registry_deleted,
+            session_ids,
+            agent_ids,
+            table_counts: counts,
+            rows_deleted,
+        })
     }
 
     pub fn upsert_model_provider(
@@ -13387,6 +14018,42 @@ fn quote_postgres_identifier(identifier: &str) -> String {
     format!("\"{identifier}\"")
 }
 
+fn postgres_purge_temp_strings(
+    tx: &mut Transaction<'_>,
+    table: &str,
+    column: &str,
+) -> CoreResult<Vec<String>> {
+    let rows = tx
+        .query(
+            &format!("SELECT {column} FROM {table} ORDER BY {column} ASC"),
+            &[],
+        )
+        .map_err(|error| postgres_error("query PostgreSQL profile purge temp table", error))?;
+    rows.iter().map(|row| Ok(row.get::<_, String>(0))).collect()
+}
+
+fn postgres_purge_delete(
+    tx: &mut Transaction<'_>,
+    counts: &mut Vec<ProfilePurgeTableCount>,
+    table: &str,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+) -> CoreResult<u64> {
+    let rows = tx.execute(sql, params).map_err(|error| {
+        postgres_error(
+            &format!("purge PostgreSQL profile rows from {table}"),
+            error,
+        )
+    })?;
+    if rows > 0 {
+        counts.push(ProfilePurgeTableCount {
+            table: table.to_string(),
+            rows_deleted: rows,
+        });
+    }
+    Ok(rows)
+}
+
 fn postgres_error(context: &str, error: postgres::Error) -> CoreError {
     CoreError::new(
         CoreErrorKind::PersistenceFailure,
@@ -16518,6 +17185,7 @@ mod tests {
             tool_profile_key: Some("planner".to_string()),
             source_tool_name: Some("den.get_task".to_string()),
             catalog_revision: Some("rev-1".to_string()),
+            debug_detail_id: None,
             policy: None,
         };
 

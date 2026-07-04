@@ -1218,6 +1218,64 @@ try {
     );
     assert.equal(decommissionCustomChatProfile.status, 200);
     assert.equal(decommissionCustomChatProfile.body.ok, true);
+
+    const hardDeleteProfile = await post(
+      "/v1/admin/control/profiles",
+      undefined,
+      {
+        profileId: "field-hard-delete-profile",
+        displayName: "Field Hard Delete Profile",
+        providerAlias: "default",
+      },
+      noAuthPort,
+    );
+    assert.equal(hardDeleteProfile.status, 200);
+    assert.equal(hardDeleteProfile.body.ok, true);
+    assert.equal(
+      existsSync(
+        join(noAuthRoot, "config", "profiles", "field-hard-delete-profile.json"),
+      ),
+      true,
+    );
+    const hardDeleteProfileResult = await post(
+      "/v1/admin/control/profiles/field-hard-delete-profile/delete",
+      undefined,
+      {
+        reason: "service host smoke hard delete cleanup",
+        confirmProfileId: "field-hard-delete-profile",
+      },
+      noAuthPort,
+    );
+    assert.equal(hardDeleteProfileResult.status, 200);
+    assert.equal(hardDeleteProfileResult.body.ok, true);
+    assert.equal(
+      hardDeleteProfileResult.body.data.outcome.result.profileDirectoryDeleted,
+      true,
+    );
+    assert.equal(
+      hardDeleteProfileResult.body.data.outcome.result.storagePurge
+        .profileRegistryDeleted,
+      true,
+    );
+    assert.equal(
+      existsSync(
+        join(noAuthRoot, "config", "profiles", "field-hard-delete-profile.json"),
+      ),
+      false,
+    );
+    assert.equal(
+      await noAuthHost.bridge.getProfileRegistryRecord(
+        "field-hard-delete-profile",
+      ),
+      undefined,
+    );
+    assert.equal(
+      (await noAuthHost.bridge.listSessions()).some(
+        (session) => session.profileId === "field-hard-delete-profile",
+      ),
+      false,
+    );
+
     const runtimeConfigAfterProfileCreate = JSON.parse(
       readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
     ) as {

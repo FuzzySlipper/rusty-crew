@@ -26,6 +26,11 @@ import {
   type BrainToolResolver,
 } from "./tool-session-selection.js";
 import { toPiAgentTools } from "./pi-tool-adapter.js";
+import {
+  localToolCallMetadata,
+  type ToolCallDebugStore,
+  withToolCallDebugReference,
+} from "./tool-call-debug-store.js";
 
 export type PiAgentLike = Pick<
   PiAgent,
@@ -41,6 +46,7 @@ export interface PiAgentBrainOptions {
   resolveTools?: BrainToolResolver;
   toolProfile?: ToolProfile;
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
+  toolCallDebugStore?: ToolCallDebugStore;
 }
 
 export function createPiAgentBrain(
@@ -70,7 +76,11 @@ export function createPiAgentBrain(
           );
       };
       const unsubscribe = agent.subscribe((event) => {
-        const mappedEvents = mapPiAgentEvent(event, { sawTextDelta });
+        const mappedEvents = mapPiAgentEvent(event, {
+          sawTextDelta,
+          wake: input,
+          toolCallDebugStore: options.toolCallDebugStore,
+        });
         for (const mapped of mappedEvents) {
           if (mapped.type === "text_delta") {
             sawTextDelta = true;
@@ -137,6 +147,7 @@ function buildAgentOptions(
         options.resolveTools,
         options.toolProfile,
         actions,
+        options.toolCallDebugStore,
       ),
     },
     sessionId: input.sessionId,
@@ -150,11 +161,12 @@ function resolveAllowedTools(
   resolveTools: BrainToolResolver | undefined,
   toolProfile: ToolProfile | undefined,
   actions: BrainActionCollector,
+  toolCallDebugStore: ToolCallDebugStore | undefined,
 ): PiAgentTool[] {
   return toPiAgentTools(
     resolveToolSession({ wake: input, resolveTools, toolProfile, actions })
       .tools,
-    { wake: input },
+    { wake: input, toolCallDebugStore },
   );
 }
 
@@ -172,7 +184,11 @@ function toPiMessages(
 
 function mapPiAgentEvent(
   event: PiAgentEvent,
-  state: { sawTextDelta: boolean },
+  state: {
+    sawTextDelta: boolean;
+    wake: BrainWakeInput;
+    toolCallDebugStore?: ToolCallDebugStore;
+  },
 ): BrainEvent[] {
   switch (event.type) {
     case "agent_start":
@@ -215,14 +231,43 @@ function mapPiAgentEvent(
       const errorText = assistantMessageErrorText(event.message);
       return errorText ? [{ type: "text_delta", text: errorText }] : [];
     }
-    case "tool_execution_start":
-      return [{ type: "tool_call_started", toolName: event.toolName }];
+    case "tool_execution_start": {
+      const debugRecord = state.toolCallDebugStore?.start({
+        sessionId: state.wake.sessionId,
+        wakeId: state.wake.wakeId,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        arguments: event.args,
+        sourceMetadata: localToolCallMetadata(event.toolName),
+      });
+      return [
+        {
+          type: "tool_call_started",
+          toolName: event.toolName,
+          metadata: withToolCallDebugReference(
+            localToolCallMetadata(event.toolName),
+            debugRecord?.debug_detail_id,
+          ),
+        },
+      ];
+    }
+    case "tool_execution_update":
+      return [];
     case "tool_execution_end":
+      const debugRecord = state.toolCallDebugStore?.referenceForToolCall({
+        sessionId: state.wake.sessionId,
+        wakeId: state.wake.wakeId,
+        toolCallId: event.toolCallId,
+      });
       return [
         {
           type: "tool_call_finished",
           toolName: event.toolName,
           isError: event.isError,
+          metadata: withToolCallDebugReference(
+            localToolCallMetadata(event.toolName),
+            debugRecord?.debug_detail_id,
+          ),
         },
       ];
     case "agent_end":

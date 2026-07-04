@@ -51,10 +51,11 @@ use rusty_crew_core_protocol::{
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
     ModelProviderQuery, ModelProviderRecord, ModelProviderWrite, ParentConsumptionPolicy,
-    ProfileId, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionActivityDigest,
-    SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
-    ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
+    ProfileId, ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryWrite,
+    ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId,
+    SessionActivityDigest, SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind,
+    SessionState, SessionStatus, ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy,
+    WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -644,6 +645,37 @@ impl CoreEngine {
         self.store
             .service_data()
             .get_profile_registry_record(profile_id)
+    }
+
+    pub fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
+        let removed_sessions = self.sessions.remove_sessions_for_profile(profile_id)?;
+        self.profile_tool_profiles
+            .lock()
+            .map_err(|_| {
+                CoreError::new(
+                    CoreErrorKind::InternalError,
+                    "profile tool profiles lock poisoned",
+                )
+            })?
+            .remove(profile_id);
+        let mut report = self.store.service_data().purge_profile(profile_id)?;
+        for state in removed_sessions {
+            if !report
+                .session_ids
+                .iter()
+                .any(|session_id| session_id == &state.session_id)
+            {
+                report.session_ids.push(state.session_id);
+            }
+            if !report
+                .agent_ids
+                .iter()
+                .any(|agent_id| agent_id == &state.agent_id)
+            {
+                report.agent_ids.push(state.agent_id);
+            }
+        }
+        Ok(report)
     }
 
     pub fn upsert_model_provider(
@@ -3817,6 +3849,7 @@ mod tests {
             tool_profile_key: Some("profile-tools".to_string()),
             source_tool_name: Some("read_file".to_string()),
             catalog_revision: Some("rev-1".to_string()),
+            debug_detail_id: None,
             policy: Some(ToolCallPolicyMetadata {
                 allowed: Some(true),
                 denial_reason: None,
@@ -3855,6 +3888,7 @@ mod tests {
             tool_profile_key: None,
             source_tool_name: Some("web_extract".to_string()),
             catalog_revision: None,
+            debug_detail_id: None,
             policy: Some(ToolCallPolicyMetadata {
                 allowed: Some(false),
                 denial_reason: Some("network_denied".to_string()),
@@ -3872,6 +3906,7 @@ mod tests {
             tool_profile_key: None,
             source_tool_name: Some("browser_vision".to_string()),
             catalog_revision: None,
+            debug_detail_id: None,
             policy: Some(ToolCallPolicyMetadata {
                 allowed: Some(true),
                 denial_reason: None,

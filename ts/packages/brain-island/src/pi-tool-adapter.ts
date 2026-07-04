@@ -6,9 +6,14 @@ import type {
 import type { Static, TSchema } from "typebox";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { BrainWakeInput } from "./index.js";
+import {
+  localToolCallMetadata,
+  type ToolCallDebugStore,
+} from "./tool-call-debug-store.js";
 
 export interface PiToolAdapterContext {
   wake: BrainWakeInput;
+  toolCallDebugStore?: ToolCallDebugStore;
 }
 
 export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
@@ -22,28 +27,82 @@ export function toPiAgentTool<TParameters extends TSchema, TDetails = unknown>(
     parameters: tool.parameters,
     prepareArguments: tool.prepareArguments,
     execute: async (toolCallId, params, signal, onUpdate) => {
+      const debugRecord = context.toolCallDebugStore?.start({
+        toolCallId,
+        sessionId: context.wake.sessionId,
+        wakeId: context.wake.wakeId,
+        toolName: tool.name,
+        arguments: params,
+        sourceMetadata: localToolCallMetadata(tool.name),
+      });
+      const recordUpdate = <TDetails>(
+        partial: BrainToolResult<TDetails>,
+      ): BrainToolResult<TDetails> => {
+        if (debugRecord) {
+          context.toolCallDebugStore?.recordUpdate({
+            debugDetailId: debugRecord.debug_detail_id,
+            partialResult: partial,
+          });
+        }
+        return partial;
+      };
       if (tool.executeWithContext) {
-        return toPiToolResult(
-          await tool.executeWithContext(params as Static<TParameters>, {
-            wake: context.wake,
-            wakeId: context.wake.wakeId,
-            sessionId: context.wake.sessionId,
-            callId: toolCallId,
-            signal: signal ?? new AbortController().signal,
-            onUpdate: onUpdate
-              ? (partial) => onUpdate(toPiToolResult(partial))
-              : undefined,
-          }),
-        );
+        try {
+          const result = await tool.executeWithContext(
+            params as Static<TParameters>,
+            {
+              wake: context.wake,
+              wakeId: context.wake.wakeId,
+              sessionId: context.wake.sessionId,
+              callId: toolCallId,
+              signal: signal ?? new AbortController().signal,
+              onUpdate: onUpdate
+                ? (partial) => onUpdate(toPiToolResult(recordUpdate(partial)))
+                : undefined,
+            },
+          );
+          if (debugRecord) {
+            context.toolCallDebugStore?.finish({
+              debugDetailId: debugRecord.debug_detail_id,
+              finalResult: result,
+            });
+          }
+          return toPiToolResult(result);
+        } catch (error) {
+          if (debugRecord) {
+            context.toolCallDebugStore?.fail({
+              debugDetailId: debugRecord.debug_detail_id,
+              error,
+            });
+          }
+          throw error;
+        }
       }
-      return toPiToolResult(
-        await tool.execute(
+      try {
+        const result = await tool.execute(
           toolCallId,
           params as Static<TParameters>,
           signal,
-          onUpdate ? (partial) => onUpdate(toPiToolResult(partial)) : undefined,
-        ),
-      );
+          onUpdate
+            ? (partial) => onUpdate(toPiToolResult(recordUpdate(partial)))
+            : undefined,
+        );
+        if (debugRecord) {
+          context.toolCallDebugStore?.finish({
+            debugDetailId: debugRecord.debug_detail_id,
+            finalResult: result,
+          });
+        }
+        return toPiToolResult(result);
+      } catch (error) {
+        if (debugRecord) {
+          context.toolCallDebugStore?.fail({
+            debugDetailId: debugRecord.debug_detail_id,
+            error,
+          });
+        }
+        throw error;
+      }
     },
     executionMode: tool.executionMode,
   };

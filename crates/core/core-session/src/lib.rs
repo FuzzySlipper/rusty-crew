@@ -1,8 +1,8 @@
 //! Session lifecycle records for full agents and workers.
 
 use rusty_crew_core_protocol::{
-    AgentId, CoreError, CoreErrorKind, CoreResult, IsoTimestamp, SessionConfig, SessionHandle,
-    SessionId, SessionState, SessionStatus,
+    AgentId, CoreError, CoreErrorKind, CoreResult, IsoTimestamp, ProfileId, SessionConfig,
+    SessionHandle, SessionId, SessionState, SessionStatus,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -139,6 +139,30 @@ impl SessionRegistry {
             .collect::<Vec<_>>();
         sessions.sort_by_key(|state| state.handle.get());
         Ok(sessions)
+    }
+
+    pub fn remove_sessions_for_profile(
+        &self,
+        profile_id: &ProfileId,
+    ) -> CoreResult<Vec<SessionState>> {
+        let mut sessions =
+            self.inner.sessions.lock().map_err(|_| {
+                CoreError::new(CoreErrorKind::InternalError, "session lock poisoned")
+            })?;
+        let mut removed = Vec::new();
+        let session_ids = sessions
+            .iter()
+            .filter_map(|(session_id, state)| {
+                (&state.profile_id == profile_id).then(|| session_id.clone())
+            })
+            .collect::<Vec<_>>();
+        for session_id in session_ids {
+            if let Some(state) = sessions.remove(&session_id) {
+                removed.push(state);
+            }
+        }
+        removed.sort_by_key(|state| state.handle.get());
+        Ok(removed)
     }
 
     pub fn delegated_sessions_for_parent(

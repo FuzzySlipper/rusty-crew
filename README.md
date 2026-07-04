@@ -53,12 +53,14 @@ field-test configuration under `/home/system/rusty-crew`.
 
 ## Service Layout
 
-The local service is expected to use:
+The local machine intentionally runs two Rusty Crew services:
 
-- config: `/home/system/rusty-crew/config`
-- data: `/home/system/rusty-crew/data`
-- logs: `/home/system/rusty-crew/logs`
-- run state: `/home/system/rusty-crew/run`
+- live agent service: `/home/system/rusty-crew`, port `9347`, PostgreSQL;
+- debug/test service: `/home/system/rusty-crew-debug`, port `9348`, SQLite.
+
+Use the debug service for smoke tests, live certification, frontend debugging,
+and disposable LLM experiments. Use the live service for long-lived agents and
+project/channel activity that should not be polluted by test profiles.
 
 The service host should bind admin/debug HTTP surfaces on `0.0.0.0` in this
 trusted LAN development environment. Tokens and service URLs belong in local

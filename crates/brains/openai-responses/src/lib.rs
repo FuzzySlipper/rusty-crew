@@ -2022,6 +2022,7 @@ fn tool_metadata(call: &PendingResponsesFunctionCall) -> ToolCallMetadata {
         tool_profile_key: None,
         source_tool_name: Some(call.name.clone()),
         catalog_revision: Some("openai-responses-neutral-tools".to_string()),
+        debug_detail_id: None,
         policy: Some(ToolCallPolicyMetadata {
             allowed: Some(true),
             denial_reason: None,

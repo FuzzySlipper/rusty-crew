@@ -9,11 +9,17 @@ official admin APIs so the same path exercises provider aliases, local tool
 profiles, create-profile defaults, runtime config refresh, brain registration,
 and session creation.
 
-Assume the Rusty Crew service is reachable at:
+Assume the Rusty Crew debug/test service is reachable at:
 
 ```bash
-export CREW=http://127.0.0.1:9347
+export CREW=${RUSTY_CREW_DEBUG_ADMIN_BASE_URL:-http://127.0.0.1:9348}
 ```
+
+The long-lived local agent service is on port `9347` and uses PostgreSQL. Do
+not run noisy live-certification setup against it unless the task explicitly
+requires testing the production-like service. The debug service at port `9348`
+uses SQLite and is the default target for disposable profiles, providers, and
+chat sessions. See `docs/local-service-topology.md`.
 
 If the local service requires an admin token, add:
 

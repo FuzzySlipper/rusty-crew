@@ -67,10 +67,12 @@ import {
 import { resolveDenMemoryTools } from "./den-memory-tools.js";
 import { resolveDelegationTools } from "./delegation-tools.js";
 import { resolveLoreMemoryTools } from "./lore-memory-tool.js";
+import { resolveSceneStateTools } from "./scene-state-tool.js";
 import type { BrainImplementation, BrainWakeResult } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
 import type { PiAgentFactory } from "./pi-agent-brain.js";
+import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import { providerStateScopeForProfile } from "./provider-state-fingerprints.js";
 import {
   channelReadbackTool,
@@ -712,6 +714,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   coordinationRuntime?: CoordinationToolRuntime;
+  toolCallDebugStore?: ToolCallDebugStore;
   onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await expandRuntimeConfigFromProfiles(
@@ -807,6 +810,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             mcpToolExecutorFactory: input.mcpToolExecutorFactory,
             adapterFactories: input.adapterFactories,
             coordinationRuntime: input.coordinationRuntime,
+            toolCallDebugStore: input.toolCallDebugStore,
           }),
           {
             profileId: brain.profileId,
@@ -970,6 +974,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
   coordinationRuntime?: CoordinationToolRuntime;
+  toolCallDebugStore?: ToolCallDebugStore;
   onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
   const runtimeConfig = await expandRuntimeConfigFromProfiles(
@@ -1034,6 +1039,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         mcpToolCatalog,
         mcpToolExecutorFactory: input.mcpToolExecutorFactory,
         coordinationRuntime: input.coordinationRuntime,
+        toolCallDebugStore: input.toolCallDebugStore,
       }),
       {
         profileId: brain.profileId,
@@ -1337,6 +1343,7 @@ async function createConfiguredBrain(
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     coordinationRuntime?: CoordinationToolRuntime;
+    toolCallDebugStore?: ToolCallDebugStore;
   } = {},
 ): Promise<BrainImplementation> {
   return module.createBrain({
@@ -1349,6 +1356,7 @@ async function createConfiguredBrain(
     planActions: completionActionFromEvents,
     maxTokens: effectiveModelMaxTokens(profile),
     createDenRouterAgentFactory: options.createDenRouterAgentFactory,
+    toolCallDebugStore: options.toolCallDebugStore,
   });
 }
 
@@ -1459,6 +1467,10 @@ function createMemoryToolResolver(
       session: input.wake.state.session,
     }),
     ...resolveLoreMemoryTools({
+      client: options.bridge,
+      session: input.wake.state.session,
+    }),
+    ...resolveSceneStateTools({
       client: options.bridge,
       session: input.wake.state.session,
     }),

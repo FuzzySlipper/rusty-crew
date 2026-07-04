@@ -228,6 +228,19 @@ const brainEventSchema = Type.Union([
     { additionalProperties: true },
   ),
   Type.Object(
+    {
+      type: Type.Literal("phase_change"),
+      phase: Type.Union([
+        Type.Literal("idle"),
+        Type.Literal("exploring"),
+        Type.Literal("composing"),
+        Type.Literal("reviewing"),
+      ]),
+      message: Type.Optional(Type.String()),
+    },
+    { additionalProperties: true },
+  ),
+  Type.Object(
     { type: Type.Literal("tool_call_started"), toolName: Type.String() },
     { additionalProperties: true },
   ),
@@ -438,6 +451,26 @@ export const rawProfileRegistryRecordArraySchema = Type.Array(
   rawProfileRegistryRecordSchema,
 );
 
+export const rawProfilePurgeReportSchema = Type.Object(
+  {
+    profile_id: Type.String(),
+    profile_registry_deleted: Type.Boolean(),
+    session_ids: Type.Array(Type.String()),
+    agent_ids: Type.Array(Type.String()),
+    table_counts: Type.Array(
+      Type.Object(
+        {
+          table: Type.String(),
+          rows_deleted: Type.Number(),
+        },
+        { additionalProperties: true },
+      ),
+    ),
+    rows_deleted: Type.Number(),
+  },
+  { additionalProperties: true },
+);
+
 const modelProviderStatusSchema = Type.Union([
   Type.Literal("active"),
   Type.Literal("disabled"),
@@ -591,6 +624,19 @@ const rawBrainEventSchema = Type.Union([
       type: Type.Literal("reasoning_delta"),
       text: Type.String(),
       format: Type.Optional(Type.String()),
+    },
+    { additionalProperties: true },
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("phase_change"),
+      phase: Type.Union([
+        Type.Literal("idle"),
+        Type.Literal("exploring"),
+        Type.Literal("composing"),
+        Type.Literal("reviewing"),
+      ]),
+      message: Type.Optional(Type.String()),
     },
     { additionalProperties: true },
   ),

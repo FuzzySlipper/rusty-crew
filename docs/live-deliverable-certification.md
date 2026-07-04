@@ -66,7 +66,7 @@ go run ./playwright-broker/cmd/den-playwright run rusty-view \
 Useful live variables:
 
 ```bash
-RV_LIVE_BACKEND_URL=http://127.0.0.1:9347
+RV_LIVE_BACKEND_URL=http://127.0.0.1:9348
 RV_LIVE_PROFILE=tester
 RV_LIVE_MIN_STREAMING_MS=15000
 ```

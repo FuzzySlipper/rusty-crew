@@ -46,12 +46,13 @@ use rusty_crew_core_protocol::{
     MemorySpaceId, MemoryVisibilityModel, MemoryWritePolicy, MessageBlockId, MessageId,
     MessageSlotId, MessageVariantId, ModelProviderCredential, ModelProviderProtocol,
     ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus,
-    ModelProviderWrite, ParentConsumptionPolicy, ProfileId, ProfileRegistryLifecycleStatus,
-    ProfileRegistryLifecycleUpdate, ProfileRegistryRecord, ProfileRegistryUpdate,
-    ProfileRegistryWrite, ProjectId, ProviderStateAbsenceReason, ResourceLimits, RunId,
-    SessionActivityDigest, SessionActivityDigestQuery, SessionConfig, SessionHandle,
-    SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind, SessionState,
-    SessionStatus, SourceSystemReference, TaskId, ToolCallMetadata, ToolProfile,
+    ModelProviderWrite, ParentConsumptionPolicy, ProfileId, ProfilePurgeReport,
+    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryLifecycleUpdate,
+    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProjectId,
+    ProviderStateAbsenceReason, ResourceLimits, RunId, SessionActivityDigest,
+    SessionActivityDigestQuery, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId,
+    SessionIdentityRecord, SessionKind, SessionState, SessionStatus, SourceSystemReference, TaskId,
+    ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -616,7 +617,7 @@ impl CoreCoordinationStore {
                     repository_groups: diagnostics.repository_groups,
                     module_registry,
                     index_checks: Vec::new(),
-                    search_healthy: false,
+                    search_healthy: true,
                     pressure_signals: Vec::new(),
                     pressure: false,
                 })
@@ -693,6 +694,14 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.get_profile_registry_record(profile_id),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.get_profile_registry_record(profile_id),
+        }
+    }
+
+    pub fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.purge_profile(profile_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.purge_profile(profile_id),
         }
     }
 
@@ -1906,6 +1915,10 @@ impl ServiceDataRepositorySet<'_> {
         profile_id: &ProfileId,
     ) -> CoreResult<Option<ProfileRegistryRecord>> {
         self.store.get_profile_registry_record(profile_id)
+    }
+
+    pub fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
+        self.store.purge_profile(profile_id)
     }
 
     pub fn upsert_model_provider(
@@ -12854,6 +12867,117 @@ mod tests {
         assert_eq!(invalid_id.kind, CoreErrorKind::InvalidInput);
 
         assert_eq!(store.count_rows("profile_registry").unwrap(), 2);
+        remove_temp_db(&db_path);
+    }
+
+    #[test]
+    fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
+        let db_path = temp_db_path("profile-purge");
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+        let config = sample_session_config();
+        let state = sample_session_state();
+
+        store
+            .create_profile_registry_record(&profile_registry_write("full-profile"))
+            .unwrap();
+        store
+            .create_profile_registry_record(&profile_registry_write("other-profile"))
+            .unwrap();
+        store.save_session_with_config(&state, &config).unwrap();
+        store
+            .add_profile_memory(
+                &ProfileMemoryWrite {
+                    profile_id: ProfileId::new("full-profile"),
+                    target: ProfileMemoryTarget::Profile,
+                    key: "style".to_string(),
+                    content: "delete me".to_string(),
+                    metadata: serde_json::json!({"source": "profile_purge_test"}),
+                    now: "2026-06-20T05:00:00Z".to_string(),
+                },
+                &ProfileMemoryCaps::default(),
+            )
+            .unwrap();
+        store
+            .save_event(
+                1,
+                &CoreEvent::SessionCreated {
+                    state: Box::new(state.clone()),
+                },
+            )
+            .unwrap();
+        store
+            .save_event(
+                2,
+                &CoreEvent::AgentMessageRouted {
+                    message: AgentMessage {
+                        from: AgentId::new("agent-alpha"),
+                        to: AgentId::new("agent-beta"),
+                        body: "profile purge message".to_string(),
+                        correlation_id: Some("corr-profile-purge".to_string()),
+                        projection: None,
+                    },
+                },
+            )
+            .unwrap();
+        let slot_id = MessageSlotId::new("slot-profile-purge");
+        let variant_id = MessageVariantId::new("variant-profile-purge");
+        store
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: slot_id.clone(),
+                session_id: state.session_id.clone(),
+                primary_variant_id: variant_id.clone(),
+                active_variant_id: None,
+                metadata_json: json!({"test": "profile_purge"}),
+                created_at: "2026-06-25T03:00:00Z".to_string(),
+                updated_at: "2026-06-25T03:00:00Z".to_string(),
+            })
+            .unwrap();
+        let mut variant = variant_write(
+            &slot_id,
+            &variant_id,
+            MessageVariantSource::Primary,
+            0,
+            "message-profile-purge",
+            "visible transcript residue",
+        );
+        variant.message.session_id = state.session_id.clone();
+        store.save_message_variant(&variant).unwrap();
+
+        assert_eq!(store.count_rows("sessions").unwrap(), 1);
+        assert_eq!(store.count_rows("profile_registry").unwrap(), 2);
+        assert_eq!(store.count_rows("message_slots").unwrap(), 1);
+        assert_eq!(store.count_rows("profile_memories").unwrap(), 1);
+
+        let report = store
+            .purge_profile(&ProfileId::new("full-profile"))
+            .unwrap();
+        assert!(report.profile_registry_deleted);
+        assert_eq!(report.profile_id, ProfileId::new("full-profile"));
+        assert_eq!(report.session_ids, vec![SessionId::new("session-alpha")]);
+        assert!(report.agent_ids.contains(&AgentId::new("agent-alpha")));
+        assert!(report.rows_deleted > 0);
+
+        assert!(store
+            .get_profile_registry_record(&ProfileId::new("full-profile"))
+            .unwrap()
+            .is_none());
+        assert!(store
+            .get_profile_registry_record(&ProfileId::new("other-profile"))
+            .unwrap()
+            .is_some());
+        assert_eq!(store.count_rows("sessions").unwrap(), 0);
+        assert_eq!(store.count_rows("session_configs").unwrap(), 0);
+        assert_eq!(store.count_rows("event_history").unwrap(), 0);
+        assert_eq!(store.count_rows("event_session_index").unwrap(), 0);
+        assert_eq!(store.count_rows("event_agent_index").unwrap(), 0);
+        assert_eq!(store.count_rows("agent_messages").unwrap(), 0);
+        assert_eq!(store.count_rows("message_slots").unwrap(), 0);
+        assert_eq!(store.count_rows("message_variants").unwrap(), 0);
+        assert_eq!(store.count_rows("messages").unwrap(), 0);
+        assert_eq!(store.count_rows("message_blocks").unwrap(), 0);
+        assert_eq!(store.count_rows("profile_memories").unwrap(), 0);
+        assert_eq!(store.count_rows("profile_registry").unwrap(), 1);
+
         remove_temp_db(&db_path);
     }
 

@@ -462,6 +462,13 @@ impl NativeBridge {
         self.engine()?.get_profile_registry_record(profile_id)
     }
 
+    pub fn purge_profile(
+        &self,
+        profile_id: &rusty_crew_core_bridge_api::ProfileId,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ProfilePurgeReport> {
+        self.engine()?.purge_profile(profile_id)
+    }
+
     pub fn upsert_model_provider(
         &self,
         write: &ModelProviderWrite,
@@ -2245,7 +2252,7 @@ struct OpenAiResponsesCredentialSecretUpdate {
     secret: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct BufferedOpenAiResponsesRun {
     items: VecDeque<BrainWakeStreamItem>,
     terminal: bool,
@@ -2759,6 +2766,13 @@ impl NativeBridgeBinding {
                 format!("OpenAI Responses buffered wake {wake_id} was not found"),
             )
         })?;
+        if !run.terminal && run.is_timed_out() {
+            run.terminal = true;
+            run.error = Some(format!(
+                "OpenAI Responses buffered wake {wake_id} exceeded {}ms timeout",
+                run.wake_timeout_ms
+            ));
+        }
         let mut items = Vec::new();
         for _ in 0..max_items {
             if run.terminal
@@ -3348,6 +3362,15 @@ impl NativeBridgeBinding {
             .get_profile_registry_record(&rusty_crew_core_bridge_api::ProfileId::new(profile_id))
             .map_err(to_napi_error)?;
         serialize_json(&record, "profile registry record")
+    }
+
+    #[napi]
+    pub fn purge_profile_json(&self, profile_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let report = bridge
+            .purge_profile(&rusty_crew_core_bridge_api::ProfileId::new(profile_id))
+            .map_err(to_napi_error)?;
+        serialize_json(&report, "profile purge report")
     }
 
     #[napi]
@@ -4191,6 +4214,21 @@ impl NativeBridgeBinding {
             "reasoning_delta" => rusty_crew_core_bridge_api::BrainEvent::ReasoningDelta {
                 text: text.unwrap_or_default(),
                 format: tool_name,
+            },
+            "phase_change" => rusty_crew_core_bridge_api::BrainEvent::PhaseChange {
+                phase: match tool_name.as_deref().unwrap_or("idle") {
+                    "idle" => rusty_crew_core_bridge_api::BrainPhase::Idle,
+                    "exploring" => rusty_crew_core_bridge_api::BrainPhase::Exploring,
+                    "composing" => rusty_crew_core_bridge_api::BrainPhase::Composing,
+                    "reviewing" => rusty_crew_core_bridge_api::BrainPhase::Reviewing,
+                    other => {
+                        return Err(napi::Error::new(
+                            napi::Status::InvalidArg,
+                            format!("unsupported brain phase {other}"),
+                        ))
+                    }
+                },
+                message: text,
             },
             "tool_call_started" => rusty_crew_core_bridge_api::BrainEvent::ToolCallStarted {
                 tool_name: tool_name.ok_or_else(|| {

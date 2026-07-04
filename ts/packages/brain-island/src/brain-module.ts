@@ -18,10 +18,12 @@ import type {
 } from "@rusty-crew/native-bridge";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
+import { createRoleplayNarratorBrain } from "./narrator-brain.js";
 import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { BrainActionPlanner, BrainImplementation } from "./index.js";
+import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 
 export type BrainModuleId = "pi-agent-core" | "local" | (string & {});
@@ -102,6 +104,7 @@ export interface BrainModuleContext {
   toolResolver?: BrainToolResolver;
   planActions?: BrainActionPlanner;
   maxTokens?: number;
+  toolCallDebugStore?: ToolCallDebugStore;
   createDenRouterAgentFactory?: (
     options: Parameters<typeof createDenRouterPiAgentFactory>[0],
   ) => Promise<PiAgentFactory>;
@@ -233,6 +236,17 @@ export const piAgentCoreBrainModule: BrainModule = {
         },
       },
     },
+    {
+      strategyId: "roleplay_narrator",
+      providerState: {
+        mode: "unused",
+        rebuild: {
+          action: "discard",
+          reason:
+            "roleplay narrator uses pi-agent-core turns without persisted provider wire state",
+        },
+      },
+    },
   ],
   diagnostics: {
     toolAdapterStatus: "neutral_tools_adapted_to_pi",
@@ -252,11 +266,28 @@ export const piAgentCoreBrainModule: BrainModule = {
           ? undefined
           : profile.modelConfig.temperatureMilli / 1_000,
     });
+    if (context.profile.profile.brain?.strategy === "roleplay_narrator") {
+      return createRoleplayNarratorBrain({
+        createAgent,
+        planActions: context.planActions,
+        resolveTools: context.toolResolver,
+        toolCallDebugStore: context.toolCallDebugStore,
+        maxReviewCycles:
+          context.profile.profile.roleplayNarrator?.review.maxReviewCycles,
+        reviewEnabled: context.profile.profile.roleplayNarrator?.review.enabled,
+        submitEvent: context.bridge
+          ? async (event) => {
+              await context.bridge?.submitBrainEvent(event);
+            }
+          : undefined,
+      });
+    }
     return createPiAgentBrain({
       createAgent,
       planActions: context.planActions,
       resolveTools: context.toolResolver,
       toolProfile: context.profile.toolSelection.toolProfile,
+      toolCallDebugStore: context.toolCallDebugStore,
       submitEvent: context.bridge
         ? async (event) => {
             await context.bridge?.submitBrainEvent(event);

@@ -245,6 +245,74 @@ backgroundReview:
     true,
   );
 
+  writeFileSync(
+    join(profilesDir, "roleplay-narrator.json"),
+    JSON.stringify(
+      {
+        profileId: "roleplay-narrator",
+        providerAlias: "deepseek_flash",
+        brain: {
+          module: "pi-agent-core",
+          strategy: "roleplay_narrator",
+        },
+        toolPolicy: {
+          requestedToolsets: [
+            "roleplay_lore_read",
+            "roleplay_lore_write",
+            "roleplay_scene_state",
+          ],
+        },
+        roleplayNarrator: {
+          tone: "dramatic",
+          explicitness: "romantic",
+          pacing: "leisurely",
+          memoryDepth: "deep",
+          exemplar: "The rain softened every edge of the room.",
+          review: {
+            enabled: true,
+            maxReviewCycles: 2,
+            checkGravityDrift: false,
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  const narrator = await loadProfileContext({
+    profilesDir,
+    profileId: "roleplay-narrator" as ProfileId,
+    modelProviderResolver: async () => ({
+      provider: "den-router",
+      modelName: "deepseek-flash",
+      temperatureMilli: 700,
+    }),
+  });
+  assert.equal(narrator.profile.brain?.strategy, "roleplay_narrator");
+  assert.equal(narrator.profile.roleplayNarrator?.tone, "dramatic");
+  assert.equal(narrator.profile.roleplayNarrator?.explicitness, "romantic");
+  assert.equal(narrator.profile.roleplayNarrator?.pacing, "leisurely");
+  assert.equal(narrator.profile.roleplayNarrator?.memoryDepth, "deep");
+  assert.equal(narrator.profile.roleplayNarrator?.review.enabled, true);
+  assert.equal(narrator.profile.roleplayNarrator?.review.maxReviewCycles, 2);
+  assert.equal(
+    narrator.profile.roleplayNarrator?.review.checkGravityDrift,
+    false,
+  );
+  assert.deepEqual(
+    narrator.toolSelection.toolProfile.tools.map((tool) => tool.name).sort(),
+    [
+      "capture_lore_fact",
+      "get_lore_layer_config",
+      "get_scene_state",
+      "list_lore_layers",
+      "promote_lore_entry",
+      "recall_lore",
+      "search_lore",
+      "update_scene_state",
+    ],
+  );
+
   const skillAllDir = join(profilesDir, "skill-all-profile");
   mkdirSync(join(skillAllDir, "skills", "local-skill-smoke"), {
     recursive: true,

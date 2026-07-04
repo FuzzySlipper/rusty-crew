@@ -209,13 +209,48 @@ async function seedDefaultLocalToolProfiles(
   now: () => string,
   catalog: BuiltInToolCatalog,
 ): Promise<void> {
-  const existing = new Set((await listProfiles(bridge)).map((item) => item.id));
+  const existing = new Map(
+    (await listProfiles(bridge)).map((item) => [item.id, item]),
+  );
   const timestamp = now();
   for (const profile of defaultLocalToolProfiles(timestamp)) {
-    if (existing.has(profile.id)) continue;
-    validateProfileReferences(profile, catalog);
-    await putProfile(bridge, profile, timestamp);
+    const current = existing.get(profile.id);
+    const seedProfile =
+      current === undefined
+        ? profile
+        : current.system && current.readOnly
+          ? {
+              ...profile,
+              createdAt: current.createdAt,
+              updatedAt: timestamp,
+              revision: current.revision,
+            }
+          : undefined;
+    if (seedProfile === undefined) continue;
+    if (current !== undefined && profilesMatch(current, seedProfile)) continue;
+    validateProfileReferences(seedProfile, catalog);
+    await putProfile(bridge, seedProfile, timestamp);
   }
+}
+
+function profilesMatch(
+  left: LocalToolProfile,
+  right: LocalToolProfile,
+): boolean {
+  return (
+    left.displayName === right.displayName &&
+    left.description === right.description &&
+    left.enabled === right.enabled &&
+    left.system === right.system &&
+    left.readOnly === right.readOnly &&
+    arraysMatch(left.toolsets, right.toolsets) &&
+    arraysMatch(left.tools, right.tools)
+  );
+}
+
+function arraysMatch(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
 }
 
 function defaultLocalToolProfiles(now: string): LocalToolProfile[] {
@@ -264,6 +299,7 @@ function defaultLocalToolProfiles(now: string): LocalToolProfile[] {
         "roleplay_lore_read",
         "roleplay_lore_write",
         "roleplay_lore_manage",
+        "roleplay_scene_state",
       ],
       tools: [],
     }),
@@ -292,6 +328,7 @@ function defaultLocalToolProfiles(now: string): LocalToolProfile[] {
         "roleplay_lore_read",
         "roleplay_lore_write",
         "roleplay_lore_manage",
+        "roleplay_scene_state",
       ],
       tools: [],
     }),

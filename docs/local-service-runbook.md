@@ -5,6 +5,15 @@ Status: Local deployment runbook; updated for `/home/system/rusty-crew`
 This runbook starts Rusty Crew from the source checkout at `/home/dev/rusty-crew`
 while keeping mutable service state under `/home/system/rusty-crew`.
 
+The local machine has two first-class service roots. See
+`docs/local-service-topology.md` for the short operational map.
+
+- live agent service: `/home/system/rusty-crew`, port `9347`, PostgreSQL;
+- debug/test service: `/home/system/rusty-crew-debug`, port `9348`, SQLite.
+
+Use the debug service for smoke tests, Rusty View live certification, and
+disposable LLM-backed experiments.
+
 ## Paths
 
 - Source checkout: `/home/dev/rusty-crew`
@@ -15,6 +24,11 @@ while keeping mutable service state under `/home/system/rusty-crew`.
 - Static frontend site: `/home/system/rusty-crew/site`
 - Local lock: `/home/system/rusty-crew/run/service.lock`
 - Systemd user unit source: `ops/systemd/rusty-crew.service`
+
+Debug/test paths mirror the live layout under `/home/system/rusty-crew-debug`.
+The debug unit is `rusty-crew-debug.service`, uses port `9348`, and stores its
+SQLite database at
+`/home/system/rusty-crew-debug/data/engine/coordination.sqlite3`.
 
 ## First Setup
 
@@ -70,12 +84,14 @@ Health is intentionally shallow and does not require auth:
 
 ```bash
 curl http://127.0.0.1:9347/v1/admin/healthz
+curl http://127.0.0.1:9348/v1/admin/healthz
 ```
 
 The browser diagnostics panel is served from the same host:
 
 ```text
 http://127.0.0.1:9347/admin
+http://127.0.0.1:9348/admin
 ```
 
 Enter the local admin token from

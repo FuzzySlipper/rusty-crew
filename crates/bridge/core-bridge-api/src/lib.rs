@@ -81,6 +81,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "update_profile_registry_record",
     "list_profile_registry_records",
     "get_profile_registry_record",
+    "purge_profile",
     "upsert_model_provider",
     "list_model_providers",
     "get_model_provider",

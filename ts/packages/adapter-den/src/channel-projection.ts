@@ -287,6 +287,10 @@ function brainEventSummary(
       return `Brain produced text for ${event.sessionId}`;
     case "reasoning_delta":
       return `Brain produced reasoning for ${event.sessionId}`;
+    case "phase_change":
+      return `Narrator phase: ${event.event.phase}${
+        event.event.message ? ` (${event.event.message})` : ""
+      }`;
     case "tool_call_started":
       return `Tool started: ${event.event.toolName}`;
     case "tool_call_finished":

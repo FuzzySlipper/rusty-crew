@@ -47,6 +47,9 @@ export interface RustyViewChatContext {
   contextUsage?(
     input: SessionContextUsageInput,
   ): Promise<SessionContextUsageResult>;
+  getToolCallDebugDetail?(
+    input: ToolCallDebugDetailInput,
+  ): Promise<ToolCallDebugDetail | undefined>;
   sendMessage?(input: ChatSendMessageInput): Promise<SendChatMessageResult>;
   listMessageSlots?(input: ListMessageSlotsInput): Promise<MessageSlotPage>;
   searchTranscript?(
@@ -153,6 +156,8 @@ export interface ChatEvent {
     | "assistant_turn_started"
     | "assistant_text_delta"
     | "assistant_reasoning_delta"
+    | "phase_change"
+    | "provider_status"
     | "assistant_message_completed"
     | "assistant_turn_finished"
     | "tool_call_started"
@@ -223,6 +228,30 @@ export interface ExecuteChatCommandInput {
 export interface SessionContextUsageInput {
   session: SessionState;
   requestId: string;
+}
+
+export interface ToolCallDebugDetailInput {
+  session: SessionState;
+  debugDetailId: string;
+  requestId: string;
+}
+
+export interface ToolCallDebugDetail {
+  debug_detail_id: string;
+  tool_call_id: string;
+  session_id: string;
+  wake_id: string;
+  tool_name: string;
+  status: string;
+  arguments: unknown;
+  partial_updates: unknown[];
+  final_result?: unknown;
+  error?: unknown;
+  source_metadata?: unknown;
+  started_at: string;
+  updated_at: string;
+  expires_at: string;
+  limits: Record<string, unknown>;
 }
 
 export interface SessionContextUsageResult {
@@ -320,6 +349,7 @@ export interface SendChatMessageResult {
   wake_id?: string;
   correlation_id?: string;
   latest_cursor: string;
+  summary?: string;
   reason_code?: string;
 }
 
@@ -1115,6 +1145,16 @@ export async function handleRustyViewChatRequest(
   }
 
   if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "tool-calls"
+  ) {
+    return handleToolCallDebugDetail(context, requestId, parts);
+  }
+
+  if (
     parts.length === 5 &&
     parts[0] === "v1" &&
     parts[1] === "chat" &&
@@ -1272,6 +1312,41 @@ export async function handleRustyViewChatRequest(
     message: `unknown Rusty View chat route ${url.pathname}`,
     retryable: false,
   });
+}
+
+async function handleToolCallDebugDetail(
+  context: RustyViewChatContext,
+  requestId: string,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.getToolCallDebugDetail) {
+    return chatFeatureUnavailable(requestId, "tool_call_debug_not_configured");
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const debugDetailId = decodeURIComponent(parts[5] ?? "");
+  if (!debugDetailId) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: "empty_tool_call_debug_detail_id",
+      message: "tool call debug detail id is required",
+      retryable: false,
+    });
+  }
+  const detail = await context.getToolCallDebugDetail({
+    session: session.session,
+    debugDetailId,
+    requestId,
+  });
+  if (!detail) {
+    return failure(404, requestId, {
+      code: "not_found",
+      reason_code: "tool_call_debug_detail_not_found",
+      message: `tool call debug detail ${debugDetailId} was not found`,
+      retryable: false,
+    });
+  }
+  return success(requestId, detail);
 }
 
 async function handleSendMessage(

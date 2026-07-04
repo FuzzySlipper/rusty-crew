@@ -297,6 +297,12 @@ function toBrainEvent(
         text: event.text,
         format: event.format,
       };
+    case "phase_change":
+      return {
+        type: event.type,
+        phase: event.phase,
+        message: event.message,
+      };
     case "tool_call_started":
       return {
         type: event.type,
@@ -510,6 +516,14 @@ type RustBrainEventJson =
   | { type: "finished" }
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string; format?: string }
+  | {
+      type: "phase_change";
+      phase: Extract<
+        Extract<CoreEvent, { type: "brain_event_observed" }>["event"],
+        { type: "phase_change" }
+      >["phase"];
+      message?: string;
+    }
   | {
       type: "tool_call_started";
       tool_name: string;

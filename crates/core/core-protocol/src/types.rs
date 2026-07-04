@@ -314,6 +314,22 @@ pub struct ProfileRegistryUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfilePurgeTableCount {
+    pub table: String,
+    pub rows_deleted: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfilePurgeReport {
+    pub profile_id: ProfileId,
+    pub profile_registry_deleted: bool,
+    pub session_ids: Vec<SessionId>,
+    pub agent_ids: Vec<AgentId>,
+    pub table_counts: Vec<ProfilePurgeTableCount>,
+    pub rows_deleted: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileRegistryLifecycleUpdate {
     pub profile_id: ProfileId,
     pub lifecycle_status: ProfileRegistryLifecycleStatus,
@@ -400,6 +416,8 @@ pub struct ToolCallMetadata {
     pub tool_profile_key: Option<String>,
     pub source_tool_name: Option<String>,
     pub catalog_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_detail_id: Option<String>,
     pub policy: Option<ToolCallPolicyMetadata>,
 }
 
@@ -772,6 +790,11 @@ pub enum BrainEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         format: Option<String>,
     },
+    PhaseChange {
+        phase: BrainPhase,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
     ToolCallStarted {
         #[serde(alias = "toolName")]
         tool_name: String,
@@ -797,6 +820,15 @@ pub enum BrainEvent {
         metadata_json: Option<String>,
     },
     Finished,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainPhase {
+    Idle,
+    Exploring,
+    Composing,
+    Reviewing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

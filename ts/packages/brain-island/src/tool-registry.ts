@@ -807,6 +807,32 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:lore-memory-tool",
   },
   {
+    name: "get_scene_state",
+    description:
+      "Read lightweight roleplay scene state for the current session.",
+    category: "memory",
+    toolsets: ["roleplay_scene_state"],
+    implementationModule: "./scene-state-tool.js#getSceneStateTool",
+    surfaces: ["brain"],
+    safety: ["read_only", "coordination_action"],
+    outputShape: "roleplay.scene_state.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:scene-state-tool",
+  },
+  {
+    name: "update_scene_state",
+    description:
+      "Update lightweight roleplay scene state for the current session.",
+    category: "memory",
+    toolsets: ["roleplay_scene_state"],
+    implementationModule: "./scene-state-tool.js#updateSceneStateTool",
+    surfaces: ["brain"],
+    safety: ["coordination_action"],
+    outputShape: "roleplay.scene_state_update.v1",
+    version: "0.1.0",
+    inventoryTest: "smoke:scene-state-tool",
+  },
+  {
     name: "skills_list",
     description: "List configured skills visible to the current profile.",
     category: "skills",

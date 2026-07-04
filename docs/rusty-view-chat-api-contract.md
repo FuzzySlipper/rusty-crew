@@ -24,6 +24,11 @@ Rust-derived replacement. Rusty View should not hand-copy backend shapes.
   in-flight wake, assistant text deltas and tool lifecycle events are appended
   and flushed as the service observes them; clients do not need to wait for the
   whole wake to finish before rendering progress.
+- `GET /v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}`: debug-only
+  bounded raw tool-call inspection. Normal chat/SSE tool events stay browser-safe
+  and expose only `debug_detail_id`/metadata references; clients call this route
+  on demand for redacted arguments, partial updates, final result, error, and
+  retention limits.
 - `POST /v1/chat/sessions/{session_id}/messages`: append a user message and
   request an agent wake.
 - `GET /v1/chat/commands`: discover slash/debug commands.
@@ -48,6 +53,8 @@ Initial known event kinds:
 - `assistant_turn_started`
 - `assistant_text_delta`
 - `assistant_reasoning_delta`
+- `phase_change`
+- `provider_status`
 - `assistant_message_completed`
 - `assistant_turn_finished`
 - `tool_call_started`
@@ -61,6 +68,10 @@ Initial known event kinds:
 
 Unknown future event kinds must not crash Rusty View. Debug Chat should render
 them generically from `payload.summary` or raw JSON.
+
+Tool lifecycle payloads may include `debug_detail_id` plus `metadata` for
+inspection affordances. They must not include raw arguments, raw partial
+updates, raw final results, credentials, or full stack traces inline.
 
 ## Command Support
 

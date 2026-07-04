@@ -85,6 +85,7 @@ export interface ToolCallMetadata {
   toolProfileKey?: string;
   sourceToolName?: string;
   catalogRevision?: string;
+  debugDetailId?: string;
   policy?: ToolCallPolicyMetadata;
 }
 
@@ -642,6 +643,8 @@ export interface DelegatedFanOutGroup {
   status: FanOutGroupStatus;
 }
 
+export type BrainPhase = "idle" | "exploring" | "composing" | "reviewing";
+
 export type BrainEvent =
   | { type: "started" }
   | { type: "text_delta"; text: string }
@@ -650,6 +653,7 @@ export type BrainEvent =
       text: string;
       format?: string;
     }
+  | { type: "phase_change"; phase: BrainPhase; message?: string }
   | {
       type: "tool_call_started";
       toolName: string;
@@ -1606,6 +1610,7 @@ export const manifestOperationNames = [
   "get_profile_registry_record",
   "create_profile_registry_record",
   "update_profile_registry_record",
+  "purge_profile",
   "upsert_model_provider",
   "list_model_providers",
   "get_model_provider",

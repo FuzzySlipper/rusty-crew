@@ -134,6 +134,15 @@ export type {
   PiAgentLike,
 } from "./pi-agent-brain.js";
 export { createPiAgentBrain } from "./pi-agent-brain.js";
+export type {
+  ToolCallDebugRecord,
+  ToolCallDebugStore,
+} from "./tool-call-debug-store.js";
+export {
+  MemoryToolCallDebugStore,
+  localToolCallMetadata,
+  withToolCallDebugReference,
+} from "./tool-call-debug-store.js";
 export {
   acquireRustyCrewServiceLock,
   ensureRustyCrewServiceDirectories,
@@ -427,6 +436,22 @@ export type {
   LoreMemoryToolDetails,
   LoreMemoryToolOperation,
 } from "./lore-memory-tool.js";
+export {
+  createSceneStateToolResolver,
+  getSceneStateTool,
+  resolveSceneStateTools,
+  updateSceneStateTool,
+} from "./scene-state-tool.js";
+export type {
+  RoleplaySceneState,
+  SceneStateToolContext,
+  SceneStateToolDetails,
+} from "./scene-state-tool.js";
+export {
+  createRoleplayNarratorBrain,
+  createRoleplayNarratorBrain as createTwoPhaseRoleplayNarratorBrain,
+} from "./narrator-brain.js";
+export type { RoleplayNarratorBrainOptions } from "./narrator-brain.js";
 export {
   channelReadbackTool,
   curatorExecuteTool,
