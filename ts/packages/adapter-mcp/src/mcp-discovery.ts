@@ -214,7 +214,10 @@ export function createMcpBrainTool(
       : candidate.source.sourceToolName,
     parameters: candidate.parameters,
     prepareArguments: (args) =>
-      normalizeMcpToolArguments(args, candidate.parameters as JsonSchemaValue),
+      normalizeMcpToolArguments(args, candidate.parameters as JsonSchemaValue, {
+        binding,
+        sourceToolName: candidate.source.sourceToolName,
+      }),
     executionMode: "sequential",
     execute: async (toolCallId, params, signal) => {
       const result = await executor.callTool({
@@ -235,15 +238,39 @@ export function createMcpBrainTool(
 function normalizeMcpToolArguments(
   args: unknown,
   schema: JsonSchemaValue | undefined,
+  policyContext?: {
+    binding: McpBindingRecord;
+    sourceToolName: string;
+  },
 ): unknown {
   if (!isRecord(args) || !isRecord(schema) || !isRecord(schema.properties)) {
     return args;
   }
   const normalized: Record<string, unknown> = { ...args };
+  const requiredProperties = new Set(
+    Array.isArray(schema.required)
+      ? schema.required.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
+  );
   for (const [propertyName, propertySchema] of Object.entries(
     schema.properties,
   )) {
     if (!Object.hasOwn(normalized, propertyName)) continue;
+    if (
+      isRecord(propertySchema) &&
+      !requiredProperties.has(propertyName) &&
+      shouldPruneOptionalMcpArgument(
+        propertyName,
+        normalized[propertyName],
+        propertySchema,
+        policyContext,
+      )
+    ) {
+      delete normalized[propertyName];
+      continue;
+    }
     const value = normalized[propertyName];
     if (!Array.isArray(value) || !isRecord(propertySchema)) continue;
     if (!schemaAcceptsString(propertySchema)) continue;
@@ -263,6 +290,77 @@ function normalizeMcpToolArguments(
     }
   }
   return normalized;
+}
+
+function shouldPruneOptionalMcpArgument(
+  propertyName: string,
+  value: unknown,
+  schema: Record<string, unknown>,
+  policyContext:
+    | {
+        binding: McpBindingRecord;
+        sourceToolName: string;
+      }
+    | undefined,
+): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string" && value.trim() === "") return true;
+  if (typeof value === "string" && isOmitPlaceholder(value)) return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (value === false) return true;
+  if (
+    policyContext?.sourceToolName === "list_tasks" &&
+    value === 0 &&
+    (propertyName === "priority" || propertyName === "parent_id")
+  ) {
+    return true;
+  }
+  if (value === 0 && !schemaAcceptsZero(schema)) return true;
+  if (
+    policyContext?.sourceToolName === "list_tasks" &&
+    propertyName === "assigned_to" &&
+    typeof value === "string" &&
+    [
+      String(policyContext.binding.agentId),
+      String(policyContext.binding.profileId),
+    ].includes(value)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isOmitPlaceholder(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return (
+    /^\{\{\s*omit\s*\}\}$/i.test(normalized) ||
+    normalized === "null" ||
+    normalized === "undefined" ||
+    normalized === "none"
+  );
+}
+
+function schemaAcceptsZero(schema: Record<string, unknown>): boolean {
+  if (!schemaAcceptsNumber(schema)) return false;
+  const minimum = numericConstraint(schema.minimum);
+  const exclusiveMinimum = numericConstraint(schema.exclusiveMinimum);
+  if (minimum !== undefined && minimum > 0) return false;
+  if (exclusiveMinimum !== undefined && exclusiveMinimum >= 0) return false;
+  return true;
+}
+
+function schemaAcceptsNumber(schema: Record<string, unknown>): boolean {
+  if (schema.type === "number" || schema.type === "integer") return true;
+  return (
+    Array.isArray(schema.type) &&
+    (schema.type.includes("number") || schema.type.includes("integer"))
+  );
+}
+
+function numericConstraint(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function normalizeCommaSeparatedStringValue(

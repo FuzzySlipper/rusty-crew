@@ -66,6 +66,15 @@ export interface ReloadMcpControlOptions {
     binding: McpBindingRecord;
     command: AdminControlCommand;
   }): AgentObservationIdentity;
+  afterReload?(input: {
+    binding: McpBindingRecord;
+    command: AdminControlCommand;
+    report: McpSurfaceReloadReport;
+    outcome: AdminControlOutcome;
+  }):
+    | Promise<AdminControlOutcome | undefined>
+    | AdminControlOutcome
+    | undefined;
   now?: () => string;
 }
 
@@ -137,7 +146,7 @@ export function createReloadMcpControlExecutor(
       report,
     );
 
-    return {
+    const outcome = {
       status: report.status === "reloaded" ? "completed" : "failed",
       summary:
         report.status === "reloaded"
@@ -167,6 +176,16 @@ export function createReloadMcpControlExecutor(
       reasonCode:
         report.status === "reloaded" ? "mcp_reloaded" : "mcp_reload_degraded",
     } satisfies AdminControlOutcome;
+    if (outcome.status === "completed") {
+      const followUp = await options.afterReload?.({
+        binding,
+        command,
+        report,
+        outcome,
+      });
+      return followUp ?? outcome;
+    }
+    return outcome;
   };
 }
 

@@ -8784,6 +8784,55 @@ function createServiceReloadMcpExecutor(
     inventoryRequest: (binding) => ({
       requestedToolsets: [`mcp:${binding.toolProfileKey}`],
     }),
+    afterReload: async ({ binding, command, outcome }) => {
+      if (optionalBodyBoolean(command, "skipBrainRebuildAfterMcpReload")) {
+        return outcome;
+      }
+      const sessionId = command.target.sessionId;
+      if (sessionId === undefined) {
+        return {
+          ...outcome,
+          status: "failed",
+          summary: `${outcome.summary} Brain rebuild was skipped because the MCP reload had no session target.`,
+          reasonCode: "mcp_reload_brain_rebuild_session_missing",
+        };
+      }
+
+      const rebuild = await applyServiceRuntimeRebuild(state, {
+        ...command,
+        name: "apply_runtime_rebuild",
+        target: { scope: "session", sessionId },
+        reason: command.reason ?? "MCP reload refreshed live brain catalog",
+        body: {
+          ...command.body,
+          skipBrainRebuildAfterMcpReload: true,
+        },
+      });
+      const rebuildCompleted = rebuild.apply.status === "completed";
+      return {
+        status: rebuildCompleted ? "completed" : "failed",
+        summary: rebuildCompleted
+          ? `${outcome.summary} Rebuilt brain runtime for profile ${binding.profileId}.`
+          : `${outcome.summary} Brain rebuild required but was blocked for profile ${binding.profileId}.`,
+        affectedIds: {
+          ...(outcome.affectedIds ?? {}),
+          profileId: binding.profileId,
+          sessionId,
+        },
+        result: {
+          reload: outcome.result,
+          rebuild,
+          followUpAction: rebuildCompleted
+            ? "none"
+            : "retry_runtime_rebuild_when_unblocked",
+        },
+        reasonCode: rebuildCompleted
+          ? outcome.reasonCode
+          : rebuild.apply.status === "blocked"
+            ? rebuild.apply.reasonCode
+            : "mcp_reload_brain_rebuild_failed",
+      };
+    },
     auditSink: {
       writeReloadMcpLifecycleAudit(event) {
         recordServiceEvent(state, {
@@ -8825,6 +8874,10 @@ async function refreshMcpBindingsAfterRuntimeRebuild(
       ...command,
       name: "reload_mcp",
       target: { sessionId: binding.sessionId },
+      body: {
+        ...command.body,
+        skipBrainRebuildAfterMcpReload: true,
+      },
       reason: command.reason ?? "runtime rebuild MCP refresh",
     });
     const status =

@@ -168,6 +168,10 @@ const taskListDiscovery = convertMcpToolsToCandidates(alphaBinding, [
       type: "object",
       properties: {
         project_id: { type: "string" },
+        assigned_to: { type: "string" },
+        parent_id: { type: "integer", minimum: 1 },
+        priority: { type: "integer", minimum: 1, maximum: 5 },
+        verbose: { type: "boolean" },
         status: {
           type: ["string", "null"],
           description:
@@ -197,6 +201,19 @@ assert.deepEqual(normalizedTaskArgs, {
   project_id: "asha",
   status: "planned,in_progress",
   tags: '["campaign","planning"]',
+});
+const prunedTaskArgs = taskListTool.prepareArguments?.({
+  assigned_to: "null",
+  parent_id: 0,
+  priority: 0,
+  project_id: "asha",
+  status: "planned,in_progress",
+  tags: "null",
+  verbose: false,
+});
+assert.deepEqual(prunedTaskArgs, {
+  project_id: "asha",
+  status: "planned,in_progress",
 });
 
 const failingTaskListTool = createMcpBrainTool(

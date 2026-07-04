@@ -39,6 +39,7 @@ const adapterId = "mcp-main" as AdapterId;
 let currentSessionId = "session-alpha";
 let currentMcpBinding = mcpBinding("mcp-alpha", currentSessionId);
 let tick = 0;
+let reloadBrainRebuilds = 0;
 const mcpManager = new McpSurfaceManager({
   transports: [createSimulatedMcpTransportFactory("stdio")],
   now: () => `2026-06-20T19:00:${String(tick++).padStart(2, "0")}.000Z`,
@@ -134,6 +135,20 @@ const reloadMcpExecutor = createReloadMcpControlExecutor({
       session_key: binding.sessionId,
     };
   },
+  afterReload({ outcome, binding }) {
+    reloadBrainRebuilds += 1;
+    return {
+      ...outcome,
+      summary: `${outcome.summary} Rebuilt brain runtime for profile ${binding.profileId}.`,
+      result: {
+        reload: outcome.result,
+        rebuild: {
+          apply: { status: "completed" },
+          profileId: binding.profileId,
+        },
+      },
+    };
+  },
   now: () => `2026-06-20T19:01:${String(tick++).padStart(2, "0")}.000Z`,
 });
 
@@ -169,6 +184,12 @@ assert.deepEqual(
   reloadAudit.events.map((event) => event.phase),
   ["reload_started", "reloaded"],
 );
+assert.equal(reloadBrainRebuilds, 1);
+assert.match(
+  projectedResponses.find((response) => response.commandName === "reload-mcp")
+    ?.title ?? "",
+  /Rebuilt brain runtime/,
+);
 assert.equal(mcpManager.diagnostics("mcp-beta")?.status, "active");
 assert.equal(
   observationSink.events.some(
@@ -192,6 +213,7 @@ console.log(
       currentSessionId,
       newLifecycleEvents: newLifecycleAudit.events.length,
       reloadEvents: reloadAudit.events.length,
+      reloadBrainRebuilds,
       observationEvents: observationSink.events.length,
       betaMcpStatus: mcpManager.diagnostics("mcp-beta")?.status,
     },
