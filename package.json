@@ -43,6 +43,7 @@
     "smoke:tool-context-diagnostics": "npm run smoke:tool-context-diagnostics -w @rusty-crew/brain-island",
     "smoke:den-memory-tools": "npm run smoke:den-memory-tools -w @rusty-crew/brain-island",
     "smoke:dense-profile-memory-tool": "npm run smoke:dense-profile-memory-tool -w @rusty-crew/brain-island",
+    "smoke:roleplay-browser-api": "npm run smoke:roleplay-browser-api -w @rusty-crew/brain-island",
     "smoke:memory-space-api": "npm run smoke:memory-space-api -w @rusty-crew/brain-island",
     "smoke:memory-proposals": "npm run smoke:memory-proposals -w @rusty-crew/brain-island",
     "smoke:session-search-tool": "npm run smoke:session-search-tool -w @rusty-crew/brain-island",

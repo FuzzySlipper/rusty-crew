@@ -49,6 +49,7 @@ import {
   type NativeRoleplayChatLayersWrite,
   type NativeRoleplayLoreFactCapture,
   type NativeRoleplayLoreLayerWrite,
+  type NativeSimpleKvRecord,
 } from "@rusty-crew/native-bridge";
 import type {
   ChannelBindingDiagnostics,
@@ -384,6 +385,68 @@ interface ServiceState {
   stopping: boolean;
 }
 
+interface RoleplayCharacterRecord {
+  id: string;
+  profileId: string;
+  name: string;
+  description: string;
+  personality: string;
+  scenario: string;
+  firstMessage: string;
+  alternateGreetings: string[];
+  exampleMessages: string[];
+  tags: string[];
+  avatarUrl?: string;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt?: string;
+}
+
+interface RoleplaySessionMetadata {
+  sessionId: string;
+  profileId: string;
+  displayName?: string;
+  characterId?: string;
+  activeLayerIds: string[];
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface RoleplayChatLayersBrowserWrite extends NativeRoleplayChatLayersWrite {
+  chat_id: string;
+  layers: Array<{ layer_id: string; priority: number; enabled: boolean }>;
+}
+
+type RoleplayNarratorTone =
+  | "whimsical"
+  | "dramatic"
+  | "matter_of_fact"
+  | "lush"
+  | "wry";
+
+type RoleplayNarratorPacing = "leisurely" | "balanced" | "rapid" | "breathless";
+
+type RoleplayNarratorExplicitness =
+  | "implied"
+  | "suggestive"
+  | "romantic"
+  | "steamy";
+
+type RoleplayNarratorMemoryDepth = "shallow" | "medium" | "deep";
+
+interface BrowserRoleplayNarratorConfig {
+  tone: RoleplayNarratorTone;
+  pacing: RoleplayNarratorPacing;
+  explicitness: RoleplayNarratorExplicitness;
+  memoryDepth: RoleplayNarratorMemoryDepth;
+  exemplar?: string;
+  review: {
+    enabled: boolean;
+    maxReviewCycles: number;
+  };
+}
+
 interface OpenAiOauthPendingLogin {
   pendingLoginId: string;
   providerAlias: string;
@@ -694,7 +757,7 @@ async function handleHttpRequest(
   }
 
   if (
-    isChatRoute(url.pathname) &&
+    isBrowserCorsRoute(url.pathname) &&
     (request.method ?? "GET").toUpperCase() === "OPTIONS"
   ) {
     return chatCorsPreflightResponse(request);
@@ -713,7 +776,9 @@ async function handleHttpRequest(
     });
     return isChatRoute(url.pathname)
       ? withChatCors(unauthorized, request)
-      : unauthorized;
+      : isRoleplayBrowserRoute(url.pathname)
+        ? withChatCors(unauthorized, request)
+        : unauthorized;
   }
 
   if (url.pathname.startsWith(CONTROL_ROUTE_PREFIX)) {
@@ -862,8 +927,11 @@ async function handleHttpRequest(
     return handleAdminLocalToolProfilesRequest(request, state, url);
   }
 
-  if (url.pathname.startsWith("/v1/admin/roleplay/lore/")) {
-    return handleAdminRoleplayLoreRequest(request, state, url);
+  if (isRoleplayBrowserRoute(url.pathname)) {
+    return withChatCors(
+      await handleAdminRoleplayRequest(request, state, url),
+      request,
+    );
   }
 
   if (url.pathname.startsWith("/v1/admin/storage/")) {
@@ -1047,6 +1115,81 @@ function localToolProfileIdFromPath(pathname: string): string | undefined {
   return decodeURIComponent(rest);
 }
 
+async function handleAdminRoleplayRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  const profileLayersMatch = url.pathname.match(
+    /^\/v1\/profile\/([^/]+)\/layers\/?$/,
+  );
+  if (profileLayersMatch) {
+    return handleBrowserProfileLoreLayersRequest(
+      request,
+      state,
+      url,
+      decodeURIComponent(profileLayersMatch[1]),
+    );
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "roleplay" &&
+    parts[3] === "profiles" &&
+    parts[4]
+  ) {
+    const profileId = decodeURIComponent(parts[4]);
+    if (parts[5] === "characters") {
+      return handleRoleplayCharacterRequest(request, state, url, profileId);
+    }
+    if (parts[5] === "narrator-config") {
+      return handleRoleplayNarratorConfigRequest(
+        request,
+        state,
+        url,
+        profileId,
+      );
+    }
+  }
+  if (url.pathname.startsWith("/v1/admin/roleplay/sessions")) {
+    return handleRoleplaySessionRequest(request, state, url);
+  }
+  if (url.pathname.startsWith("/v1/admin/roleplay/lore/")) {
+    return handleAdminRoleplayLoreRequest(request, state, url);
+  }
+  return failure(404, requestIdValue, {
+    code: "not_found",
+    reason_code: "unknown_roleplay_admin_route",
+    message: `unknown roleplay route ${url.pathname}`,
+    retryable: false,
+  });
+}
+
+async function handleBrowserProfileLoreLayersRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+  url: URL,
+  profileId: string,
+): Promise<AdminRouteResult> {
+  if ((request.method ?? "GET").toUpperCase() === "GET") {
+    return roleplayLoreLayerListResult(requestId(request), state, profileId);
+  }
+  if ((request.method ?? "GET").toUpperCase() === "POST") {
+    const body = recordBody(await readJsonBody(request));
+    const layer = await state.bridge.createLoreLayer(
+      roleplayLoreLayerWriteFromBody(body, profileId, state.now()),
+    );
+    return successRoute(requestId(request), { layer });
+  }
+  return roleplayLoreMethodNotAllowed(
+    requestId(request),
+    "profile lore layer routes support GET and POST",
+  );
+}
+
 async function handleAdminRoleplayLoreRequest(
   request: IncomingMessage,
   state: ServiceState,
@@ -1066,21 +1209,81 @@ async function handleAdminRoleplayLoreRequest(
             retryable: false,
           });
         }
-        return successRoute(requestIdValue, {
-          layers: await state.bridge.listLoreLayers(profileId),
-        });
+        return roleplayLoreLayerListResult(requestIdValue, state, profileId);
       }
       if (method === "POST") {
-        const body = (await readJsonBody(
-          request,
-        )) as NativeRoleplayLoreLayerWrite;
+        const body = recordBody(await readJsonBody(request));
         return successRoute(requestIdValue, {
-          layer: await state.bridge.createLoreLayer(body),
+          layer: await state.bridge.createLoreLayer(
+            roleplayLoreLayerWriteFromBody(body, undefined, state.now()),
+          ),
         });
       }
       return roleplayLoreMethodNotAllowed(
         requestIdValue,
         "roleplay lore layer collection supports GET and POST",
+      );
+    }
+
+    const layerEntriesMatch = url.pathname.match(
+      /^\/v1\/admin\/roleplay\/lore\/layers\/([^/]+)\/entries\/?$/,
+    );
+    if (layerEntriesMatch) {
+      if (method !== "GET") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore layer entries supports GET",
+        );
+      }
+      const layerId = decodeURIComponent(layerEntriesMatch[1]);
+      const entries = await state.bridge.listEntriesByLayer(layerId);
+      return successRoute(requestIdValue, {
+        layerId,
+        entries,
+        total: entries.length,
+      });
+    }
+
+    const layerMatch = url.pathname.match(
+      /^\/v1\/admin\/roleplay\/lore\/layers\/([^/]+)\/?$/,
+    );
+    if (layerMatch) {
+      const layerId = decodeURIComponent(layerMatch[1]);
+      if (method === "GET") {
+        const layer = await state.bridge.getLoreLayer(layerId);
+        if (layer === undefined) {
+          return failure(404, requestIdValue, {
+            code: "not_found",
+            reason_code: "roleplay_lore_layer_not_found",
+            message: `roleplay lore layer ${layerId} was not found`,
+            retryable: false,
+          });
+        }
+        const entries = await state.bridge.listEntriesByLayer(layerId);
+        return successRoute(requestIdValue, {
+          layer: withEntryCount(layer, entries.length),
+          entryCount: entries.length,
+        });
+      }
+      if (method === "PATCH") {
+        const body = recordBody(await readJsonBody(request));
+        return successRoute(requestIdValue, {
+          layer: await state.bridge.updateLoreLayer(
+            roleplayLoreLayerUpdateFromBody(body, layerId, state.now()),
+          ),
+        });
+      }
+      if (method === "DELETE") {
+        return successRoute(requestIdValue, {
+          layer: await state.bridge.archiveLoreLayer({
+            layer_id: layerId,
+            now: state.now(),
+          }),
+        });
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay lore layer item supports GET, PATCH, and DELETE",
       );
     }
 
@@ -1108,18 +1311,65 @@ async function handleAdminRoleplayLoreRequest(
       return successRoute(requestIdValue, { chatId, layerId, enabled });
     }
 
-    if (url.pathname === "/v1/admin/roleplay/lore/chat-layers") {
+    if (url.pathname === "/v1/admin/roleplay/lore/chat-layers/reorder") {
       if (method !== "POST") {
         return roleplayLoreMethodNotAllowed(
           requestIdValue,
-          "roleplay lore chat layers supports POST",
+          "roleplay lore chat layer reorder supports POST",
         );
       }
-      const body = (await readJsonBody(
-        request,
-      )) as NativeRoleplayChatLayersWrite;
-      await state.bridge.setChatLayers(body);
-      return successRoute(requestIdValue, { saved: true });
+      const body = recordBody(await readJsonBody(request));
+      const chatId = requiredRouteString(
+        optionalString(body.chatId) ?? optionalString(body.chat_id),
+        "chat_id",
+      );
+      const layerIds = stringArray(
+        body.layerIds ?? body.layer_ids,
+        "layer_ids",
+      );
+      await state.bridge.reorderChatLayers({ chatId, layerIds });
+      return successRoute(requestIdValue, { chatId, layerIds });
+    }
+
+    if (url.pathname === "/v1/admin/roleplay/lore/chat-layers") {
+      if (method === "GET") {
+        const chatId = url.searchParams.get("chat_id");
+        if (!chatId) {
+          return failure(400, requestIdValue, {
+            code: "invalid_input",
+            reason_code: "roleplay_lore_chat_id_required",
+            message: "chat_id query parameter is required",
+            retryable: false,
+          });
+        }
+        const layers = await state.bridge.getChatLayers(chatId);
+        return successRoute(requestIdValue, {
+          chatId,
+          layers,
+          activeLayerIds: layers
+            .filter((layer) => layer.enabled !== false)
+            .sort(
+              (left, right) => Number(left.priority) - Number(right.priority),
+            )
+            .map((layer) => String(layer.layer_id)),
+        });
+      }
+      if (method !== "POST") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore chat layers supports GET and POST",
+        );
+      }
+      const body = recordBody(await readJsonBody(request));
+      const write = roleplayChatLayersWriteFromBody(body, state.now());
+      await state.bridge.setChatLayers(write);
+      await upsertRoleplaySessionMetadata(state, write.chat_id, {
+        activeLayerIds: write.layers.map((layer) => layer.layer_id),
+      });
+      return successRoute(requestIdValue, {
+        saved: true,
+        chatId: write.chat_id,
+      });
     }
 
     if (url.pathname === "/v1/admin/roleplay/lore/facts/capture") {
@@ -1161,6 +1411,1032 @@ function roleplayLoreMethodNotAllowed(
     code: "method_not_allowed",
     reason_code: "roleplay_lore_method_not_allowed",
     message,
+    retryable: false,
+  });
+}
+
+async function roleplayLoreLayerListResult(
+  requestIdValue: string,
+  state: ServiceState,
+  profileId: string,
+): Promise<AdminRouteResult> {
+  const layers = await state.bridge.listLoreLayers(profileId);
+  const counts = await Promise.all(
+    layers.map(async (layer) => {
+      const layerId = String(layer.layer_id);
+      return [
+        layerId,
+        await state.bridge
+          .listEntriesByLayer(layerId)
+          .then((entries) => entries.length)
+          .catch(() => 0),
+      ] as const;
+    }),
+  );
+  const entryCounts = Object.fromEntries(counts);
+  return successRoute(requestIdValue, {
+    profileId,
+    layers: layers.map((layer) =>
+      withEntryCount(layer, entryCounts[String(layer.layer_id)] ?? 0),
+    ),
+    entryCounts,
+    total: layers.length,
+  });
+}
+
+function withEntryCount(
+  layer: Record<string, unknown>,
+  entryCount: number,
+): Record<string, unknown> {
+  return { ...layer, entry_count: entryCount, entryCount };
+}
+
+function roleplayLoreLayerWriteFromBody(
+  body: Record<string, unknown>,
+  pathProfileId: string | undefined,
+  now: string,
+): NativeRoleplayLoreLayerWrite {
+  const layerId =
+    optionalString(body.layer_id) ??
+    optionalString(body.layerId) ??
+    `layer-${randomBytes(6).toString("hex")}`;
+  const profileId =
+    pathProfileId ??
+    optionalString(body.profile_id) ??
+    optionalString(body.profileId);
+  return {
+    layer_id: requiredRouteString(layerId, "layer_id"),
+    profile_id: requiredRouteString(profileId, "profile_id"),
+    name: requiredRouteString(optionalString(body.name), "name"),
+    description:
+      optionalString(body.description) ??
+      optionalString(body.summary) ??
+      undefined,
+    purpose:
+      optionalString(body.purpose) ??
+      optionalString(body.layerPurpose) ??
+      "mixed",
+    write_policy:
+      optionalString(body.write_policy) ??
+      optionalString(body.writePolicy) ??
+      "manual",
+    now,
+  };
+}
+
+function roleplayLoreLayerUpdateFromBody(
+  body: Record<string, unknown>,
+  layerId: string,
+  now: string,
+): Record<string, unknown> {
+  return {
+    layer_id: layerId,
+    ...(optionalString(body.name) === undefined
+      ? {}
+      : { name: optionalString(body.name) }),
+    ...(Object.hasOwn(body, "description")
+      ? { description: optionalString(body.description) ?? null }
+      : {}),
+    ...(optionalString(body.purpose) === undefined
+      ? {}
+      : { purpose: optionalString(body.purpose) }),
+    ...(optionalString(body.write_policy) === undefined &&
+    optionalString(body.writePolicy) === undefined
+      ? {}
+      : {
+          write_policy:
+            optionalString(body.write_policy) ??
+            optionalString(body.writePolicy),
+        }),
+    now,
+  };
+}
+
+function roleplayChatLayersWriteFromBody(
+  body: Record<string, unknown>,
+  now: string,
+): RoleplayChatLayersBrowserWrite {
+  const chatId = requiredRouteString(
+    optionalString(body.chat_id) ??
+      optionalString(body.chatId) ??
+      optionalString(body.session_id) ??
+      optionalString(body.sessionId),
+    "chat_id",
+  );
+  const rawLayers = arrayValue(body.layers);
+  const layerIds =
+    rawLayers.length > 0
+      ? rawLayers.map((layer, index) => {
+          if (typeof layer === "string") {
+            return { layer_id: layer, priority: index, enabled: true };
+          }
+          const record = recordBody(layer);
+          return {
+            layer_id: requiredRouteString(
+              optionalString(record.layer_id) ?? optionalString(record.layerId),
+              `layers[${index}].layer_id`,
+            ),
+            priority: optionalNumber(record.priority) ?? index,
+            enabled: optionalBoolean(record.enabled) ?? true,
+          };
+        })
+      : stringArray(body.layer_ids ?? body.layerIds, "layer_ids").map(
+          (layerId, index) => ({
+            layer_id: layerId,
+            priority: index,
+            enabled: true,
+          }),
+        );
+  return { chat_id: chatId, layers: layerIds, now };
+}
+
+async function handleRoleplayCharacterRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+  url: URL,
+  profileId: string,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  const parts = url.pathname.split("/").filter(Boolean);
+  const characterId =
+    parts.length >= 7 ? decodeURIComponent(parts[6]) : undefined;
+  try {
+    if (characterId === undefined) {
+      if (method === "GET") {
+        const includeArchived =
+          url.searchParams.get("include_archived") === "true";
+        const characters = (
+          await listRoleplayCharacters(state, profileId)
+        ).filter(
+          (character) => includeArchived || character.status !== "archived",
+        );
+        return successRoute(requestIdValue, {
+          profileId,
+          items: characters,
+          total: characters.length,
+        });
+      }
+      if (method === "POST") {
+        const character = roleplayCharacterFromBody(
+          recordBody(await readJsonBody(request)),
+          profileId,
+          state.now(),
+        );
+        await putRoleplayJson(state, roleplayCharacterScope(profileId), {
+          key: roleplayCharacterKey(character.id),
+          value: character,
+        });
+        return successRoute(requestIdValue, { character });
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay character collection supports GET and POST",
+      );
+    }
+
+    if (method === "GET") {
+      const character = await getRoleplayCharacter(
+        state,
+        profileId,
+        characterId,
+      );
+      if (character === undefined) {
+        return roleplayNotFound(
+          requestIdValue,
+          "roleplay_character_not_found",
+          `roleplay character ${characterId} was not found`,
+        );
+      }
+      return successRoute(requestIdValue, { character });
+    }
+    if (method === "PATCH") {
+      const current = await requireRoleplayCharacter(
+        state,
+        profileId,
+        characterId,
+      );
+      const character = mergeRoleplayCharacter(
+        current,
+        recordBody(await readJsonBody(request)),
+        state.now(),
+      );
+      await putRoleplayJson(state, roleplayCharacterScope(profileId), {
+        key: roleplayCharacterKey(character.id),
+        value: character,
+      });
+      return successRoute(requestIdValue, { character });
+    }
+    if (method === "DELETE") {
+      const current = await requireRoleplayCharacter(
+        state,
+        profileId,
+        characterId,
+      );
+      const character = {
+        ...current,
+        status: "archived" as const,
+        updatedAt: state.now(),
+      };
+      await putRoleplayJson(state, roleplayCharacterScope(profileId), {
+        key: roleplayCharacterKey(character.id),
+        value: character,
+      });
+      return successRoute(requestIdValue, { character });
+    }
+    return roleplayLoreMethodNotAllowed(
+      requestIdValue,
+      "roleplay character item supports GET, PATCH, and DELETE",
+    );
+  } catch (error) {
+    return roleplayInputError(
+      requestIdValue,
+      "roleplay_character_request_failed",
+      error,
+    );
+  }
+}
+
+async function handleRoleplaySessionRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  const parts = url.pathname.split("/").filter(Boolean);
+  const sessionId =
+    parts.length >= 5 ? decodeURIComponent(parts[4]) : undefined;
+  const action = parts.length >= 6 ? parts[5] : undefined;
+  try {
+    if (sessionId === undefined) {
+      if (method === "GET") {
+        const profileId = url.searchParams.get("profile_id") ?? undefined;
+        return successRoute(requestIdValue, {
+          items: await listRoleplaySessions(state, profileId),
+        });
+      }
+      if (method === "POST") {
+        return successRoute(requestIdValue, {
+          session: await createRoleplaySession(
+            state,
+            recordBody(await readJsonBody(request)),
+          ),
+        });
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay session collection supports GET and POST",
+      );
+    }
+
+    if (action === "archive" && method === "POST") {
+      const archived = await archiveRoleplaySession(state, sessionId);
+      return successRoute(requestIdValue, { session: archived });
+    }
+    if (action === "restore" && method === "POST") {
+      const restored = await restoreRoleplaySession(state, sessionId);
+      return successRoute(requestIdValue, { session: restored });
+    }
+    if (action !== undefined) {
+      return roleplayNotFound(
+        requestIdValue,
+        "unknown_roleplay_session_action",
+        `unknown roleplay session action ${action}`,
+      );
+    }
+    if (method === "GET") {
+      const session = await getRoleplaySessionSummary(state, sessionId);
+      if (session === undefined) {
+        return roleplayNotFound(
+          requestIdValue,
+          "roleplay_session_not_found",
+          `roleplay session ${sessionId} was not found`,
+        );
+      }
+      return successRoute(requestIdValue, { session });
+    }
+    if (method === "PATCH") {
+      const session = await updateRoleplaySessionMetadata(
+        state,
+        sessionId,
+        recordBody(await readJsonBody(request)),
+      );
+      return successRoute(requestIdValue, { session });
+    }
+    return roleplayLoreMethodNotAllowed(
+      requestIdValue,
+      "roleplay session item supports GET and PATCH",
+    );
+  } catch (error) {
+    return roleplayInputError(
+      requestIdValue,
+      "roleplay_session_request_failed",
+      error,
+    );
+  }
+}
+
+async function handleRoleplayNarratorConfigRequest(
+  request: IncomingMessage,
+  state: ServiceState,
+  _url: URL,
+  profileId: string,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  try {
+    if (method === "GET") {
+      return successRoute(requestIdValue, {
+        profileId,
+        config: await readRoleplayNarratorConfig(state, profileId),
+        applies: "next_wake",
+      });
+    }
+    if (method === "PATCH" || method === "POST") {
+      const config = await writeRoleplayNarratorConfig(
+        state,
+        profileId,
+        recordBody(await readJsonBody(request)),
+      );
+      return successRoute(requestIdValue, {
+        profileId,
+        config,
+        applies: "next_wake",
+      });
+    }
+    return roleplayLoreMethodNotAllowed(
+      requestIdValue,
+      "roleplay narrator config supports GET, PATCH, and POST",
+    );
+  } catch (error) {
+    return roleplayInputError(
+      requestIdValue,
+      "roleplay_narrator_config_request_failed",
+      error,
+    );
+  }
+}
+
+function roleplayCharacterScope(profileId: string): {
+  scopeType: string;
+  scopeId: string;
+} {
+  return { scopeType: "roleplay_profile", scopeId: profileId };
+}
+
+function roleplaySessionScope(sessionId: string): {
+  scopeType: string;
+  scopeId: string;
+} {
+  return { scopeType: "roleplay_session", scopeId: sessionId };
+}
+
+function roleplayCharacterKey(characterId: string): string {
+  return `character:${characterId}`;
+}
+
+function roleplaySessionMetadataKey(): string {
+  return "metadata";
+}
+
+async function putRoleplayJson(
+  state: ServiceState,
+  scope: { scopeType: string; scopeId: string },
+  input: { key: string; value: unknown },
+): Promise<NativeSimpleKvRecord> {
+  return state.bridge.putSimpleKv({
+    ...scope,
+    key: input.key,
+    valueJson: JSON.stringify(input.value),
+    now: state.now(),
+  });
+}
+
+async function listRoleplayJson<T>(
+  state: ServiceState,
+  scope: { scopeType: string; scopeId: string },
+  keyPrefix: string,
+): Promise<T[]> {
+  const records = await state.bridge.listSimpleKv({
+    ...scope,
+    keyPrefix,
+    limit: 1_000,
+    offset: 0,
+  });
+  return records.map((record) => JSON.parse(record.valueJson) as T);
+}
+
+async function getRoleplayJson<T>(
+  state: ServiceState,
+  scope: { scopeType: string; scopeId: string },
+  key: string,
+): Promise<T | undefined> {
+  const records = await state.bridge.listSimpleKv({
+    ...scope,
+    keyPrefix: key,
+    limit: 1,
+    offset: 0,
+  });
+  const exact = records.find((record) => record.key === key);
+  return exact === undefined ? undefined : (JSON.parse(exact.valueJson) as T);
+}
+
+function roleplayCharacterFromBody(
+  body: Record<string, unknown>,
+  profileId: string,
+  now: string,
+): RoleplayCharacterRecord {
+  const id =
+    optionalString(body.id) ??
+    optionalString(body.character_id) ??
+    optionalString(body.characterId) ??
+    `character-${randomBytes(6).toString("hex")}`;
+  return {
+    id,
+    profileId,
+    name: requiredString(body.name, "name"),
+    description: optionalString(body.description) ?? "",
+    personality: optionalString(body.personality) ?? "",
+    scenario: optionalString(body.scenario) ?? "",
+    firstMessage:
+      optionalString(body.firstMessage) ??
+      optionalString(body.first_message) ??
+      "",
+    alternateGreetings: optionalStringArray(
+      body.alternateGreetings ?? body.alternate_greetings,
+      [],
+      "alternateGreetings",
+    ),
+    exampleMessages: optionalStringArray(
+      body.exampleMessages ?? body.example_messages,
+      [],
+      "exampleMessages",
+    ),
+    tags: optionalStringArray(body.tags, [], "tags"),
+    ...((optionalString(body.avatarUrl) ?? optionalString(body.avatar_url))
+      ? {
+          avatarUrl:
+            optionalString(body.avatarUrl) ?? optionalString(body.avatar_url),
+        }
+      : {}),
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function mergeRoleplayCharacter(
+  current: RoleplayCharacterRecord,
+  body: Record<string, unknown>,
+  now: string,
+): RoleplayCharacterRecord {
+  return {
+    ...current,
+    ...(optionalString(body.name) === undefined
+      ? {}
+      : { name: optionalString(body.name) }),
+    ...(Object.hasOwn(body, "description")
+      ? { description: optionalString(body.description) ?? "" }
+      : {}),
+    ...(Object.hasOwn(body, "personality")
+      ? { personality: optionalString(body.personality) ?? "" }
+      : {}),
+    ...(Object.hasOwn(body, "scenario")
+      ? { scenario: optionalString(body.scenario) ?? "" }
+      : {}),
+    ...(Object.hasOwn(body, "firstMessage") ||
+    Object.hasOwn(body, "first_message")
+      ? {
+          firstMessage:
+            optionalString(body.firstMessage) ??
+            optionalString(body.first_message) ??
+            "",
+        }
+      : {}),
+    ...(body.alternateGreetings !== undefined ||
+    body.alternate_greetings !== undefined
+      ? {
+          alternateGreetings: optionalStringArray(
+            body.alternateGreetings ?? body.alternate_greetings,
+            [],
+            "alternateGreetings",
+          ),
+        }
+      : {}),
+    ...(body.exampleMessages !== undefined ||
+    body.example_messages !== undefined
+      ? {
+          exampleMessages: optionalStringArray(
+            body.exampleMessages ?? body.example_messages,
+            [],
+            "exampleMessages",
+          ),
+        }
+      : {}),
+    ...(body.tags === undefined
+      ? {}
+      : { tags: optionalStringArray(body.tags, [], "tags") }),
+    ...(body.avatarUrl !== undefined || body.avatar_url !== undefined
+      ? {
+          avatarUrl:
+            optionalString(body.avatarUrl) ?? optionalString(body.avatar_url),
+        }
+      : {}),
+    status:
+      optionalString(body.status) === "archived" ? "archived" : current.status,
+    updatedAt: now,
+  };
+}
+
+async function listRoleplayCharacters(
+  state: ServiceState,
+  profileId: string,
+): Promise<RoleplayCharacterRecord[]> {
+  return listRoleplayJson<RoleplayCharacterRecord>(
+    state,
+    roleplayCharacterScope(profileId),
+    "character:",
+  );
+}
+
+async function getRoleplayCharacter(
+  state: ServiceState,
+  profileId: string,
+  characterId: string,
+): Promise<RoleplayCharacterRecord | undefined> {
+  return getRoleplayJson<RoleplayCharacterRecord>(
+    state,
+    roleplayCharacterScope(profileId),
+    roleplayCharacterKey(characterId),
+  );
+}
+
+async function requireRoleplayCharacter(
+  state: ServiceState,
+  profileId: string,
+  characterId: string,
+): Promise<RoleplayCharacterRecord> {
+  const character = await getRoleplayCharacter(state, profileId, characterId);
+  if (character === undefined) {
+    throw new Error(`roleplay character ${characterId} was not found`);
+  }
+  return character;
+}
+
+async function roleplaySessionMetadata(
+  state: ServiceState,
+  session: Pick<
+    SessionState,
+    "sessionId" | "profileId" | "createdAt" | "lastActiveAt" | "status"
+  >,
+): Promise<RoleplaySessionMetadata> {
+  const stored = await getRoleplayJson<RoleplaySessionMetadata>(
+    state,
+    roleplaySessionScope(session.sessionId),
+    roleplaySessionMetadataKey(),
+  );
+  return {
+    sessionId: session.sessionId,
+    profileId: session.profileId,
+    activeLayerIds: [],
+    archived: session.status === "archived",
+    createdAt: session.createdAt,
+    updatedAt: session.lastActiveAt,
+    ...(stored ?? {}),
+  };
+}
+
+async function upsertRoleplaySessionMetadata(
+  state: ServiceState,
+  sessionId: string,
+  patch: Partial<RoleplaySessionMetadata>,
+): Promise<RoleplaySessionMetadata> {
+  const session = await serviceSessionById(state, sessionId);
+  const current = await roleplaySessionMetadata(state, session);
+  const next: RoleplaySessionMetadata = {
+    ...current,
+    ...patch,
+    sessionId,
+    profileId: patch.profileId ?? current.profileId,
+    activeLayerIds: patch.activeLayerIds ?? current.activeLayerIds,
+    updatedAt: state.now(),
+  };
+  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
+    key: roleplaySessionMetadataKey(),
+    value: next,
+  });
+  return next;
+}
+
+async function roleplaySessionSummary(
+  state: ServiceState,
+  session: SessionState,
+): Promise<Record<string, unknown>> {
+  const metadata = await roleplaySessionMetadata(state, session);
+  const character =
+    metadata.characterId === undefined
+      ? undefined
+      : await getRoleplayCharacter(
+          state,
+          session.profileId,
+          metadata.characterId,
+        );
+  const chatLayers = await state.bridge
+    .getChatLayers(session.sessionId)
+    .catch(() => []);
+  const activeLayerIds =
+    metadata.activeLayerIds.length > 0
+      ? metadata.activeLayerIds
+      : chatLayers
+          .filter((layer) => layer.enabled !== false)
+          .sort(
+            (left, right) =>
+              numberValue(left.priority) - numberValue(right.priority),
+          )
+          .map((layer) => String(layer.layer_id));
+  const lastEvent = listChatEventsAfterCursor(state, session, undefined, 1).at(
+    -1,
+  );
+  return {
+    session_id: session.sessionId,
+    profile_id: session.profileId,
+    agent_id: session.agentId,
+    status: session.status,
+    display_name: metadata.displayName,
+    character_id: metadata.characterId,
+    character_name: character?.name,
+    active_layer_ids: activeLayerIds,
+    active_layer_count: activeLayerIds.length,
+    last_message_preview: lastEventPreview(lastEvent),
+    archived: metadata.archived || session.status === "archived",
+    created_at: metadata.createdAt,
+    updated_at: metadata.updatedAt,
+    metadata,
+  };
+}
+
+async function roleplayPromptContextForSession(
+  state: ServiceState,
+  session: Pick<
+    SessionState,
+    "sessionId" | "profileId" | "createdAt" | "lastActiveAt" | "status"
+  >,
+): Promise<string | undefined> {
+  const metadata = await roleplaySessionMetadata(state, session).catch(
+    () => undefined,
+  );
+  if (metadata === undefined) return undefined;
+  const character =
+    metadata.characterId === undefined
+      ? undefined
+      : await getRoleplayCharacter(
+          state,
+          session.profileId,
+          metadata.characterId,
+        ).catch(() => undefined);
+  if (character === undefined && metadata.activeLayerIds.length === 0) {
+    return undefined;
+  }
+  const lines = [
+    "# Roleplay Session Context",
+    metadata.displayName ? `Session: ${metadata.displayName}` : undefined,
+    character ? `Selected character: ${character.name}` : undefined,
+    character?.description
+      ? `Description: ${character.description}`
+      : undefined,
+    character?.personality
+      ? `Personality: ${character.personality}`
+      : undefined,
+    character?.scenario ? `Scenario: ${character.scenario}` : undefined,
+    character?.firstMessage
+      ? `First message: ${character.firstMessage}`
+      : undefined,
+    character && character.alternateGreetings.length > 0
+      ? `Alternate greetings: ${character.alternateGreetings.join(" | ")}`
+      : undefined,
+    character && character.exampleMessages.length > 0
+      ? `Example messages: ${character.exampleMessages.join(" | ")}`
+      : undefined,
+    metadata.activeLayerIds.length > 0
+      ? `Active lore layers: ${metadata.activeLayerIds.join(", ")}`
+      : undefined,
+    "Use this roleplay context as session-scoped setup. Prefer current chat evidence if it conflicts with older character or lore metadata.",
+  ];
+  return lines.filter((line): line is string => Boolean(line)).join("\n");
+}
+
+async function listRoleplaySessions(
+  state: ServiceState,
+  profileId: string | undefined,
+): Promise<Record<string, unknown>[]> {
+  const sessions = (await state.bridge.listSessions()).filter(
+    (session) => profileId === undefined || session.profileId === profileId,
+  );
+  return Promise.all(
+    sessions.map((session) => roleplaySessionSummary(state, session)),
+  );
+}
+
+async function getRoleplaySessionSummary(
+  state: ServiceState,
+  sessionId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const session = (await state.bridge.listSessions()).find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  return session === undefined
+    ? undefined
+    : roleplaySessionSummary(state, session);
+}
+
+async function createRoleplaySession(
+  state: ServiceState,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const profileId = requiredString(
+    body.profileId ?? body.profile_id,
+    "profileId",
+  );
+  const registry = await state.bridge.getProfileRegistryRecord(profileId);
+  const agentId =
+    optionalString(body.agentId) ??
+    optionalString(body.agent_id) ??
+    registry?.agentId ??
+    profileId;
+  const sessionId =
+    optionalString(body.sessionId) ??
+    optionalString(body.session_id) ??
+    `${agentId}-rp-${state
+      .now()
+      .replace(/[^0-9A-Za-z]/g, "")
+      .slice(0, 17)}-${randomBytes(3).toString("hex")}`;
+  const activeLayerIds = optionalStringArray(
+    body.activeLayerIds ?? body.active_layer_ids,
+    [],
+    "activeLayerIds",
+  );
+  const session = await state.bridge.createSession({
+    sessionId,
+    agentId,
+    profileId,
+    kind: "full",
+    resourceLimits: {},
+    toolProfile: { tools: [] },
+  });
+  const metadata: Partial<RoleplaySessionMetadata> = {
+    profileId,
+    displayName:
+      optionalString(body.displayName) ?? optionalString(body.display_name),
+    characterId:
+      optionalString(body.characterId) ?? optionalString(body.character_id),
+    activeLayerIds,
+    archived: false,
+    createdAt: state.now(),
+  };
+  await upsertRoleplaySessionMetadata(state, session.sessionId, metadata);
+  if (activeLayerIds.length > 0) {
+    await state.bridge.setChatLayers({
+      chat_id: session.sessionId,
+      layers: activeLayerIds.map((layerId, index) => ({
+        layer_id: layerId,
+        priority: index,
+        enabled: true,
+      })),
+      now: state.now(),
+    });
+  }
+  return (
+    (await getRoleplaySessionSummary(state, session.sessionId)) ?? {
+      session_id: session.sessionId,
+      profile_id: session.profileId,
+      agent_id: session.agentId,
+      status: session.status,
+    }
+  );
+}
+
+async function updateRoleplaySessionMetadata(
+  state: ServiceState,
+  sessionId: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const patch: Partial<RoleplaySessionMetadata> = {};
+  if (
+    Object.hasOwn(body, "displayName") ||
+    Object.hasOwn(body, "display_name")
+  ) {
+    patch.displayName =
+      optionalString(body.displayName) ?? optionalString(body.display_name);
+  }
+  if (
+    Object.hasOwn(body, "characterId") ||
+    Object.hasOwn(body, "character_id")
+  ) {
+    patch.characterId =
+      optionalString(body.characterId) ?? optionalString(body.character_id);
+  }
+  if (
+    Object.hasOwn(body, "activeLayerIds") ||
+    Object.hasOwn(body, "active_layer_ids")
+  ) {
+    patch.activeLayerIds = optionalStringArray(
+      body.activeLayerIds ?? body.active_layer_ids,
+      [],
+      "activeLayerIds",
+    );
+    await state.bridge.setChatLayers({
+      chat_id: sessionId,
+      layers: patch.activeLayerIds.map((layerId, index) => ({
+        layer_id: layerId,
+        priority: index,
+        enabled: true,
+      })),
+      now: state.now(),
+    });
+  }
+  await upsertRoleplaySessionMetadata(state, sessionId, patch);
+  const summary = await getRoleplaySessionSummary(state, sessionId);
+  if (summary === undefined)
+    throw new Error(`roleplay session ${sessionId} missing`);
+  return summary;
+}
+
+async function archiveRoleplaySession(
+  state: ServiceState,
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  await state.bridge.archiveSession(sessionId as SessionId);
+  await upsertRoleplaySessionMetadata(state, sessionId, { archived: true });
+  const summary = await getRoleplaySessionSummary(state, sessionId);
+  if (summary === undefined)
+    throw new Error(`roleplay session ${sessionId} missing`);
+  return summary;
+}
+
+async function restoreRoleplaySession(
+  state: ServiceState,
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  const existing = await serviceSessionById(state, sessionId);
+  await state.bridge.ensureConfiguredSession({
+    sessionId,
+    agentId: existing.agentId,
+    profileId: existing.profileId,
+    kind: existing.kind as "full" | "worker" | "delegated",
+    resourceLimits: compactRecord(
+      existing.resourceLimits as unknown as Record<string, unknown>,
+    ),
+    toolProfile: existing.toolProfile,
+    historyWindow: existing.historyWindow,
+  });
+  await upsertRoleplaySessionMetadata(state, sessionId, { archived: false });
+  const summary = await getRoleplaySessionSummary(state, sessionId);
+  if (summary === undefined)
+    throw new Error(`roleplay session ${sessionId} missing`);
+  return summary;
+}
+
+function lastEventPreview(event: ChatEvent | undefined): string | undefined {
+  if (event === undefined) return undefined;
+  const body =
+    optionalString(event.payload.body) ??
+    optionalString(event.payload.text) ??
+    optionalString(event.payload.summary);
+  return body === undefined ? undefined : body.slice(0, 180);
+}
+
+async function readRoleplayNarratorConfig(
+  state: ServiceState,
+  profileId: string,
+): Promise<BrowserRoleplayNarratorConfig> {
+  const profile = await loadProfileConfig(
+    state.runtimeConfig.profilesDir,
+    profileId as ProfileId,
+  );
+  return normalizeRoleplayNarratorConfig(profile.roleplayNarrator ?? {});
+}
+
+async function writeRoleplayNarratorConfig(
+  state: ServiceState,
+  profileId: string,
+  body: Record<string, unknown>,
+): Promise<BrowserRoleplayNarratorConfig> {
+  const config = normalizeRoleplayNarratorConfig(body.config ?? body);
+  const profilePath = safeProfileConfigPath(
+    state.runtimeConfig.profilesDir,
+    profileId,
+  );
+  if (profilePath === undefined) {
+    throw new Error(`profile id ${profileId} is not a valid file profile id`);
+  }
+  const raw = JSON.parse(await readFile(profilePath, "utf8")) as unknown;
+  if (!isRecord(raw)) {
+    throw new Error(`profile ${profileId} config root must be an object`);
+  }
+  await writeJsonFileAtomic(profilePath, {
+    ...raw,
+    profileId,
+    roleplayNarrator: config,
+  });
+  await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "roleplay_narrator_config_updated",
+    summaryPrefix: `Roleplay narrator config for ${profileId} updated`,
+  });
+  return config;
+}
+
+function normalizeRoleplayNarratorConfig(
+  input: unknown,
+): BrowserRoleplayNarratorConfig {
+  const raw = recordBody(input);
+  const review = optionalRecord(raw.review) ?? {};
+  const maxReviewCycles =
+    optionalNumber(review.maxReviewCycles ?? review.max_review_cycles) ?? 1;
+  if (
+    !Number.isInteger(maxReviewCycles) ||
+    maxReviewCycles < 0 ||
+    maxReviewCycles > 8
+  ) {
+    throw new Error(
+      "review.maxReviewCycles must be an integer between 0 and 8",
+    );
+  }
+  return {
+    tone: enumValue(
+      raw.tone,
+      ["whimsical", "dramatic", "matter_of_fact", "lush", "wry"],
+      "tone",
+      "lush",
+    ),
+    pacing: enumValue(
+      raw.pacing,
+      ["leisurely", "balanced", "rapid", "breathless"],
+      "pacing",
+      "balanced",
+    ),
+    explicitness: enumValue(
+      raw.explicitness,
+      ["implied", "suggestive", "romantic", "steamy"],
+      "explicitness",
+      "romantic",
+    ),
+    memoryDepth: enumValue(
+      raw.memoryDepth ?? raw.memory_depth,
+      ["shallow", "medium", "deep"],
+      "memoryDepth",
+      "medium",
+    ),
+    ...(Object.hasOwn(raw, "exemplar") || Object.hasOwn(raw, "styleExemplar")
+      ? { exemplar: optionalString(raw.exemplar ?? raw.styleExemplar) ?? "" }
+      : {}),
+    review: {
+      enabled: optionalBoolean(review.enabled) ?? false,
+      maxReviewCycles,
+    },
+  };
+}
+
+function enumValue<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fieldName: string,
+  fallback: T,
+): T {
+  if (value === undefined) return fallback;
+  if (typeof value === "string" && allowed.includes(value as T)) {
+    return value as T;
+  }
+  throw new Error(`${fieldName} must be one of ${allowed.join(", ")}`);
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function roleplayNotFound(
+  requestIdValue: string,
+  reasonCode: string,
+  message: string,
+): AdminRouteResult {
+  return failure(404, requestIdValue, {
+    code: "not_found",
+    reason_code: reasonCode,
+    message,
+    retryable: false,
+  });
+}
+
+function roleplayInputError(
+  requestIdValue: string,
+  reasonCode: string,
+  error: unknown,
+): AdminRouteResult {
+  return failure(400, requestIdValue, {
+    code: "invalid_input",
+    reason_code: reasonCode,
+    message: errorMessage(error, "roleplay request failed"),
     retryable: false,
   });
 }
@@ -11446,9 +12722,16 @@ async function dispatchWake(
       configuredSession: configured,
       profileContext,
     });
+    const roleplayContext = await roleplayPromptContextForSession(
+      state,
+      session,
+    );
     const role = buildProfileRoleAssembly(profileContext, {
       sessionMemoryContext: contextStrategy.sessionMemoryContext,
-      additionalInstructions: contextStrategy.additionalInstructions,
+      additionalInstructions: [
+        ...contextStrategy.additionalInstructions,
+        ...(roleplayContext === undefined ? [] : [roleplayContext]),
+      ],
     });
     const turnTimeoutMs = effectiveTurnTimeoutMs(
       effectiveWakeTimeoutMs({
@@ -11978,6 +13261,17 @@ function isChatRoute(pathname: string): boolean {
   return pathname === "/v1/chat" || pathname.startsWith("/v1/chat/");
 }
 
+function isRoleplayBrowserRoute(pathname: string): boolean {
+  return (
+    pathname.startsWith("/v1/admin/roleplay/") ||
+    /^\/v1\/profile\/[^/]+\/layers\/?$/.test(pathname)
+  );
+}
+
+function isBrowserCorsRoute(pathname: string): boolean {
+  return isChatRoute(pathname) || isRoleplayBrowserRoute(pathname);
+}
+
 function chatCorsPreflightResponse(
   request: IncomingMessage,
 ): ServiceRouteResult {
@@ -12006,7 +13300,7 @@ function chatCorsHeaders(request: IncomingMessage): Record<string, string> {
   const origin = stringHeader(request, "origin") ?? "*";
   return {
     "access-control-allow-origin": origin,
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "access-control-allow-headers":
       "authorization,content-type,idempotency-key,last-event-id,x-request-id",
     "access-control-expose-headers": "content-type",

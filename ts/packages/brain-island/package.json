@@ -43,6 +43,7 @@
     "smoke:lore-memory-tool": "tsx src/smoke-lore-memory-tool.ts",
     "smoke:scene-state-tool": "tsx src/smoke-scene-state-tool.ts",
     "smoke:roleplay-narrator-brain": "tsx src/smoke-roleplay-narrator-brain.ts",
+    "smoke:roleplay-browser-api": "tsx src/smoke-roleplay-browser-api.ts",
     "smoke:roleplay-quality-spike-live": "tsx src/smoke-roleplay-quality-spike-live.ts",
     "smoke:memory-space-api": "tsx src/smoke-memory-space-api.ts",
     "smoke:session-memory-prompt-context": "tsx src/smoke-session-memory-prompt-context.ts",
