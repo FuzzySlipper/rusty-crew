@@ -14,6 +14,7 @@ import type {
   NativeModelProviderRecord,
   OpenAiResponsesCredentialSecretUpdate,
   OpenAiResponsesBrainRunInput,
+  OpenAiResponsesToolRequest,
   OpenAiResponsesTransportMetrics,
 } from "@rusty-crew/native-bridge";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
@@ -22,9 +23,22 @@ import { createRoleplayNarratorBrain } from "./narrator-brain.js";
 import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
-import type { BrainActionPlanner, BrainImplementation } from "./index.js";
-import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
-import type { BrainToolResolver } from "./tool-session-selection.js";
+import type {
+  BrainActionPlanner,
+  BrainImplementation,
+  BrainWakeInput,
+} from "./index.js";
+import {
+  localToolCallMetadata,
+  withToolCallDebugReference,
+  type ToolCallDebugStore,
+} from "./tool-call-debug-store.js";
+import type { BrainTool, BrainToolResult } from "./brain-tool.js";
+import {
+  resolveToolSession,
+  type BrainActionCollector,
+  type BrainToolResolver,
+} from "./tool-session-selection.js";
 
 export type BrainModuleId = "pi-agent-core" | "local" | (string & {});
 
@@ -522,6 +536,7 @@ function withOpenAiResponsesProviderStateScope<
 
 async function runOpenAiResponsesBrainWithIncrementalDrain(
   context: BrainModuleContext,
+  wake: BrainWakeInput,
   input: Parameters<NativeBridgeModule["runOpenAiResponsesBrain"]>[0],
 ): Promise<{
   events: BrainEventEnvelope[];
@@ -538,22 +553,68 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
       "OpenAI Responses incremental drain requires native bridge",
     );
   }
-  const started = await bridge.startOpenAiResponsesBrain(input);
-  const actions: BrainAction[] = [];
+  const selectionActions = createResponsesBrainActionCollector();
+  const toolSelection = resolveToolSession({
+    wake,
+    resolveTools: context.toolResolver,
+    actions: selectionActions,
+  });
+  const toolsByName = new Map(
+    toolSelection.tools.map((tool) => [tool.name, tool]),
+  );
+  const started = await bridge.startOpenAiResponsesBrain({
+    ...input,
+    tools: toolSelection.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.parameters,
+    })),
+  });
+  const streamActions: BrainAction[] = [];
   const brainEventCounts: Record<string, number> = {};
   const brainStreamItemCounts: Record<string, number> = {};
+  const toolDebugReferences = createOpenAiResponsesToolDebugReferences();
 
   for (;;) {
     const drained = await bridge.drainOpenAiResponsesBrainStream({
       wakeId: started.wakeId,
       maxItems: 32,
     });
+    const preparedToolRequests = drained.toolRequests.map((request) =>
+      prepareOpenAiResponsesToolRequest(
+        wake,
+        request,
+        toolsByName,
+        context.toolCallDebugStore,
+      ),
+    );
+    addPreparedOpenAiResponsesToolDebugReferences(
+      toolDebugReferences,
+      preparedToolRequests,
+    );
     for (const item of drained.items) {
       incrementCount(brainStreamItemCounts, item.type);
       if (item.type === "event") {
         incrementCount(brainEventCounts, item.event.event.type);
       }
-      await handleDrainedOpenAiResponsesStreamItem(bridge, item, actions);
+      await handleDrainedOpenAiResponsesStreamItem(
+        bridge,
+        withOpenAiResponsesToolDebugReference(item, toolDebugReferences),
+        streamActions,
+      );
+    }
+    for (const request of preparedToolRequests) {
+      const output = await executePreparedOpenAiResponsesToolRequest(
+        wake,
+        request,
+        context.toolCallDebugStore,
+      );
+      await bridge.submitOpenAiResponsesToolOutput({
+        wakeId: started.wakeId,
+        callId: request.request.callId,
+        output: output.output,
+        isError: output.isError,
+      });
     }
     if (drained.error !== undefined) {
       throw new Error(
@@ -563,7 +624,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
     if (drained.terminal) {
       return {
         events: [],
-        actions,
+        actions: [...selectionActions.actions, ...streamActions],
         providerState: drained.providerState,
         transportMetrics: drained.transportMetrics,
         brainEventCounts,
@@ -573,6 +634,292 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
     }
     await delay(25);
   }
+}
+
+function createResponsesBrainActionCollector(): BrainActionCollector {
+  const actions: BrainAction[] = [];
+  return {
+    add(action) {
+      actions.push(action);
+    },
+    addMany(nextActions) {
+      actions.push(...nextActions);
+    },
+    get actions() {
+      return actions;
+    },
+  };
+}
+
+interface PreparedOpenAiResponsesToolRequest {
+  request: OpenAiResponsesToolRequest;
+  tool?: BrainTool;
+  params?: unknown;
+  debugDetailId?: string;
+  preparationError?: string;
+}
+
+function prepareOpenAiResponsesToolRequest(
+  wake: BrainWakeInput,
+  request: OpenAiResponsesToolRequest,
+  toolsByName: ReadonlyMap<string, BrainTool>,
+  toolCallDebugStore: ToolCallDebugStore | undefined,
+): PreparedOpenAiResponsesToolRequest {
+  const tool = toolsByName.get(request.name);
+  if (tool === undefined) {
+    const debugRecord = toolCallDebugStore?.start({
+      toolCallId: request.callId,
+      sessionId: wake.sessionId,
+      wakeId: wake.wakeId,
+      toolName: request.name,
+      arguments: { argumentsJson: request.argumentsJson },
+      sourceMetadata: localToolCallMetadata(request.name),
+    });
+    return {
+      request,
+      debugDetailId: debugRecord?.debug_detail_id,
+      preparationError: `Tool ${request.name} is not available in this brain session.`,
+    };
+  }
+  let rawArguments: unknown;
+  try {
+    rawArguments =
+      request.argumentsJson.trim().length === 0
+        ? {}
+        : JSON.parse(request.argumentsJson);
+  } catch (error) {
+    const debugRecord = toolCallDebugStore?.start({
+      toolCallId: request.callId,
+      sessionId: wake.sessionId,
+      wakeId: wake.wakeId,
+      toolName: request.name,
+      arguments: { argumentsJson: request.argumentsJson },
+      sourceMetadata: localToolCallMetadata(request.name),
+    });
+    return {
+      request,
+      tool,
+      debugDetailId: debugRecord?.debug_detail_id,
+      preparationError: `Tool ${request.name} arguments were not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+  try {
+    const params = tool.prepareArguments
+      ? tool.prepareArguments(rawArguments)
+      : (rawArguments as never);
+    const debugRecord = toolCallDebugStore?.start({
+      toolCallId: request.callId,
+      sessionId: wake.sessionId,
+      wakeId: wake.wakeId,
+      toolName: request.name,
+      arguments: {
+        rawArguments,
+        preparedArguments: params,
+      },
+      sourceMetadata: localToolCallMetadata(request.name),
+    });
+    return {
+      request,
+      tool,
+      params,
+      debugDetailId: debugRecord?.debug_detail_id,
+    };
+  } catch (error) {
+    const debugRecord = toolCallDebugStore?.start({
+      toolCallId: request.callId,
+      sessionId: wake.sessionId,
+      wakeId: wake.wakeId,
+      toolName: request.name,
+      arguments: { rawArguments },
+      sourceMetadata: localToolCallMetadata(request.name),
+    });
+    return {
+      request,
+      tool,
+      debugDetailId: debugRecord?.debug_detail_id,
+      preparationError: `Tool ${request.name} argument preparation failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
+async function executePreparedOpenAiResponsesToolRequest(
+  wake: BrainWakeInput,
+  prepared: PreparedOpenAiResponsesToolRequest,
+  toolCallDebugStore: ToolCallDebugStore | undefined,
+): Promise<{ output: string; isError: boolean }> {
+  const failDebugRecord = (error: unknown) => {
+    if (prepared.debugDetailId) {
+      toolCallDebugStore?.fail({
+        debugDetailId: prepared.debugDetailId,
+        error,
+      });
+    }
+  };
+  if (prepared.preparationError) {
+    failDebugRecord(prepared.preparationError);
+    return {
+      output: prepared.preparationError,
+      isError: true,
+    };
+  }
+  if (!prepared.tool) {
+    const output = `Tool ${prepared.request.name} is not available in this brain session.`;
+    failDebugRecord(output);
+    return { output, isError: true };
+  }
+  try {
+    const controller = new AbortController();
+    const result = prepared.tool.executeWithContext
+      ? await prepared.tool.executeWithContext(prepared.params as never, {
+          wake,
+          wakeId: wake.wakeId,
+          sessionId: wake.sessionId,
+          callId: prepared.request.callId,
+          signal: controller.signal,
+        })
+      : await prepared.tool.execute(
+          prepared.request.callId,
+          prepared.params as never,
+          controller.signal,
+        );
+    if (prepared.debugDetailId) {
+      toolCallDebugStore?.finish({
+        debugDetailId: prepared.debugDetailId,
+        finalResult: result,
+      });
+    }
+    return {
+      output: brainToolResultToOpenAiResponsesOutput(result),
+      isError: false,
+    };
+  } catch (error) {
+    if (prepared.debugDetailId) {
+      toolCallDebugStore?.fail({
+        debugDetailId: prepared.debugDetailId,
+        error,
+      });
+    }
+    return {
+      output: `Tool ${prepared.request.name} failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      isError: true,
+    };
+  }
+}
+
+interface OpenAiResponsesToolDebugReferences {
+  startByToolName: Map<string, string[]>;
+  finishByToolName: Map<string, string[]>;
+}
+
+function createOpenAiResponsesToolDebugReferences(): OpenAiResponsesToolDebugReferences {
+  return {
+    startByToolName: new Map(),
+    finishByToolName: new Map(),
+  };
+}
+
+function addPreparedOpenAiResponsesToolDebugReferences(
+  references: OpenAiResponsesToolDebugReferences,
+  preparedRequests: readonly PreparedOpenAiResponsesToolRequest[],
+): void {
+  for (const prepared of preparedRequests) {
+    if (!prepared.debugDetailId) continue;
+    pushDebugReference(
+      references.startByToolName,
+      prepared.request.name,
+      prepared.debugDetailId,
+    );
+    pushDebugReference(
+      references.finishByToolName,
+      prepared.request.name,
+      prepared.debugDetailId,
+    );
+  }
+}
+
+function pushDebugReference(
+  references: Map<string, string[]>,
+  toolName: string,
+  debugDetailId: string,
+): void {
+  const refs = references.get(toolName) ?? [];
+  refs.push(debugDetailId);
+  references.set(toolName, refs);
+}
+
+function withOpenAiResponsesToolDebugReference(
+  item: BrainWakeStreamItem,
+  debugReferences: OpenAiResponsesToolDebugReferences,
+): BrainWakeStreamItem {
+  if (item.type !== "event") return item;
+  const event = item.event.event;
+  if (
+    event.type !== "tool_call_started" &&
+    event.type !== "tool_call_finished"
+  ) {
+    return item;
+  }
+  const referencesByToolName =
+    event.type === "tool_call_started"
+      ? debugReferences.startByToolName
+      : debugReferences.finishByToolName;
+  const refs = referencesByToolName.get(event.toolName);
+  const debugDetailId = refs?.shift();
+  if (!debugDetailId) return item;
+  if (refs && refs.length === 0) {
+    referencesByToolName.delete(event.toolName);
+  }
+  return {
+    ...item,
+    event: {
+      ...item.event,
+      event: {
+        ...event,
+        metadata: withToolCallDebugReference(event.metadata, debugDetailId),
+      },
+    },
+  };
+}
+
+function brainToolResultToOpenAiResponsesOutput(
+  result: BrainToolResult,
+): string {
+  const content = result.content
+    .map((item) => {
+      if (item.type === "text") return item.text;
+      return `[image:${item.mimeType};${item.data.length} bytes]`;
+    })
+    .filter((text) => text.length > 0)
+    .join("\n");
+  const details =
+    result.details === undefined
+      ? undefined
+      : safeJsonStringify(result.details);
+  const output =
+    details === undefined || details === "{}"
+      ? content
+      : [content, `Details:\n${details}`].filter(Boolean).join("\n\n");
+  return limitOpenAiResponsesToolOutput(output || "(tool returned no content)");
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function limitOpenAiResponsesToolOutput(output: string): string {
+  const maxChars = 20_000;
+  if (output.length <= maxChars) return output;
+  return `${output.slice(0, maxChars)}\n[truncated ${output.length - maxChars} chars]`;
 }
 
 async function handleDrainedOpenAiResponsesStreamItem(
@@ -676,209 +1023,34 @@ export const openAiResponsesBrainModule: BrainModule = {
         stream?: import("@rusty-crew/contracts").BrainWakeStreamItem[];
         credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
       }> {
-        if (context.bridge?.runOpenAiResponsesBrain !== undefined) {
-          try {
-            const input = {
-              wakeId: wake.wakeId,
-              sessionId: wake.sessionId,
-              bodyState: wake.state,
-              providerState: wake.providerState,
-              providerStateAbsence: wake.providerStateAbsence,
-              config: {
-                model: context.profile.profile.modelConfig.modelName,
-                instructions: wake.systemPrompt,
-                streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
-              },
-              client: responsesClientConfig,
-            };
-            const result = await runOpenAiResponsesBrainWithIncrementalDrain(
-              context,
-              input,
-            );
-            responsesClientConfig =
-              await persistOpenAiResponsesCredentialSecretUpdate(
-                context,
-                responsesClientConfig,
-                result.credentialSecretUpdate,
-              );
-            return withOpenAiResponsesProviderStateScope(result, context);
-          } catch (error) {
-            if (
-              process.env.RUSTY_CREW_OPENAI_RESPONSES_REQUIRE_NATIVE === "1"
-            ) {
-              throw error;
-            }
-            try {
-              const result = await context.bridge.runOpenAiResponsesBrain({
-                wakeId: wake.wakeId,
-                sessionId: wake.sessionId,
-                bodyState: wake.state,
-                providerState: wake.providerState,
-                providerStateAbsence: wake.providerStateAbsence,
-                config: {
-                  model: context.profile.profile.modelConfig.modelName,
-                  instructions: wake.systemPrompt,
-                  streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
-                },
-                client: responsesClientConfig,
-              });
-              responsesClientConfig =
-                await persistOpenAiResponsesCredentialSecretUpdate(
-                  context,
-                  responsesClientConfig,
-                  result.credentialSecretUpdate,
-                );
-              return withOpenAiResponsesProviderStateScope(result, context);
-            } catch {
-              // Fall through to the deterministic TS scaffold below. This
-              // preserves the existing non-required-native behavior while the
-              // buffered drain path is still settling.
-            }
-          }
+        if (context.bridge === undefined) {
+          throw new Error("openai-responses brain requires native bridge");
         }
-        const toolName = wake.state.session.toolProfile.tools[0]?.name;
-        const hydrated = wake.providerState !== undefined;
-        const outputItems = [
-          {
-            itemId: `message-${wake.wakeId}`,
-            itemType: "message",
-            rawJson: {
-              type: "message",
-              id: `message-${wake.wakeId}`,
-              text: "responses replay service wake completed",
-            },
+        const input = {
+          wakeId: wake.wakeId,
+          sessionId: wake.sessionId,
+          bodyState: wake.state,
+          providerState: wake.providerState,
+          providerStateAbsence: wake.providerStateAbsence,
+          config: {
+            model: context.profile.profile.modelConfig.modelName,
+            instructions: wake.systemPrompt,
+            streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
           },
-          ...(toolName
-            ? [
-                {
-                  itemId: `call-${wake.wakeId}`,
-                  itemType: "function_call",
-                  callId: `call-${wake.wakeId}`,
-                  rawJson: {
-                    type: "function_call",
-                    id: `call-${wake.wakeId}`,
-                    call_id: `call-${wake.wakeId}`,
-                    name: toolName,
-                    arguments: "{}",
-                  },
-                },
-                {
-                  itemType: "function_call_output",
-                  callId: `call-${wake.wakeId}`,
-                  rawJson: {
-                    type: "function_call_output",
-                    call_id: `call-${wake.wakeId}`,
-                    output: `${toolName} completed in deterministic field scaffold`,
-                    is_error: false,
-                  },
-                },
-              ]
-            : []),
-        ];
-        const providerState: BrainWakeProviderStateOutput = {
-          type: "replace",
-          state: {
-            moduleId: "openai-responses",
-            strategyId: "replay",
-            profileFingerprint:
-              wake.providerState?.profileFingerprint ??
-              context.providerStateScope?.profileFingerprint ??
-              "profile-fingerprint",
-            providerFingerprint:
-              wake.providerState?.providerFingerprint ??
-              context.providerStateScope?.providerFingerprint ??
-              "provider-fingerprint",
-            payloadVersion: "openai-responses-state-v1",
-            payload: {
-              kind: "openai-responses",
-              strategyId: "replay",
-              payloadVersion: "openai-responses-state-v1",
-              lastCompletedResponse: {
-                responseId: `resp-${wake.wakeId}`,
-                outputItems,
-                tokenUsage: {
-                  inputTokens: 1,
-                  cachedInputTokens: hydrated ? 1 : 0,
-                  outputTokens: 1,
-                  reasoningOutputTokens: 0,
-                  totalTokens: 2,
-                },
-              },
-              replayHints: {
-                promptCacheKey: `profile:${wake.state.session.profileId}`,
-                providerItemWatermark: `message-${wake.wakeId}`,
-              },
-            },
-            ttlMs: 24 * 60 * 60 * 1000,
-          },
+          client: responsesClientConfig,
         };
-        return {
-          events: [
-            {
-              wakeId: wake.wakeId,
-              sessionId: wake.sessionId,
-              event: { type: "started" },
-            },
-            {
-              wakeId: wake.wakeId,
-              sessionId: wake.sessionId,
-              event: {
-                type: "provider_status",
-                level: "info",
-                message: hydrated
-                  ? "openai-responses replay hydrated provider state"
-                  : `openai-responses replay starting without provider state: ${
-                      wake.providerStateAbsence ?? "missing"
-                    }`,
-              },
-            },
-            ...(toolName
-              ? [
-                  {
-                    wakeId: wake.wakeId,
-                    sessionId: wake.sessionId,
-                    event: {
-                      type: "tool_call_started" as const,
-                      toolName,
-                    },
-                  },
-                  {
-                    wakeId: wake.wakeId,
-                    sessionId: wake.sessionId,
-                    event: {
-                      type: "tool_call_finished" as const,
-                      toolName,
-                      isError: false,
-                    },
-                  },
-                ]
-              : []),
-            {
-              wakeId: wake.wakeId,
-              sessionId: wake.sessionId,
-              event: {
-                type: "text_delta",
-                text: "responses module scaffold wake completed",
-              },
-            },
-            {
-              wakeId: wake.wakeId,
-              sessionId: wake.sessionId,
-              event: { type: "finished" },
-            },
-          ],
-          actions: [
-            {
-              type: "deliver_completion",
-              packet: {
-                sessionId: wake.sessionId as SessionId,
-                status: "completed",
-                summary: "responses replay service wake completed",
-              } satisfies CompletionPacket,
-            },
-          ],
-          providerState,
-        };
+        const result = await runOpenAiResponsesBrainWithIncrementalDrain(
+          context,
+          wake,
+          input,
+        );
+        responsesClientConfig =
+          await persistOpenAiResponsesCredentialSecretUpdate(
+            context,
+            responsesClientConfig,
+            result.credentialSecretUpdate,
+          );
+        return withOpenAiResponsesProviderStateScope(result, context);
       },
     };
   },

@@ -573,6 +573,18 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
     wakeId: Type.String(),
     sessionId: Type.String(),
     bodyState: bodyStateSchema,
+    tools: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            name: Type.String(),
+            description: Type.String(),
+            inputSchema: Type.Unknown(),
+          },
+          { additionalProperties: true },
+        ),
+      ),
+    ),
     providerState: Type.Optional(providerStateInputSchema),
     providerStateAbsence: Type.Optional(
       Type.Union([

@@ -380,9 +380,8 @@ function configuredMcpEndpoint(
     const server = config?.servers?.find((candidate) => {
       return candidate.id === serverId;
     });
-    const baseUrl = server?.baseUrl ?? config?.baseUrl;
-    if (!baseUrl) return undefined;
-    const url = new URL(baseUrl);
+    if (!server?.baseUrl) return undefined;
+    const url = new URL(server.baseUrl);
     url.searchParams.set("tool_profile", binding.toolProfileKey);
     return {
       url,

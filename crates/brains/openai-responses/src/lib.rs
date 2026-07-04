@@ -34,6 +34,7 @@ pub const MODULE_ID: &str = "openai-responses";
 pub const REPLAY_STRATEGY_ID: &str = "replay";
 pub const PREVIOUS_RESPONSE_CHAIN_STRATEGY_ID: &str = "previous-response-chain";
 pub const PROVIDER_STATE_PAYLOAD_VERSION: &str = "openai-responses-state-v1";
+pub const MAX_REPEATED_FUNCTION_CALLS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponsesBrainConfig {
@@ -905,6 +906,14 @@ pub enum ResponsesStreamError {
     ResponseIncomplete(String),
     #[error("function call output call_id mismatch: expected {expected}, got {actual}")]
     FunctionCallOutputMismatch { expected: String, actual: String },
+    #[error(
+        "provider repeated function call {name} with unchanged arguments more than {limit} times"
+    )]
+    RepeatedFunctionCall {
+        name: String,
+        arguments_json: String,
+        limit: usize,
+    },
     #[error("provider transport error: {0}")]
     Transport(String),
 }
@@ -1509,6 +1518,7 @@ where
         let mut last_response_id = None;
         let mut last_usage = None;
         let base_history = history;
+        let mut repeated_function_calls = HashMap::new();
 
         for _ in 0..=self.max_continuations {
             let planned_request = self.request_builder.build_for_strategy(
@@ -1596,6 +1606,7 @@ where
                                     &mut committed_output_items,
                                     &mut last_response_id,
                                     &mut last_usage,
+                                    &mut repeated_function_calls,
                                 )
                             }
                             Err(error) => {
@@ -1659,6 +1670,7 @@ where
                 &mut committed_output_items,
                 &mut last_response_id,
                 &mut last_usage,
+                &mut repeated_function_calls,
             );
             let completed_without_pending = match completed_without_pending {
                 Ok(done) => done,
@@ -1712,6 +1724,7 @@ where
         committed_output_items: &mut Vec<ResponsesOutputItem>,
         last_response_id: &mut Option<String>,
         last_usage: &mut Option<ResponsesTokenUsage>,
+        repeated_function_calls: &mut HashMap<(String, String), usize>,
     ) -> Result<bool, ResponsesStreamError> {
         let mut completed = false;
         let mut pending_calls = Vec::new();
@@ -1787,6 +1800,16 @@ where
             return Ok(true);
         }
         for call in pending_calls {
+            let repeat_key = (call.name.clone(), call.arguments_json.clone());
+            let repeat_count = repeated_function_calls.entry(repeat_key).or_insert(0);
+            *repeat_count += 1;
+            if *repeat_count > MAX_REPEATED_FUNCTION_CALLS {
+                return Err(ResponsesStreamError::RepeatedFunctionCall {
+                    name: call.name,
+                    arguments_json: call.arguments_json,
+                    limit: MAX_REPEATED_FUNCTION_CALLS,
+                });
+            }
             push_stream_item(
                 items,
                 event(
@@ -2764,6 +2787,59 @@ mod tests {
             item,
             BrainWakeStreamItem::Event { event } if matches!(&event.event, BrainEvent::ToolCallFinished { tool_name, is_error, .. } if tool_name == "missing_tool" && *is_error)
         )));
+    }
+
+    #[test]
+    fn repeated_identical_function_calls_fail_before_idle_timeout() {
+        let repeated_call = || {
+            Ok(vec![
+                ResponsesEvent::OutputItemDone(ResponsesOutputItem::FunctionCall {
+                    id: None,
+                    call_id: "call-repeat".to_string(),
+                    name: "lookup".to_string(),
+                    arguments: r#"{"query":"same"}"#.to_string(),
+                }),
+                ResponsesEvent::Completed {
+                    response_id: "resp-repeat".to_string(),
+                    usage: None,
+                },
+            ])
+        };
+        let client = FakeResponsesClient::new(vec![
+            repeated_call(),
+            repeated_call(),
+            repeated_call(),
+            repeated_call(),
+        ])
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat")
+        .expect_function_output("call-repeat");
+        let mut brain = brain_with(
+            client,
+            MapToolExecutor::new([(
+                "lookup".to_string(),
+                NeutralToolOutput {
+                    output: "same answer".to_string(),
+                    is_error: false,
+                },
+            )]),
+        );
+        let result = brain.wake(wake_request(None, None)).unwrap();
+        let items = result.stream.drain_until_terminal().unwrap();
+        let failures = items
+            .iter()
+            .filter_map(|item| match item {
+                BrainWakeStreamItem::WakeFailed { failure } => Some(failure.message.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            failures
+                .iter()
+                .any(|message| message.contains("repeated function call lookup")),
+            "expected repeated-call failure, got {failures:?}",
+        );
+        assert!(result.provider_state.is_none());
     }
 
     #[test]

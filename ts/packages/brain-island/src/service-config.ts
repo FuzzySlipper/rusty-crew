@@ -836,8 +836,8 @@ function loadRustyCrewMcpConfig(env: RustyCrewServiceEnv): RustyCrewMcpConfig {
     servers: baseUrl
       ? [
           {
-            id: "env-default",
-            label: "Environment MCP server",
+            id: "den",
+            label: "Den MCP",
             baseUrl,
             transport: "streamable_http",
             requestTimeoutMs,

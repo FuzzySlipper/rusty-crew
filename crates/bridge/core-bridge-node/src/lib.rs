@@ -68,7 +68,7 @@ use rusty_crew_openai_responses_brain::{
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, OnceLock};
@@ -2173,12 +2173,22 @@ struct JsOpenAiResponsesBrainRunInput {
     session_id: String,
     body_state: BodyState,
     #[serde(default)]
+    tools: Vec<JsOpenAiResponsesNeutralTool>,
+    #[serde(default)]
     provider_state: Option<BrainWakeProviderStateInput>,
     #[serde(default)]
     provider_state_absence: Option<String>,
     config: JsOpenAiResponsesBrainConfig,
     #[serde(default)]
     client: JsOpenAiResponsesClientConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsOpenAiResponsesNeutralTool {
+    name: String,
+    description: String,
+    input_schema: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2252,9 +2262,28 @@ struct OpenAiResponsesCredentialSecretUpdate {
     secret: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct OpenAiResponsesPendingToolRequest {
+    call_id: String,
+    provider_item_id: Option<String>,
+    name: String,
+    arguments_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsOpenAiResponsesToolOutputInput {
+    wake_id: String,
+    call_id: String,
+    output: String,
+    is_error: bool,
+}
+
 #[derive(Debug)]
 struct BufferedOpenAiResponsesRun {
     items: VecDeque<BrainWakeStreamItem>,
+    pending_tool_requests: VecDeque<OpenAiResponsesPendingToolRequest>,
+    submitted_tool_outputs: HashMap<String, NeutralToolOutput>,
     terminal: bool,
     started_at: OffsetDateTime,
     wake_timeout_ms: u64,
@@ -2268,6 +2297,8 @@ impl BufferedOpenAiResponsesRun {
     fn new(wake_timeout_ms: u64) -> Self {
         Self {
             items: VecDeque::new(),
+            pending_tool_requests: VecDeque::new(),
+            submitted_tool_outputs: HashMap::new(),
             terminal: false,
             started_at: OffsetDateTime::now_utc(),
             wake_timeout_ms,
@@ -2378,7 +2409,8 @@ fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
             run.items.push_back(item);
         }
     };
-    let result = run_openai_responses_brain_with_stream_sink(input_json, &mut sink);
+    let result =
+        run_openai_responses_brain_with_buffered_tools(wake_id.clone(), input_json, &mut sink);
     let mut runs = openai_responses_buffered_runs()
         .lock()
         .expect("openai responses buffered run registry poisoned");
@@ -2405,6 +2437,79 @@ impl NeutralToolExecutor for EchoNeutralToolExecutor {
         NeutralToolOutput {
             output: format!("{} completed by Rust Responses bridge", call.name),
             is_error: false,
+        }
+    }
+}
+
+struct BufferedOpenAiResponsesToolExecutor {
+    wake_id: String,
+}
+
+impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
+    fn execute(&self, call: &PendingResponsesFunctionCall) -> NeutralToolOutput {
+        let request = OpenAiResponsesPendingToolRequest {
+            call_id: call.call_id.clone(),
+            provider_item_id: call.provider_item_id.clone(),
+            name: call.name.clone(),
+            arguments_json: call.arguments_json.clone(),
+        };
+        {
+            let mut runs = openai_responses_buffered_runs()
+                .lock()
+                .expect("openai responses buffered run registry poisoned");
+            let Some(run) = runs.get_mut(&self.wake_id) else {
+                return NeutralToolOutput {
+                    output: format!(
+                        "OpenAI Responses buffered wake {} disappeared before tool request {}",
+                        self.wake_id, call.call_id
+                    ),
+                    is_error: true,
+                };
+            };
+            run.pending_tool_requests.push_back(request);
+        }
+
+        loop {
+            {
+                let mut runs = openai_responses_buffered_runs()
+                    .lock()
+                    .expect("openai responses buffered run registry poisoned");
+                let Some(run) = runs.get_mut(&self.wake_id) else {
+                    return NeutralToolOutput {
+                        output: format!(
+                            "OpenAI Responses buffered wake {} disappeared before tool output {}",
+                            self.wake_id, call.call_id
+                        ),
+                        is_error: true,
+                    };
+                };
+                if let Some(output) = run.submitted_tool_outputs.remove(&call.call_id) {
+                    return output;
+                }
+                if run.terminal {
+                    return NeutralToolOutput {
+                        output: format!(
+                            "OpenAI Responses buffered wake {} ended before tool output {}",
+                            self.wake_id, call.call_id
+                        ),
+                        is_error: true,
+                    };
+                }
+                if run.is_timed_out() {
+                    run.terminal = true;
+                    run.error = Some(format!(
+                        "OpenAI Responses buffered wake {} exceeded {}ms timeout while waiting for tool output {}",
+                        self.wake_id, run.wake_timeout_ms, call.call_id
+                    ));
+                    return NeutralToolOutput {
+                        output: run.error.clone().unwrap_or_else(|| {
+                            "OpenAI Responses buffered wake timed out".to_string()
+                        }),
+                        is_error: true,
+                    };
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
         }
     }
 }
@@ -2793,10 +2898,15 @@ impl NativeBridgeBinding {
                 break;
             }
         }
+        let mut tool_requests = Vec::new();
+        while let Some(request) = run.pending_tool_requests.pop_front() {
+            tool_requests.push(request);
+        }
         let terminal = run.terminal && run.items.is_empty();
         let output = json!({
             "wake_id": wake_id,
             "items": items,
+            "tool_requests": tool_requests,
             "terminal": terminal,
             "provider_state": terminal.then(|| run.provider_state.clone()).flatten(),
             "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
@@ -2810,6 +2920,53 @@ impl NativeBridgeBinding {
             napi::Error::new(
                 napi::Status::GenericFailure,
                 format!("serialize OpenAI Responses buffered wake drain: {error}"),
+            )
+        })
+    }
+
+    #[napi]
+    pub fn submit_openai_responses_tool_output_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input: JsOpenAiResponsesToolOutputInput =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid OpenAI Responses tool output JSON: {error}"),
+                )
+            })?;
+        let mut runs = openai_responses_buffered_runs().lock().map_err(|_| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                "openai responses buffered run registry is poisoned",
+            )
+        })?;
+        let run = runs.get_mut(&input.wake_id).ok_or_else(|| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!(
+                    "OpenAI Responses buffered wake {} was not found",
+                    input.wake_id
+                ),
+            )
+        })?;
+        run.submitted_tool_outputs.insert(
+            input.call_id.clone(),
+            NeutralToolOutput {
+                output: input.output,
+                is_error: input.is_error,
+            },
+        );
+        serde_json::to_string(&json!({
+            "ok": true,
+            "wake_id": input.wake_id,
+            "call_id": input.call_id,
+        }))
+        .map_err(|error| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("serialize OpenAI Responses tool output receipt: {error}"),
             )
         })
     }
@@ -5456,20 +5613,43 @@ fn openai_oauth_exchange_error_json(error: OpenAiOauthError) -> serde_json::Valu
 }
 
 fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponsesBrainRunOutput> {
-    run_openai_responses_brain_internal(input_json, None)
+    run_openai_responses_brain_internal(input_json, None, EchoNeutralToolExecutor)
 }
 
-fn run_openai_responses_brain_with_stream_sink(
+fn run_openai_responses_brain_with_buffered_tools(
+    wake_id: String,
     input_json: String,
     sink: &mut dyn FnMut(BrainWakeStreamItem),
 ) -> napi::Result<OpenAiResponsesBrainRunOutput> {
-    run_openai_responses_brain_internal(input_json, Some(sink))
+    run_openai_responses_brain_internal(
+        input_json,
+        Some(sink),
+        BufferedOpenAiResponsesToolExecutor { wake_id },
+    )
 }
 
-fn run_openai_responses_brain_internal(
+fn normalize_responses_tool_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(object) if object.get("type").is_some() => schema.clone(),
+        Value::Object(_) => {
+            let mut normalized = schema.clone();
+            if let Value::Object(object) = &mut normalized {
+                object.insert("type".to_string(), json!("object"));
+            }
+            normalized
+        }
+        _ => json!({"type": "object", "properties": {}}),
+    }
+}
+
+fn run_openai_responses_brain_internal<T>(
     input_json: String,
     mut sink: Option<&mut dyn FnMut(BrainWakeStreamItem)>,
-) -> napi::Result<OpenAiResponsesBrainRunOutput> {
+    tool_executor: T,
+) -> napi::Result<OpenAiResponsesBrainRunOutput>
+where
+    T: NeutralToolExecutor,
+{
     let input: JsOpenAiResponsesBrainRunInput =
         serde_json::from_str(&input_json).map_err(|error| {
             napi::Error::new(
@@ -5480,18 +5660,30 @@ fn run_openai_responses_brain_internal(
     let mut config = ResponsesBrainConfig::replay(input.config.model);
     config.instructions = input.config.instructions;
     config.stream_idle_timeout_ms = input.config.stream_idle_timeout_ms;
-    let descriptors = input
-        .body_state
-        .session
-        .tool_profile
-        .tools
-        .iter()
-        .map(|tool| NeutralBrainTool {
-            name: tool.name.clone(),
-            description: tool.description.clone(),
-            input_schema: json!({"type": "object", "properties": {}}),
-        })
-        .collect::<Vec<_>>();
+    let descriptors = if input.tools.is_empty() {
+        input
+            .body_state
+            .session
+            .tool_profile
+            .tools
+            .iter()
+            .map(|tool| NeutralBrainTool {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                input_schema: json!({"type": "object", "properties": {}}),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        input
+            .tools
+            .iter()
+            .map(|tool| NeutralBrainTool {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                input_schema: normalize_responses_tool_schema(&tool.input_schema),
+            })
+            .collect::<Vec<_>>()
+    };
     let history = rusty_crew_openai_responses_brain::ResponsesReplayProjection::from_body_state(
         &input.body_state,
     );
@@ -5514,8 +5706,7 @@ fn run_openai_responses_brain_internal(
     let result = match input.client {
         JsOpenAiResponsesClientConfig::Fake => {
             let client = fake_responses_client_for_body(&input.body_state);
-            let mut brain =
-                ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
+            let mut brain = ResponsesReplayBrain::new(client, tool_executor, config, descriptors);
             if let Some(sink) = &mut sink {
                 brain.wake_with_history_and_stream_sink(request, history, *sink)
             } else {
@@ -5576,8 +5767,7 @@ fn run_openai_responses_brain_internal(
                 config.stream_idle_timeout_ms,
             )
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?;
-            let mut brain =
-                ResponsesReplayBrain::new(client, EchoNeutralToolExecutor, config, descriptors);
+            let mut brain = ResponsesReplayBrain::new(client, tool_executor, config, descriptors);
             if let Some(sink) = &mut sink {
                 brain.wake_with_history_and_stream_sink(request, history, *sink)
             } else {
@@ -5914,6 +6104,32 @@ mod tests {
             .expect_err("double release must fail loudly");
 
         assert_eq!(error.kind, CoreErrorKind::NotFound);
+    }
+
+    #[test]
+    fn openai_responses_tool_schema_normalization_preserves_required_fields() {
+        let schema = serde_json::json!({
+            "properties": {
+                "project_id": { "type": "string" },
+                "status": { "type": "string" }
+            },
+            "required": ["project_id"]
+        });
+        assert_eq!(
+            normalize_responses_tool_schema(&schema),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "project_id": { "type": "string" },
+                    "status": { "type": "string" }
+                },
+                "required": ["project_id"]
+            })
+        );
+        assert_eq!(
+            normalize_responses_tool_schema(&serde_json::json!("not-a-schema")),
+            serde_json::json!({"type": "object", "properties": {}})
+        );
     }
 
     #[test]

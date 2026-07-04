@@ -33,11 +33,8 @@ export async function handleAdminMcpCatalogRequest(
 
   const serverCatalog = mcpServerCatalogEntries(context);
   const serverIds = new Set(serverCatalog.map((server) => server.id));
-  const compatibilityServerId = context.config.mcp.baseUrl
-    ? context.config.mcp.servers[0]?.id
-    : undefined;
   const bindings = context.runtimeConfig.mcpBindings.map((binding) =>
-    mcpBindingCatalogEntry(binding, serverIds, compatibilityServerId),
+    mcpBindingCatalogEntry(binding, serverIds),
   );
   const bindingCounts = new Map<string, number>();
   for (const binding of bindings) {
@@ -101,15 +98,12 @@ export function mcpServerIdFromEndpointRef(
 function mcpBindingCatalogEntry(
   binding: McpBindingRecord,
   serverIds: Set<string>,
-  compatibilityServerId: string | undefined,
 ) {
   const endpointServerId = mcpServerIdFromEndpointRef(binding.endpointRef);
   const resolvedServerId =
     endpointServerId && serverIds.has(endpointServerId)
       ? endpointServerId
-      : endpointServerId && compatibilityServerId
-        ? compatibilityServerId
-        : undefined;
+      : undefined;
   return {
     bindingId: binding.bindingId,
     adapterId: binding.adapterId,

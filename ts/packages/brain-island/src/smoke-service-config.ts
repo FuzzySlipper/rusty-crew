@@ -156,6 +156,16 @@ try {
   assert.equal(config.denMemory.paths.recall, "/memory/recall");
   assert.equal(config.mcp.baseUrl, "http://127.0.0.1:5199/mcp");
   assert.equal(config.mcp.requestTimeoutMs, 12_000);
+  assert.deepEqual(config.mcp.servers, [
+    {
+      id: "den",
+      label: "Den MCP",
+      baseUrl: "http://127.0.0.1:5199/mcp",
+      transport: "streamable_http",
+      requestTimeoutMs: 12_000,
+      source: "env",
+    },
+  ]);
   assert.equal(config.telegram.enabled, true);
   assert.equal(config.telegram.botToken, "telegram-token");
   assert.equal(config.telegram.apiBaseUrl, "http://127.0.0.1:19998");

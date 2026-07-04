@@ -117,12 +117,17 @@ const deniedAcrossProfiles = evaluateMcpResourceHooks({
 assert.equal(deniedAcrossProfiles.allowed, false);
 assert.equal(deniedAcrossProfiles.denialReason, "tool_profile_denied");
 
-const calls: Array<{ bindingId: string; toolName: string }> = [];
+const calls: Array<{
+  bindingId: string;
+  toolName: string;
+  arguments: unknown;
+}> = [];
 const executor: McpToolExecutor = {
   callTool(input) {
     calls.push({
       bindingId: input.binding.bindingId,
       toolName: input.toolName,
+      arguments: input.arguments,
     });
     return {
       content: `${input.binding.bindingId}:${input.toolName}`,
@@ -143,9 +148,74 @@ const betaTool = createMcpBrainTool(
 await alphaTool.execute("call-alpha", { query: "status" });
 await betaTool.execute("call-beta", { text: "review this" });
 assert.deepEqual(calls, [
-  { bindingId: "mcp-alpha", toolName: "search" },
-  { bindingId: "mcp-beta", toolName: "summarize" },
+  {
+    bindingId: "mcp-alpha",
+    toolName: "search",
+    arguments: { query: "status" },
+  },
+  {
+    bindingId: "mcp-beta",
+    toolName: "summarize",
+    arguments: { text: "review this" },
+  },
 ]);
+
+const taskListDiscovery = convertMcpToolsToCandidates(alphaBinding, [
+  {
+    name: "list_tasks",
+    description: "List tasks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string" },
+        status: {
+          type: ["string", "null"],
+          description:
+            "Filter by statuses (comma-separated): planned,in_progress,review,blocked,done,cancelled.",
+        },
+        tags: {
+          type: ["string", "null"],
+          description:
+            "JSON array of string tags. Accepts a native JSON array or a JSON-encoded string for backward compatibility.",
+        },
+      },
+      required: ["project_id"],
+    },
+  },
+]);
+const taskListTool = createMcpBrainTool(
+  alphaBinding,
+  taskListDiscovery.candidates[0]!,
+  executor,
+);
+const normalizedTaskArgs = taskListTool.prepareArguments?.({
+  project_id: "asha",
+  status: ["planned", "in-progress"],
+  tags: ["campaign", "planning"],
+});
+assert.deepEqual(normalizedTaskArgs, {
+  project_id: "asha",
+  status: "planned,in_progress",
+  tags: '["campaign","planning"]',
+});
+
+const failingTaskListTool = createMcpBrainTool(
+  alphaBinding,
+  taskListDiscovery.candidates[0]!,
+  {
+    callTool() {
+      return {
+        content: "invalid status: in-progress",
+        details: {},
+        isError: true,
+      };
+    },
+  },
+);
+await assert.rejects(
+  () => failingTaskListTool.execute("call-task-list-failure", {}),
+  /invalid status: in-progress/,
+);
 
 const engineDataDir = mkdtempSync(
   join(tmpdir(), "rusty-crew-mcp-surfaces-e2e-engine-"),

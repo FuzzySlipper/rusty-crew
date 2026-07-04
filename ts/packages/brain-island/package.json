@@ -109,6 +109,7 @@
     "smoke:tool-session-selection": "tsx src/smoke-tool-session-selection.ts",
     "smoke:brain-tool-pi-adapter": "tsx src/smoke-brain-tool-pi-adapter.ts",
     "smoke:brain-module-registry": "tsx src/smoke-brain-module-registry.ts",
+    "smoke:openai-responses-tool-bridge": "tsx src/smoke-openai-responses-tool-bridge.ts",
     "smoke:responses-service-field-test": "tsx src/smoke-responses-service-field-test.ts",
     "smoke:responses-event-loop": "tsx src/smoke-responses-event-loop.ts",
     "smoke:responses-concurrency-capacity": "tsx src/smoke-responses-concurrency-capacity.ts",

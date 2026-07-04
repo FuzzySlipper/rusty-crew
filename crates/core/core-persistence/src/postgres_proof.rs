@@ -886,14 +886,6 @@ impl PostgresRuntimeCounterProofStore {
                 ),
             ),
             (
-                "agent_messages",
-                format!(
-                    "DELETE FROM {schema}.agent_messages
-                     WHERE from_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)
-                        OR to_agent IN (SELECT agent_id FROM __rusty_profile_purge_agents)"
-                ),
-            ),
-            (
                 "runtime_search_entries",
                 format!(
                     "DELETE FROM {schema}.runtime_search_entries
@@ -15787,6 +15779,22 @@ mod tests {
             .table_counts
             .iter()
             .any(|count| count.table == "session_memory_records" && count.rows == 1));
+
+        let purge = store
+            .purge_profile(&ProfileId::new("runner_profile"))
+            .unwrap();
+        assert!(purge.profile_registry_deleted);
+        assert_eq!(
+            store
+                .get_profile_registry_record(&ProfileId::new("runner_profile"))
+                .unwrap(),
+            None
+        );
+        let diagnostics = store.storage_diagnostics().unwrap();
+        assert!(diagnostics
+            .table_counts
+            .iter()
+            .any(|count| count.table == "profile_registry" && count.rows == 0));
 
         store.drop_schema_for_test().unwrap();
     }

@@ -25,6 +25,7 @@ export interface BrainCompatibleTool<
   description: string;
   label: string;
   parameters: TParameters;
+  prepareArguments?: (args: unknown) => unknown;
   execute(
     toolCallId: string,
     params: unknown,
@@ -119,6 +120,8 @@ export function createMcpBrainTool(
       ? String(candidate.annotations.title)
       : candidate.source.sourceToolName,
     parameters: candidate.parameters as TSchema,
+    prepareArguments: (args) =>
+      normalizeMcpToolArguments(args, candidate.parameters as JsonSchemaValue),
     executionMode: "sequential",
     execute: async (toolCallId, params, signal) => {
       const result = await executor.callTool({
@@ -128,9 +131,72 @@ export function createMcpBrainTool(
         toolCallId,
         signal,
       });
+      if (result.isError === true) {
+        throw new Error(mcpToolExecutionErrorMessage(result));
+      }
       return toBrainToolResult(result);
     },
   };
+}
+
+function normalizeMcpToolArguments(
+  args: unknown,
+  schema: JsonSchemaValue | undefined,
+): unknown {
+  if (!isRecord(args) || !isRecord(schema) || !isRecord(schema.properties)) {
+    return args;
+  }
+  const normalized: Record<string, unknown> = { ...args };
+  for (const [propertyName, propertySchema] of Object.entries(
+    schema.properties,
+  )) {
+    if (!Object.hasOwn(normalized, propertyName)) continue;
+    const value = normalized[propertyName];
+    if (!Array.isArray(value) || !isRecord(propertySchema)) continue;
+    if (!schemaAcceptsString(propertySchema)) continue;
+
+    const description = String(propertySchema.description ?? "").toLowerCase();
+    if (description.includes("comma-separated")) {
+      normalized[propertyName] = value
+        .map((item) => normalizeCommaSeparatedStringValue(item, description))
+        .join(",");
+      continue;
+    }
+    if (
+      description.includes("json array") ||
+      description.includes("json-encoded")
+    ) {
+      normalized[propertyName] = JSON.stringify(value);
+    }
+  }
+  return normalized;
+}
+
+function normalizeCommaSeparatedStringValue(
+  value: unknown,
+  description: string,
+): string {
+  const text = String(value).trim();
+  if (description.includes("in_progress")) {
+    return text.replace(/\bin[- ]progress\b/gi, "in_progress");
+  }
+  return text;
+}
+
+function schemaAcceptsString(schema: Record<string, unknown>): boolean {
+  if (schema.type === "string") return true;
+  return Array.isArray(schema.type) && schema.type.includes("string");
+}
+
+function mcpToolExecutionErrorMessage(result: McpToolExecutionResult): string {
+  const content =
+    typeof result.content === "string"
+      ? result.content
+      : result.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join("\n");
+  return content || "MCP tool returned isError=true";
 }
 
 export function normalizeMcpInputSchema(

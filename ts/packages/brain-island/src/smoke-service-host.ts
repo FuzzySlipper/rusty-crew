@@ -243,6 +243,11 @@ try {
         baseUrl: "http://mcp.local/mcp",
         configuredBindingCount: 1,
       },
+      {
+        id: "field-extra",
+        baseUrl: "http://mcp-extra.local/mcp",
+        configuredBindingCount: 0,
+      },
     ],
   );
   assert.deepEqual(mcpCatalog.body.data.toolProfiles, ["field-profile-mcp"]);
@@ -1278,6 +1283,16 @@ try {
         "field-hard-delete-profile",
       ),
       undefined,
+    );
+    const hardDeletedRegistryRead = await get(
+      "/v1/admin/profiles/registry/field-hard-delete-profile",
+      undefined,
+      noAuthPort,
+    );
+    assert.equal(hardDeletedRegistryRead.status, 404);
+    assert.equal(
+      hardDeletedRegistryRead.body.error.reason_code,
+      "profile_registry_record_not_found",
     );
     assert.equal(
       (await noAuthHost.bridge.listSessions()).some(
@@ -2372,6 +2387,12 @@ function writeRuntimeConfig(
         label: "Field MCP",
         baseUrl: "http://mcp.local/mcp",
         transport: "streamable_http",
+      },
+      {
+        id: "field-extra",
+        label: "Field Extra MCP",
+        baseUrl: "http://mcp-extra.local/mcp",
+        transport: "stdio",
       },
     ],
     mcpBindings: [] as McpBindingRecord[],

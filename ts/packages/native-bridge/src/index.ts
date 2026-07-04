@@ -195,6 +195,7 @@ interface NativeBridgeBinding {
     wakeId: string,
     maxItems?: number,
   ): string;
+  submitOpenaiResponsesToolOutputJson(inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
@@ -577,6 +578,11 @@ export interface OpenAiResponsesBrainRunInput {
   wakeId: string;
   sessionId: SessionId;
   bodyState: BodyState;
+  tools?: Array<{
+    name: string;
+    description: string;
+    inputSchema: unknown;
+  }>;
   providerState?: BrainWakeProviderStateInput;
   providerStateAbsence?: ProviderStateAbsenceReason;
   config: {
@@ -594,6 +600,14 @@ export interface OpenAiResponsesBrainRunInput {
         providerAlias?: string;
         oauthCredentialSecret?: string;
       };
+}
+
+export interface OpenAiResponsesToolRequest {
+  wakeId: string;
+  callId: string;
+  providerItemId?: string;
+  name: string;
+  argumentsJson: string;
 }
 
 interface NativeBrainWakeProviderStateInput {
@@ -1855,12 +1869,19 @@ export interface NativeBridgeModule {
   }): Promise<{
     wakeId: string;
     items: BrainWakeStreamItem[];
+    toolRequests: OpenAiResponsesToolRequest[];
     terminal: boolean;
     providerState?: BrainWakeProviderStateOutput;
     transportMetrics?: OpenAiResponsesTransportMetrics;
     credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
     error?: string;
   }>;
+  submitOpenAiResponsesToolOutput(input: {
+    wakeId: string;
+    callId: string;
+    output: string;
+    isError: boolean;
+  }): Promise<{ ok: true; wakeId: string; callId: string }>;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
@@ -2148,6 +2169,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     exchangeOpenAiOauthCode: unavailable("wake_brain"),
     startOpenAiResponsesBrain: unavailable("wake_brain"),
     drainOpenAiResponsesBrainStream: unavailable("wake_brain"),
+    submitOpenAiResponsesToolOutput: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
     getProfileMemory: unavailable("initialize_engine"),
     addProfileMemory: unavailable("initialize_engine"),
@@ -3334,6 +3356,13 @@ function createNativeBridgeModule(
       return {
         wakeId: raw.wake_id,
         items: raw.items.map(toBrainWakeStreamItem),
+        toolRequests: (raw.tool_requests ?? []).map((request) => ({
+          wakeId: raw.wake_id,
+          callId: request.call_id,
+          providerItemId: request.provider_item_id ?? undefined,
+          name: request.name,
+          argumentsJson: request.arguments_json,
+        })),
         terminal: raw.terminal,
         providerState: raw.provider_state
           ? toBrainWakeProviderStateOutput(raw.provider_state)
@@ -3346,6 +3375,27 @@ function createNativeBridgeModule(
             }
           : undefined,
         error: typeof raw.error === "string" ? raw.error : undefined,
+      };
+    },
+    submitOpenAiResponsesToolOutput: async (input) => {
+      const raw = JSON.parse(
+        binding.submitOpenaiResponsesToolOutputJson(
+          JSON.stringify({
+            wakeId: input.wakeId,
+            callId: input.callId,
+            output: input.output,
+            isError: input.isError,
+          }),
+        ),
+      ) as {
+        ok: true;
+        wake_id: string;
+        call_id: string;
+      };
+      return {
+        ok: true,
+        wakeId: raw.wake_id,
+        callId: raw.call_id,
       };
     },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
@@ -3449,6 +3499,11 @@ function toNativeOpenAiResponsesBrainRunInput(
     wakeId: input.wakeId,
     sessionId: input.sessionId,
     bodyState: toNativeBodyState(input.bodyState),
+    tools: input.tools?.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })),
     providerState: input.providerState
       ? toNativeProviderStateInput(input.providerState)
       : undefined,
@@ -5353,6 +5408,12 @@ interface RawOpenAiResponsesBufferedStartResult {
 interface RawOpenAiResponsesBufferedDrainResult {
   wake_id: string;
   items: RawBrainWakeStreamItem[];
+  tool_requests?: Array<{
+    call_id: string;
+    provider_item_id?: string | null;
+    name: string;
+    arguments_json: string;
+  }>;
   terminal: boolean;
   provider_state?: RawBrainWakeProviderStateOutput;
   transport_metrics?: OpenAiResponsesTransportMetrics;
