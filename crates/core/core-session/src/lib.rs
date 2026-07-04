@@ -152,9 +152,8 @@ impl SessionRegistry {
         let mut removed = Vec::new();
         let session_ids = sessions
             .iter()
-            .filter_map(|(session_id, state)| {
-                (&state.profile_id == profile_id).then(|| session_id.clone())
-            })
+            .filter(|(_, state)| &state.profile_id == profile_id)
+            .map(|(session_id, _)| session_id.clone())
             .collect::<Vec<_>>();
         for session_id in session_ids {
             if let Some(state) = sessions.remove(&session_id) {

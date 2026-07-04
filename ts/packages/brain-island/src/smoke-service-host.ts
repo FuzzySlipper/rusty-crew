@@ -1233,7 +1233,12 @@ try {
     assert.equal(hardDeleteProfile.body.ok, true);
     assert.equal(
       existsSync(
-        join(noAuthRoot, "config", "profiles", "field-hard-delete-profile.json"),
+        join(
+          noAuthRoot,
+          "config",
+          "profiles",
+          "field-hard-delete-profile.json",
+        ),
       ),
       true,
     );
@@ -1259,7 +1264,12 @@ try {
     );
     assert.equal(
       existsSync(
-        join(noAuthRoot, "config", "profiles", "field-hard-delete-profile.json"),
+        join(
+          noAuthRoot,
+          "config",
+          "profiles",
+          "field-hard-delete-profile.json",
+        ),
       ),
       false,
     );
