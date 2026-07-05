@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "service:preflight": "tsx src/preflight.ts",
     "service:start": "tsx src/start.ts",
     "smoke:admin-diagnostics-api": "tsx ../brain-island/src/smoke-admin-diagnostics-api.ts",
     "smoke:adapter-diagnostics": "tsx ../brain-island/src/smoke-adapter-diagnostics.ts",

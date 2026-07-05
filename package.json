@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "26.2.x",
+    "npm": "11.16.x"
+  },
   "workspaces": [
     "ts/packages/*"
   ],
@@ -118,6 +122,7 @@
     "smoke:pi-agent-brain-events": "npm run smoke:pi-agent-brain-events -w @rusty-crew/brain-island",
     "service:debug-turn": "npm run service:debug-turn -w @rusty-crew/brain-island --",
     "cron": "npm run cron -w @rusty-crew/brain-island --",
+    "service:preflight": "npm run service:preflight -w @rusty-crew/service-host",
     "service:start": "npm run service:start -w @rusty-crew/service-host",
     "smoke:den": "npm run smoke -w @rusty-crew/adapter-den",
     "smoke:den-router-metadata": "npm run smoke:router-metadata -w @rusty-crew/adapter-den",

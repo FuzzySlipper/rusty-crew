@@ -1,0 +1,9 @@
+[Unit]
+Description=Rusty Crew debug SQLite backup
+Documentation=file:/home/dev/rusty-crew/docs/local-service-runbook.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/dev/rusty-crew
+EnvironmentFile=/home/system/rusty-crew-debug/config/service.env
+ExecStart=/home/dev/rusty-crew/ops/scripts/rusty-crew-backup.sh --root /home/system/rusty-crew-debug --backend sqlite

@@ -81,9 +81,13 @@ Generated task/tool artifacts owned by this service instance.
 
 ### `backups/`
 
-Operator backups and pre-cutover snapshots. The old `/home/agents/rusty-crew`
-root should be backed up before the final service switch, but the backup should
-not be imported into the fresh PostgreSQL database during the first cutover.
+Operator backups and pre-cutover snapshots. Repo helper
+`ops/scripts/rusty-crew-backup.sh` writes PostgreSQL dumps for the live root and
+SQLite online backups for the debug root here, with a sibling `.sha256` file.
+
+The old `/home/agents/rusty-crew` root should be backed up before the final
+service switch, but the backup should not be imported into the fresh PostgreSQL
+database during the first cutover.
 
 ### `site/`
 
@@ -233,6 +237,15 @@ RestartSec=5s
 KillSignal=SIGTERM
 TimeoutStopSec=30s
 ```
+
+Current repo systemd templates also include:
+
+- `ExecStartPre=/usr/bin/env npm run service:preflight` so stale
+  `run/service.lock` files are cleared safely before startup;
+- `rusty-crew-debug.service` for `/home/system/rusty-crew-debug` on port
+  `9348`;
+- `rusty-crew-backup.timer` for live PostgreSQL dumps;
+- `rusty-crew-debug-backup.timer` for debug SQLite backups.
 
 If the final deployment later uses a packaged release instead of the source
 checkout, update `WorkingDirectory` and `ExecStart` in a separate deployment

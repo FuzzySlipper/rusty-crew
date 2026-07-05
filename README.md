@@ -111,6 +111,16 @@ npm run smoke:production-delegation-wake
 
 ## Build And Test
 
+Pinned local toolchains:
+
+- Rust `1.96.0` with `rustfmt` and `clippy` from `rust-toolchain.toml`;
+- Node `v26.2.0` and npm `11.16.x` from `.nvmrc` / `package.json` engines.
+
+Native bridge builds require the usual local compiler toolchain plus Node/npm:
+`cargo`, `rustc`, `npm`, and `napi-rs` build dependencies installed by
+`npm ci`. PostgreSQL and SQLite CLIs are needed only for backup/live-storage
+operations, not for the offline CI gate.
+
 Use focused smokes while developing, then run the offline gate before handoff.
 GitHub Actions runs the same offline gate on pushes to `main`, pull requests,
 and manual dispatch:

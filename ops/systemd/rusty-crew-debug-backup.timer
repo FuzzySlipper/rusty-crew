@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Rusty Crew debug SQLite backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:50:00
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target

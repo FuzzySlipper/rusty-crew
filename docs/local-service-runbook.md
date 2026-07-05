@@ -371,10 +371,15 @@ background heartbeat.
 ## Guardrails
 
 - Do not run two Rusty Crew service processes against the same runtime root.
-  Startup creates `/home/system/rusty-crew/run/service.lock` and fails if it is
-  already present.
-- If the process dies hard, inspect the lock file before removing it. It records
-  the pid and creation time.
+  Startup creates `/home/system/rusty-crew/run/service.lock` or
+  `/home/system/rusty-crew-debug/run/service.lock` and fails if a live Rusty
+  Crew process still owns the lock.
+- Service startup clears stale lock files whose recorded PID is gone or no
+  longer looks like a Rusty Crew service. The systemd templates run
+  `npm run service:preflight` before `service:start` so hard-kill stale locks
+  are handled before systemd enters a restart loop.
+- If preflight still reports an existing lock, inspect the lock file before
+  removing it. It records the pid and creation time.
 - Do not copy only the SQLite main database file while the service is running.
   Backup/export should be quiesced or service-owned.
 - Read-only admin routes must not trigger maintenance, queue delivery, or any
@@ -416,7 +421,44 @@ Warning signals that should trigger a PostgreSQL or retention design pass:
 
 ## Backup
 
-For now, prefer stopped-service backup for local field tests:
+Repo-owned backup helpers live in `ops/scripts` and `ops/systemd`.
+
+Live service (`/home/system/rusty-crew`) uses PostgreSQL. Run a manual dump with:
+
+```bash
+ops/scripts/rusty-crew-backup.sh \
+  --root /home/system/rusty-crew \
+  --backend postgres \
+  --database-env /home/system/database/rusty-crew-postgres.env
+```
+
+Debug service (`/home/system/rusty-crew-debug`) uses SQLite. Run an online
+SQLite backup with:
+
+```bash
+ops/scripts/rusty-crew-backup.sh \
+  --root /home/system/rusty-crew-debug \
+  --backend sqlite
+```
+
+The script writes the backup and a `.sha256` file under each service root's
+`RUSTY_CREW_BACKUP_DIR`.
+
+Install optional user timers:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ops/systemd/rusty-crew-backup.service \
+  ops/systemd/rusty-crew-backup.timer \
+  ops/systemd/rusty-crew-debug-backup.service \
+  ops/systemd/rusty-crew-debug-backup.timer \
+  ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now rusty-crew-backup.timer
+systemctl --user enable --now rusty-crew-debug-backup.timer
+```
+
+Stopped-service root snapshots are still useful before major local cutovers:
 
 ```bash
 systemctl --user stop rusty-crew.service
@@ -426,9 +468,6 @@ tar -C /home/system -czf /home/system/rusty-crew-field-test.tgz rusty-crew
 If using direct-run testing, stop the foreground process first. Do not copy only
 `coordination.sqlite3` while the service is active; SQLite WAL mode also uses
 `coordination.sqlite3-wal` and `coordination.sqlite3-shm`.
-
-Future backup tooling should be service-owned or quiesced and should report the
-same database size fields before and after export.
 
 ## Rollback
 

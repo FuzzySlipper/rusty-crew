@@ -1,0 +1,10 @@
+[Unit]
+Description=Rusty Crew live PostgreSQL backup
+Documentation=file:/home/dev/rusty-crew/docs/local-service-runbook.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/dev/rusty-crew
+EnvironmentFile=/home/system/database/rusty-crew-postgres.env
+EnvironmentFile=/home/system/rusty-crew/config/service.env
+ExecStart=/home/dev/rusty-crew/ops/scripts/rusty-crew-backup.sh --root /home/system/rusty-crew --backend postgres --database-env /home/system/database/rusty-crew-postgres.env

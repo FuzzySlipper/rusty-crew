@@ -1,5 +1,5 @@
 [Unit]
-Description=Rusty Crew local agent runtime
+Description=Rusty Crew debug/test runtime
 Documentation=file:/home/dev/rusty-crew/docs/local-service-runbook.md
 After=network-online.target
 Wants=network-online.target
@@ -7,9 +7,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/dev/rusty-crew
-EnvironmentFile=/home/system/database/rusty-crew-postgres.env
-EnvironmentFile=/home/system/rusty-crew/config/service.env
-EnvironmentFile=-/home/system/rusty-crew/config/adapter-secrets.env
+EnvironmentFile=/home/system/rusty-crew-debug/config/service.env
+EnvironmentFile=-/home/system/rusty-crew-debug/config/adapter-secrets.env
 ExecStartPre=/usr/bin/env npm run service:preflight
 ExecStart=/usr/bin/env npm run service:start
 Restart=on-failure
