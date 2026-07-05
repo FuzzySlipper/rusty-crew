@@ -48,6 +48,7 @@ import {
   type NativeProfileRegistryRecord,
   type NativeProfileRegistryWrite,
   type NativeRoleplayChatLayersWrite,
+  type NativeRoleplayLoreEntryPromotion,
   type NativeRoleplayLoreFactCapture,
   type NativeRoleplayLoreLayerWrite,
   type NativeRoleplayLoreQuery,
@@ -1558,6 +1559,26 @@ async function handleAdminRoleplayLoreRequest(
       );
     }
 
+    const entryPromoteMatch = url.pathname.match(
+      /^\/v1\/admin\/roleplay\/lore\/entries\/([^/]+)\/promote\/?$/,
+    );
+    if (entryPromoteMatch) {
+      const entryId = decodeURIComponent(entryPromoteMatch[1]);
+      if (method !== "POST") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore entry promote supports POST",
+        );
+      }
+      return roleplayLoreEntryPromoteResult(
+        requestIdValue,
+        state,
+        entryId,
+        recordBody(await readJsonBody(request)),
+        url,
+      );
+    }
+
     const layerEntriesMatch = url.pathname.match(
       /^\/v1\/admin\/roleplay\/lore\/layers\/([^/]+)\/entries\/?$/,
     );
@@ -1969,6 +1990,251 @@ async function roleplayLoreEntryPatchResult(
       explicitLayerIds: roleplayLoreSearchLayerIds(url.searchParams),
     }),
   );
+}
+
+async function roleplayLoreEntryPromoteResult(
+  requestIdValue: string,
+  state: ServiceState,
+  entryId: string,
+  body: Record<string, unknown>,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const sourceEntry = await state.bridge.getLoreEntry(entryId);
+  if (sourceEntry === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_entry_not_found",
+      message: `roleplay lore entry ${entryId} was not found`,
+      retryable: false,
+    });
+  }
+
+  const targetLayerId = requiredRouteString(
+    optionalString(body.targetLayerId) ?? optionalString(body.target_layer_id),
+    "target_layer_id",
+  );
+  const targetLayer = await state.bridge.getLoreLayer(targetLayerId);
+  if (targetLayer === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_target_layer_not_found",
+      message: `roleplay lore target layer ${targetLayerId} was not found`,
+      retryable: false,
+    });
+  }
+  if (targetLayer.is_archived === true) {
+    return failure(409, requestIdValue, {
+      code: "conflict",
+      reason_code: "roleplay_lore_target_layer_archived",
+      message: `roleplay lore target layer ${targetLayerId} is archived`,
+      retryable: false,
+    });
+  }
+  if (targetLayer.write_policy === "readonly") {
+    return failure(409, requestIdValue, {
+      code: "conflict",
+      reason_code: "roleplay_lore_target_layer_readonly",
+      message: `roleplay lore target layer ${targetLayerId} is readonly`,
+      retryable: false,
+    });
+  }
+
+  const sourceLayerId = await roleplayLorePromotionSourceLayerId(
+    requestIdValue,
+    state,
+    entryId,
+    body,
+    url,
+  );
+  if (typeof sourceLayerId !== "string") return sourceLayerId;
+
+  const newRecordId =
+    optionalString(body.newRecordId) ??
+    optionalString(body.new_record_id) ??
+    `lore-promoted-${randomBytes(8).toString("hex")}`;
+  if ((await state.bridge.getLoreEntry(newRecordId)) !== undefined) {
+    return failure(409, requestIdValue, {
+      code: "conflict",
+      reason_code: "roleplay_lore_promoted_entry_exists",
+      message: `roleplay lore promoted entry ${newRecordId} already exists`,
+      retryable: false,
+    });
+  }
+
+  const now = optionalString(body.now) ?? state.now();
+  const promotion: NativeRoleplayLoreEntryPromotion = {
+    source_layer_id: sourceLayerId,
+    source_record_id: entryId,
+    target_layer_id: targetLayerId,
+    new_record_id: newRecordId,
+    is_constant:
+      optionalBoolean(body.is_constant) ??
+      optionalBoolean(body.isConstant) ??
+      false,
+    priority: Math.trunc(optionalNumber(body.priority) ?? 0),
+    now,
+  };
+  await state.bridge.promoteLoreEntry(promotion);
+  const promotedEntry = await state.bridge.getLoreEntry(newRecordId);
+  if (promotedEntry === undefined) {
+    return failure(500, requestIdValue, {
+      code: "internal_error",
+      reason_code: "roleplay_lore_promoted_entry_unreadable",
+      message: `roleplay lore promoted entry ${newRecordId} was not readable`,
+      retryable: false,
+    });
+  }
+  return successRoute(requestIdValue, {
+    ...(await roleplayLoreEntryDetailData(state, promotedEntry, {
+      profileId: optionalString(url.searchParams.get("profile_id")),
+      chatId: optionalString(url.searchParams.get("chat_id")),
+      explicitLayerIds: [targetLayerId],
+    })),
+    promoted: true,
+    source: {
+      layerId: sourceLayerId,
+      recordId: entryId,
+      entry: browserSafeLoreEntry(sourceEntry),
+    },
+    target: {
+      layerId: targetLayerId,
+      recordId: newRecordId,
+    },
+  });
+}
+
+async function roleplayLorePromotionSourceLayerId(
+  requestIdValue: string,
+  state: ServiceState,
+  entryId: string,
+  body: Record<string, unknown>,
+  url: URL,
+): Promise<string | AdminRouteResult> {
+  const explicitSourceLayerId =
+    optionalString(body.sourceLayerId) ??
+    optionalString(body.source_layer_id) ??
+    optionalString(url.searchParams.get("source_layer_id")) ??
+    optionalString(url.searchParams.get("sourceLayerId"));
+  if (explicitSourceLayerId !== undefined) {
+    return roleplayLorePromotionValidatedSourceLayerId(
+      requestIdValue,
+      state,
+      entryId,
+      explicitSourceLayerId,
+    );
+  }
+
+  const candidateLayerIds = await roleplayLorePromotionCandidateLayerIds(
+    state,
+    body,
+    url,
+  );
+  if (candidateLayerIds.length === 0) {
+    return failure(400, requestIdValue, {
+      code: "invalid_input",
+      reason_code: "roleplay_lore_source_layer_required",
+      message:
+        "source_layer_id is required when profile_id, chat_id, or source layer scope is not provided",
+      retryable: false,
+    });
+  }
+  const containingLayerIds = (
+    await Promise.all(
+      candidateLayerIds.map(async (layerId) => {
+        if ((await state.bridge.getLoreLayer(layerId)) === undefined) {
+          return undefined;
+        }
+        const entries = await state.bridge.listEntriesByLayer(layerId);
+        return entries.some((entry) => String(entry.record_id) === entryId)
+          ? layerId
+          : undefined;
+      }),
+    )
+  ).filter((layerId): layerId is string => layerId !== undefined);
+  if (containingLayerIds.length === 1) return containingLayerIds[0]!;
+  if (containingLayerIds.length === 0) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_source_layer_not_found",
+      message: `roleplay lore entry ${entryId} was not found in the provided source layer scope`,
+      retryable: false,
+    });
+  }
+  return failure(409, requestIdValue, {
+    code: "conflict",
+    reason_code: "roleplay_lore_source_layer_ambiguous",
+    message: `roleplay lore entry ${entryId} exists in multiple source layers; source_layer_id is required`,
+    retryable: false,
+  });
+}
+
+async function roleplayLorePromotionValidatedSourceLayerId(
+  requestIdValue: string,
+  state: ServiceState,
+  entryId: string,
+  sourceLayerId: string,
+): Promise<string | AdminRouteResult> {
+  if ((await state.bridge.getLoreLayer(sourceLayerId)) === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_source_layer_not_found",
+      message: `roleplay lore source layer ${sourceLayerId} was not found`,
+      retryable: false,
+    });
+  }
+  const entries = await state.bridge.listEntriesByLayer(sourceLayerId);
+  if (!entries.some((entry) => String(entry.record_id) === entryId)) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_source_entry_not_in_layer",
+      message: `roleplay lore entry ${entryId} was not found in source layer ${sourceLayerId}`,
+      retryable: false,
+    });
+  }
+  return sourceLayerId;
+}
+
+async function roleplayLorePromotionCandidateLayerIds(
+  state: ServiceState,
+  body: Record<string, unknown>,
+  url: URL,
+): Promise<string[]> {
+  const explicitLayerIds = [
+    ...stringListField(body, ["sourceLayerIds", "source_layer_ids"]),
+    ...url.searchParams.getAll("source_layer_id"),
+    ...url.searchParams.getAll("sourceLayerId"),
+    ...url.searchParams.getAll("source_layer_ids"),
+    ...url.searchParams.getAll("sourceLayerIds"),
+  ]
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (explicitLayerIds.length > 0) return [...new Set(explicitLayerIds)];
+
+  const profileId =
+    optionalString(body.profileId) ??
+    optionalString(body.profile_id) ??
+    optionalString(url.searchParams.get("profile_id")) ??
+    optionalString(url.searchParams.get("profileId"));
+  if (profileId !== undefined) {
+    const layers = await state.bridge.listLoreLayers(profileId);
+    return layers.map((layer) => String(layer.layer_id));
+  }
+
+  const chatId =
+    optionalString(body.chatId) ??
+    optionalString(body.chat_id) ??
+    optionalString(url.searchParams.get("chat_id")) ??
+    optionalString(url.searchParams.get("chatId"));
+  if (chatId !== undefined) {
+    const layers = await state.bridge.getChatLayers(chatId);
+    return layers
+      .filter((layer) => layer.enabled !== false)
+      .sort((left, right) => Number(left.priority) - Number(right.priority))
+      .map((layer) => String(layer.layer_id));
+  }
+
+  return [];
 }
 
 async function roleplayLoreEntryDetailData(
@@ -2469,6 +2735,24 @@ function stringField(
     if (Object.hasOwn(body, key)) return optionalString(body[key]);
   }
   return fallback;
+}
+
+function stringListField(
+  body: Record<string, unknown>,
+  keys: readonly string[],
+): string[] {
+  for (const key of keys) {
+    if (!Object.hasOwn(body, key)) continue;
+    const value = body[key];
+    if (Array.isArray(value)) {
+      return value.map((item, index) =>
+        requiredRouteString(optionalString(item), `${key}[${index}]`),
+      );
+    }
+    const text = optionalString(value);
+    return text === undefined ? [] : [text];
+  }
+  return [];
 }
 
 function nullableStringField(

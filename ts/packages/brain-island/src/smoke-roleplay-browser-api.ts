@@ -53,6 +53,22 @@ try {
     writePolicy: "auto_capture",
   });
   assert.equal(hiddenLayer.status, 200, JSON.stringify(hiddenLayer.body));
+  const manualLayer = await post("/v1/profile/rp-profile/layers", {
+    layerId: "rp-manual",
+    name: "RP Manual",
+    description: "Durable browser-promoted lore.",
+    purpose: "world",
+    writePolicy: "manual",
+  });
+  assert.equal(manualLayer.status, 200, JSON.stringify(manualLayer.body));
+  const readonlyLayer = await post("/v1/profile/rp-profile/layers", {
+    layerId: "rp-readonly",
+    name: "RP Readonly",
+    description: "Promotion rejection target.",
+    purpose: "world",
+    writePolicy: "readonly",
+  });
+  assert.equal(readonlyLayer.status, 200, JSON.stringify(readonlyLayer.body));
 
   const listedLayers = await get("/v1/profile/rp-profile/layers");
   assert.equal(listedLayers.status, 200);
@@ -89,6 +105,75 @@ try {
     title: "Obsidian Vault",
     body: "The Obsidian Vault opens only for the forgotten royal signet.",
   });
+
+  const promoted = await post(
+    "/v1/admin/roleplay/lore/entries/rp-clockmaker-song/promote?profile_id=rp-profile",
+    {
+      targetLayerId: "rp-manual",
+      newRecordId: "rp-clockmaker-song-promoted",
+      isConstant: true,
+      priority: 9,
+    },
+  );
+  assert.equal(promoted.status, 200, JSON.stringify(promoted.body));
+  assert.equal(promoted.body.data.promoted, true);
+  assert.equal(
+    promoted.body.data.entry.record_id,
+    "rp-clockmaker-song-promoted",
+  );
+  assert.equal(promoted.body.data.entry.title, "Clockmaker Song");
+  assert.equal(promoted.body.data.source.layerId, "rp-world");
+  assert.equal(promoted.body.data.target.layerId, "rp-manual");
+  assert.equal(promoted.body.data.layerEntries[0]?.layer_id, "rp-manual");
+  assert.equal(promoted.body.data.layerEntries[0]?.is_constant, true);
+  assert.equal(promoted.body.data.layerEntries[0]?.priority, 9);
+  assert.match(
+    promoted.body.data.provenance[0]?.note,
+    /promoted from rp-world:rp-clockmaker-song/,
+  );
+
+  const promotedReadback = await get(
+    "/v1/admin/roleplay/lore/entries/rp-clockmaker-song-promoted?layer_id=rp-manual",
+  );
+  assert.equal(
+    promotedReadback.status,
+    200,
+    JSON.stringify(promotedReadback.body),
+  );
+  assert.equal(
+    promotedReadback.body.data.entry.record_id,
+    "rp-clockmaker-song-promoted",
+  );
+  assert.equal(
+    promotedReadback.body.data.layerEntries[0]?.layer_id,
+    "rp-manual",
+  );
+
+  const promotedSearch = await get(
+    "/v1/admin/roleplay/lore/entries/search?q=clockmaker&layer_id=rp-manual",
+  );
+  assert.equal(promotedSearch.status, 200, JSON.stringify(promotedSearch.body));
+  assert.deepEqual(
+    promotedSearch.body.data.entries.map(
+      (entry: Record<string, unknown>) => entry.record_id,
+    ),
+    ["rp-clockmaker-song-promoted"],
+  );
+
+  const readonlyPromotion = await post(
+    "/v1/admin/roleplay/lore/entries/rp-clockmaker-song/promote",
+    {
+      sourceLayerId: "rp-world",
+      targetLayerId: "rp-readonly",
+      newRecordId: "rp-clockmaker-song-readonly",
+    },
+  );
+  assert.equal(readonlyPromotion.status, 409);
+  assert.equal(
+    readonlyPromotion.body.error.reason_code,
+    "roleplay_lore_target_layer_readonly",
+  );
+
   for (let index = 0; index < 105; index += 1) {
     await captureLoreFact({
       layerId: "rp-world",
@@ -108,10 +193,11 @@ try {
     200,
     JSON.stringify(clockmakerSearch.body),
   );
-  assert.equal(clockmakerSearch.body.data.entries.length, 1);
-  assert.equal(
-    clockmakerSearch.body.data.entries[0]?.record_id,
-    "rp-clockmaker-song",
+  assert.deepEqual(
+    clockmakerSearch.body.data.entries
+      .map((entry: Record<string, unknown>) => entry.record_id)
+      .sort(),
+    ["rp-clockmaker-song", "rp-clockmaker-song-promoted"],
   );
   assert.equal(clockmakerSearch.body.data.layerContext.source, "profile");
 

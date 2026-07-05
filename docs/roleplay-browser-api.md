@@ -26,6 +26,7 @@ Canonical routes:
 - `POST /v1/admin/roleplay/lore/entries`
 - `GET /v1/admin/roleplay/lore/entries/{entryId}`
 - `PATCH /v1/admin/roleplay/lore/entries/{entryId}`
+- `POST /v1/admin/roleplay/lore/entries/{entryId}/promote`
 
 Compatibility route for roleplay clients:
 
@@ -177,6 +178,30 @@ flat partial fields such as `title`, `body`, `canon_status`, `visibility`,
 `entity_id`, `content`, `evidence_refs`, `confidence`, and
 `durability_rationale`. The response uses the same detail shape as `GET`, so
 the frontend can refresh the edited entry directly.
+
+`POST /v1/admin/roleplay/lore/entries/{entryId}/promote` promotes an
+auto-captured or otherwise lower-layer entry into a durable target layer through
+the native promotion path. The body accepts `target_layer_id` / `targetLayerId`,
+optional `source_layer_id` / `sourceLayerId`, optional `new_record_id` /
+`newRecordId`, optional `is_constant` / `isConstant`, optional `priority`, and
+optional `now`. If `new_record_id` is omitted, the service generates one. If
+`source_layer_id` is omitted, the service can infer it from `profile_id`,
+`chat_id`, or explicit source layer scope when exactly one scoped layer contains
+the entry; otherwise the request is rejected with
+`roleplay_lore_source_layer_required` or
+`roleplay_lore_source_layer_ambiguous`. Archived or readonly targets are
+rejected. The response uses the same detail shape as `GET` for the promoted
+entry and adds `promoted`, `source`, and `target` fields.
+
+```json
+{
+  "targetLayerId": "world-main",
+  "sourceLayerId": "auto-captured",
+  "newRecordId": "clockmaker-song-promoted",
+  "isConstant": true,
+  "priority": 10
+}
+```
 
 ## Chat Layer Binding
 
