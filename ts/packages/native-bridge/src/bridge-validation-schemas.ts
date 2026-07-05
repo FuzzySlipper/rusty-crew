@@ -110,6 +110,7 @@ const rawAgentMessageSchema = Type.Object(
     to: Type.String(),
     body: Type.String(),
     correlation_id: Type.Optional(Type.String()),
+    projection: Type.Optional(Type.Unknown()),
   },
   { additionalProperties: true },
 );
@@ -125,8 +126,17 @@ export const rawSessionStateSchema = Type.Object(
       Type.Literal("worker"),
       Type.Literal("delegated"),
     ]),
+    delegation: Type.Optional(Type.Unknown()),
     resource_limits: Type.Optional(rawResourceLimitsSchema),
     tool_profile: Type.Optional(rawToolProfileSchema),
+    history_window: Type.Optional(
+      Type.Object(
+        {
+          max_messages: Type.Optional(nullableNumber),
+        },
+        { additionalProperties: true },
+      ),
+    ),
     status: Type.Union([
       Type.Literal("active"),
       Type.Literal("idle"),
@@ -146,7 +156,10 @@ export const rawBodyStateSchema = Type.Object(
     session: rawSessionStateSchema,
     pending_messages: Type.Array(rawAgentMessageSchema),
     recent_events: Type.Array(
-      Type.Object({ type: Type.String() }, { additionalProperties: true }),
+      Type.Object(
+        { type: Type.String(), session_id: Type.Optional(Type.String()) },
+        { additionalProperties: true },
+      ),
     ),
     child_completions: Type.Array(Type.Unknown()),
     fan_out_groups: Type.Array(Type.Unknown()),
@@ -692,6 +705,8 @@ const rawBrainActionSchema = Type.Union([
           from: Type.String(),
           to: Type.String(),
           body: Type.String(),
+          correlation_id: Type.Optional(Type.String()),
+          projection: Type.Optional(Type.Unknown()),
         },
         { additionalProperties: true },
       ),

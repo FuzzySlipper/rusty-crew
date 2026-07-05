@@ -183,9 +183,10 @@ npm run verify:offline
 
 `verify:offline` is the deterministic local gate and the command run by GitHub
 Actions. It includes Rust fmt/clippy/tests, TypeScript typecheck, architecture
-boundaries, runtime-config parity, bridge fixture drift, and bridge validation.
-It must not require Den, live providers, local Postgres, a running Rusty Crew
-service, or Rusty View. The architecture boundary portion runs
+boundaries, runtime-config parity, bridge contract parity, bridge fixture
+drift, and bridge validation. It must not require Den, live providers, local
+Postgres, a running Rusty Crew service, or Rusty View. The architecture
+boundary portion runs
 `rust-crate-boundaries`, `ts-package-boundaries`, `storage-scope`, and
 `production-fake-guard`; those checks live in `tools/`. See
 `smoke-test-inventory.md` for the full smoke catalogue and the separate

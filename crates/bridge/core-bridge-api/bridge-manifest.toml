@@ -179,6 +179,15 @@ errors = "core_protocol::CoreError"
 summary = "Queue a steer/follow-up message for the next Rust-owned wake with body-policy TTL and cap enforcement."
 
 [[operation]]
+name = "archive_session"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionId"
+output = "core_protocol::SessionState"
+errors = "core_protocol::CoreError"
+summary = "Archive a Rust-owned runtime session without minting a replacement session."
+
+[[operation]]
 name = "ensure_configured_session"
 surface = "stable"
 direction = "ts_to_rust"
@@ -347,6 +356,15 @@ input = "unit"
 output = "Vec<core_protocol::SessionState>"
 errors = "core_protocol::CoreError"
 summary = "List Rust-owned runtime sessions for diagnostics and debug context."
+
+[[operation]]
+name = "provider_state_diagnostics"
+surface = "stable"
+direction = "ts_to_rust"
+input = "limit: Option<u32>"
+output = "Vec<core_protocol::BrainProviderStateDiagnostic>"
+errors = "core_protocol::CoreError"
+summary = "List provider-owned brain state diagnostics for bridge/runtime debug surfaces."
 
 # Runtime maintenance and scale diagnostics.
 
@@ -803,6 +821,24 @@ errors = "core_protocol::CoreError"
 summary = "Read backend-neutral module schema registry diagnostics for admin and frontend surfaces."
 
 [[operation]]
+name = "create_profile_registry_record"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ProfileRegistryWrite"
+output = "core_protocol::ProfileRegistryRecord"
+errors = "core_protocol::CoreError"
+summary = "Create a DB-backed profile registry record through the Rust service-data repository."
+
+[[operation]]
+name = "update_profile_registry_record"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ProfileRegistryUpdate"
+output = "core_protocol::ProfileRegistryRecord"
+errors = "core_protocol::CoreError"
+summary = "Update mutable DB-backed profile registry fields through the Rust service-data repository."
+
+[[operation]]
 name = "list_profile_registry_records"
 surface = "stable"
 direction = "ts_to_rust"
@@ -819,6 +855,51 @@ input = "core_protocol::ProfileId"
 output = "Option<core_protocol::ProfileRegistryRecord>"
 errors = "core_protocol::CoreError"
 summary = "Read a single DB-backed profile registry record by profile id."
+
+[[operation]]
+name = "purge_profile"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ProfileId"
+output = "core_persistence::ProfilePurgeReport"
+errors = "core_protocol::CoreError"
+summary = "Hard-delete profile-owned registry, session, memory, binding, and related service data."
+
+[[operation]]
+name = "upsert_model_provider"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ModelProviderWrite"
+output = "core_protocol::ModelProviderRecord"
+errors = "core_protocol::CoreError"
+summary = "Create or update a DB-backed model-provider alias and secret envelope."
+
+[[operation]]
+name = "list_model_providers"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ModelProviderQuery"
+output = "Vec<core_protocol::ModelProviderRecord>"
+errors = "core_protocol::CoreError"
+summary = "List DB-backed model-provider aliases for admin and profile configuration surfaces."
+
+[[operation]]
+name = "get_model_provider"
+surface = "stable"
+direction = "ts_to_rust"
+input = "alias: String"
+output = "Option<core_protocol::ModelProviderRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one DB-backed model-provider alias by id."
+
+[[operation]]
+name = "get_model_provider_secret"
+surface = "stable"
+direction = "ts_to_rust"
+input = "alias: String"
+output = "Option<String>"
+errors = "core_protocol::CoreError"
+summary = "Read the stored provider secret payload for provider execution only."
 
 [[operation]]
 name = "list_simple_kv"
@@ -846,6 +927,15 @@ input = "core_persistence::SimpleKvDelete"
 output = "core_persistence::SimpleKvRecord"
 errors = "core_protocol::CoreError"
 summary = "Delete a simple_kv module entry through the Rust repository surface."
+
+[[operation]]
+name = "storage_diagnostics"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "core_persistence::RuntimeStorageDiagnostics"
+errors = "core_protocol::CoreError"
+summary = "Read backend, repository coverage, and module-store diagnostics for admin surfaces."
 
 [[operation]]
 name = "run_maintenance"

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusty_crew_core_bridge_api::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{env, fs, path::Path};
+use std::{collections::BTreeSet, env, fs, path::Path};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct BridgeValidationFixtureFile {
@@ -31,7 +31,7 @@ fn main() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         None | Some("summary") => {
-            let operation_count = manifest_operation_count();
+            let operation_count = manifest_operation_count()?;
             println!("core bridge codegen scaffold: found {operation_count} manifest operations");
         }
         Some("emit-fixtures") => {
@@ -44,6 +44,13 @@ fn main() -> Result<()> {
                 .context("check-fixtures requires a fixture JSON path")?;
             check_fixtures(Path::new(&path))?;
             println!("bridge validation Rust fixture drift check passed");
+        }
+        Some("check-contracts") => {
+            let path = args
+                .next()
+                .context("check-contracts requires a TypeScript contracts index path")?;
+            check_contracts(Path::new(&path))?;
+            println!("bridge contract operation parity check passed");
         }
         Some("--help" | "-h") => {
             print_help();
@@ -64,6 +71,7 @@ Commands:
   summary                         Print manifest operation count.
   emit-fixtures                   Emit Rust-authored bridge validation fixtures as JSON.
   check-fixtures <path>           Compare <path> with freshly emitted fixtures.
+  check-contracts <path>          Check manifest/Rust/TS operation inventory parity.
 
 The fixtures are an incremental drift-check scaffold. They do not replace the
 bridge manifest operation inventory; they give TS validation smokes a Rust
@@ -71,8 +79,8 @@ serialization source for covered bridge families while full codegen matures."
     );
 }
 
-fn manifest_operation_count() -> usize {
-    MANIFEST_TEXT.matches("[[operation]]").count()
+fn manifest_operation_count() -> Result<usize> {
+    Ok(operation_names_from_manifest(MANIFEST_TEXT)?.len())
 }
 
 fn check_fixtures(path: &Path) -> Result<()> {
@@ -91,11 +99,41 @@ fn check_fixtures(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn check_contracts(contracts_index_path: &Path) -> Result<()> {
+    let manifest_operation_names = operation_names_from_manifest(MANIFEST_TEXT)?;
+    let rust_operation_names = OPERATION_NAMES
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<Vec<_>>();
+    let contracts_source = fs::read_to_string(contracts_index_path).with_context(|| {
+        format!(
+            "failed to read TypeScript contracts file {}",
+            contracts_index_path.display()
+        )
+    })?;
+    let ts_operation_names = operation_names_from_ts_contracts(&contracts_source)?;
+
+    compare_operation_sets(
+        "bridge-manifest.toml [[operation]] names",
+        &manifest_operation_names,
+        "core_bridge_api::OPERATION_NAMES",
+        &rust_operation_names,
+    )?;
+    compare_operation_order(
+        "ts/packages/contracts manifestOperationNames",
+        &ts_operation_names,
+        "core_bridge_api::OPERATION_NAMES",
+        &rust_operation_names,
+    )?;
+
+    Ok(())
+}
+
 fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
     Ok(BridgeValidationFixtureFile {
         format_version: 1,
         manifest_version: MANIFEST_VERSION,
-        operation_count: manifest_operation_count(),
+        operation_count: manifest_operation_count()?,
         schema_source: "rusty-crew-core-protocol serde wire fixtures".to_owned(),
         fixtures: vec![
             BridgeValidationFixture {
@@ -137,6 +175,122 @@ fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
             },
         ],
     })
+}
+
+fn operation_names_from_manifest(manifest_text: &str) -> Result<Vec<String>> {
+    let mut names = Vec::new();
+    let mut in_operation = false;
+
+    for line in manifest_text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[operation]]" {
+            in_operation = true;
+            continue;
+        }
+        if !in_operation || !trimmed.starts_with("name = ") {
+            continue;
+        }
+        names.push(parse_quoted_assignment_value(trimmed, "name")?);
+        in_operation = false;
+    }
+
+    ensure_no_duplicate_operations("bridge manifest", &names)?;
+    Ok(names)
+}
+
+fn operation_names_from_ts_contracts(source: &str) -> Result<Vec<String>> {
+    let marker = "export const manifestOperationNames = [";
+    let start = source
+        .find(marker)
+        .context("failed to find manifestOperationNames export in TypeScript contracts")?
+        + marker.len();
+    let rest = &source[start..];
+    let end = rest
+        .find("] as const")
+        .context("failed to find end of manifestOperationNames export")?;
+    let block = &rest[..end];
+    let mut names = Vec::new();
+    for line in block.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('"') {
+            continue;
+        }
+        let Some(end_quote) = trimmed[1..].find('"') else {
+            bail!("malformed manifestOperationNames line `{trimmed}`");
+        };
+        names.push(trimmed[1..1 + end_quote].to_owned());
+    }
+    ensure_no_duplicate_operations("TypeScript contracts manifestOperationNames", &names)?;
+    Ok(names)
+}
+
+fn parse_quoted_assignment_value(line: &str, key: &str) -> Result<String> {
+    let prefix = format!("{key} = \"");
+    let value = line
+        .strip_prefix(&prefix)
+        .with_context(|| format!("expected `{key} = \"...\"` assignment, got `{line}`"))?;
+    let end_quote = value
+        .find('"')
+        .with_context(|| format!("missing closing quote in assignment `{line}`"))?;
+    Ok(value[..end_quote].to_owned())
+}
+
+fn ensure_no_duplicate_operations(label: &str, names: &[String]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    let duplicates = names
+        .iter()
+        .filter(|name| !seen.insert((*name).clone()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !duplicates.is_empty() {
+        bail!("{label} has duplicate bridge operations: {duplicates:?}");
+    }
+    Ok(())
+}
+
+fn compare_operation_sets(
+    left_label: &str,
+    left: &[String],
+    right_label: &str,
+    right: &[String],
+) -> Result<()> {
+    let left_set = left.iter().cloned().collect::<BTreeSet<_>>();
+    let right_set = right.iter().cloned().collect::<BTreeSet<_>>();
+    if left_set == right_set {
+        return Ok(());
+    }
+
+    let missing_from_left = right_set.difference(&left_set).cloned().collect::<Vec<_>>();
+    let extra_in_left = left_set.difference(&right_set).cloned().collect::<Vec<_>>();
+    bail!(
+        "bridge operation inventory drift between {left_label} and {right_label}; missing from {left_label}: {missing_from_left:?}; extra in {left_label}: {extra_in_left:?}"
+    );
+}
+
+fn compare_operation_order(
+    left_label: &str,
+    left: &[String],
+    right_label: &str,
+    right: &[String],
+) -> Result<()> {
+    if left == right {
+        return Ok(());
+    }
+
+    let first_diff = left
+        .iter()
+        .zip(right.iter())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| left.len().min(right.len()));
+    let left_value = left.get(first_diff).map_or("<missing>", String::as_str);
+    let right_value = right.get(first_diff).map_or("<missing>", String::as_str);
+    let left_set = left.iter().cloned().collect::<BTreeSet<_>>();
+    let right_set = right.iter().cloned().collect::<BTreeSet<_>>();
+    let missing_from_left = right_set.difference(&left_set).cloned().collect::<Vec<_>>();
+    let extra_in_left = left_set.difference(&right_set).cloned().collect::<Vec<_>>();
+    bail!(
+        "bridge operation inventory drift between {left_label} and {right_label}; first difference at index {first_diff}: {left_label} has `{left_value}`, {right_label} has `{right_value}`; missing from {left_label}: {missing_from_left:?}; extra in {left_label}: {extra_in_left:?}"
+    );
 }
 
 fn sample_body_state() -> BodyState {

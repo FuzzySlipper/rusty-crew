@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 
 import type { BodyState } from "@rusty-crew/contracts";
+import type { TSchema } from "typebox";
+import { Value } from "typebox/value";
 
 import {
   BridgeValidationError,
@@ -19,11 +21,18 @@ import {
   rawProfileRegistryRecordSchema,
   rawSessionStateArraySchema,
 } from "./bridge-validation-schemas.js";
-import type { OpenAiResponsesBrainRunInput } from "./index.js";
+import {
+  loadNativeBridge,
+  nativeManifestOperationNames,
+  nativeManifestVersion,
+  type OpenAiResponsesBrainRunInput,
+} from "./index.js";
 
 const validationEnv = { RUSTY_CREW_BRIDGE_VALIDATE: "1" };
 
 interface RustBridgeValidationFixtureFile {
+  manifest_version: number;
+  operation_count: number;
   fixtures: Array<{
     name: string;
     value: unknown;
@@ -41,12 +50,162 @@ const rustFixtureValues = new Map(
   rustFixtures.fixtures.map((fixture) => [fixture.name, fixture.value]),
 );
 
+if (rustFixtures.manifest_version !== nativeManifestVersion) {
+  throw new Error(
+    `Rust fixture manifest version ${rustFixtures.manifest_version} does not match TS native manifest version ${nativeManifestVersion}`,
+  );
+}
+
+if (rustFixtures.operation_count !== nativeManifestOperationNames.length) {
+  throw new Error(
+    `Rust fixture operation count ${rustFixtures.operation_count} does not match TS manifest operation count ${nativeManifestOperationNames.length}`,
+  );
+}
+
+const nativeBridge = await loadNativeBridge();
+assertArrayEqual(
+  "loaded native bridge operation inventory",
+  nativeBridge.operationNames,
+  nativeManifestOperationNames,
+);
+
 function rustFixture(name: string): unknown {
   const value = rustFixtureValues.get(name);
   if (value === undefined) {
     throw new Error(`missing Rust bridge validation fixture ${name}`);
   }
   return value;
+}
+
+function validateRustFixture(input: {
+  name: string;
+  operation: string;
+  schema: TSchema;
+}): void {
+  const value = rustFixture(input.name);
+  assertSchemaCoversValueKeys({
+    schema: input.schema,
+    value,
+    path: input.name,
+  });
+  validateBridgeValue({
+    operation: input.operation,
+    direction: "rust_to_ts",
+    schema: input.schema,
+    value,
+    env: validationEnv,
+  });
+}
+
+function assertSchemaCoversValueKeys(input: {
+  schema: TSchema;
+  value: unknown;
+  path: string;
+}): void {
+  const schema = bestMatchingSchema(input.schema, input.value);
+  if (schema === undefined) return;
+
+  if (Array.isArray(input.value)) {
+    const items = schemaRecord(schema).items;
+    if (items && isSchema(items)) {
+      input.value.forEach((item, index) =>
+        assertSchemaCoversValueKeys({
+          schema: items,
+          value: item,
+          path: `${input.path}[${index}]`,
+        }),
+      );
+    }
+    return;
+  }
+
+  if (!isPlainObject(input.value)) return;
+
+  const record = schemaRecord(schema);
+  if (record.type !== "object") return;
+  const properties = schemaProperties(schema);
+  if (properties === undefined) return;
+
+  for (const [key, value] of Object.entries(input.value)) {
+    const propertySchema = properties[key];
+    if (propertySchema === undefined) {
+      throw new Error(
+        `Rust fixture ${input.path} has key ${key} that is not declared in the TypeScript bridge schema`,
+      );
+    }
+    assertSchemaCoversValueKeys({
+      schema: propertySchema,
+      value,
+      path: `${input.path}.${key}`,
+    });
+  }
+}
+
+function bestMatchingSchema(
+  schema: TSchema,
+  value: unknown,
+): TSchema | undefined {
+  const record = schemaRecord(schema);
+  const branches = unionBranches(record);
+  if (branches.length === 0) return schema;
+  return branches.find((branch) => Value.Check(branch, value));
+}
+
+function unionBranches(record: Record<string, unknown>): TSchema[] {
+  const branches = record.anyOf ?? record.oneOf ?? record.allOf;
+  if (!Array.isArray(branches)) return [];
+  return branches.filter(isSchema);
+}
+
+function schemaProperties(
+  schema: TSchema,
+): Record<string, TSchema> | undefined {
+  const properties = schemaRecord(schema).properties;
+  if (!isPlainObject(properties)) return undefined;
+  const entries = Object.entries(properties).filter(
+    (entry): entry is [string, TSchema] => isSchema(entry[1]),
+  );
+  return Object.fromEntries(entries);
+}
+
+function schemaRecord(schema: TSchema): Record<string, unknown> {
+  return schema as unknown as Record<string, unknown>;
+}
+
+function isSchema(value: unknown): value is TSchema {
+  return isPlainObject(value);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertArrayEqual(
+  label: string,
+  actual: readonly string[],
+  expected: readonly string[],
+): void {
+  if (
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  ) {
+    return;
+  }
+  const firstDiff = firstArrayDifference(actual, expected);
+  throw new Error(
+    `${label} mismatch at index ${firstDiff ?? "unknown"}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`,
+  );
+}
+
+function firstArrayDifference(
+  actual: readonly string[],
+  expected: readonly string[],
+): number | undefined {
+  const length = Math.max(actual.length, expected.length);
+  for (let index = 0; index < length; index += 1) {
+    if (actual[index] !== expected[index]) return index;
+  }
+  return undefined;
 }
 
 const bodyState: BodyState = {
@@ -244,44 +403,34 @@ validateBridgeValue({
   env: validationEnv,
 });
 
-validateBridgeValue({
+validateRustFixture({
   operation: "rust_fixture_project_body_state_json",
-  direction: "rust_to_ts",
   schema: rawBodyStateSchema,
-  value: rustFixture("body_state_v1"),
-  env: validationEnv,
+  name: "body_state_v1",
 });
 
-validateBridgeValue({
+validateRustFixture({
   operation: "rust_fixture_list_sessions",
-  direction: "rust_to_ts",
   schema: rawSessionStateArraySchema,
-  value: rustFixture("list_sessions_v1"),
-  env: validationEnv,
+  name: "list_sessions_v1",
 });
 
-validateBridgeValue({
+validateRustFixture({
   operation: "rust_fixture_run_openai_responses_brain",
-  direction: "rust_to_ts",
   schema: rawOpenAiResponsesBrainRunResultSchema,
-  value: rustFixture("brain_wake_stream_result_v1"),
-  env: validationEnv,
+  name: "brain_wake_stream_result_v1",
 });
 
-validateBridgeValue({
+validateRustFixture({
   operation: "rust_fixture_profile_registry_record",
-  direction: "rust_to_ts",
   schema: rawProfileRegistryRecordSchema,
-  value: rustFixture("profile_registry_record_v1"),
-  env: validationEnv,
+  name: "profile_registry_record_v1",
 });
 
-validateBridgeValue({
+validateRustFixture({
   operation: "rust_fixture_model_provider_record",
-  direction: "rust_to_ts",
   schema: rawModelProviderRecordSchema,
-  value: rustFixture("model_provider_record_v1"),
-  env: validationEnv,
+  name: "model_provider_record_v1",
 });
 
 try {

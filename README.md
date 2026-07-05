@@ -132,6 +132,7 @@ npm run test:unit
 npm run format
 npm run smoke:architecture-boundaries
 npm run smoke:runtime-config-parity
+npm run smoke:bridge-contract-parity
 npm run smoke:bridge-fixture-drift
 npm run smoke:bridge-validation
 ```

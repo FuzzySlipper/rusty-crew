@@ -1,6 +1,8 @@
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
+import { manifestOperationNames } from "@rusty-crew/contracts";
+
 import {
   validateBridgeJsonText,
   validateBridgeValue,
@@ -1931,106 +1933,15 @@ export interface NativeBridgeModule {
   releaseBuffer(handle: RuntimeBufferHandle): Promise<Unit>;
 }
 
-export const nativeManifestOperationNames = [
-  "initialize_engine",
-  "shutdown_engine",
-  "register_brain_implementation",
-  "replace_brain_implementation",
-  "unregister_brain_implementation_for_profile",
-  "wake_brain",
-  "submit_brain_event",
-  "submit_brain_actions",
-  "apply_brain_provider_state_output",
-  "register_platform_adapter",
-  "validate_runtime_config_draft",
-  "plan_runtime_config",
-  "plan_create_profile",
-  "inject_external_event",
-  "inject_den_data_update",
-  "enqueue_body_follow_up_message",
-  "archive_session",
-  "ensure_configured_session",
-  "register_scheduled_wake_job",
-  "run_scheduler_tick",
-  "request_scheduled_job_run",
-  "pause_scheduled_job",
-  "resume_scheduled_job",
-  "cancel_delegated_session",
-  "request_delegated_checkpoint",
-  "drain_delegated_sessions",
-  "cleanup_delegated_resources",
-  "delegated_session_status",
-  "list_sessions",
-  "provider_state_diagnostics",
-  "save_message_slot",
-  "save_message_variant",
-  "query_message_slots",
-  "query_message_variants",
-  "select_active_message_variant",
-  "delete_message_variant",
-  "reorder_message_variants",
-  "save_conversation_branch",
-  "query_conversation_branches",
-  "get_conversation_branch_state",
-  "select_active_conversation_branch",
-  "update_conversation_branch_head",
-  "save_conversation_snapshot",
-  "query_conversation_snapshots",
-  "resolve_conversation_jump",
-  "save_attachment",
-  "query_attachments",
-  "remove_attachment",
-  "save_data_bank_scope",
-  "query_data_bank_scopes",
-  "remove_data_bank_scope",
-  "database_size",
-  "storage_schema",
-  "create_profile_registry_record",
-  "update_profile_registry_record",
-  "list_profile_registry_records",
-  "get_profile_registry_record",
-  "purge_profile",
-  "upsert_model_provider",
-  "list_model_providers",
-  "get_model_provider",
-  "get_model_provider_secret",
-  "create_lore_layer",
-  "get_lore_layer",
-  "list_lore_layers",
-  "update_lore_layer",
-  "archive_lore_layer",
-  "set_chat_layers",
-  "get_chat_layers",
-  "toggle_chat_layer",
-  "reorder_chat_layers",
-  "add_lore_entry",
-  "replace_lore_entry",
-  "supersede_lore_entry",
-  "tombstone_lore_entry",
-  "query_lore_entries",
-  "get_lore_entry",
-  "lore_entry_provenance_events",
-  "add_entry_to_layer",
-  "remove_entry_from_layer",
-  "set_entry_constant",
-  "list_entries_by_layer",
-  "recall_lore",
-  "capture_lore_fact",
-  "promote_lore_entry",
-  "get_lore_layer_config",
-  "set_lore_layer_config",
-  "list_recall_traces",
-  "get_recall_trace",
-  "list_simple_kv",
-  "put_simple_kv",
-  "delete_simple_kv",
-  "storage_diagnostics",
-  "run_maintenance",
-  "subscribe_events",
-  "unsubscribe_events",
-  "get_buffer",
-  "release_buffer",
-] as const satisfies readonly ManifestOperationName[];
+export const nativeManifestOperationNames = manifestOperationNames;
+export const nativeManifestVersion = 1;
+
+export class NativeBridgeContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NativeBridgeContractError";
+  }
+}
 
 export async function loadNativeBridge(): Promise<NativeBridgeModule> {
   const addon = loadNativeAddon();
@@ -2038,12 +1949,14 @@ export async function loadNativeBridge(): Promise<NativeBridgeModule> {
     return createUnavailableNativeBridge();
   }
 
-  return createNativeBridgeModule(new addon.NativeBridgeBinding());
+  const binding = new addon.NativeBridgeBinding();
+  assertNativeBridgeContract(binding);
+  return createNativeBridgeModule(binding);
 }
 
 export function createUnavailableNativeBridge(): NativeBridgeModule {
   return {
-    manifestVersion: 1,
+    manifestVersion: nativeManifestVersion,
     operationNames: nativeManifestOperationNames,
     initializeEngine: unavailable("initialize_engine"),
     shutdownEngine: unavailable("shutdown_engine"),
@@ -2401,6 +2314,60 @@ function nativeArtifactName(): string | undefined {
   return undefined;
 }
 
+function assertNativeBridgeContract(binding: NativeBridgeBinding): void {
+  if (binding.manifestVersion !== nativeManifestVersion) {
+    throw new NativeBridgeContractError(
+      `native bridge manifest version mismatch: expected ${nativeManifestVersion}, got ${binding.manifestVersion}; rebuild the native bridge binary with npm run build:native`,
+    );
+  }
+
+  const actual = [...binding.operationNames];
+  const expected = [...nativeManifestOperationNames];
+  if (arraysEqual(actual, expected)) {
+    return;
+  }
+
+  const actualSet = new Set(actual);
+  const expectedSet = new Set<string>(expected);
+  const missing = expected.filter((name) => !actualSet.has(name));
+  const extra = actual.filter((name) => !expectedSet.has(name));
+  const firstDiff = firstArrayDifference(actual, expected);
+  const firstDiffDetail =
+    firstDiff === undefined
+      ? "none"
+      : `index ${firstDiff}: native has ${actual[firstDiff] ?? "<missing>"}, contracts expect ${expected[firstDiff] ?? "<missing>"}`;
+
+  throw new NativeBridgeContractError(
+    [
+      "native bridge operation inventory mismatch; rebuild the native bridge binary with npm run build:native",
+      `first difference: ${firstDiffDetail}`,
+      `missing from native: ${missing.length === 0 ? "[]" : JSON.stringify(missing)}`,
+      `extra in native: ${extra.length === 0 ? "[]" : JSON.stringify(extra)}`,
+    ].join("; "),
+  );
+}
+
+function arraysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function firstArrayDifference(
+  left: readonly string[],
+  right: readonly string[],
+): number | undefined {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (left[index] !== right[index]) return index;
+  }
+  return undefined;
+}
+
 function createNativeBridgeModule(
   binding: NativeBridgeBinding,
 ): NativeBridgeModule {
@@ -2451,10 +2418,7 @@ function createNativeBridgeModule(
   });
   const module: NativeBridgeModule = {
     manifestVersion: binding.manifestVersion,
-    operationNames:
-      binding.operationNames.length > 0
-        ? (binding.operationNames as ManifestOperationName[])
-        : nativeManifestOperationNames,
+    operationNames: binding.operationNames as ManifestOperationName[],
     initializeEngine: async (config) =>
       binding.initializeEngine({
         engineDataDir: config.engineDataDir,
