@@ -607,10 +607,10 @@ impl CoreCoordinationStore {
                 let module_registry = self.storage_schema()?;
                 Ok(RuntimeStorageDiagnostics {
                     backend: diagnostics.backend,
-                    backend_label: "PostgreSQL".to_string(),
+                    backend_label: diagnostics.backend_label,
                     schema_version: diagnostics.schema_version,
-                    supported_schema_version: diagnostics.schema_version,
-                    migrations: Vec::new(),
+                    supported_schema_version: diagnostics.supported_schema_version,
+                    migrations: diagnostics.migrations,
                     size,
                     table_counts: diagnostics.table_counts,
                     capabilities: diagnostics.capabilities,

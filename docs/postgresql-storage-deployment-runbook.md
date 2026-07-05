@@ -62,21 +62,25 @@ migration triggers.
 
 ## PostgreSQL Posture
 
-PostgreSQL is the future scale/concurrency backend, but the full Rusty Crew
-service is not production-ready on PostgreSQL yet.
+PostgreSQL is the scale/concurrency backend for larger Rusty Crew services. It
+is selectable by the service and owns Crew durable service data behind the same
+typed repository API as SQLite.
 
-Current PostgreSQL proof coverage is intentionally narrow:
+Current PostgreSQL coverage is still being hardened:
 
-- storage/admin diagnostics proof;
-- runtime-counter proof;
-- simple key/value module proof.
-
-Unsupported high-risk surfaces include queues/messages, scheduler claims,
-transcripts, attachments, runtime search, profile memory, roleplay lore, and
-provider wire state unless later tasks explicitly implement them.
+- startup applies a versioned schema migration ledger and fails closed on
+  unsupported future versions;
+- storage/admin diagnostics report backend capabilities, schema versions, and
+  table counts;
+- session, event, queue, scheduler, worker-run, runtime-counter, runtime
+  search, provider-state, profile-memory, conversation, attachment, and
+  roleplay-lore repository surfaces have typed Postgres implementations and
+  conformance tests;
+- repository trait/parity reduction and connection pooling/reconnect behavior
+  remain active hardening work.
 
 The service must fail closed rather than silently falling back to SQLite or
-advertising PostgreSQL production readiness.
+running with an unsupported schema.
 
 ## PostgreSQL Config
 
@@ -126,6 +130,29 @@ The first local PostgreSQL service exercise should use a fresh empty database:
 
 This path proves PostgreSQL as a first-class empty backend. It is separate from
 SQLite-to-PostgreSQL migration.
+
+## PostgreSQL Test Commands
+
+The Postgres feature has a no-database test slice suitable for local and CI
+checks:
+
+```bash
+cargo test -p rusty-crew-core-persistence --features postgres postgres_migration_catalog
+```
+
+Live Postgres repository conformance tests still require an actual database,
+but they do not require sourcing a machine-private env file. Provide a throwaway
+database URL directly through one of the supported env vars:
+
+```bash
+RUSTY_CREW_POSTGRES_PROOF_DATABASE_URL='postgres://user:password@host:5432/rusty_crew_test' \
+  cargo test -p rusty-crew-core-persistence --features postgres-proof \
+  postgres_runtime_counter_proof_matches_typed_counter_contract -- --ignored --nocapture
+```
+
+The ignored live tests create unique schemas per run. Use a disposable database
+or CI service database and clean old `rusty_crew_*_proof_*` schemas as part of
+normal maintenance.
 
 ## Migration And Logical Export/Import
 

@@ -1,9 +1,9 @@
-//! Narrow PostgreSQL proof slice for the runtime counter repository.
+//! PostgreSQL durable storage backend.
 //!
-//! This module is intentionally not the full `CoordinationStore` backend. It
-//! exists to prove connection, migration, typed API parity, and diagnostics for
-//! one low-risk repository before correctness-sensitive coordination state moves
-//! beyond SQLite.
+//! The file name is historical from the first proof slices. The implementation
+//! is now the selectable PostgreSQL backend for Rust-owned Crew service data,
+//! so it must fail closed on schema incompatibility and report capabilities
+//! honestly while repository split/parity work continues.
 
 use crate::{
     counter_value, default_lore_layer_config, estimate_lore_tokens, excluded_subject_match,
@@ -59,12 +59,13 @@ use crate::{
     RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
     RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageTableCount,
     ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SessionConfig,
-    SessionConfigRecord, SessionId, SessionIdentityRecord, SessionKind, SessionMemoryArchive,
-    SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
-    SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
-    SessionMemoryRecord, SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
+    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, SessionConfig, SessionConfigRecord, SessionId,
+    SessionIdentityRecord, SessionKind, SessionMemoryArchive, SessionMemoryCompactionReport,
+    SessionMemoryPromptContext, SessionMemoryPromptContextPolicy, SessionMemoryPromptDiagnostics,
+    SessionMemoryPromptExcludedCounts, SessionMemoryQuery, SessionMemoryRecord,
+    SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionState, SessionStatus,
     SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
     SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
@@ -94,7 +95,100 @@ use rusty_crew_core_protocol::{
 use std::collections::BTreeSet;
 use std::sync::{Mutex, MutexGuard};
 
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = 16;
+const POSTGRES_SCHEMA_VERSION: i64 = 16;
+const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
+
+#[allow(dead_code)]
+const POSTGRES_PROOF_SCHEMA_VERSION: i64 = POSTGRES_SCHEMA_VERSION;
+
+struct PostgresSchemaMigration {
+    version: i64,
+    description: &'static str,
+    apply: Option<fn(&mut Transaction<'_>, &str) -> CoreResult<()>>,
+}
+
+const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
+    PostgresSchemaMigration {
+        version: 1,
+        description: "create baseline PostgreSQL durable service schema",
+        apply: Some(apply_postgres_baseline_schema),
+    },
+    PostgresSchemaMigration {
+        version: 2,
+        description: "baseline includes sessions and immutable session configs",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 3,
+        description: "baseline includes profile registry and model providers",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 4,
+        description: "baseline includes per-agent channel and MCP bindings",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 5,
+        description: "baseline includes durable identities and event projections",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 6,
+        description: "baseline includes queued messages and scheduler state",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 7,
+        description: "baseline includes worker runs, pools, and completion packets",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 8,
+        description: "baseline includes tool telemetry and module simple_kv",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 9,
+        description: "baseline includes session memory and activity digests",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 10,
+        description: "baseline includes context compaction artifacts",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 11,
+        description: "baseline includes memory proposal governance",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 12,
+        description: "baseline includes runtime search and provider wire state",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 13,
+        description: "baseline includes conversation trees and message variants",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 14,
+        description: "baseline includes attachments and data-bank scopes",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 15,
+        description: "baseline includes profile memory and roleplay lore records",
+        apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 16,
+        description: "baseline includes roleplay lore layers and recall traces",
+        apply: None,
+    },
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresRuntimeCounterProofConfig {
@@ -118,6 +212,8 @@ pub struct PostgresRuntimeCounterProofDiagnostics {
     pub schema: String,
     pub proof_repository: String,
     pub schema_version: i64,
+    pub supported_schema_version: i64,
+    pub migrations: Vec<SchemaMigrationRecord>,
     pub table_counts: Vec<RuntimeStorageTableCount>,
     pub capabilities: Vec<RuntimeStorageCapability>,
     pub repository_groups: Vec<RuntimeRepositoryGroupDiagnostic>,
@@ -143,7 +239,7 @@ impl PostgresRuntimeCounterProofStore {
             CoreError::new(
                 CoreErrorKind::PersistenceFailure,
                 format!(
-                    "load PostgreSQL proof database URL from env {}: {error}",
+                    "load PostgreSQL durable backend database URL from env {}: {error}",
                     config.database_url_env
                 ),
             )
@@ -2953,12 +3049,14 @@ impl PostgresRuntimeCounterProofStore {
     pub fn storage_diagnostics(&self) -> CoreResult<PostgresRuntimeCounterProofDiagnostics> {
         Ok(PostgresRuntimeCounterProofDiagnostics {
             backend: "postgres".to_string(),
-            backend_label: "PostgreSQL runtime-counter proof slice".to_string(),
+            backend_label: "PostgreSQL durable backend".to_string(),
             schema: self.schema.clone(),
             proof_repository:
                 "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers"
                     .to_string(),
             schema_version: self.schema_version()?,
+            supported_schema_version: POSTGRES_SCHEMA_VERSION,
+            migrations: self.schema_migrations()?,
             table_counts: vec![
                 RuntimeStorageTableCount {
                     table: "sessions".to_string(),
@@ -5913,12 +6011,19 @@ impl PostgresRuntimeCounterProofStore {
         let schema = self.quoted_schema();
         self.client()?
             .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
-            .map_err(|error| postgres_error("drop PostgreSQL proof schema", error))
+            .map_err(|error| postgres_error("drop PostgreSQL durable backend schema", error))
     }
 
     fn migrate(&self) -> CoreResult<()> {
         let schema = self.quoted_schema();
-        self.client()?
+        let mut client = self.client()?;
+        prepare_postgres_migration_metadata(&mut client, &schema)?;
+        apply_postgres_schema_migrations(&mut client, &schema)
+    }
+}
+
+fn apply_postgres_baseline_schema(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx
             .batch_execute(&format!(
                 "CREATE SCHEMA IF NOT EXISTS {schema};
                  CREATE TABLE IF NOT EXISTS {schema}.rusty_crew_storage_metadata (
@@ -5926,18 +6031,6 @@ impl PostgresRuntimeCounterProofStore {
                     metadata_value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                  );
-                 INSERT INTO {schema}.rusty_crew_storage_metadata (
-                    metadata_key,
-                    metadata_value,
-                    updated_at
-                 ) VALUES (
-                    'runtime_counter_proof_schema_version',
-                    '{POSTGRES_PROOF_SCHEMA_VERSION}',
-                    '2026-06-26T00:00:00Z'
-                 )
-                 ON CONFLICT(metadata_key) DO UPDATE SET
-                    metadata_value = EXCLUDED.metadata_value,
-                    updated_at = EXCLUDED.updated_at;
                  CREATE TABLE IF NOT EXISTS {schema}.runtime_counters (
                     scope_type TEXT NOT NULL,
                     scope_id TEXT NOT NULL,
@@ -6726,9 +6819,10 @@ impl PostgresRuntimeCounterProofStore {
                     updated_at TEXT NOT NULL
                  );"
             ))
-            .map_err(|error| postgres_error("migrate PostgreSQL runtime counter proof", error))
-    }
+            .map_err(|error| postgres_error("migrate PostgreSQL durable backend baseline", error))
+}
 
+impl PostgresRuntimeCounterProofStore {
     fn insert_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
         let value_json = to_json_text(&write.value_json)?;
         let schema = self.quoted_schema();
@@ -7360,24 +7454,14 @@ impl PostgresRuntimeCounterProofStore {
 
     fn schema_version(&self) -> CoreResult<i64> {
         let schema = self.quoted_schema();
-        let row = self
-            .client()?
-            .query_one(
-                &format!(
-                    "SELECT metadata_value
-                     FROM {schema}.rusty_crew_storage_metadata
-                     WHERE metadata_key = 'runtime_counter_proof_schema_version'"
-                ),
-                &[],
-            )
-            .map_err(|error| postgres_error("load PostgreSQL proof schema version", error))?;
-        let raw: String = row.get(0);
-        raw.parse::<i64>().map_err(|error| {
-            CoreError::new(
-                CoreErrorKind::PersistenceFailure,
-                format!("parse PostgreSQL proof schema version: {error}"),
-            )
-        })
+        let mut client = self.client()?;
+        current_postgres_schema_version(&mut *client, &schema)
+    }
+
+    fn schema_migrations(&self) -> CoreResult<Vec<SchemaMigrationRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        load_postgres_schema_migration_records(&mut *client, &schema)
     }
 
     fn runtime_counter_rows(&self) -> CoreResult<u64> {
@@ -7430,7 +7514,9 @@ impl PostgresRuntimeCounterProofStore {
         let row = self
             .client()?
             .query_one(&format!("SELECT COUNT(*) FROM {schema}.{table}"), &[])
-            .map_err(|error| postgres_error("count PostgreSQL proof table rows", error))?;
+            .map_err(|error| {
+                postgres_error("count PostgreSQL durable backend table rows", error)
+            })?;
         let rows: i64 = row.get(0);
         Ok(rows as u64)
     }
@@ -7443,10 +7529,222 @@ impl PostgresRuntimeCounterProofStore {
         self.client.lock().map_err(|_| {
             CoreError::new(
                 CoreErrorKind::PersistenceFailure,
-                "PostgreSQL proof connection mutex poisoned",
+                "PostgreSQL durable backend connection mutex poisoned",
             )
         })
     }
+}
+
+fn prepare_postgres_migration_metadata(client: &mut Client, schema: &str) -> CoreResult<()> {
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA IF NOT EXISTS {schema};
+             CREATE TABLE IF NOT EXISTS {schema}.rusty_crew_storage_metadata (
+                metadata_key TEXT PRIMARY KEY,
+                metadata_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS {schema}.schema_migrations (
+                version BIGINT PRIMARY KEY,
+                description TEXT NOT NULL DEFAULT '',
+                applied_at TEXT NOT NULL DEFAULT to_char(
+                    CURRENT_TIMESTAMP AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'
+                )
+             );"
+        ))
+        .map_err(|error| postgres_error("prepare PostgreSQL schema migration metadata", error))
+}
+
+fn apply_postgres_schema_migrations(client: &mut Client, schema: &str) -> CoreResult<()> {
+    validate_postgres_migration_catalog(POSTGRES_SCHEMA_MIGRATIONS)?;
+    let migration_version = current_postgres_schema_version(client, schema)?;
+    let legacy_version = legacy_postgres_schema_version(client, schema)?;
+    let current_version = migration_version.max(legacy_version.unwrap_or(0));
+
+    if current_version > POSTGRES_SCHEMA_VERSION {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!(
+                "postgres schema version {current_version} is newer than supported version {POSTGRES_SCHEMA_VERSION}"
+            ),
+        ));
+    }
+    if current_version > 0 && current_version < POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!(
+                "postgres schema version {current_version} is older than supported version {POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION}"
+            ),
+        ));
+    }
+
+    if migration_version == 0 && current_version > 0 {
+        backfill_postgres_schema_migrations(client, schema, current_version)?;
+    }
+
+    for migration in POSTGRES_SCHEMA_MIGRATIONS {
+        let current = current_postgres_schema_version(client, schema)?;
+        if migration.version <= current {
+            refresh_postgres_schema_migration_description(
+                client,
+                schema,
+                migration.version,
+                migration.description,
+            )?;
+            continue;
+        }
+
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL schema migration", error))?;
+        if let Some(apply) = migration.apply {
+            apply(&mut tx, schema)?;
+        }
+        insert_postgres_schema_migration(&mut tx, schema, migration)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL schema migration", error))?;
+    }
+
+    Ok(())
+}
+
+fn validate_postgres_migration_catalog(migrations: &[PostgresSchemaMigration]) -> CoreResult<()> {
+    for (index, migration) in migrations.iter().enumerate() {
+        let expected = (index as i64) + 1;
+        if migration.version != expected {
+            return Err(CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!(
+                    "invalid postgres schema migration catalog: expected version {expected}, found {}",
+                    migration.version
+                ),
+            ));
+        }
+    }
+    if migrations.last().map(|migration| migration.version) != Some(POSTGRES_SCHEMA_VERSION) {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!(
+                "invalid postgres schema migration catalog: supported version {POSTGRES_SCHEMA_VERSION} is not the final migration"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn current_postgres_schema_version<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+) -> CoreResult<i64> {
+    client
+        .query_one(
+            &format!("SELECT COALESCE(MAX(version), 0) FROM {schema}.schema_migrations"),
+            &[],
+        )
+        .map(|row| row.get::<_, i64>(0))
+        .map_err(|error| postgres_error("read PostgreSQL schema version", error))
+}
+
+fn legacy_postgres_schema_version<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+) -> CoreResult<Option<i64>> {
+    let row = client
+        .query_opt(
+            &format!(
+                "SELECT metadata_value
+                 FROM {schema}.rusty_crew_storage_metadata
+                 WHERE metadata_key = 'runtime_counter_proof_schema_version'"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("read legacy PostgreSQL schema metadata", error))?;
+    row.map(|row| {
+        let raw: String = row.get(0);
+        raw.parse::<i64>().map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                format!("parse legacy PostgreSQL schema version: {error}"),
+            )
+        })
+    })
+    .transpose()
+}
+
+fn backfill_postgres_schema_migrations(
+    client: &mut Client,
+    schema: &str,
+    through_version: i64,
+) -> CoreResult<()> {
+    let mut tx = client
+        .transaction()
+        .map_err(|error| postgres_error("start PostgreSQL schema migration backfill", error))?;
+    for migration in POSTGRES_SCHEMA_MIGRATIONS {
+        if migration.version > through_version {
+            break;
+        }
+        insert_postgres_schema_migration(&mut tx, schema, migration)?;
+    }
+    tx.commit()
+        .map_err(|error| postgres_error("commit PostgreSQL schema migration backfill", error))
+}
+
+fn insert_postgres_schema_migration<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    migration: &PostgresSchemaMigration,
+) -> CoreResult<()> {
+    client
+        .execute(
+            &format!(
+                "INSERT INTO {schema}.schema_migrations (version, description)
+                 VALUES ($1, $2)
+                 ON CONFLICT(version) DO UPDATE SET description = EXCLUDED.description"
+            ),
+            &[&migration.version, &migration.description],
+        )
+        .map(|_| ())
+        .map_err(|error| postgres_error("record PostgreSQL schema migration", error))
+}
+
+fn refresh_postgres_schema_migration_description<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    version: i64,
+    description: &str,
+) -> CoreResult<()> {
+    client
+        .execute(
+            &format!("UPDATE {schema}.schema_migrations SET description = $1 WHERE version = $2"),
+            &[&description, &version],
+        )
+        .map(|_| ())
+        .map_err(|error| postgres_error("refresh PostgreSQL schema migration metadata", error))
+}
+
+fn load_postgres_schema_migration_records<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+) -> CoreResult<Vec<SchemaMigrationRecord>> {
+    let rows = client
+        .query(
+            &format!(
+                "SELECT version, description, applied_at
+                 FROM {schema}.schema_migrations
+                 ORDER BY version ASC"
+            ),
+            &[],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL schema migration records", error))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| SchemaMigrationRecord {
+            version: row.get(0),
+            description: row.get(1),
+            applied_at: row.get(2),
+        })
+        .collect())
 }
 
 fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
@@ -7454,22 +7752,22 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
         (
             "transactions",
             true,
-            "PostgreSQL transactions are available for the proof repository",
+            "PostgreSQL transactions are available for durable service repositories",
         ),
         (
             "json_metadata",
             true,
-            "PostgreSQL can store JSON metadata, though runtime counters do not need it",
+            "PostgreSQL stores structured metadata in JSON/JSONB columns behind typed repository APIs",
         ),
         (
             "concurrent_writers",
             true,
-            "PostgreSQL supports concurrent writers for this proof repository",
+            "PostgreSQL supports concurrent writers for durable service repositories",
         ),
         (
             "estimated_table_size",
             true,
-            "the proof slice exposes row counts for proof-owned tables",
+            "the backend exposes row counts for Crew-owned tables",
         ),
         (
             "row_level_claims",
@@ -7485,6 +7783,11 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
             "logical_export_import",
             false,
             "logical cross-backend export/import remains future work",
+        ),
+        (
+            "online_migrations",
+            false,
+            "schema migrations run during service startup/open and fail closed on unsupported versions",
         ),
     ]
     .into_iter()
@@ -7503,67 +7806,67 @@ fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
             if group.group_id == "storage_admin" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for proof-owned migrations and storage diagnostics only.".to_string(),
+                    "PostgreSQL durable backend status: startup applies versioned migrations and reports storage diagnostics.".to_string(),
                 );
             } else if group.group_id == "sessions_identities" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for session/config/identity hydration conformance; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for session/config/identity hydration conformance.".to_string(),
                 );
             } else if group.group_id == "events_projections" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for event history and typed event-index query conformance; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for event history and typed event-index query conformance.".to_string(),
                 );
             } else if group.group_id == "queues_messages" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for queued-message TTL and no-resurrection conformance; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for queued-message TTL and no-resurrection conformance.".to_string(),
                 );
             } else if group.group_id == "scheduler_jobs" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for scheduled jobs, scheduled run claim/completion, stale-run expiry, and row-level claim conformance; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for scheduled jobs, scheduled run claim/completion, stale-run expiry, and row-level claim conformance.".to_string(),
                 );
             } else if group.group_id == "worker_runs_completions" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for worker run lifecycle, delegated completion lookup, completion packet persistence, and terminal-status conformance; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for worker run lifecycle, delegated completion lookup, completion packet persistence, and terminal-status conformance.".to_string(),
                 );
             } else if group.group_id == "module_schema_registry" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented only for the simple_kv module-owned data table, not the full module registry.".to_string(),
+                    "PostgreSQL durable backend status: module schema diagnostics are projected from the compiled registry; module simple_kv storage is implemented.".to_string(),
                 );
             } else if group.group_id == "runtime_counters" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for the runtime-counter proof repository.".to_string(),
+                    "PostgreSQL durable backend status: implemented for runtime counters.".to_string(),
                 );
             } else if group.group_id == "runtime_search" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for runtime search entries through the typed search API; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for runtime search entries through the typed search API.".to_string(),
                 );
             } else if group.group_id == "provider_state" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for provider wire-state conformance through the typed provider-state API; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for provider wire-state conformance through the typed provider-state API.".to_string(),
                 );
             } else if group.group_id == "conversations_attachments" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for the conversation transcript proof surface and attachment/data-bank proof surface; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for conversation transcript, attachment, and data-bank repository surfaces.".to_string(),
                 );
             } else if group.group_id == "profile_memory" {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: implemented for profile_dense descriptor projection, dense profile memory conformance, and roleplay_lore record/layer physical schema; not yet wired as the full service backend.".to_string(),
+                    "PostgreSQL durable backend status: implemented for profile_dense descriptor projection, dense profile memory conformance, and roleplay_lore record/layer physical schema.".to_string(),
                 );
             } else {
                 group.notes.insert(
                     0,
-                    "PostgreSQL proof status: unsupported; full service boot must fail closed before using this repository group.".to_string(),
+                    "PostgreSQL durable backend status: repository group still needs parity review before it can be considered stable under load.".to_string(),
                 );
             }
             group
@@ -15412,9 +15715,8 @@ mod tests {
     #[test]
     fn postgres_proof_repository_groups_mark_unsupported_service_repositories() {
         let groups = postgres_proof_repository_groups();
-        assert!(groups.iter().any(
-            |group| group.group_id == "storage_admin" && group.notes[0].contains("implemented")
-        ));
+        assert!(groups.iter().any(|group| group.group_id == "storage_admin"
+            && group.notes[0].contains("versioned migrations")));
         assert!(groups
             .iter()
             .any(|group| group.group_id == "sessions_identities"
@@ -15449,10 +15751,45 @@ mod tests {
             .iter()
             .any(|group| group.group_id == "conversations_attachments"
                 && group.notes[0].contains("conversation transcript")
-                && group.notes[0].contains("attachment/data-bank")));
+                && group.notes[0].contains("data-bank")));
         assert!(groups.iter().any(|group| group.group_id == "profile_memory"
             && group.notes[0].contains("profile_dense")
             && group.notes[0].contains("conformance")));
+    }
+
+    #[test]
+    fn postgres_migration_catalog_is_ordered_and_current() {
+        validate_postgres_migration_catalog(POSTGRES_SCHEMA_MIGRATIONS).unwrap();
+        assert_eq!(
+            POSTGRES_SCHEMA_MIGRATIONS
+                .last()
+                .map(|migration| migration.version),
+            Some(POSTGRES_SCHEMA_VERSION)
+        );
+        assert_eq!(POSTGRES_SCHEMA_MIGRATIONS[0].version, 1);
+        assert!(POSTGRES_SCHEMA_MIGRATIONS[0].apply.is_some());
+        assert!(POSTGRES_SCHEMA_MIGRATIONS[1..]
+            .iter()
+            .all(|migration| migration.apply.is_none()));
+    }
+
+    #[test]
+    fn postgres_migration_catalog_rejects_gaps() {
+        let migrations = [
+            PostgresSchemaMigration {
+                version: 1,
+                description: "first",
+                apply: None,
+            },
+            PostgresSchemaMigration {
+                version: 3,
+                description: "gap",
+                apply: None,
+            },
+        ];
+        let error = validate_postgres_migration_catalog(&migrations).unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
+        assert!(error.message.contains("expected version 2"));
     }
 
     #[test]
@@ -16169,6 +16506,21 @@ mod tests {
         let diagnostics = store.storage_diagnostics().unwrap();
         assert_eq!(diagnostics.backend, "postgres");
         assert_eq!(diagnostics.schema_version, POSTGRES_PROOF_SCHEMA_VERSION);
+        assert_eq!(
+            diagnostics.supported_schema_version,
+            POSTGRES_PROOF_SCHEMA_VERSION
+        );
+        assert_eq!(
+            diagnostics.migrations.len(),
+            POSTGRES_SCHEMA_MIGRATIONS.len()
+        );
+        assert_eq!(
+            diagnostics
+                .migrations
+                .last()
+                .map(|migration| migration.version),
+            Some(POSTGRES_PROOF_SCHEMA_VERSION)
+        );
         assert_eq!(diagnostics.repository_groups[0].group_id, "storage_admin");
         assert_eq!(
             diagnostics
