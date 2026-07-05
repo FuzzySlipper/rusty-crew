@@ -25,6 +25,8 @@ import {
   loadNativeBridge,
   nativeManifestOperationNames,
   nativeManifestVersion,
+  roundTripNativeBridgeFixture,
+  type NativeBridgeRoundTripFixtureName,
   type OpenAiResponsesBrainRunInput,
 } from "./index.js";
 
@@ -78,7 +80,7 @@ function rustFixture(name: string): unknown {
 }
 
 function validateRustFixture(input: {
-  name: string;
+  name: NativeBridgeRoundTripFixtureName;
   operation: string;
   schema: TSchema;
 }): void {
@@ -95,6 +97,39 @@ function validateRustFixture(input: {
     value,
     env: validationEnv,
   });
+  assertRustFixtureMapperRoundTrips(input.name, value);
+}
+
+function assertRustFixtureMapperRoundTrips(
+  name: NativeBridgeRoundTripFixtureName,
+  value: unknown,
+): void {
+  const roundTripped = roundTripNativeBridgeFixture({ name, value });
+  const actual = normalizeRoundTripValue(roundTripped);
+  const expected = normalizeRoundTripValue(value);
+  const actualJson = JSON.stringify(actual, null, 2);
+  const expectedJson = JSON.stringify(expected, null, 2);
+  if (actualJson === expectedJson) return;
+
+  throw new Error(
+    `Rust fixture ${name} did not round-trip through the TypeScript native-bridge mapper.\nExpected:\n${expectedJson}\nActual:\n${actualJson}`,
+  );
+}
+
+function normalizeRoundTripValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeRoundTripValue);
+  }
+
+  if (!isPlainObject(value)) {
+    return value ?? undefined;
+  }
+
+  const entries = Object.entries(value)
+    .map(([key, entryValue]) => [key, normalizeRoundTripValue(entryValue)])
+    .filter((entry): entry is [string, unknown] => entry[1] !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return Object.fromEntries(entries);
 }
 
 function assertSchemaCoversValueKeys(input: {
