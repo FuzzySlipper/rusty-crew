@@ -13,6 +13,59 @@ pub(crate) const COUNTER_MESSAGES: &str = "messages";
 pub(crate) const COUNTER_COMPLETIONS: &str = "completions";
 pub(crate) const COUNTER_QUEUE_EXPIRATIONS: &str = "queue_expirations";
 
+pub(crate) trait RuntimeCounterRepository {
+    #[cfg(test)]
+    fn record_runtime_counter_delta(
+        &self,
+        scope: &RuntimeCounterScope,
+        counter_name: &str,
+        amount: u64,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()>;
+
+    fn runtime_counters(
+        &self,
+        scope: Option<&RuntimeCounterScope>,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>>;
+
+    fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>>;
+
+    fn reset_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+        now: IsoTimestamp,
+    ) -> CoreResult<u64>;
+
+    fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
+        let counters = self.runtime_counters(Some(scope))?;
+        Ok(runtime_summary_from_counters(scope, &counters))
+    }
+}
+
+pub(crate) fn runtime_summary_from_counters(
+    scope: &RuntimeCounterScope,
+    counters: &[RuntimeCounterRecord],
+) -> RuntimeStateSummary {
+    RuntimeStateSummary {
+        scope: scope.clone(),
+        brain_turns: counter_value(counters, COUNTER_BRAIN_TURNS),
+        wakes: counter_value(counters, COUNTER_WAKES),
+        tool_calls: counter_value(counters, COUNTER_TOOL_CALLS),
+        tool_errors: counter_value(counters, COUNTER_TOOL_ERRORS),
+        delegations_created: counter_value(counters, COUNTER_DELEGATIONS_CREATED),
+        delegations_completed: counter_value(counters, COUNTER_DELEGATIONS_COMPLETED),
+        delegations_failed: counter_value(counters, COUNTER_DELEGATIONS_FAILED),
+        delegations_timed_out: counter_value(counters, COUNTER_DELEGATIONS_TIMED_OUT),
+        delegations_cancelled: counter_value(counters, COUNTER_DELEGATIONS_CANCELLED),
+        messages: counter_value(counters, COUNTER_MESSAGES),
+        completions: counter_value(counters, COUNTER_COMPLETIONS),
+        queue_expirations: counter_value(counters, COUNTER_QUEUE_EXPIRATIONS),
+    }
+}
+
 pub(crate) fn migrate_v7_add_runtime_counters(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     tx.execute_batch(
         "
@@ -132,6 +185,26 @@ pub(crate) fn counter_value(counters: &[RuntimeCounterRecord], name: &str) -> u6
         .map_or(0, |counter| counter.value)
 }
 
+#[cfg(test)]
+pub(crate) fn record_runtime_counter_delta(
+    conn: &mut Connection,
+    scope: &RuntimeCounterScope,
+    counter_name: &str,
+    amount: u64,
+    now: &IsoTimestamp,
+) -> CoreResult<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    let tx = conn
+        .transaction()
+        .map_err(|error| persistence_error("begin runtime counter delta", error))?;
+    increment_counter_in_tx(&tx, scope, counter_name, amount, Some(now))?;
+    tx.commit()
+        .map_err(|error| persistence_error("commit runtime counter delta", error))
+}
+
 pub(crate) fn increment_counter_for_scopes_in_tx(
     tx: &rusqlite::Transaction<'_>,
     scopes: Vec<RuntimeCounterScope>,
@@ -139,7 +212,7 @@ pub(crate) fn increment_counter_for_scopes_in_tx(
     amount: u64,
 ) -> CoreResult<()> {
     for scope in dedupe_counter_scopes(scopes) {
-        increment_counter_in_tx(tx, &scope, counter_name, amount)?;
+        increment_counter_in_tx(tx, &scope, counter_name, amount, None)?;
     }
     Ok(())
 }
@@ -170,24 +243,40 @@ fn increment_counter_in_tx(
     scope: &RuntimeCounterScope,
     counter_name: &str,
     amount: u64,
+    now: Option<&IsoTimestamp>,
 ) -> CoreResult<()> {
     if amount == 0 {
         return Ok(());
     }
 
     let (scope_type, scope_id) = runtime_counter_scope_parts(scope);
-    tx.execute(
-        "INSERT INTO runtime_counters (
-            scope_type,
-            scope_id,
-            counter_name,
-            value
-        ) VALUES (?1, ?2, ?3, ?4)
-        ON CONFLICT(scope_type, scope_id, counter_name) DO UPDATE SET
-            value = value + excluded.value,
-            updated_at = CURRENT_TIMESTAMP",
-        params![scope_type, scope_id, counter_name, amount as i64],
-    )
+    match now {
+        Some(now) => tx.execute(
+            "INSERT INTO runtime_counters (
+                scope_type,
+                scope_id,
+                counter_name,
+                value,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(scope_type, scope_id, counter_name) DO UPDATE SET
+                value = value + excluded.value,
+                updated_at = excluded.updated_at",
+            params![scope_type, scope_id, counter_name, amount as i64, now],
+        ),
+        None => tx.execute(
+            "INSERT INTO runtime_counters (
+                scope_type,
+                scope_id,
+                counter_name,
+                value
+            ) VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(scope_type, scope_id, counter_name) DO UPDATE SET
+                value = value + excluded.value,
+                updated_at = CURRENT_TIMESTAMP",
+            params![scope_type, scope_id, counter_name, amount as i64],
+        ),
+    }
     .map_err(|error| persistence_error("increment runtime counter", error))?;
     Ok(())
 }
@@ -299,9 +388,79 @@ fn dedupe_counter_scopes(scopes: Vec<RuntimeCounterScope>) -> Vec<RuntimeCounter
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    pub(crate) fn runtime_counter_repository_conformance<R: RuntimeCounterRepository>(store: &R) {
+        store
+            .record_runtime_counter_delta(
+                &RuntimeCounterScope::Runtime,
+                COUNTER_MESSAGES,
+                2,
+                &"2026-07-05T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        store
+            .record_runtime_counter_delta(
+                &RuntimeCounterScope::Session(SessionId::new("session-alpha")),
+                COUNTER_WAKES,
+                1,
+                &"2026-07-05T00:00:01Z".to_string(),
+            )
+            .unwrap();
+
+        let runtime_summary = store
+            .runtime_summary(&RuntimeCounterScope::Runtime)
+            .unwrap();
+        let session_summary = store
+            .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                "session-alpha",
+            )))
+            .unwrap();
+        assert_eq!(runtime_summary.messages, 2);
+        assert_eq!(session_summary.wakes, 1);
+
+        let messages = store
+            .query_runtime_counters(&RuntimeCounterQuery {
+                scope: Some(RuntimeCounterScope::Runtime),
+                counter_name: Some(COUNTER_MESSAGES.to_string()),
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].value, 2);
+
+        assert_eq!(
+            store
+                .reset_runtime_counters(
+                    &RuntimeCounterQuery {
+                        scope: Some(RuntimeCounterScope::Runtime),
+                        counter_name: Some(COUNTER_MESSAGES.to_string()),
+                        page: None,
+                    },
+                    "2026-07-05T00:00:02Z".to_string(),
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .runtime_summary(&RuntimeCounterScope::Runtime)
+                .unwrap()
+                .messages,
+            0
+        );
+        assert_eq!(
+            store
+                .runtime_summary(&RuntimeCounterScope::Session(SessionId::new(
+                    "session-alpha"
+                )))
+                .unwrap()
+                .wakes,
+            1
+        );
+    }
 
     #[test]
     fn runtime_counter_repo_records_and_resets_event_projection() {
@@ -350,6 +509,23 @@ mod tests {
 
         assert_eq!(reset, 1);
         assert_eq!(runtime.messages, 0);
+
+        drop(store);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn sqlite_runtime_counter_repository_matches_shared_contract() {
+        let db_path = std::env::temp_dir().join(format!(
+            "rusty-crew-runtime-counter-repository-contract-{}.sqlite3",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = CoordinationStore::open_file(&db_path).unwrap();
+
+        runtime_counter_repository_conformance(&store);
 
         drop(store);
         let _ = std::fs::remove_file(db_path);

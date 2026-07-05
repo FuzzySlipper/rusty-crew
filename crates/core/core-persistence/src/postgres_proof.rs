@@ -5,15 +5,21 @@
 //! so it must fail closed on schema incompatibility and report capabilities
 //! honestly while repository split/parity work continues.
 
+use crate::repos::runtime_counters::{
+    COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED,
+    COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED,
+    COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS,
+    COUNTER_TOOL_ERRORS, COUNTER_WAKES,
+};
 use crate::{
-    counter_value, default_lore_layer_config, estimate_lore_tokens, excluded_subject_match,
-    from_json_text, lore_recall_config_snapshot, memory_proposal_source_as_str,
-    normalized_optional_text, profile_memory_target_parts, repositories,
-    roleplay_lore_canon_status_as_str, roleplay_lore_layer_purpose_as_str,
-    roleplay_lore_layer_write_policy_as_str, roleplay_lore_memory_space_descriptor,
-    roleplay_lore_record_status_as_str, roleplay_lore_visibility_as_str, score_lore_recall_entry,
-    to_json_text, validate_lore_recall_query, validate_lore_recall_trace_query,
-    validate_profile_memory_key, validate_profile_memory_write, validate_provider_wire_state_key,
+    default_lore_layer_config, estimate_lore_tokens, excluded_subject_match, from_json_text,
+    lore_recall_config_snapshot, memory_proposal_source_as_str, normalized_optional_text,
+    profile_memory_target_parts, repositories, roleplay_lore_canon_status_as_str,
+    roleplay_lore_layer_purpose_as_str, roleplay_lore_layer_write_policy_as_str,
+    roleplay_lore_memory_space_descriptor, roleplay_lore_record_status_as_str,
+    roleplay_lore_visibility_as_str, score_lore_recall_entry, to_json_text,
+    validate_lore_recall_query, validate_lore_recall_trace_query, validate_profile_memory_key,
+    validate_profile_memory_write, validate_provider_wire_state_key,
     validate_roleplay_chat_layers_write, validate_roleplay_lore_entry_promotion,
     validate_roleplay_lore_fact_capture, validate_roleplay_lore_identifier,
     validate_roleplay_lore_layer_config_write, validate_roleplay_lore_layer_entry_link,
@@ -73,10 +79,7 @@ use crate::{
     WorkerPoolCompletionRequest, WorkerPoolLeaseRecord, WorkerPoolLeaseStatus,
     WorkerPoolMemberRecord, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
     WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery, WorkerRunRecord,
-    WorkerRunStatus, COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED,
-    COUNTER_DELEGATIONS_COMPLETED, COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED,
-    COUNTER_DELEGATIONS_TIMED_OUT, COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS,
-    COUNTER_TOOL_ERRORS, COUNTER_WAKES,
+    WorkerRunStatus,
 };
 use postgres::{types::ToSql, Client, GenericClient, NoTls, Row, Transaction};
 use rusty_crew_core_protocol::{
@@ -2790,22 +2793,7 @@ impl PostgresRuntimeCounterProofStore {
     }
 
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
-        let counters = self.runtime_counters(Some(scope))?;
-        Ok(RuntimeStateSummary {
-            scope: scope.clone(),
-            brain_turns: counter_value(&counters, COUNTER_BRAIN_TURNS),
-            wakes: counter_value(&counters, COUNTER_WAKES),
-            tool_calls: counter_value(&counters, COUNTER_TOOL_CALLS),
-            tool_errors: counter_value(&counters, COUNTER_TOOL_ERRORS),
-            delegations_created: counter_value(&counters, COUNTER_DELEGATIONS_CREATED),
-            delegations_completed: counter_value(&counters, COUNTER_DELEGATIONS_COMPLETED),
-            delegations_failed: counter_value(&counters, COUNTER_DELEGATIONS_FAILED),
-            delegations_timed_out: counter_value(&counters, COUNTER_DELEGATIONS_TIMED_OUT),
-            delegations_cancelled: counter_value(&counters, COUNTER_DELEGATIONS_CANCELLED),
-            messages: counter_value(&counters, COUNTER_MESSAGES),
-            completions: counter_value(&counters, COUNTER_COMPLETIONS),
-            queue_expirations: counter_value(&counters, COUNTER_QUEUE_EXPIRATIONS),
-        })
+        crate::repos::runtime_counters::RuntimeCounterRepository::runtime_summary(self, scope)
     }
 
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
@@ -9279,6 +9267,41 @@ fn postgres_scheduled_run_trigger_from_str(raw: &str) -> CoreResult<ScheduledRun
     }
 }
 
+impl crate::repos::runtime_counters::RuntimeCounterRepository for PostgresRuntimeCounterProofStore {
+    #[cfg(test)]
+    fn record_runtime_counter_delta(
+        &self,
+        scope: &RuntimeCounterScope,
+        counter_name: &str,
+        amount: u64,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        PostgresRuntimeCounterProofStore::increment_counter(self, scope, counter_name, amount, now)
+    }
+
+    fn runtime_counters(
+        &self,
+        scope: Option<&RuntimeCounterScope>,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        PostgresRuntimeCounterProofStore::runtime_counters(self, scope)
+    }
+
+    fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        PostgresRuntimeCounterProofStore::query_runtime_counters(self, query)
+    }
+
+    fn reset_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+        now: IsoTimestamp,
+    ) -> CoreResult<u64> {
+        PostgresRuntimeCounterProofStore::reset_runtime_counters(self, query, now)
+    }
+}
+
 fn runtime_counter_scope_parts(scope: &RuntimeCounterScope) -> (&'static str, String) {
     match scope {
         RuntimeCounterScope::Runtime => ("runtime", "_global".to_string()),
@@ -14380,10 +14403,11 @@ mod tests {
     use crate::repos::attachments::conformance::{
         run_attachment_data_bank_conformance, AttachmentDataBankConformanceStore,
     };
+    use crate::repos::runtime_counters::{COUNTER_MESSAGES, COUNTER_WAKES};
     use crate::{
         CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
         RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
-        RoleplayLoreVisibility, COUNTER_MESSAGES, COUNTER_WAKES,
+        RoleplayLoreVisibility,
     };
     use rusty_crew_core_protocol::{
         AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource,
@@ -16538,6 +16562,23 @@ mod tests {
                 .map(|count| count.rows),
             Some(2)
         );
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_runtime_counter_repository_matches_shared_contract() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!(
+                "skipping PostgreSQL runtime counter repository proof; no database URL env is set"
+            );
+            return;
+        };
+        let schema = unique_schema("rusty_crew_counter_repo_contract");
+        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+
+        crate::repos::runtime_counters::tests::runtime_counter_repository_conformance(&store);
 
         store.drop_schema_for_test().unwrap();
     }

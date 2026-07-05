@@ -93,12 +93,9 @@ pub(crate) use repos::roleplay_lore::{
     validate_roleplay_lore_record_id, validate_roleplay_lore_write, validate_unique_roleplay_ids,
 };
 pub(crate) use repos::runtime_counters::{
-    counter_value, increment_counter_for_scopes_in_tx, increment_event_counters_in_tx,
-    load_runtime_counters, query_runtime_counters, reset_runtime_counters, COUNTER_BRAIN_TURNS,
-    COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED, COUNTER_DELEGATIONS_COMPLETED,
-    COUNTER_DELEGATIONS_CREATED, COUNTER_DELEGATIONS_FAILED, COUNTER_DELEGATIONS_TIMED_OUT,
-    COUNTER_MESSAGES, COUNTER_QUEUE_EXPIRATIONS, COUNTER_TOOL_CALLS, COUNTER_TOOL_ERRORS,
-    COUNTER_WAKES,
+    increment_counter_for_scopes_in_tx, increment_event_counters_in_tx, load_runtime_counters,
+    query_runtime_counters, reset_runtime_counters, RuntimeCounterRepository,
+    COUNTER_QUEUE_EXPIRATIONS,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use repos::service_config::{
@@ -1457,23 +1454,24 @@ impl CoreCoordinationStore {
         }
     }
 
+    fn runtime_counter_repository(&self) -> &dyn RuntimeCounterRepository {
+        match self {
+            Self::Sqlite(sqlite) => sqlite,
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.as_ref(),
+        }
+    }
+
     pub fn query_runtime_counters(
         &self,
         query: &RuntimeCounterQuery,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
-        match self {
-            Self::Sqlite(sqlite) => sqlite.query_runtime_counters(query),
-            #[cfg(feature = "postgres")]
-            Self::Postgres(postgres) => postgres.query_runtime_counters(query),
-        }
+        self.runtime_counter_repository()
+            .query_runtime_counters(query)
     }
 
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
-        match self {
-            Self::Sqlite(sqlite) => sqlite.runtime_summary(scope),
-            #[cfg(feature = "postgres")]
-            Self::Postgres(postgres) => postgres.runtime_summary(scope),
-        }
+        self.runtime_counter_repository().runtime_summary(scope)
     }
 
     pub fn reset_runtime_counters(
@@ -1481,11 +1479,8 @@ impl CoreCoordinationStore {
         query: &RuntimeCounterQuery,
         now: IsoTimestamp,
     ) -> CoreResult<u64> {
-        match self {
-            Self::Sqlite(sqlite) => sqlite.reset_runtime_counters(query, now),
-            #[cfg(feature = "postgres")]
-            Self::Postgres(postgres) => postgres.reset_runtime_counters(query, now),
-        }
+        self.runtime_counter_repository()
+            .reset_runtime_counters(query, now)
     }
 
     pub fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
@@ -5746,16 +5741,14 @@ impl CoordinationStore {
         &self,
         scope: Option<&RuntimeCounterScope>,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
-        let conn = self.conn()?;
-        load_runtime_counters(&conn, scope)
+        RuntimeCounterRepository::runtime_counters(self, scope)
     }
 
     pub fn query_runtime_counters(
         &self,
         query: &RuntimeCounterQuery,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
-        let conn = self.conn()?;
-        query_runtime_counters(&conn, query)
+        RuntimeCounterRepository::query_runtime_counters(self, query)
     }
 
     pub fn reset_runtime_counters(
@@ -5763,27 +5756,11 @@ impl CoordinationStore {
         query: &RuntimeCounterQuery,
         now: IsoTimestamp,
     ) -> CoreResult<u64> {
-        let conn = self.conn()?;
-        reset_runtime_counters(&conn, query, &now)
+        RuntimeCounterRepository::reset_runtime_counters(self, query, now)
     }
 
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
-        let counters = self.runtime_counters(Some(scope))?;
-        Ok(RuntimeStateSummary {
-            scope: scope.clone(),
-            brain_turns: counter_value(&counters, COUNTER_BRAIN_TURNS),
-            wakes: counter_value(&counters, COUNTER_WAKES),
-            tool_calls: counter_value(&counters, COUNTER_TOOL_CALLS),
-            tool_errors: counter_value(&counters, COUNTER_TOOL_ERRORS),
-            delegations_created: counter_value(&counters, COUNTER_DELEGATIONS_CREATED),
-            delegations_completed: counter_value(&counters, COUNTER_DELEGATIONS_COMPLETED),
-            delegations_failed: counter_value(&counters, COUNTER_DELEGATIONS_FAILED),
-            delegations_timed_out: counter_value(&counters, COUNTER_DELEGATIONS_TIMED_OUT),
-            delegations_cancelled: counter_value(&counters, COUNTER_DELEGATIONS_CANCELLED),
-            messages: counter_value(&counters, COUNTER_MESSAGES),
-            completions: counter_value(&counters, COUNTER_COMPLETIONS),
-            queue_expirations: counter_value(&counters, COUNTER_QUEUE_EXPIRATIONS),
-        })
+        RuntimeCounterRepository::runtime_summary(self, scope)
     }
 
     pub fn schema_version(&self) -> CoreResult<i64> {
@@ -5795,7 +5772,54 @@ impl CoordinationStore {
         let conn = self.conn()?;
         load_schema_migration_records(&conn)
     }
+}
 
+impl RuntimeCounterRepository for CoordinationStore {
+    #[cfg(test)]
+    fn record_runtime_counter_delta(
+        &self,
+        scope: &RuntimeCounterScope,
+        counter_name: &str,
+        amount: u64,
+        now: &IsoTimestamp,
+    ) -> CoreResult<()> {
+        let mut conn = self.conn()?;
+        repos::runtime_counters::record_runtime_counter_delta(
+            &mut conn,
+            scope,
+            counter_name,
+            amount,
+            now,
+        )
+    }
+
+    fn runtime_counters(
+        &self,
+        scope: Option<&RuntimeCounterScope>,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        let conn = self.conn()?;
+        load_runtime_counters(&conn, scope)
+    }
+
+    fn query_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+    ) -> CoreResult<Vec<RuntimeCounterRecord>> {
+        let conn = self.conn()?;
+        query_runtime_counters(&conn, query)
+    }
+
+    fn reset_runtime_counters(
+        &self,
+        query: &RuntimeCounterQuery,
+        now: IsoTimestamp,
+    ) -> CoreResult<u64> {
+        let conn = self.conn()?;
+        reset_runtime_counters(&conn, query, &now)
+    }
+}
+
+impl CoordinationStore {
     pub fn installed_module_schemas(&self) -> CoreResult<Vec<InstalledModuleSchemaRecord>> {
         let conn = self.conn()?;
         load_installed_module_schema_records(&conn)
@@ -10081,6 +10105,7 @@ fn persistence_error(context: &str, error: impl std::error::Error) -> CoreError 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repos::runtime_counters::COUNTER_MESSAGES;
     use rusty_crew_core_protocol::{
         AgentMessage, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
         MemoryEvidenceRef, MemoryExportImportPolicy, MemoryFieldType, MemoryIndexingPolicy,
