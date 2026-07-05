@@ -62,6 +62,39 @@ inventory when a co-located `.node` binary is loaded. A stale committed binary
 now fails during `loadNativeBridge()` with a `NativeBridgeContractError`
 instead of failing later as a missing native function.
 
+## Wire-Shape Versioning Policy
+
+The operation inventory catches stale binaries when an operation is added,
+removed, or reordered. It does not catch a stale native addon when an existing
+operation keeps the same name but changes a payload shape. The intended next
+guard is a generated **wire-shape fingerprint**:
+
+1. `core-bridge-codegen` emits a deterministic SHA-256 over the Rust-authored
+   bridge validation fixture output plus the ordered manifest operation list.
+2. The expected fingerprint is checked into the repo beside the bridge
+   manifest/fixtures and exported through the TypeScript contracts package.
+3. `core-bridge-api` includes the same checked-in fingerprint, and
+   `core-bridge-node` exposes it through `NativeBridgeBinding`.
+4. `loadNativeBridge()` asserts native `manifestVersion`, operation names, and
+   wire-shape fingerprint before returning a usable bridge module.
+5. `verify:offline` runs a fingerprint drift check so a Rust wire-shape change
+   fails until fixtures and the checked-in fingerprint are regenerated.
+
+This fingerprint is a stale-binary guard, not a replacement for schema
+coverage. It protects only the wire families represented in the Rust fixture
+file. When a bridge family is not fixture-backed yet, a wire-shape change must
+also extend fixture coverage or explicitly bump `MANIFEST_VERSION`.
+
+`MANIFEST_VERSION` remains a coarse compatibility version. Bump it when a
+change alters bridge semantics that are not captured by the fixture fingerprint,
+including:
+
+- buffer lease/ownership rules;
+- error-channel shape or retryability semantics;
+- operation direction or lifecycle ordering;
+- native loader compatibility assumptions;
+- any intentionally breaking change to an uncovered bridge family.
+
 `schemars` remains the preferred future path for full JSON Schema generation,
 but this fixture scaffold avoids forcing schema derives through every nested
 protocol type before the checker workflow is proven.
@@ -100,11 +133,13 @@ Runtime validation currently wraps:
    the Rust protocol type or a small wrapper struct when the bridge returns an
    envelope.
 4. Regenerate fixtures with `npm run codegen:bridge-fixtures`.
-5. Add or extend the matching TypeBox schema in
+5. After the wire-shape fingerprint guard lands, regenerate the fingerprint and
+   commit it with the fixture change.
+6. Add or extend the matching TypeBox schema in
    `ts/packages/native-bridge/src/bridge-validation-schemas.ts`.
-6. Validate the fixture in
+7. Validate the fixture in
    `ts/packages/native-bridge/src/smoke-bridge-validation.ts`.
-7. Wrap the native bridge parse/cast chokepoint with `validateBridgeValue`.
-8. Run `npm run smoke:bridge-contract-parity`,
+8. Wrap the native bridge parse/cast chokepoint with `validateBridgeValue`.
+9. Run `npm run smoke:bridge-contract-parity`,
    `npm run smoke:bridge-native-surface`, `npm run smoke:bridge-fixture-drift`,
    `npm run smoke:bridge-validation`, and the relevant package typecheck/smoke.
