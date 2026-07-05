@@ -20,7 +20,7 @@
     "codegen:bridge-fixtures": "cargo run -p rusty-crew-core-bridge-codegen -- emit-fixtures > ts/packages/native-bridge/bridge-validation-rust-fixtures.json",
     "smoke": "node tools/smoke-runner.mjs",
     "smoke:bridge-contract-parity": "cargo run -p rusty-crew-core-bridge-codegen -- check-contracts ts/packages/contracts/src/index.ts",
-    "smoke:bridge-native-surface": "cargo run -p rusty-crew-core-bridge-codegen -- check-native-surface ts/packages/native-bridge/native/index.d.ts",
+    "smoke:bridge-native-surface": "npm run build:native && cargo run -p rusty-crew-core-bridge-codegen -- check-native-surface ts/packages/native-bridge/native/index.d.ts",
     "smoke:bridge-fixture-drift": "cargo run -p rusty-crew-core-bridge-codegen -- check-fixtures ts/packages/native-bridge/bridge-validation-rust-fixtures.json",
     "smoke:bridge-validation": "npm run smoke:bridge-validation -w @rusty-crew/native-bridge",
     "smoke:brain": "npm run smoke:wake -w @rusty-crew/brain-island",
