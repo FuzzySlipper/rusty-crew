@@ -52,6 +52,13 @@ fn main() -> Result<()> {
             check_contracts(Path::new(&path))?;
             println!("bridge contract operation parity check passed");
         }
+        Some("check-native-surface") => {
+            let path = args
+                .next()
+                .context("check-native-surface requires a native index.d.ts path")?;
+            check_native_surface(Path::new(&path))?;
+            println!("bridge native surface inventory check passed");
+        }
         Some("--help" | "-h") => {
             print_help();
         }
@@ -72,6 +79,7 @@ Commands:
   emit-fixtures                   Emit Rust-authored bridge validation fixtures as JSON.
   check-fixtures <path>           Compare <path> with freshly emitted fixtures.
   check-contracts <path>          Check manifest/Rust/TS operation inventory parity.
+  check-native-surface <path>     Check generated napi *Json methods have manifest entries.
 
 The fixtures are an incremental drift-check scaffold. They do not replace the
 bridge manifest operation inventory; they give TS validation smokes a Rust
@@ -127,6 +135,24 @@ fn check_contracts(contracts_index_path: &Path) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+fn check_native_surface(native_index_path: &Path) -> Result<()> {
+    let manifest_operation_names = operation_names_from_manifest(MANIFEST_TEXT)?;
+    let native_source = fs::read_to_string(native_index_path).with_context(|| {
+        format!(
+            "failed to read native bridge declaration file {}",
+            native_index_path.display()
+        )
+    })?;
+    let native_json_operations = operation_names_from_native_json_methods(&native_source)?;
+
+    ensure_operations_cover_native_json_methods(
+        "bridge-manifest.toml [[operation]] names",
+        &manifest_operation_names,
+        "generated napi NativeBridgeBinding *Json methods",
+        &native_json_operations,
+    )
 }
 
 fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
@@ -224,6 +250,55 @@ fn operation_names_from_ts_contracts(source: &str) -> Result<Vec<String>> {
     Ok(names)
 }
 
+fn operation_names_from_native_json_methods(source: &str) -> Result<Vec<String>> {
+    let marker = "export declare class NativeBridgeBinding {";
+    let start = source
+        .find(marker)
+        .context("failed to find NativeBridgeBinding class in native declaration file")?
+        + marker.len();
+    let rest = &source[start..];
+    let end = rest
+        .find("\n}")
+        .context("failed to find end of NativeBridgeBinding class in native declaration file")?;
+    let block = &rest[..end];
+    let mut names = Vec::new();
+
+    for line in block.lines() {
+        let trimmed = line.trim();
+        let Some(open_paren) = trimmed.find('(') else {
+            continue;
+        };
+        let method_name = &trimmed[..open_paren];
+        if !method_name.ends_with("Json") {
+            continue;
+        }
+        names.push(camel_json_method_to_operation_name(method_name)?);
+    }
+
+    ensure_no_duplicate_operations("generated napi NativeBridgeBinding *Json methods", &names)?;
+    Ok(names)
+}
+
+fn camel_json_method_to_operation_name(method_name: &str) -> Result<String> {
+    let stem = method_name
+        .strip_suffix("Json")
+        .with_context(|| format!("native method `{method_name}` does not end with Json"))?;
+    let mut output = String::new();
+    for (index, ch) in stem.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if index > 0 {
+                output.push('_');
+            }
+            output.push(ch.to_ascii_lowercase());
+        } else if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            output.push(ch);
+        } else {
+            bail!("native method `{method_name}` contains unsupported character `{ch}`");
+        }
+    }
+    Ok(output)
+}
+
 fn parse_quoted_assignment_value(line: &str, key: &str) -> Result<String> {
     let prefix = format!("{key} = \"");
     let value = line
@@ -264,6 +339,27 @@ fn compare_operation_sets(
     let extra_in_left = left_set.difference(&right_set).cloned().collect::<Vec<_>>();
     bail!(
         "bridge operation inventory drift between {left_label} and {right_label}; missing from {left_label}: {missing_from_left:?}; extra in {left_label}: {extra_in_left:?}"
+    );
+}
+
+fn ensure_operations_cover_native_json_methods(
+    manifest_label: &str,
+    manifest_names: &[String],
+    native_label: &str,
+    native_names: &[String],
+) -> Result<()> {
+    let manifest_set = manifest_names.iter().cloned().collect::<BTreeSet<_>>();
+    let missing_from_manifest = native_names
+        .iter()
+        .filter(|name| !manifest_set.contains(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if missing_from_manifest.is_empty() {
+        return Ok(());
+    }
+
+    bail!(
+        "bridge native surface inventory drift between {manifest_label} and {native_label}; missing from {manifest_label}: {missing_from_manifest:?}"
     );
 }
 

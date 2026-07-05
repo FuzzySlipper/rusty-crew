@@ -3,9 +3,10 @@
 Rusty Crew is moving bridge contract checks in three steps:
 
 1. Manifest/Rust/TypeScript operation-inventory parity.
-2. TypeScript runtime validation at native bridge chokepoints.
-3. Rust-authored wire fixtures emitted by `core-bridge-codegen`.
-4. Later generated schemas/bindings for full operation families.
+2. Generated napi `*Json` method surface coverage against the manifest.
+3. TypeScript runtime validation at native bridge chokepoints.
+4. Rust-authored wire fixtures emitted by `core-bridge-codegen`.
+5. Later generated schemas/bindings for full operation families.
 
 The active incremental source is:
 
@@ -40,6 +41,13 @@ same operation set as Rust. The TypeScript contract list must match Rust in
 both membership and order, and `@rusty-crew/native-bridge` imports that list
 instead of keeping a fourth operation-name mirror.
 
+`smoke:bridge-native-surface` parses the generated napi declaration file at
+`ts/packages/native-bridge/native/index.d.ts`, derives operation names from
+`NativeBridgeBinding` methods ending in `Json`, and fails when any such method
+is missing from the manifest. This catches drift where a Rust `#[napi]`
+JSON-string operation is exported without being inventoried in the bridge
+contract.
+
 `smoke:bridge-fixture-drift` compares the checked-in file with fresh Rust
 serialization output. `smoke:bridge-validation` validates those Rust fixtures
 against the TypeBox bridge schemas and asserts that each object key present in
@@ -64,7 +72,7 @@ Checker-backed Rust fixtures currently cover:
 
 | Family | Operations / Shape | TS Validation Surface |
 | --- | --- | --- |
-| Wake/session/action | `project_body_state_json`, `list_sessions`, Responses-style brain wake stream result | `rawBodyStateSchema`, `rawSessionStateArraySchema`, `rawOpenAiResponsesBrainRunResultSchema` |
+| Wake/session/action | `project_body_state`, `list_sessions`, Responses-style brain wake stream result | `rawBodyStateSchema`, `rawSessionStateArraySchema`, `rawOpenAiResponsesBrainRunResultSchema` |
 | Profile/model admin | profile registry records and model provider records returned by admin bridge methods | `rawProfileRegistryRecordSchema`, `rawModelProviderRecordSchema` |
 
 Runtime validation currently wraps:
@@ -86,7 +94,8 @@ Runtime validation currently wraps:
    `crates/bridge/core-bridge-api/bridge-manifest.toml`,
    `core_bridge_api::OPERATION_NAMES`, and
    `ts/packages/contracts/src/index.ts` `manifestOperationNames`.
-2. Run `npm run smoke:bridge-contract-parity` before touching runtime code.
+2. Run `npm run smoke:bridge-contract-parity` and
+   `npm run smoke:bridge-native-surface` before touching runtime code.
 3. Add a Rust fixture in `crates/bridge/core-bridge-codegen/src/main.rs` using
    the Rust protocol type or a small wrapper struct when the bridge returns an
    envelope.
@@ -97,5 +106,5 @@ Runtime validation currently wraps:
    `ts/packages/native-bridge/src/smoke-bridge-validation.ts`.
 7. Wrap the native bridge parse/cast chokepoint with `validateBridgeValue`.
 8. Run `npm run smoke:bridge-contract-parity`,
-   `npm run smoke:bridge-fixture-drift`, `npm run smoke:bridge-validation`, and
-   the relevant package typecheck/smoke.
+   `npm run smoke:bridge-native-surface`, `npm run smoke:bridge-fixture-drift`,
+   `npm run smoke:bridge-validation`, and the relevant package typecheck/smoke.

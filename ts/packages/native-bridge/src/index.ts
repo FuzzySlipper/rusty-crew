@@ -2887,7 +2887,7 @@ function createNativeBridgeModule(
     diagnosticProjectBodyStateJson: async (sessionId) => {
       const bytes = binding.projectBodyStateJson(sessionId);
       validateBridgeJsonText({
-        operation: "project_body_state_json",
+        operation: "project_body_state",
         direction: "rust_to_ts",
         schema: rawBodyStateSchema,
         text: new TextDecoder().decode(bytes),

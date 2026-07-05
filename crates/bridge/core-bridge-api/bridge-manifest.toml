@@ -113,6 +113,54 @@ output = "()"
 errors = "core_protocol::CoreError"
 summary = "Apply provider-owned wire-state replacement or clear output for a brain wake."
 
+# Native brain modules that run inside the Rust bridge crate but are invoked by
+# the TS service host.
+
+[[operation]]
+name = "run_openai_responses_brain"
+surface = "stable"
+direction = "ts_to_rust"
+input = "openai_responses_brain::OpenAiResponsesBrainRunInput"
+output = "openai_responses_brain::OpenAiResponsesBrainRunOutput"
+errors = "core_protocol::CoreError"
+summary = "Run one blocking OpenAI Responses brain wake through the Rust-native brain module."
+
+[[operation]]
+name = "start_openai_responses_brain"
+surface = "stable"
+direction = "ts_to_rust"
+input = "openai_responses_brain::OpenAiResponsesBrainRunInput"
+output = "{ wake_id: String }"
+errors = "core_protocol::CoreError"
+summary = "Start one buffered OpenAI Responses brain wake and return the stream registry id."
+
+[[operation]]
+name = "drain_openai_responses_brain_stream"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(wake_id: String, max_items: Option<u32>)"
+output = "Vec<core_protocol::BrainWakeStreamItem>"
+errors = "core_protocol::CoreError"
+summary = "Drain buffered OpenAI Responses stream items for a running native brain wake."
+
+[[operation]]
+name = "submit_openai_responses_tool_output"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ wake_id, call_id, output }"
+output = "{ accepted: bool }"
+errors = "core_protocol::CoreError"
+summary = "Submit one tool result into a buffered OpenAI Responses brain wake."
+
+[[operation]]
+name = "exchange_openai_oauth_code"
+surface = "stable"
+direction = "ts_to_rust"
+input = "openai_responses_brain::OpenAiOauthCodeExchangeInput"
+output = "openai_responses_brain::OpenAiOauthCodeExchangeOutput"
+errors = "core_protocol::CoreError"
+summary = "Exchange an OpenAI OAuth authorization code for the stored provider secret envelope."
+
 # Platform adapters: external systems inject/project through the bus.
 
 [[operation]]
@@ -356,6 +404,15 @@ input = "unit"
 output = "Vec<core_protocol::SessionState>"
 errors = "core_protocol::CoreError"
 summary = "List Rust-owned runtime sessions for diagnostics and debug context."
+
+[[operation]]
+name = "project_body_state"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionId"
+output = "core_protocol::BodyState"
+errors = "core_protocol::CoreError"
+summary = "Project a frozen body-state snapshot for diagnostics and wake assembly."
 
 [[operation]]
 name = "provider_state_diagnostics"
@@ -947,6 +1004,51 @@ errors = "core_protocol::CoreError"
 summary = "Run explicit runtime maintenance such as queue expiry, queue purge, optimize, and WAL checkpoint."
 
 [[operation]]
+name = "list_memory_space_descriptors"
+surface = "stable"
+direction = "ts_to_rust"
+input = "unit"
+output = "Vec<core_protocol::MemorySpaceDescriptor>"
+errors = "core_protocol::CoreError"
+summary = "List memory-space descriptors for profile/session memory tooling."
+
+[[operation]]
+name = "query_session_memory_records"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::SessionMemoryQuery"
+output = "Vec<core_protocol::SessionMemoryRecord>"
+errors = "core_protocol::CoreError"
+summary = "Query durable branch-aware session memory records through the Rust memory repository."
+
+[[operation]]
+name = "build_session_memory_prompt_context"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BranchAwareSessionMemoryQuery"
+output = "core_protocol::SessionMemoryPromptContext"
+errors = "core_protocol::CoreError"
+summary = "Build model-facing session memory prompt context from durable memory records."
+
+[[operation]]
+name = "save_memory_proposal"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::MemoryProposalEnvelope"
+output = "core_protocol::MemoryProposalRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist a governed memory proposal without directly mutating accepted memory."
+
+[[operation]]
+name = "list_memory_proposals"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::MemoryProposalQuery"
+output = "Vec<core_protocol::MemoryProposalRecord>"
+errors = "core_protocol::CoreError"
+summary = "List governed memory proposals for review and capture workflows."
+
+[[operation]]
 name = "save_session_activity_digest"
 surface = "stable"
 direction = "ts_to_rust"
@@ -981,6 +1083,15 @@ input = "core_protocol::ContextCompactionArtifactQuery"
 output = "Vec<core_protocol::ContextCompactionArtifact>"
 errors = "core_protocol::CoreError"
 summary = "List derived context compaction artifacts for session context diagnostics and strategy readback."
+
+[[operation]]
+name = "record_memory_governance_decision"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::MemoryGovernanceDecisionInput"
+output = "core_protocol::MemoryGovernanceDecisionRecord"
+errors = "core_protocol::CoreError"
+summary = "Persist an explicit memory governance decision for audit and curator workflows."
 
 # Observability/event projection.
 
