@@ -11449,7 +11449,19 @@ mod tests {
         assert_eq!(promoted.layer_id, "layer-world");
         assert_eq!(promoted.record.record_id, "lore-promoted-orchard");
         assert_eq!(promoted.record.title, "Silver Orchard");
-        assert_eq!(promoted.record.supersedes_record_id, None);
+        assert_eq!(
+            promoted.record.supersedes_record_id.as_deref(),
+            Some("lore-captured-orchard")
+        );
+        let promoted_source = store
+            .get_roleplay_lore_record("lore-captured-orchard")
+            .unwrap()
+            .unwrap();
+        assert_eq!(promoted_source.status, RoleplayLoreRecordStatus::Superseded);
+        assert_eq!(
+            promoted_source.superseded_by_record_id.as_deref(),
+            Some("lore-promoted-orchard")
+        );
         assert_eq!(
             store
                 .roleplay_lore_provenance_events("lore-promoted-orchard")

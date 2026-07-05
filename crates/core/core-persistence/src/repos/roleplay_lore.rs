@@ -672,10 +672,17 @@ impl CoordinationStore {
             source: source.record.source,
             confidence: source.record.confidence,
             durability_rationale: source.record.durability_rationale.clone(),
-            supersedes_record_id: None,
+            supersedes_record_id: Some(promotion.source_record_id.clone()),
             now: promotion.now.clone(),
         };
         insert_roleplay_lore_record_in_tx(&tx, &promoted)?;
+        mark_roleplay_lore_superseded_in_tx(
+            &tx,
+            &source.record.record_id,
+            &promotion.new_record_id,
+            source.record.revision + 1,
+            &promotion.now,
+        )?;
         insert_lore_layer_entry_in_tx(
             &tx,
             &RoleplayLoreLayerEntryLink {

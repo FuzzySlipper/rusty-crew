@@ -122,6 +122,14 @@ try {
     "rp-clockmaker-song-promoted",
   );
   assert.equal(promoted.body.data.entry.title, "Clockmaker Song");
+  assert.equal(
+    promoted.body.data.supersession.supersedesRecordId,
+    "rp-clockmaker-song",
+  );
+  assert.equal(
+    promoted.body.data.supersession.supersedes.record_id,
+    "rp-clockmaker-song",
+  );
   assert.equal(promoted.body.data.source.layerId, "rp-world");
   assert.equal(promoted.body.data.target.layerId, "rp-manual");
   assert.equal(promoted.body.data.layerEntries[0]?.layer_id, "rp-manual");
@@ -145,8 +153,29 @@ try {
     "rp-clockmaker-song-promoted",
   );
   assert.equal(
+    promotedReadback.body.data.supersession.supersedesRecordId,
+    "rp-clockmaker-song",
+  );
+  assert.equal(
     promotedReadback.body.data.layerEntries[0]?.layer_id,
     "rp-manual",
+  );
+
+  const promotedSourceReadback = await get(
+    "/v1/admin/roleplay/lore/entries/rp-clockmaker-song?layer_id=rp-world",
+  );
+  assert.equal(
+    promotedSourceReadback.status,
+    200,
+    JSON.stringify(promotedSourceReadback.body),
+  );
+  assert.equal(
+    promotedSourceReadback.body.data.supersession.supersededByRecordId,
+    "rp-clockmaker-song-promoted",
+  );
+  assert.equal(
+    promotedSourceReadback.body.data.supersession.supersededBy.record_id,
+    "rp-clockmaker-song-promoted",
   );
 
   const promotedSearch = await get(
@@ -197,7 +226,7 @@ try {
     clockmakerSearch.body.data.entries
       .map((entry: Record<string, unknown>) => entry.record_id)
       .sort(),
-    ["rp-clockmaker-song", "rp-clockmaker-song-promoted"],
+    ["rp-clockmaker-song-promoted"],
   );
   assert.equal(clockmakerSearch.body.data.layerContext.source, "profile");
 
