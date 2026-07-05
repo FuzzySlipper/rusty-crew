@@ -11,12 +11,14 @@ import {
   type NativeBridgeModule,
 } from "@rusty-crew/native-bridge";
 import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
+import { MemoryToolCallDebugStore } from "./tool-call-debug-store.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-read-api-"));
 const port = await openPort();
 const mcpPort = await openPort();
 const token = "rusty-view-chat-token";
 const retainedDeltaCount = 7_300;
+const toolCallDebugStore = new MemoryToolCallDebugStore();
 writeRuntimeConfig(root, mcpPort);
 const mcpServer = await startMcpServer(mcpPort);
 let host = await startHost();
@@ -364,7 +366,11 @@ try {
   );
   assert.match(
     String(failedCompletion?.payload?.summary ?? ""),
-    /Completed tool calls before failure: 2/,
+    /Tool calls reporting unsuccessful results: rusty_view_unsuccessful_tool \(memory_client_unavailable\)/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Completed tool calls before failure: 3/,
   );
   assert.match(
     String(failedCompletion?.payload?.summary ?? ""),
@@ -1093,7 +1099,7 @@ try {
       actor: { id: "human-operator", kind: "human" },
     },
   );
-  assert.equal(newCommand.status, 200);
+  assert.equal(newCommand.status, 200, JSON.stringify(newCommand.body));
   assert.equal(newCommand.body.data.command_name, "new");
   assert.equal(newCommand.body.data.status, "completed");
   assert.equal(newCommand.body.data.old_session_id, "chat-session");
@@ -1140,7 +1146,10 @@ try {
 }
 
 async function startHost(extraEnv: Record<string, string> = {}) {
-  const bridge = withLiveWakeEventsBridge(await loadNativeBridge());
+  const bridge = withLiveWakeEventsBridge(
+    await loadNativeBridge(),
+    toolCallDebugStore,
+  );
   return startRustyCrewServiceHost({
     env: {
       RUSTY_CREW_DATA_DIR: root,
@@ -1153,6 +1162,7 @@ async function startHost(extraEnv: Record<string, string> = {}) {
       ...extraEnv,
     },
     bridge,
+    toolCallDebugStore,
   });
 }
 
@@ -1328,6 +1338,7 @@ interface SseEvent {
 
 function withLiveWakeEventsBridge(
   bridge: NativeBridgeModule,
+  debugStore: MemoryToolCallDebugStore,
 ): NativeBridgeModule {
   return {
     ...bridge,
@@ -1335,6 +1346,36 @@ function withLiveWakeEventsBridge(
       const wrappedExecutor: BrainWakeExecutor = {
         wake: async (request, buffers) => {
           if (request.sessionId === "chat-fail-session") {
+            const unsuccessfulDebug = debugStore.start({
+              toolCallId: "rusty-view-unsuccessful-tool-call",
+              sessionId: request.sessionId,
+              wakeId: request.wakeId,
+              toolName: "rusty_view_unsuccessful_tool",
+              arguments: { query: "unavailable memory" },
+              sourceMetadata: {
+                source: "local",
+                serverNames: [],
+                sourceToolName: "rusty_view_unsuccessful_tool",
+              },
+            });
+            debugStore.finish({
+              debugDetailId: unsuccessfulDebug.debug_detail_id,
+              finalResult: {
+                content: [
+                  {
+                    type: "text",
+                    text: "MEMORY_TOOL_RESULT ok=false operation=search action=failed reason=memory_client_unavailable",
+                  },
+                ],
+                details: {
+                  ok: false,
+                  operation: "search",
+                  action: "failed",
+                  reasonCode: "memory_client_unavailable",
+                  retryable: true,
+                },
+              },
+            });
             await submitLiveWakeEvents(bridge, [
               {
                 wakeId: request.wakeId,
@@ -1387,6 +1428,35 @@ function withLiveWakeEventsBridge(
                   type: "tool_call_finished",
                   toolName: "rusty_view_failure_tool",
                   isError: true,
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_unsuccessful_tool",
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "rusty_view_unsuccessful_tool",
+                    debugDetailId: unsuccessfulDebug.debug_detail_id,
+                  },
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_unsuccessful_tool",
+                  isError: false,
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "rusty_view_unsuccessful_tool",
+                    debugDetailId: unsuccessfulDebug.debug_detail_id,
+                  },
                 },
               },
               {

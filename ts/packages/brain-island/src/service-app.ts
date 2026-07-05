@@ -334,6 +334,7 @@ export interface RustyCrewServiceAppOptions {
   config?: RustyCrewServiceConfig;
   bridge?: NativeBridgeModule;
   adapterFactories: ServiceAdapterFactories;
+  toolCallDebugStore?: ToolCallDebugStore;
   now?: () => string;
 }
 
@@ -595,9 +596,11 @@ export async function createRustyCrewServiceApp(
       now: options.now ?? (() => new Date().toISOString()),
     });
     let liveState: ServiceState | undefined;
-    const toolCallDebugStore = new MemoryToolCallDebugStore({
-      now: options.now,
-    });
+    const toolCallDebugStore =
+      options.toolCallDebugStore ??
+      new MemoryToolCallDebugStore({
+        now: options.now,
+      });
     const providerRequestDebugStore = new MemoryProviderRequestDebugStore({
       now: options.now,
     });

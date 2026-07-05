@@ -4755,7 +4755,9 @@ function toSessionState(state: RawSessionState): SessionState {
           name: tool.name,
           description: tool.description,
           inputSchema:
-            tool.input_schema as SessionState["toolProfile"]["tools"][number]["inputSchema"],
+            typeof tool.input_schema === "number"
+              ? (tool.input_schema as SessionState["toolProfile"]["tools"][number]["inputSchema"])
+              : undefined,
         })) ?? [],
     },
     historyWindow: state.history_window

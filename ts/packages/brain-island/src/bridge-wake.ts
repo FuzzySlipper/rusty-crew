@@ -278,7 +278,8 @@ function toToolDescriptor(
   return {
     name: tool.name,
     description: tool.description,
-    inputSchema: tool.input_schema,
+    inputSchema:
+      typeof tool.input_schema === "number" ? tool.input_schema : undefined,
   };
 }
 
@@ -503,7 +504,9 @@ type RustCoreEventJson =
 interface RustToolDescriptorJson {
   name: string;
   description: string;
-  input_schema?: BodyState["session"]["toolProfile"]["tools"][number]["inputSchema"];
+  input_schema?:
+    | BodyState["session"]["toolProfile"]["tools"][number]["inputSchema"]
+    | null;
 }
 
 type ToolEventMetadata = Extract<
