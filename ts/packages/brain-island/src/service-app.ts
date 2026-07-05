@@ -12084,6 +12084,152 @@ function ensureChatWakeTerminalEventsFromChatLog(
   }
 }
 
+function buildChatWakeFailureSummary(
+  state: ServiceState,
+  session: SessionState | undefined,
+  wakeId: string | undefined,
+  failureSummary: string,
+): string {
+  const base = failureSummary.trim() || "assistant turn failed";
+  if (!session || !wakeId) return base;
+
+  const events = (
+    state.chatEventsBySession.get(session.sessionId) ?? []
+  ).filter((event) => {
+    const payload = event.payload;
+    return isRecord(payload) && payload.wake_id === wakeId;
+  });
+  if (events.length === 0) return base;
+
+  const text = mergeTextParts(
+    events.flatMap((event) => {
+      if (event.kind !== "assistant_text_delta") return [];
+      const payload = event.payload;
+      return isRecord(payload) && typeof payload.text === "string"
+        ? [payload.text]
+        : [];
+    }),
+  ).trim();
+  const reasoningDeltaCount = events.filter(
+    (event) => event.kind === "assistant_reasoning_delta",
+  ).length;
+  const startedTools = toolCallsForChatEvents(events, "tool_call_started");
+  const completedTools = toolCallsForChatEvents(events, "tool_call_completed");
+  const failedTools = toolCallsForChatEvents(events, "tool_call_failed");
+  const unsuccessfulCompletedTools = unsuccessfulCompletedToolSummaries(
+    state,
+    session,
+    events,
+  );
+  const inFlightTools = [...startedTools].filter(
+    ([toolCallId]) =>
+      !completedTools.has(toolCallId) && !failedTools.has(toolCallId),
+  );
+  const providerStatuses = events.flatMap((event) => {
+    if (event.kind !== "provider_status") return [];
+    const payload = event.payload;
+    if (!isRecord(payload) || typeof payload.message !== "string") return [];
+    return [`${String(payload.level ?? "info")}: ${payload.message}`];
+  });
+
+  const lines = [`Assistant turn failed before it could finish: ${base}`];
+  if (text) {
+    lines.push(`Partial response before failure: ${truncate(text, 360)}`);
+  }
+  if (failedTools.size > 0) {
+    lines.push(`Failed tool calls: ${formatToolCallMap(failedTools)}.`);
+  }
+  if (unsuccessfulCompletedTools.length > 0) {
+    lines.push(
+      `Tool calls reporting unsuccessful results: ${unsuccessfulCompletedTools
+        .slice(0, 5)
+        .join("; ")}.`,
+    );
+  }
+  if (completedTools.size > 0) {
+    lines.push(`Completed tool calls before failure: ${completedTools.size}.`);
+  }
+  if (inFlightTools.length > 0) {
+    lines.push(
+      `Tool calls still in flight: ${inFlightTools
+        .slice(0, 5)
+        .map(([, toolName]) => toolName)
+        .join(", ")}.`,
+    );
+  }
+  if (reasoningDeltaCount > 0) {
+    lines.push(`Reasoning updates before failure: ${reasoningDeltaCount}.`);
+  }
+  if (providerStatuses.length > 0) {
+    lines.push(
+      `Recent provider status: ${providerStatuses.slice(-3).join("; ")}.`,
+    );
+  }
+  return truncate(lines.join("\n"), 1_500);
+}
+
+function toolCallsForChatEvents(
+  events: readonly ChatEvent[],
+  kind: ChatEvent["kind"],
+): Map<string, string> {
+  const calls = new Map<string, string>();
+  for (const event of events) {
+    if (event.kind !== kind) continue;
+    const payload = event.payload;
+    if (!isRecord(payload) || typeof payload.tool_name !== "string") {
+      continue;
+    }
+    const toolCallId =
+      typeof payload.tool_call_id === "string"
+        ? payload.tool_call_id
+        : `${kind}:${calls.size}:${payload.tool_name}`;
+    calls.set(toolCallId, payload.tool_name);
+  }
+  return calls;
+}
+
+function unsuccessfulCompletedToolSummaries(
+  state: ServiceState,
+  session: SessionState,
+  events: readonly ChatEvent[],
+): string[] {
+  return events.flatMap((event) => {
+    if (event.kind !== "tool_call_completed") return [];
+    const payload = event.payload;
+    if (!isRecord(payload)) return [];
+    const debugDetailId =
+      typeof payload.debug_detail_id === "string"
+        ? payload.debug_detail_id
+        : undefined;
+    if (!debugDetailId) return [];
+    const record = state.toolCallDebugStore.get({
+      sessionId: session.sessionId,
+      debugDetailId,
+    });
+    const detail = unsuccessfulToolDetail(record?.final_result?.value);
+    if (!detail) return [];
+    const toolName =
+      typeof payload.tool_name === "string"
+        ? payload.tool_name
+        : record?.tool_name;
+    return [toolName ? `${toolName} (${detail})` : detail];
+  });
+}
+
+function unsuccessfulToolDetail(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const details = isRecord(value.details) ? value.details : undefined;
+  if (!details) return undefined;
+  if (details.ok !== false && details.action !== "failed") return undefined;
+  if (typeof details.reasonCode === "string") return details.reasonCode;
+  if (typeof details.action === "string") return details.action;
+  return "ok=false";
+}
+
+function formatToolCallMap(calls: Map<string, string>): string {
+  return [...calls.values()].slice(0, 5).join(", ");
+}
+
 function appendChatEvent(
   state: ServiceState,
   sessionId: SessionId,
@@ -13307,7 +13453,12 @@ async function dispatchWake(
         sessionId,
         wakeId: error.wakeId,
         status: "failed",
-        summary: `wake ${error.wakeId} timed out after ${error.timeoutMs}ms`,
+        summary: buildChatWakeFailureSummary(
+          state,
+          activeWake?.session,
+          error.wakeId,
+          `wake ${error.wakeId} timed out after ${error.timeoutMs}ms`,
+        ),
         reasonCode: "wake_timeout",
       };
       if (activeWake !== undefined) {
@@ -13335,7 +13486,12 @@ async function dispatchWake(
       sessionId,
       wakeId: activeWake?.wakeId,
       status: "failed",
-      summary: errorMessage(error, `wake for ${sessionId} failed`),
+      summary: buildChatWakeFailureSummary(
+        state,
+        activeWake?.session,
+        activeWake?.wakeId,
+        errorMessage(error, `wake for ${sessionId} failed`),
+      ),
       reasonCode: "wake_dispatch_failed",
     };
     if (activeWake !== undefined) {

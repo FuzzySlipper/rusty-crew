@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type {
   AgentId,
   BrainEventEnvelope,
+  BrainWakeStreamItem,
   ProfileId,
   SessionHandle,
   SessionId,
@@ -167,6 +168,8 @@ try {
     result.actions.some((action) => action.type === "deliver_completion"),
     "expected completion action from fake Responses provider",
   );
+  const repeatedFailurePolicy = await runRepeatedFailurePolicyScenario();
+  const singleDeniedContinuation = await runSingleDeniedContinuationScenario();
 
   console.log(
     JSON.stringify(
@@ -177,6 +180,8 @@ try {
         providerStateContainsRealToolOutput: providerStateText.includes(
           "SENTINEL_REAL_TOOL_OUTPUT",
         ),
+        repeatedFailurePolicy,
+        singleDeniedContinuation,
       },
       null,
       2,
@@ -188,6 +193,477 @@ try {
   } else {
     process.env.RUSTY_CREW_OPENAI_RESPONSES_LIVE = previousLiveMode;
   }
+}
+
+async function runRepeatedFailurePolicyScenario(): Promise<{
+  submittedOutputs: number;
+  providerStatusReported: boolean;
+  debugRecordsCompleted: number;
+}> {
+  const observedEvents: BrainEventEnvelope[] = [];
+  const submittedOutputs: Array<{
+    wakeId: string;
+    callId: string;
+    output: string;
+    isError: boolean;
+  }> = [];
+  const toolCallDebugStore = new MemoryToolCallDebugStore({
+    now: () => "2026-07-04T00:00:00.000Z",
+  });
+  let drainCount = 0;
+  const bridge = {
+    runOpenAiResponsesBrain: async () => {
+      throw new Error("blocking Responses runner should not be used");
+    },
+    startOpenAiResponsesBrain: async (
+      input: Parameters<NativeBridgeModule["startOpenAiResponsesBrain"]>[0],
+    ) => ({ wakeId: input.wakeId }),
+    drainOpenAiResponsesBrainStream: async (
+      input: Parameters<
+        NativeBridgeModule["drainOpenAiResponsesBrainStream"]
+      >[0],
+    ) => {
+      drainCount += 1;
+      if (drainCount <= 2) {
+        const callId = `repeated-failure-call-${drainCount}`;
+        return {
+          wakeId: input.wakeId,
+          items: repeatedFailureToolEvents(input.wakeId, callId),
+          toolRequests: [
+            {
+              wakeId: input.wakeId,
+              callId,
+              name: "memory",
+              argumentsJson: "{}",
+            },
+          ],
+          terminal: false,
+        };
+      }
+      return {
+        wakeId: input.wakeId,
+        items: [],
+        toolRequests: [],
+        terminal: true,
+      };
+    },
+    submitOpenAiResponsesToolOutput: async (
+      input: Parameters<
+        NativeBridgeModule["submitOpenAiResponsesToolOutput"]
+      >[0],
+    ) => {
+      submittedOutputs.push(input);
+      return { ok: true, wakeId: input.wakeId, callId: input.callId };
+    },
+    submitBrainEvent: async (event: BrainEventEnvelope) => {
+      observedEvents.push(event);
+      return { accepted: true, sequence: observedEvents.length };
+    },
+  } as unknown as NativeBridgeModule;
+  const failureToolParameters = Type.Object({});
+  const failureTool: BrainTool<typeof failureToolParameters> = {
+    name: "memory",
+    label: "Memory",
+    description: "Synthetic repeated unavailable memory tool",
+    parameters: failureToolParameters,
+    execute: async () => ({
+      content: [
+        {
+          type: "text",
+          text: "MEMORY_TOOL_RESULT ok=false operation=search action=failed reason=memory_client_unavailable",
+        },
+      ],
+      details: {
+        ok: false,
+        operation: "search",
+        action: "failed",
+        reasonCode: "memory_client_unavailable",
+        retryable: true,
+      },
+    }),
+  };
+  const brain = await openAiResponsesBrainModule.createBrain({
+    bridge,
+    profile: {
+      profile: {
+        profileId: "responses-tool-failure-profile",
+        modelConfig: {
+          provider: "openai",
+          modelName: "gpt-5",
+          api: "responses",
+        },
+        brain: {
+          module: "openai-responses",
+          strategy: "replay",
+        },
+      },
+      skills: [],
+      toolSelection: {
+        source: "smoke",
+        toolProfile: {
+          tools: [
+            {
+              name: "memory",
+              description: "Synthetic repeated unavailable memory tool",
+            },
+          ],
+        },
+      },
+    } as unknown as LoadedProfileContext,
+    toolResolver: () => [failureTool],
+    providerStateScope: {
+      profileFingerprint: "profile-failure-smoke",
+      providerFingerprint: "provider-failure-smoke",
+    },
+    toolCallDebugStore,
+  });
+
+  await assert.rejects(
+    () => brain.wake(wakeInputForRepeatedFailure()),
+    /Stopping assistant turn after repeated memory failure \(memory_client_unavailable\)/,
+  );
+  assert.equal(submittedOutputs.length, 2);
+  assert.equal(
+    submittedOutputs.every((output) => output.isError),
+    true,
+  );
+  assert.match(submittedOutputs[0]?.output ?? "", /memory_client_unavailable/);
+  const providerStatusReported = observedEvents.some(
+    (event) =>
+      event.event.type === "provider_status" &&
+      event.event.level === "error" &&
+      event.event.message.includes("memory_client_unavailable"),
+  );
+  assert.equal(providerStatusReported, true);
+  const completedDebugRecords = observedEvents
+    .filter(
+      (event) =>
+        event.event.type === "tool_call_finished" &&
+        event.event.toolName === "memory",
+    )
+    .flatMap((event) =>
+      event.event.type === "tool_call_finished" &&
+      typeof event.event.metadata?.debugDetailId === "string"
+        ? [event.event.metadata.debugDetailId]
+        : [],
+    )
+    .map((debugDetailId) =>
+      toolCallDebugStore.get({
+        sessionId: "responses-repeated-failure-session",
+        debugDetailId,
+      }),
+    );
+  assert.equal(completedDebugRecords.length, 2);
+  assert.equal(
+    completedDebugRecords.every(
+      (record) =>
+        record?.status === "completed" &&
+        JSON.stringify(record.final_result?.value).includes(
+          "memory_client_unavailable",
+        ),
+    ),
+    true,
+  );
+  return {
+    submittedOutputs: submittedOutputs.length,
+    providerStatusReported,
+    debugRecordsCompleted: completedDebugRecords.length,
+  };
+}
+
+async function runSingleDeniedContinuationScenario(): Promise<{
+  submittedOutputs: number;
+  outputWasProviderError: boolean;
+  providerContinuedAfterDenial: boolean;
+}> {
+  const observedEvents: BrainEventEnvelope[] = [];
+  const submittedOutputs: Array<{
+    wakeId: string;
+    callId: string;
+    output: string;
+    isError: boolean;
+  }> = [];
+  let drainCount = 0;
+  const bridge = {
+    runOpenAiResponsesBrain: async () => {
+      throw new Error("blocking Responses runner should not be used");
+    },
+    startOpenAiResponsesBrain: async (
+      input: Parameters<NativeBridgeModule["startOpenAiResponsesBrain"]>[0],
+    ) => ({ wakeId: input.wakeId }),
+    drainOpenAiResponsesBrainStream: async (
+      input: Parameters<
+        NativeBridgeModule["drainOpenAiResponsesBrainStream"]
+      >[0],
+    ) => {
+      drainCount += 1;
+      if (drainCount === 1) {
+        return {
+          wakeId: input.wakeId,
+          items: toolEvents(
+            input.wakeId,
+            "responses-single-denial-session",
+            "single-denial-call",
+            "memory_store",
+          ),
+          toolRequests: [
+            {
+              wakeId: input.wakeId,
+              callId: "single-denial-call",
+              name: "memory_store",
+              argumentsJson: "{}",
+            },
+          ],
+          terminal: false,
+        };
+      }
+      return {
+        wakeId: input.wakeId,
+        items: [
+          {
+            type: "event",
+            event: {
+              wakeId: input.wakeId,
+              sessionId: "responses-single-denial-session" as SessionId,
+              event: {
+                type: "text_delta",
+                text: "provider continued after single denial",
+              },
+            },
+          },
+        ],
+        toolRequests: [],
+        terminal: true,
+      };
+    },
+    submitOpenAiResponsesToolOutput: async (
+      input: Parameters<
+        NativeBridgeModule["submitOpenAiResponsesToolOutput"]
+      >[0],
+    ) => {
+      submittedOutputs.push(input);
+      return { ok: true, wakeId: input.wakeId, callId: input.callId };
+    },
+    submitBrainEvent: async (event: BrainEventEnvelope) => {
+      observedEvents.push(event);
+      return { accepted: true, sequence: observedEvents.length };
+    },
+  } as unknown as NativeBridgeModule;
+  const denialParameters = Type.Object({});
+  const denialTool: BrainTool<typeof denialParameters> = {
+    name: "memory_store",
+    label: "Memory Store",
+    description: "Synthetic manual-review memory denial",
+    parameters: denialParameters,
+    execute: async () => ({
+      content: [
+        {
+          type: "text",
+          text: "MEMORY_TOOL_RESULT ok=false operation=store action=denied reason=memory_manual_review_required",
+        },
+      ],
+      details: {
+        ok: false,
+        operation: "store",
+        action: "denied",
+        reasonCode: "memory_manual_review_required",
+        retryable: false,
+      },
+    }),
+  };
+  const brain = await openAiResponsesBrainModule.createBrain({
+    bridge,
+    profile: loadedProfileContext(
+      "responses-single-denial-profile",
+      "memory_store",
+      "Synthetic manual-review memory denial",
+    ),
+    toolResolver: () => [denialTool],
+    providerStateScope: {
+      profileFingerprint: "profile-single-denial-smoke",
+      providerFingerprint: "provider-single-denial-smoke",
+    },
+    toolCallDebugStore: new MemoryToolCallDebugStore({
+      now: () => "2026-07-04T00:00:00.000Z",
+    }),
+  });
+
+  await brain.wake(
+    wakeInputForTool({
+      wakeId: "responses-single-denial-wake",
+      sessionId: "responses-single-denial-session",
+      profileId: "responses-single-denial-profile",
+      toolName: "memory_store",
+      toolDescription: "Synthetic manual-review memory denial",
+      body: "Try storing one memory, then explain the denial.",
+    }),
+  );
+  assert.equal(submittedOutputs.length, 1);
+  assert.equal(submittedOutputs[0]?.isError, true);
+  assert.match(
+    submittedOutputs[0]?.output ?? "",
+    /memory_manual_review_required/,
+  );
+  assert.equal(
+    observedEvents.some(
+      (event) =>
+        event.event.type === "provider_status" && event.event.level === "error",
+    ),
+    false,
+  );
+  const providerContinuedAfterDenial = observedEvents.some(
+    (event) =>
+      event.event.type === "text_delta" &&
+      event.event.text.includes("provider continued after single denial"),
+  );
+  assert.equal(providerContinuedAfterDenial, true);
+  return {
+    submittedOutputs: submittedOutputs.length,
+    outputWasProviderError: submittedOutputs[0]?.isError === true,
+    providerContinuedAfterDenial,
+  };
+}
+
+function repeatedFailureToolEvents(
+  wakeId: string,
+  callId: string,
+): BrainWakeStreamItem[] {
+  return toolEvents(
+    wakeId,
+    "responses-repeated-failure-session",
+    callId,
+    "memory",
+  );
+}
+
+function toolEvents(
+  wakeId: string,
+  sessionId: string,
+  callId: string,
+  toolName: string,
+): BrainWakeStreamItem[] {
+  return [
+    {
+      type: "event",
+      event: {
+        wakeId,
+        sessionId: sessionId as SessionId,
+        event: {
+          type: "tool_call_started",
+          toolName,
+          metadata: {
+            source: "local",
+            serverNames: [],
+            sourceToolName: callId,
+          },
+        },
+      },
+    },
+    {
+      type: "event",
+      event: {
+        wakeId,
+        sessionId: sessionId as SessionId,
+        event: {
+          type: "tool_call_finished",
+          toolName,
+          isError: false,
+          metadata: {
+            source: "local",
+            serverNames: [],
+            sourceToolName: callId,
+          },
+        },
+      },
+    },
+  ];
+}
+
+function loadedProfileContext(
+  profileId: string,
+  toolName: string,
+  toolDescription: string,
+): LoadedProfileContext {
+  return {
+    profile: {
+      profileId,
+      modelConfig: {
+        provider: "openai",
+        modelName: "gpt-5",
+        api: "responses",
+      },
+      brain: {
+        module: "openai-responses",
+        strategy: "replay",
+      },
+    },
+    skills: [],
+    toolSelection: {
+      source: "smoke",
+      toolProfile: {
+        tools: [
+          {
+            name: toolName,
+            description: toolDescription,
+          },
+        ],
+      },
+    },
+  } as unknown as LoadedProfileContext;
+}
+
+function wakeInputForRepeatedFailure(): BrainWakeInput {
+  return wakeInputForTool({
+    wakeId: "responses-repeated-failure-wake",
+    sessionId: "responses-repeated-failure-session",
+    profileId: "responses-tool-failure-profile",
+    toolName: "memory",
+    toolDescription: "Synthetic repeated unavailable memory tool",
+    body: "Search memory repeatedly until available.",
+  });
+}
+
+function wakeInputForTool(input: {
+  wakeId: string;
+  sessionId: string;
+  profileId: string;
+  toolName: string;
+  toolDescription: string;
+  body: string;
+}): BrainWakeInput {
+  const toolProfile = {
+    tools: [
+      {
+        name: input.toolName,
+        description: input.toolDescription,
+      },
+    ],
+  };
+  const base = wakeInput(toolProfile);
+  return {
+    ...base,
+    wakeId: input.wakeId,
+    sessionId: input.sessionId as SessionId,
+    roleAssembly: {
+      instructions: `Use the ${input.toolName} tool to answer the user.`,
+    },
+    state: {
+      ...base.state,
+      session: {
+        ...base.state.session,
+        sessionId: input.sessionId as SessionId,
+        profileId: input.profileId as ProfileId,
+        toolProfile,
+      },
+      pendingMessages: [
+        {
+          from: "tester" as AgentId,
+          to: "responses-tool-bridge-agent" as AgentId,
+          body: input.body,
+        },
+      ],
+    },
+  };
 }
 
 function wakeInput(toolProfile: {

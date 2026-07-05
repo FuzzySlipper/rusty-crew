@@ -354,6 +354,26 @@ try {
     String(failedCompletion?.payload?.summary ?? ""),
     /synthetic live wake failure/,
   );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Partial response before failure: partial failure delta/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Failed tool calls: rusty_view_failure_tool/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Completed tool calls before failure: 2/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Recent provider status: degraded: synthetic provider degraded/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Tool calls still in flight: rusty_view_duplicate_tool/,
+  );
   const failedFinished = failStreamEvents.find(
     (event) => event.kind === "assistant_turn_finished",
   );
@@ -1330,6 +1350,32 @@ function withLiveWakeEventsBridge(
                 wakeId: request.wakeId,
                 sessionId: request.sessionId,
                 event: {
+                  type: "provider_status",
+                  level: "degraded",
+                  message: "synthetic provider degraded",
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_completed_tool",
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_completed_tool",
+                  isError: false,
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
                   type: "tool_call_started",
                   toolName: "rusty_view_failure_tool",
                 },
@@ -1341,6 +1387,46 @@ function withLiveWakeEventsBridge(
                   type: "tool_call_finished",
                   toolName: "rusty_view_failure_tool",
                   isError: true,
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_duplicate_tool",
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "duplicate-finished",
+                  },
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_duplicate_tool",
+                  isError: false,
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "duplicate-finished",
+                  },
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_duplicate_tool",
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "duplicate-in-flight",
+                  },
                 },
               },
             ]);

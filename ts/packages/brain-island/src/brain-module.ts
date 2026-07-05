@@ -1,5 +1,6 @@
 import type {
   BrainAction,
+  BrainEvent,
   BrainEventEnvelope,
   CompletionPacket,
   BrainProviderStateScope,
@@ -577,6 +578,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   const brainEventCounts: Record<string, number> = {};
   const brainStreamItemCounts: Record<string, number> = {};
   const toolDebugReferences = createOpenAiResponsesToolDebugReferences();
+  const toolFailurePolicy = createOpenAiResponsesToolFailurePolicyState();
 
   for (;;) {
     const drained = await bridge.drainOpenAiResponsesBrainStream({
@@ -618,6 +620,18 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
         output: output.output,
         isError: output.isError,
       });
+      const stopReport = recordOpenAiResponsesToolFailure(
+        toolFailurePolicy,
+        output.failure,
+      );
+      if (stopReport !== undefined) {
+        await submitOpenAiResponsesBrainEvent(bridge, wake, {
+          type: "provider_status",
+          level: "error",
+          message: stopReport,
+        });
+        throw new Error(stopReport);
+      }
     }
     if (drained.error !== undefined) {
       throw new Error(
@@ -660,6 +674,26 @@ interface PreparedOpenAiResponsesToolRequest {
   params?: unknown;
   debugDetailId?: string;
   preparationError?: string;
+}
+
+interface OpenAiResponsesToolFailure {
+  toolName: string;
+  reasonCode: string;
+  retryable: boolean;
+  detail: string;
+}
+
+interface OpenAiResponsesToolExecutionResult {
+  output: string;
+  isError: boolean;
+  failure?: OpenAiResponsesToolFailure;
+}
+
+interface OpenAiResponsesToolFailurePolicyState {
+  totalFailures: number;
+  consecutiveFailures: number;
+  failuresByKey: Map<string, number>;
+  recentFailures: OpenAiResponsesToolFailure[];
 }
 
 function prepareOpenAiResponsesToolRequest(
@@ -753,7 +787,7 @@ async function executePreparedOpenAiResponsesToolRequest(
   wake: BrainWakeInput,
   prepared: PreparedOpenAiResponsesToolRequest,
   toolCallDebugStore: ToolCallDebugStore | undefined,
-): Promise<{ output: string; isError: boolean }> {
+): Promise<OpenAiResponsesToolExecutionResult> {
   const failDebugRecord = (error: unknown) => {
     if (prepared.debugDetailId) {
       toolCallDebugStore?.fail({
@@ -767,12 +801,27 @@ async function executePreparedOpenAiResponsesToolRequest(
     return {
       output: prepared.preparationError,
       isError: true,
+      failure: {
+        toolName: prepared.request.name,
+        reasonCode: "tool_preparation_failed",
+        retryable: false,
+        detail: prepared.preparationError,
+      },
     };
   }
   if (!prepared.tool) {
     const output = `Tool ${prepared.request.name} is not available in this brain session.`;
     failDebugRecord(output);
-    return { output, isError: true };
+    return {
+      output,
+      isError: true,
+      failure: {
+        toolName: prepared.request.name,
+        reasonCode: "tool_unavailable",
+        retryable: false,
+        detail: output,
+      },
+    };
   }
   try {
     const controller = new AbortController();
@@ -795,9 +844,14 @@ async function executePreparedOpenAiResponsesToolRequest(
         finalResult: result,
       });
     }
+    const failure = openAiResponsesToolFailureFromResult(
+      prepared.request.name,
+      result,
+    );
     return {
       output: brainToolResultToOpenAiResponsesOutput(result),
-      isError: false,
+      isError: failure !== undefined,
+      ...(failure === undefined ? {} : { failure }),
     };
   } catch (error) {
     if (prepared.debugDetailId) {
@@ -806,13 +860,112 @@ async function executePreparedOpenAiResponsesToolRequest(
         error,
       });
     }
+    const detail = `Tool ${prepared.request.name} failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
     return {
-      output: `Tool ${prepared.request.name} failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      output: detail,
       isError: true,
+      failure: {
+        toolName: prepared.request.name,
+        reasonCode: "tool_exception",
+        retryable: true,
+        detail,
+      },
     };
   }
+}
+
+function createOpenAiResponsesToolFailurePolicyState(): OpenAiResponsesToolFailurePolicyState {
+  return {
+    totalFailures: 0,
+    consecutiveFailures: 0,
+    failuresByKey: new Map(),
+    recentFailures: [],
+  };
+}
+
+function openAiResponsesToolFailureFromResult(
+  toolName: string,
+  result: BrainToolResult,
+): OpenAiResponsesToolFailure | undefined {
+  const details = result.details;
+  if (!isRecord(details)) return undefined;
+  if (details.ok !== false && details.action !== "failed") return undefined;
+  const reasonCode =
+    stringField(details, "reasonCode") ??
+    stringField(details, "reason_code") ??
+    stringField(details, "code") ??
+    stringField(details, "action") ??
+    "tool_reported_unsuccessful_result";
+  const operation = stringField(details, "operation");
+  const retryable =
+    typeof details.retryable === "boolean" ? details.retryable : true;
+  return {
+    toolName,
+    reasonCode,
+    retryable,
+    detail: [
+      `${toolName} returned ok=false`,
+      operation ? `operation=${operation}` : undefined,
+      `reason=${reasonCode}`,
+      `retryable=${retryable}`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
+}
+
+function recordOpenAiResponsesToolFailure(
+  state: OpenAiResponsesToolFailurePolicyState,
+  failure: OpenAiResponsesToolFailure | undefined,
+): string | undefined {
+  if (failure === undefined) {
+    state.consecutiveFailures = 0;
+    return undefined;
+  }
+  state.totalFailures += 1;
+  state.consecutiveFailures += 1;
+  state.recentFailures.push(failure);
+  if (state.recentFailures.length > 5) state.recentFailures.shift();
+  const key = `${failure.toolName}:${failure.reasonCode}`;
+  const keyCount = (state.failuresByKey.get(key) ?? 0) + 1;
+  state.failuresByKey.set(key, keyCount);
+
+  if (keyCount >= 2) {
+    return openAiResponsesToolFailureStopReport(
+      state,
+      `repeated ${failure.toolName} failure (${failure.reasonCode})`,
+    );
+  }
+  if (state.consecutiveFailures >= 3) {
+    return openAiResponsesToolFailureStopReport(
+      state,
+      "three consecutive tool failures",
+    );
+  }
+  return undefined;
+}
+
+function openAiResponsesToolFailureStopReport(
+  state: OpenAiResponsesToolFailurePolicyState,
+  reason: string,
+): string {
+  const recent = state.recentFailures
+    .slice(-5)
+    .map(
+      (failure) =>
+        `${failure.toolName}: ${failure.reasonCode} (retryable=${failure.retryable})`,
+    )
+    .join("; ");
+  return [
+    `Stopping assistant turn after ${reason}.`,
+    `Tool failure count this turn: ${state.totalFailures}.`,
+    recent ? `Recent tool failures: ${recent}.` : undefined,
+    "The assistant should report the unavailable tool/dependency instead of continuing unrelated tool attempts.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 interface OpenAiResponsesToolDebugReferences {
@@ -942,6 +1095,30 @@ async function handleDrainedOpenAiResponsesStreamItem(
         `OpenAI Responses wake ${item.failure.wakeId} failed: ${item.failure.message}`,
       );
   }
+}
+
+async function submitOpenAiResponsesBrainEvent(
+  bridge: NativeBridgeModule,
+  wake: BrainWakeInput,
+  event: BrainEvent,
+): Promise<void> {
+  await bridge.submitBrainEvent({
+    wakeId: wake.wakeId,
+    sessionId: wake.sessionId,
+    event,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(
+  record: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  const value = record[field];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function incrementCount(counts: Record<string, number>, key: string): void {
