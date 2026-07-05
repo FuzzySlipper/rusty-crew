@@ -160,16 +160,21 @@ export function searchFilesTool(
       const maxResults = params.maxResults ?? 50;
       const matches: Array<{ path: string; line?: number; preview: string }> =
         [];
+      const skipped: SearchSkippedPath[] = [];
       const root = resolveToolPath(
         context.workdir,
         params.root ?? ".",
         "unrestricted",
       );
-      await searchDirectory(root, root, params.query, matches, maxResults);
+      await searchDirectory(root, root, params.query, matches, maxResults, {
+        skipped,
+      });
       const details = {
         query: params.query,
         root,
         matches,
+        skipped,
+        skippedCount: skipped.length,
         truncated: matches.length >= maxResults,
       };
       return {
@@ -341,12 +346,19 @@ async function searchDirectory(
   query: string,
   matches: Array<{ path: string; line?: number; preview: string }>,
   maxResults: number,
+  state: SearchState,
 ): Promise<void> {
   if (matches.length >= maxResults) {
     return;
   }
 
-  const entries = await readdir(current, { withFileTypes: true });
+  const entries = await readdir(current, { withFileTypes: true }).catch(
+    (error: unknown) => {
+      recordSkippedPath(state, root, current, "read_dir_failed", error);
+      return undefined;
+    },
+  );
+  if (!entries) return;
   for (const entry of entries) {
     if (matches.length >= maxResults || shouldSkipEntry(entry.name)) {
       continue;
@@ -354,7 +366,14 @@ async function searchDirectory(
     const absolutePath = resolve(current, entry.name);
     const displayPath = relative(root, absolutePath);
     if (entry.isDirectory()) {
-      await searchDirectory(root, absolutePath, query, matches, maxResults);
+      await searchDirectory(
+        root,
+        absolutePath,
+        query,
+        matches,
+        maxResults,
+        state,
+      );
       continue;
     }
     if (!entry.isFile()) {
@@ -370,8 +389,20 @@ async function searchDirectory(
       query,
       matches,
       maxResults,
+      state,
+      root,
     );
   }
+}
+
+interface SearchSkippedPath {
+  path: string;
+  reason: string;
+  message?: string;
+}
+
+interface SearchState {
+  skipped: SearchSkippedPath[];
 }
 
 async function searchFileContent(
@@ -380,12 +411,22 @@ async function searchFileContent(
   query: string,
   matches: Array<{ path: string; line?: number; preview: string }>,
   maxResults: number,
+  state: SearchState,
+  root: string,
 ): Promise<void> {
-  const metadata = await stat(absolutePath);
+  const metadata = await stat(absolutePath).catch((error: unknown) => {
+    recordSkippedPath(state, root, absolutePath, "stat_failed", error);
+    return undefined;
+  });
+  if (!metadata) return;
   if (metadata.size > defaultMaxSearchFileBytes) {
+    recordSkippedPath(state, root, absolutePath, "file_too_large");
     return;
   }
-  const text = await readFile(absolutePath, "utf8").catch(() => undefined);
+  const text = await readFile(absolutePath, "utf8").catch((error: unknown) => {
+    recordSkippedPath(state, root, absolutePath, "read_file_failed", error);
+    return undefined;
+  });
   if (!text) {
     return;
   }
@@ -405,7 +446,28 @@ async function searchFileContent(
 }
 
 function shouldSkipEntry(name: string): boolean {
-  return name === ".git" || name === "node_modules" || name === "target";
+  return (
+    name === ".git" ||
+    name === "node_modules" ||
+    name === "target" ||
+    name === ".tmp" ||
+    name.startsWith("systemd-private-")
+  );
+}
+
+function recordSkippedPath(
+  state: SearchState,
+  root: string,
+  absolutePath: string,
+  reason: string,
+  error?: unknown,
+): void {
+  if (state.skipped.length >= 200) return;
+  state.skipped.push({
+    path: relative(root, absolutePath) || ".",
+    reason,
+    message: error instanceof Error ? error.message : undefined,
+  });
 }
 
 function runShellCommand(

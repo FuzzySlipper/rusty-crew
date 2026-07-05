@@ -121,7 +121,10 @@ export interface RuntimeDiagnosticsInput {
   queues?: QueueDiagnosticsInput;
   persistence?: PersistenceDiagnosticsInput;
   adapters?: AdapterDiagnosticsProjection;
-  tools?: readonly ToolRegistryDiagnosticsReport[];
+  tools?: readonly (
+    | ToolRegistryDiagnosticsReport
+    | ToolDiagnosticsProjection
+  )[];
   observation?: ObservationDiagnosticsInput;
   brainModules?: readonly RuntimeBrainModuleDiagnostics[];
   providerStates?: readonly RuntimeProviderStateSessionDiagnostics[];
@@ -432,6 +435,24 @@ export interface StorageDiagnosticsProjection {
 
 export interface ToolDiagnosticsProjection {
   catalogId: string;
+  sessionId?: SessionId | string;
+  agentId?: string;
+  profileId?: ProfileId | string;
+  toolName?: string;
+  description?: string;
+  source?: "local" | "mcp";
+  adapterId?: string;
+  bindingId?: string;
+  serverNames?: string[];
+  endpointRef?: string;
+  toolProfileKey?: string;
+  sourceToolName?: string;
+  catalogRevision?: string;
+  schemaStatus?: "present" | "missing" | "unknown";
+  category?: string;
+  toolsets?: string[];
+  safety?: string[];
+  outputShape?: string;
   registeredTools: number;
   selectedTools: number;
   validationErrors: number;
@@ -735,8 +756,9 @@ function persistenceDiagnostics(
 }
 
 function toolDiagnostics(
-  report: ToolRegistryDiagnosticsReport,
+  report: ToolRegistryDiagnosticsReport | ToolDiagnosticsProjection,
 ): ToolDiagnosticsProjection {
+  if ("invalid" in report) return report;
   return {
     catalogId: report.catalogId,
     registeredTools: report.summary.registeredTools,

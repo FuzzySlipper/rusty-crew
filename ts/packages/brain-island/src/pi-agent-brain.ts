@@ -31,6 +31,7 @@ import {
   type ToolCallDebugStore,
   withToolCallDebugReference,
 } from "./tool-call-debug-store.js";
+import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 
 export type PiAgentLike = Pick<
   PiAgent,
@@ -47,6 +48,7 @@ export interface PiAgentBrainOptions {
   toolProfile?: ToolProfile;
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
   toolCallDebugStore?: ToolCallDebugStore;
+  providerRequestDebugStore?: ProviderRequestDebugStore;
 }
 
 export function createPiAgentBrain(
@@ -56,10 +58,6 @@ export function createPiAgentBrain(
     async wake(input: BrainWakeInput): Promise<BrainWakeResult> {
       const events: BrainWakeResult["events"] = [];
       const actions = createBrainActionCollector();
-      const agent = options.createAgent(
-        buildAgentOptions(input, options, actions),
-      );
-      let sawTextDelta = false;
       let submitQueue: Promise<void> = Promise.resolve();
       let submitError: unknown;
       const submitLiveEvent = (event: BrainEventEnvelope): void => {
@@ -75,6 +73,31 @@ export function createPiAgentBrain(
             },
           );
       };
+      const agentOptions = buildAgentOptions(input, options, actions);
+      const modelConfig = optionalSessionModelConfig(input.state.session);
+      const providerDebug = options.providerRequestDebugStore?.record({
+        sessionId: input.sessionId,
+        wakeId: input.wakeId,
+        brainModule: "pi-agent-core",
+        model: modelConfig?.modelName,
+        protocol: modelConfig?.api,
+        providerKind: modelConfig?.provider,
+        request: {
+          boundary: "pi_agent_options",
+          sessionId: input.sessionId,
+          wakeId: input.wakeId,
+          initialState: agentOptions.initialState,
+          steeringMode: agentOptions.steeringMode,
+          followUpMode: agentOptions.followUpMode,
+        },
+      });
+      if (providerDebug) {
+        const event = providerRequestDebugEvent(input, providerDebug);
+        events.push(event);
+        submitLiveEvent(event);
+      }
+      const agent = options.createAgent(agentOptions);
+      let sawTextDelta = false;
       const unsubscribe = agent.subscribe((event) => {
         const mappedEvents = mapPiAgentEvent(event, {
           sawTextDelta,
@@ -118,6 +141,53 @@ export function createPiAgentBrain(
       };
     },
   };
+}
+
+function optionalSessionModelConfig(session: unknown):
+  | {
+      modelName?: string;
+      api?: string;
+      provider?: string;
+    }
+  | undefined {
+  if (!session || typeof session !== "object" || !("modelConfig" in session)) {
+    return undefined;
+  }
+  const modelConfig = (session as { modelConfig?: unknown }).modelConfig;
+  if (!modelConfig || typeof modelConfig !== "object") return undefined;
+  const record = modelConfig as Record<string, unknown>;
+  return {
+    modelName:
+      typeof record.modelName === "string" ? record.modelName : undefined,
+    api: typeof record.api === "string" ? record.api : undefined,
+    provider:
+      typeof record.provider === "string" ? record.provider : undefined,
+  };
+}
+
+function providerRequestDebugEvent(
+  input: BrainWakeInput,
+  debug: {
+    debug_detail_id: string;
+    request_sha256: string;
+    request_json_chars: number;
+    expires_at: string;
+  },
+): BrainEventEnvelope {
+  return envelope(input, {
+    type: "provider_status",
+    level: "info",
+    message: "Provider request debug snapshot captured.",
+    metadataJson: JSON.stringify({
+      provider_request_debug_detail_id: debug.debug_detail_id,
+      provider_request_debug_url: `/v1/chat/sessions/${encodeURIComponent(
+        String(input.sessionId),
+      )}/provider-requests/${encodeURIComponent(debug.debug_detail_id)}`,
+      request_sha256: debug.request_sha256,
+      request_json_chars: debug.request_json_chars,
+      expires_at: debug.expires_at,
+    }),
+  });
 }
 
 function envelope(

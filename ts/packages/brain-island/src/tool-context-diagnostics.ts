@@ -879,7 +879,7 @@ function profileConfigIssues(
       severity: "warning",
       message:
         "profile memoryConfig requests Den memory, but service Den memory is not configured",
-      toolName: "den_memory_recall",
+      toolName: "memory_recall",
     });
   }
   if (
@@ -931,7 +931,7 @@ function memorySkillsPlanningIssues(
       code: "den_memory_unavailable",
       severity: "warning",
       message: `Den memory is configured but unavailable${detail(summary.denMemory.lastError)}`,
-      toolName: "den_memory_recall",
+      toolName: "memory_recall",
     });
   }
   if (

@@ -614,9 +614,9 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:tool-registry",
   },
   {
-    name: "den_memory_recall",
+    name: "memory_recall",
     description:
-      "Recall relevant Den-owned memory summaries for the current profile or work context.",
+      "Recall relevant memory summaries for the current profile or work context. This is not a Den document, task, project, or guidance lookup tool.",
     category: "memory",
     toolsets: ["memory_den_read"],
     implementationModule: "./den-memory-tools.js#denMemoryRecallTool",
@@ -627,8 +627,9 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:tool-registry",
   },
   {
-    name: "den_memory_read",
-    description: "Read a specific Den-owned memory entry by stable reference.",
+    name: "memory_read",
+    description:
+      "Read a specific memory entry by stable reference. This is not a Den document, task, project, or guidance lookup tool.",
     category: "memory",
     toolsets: ["memory_den_read"],
     implementationModule: "./den-memory-tools.js#denMemoryReadTool",
@@ -639,9 +640,9 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:tool-registry",
   },
   {
-    name: "den_memory_search",
+    name: "memory_search",
     description:
-      "Search Den-owned memories through the configured Den Memories service.",
+      "Search memory entries through the configured memory service. This is not a Den document, task, project, or guidance lookup tool.",
     category: "memory",
     toolsets: ["memory_den_read"],
     implementationModule: "./den-memory-tools.js#denMemorySearchTool",
@@ -652,9 +653,9 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:tool-registry",
   },
   {
-    name: "den_memory_store",
+    name: "memory_store",
     description:
-      "Store a new Den-owned memory through the configured Den Memories service.",
+      "Store a new memory entry through the configured memory service. This is not a Den document, task, project, or guidance update tool.",
     category: "memory",
     toolsets: ["memory_den_write"],
     implementationModule: "./den-memory-tools.js#denMemoryStoreTool",
@@ -665,9 +666,9 @@ const defaultToolRegistryDefinitions = [
     inventoryTest: "smoke:tool-registry",
   },
   {
-    name: "den_memory_propose",
+    name: "memory_propose",
     description:
-      "Propose a Den-owned memory change for later review or acceptance.",
+      "Propose a memory change for later review or acceptance. This is not a Den document, task, project, or guidance update tool.",
     category: "memory",
     toolsets: ["memory_den_write"],
     implementationModule: "./den-memory-tools.js#denMemoryProposeTool",

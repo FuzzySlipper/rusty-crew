@@ -38,10 +38,10 @@ const tools = buildSessionActivityDigest({
   source: "channel",
   now: "2026-06-27T12:01:00.000Z",
   events: [
-    observed({ type: "tool_call_started", toolName: "den_memory_recall" }),
+    observed({ type: "tool_call_started", toolName: "memory_recall" }),
     observed({
       type: "tool_call_finished",
-      toolName: "den_memory_recall",
+      toolName: "memory_recall",
       isError: false,
     }),
     observed({ type: "tool_call_started", toolName: "shell" }),
@@ -53,8 +53,8 @@ assert.deepEqual(
     isToolCall(call) ? `${call.tool_name}:${call.status}` : "bad",
   ),
   [
-    "den_memory_recall:started",
-    "den_memory_recall:completed",
+    "memory_recall:started",
+    "memory_recall:completed",
     "shell:started",
     "shell:failed",
   ],

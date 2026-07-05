@@ -439,16 +439,30 @@ function agentDiagnostics(
   );
 }
 
-function filterTools<T extends { catalogId?: string; invalid?: boolean }>(
-  tools: readonly T[],
-  url: URL,
-): T[] {
+function filterTools<
+  T extends {
+    catalogId?: string;
+    invalid?: boolean;
+    sessionId?: string;
+    profileId?: string;
+    source?: string;
+    toolName?: string;
+  },
+>(tools: readonly T[], url: URL): T[] {
   const catalogId = url.searchParams.get("catalog_id");
   const invalid = url.searchParams.get("invalid");
+  const sessionId = url.searchParams.get("session_id");
+  const profileId = url.searchParams.get("profile_id");
+  const source = url.searchParams.get("source");
+  const toolName = url.searchParams.get("tool_name");
   return tools.filter(
     (tool) =>
       (catalogId === null || tool.catalogId === catalogId) &&
-      (invalid === null || String(Boolean(tool.invalid)) === invalid),
+      (invalid === null || String(Boolean(tool.invalid)) === invalid) &&
+      (sessionId === null || tool.sessionId === sessionId) &&
+      (profileId === null || tool.profileId === profileId) &&
+      (source === null || tool.source === source) &&
+      (toolName === null || tool.toolName === toolName),
   );
 }
 

@@ -86,7 +86,7 @@ class MemorySkillsFakeAgent {
     );
     assert.match(this.options.initialState?.systemPrompt ?? "", /Memory Skill/);
 
-    await this.callTool("den_memory_recall", {
+    await this.callTool("memory_recall", {
       prompt: "What memory guidance is relevant?",
     });
     await this.callTool("dense_profile_memory", {
@@ -301,7 +301,7 @@ Use Den memory for product/project facts and dense profile memory for stable pro
   const accepted = await native.wakeBrain(request);
   assert.deepEqual(accepted, { wakeId, accepted: true });
   assert.equal(denCalls[0]?.context?.sessionId, sessionId);
-  assert.match(toolOutputs.den_memory_recall, /Den memory belongs to Den/);
+  assert.match(toolOutputs.memory_recall, /Den memory belongs to Den/);
   assert.match(toolOutputs.dense_profile_memory, /memory-boundary/);
   assert.match(toolOutputs.skills_list, /memory-skill/);
   assert.match(toolOutputs.skill_view, /Memory Skill/);

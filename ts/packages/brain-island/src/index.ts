@@ -143,6 +143,11 @@ export {
   localToolCallMetadata,
   withToolCallDebugReference,
 } from "./tool-call-debug-store.js";
+export type {
+  ProviderRequestDebugRecord,
+  ProviderRequestDebugStore,
+} from "./provider-request-debug-store.js";
+export { MemoryProviderRequestDebugStore } from "./provider-request-debug-store.js";
 export {
   acquireRustyCrewServiceLock,
   ensureRustyCrewServiceDirectories,

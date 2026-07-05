@@ -48,7 +48,7 @@ const requestedToolNames = [
   "channel_readback",
   "counter_reset",
   "curator_execute",
-  "den_memory_recall",
+  "memory_recall",
   "dense_profile_memory",
   "field_search",
   "git_status",
@@ -84,7 +84,7 @@ class ToolCallingFakeAgent {
     _input: PiAgentMessage | PiAgentMessage[] | string,
   ): Promise<void> {
     await this.emit({ type: "agent_start" } as PiAgentEvent);
-    await this.callTool("den_memory_recall", {
+    await this.callTool("memory_recall", {
       prompt: "What memory guidance is relevant?",
     });
     await this.callTool("field_search", { query: "runner mcp tools" });
@@ -428,7 +428,7 @@ try {
       ],
     );
     assert.match(
-      outputs.den_memory_recall ?? "",
+      outputs.memory_recall ?? "",
       /Den memory is available through service config/,
     );
     assert.equal(memoryRequests.length, 1);

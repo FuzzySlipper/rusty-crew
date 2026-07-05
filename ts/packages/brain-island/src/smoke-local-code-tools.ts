@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -34,6 +35,17 @@ const outsideDir = mkdtempSync(
 const outsideReadPath = join(outsideDir, "outside-note.txt");
 const outsideWritePath = join(outsideDir, "outside-write.txt");
 writeFileSync(join(workdir, "note.txt"), "hello from local tools\n", "utf8");
+mkdirSync(join(workdir, "nested"), { recursive: true });
+writeFileSync(
+  join(workdir, "nested", "search-note.txt"),
+  "needle appears in a nested file\n",
+  "utf8",
+);
+writeFileSync(
+  join(workdir, "large-skip.txt"),
+  `${"x".repeat(270 * 1024)}needle after large payload\n`,
+  "utf8",
+);
 writeFileSync(outsideReadPath, "hello from outside local tools\n", "utf8");
 
 const sessionId = "local-tools-session" as SessionId;
@@ -42,6 +54,12 @@ const selection = selectToolProfile({
   profileId: "local-tools-profile" as ProfileId,
   policy: {
     requestedTools: ["read_file", "write_file", "terminal", "worker_write"],
+  },
+});
+const searchSelection = selectToolProfile({
+  profileId: "local-tools-profile" as ProfileId,
+  policy: {
+    requestedTools: ["search_files"],
   },
 });
 
@@ -63,10 +81,12 @@ class ToolCallingFakeAgent {
     const tools = this.options.initialState?.tools ?? [];
     const readFile = tools.find((tool) => tool.name === "read_file");
     const writeFile = tools.find((tool) => tool.name === "write_file");
+    const searchFiles = tools.find((tool) => tool.name === "search_files");
     const terminal = tools.find((tool) => tool.name === "terminal");
     const workerWrite = tools.find((tool) => tool.name === "worker_write");
     assert.ok(readFile);
     assert.ok(writeFile);
+    assert.ok(searchFiles);
     assert.ok(terminal);
     assert.ok(workerWrite);
 
@@ -86,6 +106,11 @@ class ToolCallingFakeAgent {
         content: "written outside workdir\n",
       },
     );
+    this.results.search_files = await searchFiles.execute("search-files-call", {
+      query: "needle",
+      root: ".",
+      maxResults: 20,
+    });
     try {
       this.results.worker_write_outside = await workerWrite.execute(
         "worker-write-outside-call",
@@ -141,7 +166,12 @@ try {
           workdir,
           maxDurationMs: 5_000,
         },
-        toolProfile: selection.toolProfile,
+        toolProfile: {
+          tools: [
+            ...selection.toolProfile.tools,
+            ...searchSelection.toolProfile.tools,
+          ],
+        },
         status: "idle",
         brainTurnCount: 0,
         createdAt: "2026-06-20T00:00:00Z",
@@ -164,6 +194,25 @@ try {
     readFileSync(outsideWritePath, "utf8"),
     "written outside workdir\n",
   );
+  const searchDetails = toolResults.search_files.details as {
+    matches: Array<{ path: string; preview: string }>;
+    skipped: Array<{ path: string; reason: string }>;
+    skippedCount: number;
+  };
+  assert.ok(
+    searchDetails.matches.some(
+      (match) =>
+        match.path === "nested/search-note.txt" &&
+        match.preview.includes("needle"),
+    ),
+  );
+  assert.ok(
+    searchDetails.skipped.some(
+      (skip) =>
+        skip.path === "large-skip.txt" && skip.reason === "file_too_large",
+    ),
+  );
+  assert.equal(searchDetails.skippedCount, searchDetails.skipped.length);
   assert.match(
     textResult(toolResults.worker_write_outside),
     /path escapes session workdir/,
@@ -185,6 +234,8 @@ try {
         readFileText: textResult(toolResults.read_file).trim(),
         absoluteReadText: textResult(toolResults.read_file_absolute).trim(),
         absoluteWriteText: readFileSync(outsideWritePath, "utf8").trim(),
+        searchMatches: searchDetails.matches.length,
+        searchSkipped: searchDetails.skipped,
         workerWriteDenied: /path escapes session workdir/.test(
           textResult(toolResults.worker_write_outside),
         ),

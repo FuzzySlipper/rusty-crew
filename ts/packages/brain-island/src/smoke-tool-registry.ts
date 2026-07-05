@@ -92,14 +92,14 @@ const memoryInventory = defaultToolRegistry.buildInventory({
     "planning_session",
   ],
   resourceDeniedTools: [
-    "den_memory_store",
-    "den_memory_propose",
+    "memory_store",
+    "memory_propose",
     "dense_profile_memory",
     "session_search",
   ],
   resourceDeniedReasons: {
-    den_memory_store: "Den Memories write endpoint is not configured",
-    den_memory_propose: "Den Memories proposal endpoint is not configured",
+    memory_store: "Den Memories write endpoint is not configured",
+    memory_propose: "Den Memories proposal endpoint is not configured",
     dense_profile_memory: "dense profile memory persistence is unavailable",
     session_search: "runtime search API is unavailable",
   },
@@ -107,9 +107,9 @@ const memoryInventory = defaultToolRegistry.buildInventory({
 assert.deepEqual(
   memoryInventory.selectedTools.map((tool) => tool.name),
   [
-    "den_memory_recall",
-    "den_memory_read",
-    "den_memory_search",
+    "memory_recall",
+    "memory_read",
+    "memory_search",
     "memory_space_catalog",
     "memory_space_read",
     "skills_list",
@@ -118,12 +118,11 @@ assert.deepEqual(
   ],
 );
 assert.equal(
-  memoryInventory.items.find((item) => item.name === "den_memory_store")
-    ?.status,
+  memoryInventory.items.find((item) => item.name === "memory_store")?.status,
   "resource_denied",
 );
 assert.equal(
-  memoryInventory.items.find((item) => item.name === "den_memory_store")
+  memoryInventory.items.find((item) => item.name === "memory_store")
     ?.reasons[0],
   "Den Memories write endpoint is not configured",
 );

@@ -11,11 +11,11 @@ before profiles should select them in production.
 
 Den Memories:
 
-- `den_memory_recall`
-- `den_memory_read`
-- `den_memory_search`
-- `den_memory_store`
-- `den_memory_propose`
+- `memory_recall`
+- `memory_read`
+- `memory_search`
+- `memory_store`
+- `memory_propose`
 
 Rusty Crew memory:
 

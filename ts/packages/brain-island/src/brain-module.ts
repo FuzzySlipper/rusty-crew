@@ -33,6 +33,7 @@ import {
   withToolCallDebugReference,
   type ToolCallDebugStore,
 } from "./tool-call-debug-store.js";
+import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import {
   resolveToolSession,
@@ -119,6 +120,7 @@ export interface BrainModuleContext {
   planActions?: BrainActionPlanner;
   maxTokens?: number;
   toolCallDebugStore?: ToolCallDebugStore;
+  providerRequestDebugStore?: ProviderRequestDebugStore;
   createDenRouterAgentFactory?: (
     options: Parameters<typeof createDenRouterPiAgentFactory>[0],
   ) => Promise<PiAgentFactory>;
@@ -286,6 +288,7 @@ export const piAgentCoreBrainModule: BrainModule = {
         planActions: context.planActions,
         resolveTools: context.toolResolver,
         toolCallDebugStore: context.toolCallDebugStore,
+        providerRequestDebugStore: context.providerRequestDebugStore,
         maxReviewCycles:
           context.profile.profile.roleplayNarrator?.review.maxReviewCycles,
         reviewEnabled: context.profile.profile.roleplayNarrator?.review.enabled,
@@ -301,6 +304,7 @@ export const piAgentCoreBrainModule: BrainModule = {
       planActions: context.planActions,
       resolveTools: context.toolResolver,
       toolCallDebugStore: context.toolCallDebugStore,
+      providerRequestDebugStore: context.providerRequestDebugStore,
       submitEvent: context.bridge
         ? async (event) => {
             await context.bridge?.submitBrainEvent(event);
@@ -1038,11 +1042,54 @@ export const openAiResponsesBrainModule: BrainModule = {
           },
           client: responsesClientConfig,
         };
+        const providerDebug = context.providerRequestDebugStore?.record({
+          sessionId: wake.sessionId,
+          wakeId: wake.wakeId,
+          brainModule: "openai-responses",
+          providerAlias:
+            "providerAlias" in responsesClientConfig
+              ? responsesClientConfig.providerAlias
+              : undefined,
+          model: input.config.model,
+          protocol: "responses",
+          providerKind:
+            "authKind" in responsesClientConfig &&
+            responsesClientConfig.authKind === "openai_oauth"
+              ? "openai_oauth"
+              : undefined,
+          request: {
+            boundary: "ts_to_native_openai_responses",
+            wakeId: input.wakeId,
+            sessionId: input.sessionId,
+            providerState: input.providerState,
+            providerStateAbsence: input.providerStateAbsence,
+            config: input.config,
+            client: input.client,
+            bodyState: input.bodyState,
+          },
+        });
+        if (providerDebug) {
+          await context.bridge.submitBrainEvent(
+            providerRequestDebugEvent(wake, providerDebug),
+          );
+        }
         const result = await runOpenAiResponsesBrainWithIncrementalDrain(
           context,
           wake,
           input,
         );
+        const exactDebug = recordOpenAiResponsesProviderRequestSamples(
+          context,
+          wake,
+          input.config.model,
+          responsesClientConfig,
+          result.transportMetrics?.providerRequestDebugSamples,
+        );
+        if (exactDebug) {
+          await context.bridge.submitBrainEvent(
+            providerRequestDebugEvent(wake, exactDebug),
+          );
+        }
         responsesClientConfig =
           await persistOpenAiResponsesCredentialSecretUpdate(
             context,
@@ -1059,4 +1106,72 @@ function responsesInstructions(wake: BrainWakeInput): string {
   return [wake.systemPrompt, wake.roleAssembly.instructions]
     .filter((part): part is string => Boolean(part))
     .join("\n\n");
+}
+
+function providerRequestDebugEvent(
+  wake: BrainWakeInput,
+  debug: {
+    debug_detail_id: string;
+    request_sha256: string;
+    request_json_chars: number;
+    expires_at: string;
+  },
+): BrainEventEnvelope {
+  return {
+    wakeId: wake.wakeId,
+    sessionId: wake.sessionId,
+    event: {
+      type: "provider_status",
+      level: "info",
+      message: "Provider request debug snapshot captured.",
+      metadataJson: JSON.stringify({
+        provider_request_debug_detail_id: debug.debug_detail_id,
+        provider_request_debug_url: `/v1/chat/sessions/${encodeURIComponent(
+          String(wake.sessionId),
+        )}/provider-requests/${encodeURIComponent(debug.debug_detail_id)}`,
+        request_sha256: debug.request_sha256,
+        request_json_chars: debug.request_json_chars,
+        expires_at: debug.expires_at,
+      }),
+    },
+  };
+}
+
+function recordOpenAiResponsesProviderRequestSamples(
+  context: BrainModuleContext,
+  wake: BrainWakeInput,
+  model: string,
+  responsesClientConfig: OpenAiResponsesBrainRunInput["client"],
+  samples: unknown[] | undefined,
+):
+  | {
+      debug_detail_id: string;
+      request_sha256: string;
+      request_json_chars: number;
+      expires_at: string;
+    }
+  | undefined {
+  if (!samples || samples.length === 0) return undefined;
+  return context.providerRequestDebugStore?.record({
+    sessionId: wake.sessionId,
+    wakeId: wake.wakeId,
+    brainModule: "openai-responses",
+    providerAlias:
+      responsesClientConfig && "providerAlias" in responsesClientConfig
+        ? responsesClientConfig.providerAlias
+        : undefined,
+    model,
+    protocol: "responses",
+    providerKind:
+      responsesClientConfig &&
+      "authKind" in responsesClientConfig &&
+      responsesClientConfig.authKind === "openai_oauth"
+        ? "openai_oauth"
+        : undefined,
+    request: {
+      boundary: "rust_openai_responses_request",
+      requestCount: samples.length,
+      requests: samples,
+    },
+  });
 }

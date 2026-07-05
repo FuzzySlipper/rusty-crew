@@ -525,6 +525,7 @@ export interface OpenAiResponsesTransportMetrics {
   providerRequestCount: number;
   continuationRoundCount: number;
   providerRequestPayloadBytes: number;
+  providerRequestDebugSamples?: unknown[];
   providerEventCounts: Record<string, number>;
   firstTextDeltaLatencyMs?: number | null;
   totalTurnDurationMs: number;

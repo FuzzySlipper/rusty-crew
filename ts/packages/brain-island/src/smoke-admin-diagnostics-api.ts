@@ -94,6 +94,32 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
   }),
   tools: [
     buildToolRegistryDiagnostics({ catalogId: "default-local-tools" }),
+    {
+      catalogId: "session:session-alpha",
+      sessionId: "session-alpha",
+      agentId: "agent-alpha",
+      profileId: "prime",
+      toolName: "den_get_document",
+      description: "Get a Den document.",
+      source: "mcp",
+      adapterId: "mcp-ts-main",
+      bindingId: "agent-alpha-mcp",
+      serverNames: ["den"],
+      endpointRef: "config://mcp/den",
+      toolProfileKey: "planner",
+      sourceToolName: "den_get_document",
+      catalogRevision: "mcp:planner",
+      schemaStatus: "present",
+      category: "mcp",
+      toolsets: ["mcp:planner"],
+      safety: ["network_access"],
+      outputShape: "mcp.tool_result.v1",
+      registeredTools: 1,
+      selectedTools: 1,
+      validationErrors: 0,
+      validationWarnings: 0,
+      invalid: false,
+    },
     buildToolRegistryDiagnostics({
       catalogId: "broken-tools",
       entries: [tool("read_file", "first"), tool("read_file", "second")],
@@ -441,6 +467,18 @@ const tools = handleAdminDiagnosticsRequest(
 );
 const toolPage = okData<AdminPage<{ catalogId: string }>>(tools);
 assert.equal(toolPage.items[0]?.catalogId, "broken-tools");
+
+const selectedMcpTools = handleAdminDiagnosticsRequest(
+  {
+    method: "GET",
+    url: "/v1/admin/diagnostics/tools?profile_id=prime&source=mcp",
+  },
+  { diagnostics },
+);
+const selectedMcpToolPage =
+  okData<AdminPage<{ toolName: string; bindingId?: string }>>(selectedMcpTools);
+assert.equal(selectedMcpToolPage.items[0]?.toolName, "den_get_document");
+assert.equal(selectedMcpToolPage.items[0]?.bindingId, "agent-alpha-mcp");
 
 const redacted = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/events/recent" },

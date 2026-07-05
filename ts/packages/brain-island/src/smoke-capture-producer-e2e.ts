@@ -49,7 +49,7 @@ const profileDenseProposal: TypedCaptureMemoryProposal = {
     {
       eventType: "tool_call_failed",
       wakeId,
-      summary: "den_memory_recall failed during wake.",
+      summary: "memory_recall failed during wake.",
     },
     {
       eventType: "user_correction",
@@ -85,10 +85,10 @@ try {
     source: "channel",
     now: "2026-06-28T01:00:00.000Z",
     events: [
-      observed({ type: "tool_call_started", toolName: "den_memory_recall" }),
+      observed({ type: "tool_call_started", toolName: "memory_recall" }),
       observed({
         type: "tool_call_finished",
-        toolName: "den_memory_recall",
+        toolName: "memory_recall",
         isError: true,
       }),
       {

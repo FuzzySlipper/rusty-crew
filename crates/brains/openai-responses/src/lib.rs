@@ -961,6 +961,7 @@ pub struct ResponsesTransportMetrics {
     pub provider_request_count: u64,
     pub continuation_round_count: u64,
     pub provider_request_payload_bytes: u64,
+    pub provider_request_debug_samples: Vec<Value>,
     pub provider_event_counts: HashMap<String, u64>,
     pub first_text_delta_latency_ms: Option<u64>,
     pub total_turn_duration_ms: u64,
@@ -973,6 +974,7 @@ struct ResponsesTransportMetricsBuilder {
     provider_request_count: u64,
     continuation_round_count: u64,
     provider_request_payload_bytes: u64,
+    provider_request_debug_samples: Vec<Value>,
     provider_event_counts: HashMap<String, u64>,
     first_text_delta_latency_ms: Option<u64>,
     turn_started_at: Instant,
@@ -988,6 +990,7 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_count: 0,
             continuation_round_count: 0,
             provider_request_payload_bytes: 0,
+            provider_request_debug_samples: Vec::new(),
             provider_event_counts: HashMap::new(),
             first_text_delta_latency_ms: None,
             turn_started_at: Instant::now(),
@@ -1003,6 +1006,11 @@ impl ResponsesTransportMetricsBuilder {
         self.provider_request_count += 1;
         if let Ok(payload) = serde_json::to_vec(request) {
             self.provider_request_payload_bytes += payload.len() as u64;
+        }
+        if self.provider_request_debug_samples.len() < 4 {
+            if let Ok(value) = serde_json::to_value(request) {
+                self.provider_request_debug_samples.push(value);
+            }
         }
     }
 
@@ -1035,6 +1043,7 @@ impl ResponsesTransportMetricsBuilder {
             provider_request_count: self.provider_request_count,
             continuation_round_count: self.continuation_round_count,
             provider_request_payload_bytes: self.provider_request_payload_bytes,
+            provider_request_debug_samples: self.provider_request_debug_samples.clone(),
             provider_event_counts: self.provider_event_counts.clone(),
             first_text_delta_latency_ms: self.first_text_delta_latency_ms,
             total_turn_duration_ms: duration_ms(self.turn_started_at.elapsed()),
@@ -2651,6 +2660,20 @@ mod tests {
         assert!(
             result.transport_metrics.provider_request_payload_bytes > 0,
             "request payload bytes should be measured"
+        );
+        assert_eq!(
+            result
+                .transport_metrics
+                .provider_request_debug_samples
+                .len(),
+            1,
+            "one exact provider request sample should be cached in metrics"
+        );
+        assert_eq!(
+            result.transport_metrics.provider_request_debug_samples[0]
+                .get("stream")
+                .and_then(Value::as_bool),
+            Some(true)
         );
         assert_eq!(
             result

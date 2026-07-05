@@ -86,11 +86,11 @@ const tools = resolveDenMemoryTools(baseContext);
 assert.deepEqual(
   tools.map((tool) => tool.name),
   [
-    "den_memory_recall",
-    "den_memory_read",
-    "den_memory_search",
-    "den_memory_store",
-    "den_memory_propose",
+    "memory_recall",
+    "memory_read",
+    "memory_search",
+    "memory_store",
+    "memory_propose",
   ],
 );
 
@@ -103,7 +103,7 @@ assertDetails(recall.details, {
 });
 assert.match(
   textContent(recall),
-  /^DEN_MEMORY_TOOL_RESULT ok=true operation=recall action=read/m,
+  /^MEMORY_TOOL_RESULT ok=true operation=recall action=read/m,
 );
 assert.equal(
   (calls.find((call) => call.method === "recall")?.payload as { role?: string })
@@ -198,10 +198,7 @@ assertDetails(manualStore.details, {
   operation: "store",
   action: "denied",
 });
-assert.equal(
-  manualStore.details.reasonCode,
-  "den_memory_manual_review_required",
-);
+assert.equal(manualStore.details.reasonCode, "memory_manual_review_required");
 
 const metadataPropose = await denMemoryProposeTool({
   ...baseContext,
@@ -220,10 +217,10 @@ const offRecall = await denMemoryRecallTool({
 }).execute("off-recall", {
   prompt: "No memory.",
 });
-assert.equal(offRecall.details.reasonCode, "den_memory_policy_off");
+assert.equal(offRecall.details.reasonCode, "memory_policy_off");
 assert.match(
   textContent(offRecall),
-  /^DEN_MEMORY_TOOL_RESULT ok=false operation=recall action=denied reason=den_memory_policy_off/m,
+  /^MEMORY_TOOL_RESULT ok=false operation=recall action=denied reason=memory_policy_off/m,
 );
 
 const missingClient = await denMemorySearchTool({
@@ -231,7 +228,7 @@ const missingClient = await denMemorySearchTool({
 }).execute("missing-client", {
   query: "unavailable",
 });
-assert.equal(missingClient.details.reasonCode, "den_memory_client_unavailable");
+assert.equal(missingClient.details.reasonCode, "memory_client_unavailable");
 assert.equal(missingClient.details.retryable, true);
 
 const proposal = await denMemoryProposeTool(baseContext).execute("propose", {

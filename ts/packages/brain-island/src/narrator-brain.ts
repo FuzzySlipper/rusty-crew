@@ -17,6 +17,7 @@ import type {
 } from "./index.js";
 import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
+import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import {
   resolveToolSession,
   type BrainToolResolver,
@@ -30,6 +31,7 @@ export interface RoleplayNarratorBrainOptions {
   maxReviewCycles?: number;
   reviewEnabled?: boolean;
   toolCallDebugStore?: ToolCallDebugStore;
+  providerRequestDebugStore?: ProviderRequestDebugStore;
 }
 
 const EXPLORE_TOOLS = new Set([
@@ -55,6 +57,7 @@ export function createRoleplayNarratorBrain(
     ),
     resolveTools: filteringResolver(options.resolveTools, EXPLORE_TOOLS),
     toolCallDebugStore: options.toolCallDebugStore,
+    providerRequestDebugStore: options.providerRequestDebugStore,
   });
 
   const composeBrain = createPiAgentBrain({
@@ -66,6 +69,7 @@ export function createRoleplayNarratorBrain(
     submitEvent: options.submitEvent,
     planActions: options.planActions,
     toolCallDebugStore: options.toolCallDebugStore,
+    providerRequestDebugStore: options.providerRequestDebugStore,
   });
 
   const composeDraftBrain = createPiAgentBrain({
@@ -75,6 +79,7 @@ export function createRoleplayNarratorBrain(
     ),
     resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
     toolCallDebugStore: options.toolCallDebugStore,
+    providerRequestDebugStore: options.providerRequestDebugStore,
   });
 
   const reviewBrain =
@@ -86,6 +91,7 @@ export function createRoleplayNarratorBrain(
           ),
           resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
           toolCallDebugStore: options.toolCallDebugStore,
+          providerRequestDebugStore: options.providerRequestDebugStore,
         })
       : undefined;
 

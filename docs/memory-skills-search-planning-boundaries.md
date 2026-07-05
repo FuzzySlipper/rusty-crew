@@ -32,9 +32,9 @@ Implementation boundary:
 
 - `adapter-den` owns the Den Memories HTTP client and request/response
   normalization.
-- `brain-island` owns model-callable tools such as `den_memory_recall`,
-  `den_memory_read`, `den_memory_search`, `den_memory_store`, and
-  `den_memory_propose`.
+- `brain-island` owns model-callable tools such as `memory_recall`,
+  `memory_read`, `memory_search`, `memory_store`, and
+  `memory_propose`.
 - The canonical tool registry owns names, categories, toolsets, safety flags,
   and diagnostics for these tools.
 - Rust should only see Den memory tool use as tool telemetry/events and selected

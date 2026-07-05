@@ -587,6 +587,14 @@ export const API_CAPABILITIES = [
     "chat",
     ["chat", "session", "diagnostics", "tool"],
   ),
+  readCapability(
+    "chat.sessions.provider_requests.debug.get",
+    "GET",
+    "/v1/chat/sessions/{session_id}/provider-requests/{debug_detail_id}",
+    "Read bounded redacted provider request debug detail for a session.",
+    "chat",
+    ["chat", "session", "diagnostics"],
+  ),
   {
     id: "chat.sessions.messages.create",
     method: "POST",

@@ -4,11 +4,11 @@ Task: Den `2899`
 
 Rusty Crew now has brain-island tool factories for the Den Memories tool family:
 
-- `den_memory_recall`
-- `den_memory_read`
-- `den_memory_search`
-- `den_memory_store`
-- `den_memory_propose`
+- `memory_recall`
+- `memory_read`
+- `memory_search`
+- `memory_store`
+- `memory_propose`
 
 These tools wrap the `@rusty-crew/adapter-den` Den Memories client. They do not
 make Rusty Crew the owner of Den memory data.

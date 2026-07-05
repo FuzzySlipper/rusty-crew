@@ -29,6 +29,10 @@ Rust-derived replacement. Rusty View should not hand-copy backend shapes.
   and expose only `debug_detail_id`/metadata references; clients call this route
   on demand for redacted arguments, partial updates, final result, error, and
   retention limits.
+- `GET /v1/chat/sessions/{session_id}/provider-requests/{debug_detail_id}`:
+  debug-only bounded provider request inspection. Provider status events expose
+  `provider_request_debug_detail_id` metadata; clients call this route on demand
+  to inspect the cached, redacted provider-facing prompt/tool payload.
 - `POST /v1/chat/sessions/{session_id}/messages`: append a user message and
   request an agent wake.
 - `GET /v1/chat/commands`: discover slash/debug commands.

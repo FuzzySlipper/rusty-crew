@@ -164,6 +164,7 @@ import {
 } from "./runtime-config-validation.js";
 import {
   buildRuntimeDiagnosticsProjection,
+  type ToolDiagnosticsProjection,
   type RuntimeSessionEffectiveDefaults,
   type RuntimePauseDiagnostics,
   type RuntimeResponsesWakeMetrics,
@@ -210,6 +211,7 @@ import {
   type MessageVariantPage,
   type MessageVariantRecord,
   type MessageVariantsReorderResult,
+  type ProviderRequestDebugDetail,
   type ReorderMessageVariantsInput,
   type RemoveAttachmentInput,
   type RemoveDataBankScopeInput,
@@ -258,6 +260,10 @@ import {
   MemoryToolCallDebugStore,
   type ToolCallDebugStore,
 } from "./tool-call-debug-store.js";
+import {
+  MemoryProviderRequestDebugStore,
+  type ProviderRequestDebugStore,
+} from "./provider-request-debug-store.js";
 import {
   listCuratorArchivedSkills,
   listCuratorPinnedSkills,
@@ -310,7 +316,10 @@ import {
   WakeDispatchTimeoutError,
   withWakeTimeout,
 } from "./wake-timeout.js";
-import { buildBuiltInToolCatalog } from "./tool-registry.js";
+import {
+  buildBuiltInToolCatalog,
+  defaultToolRegistry,
+} from "./tool-registry.js";
 import type { ServiceAdapterFactories } from "./service-adapter-ports.js";
 import { ChatEventStore } from "./chat-event-store.js";
 
@@ -381,6 +390,7 @@ interface ServiceState {
   readonly chatSequencesBySession: Map<SessionId, number>;
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
   readonly toolCallDebugStore: ToolCallDebugStore;
+  readonly providerRequestDebugStore: ProviderRequestDebugStore;
   readonly responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
@@ -583,6 +593,9 @@ export async function createRustyCrewServiceApp(
     const toolCallDebugStore = new MemoryToolCallDebugStore({
       now: options.now,
     });
+    const providerRequestDebugStore = new MemoryProviderRequestDebugStore({
+      now: options.now,
+    });
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,
@@ -592,6 +605,7 @@ export async function createRustyCrewServiceApp(
       adapterFactories: options.adapterFactories,
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
       toolCallDebugStore,
+      providerRequestDebugStore,
       onBrainWakeResult: (observation) => {
         const state = liveState;
         if (state === undefined) return;
@@ -642,6 +656,7 @@ export async function createRustyCrewServiceApp(
       chatSequencesBySession: new Map(),
       chatSubscribersBySession: new Map(),
       toolCallDebugStore,
+      providerRequestDebugStore,
       responsesWakeMetrics: [],
       suppressedWakeEvents: new Map(),
       recentEvents: [],
@@ -836,6 +851,8 @@ async function handleHttpRequest(
           listChatEventsAfterCursor(state, session, cursor, limit),
         getToolCallDebugDetail: (input) =>
           rustyViewToolCallDebugDetail(state, input),
+        getProviderRequestDebugDetail: (input) =>
+          rustyViewProviderRequestDebugDetail(state, input),
         executeCommand: (input) => executeRustyViewChatCommand(state, input),
         contextUsage: (input) => rustyViewSessionContextUsage(state, input),
         sendMessage: (input) => submitRustyViewChatMessage(state, input),
@@ -4663,6 +4680,52 @@ async function handleDirectDebugRequest(
   }
 
   if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "debug" &&
+    parts[2] === "sessions" &&
+    parts[4] === "provider-requests"
+  ) {
+    if ((request.method ?? "GET").toUpperCase() !== "GET") {
+      return failure(405, requestId(request), {
+        code: "method_not_allowed",
+        reason_code: "debug_provider_request_requires_get",
+        message: "direct provider request debug route only supports GET",
+        retryable: false,
+      });
+    }
+    const requestIdValue = requestId(request);
+    const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
+    const debugDetailId = decodeURIComponent(parts[5] ?? "");
+    const sessions = await state.bridge.listSessions();
+    const session = sessions.find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (!session) {
+      return failure(404, requestIdValue, {
+        code: "not_found",
+        reason_code: "debug_provider_request_session_not_found",
+        message: `debug session ${sessionId} was not found`,
+        retryable: false,
+      });
+    }
+    const detail = await rustyViewProviderRequestDebugDetail(state, {
+      session,
+      debugDetailId,
+      requestId: requestIdValue,
+    });
+    if (!detail) {
+      return failure(404, requestIdValue, {
+        code: "not_found",
+        reason_code: "debug_provider_request_not_found",
+        message: `provider request debug detail ${debugDetailId} was not found`,
+        retryable: false,
+      });
+    }
+    return successRoute(requestIdValue, detail);
+  }
+
+  if (
     parts.length === 5 &&
     parts[0] === "v1" &&
     parts[1] === "debug" &&
@@ -4839,6 +4902,7 @@ async function buildDiagnosticsContext(
     providerStates,
     responsesWakeMetrics: state.responsesWakeMetrics,
     adapters: buildServiceAdapterDiagnostics(state, now),
+    tools: buildSelectedToolDiagnostics(state, sessions),
     persistence: {
       tableCounts: tableCountMap(storage),
       searchHealthy: storage?.searchHealthy ?? true,
@@ -4880,6 +4944,57 @@ async function buildDiagnosticsContext(
       ...state.recentEvents,
     ],
   };
+}
+
+function buildSelectedToolDiagnostics(
+  state: ServiceState,
+  sessions: readonly SessionState[],
+): ToolDiagnosticsProjection[] {
+  return sessions.flatMap((session) => {
+    const activeMcpBinding = state.runtimeConfig.mcpBindings.find(
+      (binding) =>
+        (binding.status === undefined || binding.status === "active") &&
+        (binding.sessionId === session.sessionId ||
+          binding.profileId === session.profileId),
+    );
+    return session.toolProfile.tools.map((tool) => {
+      const localEntry = defaultToolRegistry.resolve(tool.name);
+      const source = localEntry ? "local" : "mcp";
+      const catalogId =
+        source === "mcp" && activeMcpBinding
+          ? `mcp:${activeMcpBinding.toolProfileKey}`
+          : `session:${session.sessionId}`;
+      return {
+        catalogId,
+        sessionId: session.sessionId,
+        agentId: session.agentId,
+        profileId: session.profileId,
+        toolName: tool.name,
+        description: tool.description,
+        source,
+        adapterId: source === "mcp" ? activeMcpBinding?.adapterId : undefined,
+        bindingId: source === "mcp" ? activeMcpBinding?.bindingId : undefined,
+        serverNames:
+          source === "mcp" ? [...(activeMcpBinding?.serverNames ?? [])] : [],
+        endpointRef:
+          source === "mcp" ? activeMcpBinding?.endpointRef : undefined,
+        toolProfileKey:
+          source === "mcp" ? activeMcpBinding?.toolProfileKey : undefined,
+        sourceToolName: tool.name,
+        catalogRevision: source === "mcp" ? catalogId : "default-local-tools",
+        schemaStatus: tool.inputSchema ? "present" : "missing",
+        category: localEntry?.category ?? source,
+        toolsets: localEntry ? [...localEntry.toolsets] : [],
+        safety: localEntry ? [...localEntry.safety] : [],
+        outputShape: localEntry?.outputShape,
+        registeredTools: 1,
+        selectedTools: 1,
+        validationErrors: 0,
+        validationWarnings: 0,
+        invalid: false,
+      } satisfies ToolDiagnosticsProjection;
+    });
+  });
 }
 
 function isProfileRegistryAdminRoute(pathname: string): boolean {
@@ -6687,6 +6802,7 @@ async function applyServiceRuntimeConfigFromDisk(
     adapterFactories: state.adapterFactories,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
+    providerRequestDebugStore: state.providerRequestDebugStore,
   });
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
@@ -9274,6 +9390,7 @@ async function applyServiceRuntimeRebuild(
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
+    providerRequestDebugStore: state.providerRequestDebugStore,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -9383,6 +9500,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
+    providerRequestDebugStore: state.providerRequestDebugStore,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -10602,6 +10720,29 @@ async function rustyViewToolCallDebugDetail(
     source_metadata: record.source_metadata,
     started_at: record.started_at,
     updated_at: record.updated_at,
+    expires_at: record.expires_at,
+    limits: { ...record.limits },
+  };
+}
+
+async function rustyViewProviderRequestDebugDetail(
+  state: ServiceState,
+  input: { session: SessionState; debugDetailId: string; requestId: string },
+): Promise<ProviderRequestDebugDetail | undefined> {
+  const record = state.providerRequestDebugStore.get({
+    sessionId: input.session.sessionId,
+    debugDetailId: input.debugDetailId,
+  });
+  if (!record) return undefined;
+  return {
+    debug_detail_id: record.debug_detail_id,
+    session_id: record.session_id,
+    wake_id: record.wake_id,
+    provider: record.provider,
+    request: record.request,
+    request_sha256: record.request_sha256,
+    request_json_chars: record.request_json_chars,
+    recorded_at: record.recorded_at,
     expires_at: record.expires_at,
     limits: { ...record.limits },
   };

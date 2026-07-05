@@ -456,7 +456,7 @@ try {
   });
   assert.equal(toolStartedEvent?.runtime_instance_id, "field-agent@rusty-crew");
   assert.equal(toolStartedEvent?.payload.kind, "agent_activity.v1");
-  assert.equal(toolStartedEvent?.payload.tool_name, "den_memory_recall");
+  assert.equal(toolStartedEvent?.payload.tool_name, "memory_recall");
   assert.equal(toolStartedEvent?.payload.adapter, "rusty-crew");
   assert.equal(toolStartedEvent?.payload.visibility, "channel");
   const toolWorkRef = toolStartedEvent?.payload.work_ref as
@@ -660,14 +660,14 @@ function withToolAndStreamingEvents(
     {
       wakeId: started.wakeId,
       sessionId: started.sessionId,
-      event: { type: "tool_call_started", toolName: "den_memory_recall" },
+      event: { type: "tool_call_started", toolName: "memory_recall" },
     },
     {
       wakeId: started.wakeId,
       sessionId: started.sessionId,
       event: {
         type: "tool_call_finished",
-        toolName: "den_memory_recall",
+        toolName: "memory_recall",
         isError: false,
       },
     },

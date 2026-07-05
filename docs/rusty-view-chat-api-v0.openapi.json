@@ -227,6 +227,44 @@
         }
       }
     },
+    "/v1/chat/sessions/{session_id}/provider-requests/{debug_detail_id}": {
+      "get": {
+        "operationId": "getChatProviderRequestDebugDetail",
+        "summary": "Read bounded raw provider request debug detail",
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionId" },
+          {
+            "name": "debug_detail_id",
+            "in": "path",
+            "required": true,
+            "description": "Debug detail id from provider_status metadata.provider_request_debug_detail_id.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Debug-only bounded/redacted provider request detail for the session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ProviderRequestDebugDetail" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The session or debug detail id was not found."
+          }
+        }
+      }
+    },
     "/v1/chat/sessions/{session_id}/messages": {
       "post": {
         "operationId": "sendChatMessage",
@@ -1693,6 +1731,45 @@
           "source_metadata": { "type": "object", "additionalProperties": true },
           "started_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "limits": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": false
+      },
+      "ProviderRequestDebugDetail": {
+        "type": "object",
+        "required": [
+          "debug_detail_id",
+          "session_id",
+          "wake_id",
+          "provider",
+          "request",
+          "request_sha256",
+          "request_json_chars",
+          "recorded_at",
+          "expires_at",
+          "limits"
+        ],
+        "properties": {
+          "debug_detail_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "wake_id": { "type": "string" },
+          "provider": {
+            "type": "object",
+            "required": ["brain_module"],
+            "properties": {
+              "brain_module": { "type": "string" },
+              "provider_alias": { "type": "string" },
+              "model": { "type": "string" },
+              "protocol": { "type": "string" },
+              "provider_kind": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "request": { "$ref": "#/components/schemas/ToolCallDebugValue" },
+          "request_sha256": { "type": "string" },
+          "request_json_chars": { "type": "integer", "minimum": 0 },
+          "recorded_at": { "type": "string", "format": "date-time" },
           "expires_at": { "type": "string", "format": "date-time" },
           "limits": { "type": "object", "additionalProperties": true }
         },

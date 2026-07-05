@@ -50,6 +50,9 @@ export interface RustyViewChatContext {
   getToolCallDebugDetail?(
     input: ToolCallDebugDetailInput,
   ): Promise<ToolCallDebugDetail | undefined>;
+  getProviderRequestDebugDetail?(
+    input: ProviderRequestDebugDetailInput,
+  ): Promise<ProviderRequestDebugDetail | undefined>;
   sendMessage?(input: ChatSendMessageInput): Promise<SendChatMessageResult>;
   listMessageSlots?(input: ListMessageSlotsInput): Promise<MessageSlotPage>;
   searchTranscript?(
@@ -250,6 +253,31 @@ export interface ToolCallDebugDetail {
   source_metadata?: unknown;
   started_at: string;
   updated_at: string;
+  expires_at: string;
+  limits: Record<string, unknown>;
+}
+
+export interface ProviderRequestDebugDetailInput {
+  session: SessionState;
+  debugDetailId: string;
+  requestId: string;
+}
+
+export interface ProviderRequestDebugDetail {
+  debug_detail_id: string;
+  session_id: string;
+  wake_id: string;
+  provider: {
+    brain_module: string;
+    provider_alias?: string;
+    model?: string;
+    protocol?: string;
+    provider_kind?: string;
+  };
+  request: unknown;
+  request_sha256: string;
+  request_json_chars: number;
+  recorded_at: string;
   expires_at: string;
   limits: Record<string, unknown>;
 }
@@ -1155,6 +1183,16 @@ export async function handleRustyViewChatRequest(
   }
 
   if (
+    parts.length === 6 &&
+    parts[0] === "v1" &&
+    parts[1] === "chat" &&
+    parts[2] === "sessions" &&
+    parts[4] === "provider-requests"
+  ) {
+    return handleProviderRequestDebugDetail(context, requestId, parts);
+  }
+
+  if (
     parts.length === 5 &&
     parts[0] === "v1" &&
     parts[1] === "chat" &&
@@ -1343,6 +1381,44 @@ async function handleToolCallDebugDetail(
       code: "not_found",
       reason_code: "tool_call_debug_detail_not_found",
       message: `tool call debug detail ${debugDetailId} was not found`,
+      retryable: false,
+    });
+  }
+  return success(requestId, detail);
+}
+
+async function handleProviderRequestDebugDetail(
+  context: RustyViewChatContext,
+  requestId: string,
+  parts: string[],
+): Promise<AdminRouteResult> {
+  if (!context.getProviderRequestDebugDetail) {
+    return chatFeatureUnavailable(
+      requestId,
+      "provider_request_debug_not_configured",
+    );
+  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  const debugDetailId = decodeURIComponent(parts[5] ?? "");
+  if (!debugDetailId) {
+    return failure(400, requestId, {
+      code: "invalid_input",
+      reason_code: "empty_provider_request_debug_detail_id",
+      message: "provider request debug detail id is required",
+      retryable: false,
+    });
+  }
+  const detail = await context.getProviderRequestDebugDetail({
+    session: session.session,
+    debugDetailId,
+    requestId,
+  });
+  if (!detail) {
+    return failure(404, requestId, {
+      code: "not_found",
+      reason_code: "provider_request_debug_detail_not_found",
+      message: `provider request debug detail ${debugDetailId} was not found`,
       retryable: false,
     });
   }

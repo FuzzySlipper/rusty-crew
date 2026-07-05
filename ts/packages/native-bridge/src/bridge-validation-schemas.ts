@@ -559,6 +559,7 @@ const openAiResponsesTransportMetricsSchema = Type.Object(
     providerRequestCount: Type.Number(),
     continuationRoundCount: Type.Number(),
     providerRequestPayloadBytes: Type.Number(),
+    providerRequestDebugSamples: Type.Optional(Type.Array(Type.Unknown())),
     providerEventCounts: Type.Record(Type.String(), Type.Number()),
     firstTextDeltaLatencyMs: Type.Optional(
       Type.Union([Type.Number(), Type.Null()]),

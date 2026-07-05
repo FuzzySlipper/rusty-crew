@@ -98,7 +98,7 @@ selection must be built from registry entries.
 - Avoid synonyms that hide capability overlap. If two tools claim the same
   output shape and category, the registry diagnostic must flag the collision.
 - Adapter-specific names should be prefixed only when needed to avoid ambiguity,
-  for example `den_memory_recall`.
+  for example `memory_recall`.
 - MCP imported tools must keep a stable source identity in metadata even when
   exposed under an unprefixed model name.
 

@@ -114,10 +114,10 @@ export function denMemoryRecallTool(
   context: DenMemoryToolContext,
 ): BrainTool<typeof recallParameters, DenMemoryToolDetails> {
   return {
-    name: "den_memory_recall",
-    label: "Recall Den memory",
+    name: "memory_recall",
+    label: "Recall memory",
     description:
-      "Recall relevant Den-owned memory summaries for the current profile or work context.",
+      "Recall relevant memory summaries for the current profile or work context. This is not a Den document, task, project, or guidance lookup tool.",
     parameters: recallParameters,
     execute: async (_toolCallId, params: RecallParams) =>
       withMemoryClient(context, "recall", async (client) => {
@@ -136,9 +136,10 @@ export function denMemoryReadTool(
   context: DenMemoryToolContext,
 ): BrainTool<typeof readParameters, DenMemoryToolDetails> {
   return {
-    name: "den_memory_read",
-    label: "Read Den memory",
-    description: "Read a specific Den-owned memory entry by stable reference.",
+    name: "memory_read",
+    label: "Read memory",
+    description:
+      "Read a specific memory entry by stable reference. This is not a Den document, task, project, or guidance lookup tool.",
     parameters: readParameters,
     execute: async (_toolCallId, params: ReadParams) => {
       if (!params.id && !params.slug) {
@@ -160,10 +161,10 @@ export function denMemorySearchTool(
   context: DenMemoryToolContext,
 ): BrainTool<typeof searchParameters, DenMemoryToolDetails> {
   return {
-    name: "den_memory_search",
-    label: "Search Den memory",
+    name: "memory_search",
+    label: "Search memory",
     description:
-      "Search Den-owned memories through the configured Den Memories service.",
+      "Search memory entries through the configured memory service. This is not a Den document, task, project, or guidance lookup tool.",
     parameters: searchParameters,
     execute: async (_toolCallId, params: SearchParams) =>
       withMemoryClient(context, "search", async (client) => {
@@ -182,10 +183,10 @@ export function denMemoryStoreTool(
   context: DenMemoryToolContext,
 ): BrainTool<typeof storeParameters, DenMemoryToolDetails> {
   return {
-    name: "den_memory_store",
-    label: "Store Den memory",
+    name: "memory_store",
+    label: "Store memory",
     description:
-      "Store a new Den-owned memory or route it to proposal depending on policy.",
+      "Store a new memory entry or route it to proposal depending on policy. This is not a Den document, task, project, or guidance update tool.",
     parameters: storeParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: StoreParams) =>
@@ -195,7 +196,7 @@ export function denMemoryStoreTool(
           return deniedResult(
             "store",
             context,
-            "den_memory_writes_disabled_metadata_mode",
+            "memory_writes_disabled_metadata_mode",
             false,
           );
         }
@@ -203,7 +204,7 @@ export function denMemoryStoreTool(
           return deniedResult(
             "store",
             context,
-            "den_memory_manual_review_required",
+            "memory_manual_review_required",
             false,
           );
         }
@@ -234,10 +235,10 @@ export function denMemoryProposeTool(
   context: DenMemoryToolContext,
 ): BrainTool<typeof proposeParameters, DenMemoryToolDetails> {
   return {
-    name: "den_memory_propose",
-    label: "Propose Den memory",
+    name: "memory_propose",
+    label: "Propose memory",
     description:
-      "Propose a Den-owned memory change for review without direct storage.",
+      "Propose a memory change for review without direct storage. This is not a Den document, task, project, or guidance update tool.",
     parameters: proposeParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: ProposeParams) =>
@@ -246,7 +247,7 @@ export function denMemoryProposeTool(
           return deniedResult(
             "propose",
             context,
-            "den_memory_proposals_disabled_metadata_mode",
+            "memory_proposals_disabled_metadata_mode",
             false,
           );
         }
@@ -272,15 +273,10 @@ async function withMemoryClient(
   ) => Promise<BrainToolResult<DenMemoryToolDetails>>,
 ): Promise<BrainToolResult<DenMemoryToolDetails>> {
   if (context.policy.mode === "off") {
-    return deniedResult(operation, context, "den_memory_policy_off", false);
+    return deniedResult(operation, context, "memory_policy_off", false);
   }
   if (!context.client) {
-    return deniedResult(
-      operation,
-      context,
-      "den_memory_client_unavailable",
-      true,
-    );
+    return deniedResult(operation, context, "memory_client_unavailable", true);
   }
   try {
     return await callback(context.client);
@@ -389,7 +385,7 @@ function errorResult(
     reasonCode:
       memoryError.options?.reasonCode ??
       memoryError.code ??
-      "den_memory_request_failed",
+      "memory_request_failed",
     retryable: memoryError.options?.retryable ?? true,
     result: {
       message:
@@ -409,7 +405,7 @@ function memoryToolResultText(details: DenMemoryToolDetails): string {
     ? "The tool call completed successfully; answer tool-status questions with ok=true even if the result contains zero matching memories."
     : "The tool call did not complete successfully; answer tool-status questions with ok=false.";
   return [
-    `DEN_MEMORY_TOOL_RESULT ${status} operation=${details.operation} action=${details.action}${reason}`,
+    `MEMORY_TOOL_RESULT ${status} operation=${details.operation} action=${details.action}${reason}`,
     interpretation,
     JSON.stringify(details, null, 2),
   ].join("\n");
