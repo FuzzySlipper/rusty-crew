@@ -41,10 +41,18 @@ try {
     name: "RP World",
     description: "Browser smoke lore.",
     purpose: "world",
-    writePolicy: "manual",
+    writePolicy: "auto_capture",
   });
   assert.equal(createdLayer.status, 200, JSON.stringify(createdLayer.body));
   assert.equal(createdLayer.body.data.layer.layer_id, "rp-world");
+  const hiddenLayer = await post("/v1/profile/rp-profile/layers", {
+    layerId: "rp-hidden",
+    name: "RP Hidden",
+    description: "Inactive browser smoke lore.",
+    purpose: "story",
+    writePolicy: "auto_capture",
+  });
+  assert.equal(hiddenLayer.status, 200, JSON.stringify(hiddenLayer.body));
 
   const listedLayers = await get("/v1/profile/rp-profile/layers");
   assert.equal(listedLayers.status, 200);
@@ -64,6 +72,174 @@ try {
     layerIds: ["rp-world"],
   });
   assert.equal(reordered.status, 200);
+
+  await captureLoreFact({
+    layerId: "rp-world",
+    recordId: "rp-clockmaker-song",
+    worldId: "rp-world-id",
+    entityId: "clockmaker",
+    title: "Clockmaker Song",
+    body: "The clockmaker sings three notes at dusk to wake silver leaves.",
+  });
+  await captureLoreFact({
+    layerId: "rp-hidden",
+    recordId: "rp-obsidian-vault",
+    worldId: "rp-world-id",
+    entityId: "vault",
+    title: "Obsidian Vault",
+    body: "The Obsidian Vault opens only for the forgotten royal signet.",
+  });
+  for (let index = 0; index < 105; index += 1) {
+    await captureLoreFact({
+      layerId: "rp-world",
+      recordId: `rp-decoy-${String(index).padStart(3, "0")}`,
+      worldId: "rp-world-id",
+      entityId: `decoy-${index}`,
+      title: `Obsidian Decoy ${index}`,
+      body: "Obsidian decoy lore that should not satisfy explicit hidden-layer filtering.",
+    });
+  }
+
+  const clockmakerSearch = await get(
+    "/v1/admin/roleplay/lore/entries/search?q=clockmaker&profile_id=rp-profile&limit=10&offset=0",
+  );
+  assert.equal(
+    clockmakerSearch.status,
+    200,
+    JSON.stringify(clockmakerSearch.body),
+  );
+  assert.equal(clockmakerSearch.body.data.entries.length, 1);
+  assert.equal(
+    clockmakerSearch.body.data.entries[0]?.record_id,
+    "rp-clockmaker-song",
+  );
+  assert.equal(clockmakerSearch.body.data.layerContext.source, "profile");
+
+  const chatFilteredSearch = await get(
+    "/v1/admin/roleplay/lore/entries/search?q=Vault&chat_id=rp-session",
+  );
+  assert.equal(chatFilteredSearch.status, 200);
+  assert.equal(chatFilteredSearch.body.data.entries.length, 0);
+  assert.equal(chatFilteredSearch.body.data.totalExact, true);
+  assert.deepEqual(chatFilteredSearch.body.data.layerContext.activeLayerIds, [
+    "rp-world",
+  ]);
+
+  const unscopedPagedSearch = await get(
+    "/v1/admin/roleplay/lore/entries/search?q=Obsidian&limit=5&offset=0",
+  );
+  assert.equal(unscopedPagedSearch.status, 200);
+  assert.equal(unscopedPagedSearch.body.data.entries.length, 5);
+  assert.equal(unscopedPagedSearch.body.data.hasMore, true);
+  assert.equal(unscopedPagedSearch.body.data.total, 6);
+  assert.equal(unscopedPagedSearch.body.data.totalExact, false);
+
+  const explicitLayerSearch = await get(
+    "/v1/admin/roleplay/lore/entries/search?q=Obsidian&layer_id=rp-hidden",
+  );
+  assert.equal(explicitLayerSearch.status, 200);
+  assert.equal(explicitLayerSearch.body.data.entries.length, 1);
+  assert.equal(
+    explicitLayerSearch.body.data.entries[0]?.record_id,
+    "rp-obsidian-vault",
+  );
+  assert.equal(explicitLayerSearch.body.data.total, 1);
+  assert.equal(explicitLayerSearch.body.data.totalExact, true);
+
+  const createdEntry = await post("/v1/admin/roleplay/lore/entries", {
+    layer_id: "rp-world",
+    is_constant: true,
+    priority: 7,
+    write: {
+      record_id: "rp-manual-entry",
+      world_id: "rp-world-id",
+      entity_id: "manual-entry",
+      shape: { shape_id: "lore_entry", version: 1 },
+      canon_status: "draft",
+      visibility: "public",
+      title: "Manual Entry",
+      body: "The manual entry starts as a browser-created draft.",
+      content: {
+        world_id: "rp-world-id",
+        entity_id: "manual-entry",
+        title: "Manual Entry",
+        body: "The manual entry starts as a browser-created draft.",
+        canon_status: "draft",
+        visibility: "public",
+        metadata_json: { tags: ["editor-smoke"] },
+      },
+      evidence_refs: [
+        {
+          evidence_type: "ui",
+          ref_id: "roleplay-browser-editor",
+          label: "roleplay browser editor",
+        },
+      ],
+      source: "ui",
+      confidence: 0.9,
+      durability_rationale: "Created by browser API editor smoke.",
+    },
+  });
+  assert.equal(createdEntry.status, 200, JSON.stringify(createdEntry.body));
+  assert.equal(createdEntry.body.data.entry.record_id, "rp-manual-entry");
+  assert.equal(createdEntry.body.data.entry.revision, 1);
+  assert.equal(createdEntry.body.data.layerEntries.length, 1);
+  assert.equal(createdEntry.body.data.layerEntries[0]?.layer_id, "rp-world");
+  assert.equal(createdEntry.body.data.provenance.length, 1);
+
+  const readEntry = await get(
+    "/v1/admin/roleplay/lore/entries/rp-manual-entry?layer_id=rp-world",
+  );
+  assert.equal(readEntry.status, 200, JSON.stringify(readEntry.body));
+  assert.equal(readEntry.body.data.entry.title, "Manual Entry");
+  assert.equal(
+    readEntry.body.data.layerEntries[0]?.record_id,
+    "rp-manual-entry",
+  );
+  assert.equal(readEntry.body.data.provenance[0]?.record_id, "rp-manual-entry");
+
+  const patchedEntry = await patch(
+    "/v1/admin/roleplay/lore/entries/rp-manual-entry?layer_id=rp-world",
+    {
+      expected_revision: readEntry.body.data.entry.revision,
+      title: "Manual Entry Revised",
+      body: "The manual entry was revised by the browser editor.",
+      canon_status: "canon",
+      content: {
+        metadata_json: { tags: ["editor-smoke", "revised"] },
+      },
+      evidence_refs: [
+        {
+          evidence_type: "ui",
+          ref_id: "roleplay-browser-editor-revision",
+          label: "roleplay browser editor revision",
+        },
+      ],
+      confidence: 0.95,
+      durability_rationale: "Updated by browser API editor smoke.",
+    },
+  );
+  assert.equal(patchedEntry.status, 200, JSON.stringify(patchedEntry.body));
+  assert.equal(patchedEntry.body.data.entry.title, "Manual Entry Revised");
+  assert.equal(patchedEntry.body.data.entry.canon_status, "canon");
+  assert.equal(patchedEntry.body.data.entry.revision, 2);
+  assert.equal(patchedEntry.body.data.provenance.length, 2);
+  assert.equal(
+    patchedEntry.body.data.entry.content.metadata_json.tags[1],
+    "revised",
+  );
+
+  const layerEntryReadback = await get(
+    "/v1/admin/roleplay/lore/layers/rp-world/entries",
+  );
+  const manualJoin = layerEntryReadback.body.data.entries.find(
+    (entry: Record<string, unknown>) => entry.record_id === "rp-manual-entry",
+  );
+  assert.equal(manualJoin?.layer_id, "rp-world");
+  assert.equal(
+    (manualJoin?.record as Record<string, unknown> | undefined)?.title,
+    "Manual Entry Revised",
+  );
 
   const character = await post(
     "/v1/admin/roleplay/profiles/rp-profile/characters",
@@ -93,6 +269,8 @@ try {
       pacing: "balanced",
       explicitness: "romantic",
       memoryDepth: "deep",
+      stylePrompt:
+        "Use lean, emotionally direct narration with one vivid sensory anchor.",
       exemplar: "Keep continuity clear.",
       review: { enabled: true, maxReviewCycles: 2 },
     },
@@ -103,6 +281,14 @@ try {
     "/v1/admin/roleplay/profiles/rp-profile/narrator-config",
   );
   assert.equal(narratorReadback.body.data.config.memoryDepth, "deep");
+  assert.equal(
+    narratorReadback.body.data.config.stylePrompt,
+    "Use lean, emotionally direct narration with one vivid sensory anchor.",
+  );
+  assert.equal(
+    narratorReadback.body.data.config.exemplar,
+    "Keep continuity clear.",
+  );
 
   const session = await post("/v1/admin/roleplay/sessions", {
     sessionId: "rp-browser-session",
@@ -170,6 +356,55 @@ async function post(path: string, body: unknown) {
     status: response.status,
     body: (await response.json()) as any,
   };
+}
+
+async function captureLoreFact(input: {
+  layerId: string;
+  recordId: string;
+  worldId: string;
+  entityId: string;
+  title: string;
+  body: string;
+}) {
+  const response = await post("/v1/admin/roleplay/lore/facts/capture", {
+    layer_id: input.layerId,
+    write: {
+      record_id: input.recordId,
+      world_id: input.worldId,
+      entity_id: input.entityId,
+      shape: {
+        shape_id: "lore_entry",
+        version: 1,
+      },
+      canon_status: "canon",
+      visibility: "public",
+      title: input.title,
+      body: input.body,
+      content: {
+        world_id: input.worldId,
+        entity_id: input.entityId,
+        title: input.title,
+        body: input.body,
+        canon_status: "canon",
+        visibility: "public",
+      },
+      evidence_refs: [
+        {
+          evidence_type: "import",
+          ref_id: "roleplay-browser-smoke",
+          label: "roleplay browser smoke",
+        },
+      ],
+      source: "import",
+      confidence: 1,
+      durability_rationale: "Seed fixture for roleplay browser API smoke.",
+      now: new Date("2026-07-05T00:00:00.000Z").toISOString(),
+    },
+    is_constant: false,
+    priority: 1,
+    capture_reason: "roleplay-browser-api-smoke",
+  });
+  assert.equal(response.status, 200, JSON.stringify(response.body));
 }
 
 async function patch(path: string, body: unknown) {

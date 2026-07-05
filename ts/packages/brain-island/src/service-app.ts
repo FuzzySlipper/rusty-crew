@@ -50,6 +50,9 @@ import {
   type NativeRoleplayChatLayersWrite,
   type NativeRoleplayLoreFactCapture,
   type NativeRoleplayLoreLayerWrite,
+  type NativeRoleplayLoreQuery,
+  type NativeRoleplayLoreReplace,
+  type NativeRoleplayLoreWrite,
   type NativeSimpleKvRecord,
 } from "@rusty-crew/native-bridge";
 import type {
@@ -455,6 +458,7 @@ interface BrowserRoleplayNarratorConfig {
   pacing: RoleplayNarratorPacing;
   explicitness: RoleplayNarratorExplicitness;
   memoryDepth: RoleplayNarratorMemoryDepth;
+  stylePrompt?: string;
   exemplar?: string;
   review: {
     enabled: boolean;
@@ -1499,6 +1503,61 @@ async function handleAdminRoleplayLoreRequest(
       );
     }
 
+    if (url.pathname === "/v1/admin/roleplay/lore/entries/search") {
+      if (method !== "GET") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore entry search supports GET",
+        );
+      }
+      return successRoute(
+        requestIdValue,
+        await roleplayLoreEntrySearchResult(state, url),
+      );
+    }
+
+    if (url.pathname === "/v1/admin/roleplay/lore/entries") {
+      if (method !== "POST") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay lore entry collection supports POST",
+        );
+      }
+      return roleplayLoreEntryCreateResult(
+        requestIdValue,
+        state,
+        recordBody(await readJsonBody(request)),
+      );
+    }
+
+    const entryMatch = url.pathname.match(
+      /^\/v1\/admin\/roleplay\/lore\/entries\/([^/]+)\/?$/,
+    );
+    if (entryMatch) {
+      const entryId = decodeURIComponent(entryMatch[1]);
+      if (method === "GET") {
+        return roleplayLoreEntryDetailResult(
+          requestIdValue,
+          state,
+          entryId,
+          url,
+        );
+      }
+      if (method === "PATCH") {
+        return roleplayLoreEntryPatchResult(
+          requestIdValue,
+          state,
+          entryId,
+          recordBody(await readJsonBody(request)),
+          url,
+        );
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay lore entry item supports GET and PATCH",
+      );
+    }
+
     const layerEntriesMatch = url.pathname.match(
       /^\/v1\/admin\/roleplay\/lore\/layers\/([^/]+)\/entries\/?$/,
     );
@@ -1718,11 +1777,709 @@ async function roleplayLoreLayerListResult(
   });
 }
 
+async function roleplayLoreEntrySearchResult(
+  state: ServiceState,
+  url: URL,
+): Promise<Record<string, unknown>> {
+  const params = url.searchParams;
+  const profileId = optionalString(params.get("profile_id"));
+  const chatId = optionalString(params.get("chat_id"));
+  const explicitLayerIds = roleplayLoreSearchLayerIds(params);
+  const layerScope = await roleplayLoreSearchLayerScope(state, {
+    profileId,
+    chatId,
+    explicitLayerIds,
+  });
+  const page = roleplayLoreSearchPage(params);
+  const query = roleplayLoreSearchQuery(params, page);
+  const pageResult =
+    layerScope.recordIds === undefined
+      ? await queryUnscopedRoleplayLoreEntrySearchPage(state, query, page)
+      : await queryLayerScopedRoleplayLoreEntrySearchPage(
+          state,
+          query,
+          page,
+          layerScope.recordIds,
+        );
+  return {
+    query: {
+      text:
+        optionalString(params.get("q")) ?? optionalString(params.get("query")),
+      profileId,
+      chatId,
+      layerIds: layerScope.layerIds,
+      worldId: optionalString(params.get("world_id") ?? params.get("worldId")),
+      entityId: optionalString(
+        params.get("entity_id") ?? params.get("entityId"),
+      ),
+      canonStatus: optionalString(
+        params.get("canon_status") ?? params.get("canonStatus"),
+      ),
+      visibility: optionalString(params.get("visibility")),
+      shapeId: optionalString(params.get("shape_id") ?? params.get("shapeId")),
+      includeSuperseded: optionalBooleanQuery(params, "include_superseded"),
+      includeTombstoned: optionalBooleanQuery(params, "include_tombstoned"),
+    },
+    entries: pageResult.entries.map(browserSafeLoreEntry),
+    layers: layerScope.layers.map((layer) => withEntryCount(layer, 0)),
+    layerContext: {
+      source: layerScope.source,
+      profileId,
+      chatId,
+      layerIds: layerScope.layerIds,
+      activeLayerIds: layerScope.activeLayerIds,
+    },
+    total: pageResult.total,
+    totalExact: pageResult.totalExact,
+    limit: page.limit,
+    offset: page.offset,
+    hasMore: pageResult.hasMore,
+  };
+}
+
+async function roleplayLoreEntryCreateResult(
+  requestIdValue: string,
+  state: ServiceState,
+  body: Record<string, unknown>,
+): Promise<AdminRouteResult> {
+  const layerId = requiredRouteString(
+    optionalString(body.layer_id) ?? optionalString(body.layerId),
+    "layer_id",
+  );
+  const layer = await state.bridge.getLoreLayer(layerId);
+  if (layer === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_layer_not_found",
+      message: `roleplay lore layer ${layerId} was not found`,
+      retryable: false,
+    });
+  }
+  if (layer.is_archived === true) {
+    return failure(409, requestIdValue, {
+      code: "conflict",
+      reason_code: "roleplay_lore_layer_archived",
+      message: `roleplay lore layer ${layerId} is archived`,
+      retryable: false,
+    });
+  }
+  if (layer.write_policy === "readonly") {
+    return failure(409, requestIdValue, {
+      code: "conflict",
+      reason_code: "roleplay_lore_layer_readonly",
+      message: `roleplay lore layer ${layerId} is readonly`,
+      retryable: false,
+    });
+  }
+
+  const write = roleplayLoreWriteFromBody(
+    recordBody(body.write ?? body),
+    undefined,
+    state.now(),
+    {
+      defaultRecordId: `lore-${randomBytes(8).toString("hex")}`,
+      defaultSource: "ui",
+      defaultDurabilityRationale:
+        "Manual roleplay lore entry created through browser admin API.",
+    },
+  );
+  const entry = await state.bridge.addLoreEntry(write);
+  await state.bridge.addEntryToLayer({
+    layer_id: layerId,
+    record_id: String(entry.record_id),
+    is_constant:
+      optionalBoolean(body.is_constant) ??
+      optionalBoolean(body.isConstant) ??
+      false,
+    priority: Math.trunc(optionalNumber(body.priority) ?? 0),
+    added_at: write.now,
+  });
+  return successRoute(requestIdValue, {
+    ...(await roleplayLoreEntryDetailData(state, entry, {
+      explicitLayerIds: [layerId],
+    })),
+    created: true,
+  });
+}
+
+async function roleplayLoreEntryDetailResult(
+  requestIdValue: string,
+  state: ServiceState,
+  entryId: string,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const entry = await state.bridge.getLoreEntry(entryId);
+  if (entry === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_entry_not_found",
+      message: `roleplay lore entry ${entryId} was not found`,
+      retryable: false,
+    });
+  }
+  return successRoute(
+    requestIdValue,
+    await roleplayLoreEntryDetailData(state, entry, {
+      profileId: optionalString(url.searchParams.get("profile_id")),
+      chatId: optionalString(url.searchParams.get("chat_id")),
+      explicitLayerIds: roleplayLoreSearchLayerIds(url.searchParams),
+    }),
+  );
+}
+
+async function roleplayLoreEntryPatchResult(
+  requestIdValue: string,
+  state: ServiceState,
+  entryId: string,
+  body: Record<string, unknown>,
+  url: URL,
+): Promise<AdminRouteResult> {
+  const existing = await state.bridge.getLoreEntry(entryId);
+  if (existing === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_entry_not_found",
+      message: `roleplay lore entry ${entryId} was not found`,
+      retryable: false,
+    });
+  }
+  const replace: NativeRoleplayLoreReplace = {
+    write: roleplayLoreWriteFromBody(
+      recordBody(body.write ?? body),
+      existing,
+      state.now(),
+      {
+        forcedRecordId: entryId,
+        defaultSource: "ui",
+        defaultDurabilityRationale:
+          "Roleplay lore entry updated through browser admin API.",
+      },
+    ),
+    expected_revision: requiredPositiveInteger(
+      body.expected_revision ?? body.expectedRevision,
+      "expected_revision",
+    ),
+  };
+  const entry = await state.bridge.replaceLoreEntry(replace);
+  return successRoute(
+    requestIdValue,
+    await roleplayLoreEntryDetailData(state, entry, {
+      profileId: optionalString(url.searchParams.get("profile_id")),
+      chatId: optionalString(url.searchParams.get("chat_id")),
+      explicitLayerIds: roleplayLoreSearchLayerIds(url.searchParams),
+    }),
+  );
+}
+
+async function roleplayLoreEntryDetailData(
+  state: ServiceState,
+  entry: Record<string, unknown>,
+  scope: {
+    profileId?: string;
+    chatId?: string;
+    explicitLayerIds: readonly string[];
+  },
+): Promise<Record<string, unknown>> {
+  const entryId = String(entry.record_id);
+  const [provenance, layerContext, supersedes, supersededBy] =
+    await Promise.all([
+      state.bridge.loreEntryProvenanceEvents(entryId),
+      roleplayLoreEntryLayerContext(state, entryId, scope),
+      optionalString(entry.supersedes_record_id) === undefined
+        ? Promise.resolve(undefined)
+        : state.bridge.getLoreEntry(String(entry.supersedes_record_id)),
+      optionalString(entry.superseded_by_record_id) === undefined
+        ? Promise.resolve(undefined)
+        : state.bridge.getLoreEntry(String(entry.superseded_by_record_id)),
+    ]);
+  return {
+    entry: browserSafeLoreEntry(entry),
+    provenance,
+    supersession: {
+      supersedesRecordId: optionalString(entry.supersedes_record_id),
+      supersededByRecordId: optionalString(entry.superseded_by_record_id),
+      supersedes: supersedes ? browserSafeLoreEntry(supersedes) : undefined,
+      supersededBy: supersededBy
+        ? browserSafeLoreEntry(supersededBy)
+        : undefined,
+    },
+    layerEntries: layerContext.layerEntries,
+    layers: layerContext.layers,
+    layerContext: {
+      source: layerContext.source,
+      profileId: scope.profileId,
+      chatId: scope.chatId,
+      layerIds: layerContext.layerIds,
+      activeLayerIds: layerContext.activeLayerIds,
+    },
+  };
+}
+
+async function roleplayLoreEntryLayerContext(
+  state: ServiceState,
+  entryId: string,
+  scope: {
+    profileId?: string;
+    chatId?: string;
+    explicitLayerIds: readonly string[];
+  },
+): Promise<{
+  source: "explicit" | "chat" | "profile" | "all";
+  layerIds: string[];
+  activeLayerIds: string[];
+  layers: Record<string, unknown>[];
+  layerEntries: Record<string, unknown>[];
+}> {
+  const layerScope = await roleplayLoreSearchLayerScope(state, scope);
+  const layerEntries =
+    layerScope.layerIds.length === 0
+      ? []
+      : (
+          await Promise.all(
+            layerScope.layerIds.map((layerId) =>
+              state.bridge.listEntriesByLayer(layerId),
+            ),
+          )
+        )
+          .flat()
+          .filter((entry) => String(entry.record_id) === entryId);
+  return {
+    source: layerScope.source,
+    layerIds: layerScope.layerIds,
+    activeLayerIds: layerScope.activeLayerIds,
+    layers: layerScope.layers,
+    layerEntries,
+  };
+}
+
+function roleplayLoreSearchQuery(
+  params: URLSearchParams,
+  page: { limit: number; offset: number },
+): NativeRoleplayLoreQuery {
+  return {
+    world_id: optionalString(params.get("world_id") ?? params.get("worldId")),
+    entity_id: optionalString(
+      params.get("entity_id") ?? params.get("entityId"),
+    ),
+    canon_status: optionalString(
+      params.get("canon_status") ?? params.get("canonStatus"),
+    ),
+    visibility: optionalString(params.get("visibility")),
+    shape_id: optionalString(params.get("shape_id") ?? params.get("shapeId")),
+    query:
+      optionalString(params.get("q")) ?? optionalString(params.get("query")),
+    include_superseded:
+      optionalBooleanQuery(params, "include_superseded") ??
+      optionalBooleanQuery(params, "includeSuperseded") ??
+      false,
+    include_tombstoned:
+      optionalBooleanQuery(params, "include_tombstoned") ??
+      optionalBooleanQuery(params, "includeTombstoned") ??
+      false,
+    page,
+  };
+}
+
+async function queryUnscopedRoleplayLoreEntrySearchPage(
+  state: ServiceState,
+  query: NativeRoleplayLoreQuery,
+  page: { limit: number; offset: number },
+): Promise<{
+  entries: Record<string, unknown>[];
+  total: number;
+  totalExact: boolean;
+  hasMore: boolean;
+}> {
+  const rawEntries = await state.bridge.queryLoreEntries({
+    ...query,
+    page: {
+      limit: page.limit + 1,
+      offset: page.offset,
+    },
+  });
+  const hasMore = rawEntries.length > page.limit;
+  const entries = rawEntries.slice(0, page.limit);
+  return {
+    entries,
+    total: page.offset + entries.length + (hasMore ? 1 : 0),
+    totalExact: !hasMore,
+    hasMore,
+  };
+}
+
+async function queryLayerScopedRoleplayLoreEntrySearchPage(
+  state: ServiceState,
+  query: NativeRoleplayLoreQuery,
+  page: { limit: number; offset: number },
+  recordIds: Set<string>,
+): Promise<{
+  entries: Record<string, unknown>[];
+  total: number;
+  totalExact: boolean;
+  hasMore: boolean;
+}> {
+  const rawEntries = await queryAllRoleplayLoreEntriesForLayerScopedSearch(
+    state,
+    query,
+  );
+  const filteredEntries = rawEntries.filter((entry) =>
+    recordIds.has(String(entry.record_id)),
+  );
+  const entries = filteredEntries.slice(page.offset, page.offset + page.limit);
+  return {
+    entries,
+    total: filteredEntries.length,
+    totalExact: true,
+    hasMore: page.offset + entries.length < filteredEntries.length,
+  };
+}
+
+async function queryAllRoleplayLoreEntriesForLayerScopedSearch(
+  state: ServiceState,
+  baseQuery: NativeRoleplayLoreQuery,
+): Promise<Record<string, unknown>[]> {
+  const pageLimit = 1_000;
+  const entries: Record<string, unknown>[] = [];
+  for (let offset = 0; ; offset += pageLimit) {
+    const pageEntries = await state.bridge.queryLoreEntries({
+      ...baseQuery,
+      page: {
+        limit: pageLimit,
+        offset,
+      },
+    });
+    entries.push(...pageEntries);
+    if (pageEntries.length < pageLimit) return entries;
+  }
+}
+
+async function roleplayLoreSearchLayerScope(
+  state: ServiceState,
+  input: {
+    profileId?: string;
+    chatId?: string;
+    explicitLayerIds: readonly string[];
+  },
+): Promise<{
+  source: "explicit" | "chat" | "profile" | "all";
+  layerIds: string[];
+  activeLayerIds: string[];
+  layers: Record<string, unknown>[];
+  recordIds?: Set<string>;
+}> {
+  let source: "explicit" | "chat" | "profile" | "all" = "all";
+  let layerIds = [...input.explicitLayerIds];
+  let activeLayerIds: string[] = [];
+
+  if (layerIds.length > 0) {
+    source = "explicit";
+    activeLayerIds = [...layerIds];
+  } else if (input.chatId) {
+    source = "chat";
+    const chatLayers = await state.bridge.getChatLayers(input.chatId);
+    layerIds = chatLayers
+      .filter((layer) => layer.enabled !== false)
+      .sort((left, right) => Number(left.priority) - Number(right.priority))
+      .map((layer) => String(layer.layer_id));
+    activeLayerIds = [...layerIds];
+  } else if (input.profileId) {
+    source = "profile";
+    const profileLayers = await state.bridge.listLoreLayers(input.profileId);
+    layerIds = profileLayers.map((layer) => String(layer.layer_id));
+    activeLayerIds = [...layerIds];
+  }
+
+  const layers = (
+    await Promise.all(
+      layerIds.map((layerId) =>
+        state.bridge.getLoreLayer(layerId).catch(() => undefined),
+      ),
+    )
+  ).filter((layer): layer is Record<string, unknown> => layer !== undefined);
+
+  if (layerIds.length === 0) {
+    return { source, layerIds, activeLayerIds, layers };
+  }
+
+  const recordIds = new Set<string>();
+  await Promise.all(
+    layerIds.map(async (layerId) => {
+      const entries = await state.bridge.listEntriesByLayer(layerId);
+      for (const entry of entries) {
+        recordIds.add(String(entry.record_id));
+      }
+    }),
+  );
+  return { source, layerIds, activeLayerIds, layers, recordIds };
+}
+
+function roleplayLoreSearchLayerIds(params: URLSearchParams): string[] {
+  const values = [
+    ...params.getAll("layer_id"),
+    ...params.getAll("layerId"),
+    ...params.getAll("layer_ids"),
+    ...params.getAll("layerIds"),
+  ];
+  return [
+    ...new Set(
+      values
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ];
+}
+
+function roleplayLoreSearchPage(params: URLSearchParams): {
+  limit: number;
+  offset: number;
+} {
+  const limit = integerQueryParam(params, "limit", 50);
+  const offset = integerQueryParam(params, "offset", 0);
+  return {
+    limit: Math.min(Math.max(limit, 1), 200),
+    offset: Math.max(offset, 0),
+  };
+}
+
+function integerQueryParam(
+  params: URLSearchParams,
+  name: string,
+  fallback: number,
+): number {
+  const raw = params.get(name);
+  if (raw === null || raw.trim().length === 0) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  return value;
+}
+
+function optionalBooleanQuery(
+  params: URLSearchParams,
+  name: string,
+): boolean | undefined {
+  const raw = params.get(name);
+  if (raw === null || raw.trim().length === 0) return undefined;
+  if (raw === "true" || raw === "1") return true;
+  if (raw === "false" || raw === "0") return false;
+  throw new Error(`${name} must be true or false`);
+}
+
+function browserSafeLoreEntry(
+  entry: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...entry };
+}
+
 function withEntryCount(
   layer: Record<string, unknown>,
   entryCount: number,
 ): Record<string, unknown> {
   return { ...layer, entry_count: entryCount, entryCount };
+}
+
+function roleplayLoreWriteFromBody(
+  body: Record<string, unknown>,
+  existing: Record<string, unknown> | undefined,
+  now: string,
+  options: {
+    defaultRecordId?: string;
+    forcedRecordId?: string;
+    defaultSource: string;
+    defaultDurabilityRationale: string;
+  },
+): NativeRoleplayLoreWrite {
+  const recordId = requiredRouteString(
+    options.forcedRecordId ??
+      stringField(
+        body,
+        ["record_id", "recordId"],
+        optionalString(existing?.record_id),
+      ) ??
+      options.defaultRecordId,
+    "record_id",
+  );
+  const worldId = requiredRouteString(
+    stringField(
+      body,
+      ["world_id", "worldId"],
+      optionalString(existing?.world_id),
+    ),
+    "world_id",
+  );
+  const entityId = nullableStringField(
+    body,
+    ["entity_id", "entityId"],
+    existing?.entity_id,
+  );
+  const title = requiredRouteString(
+    stringField(body, ["title"], optionalString(existing?.title)),
+    "title",
+  );
+  const loreBody = requiredRouteString(
+    stringField(body, ["body"], optionalString(existing?.body)),
+    "body",
+  );
+  const canonStatus = requiredRouteString(
+    stringField(
+      body,
+      ["canon_status", "canonStatus"],
+      optionalString(existing?.canon_status) ?? "draft",
+    ),
+    "canon_status",
+  );
+  const visibility = requiredRouteString(
+    stringField(
+      body,
+      ["visibility"],
+      optionalString(existing?.visibility) ?? "public",
+    ),
+    "visibility",
+  );
+  const content = roleplayLoreContentFromBody(body, existing, {
+    worldId,
+    entityId,
+    title,
+    body: loreBody,
+    canonStatus,
+    visibility,
+  });
+  return {
+    record_id: recordId,
+    world_id: worldId,
+    entity_id: entityId,
+    session_id: nullableStringField(
+      body,
+      ["session_id", "sessionId"],
+      existing?.session_id,
+    ),
+    branch_id: nullableStringField(
+      body,
+      ["branch_id", "branchId"],
+      existing?.branch_id,
+    ),
+    shape: roleplayLoreShapeFromBody(body, existing),
+    canon_status: canonStatus,
+    visibility,
+    title,
+    body: loreBody,
+    content,
+    evidence_refs: roleplayLoreEvidenceRefsFromBody(body, existing),
+    source: stringField(body, ["source"], undefined) ?? options.defaultSource,
+    confidence:
+      optionalNumber(body.confidence) ??
+      optionalNumber(existing?.confidence) ??
+      1,
+    durability_rationale:
+      stringField(
+        body,
+        ["durability_rationale", "durabilityRationale"],
+        optionalString(existing?.durability_rationale),
+      ) ?? options.defaultDurabilityRationale,
+    supersedes_record_id: nullableStringField(
+      body,
+      ["supersedes_record_id", "supersedesRecordId"],
+      existing?.supersedes_record_id,
+    ),
+    now,
+  };
+}
+
+function roleplayLoreShapeFromBody(
+  body: Record<string, unknown>,
+  existing: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const bodyShape = recordBody(body.shape);
+  const existingShape = recordBody(existing?.shape);
+  return {
+    shape_id:
+      optionalString(bodyShape.shape_id) ??
+      optionalString(bodyShape.shapeId) ??
+      optionalString(body.shape_id) ??
+      optionalString(body.shapeId) ??
+      optionalString(existingShape.shape_id) ??
+      "lore_entry",
+    version:
+      optionalNumber(bodyShape.version) ??
+      optionalNumber(body.shape_version) ??
+      optionalNumber(body.shapeVersion) ??
+      optionalNumber(existingShape.version) ??
+      1,
+  };
+}
+
+function roleplayLoreContentFromBody(
+  body: Record<string, unknown>,
+  existing: Record<string, unknown> | undefined,
+  fields: {
+    worldId: string;
+    entityId: string | null | undefined;
+    title: string;
+    body: string;
+    canonStatus: string;
+    visibility: string;
+  },
+): Record<string, unknown> {
+  const rawContent = Object.hasOwn(body, "content")
+    ? body.content
+    : existing?.content;
+  const content = isRecord(rawContent) ? { ...rawContent } : {};
+  content.world_id = fields.worldId;
+  if (fields.entityId === null || fields.entityId === undefined) {
+    delete content.entity_id;
+  } else {
+    content.entity_id = fields.entityId;
+  }
+  content.title = fields.title;
+  content.body = fields.body;
+  content.canon_status = fields.canonStatus;
+  content.visibility = fields.visibility;
+  return content;
+}
+
+function roleplayLoreEvidenceRefsFromBody(
+  body: Record<string, unknown>,
+  existing: Record<string, unknown> | undefined,
+): unknown[] {
+  const value = Object.hasOwn(body, "evidence_refs")
+    ? body.evidence_refs
+    : Object.hasOwn(body, "evidenceRefs")
+      ? body.evidenceRefs
+      : existing?.evidence_refs;
+  const refs = Array.isArray(value) ? value : [];
+  return refs.length > 0
+    ? refs
+    : [
+        {
+          evidence_type: "ui",
+          ref_id: "browser-admin",
+          label: "Browser admin edit",
+        },
+      ];
+}
+
+function stringField(
+  body: Record<string, unknown>,
+  keys: readonly string[],
+  fallback: string | undefined,
+): string | undefined {
+  for (const key of keys) {
+    if (Object.hasOwn(body, key)) return optionalString(body[key]);
+  }
+  return fallback;
+}
+
+function nullableStringField(
+  body: Record<string, unknown>,
+  keys: readonly string[],
+  fallback: unknown,
+): string | null | undefined {
+  for (const key of keys) {
+    if (Object.hasOwn(body, key)) return optionalString(body[key]) ?? null;
+  }
+  return optionalString(fallback);
 }
 
 function roleplayLoreLayerWriteFromBody(
@@ -2662,6 +3419,12 @@ function normalizeRoleplayNarratorConfig(
       "memoryDepth",
       "medium",
     ),
+    ...(Object.hasOwn(raw, "stylePrompt") || Object.hasOwn(raw, "style_prompt")
+      ? {
+          stylePrompt:
+            optionalString(raw.stylePrompt ?? raw.style_prompt) ?? "",
+        }
+      : {}),
     ...(Object.hasOwn(raw, "exemplar") || Object.hasOwn(raw, "styleExemplar")
       ? { exemplar: optionalString(raw.exemplar ?? raw.styleExemplar) ?? "" }
       : {}),
@@ -2729,6 +3492,14 @@ function requiredRouteBoolean(
 ): boolean {
   if (value === undefined) throw new Error(`${fieldName} is required`);
   return value;
+}
+
+function requiredPositiveInteger(value: unknown, fieldName: string): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${fieldName} must be a positive integer`);
+  }
+  return parsed;
 }
 
 async function handleProfileRegistryWriteRequest(

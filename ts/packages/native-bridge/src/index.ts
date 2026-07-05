@@ -223,6 +223,7 @@ interface NativeBridgeBinding {
   supersedeLoreEntryJson(inputJson: string): string;
   tombstoneLoreEntryJson(inputJson: string): string;
   queryLoreEntriesJson(inputJson: string): string;
+  getLoreEntryJson(recordId: string): string;
   loreEntryProvenanceEventsJson(recordId: string): string;
   createLoreLayerJson(inputJson: string): string;
   getLoreLayerJson(layerId: string): string;
@@ -1765,6 +1766,7 @@ export interface NativeBridgeModule {
   queryLoreEntries(
     query: NativeRoleplayLoreQuery,
   ): Promise<NativeRoleplayLoreRecord[]>;
+  getLoreEntry(recordId: string): Promise<NativeRoleplayLoreRecord | undefined>;
   loreEntryProvenanceEvents(
     recordId: string,
   ): Promise<NativeRoleplayLoreProvenanceEvent[]>;
@@ -2006,6 +2008,7 @@ export const nativeManifestOperationNames = [
   "supersede_lore_entry",
   "tombstone_lore_entry",
   "query_lore_entries",
+  "get_lore_entry",
   "lore_entry_provenance_events",
   "add_entry_to_layer",
   "remove_entry_from_layer",
@@ -2117,6 +2120,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     supersedeLoreEntry: unavailable("initialize_engine"),
     tombstoneLoreEntry: unavailable("initialize_engine"),
     queryLoreEntries: unavailable("initialize_engine"),
+    getLoreEntry: unavailable("initialize_engine"),
     loreEntryProvenanceEvents: unavailable("initialize_engine"),
     addEntryToLayer: unavailable("initialize_engine"),
     removeEntryFromLayer: unavailable("initialize_engine"),
@@ -3084,6 +3088,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.queryLoreEntriesJson(JSON.stringify(query)),
       ) as NativeRoleplayLoreRecord[],
+    getLoreEntry: async (recordId) =>
+      (JSON.parse(
+        binding.getLoreEntryJson(recordId),
+      ) as NativeRoleplayLoreRecord | null) ?? undefined,
     loreEntryProvenanceEvents: async (recordId) =>
       JSON.parse(
         binding.loreEntryProvenanceEventsJson(recordId),

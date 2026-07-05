@@ -668,6 +668,15 @@ errors = "core_protocol::CoreError"
 summary = "Query roleplay lore entries by world, subject, scope, status, or text."
 
 [[operation]]
+name = "get_lore_entry"
+surface = "stable"
+direction = "ts_to_rust"
+input = "record_id"
+output = "Option<core_persistence::RoleplayLoreRecord>"
+errors = "core_protocol::CoreError"
+summary = "Get one roleplay lore entry by record id."
+
+[[operation]]
 name = "lore_entry_provenance_events"
 surface = "stable"
 direction = "ts_to_rust"

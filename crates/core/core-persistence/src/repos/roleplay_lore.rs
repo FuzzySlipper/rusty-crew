@@ -215,6 +215,47 @@ impl CoordinationStore {
         let conn = self.conn()?;
         query_roleplay_lore_records(&conn, query)
     }
+
+    pub fn get_roleplay_lore_record(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreRecord>> {
+        validate_roleplay_lore_record_id(record_id)?;
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT record_id,
+                    world_id,
+                    entity_id,
+                    session_id,
+                    branch_id,
+                    shape_id,
+                    shape_version,
+                    canon_status,
+                    visibility,
+                    status,
+                    revision,
+                    title,
+                    body,
+                    content_json,
+                    evidence_refs_json,
+                    source,
+                    confidence,
+                    durability_rationale,
+                    supersedes_record_id,
+                    superseded_by_record_id,
+                    tombstoned_at,
+                    tombstone_reason,
+                    created_at,
+                    updated_at
+             FROM module_roleplay_lore_records
+             WHERE record_id = ?1",
+            params![record_id],
+            row_to_roleplay_lore_record,
+        )
+        .optional()
+        .map_err(|error| persistence_error("get roleplay lore record", error))
+    }
+
     pub fn roleplay_lore_provenance_events(
         &self,
         record_id: &str,

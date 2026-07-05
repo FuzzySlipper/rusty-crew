@@ -61,10 +61,11 @@ policy.
 Producer: profile/brain registration assembly, stored or resolved through the
 Rust-owned session/brain binding and passed through the bridge as text.
 
-The current scaffold does not yet include full pi-profile prompt assembly.
-Until that lands, the first implementation may use a minimal registered prompt
-string, but the prompt must be part of the registered profile/brain input and
-not hard-coded inside the scheduler.
+Profile prompt assembly landed in
+`ts/packages/brain-island/src/profile-loading.ts` (system, instructions, soul,
+and memory prompt fragments plus role/style prompts). The prompt is part of the
+registered profile/brain input consumed by the wake path, not hard-coded inside
+the scheduler.
 
 ### role_assembly
 

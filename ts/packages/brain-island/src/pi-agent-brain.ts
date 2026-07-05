@@ -160,8 +160,7 @@ function optionalSessionModelConfig(session: unknown):
     modelName:
       typeof record.modelName === "string" ? record.modelName : undefined,
     api: typeof record.api === "string" ? record.api : undefined,
-    provider:
-      typeof record.provider === "string" ? record.provider : undefined,
+    provider: typeof record.provider === "string" ? record.provider : undefined,
   };
 }
 

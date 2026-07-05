@@ -18,6 +18,7 @@ import type {
 import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
+import type { RoleplayNarratorConfig } from "./profile-loading.js";
 import {
   resolveToolSession,
   type BrainToolResolver,
@@ -30,6 +31,7 @@ export interface RoleplayNarratorBrainOptions {
   planActions?: BrainActionPlanner;
   maxReviewCycles?: number;
   reviewEnabled?: boolean;
+  narratorConfig?: RoleplayNarratorConfig;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
 }
@@ -61,9 +63,8 @@ export function createRoleplayNarratorBrain(
   });
 
   const composeBrain = createPiAgentBrain({
-    createAgent: wrapCreateAgentSystemPrompt(
-      options.createAgent,
-      composeSystemInstructions,
+    createAgent: wrapCreateAgentSystemPrompt(options.createAgent, () =>
+      composeSystemInstructions(options.narratorConfig),
     ),
     resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
     submitEvent: options.submitEvent,
@@ -73,9 +74,8 @@ export function createRoleplayNarratorBrain(
   });
 
   const composeDraftBrain = createPiAgentBrain({
-    createAgent: wrapCreateAgentSystemPrompt(
-      options.createAgent,
-      composeSystemInstructions,
+    createAgent: wrapCreateAgentSystemPrompt(options.createAgent, () =>
+      composeSystemInstructions(options.narratorConfig),
     ),
     resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
     toolCallDebugStore: options.toolCallDebugStore,
@@ -137,7 +137,11 @@ export function createRoleplayNarratorBrain(
           const draftResult = await composeDraftBrain.wake(
             withFilteredTools(
               withNarratorInstructions(input, {
-                instructions: composeInstructions(sceneBrief, reviewFeedback),
+                instructions: composeInstructions(
+                  sceneBrief,
+                  reviewFeedback,
+                  options.narratorConfig,
+                ),
               }),
               COMPOSE_TOOLS,
             ),
@@ -169,7 +173,11 @@ export function createRoleplayNarratorBrain(
       const composeResult = await composeBrain.wake(
         withFilteredTools(
           withNarratorInstructions(input, {
-            instructions: composeInstructions(sceneBrief, reviewFeedback),
+            instructions: composeInstructions(
+              sceneBrief,
+              reviewFeedback,
+              options.narratorConfig,
+            ),
           }),
           COMPOSE_TOOLS,
         ),
@@ -380,7 +388,8 @@ async function runMandatoryAutoCapture(
     observations.push({
       toolName: "capture_lore_fact",
       ok: false,
-      summary: "auto-capture skipped because no story auto-capture layer exists",
+      summary:
+        "auto-capture skipped because no story auto-capture layer exists",
     });
     return observations;
   }
@@ -640,18 +649,17 @@ function exploreInstructions(prelude?: string): string {
     "Use those results, and call additional lore or scene-state tools only if more context is needed.",
     "Do not write the user-facing narrative in this phase.",
     "Return only a concise scene brief as JSON or structured Markdown with location, charactersPresent, activeThreads, loreReferences, capturedFacts, and toneSuggestion.",
-    ...(prelude
-      ? ["", "Mandatory explore tool results:", prelude]
-      : []),
+    ...(prelude ? ["", "Mandatory explore tool results:", prelude] : []),
   ].join("\n");
 }
 
 function composeInstructions(
   sceneBrief = "{}",
   reviewFeedback?: string,
+  narratorConfig?: RoleplayNarratorConfig,
 ): string {
   return [
-    composeSystemInstructions(),
+    composeSystemInstructions(narratorConfig),
     ...(reviewFeedback
       ? [
           "Apply the internal review feedback below while keeping the output clean.",
@@ -666,13 +674,47 @@ function composeInstructions(
   ].join("\n");
 }
 
-function composeSystemInstructions(): string {
+function composeSystemInstructions(
+  narratorConfig?: RoleplayNarratorConfig,
+): string {
   return [
     "Roleplay narrator phase: compose.",
     "Write the user-facing narrative response as clean prose.",
     "Do not mention tools, retrieval, scene briefs, or internal phases.",
+    ...roleplayNarratorStyleInstructions(narratorConfig),
     "Use the scene brief below as private context.",
   ].join("\n");
+}
+
+function roleplayNarratorStyleInstructions(
+  narratorConfig: RoleplayNarratorConfig | undefined,
+): string[] {
+  if (!narratorConfig) return [];
+  const lines = [
+    "",
+    "Narrator style controls:",
+    `- tone: ${narratorConfig.tone}`,
+    `- pacing: ${narratorConfig.pacing}`,
+    `- explicitness: ${narratorConfig.explicitness}`,
+    `- memoryDepth: ${narratorConfig.memoryDepth}`,
+  ];
+  if (narratorConfig.stylePrompt) {
+    lines.push(
+      "",
+      "Direct narrator style prompt:",
+      narratorConfig.stylePrompt,
+      "Treat the direct style prompt above as style guidance/instructions, not as prose to copy.",
+    );
+  }
+  if (narratorConfig.exemplar) {
+    lines.push(
+      "",
+      "Style exemplar/reference prose:",
+      narratorConfig.exemplar,
+      "Use the exemplar only as a reference for rhythm and descriptive density; do not copy its wording.",
+    );
+  }
+  return lines;
 }
 
 function reviewInstructions(sceneBrief = "{}", draft = ""): string {

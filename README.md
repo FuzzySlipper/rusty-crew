@@ -111,18 +111,29 @@ npm run smoke:production-delegation-wake
 
 ## Build And Test
 
-Use focused smokes while developing, then broaden before handoff:
+Use focused smokes while developing, then run the offline gate before handoff.
+GitHub Actions runs the same offline gate on pushes to `main`, pull requests,
+and manual dispatch:
+
+```sh
+npm ci
+npm run verify:offline
+```
+
+`verify:offline` is intentionally free of Den, live providers, local Postgres,
+running Rusty Crew services, and Rusty View. It expands to:
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-npm install
-npm run test:unit
 npm run typecheck
-npm run smoke:architecture-boundaries
-npm run smoke:ts-package-boundaries
+npm run test:unit
 npm run format
+npm run smoke:architecture-boundaries
+npm run smoke:runtime-config-parity
+npm run smoke:bridge-fixture-drift
+npm run smoke:bridge-validation
 ```
 
 TypeScript unit tests use Node's built-in `node:test` runner through `tsx`.

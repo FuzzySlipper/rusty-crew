@@ -4,3 +4,4 @@ docs/
 *.tsbuildinfo
 ts/packages/native-bridge/native/*.d.ts
 ts/packages/native-bridge/native/*.js
+.claude/

@@ -1629,6 +1629,7 @@ export const manifestOperationNames = [
   "supersede_lore_entry",
   "tombstone_lore_entry",
   "query_lore_entries",
+  "get_lore_entry",
   "lore_entry_provenance_events",
   "add_entry_to_layer",
   "remove_entry_from_layer",

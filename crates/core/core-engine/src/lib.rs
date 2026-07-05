@@ -735,6 +735,13 @@ impl CoreEngine {
         self.store.memory().query_roleplay_lore_records(query)
     }
 
+    pub fn get_roleplay_lore_record(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreRecord>> {
+        self.store.memory().get_roleplay_lore_record(record_id)
+    }
+
     pub fn roleplay_lore_provenance_events(
         &self,
         record_id: &str,

@@ -66,7 +66,9 @@ for (const rootDir of scanRoots) {
   if (!existsSync(rootDir)) continue;
   for (const file of findFiles(rootDir)) {
     const relativePath = normalizePath(relative(root, file));
-    if (ignoredPathFragments.some((fragment) => relativePath.includes(fragment))) {
+    if (
+      ignoredPathFragments.some((fragment) => relativePath.includes(fragment))
+    ) {
       continue;
     }
     const source = readFileSync(file, "utf8");
@@ -108,7 +110,9 @@ if (violations.length > 0) {
 console.log(
   JSON.stringify(
     {
-      checkedRoots: scanRoots.map((path) => normalizePath(relative(root, path))),
+      checkedRoots: scanRoots.map((path) =>
+        normalizePath(relative(root, path)),
+      ),
       forbiddenRules: forbidden.map((rule) => rule.id),
       allowedLegacySeams: allowed.map(({ id, path, count, reason }) => ({
         id,

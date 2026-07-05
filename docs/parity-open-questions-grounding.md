@@ -1,131 +1,132 @@
-# Parity Open Questions Current Grounding
+# Parity Open Questions Closeout
 
-Date: 2026-06-20
+Date: 2026-06-20 (grounding snapshot); closeout update 2026-07-05.
 
-Status: Task 2986 grounding note.
+Status: Superseded closeout for task 2986. The findings below were a 2026-06-20
+grounding snapshot that mapped the 2824 open questions against code reality
+before implementation. Every item has since been resolved by an accepted ADR
+and/or landed code. Treat this file as a historical closeout, not current
+architecture. For active policy use `docs/README.md`, the `docs/adr/` trail,
+and the Den document `rusty-crew-unified-architecture`.
 
 ## Purpose
 
-The parity audit `pi-crew-vs-rusty-crew-parity-2026-06-19` is useful as a
-baseline, but it predates several Rusty Crew commits. This note maps the open
-questions from task 2824 to current code reality before implementation work
-uses the audit as if it were still exact.
+The parity audit `pi-crew-vs-rusty-crew-parity-2026-06-19` was useful as a
+baseline but predated several Rusty Crew commits. This note originally mapped
+the open questions from task 2824 to current code reality so implementation
+work would not treat the audit as if it were still exact. The 2824 questions
+are now closed; see `2824-architecture-decision-index.md` for the per-question
+outcome map.
 
-The authoritative architecture remains the Den document
-`rusty-crew-unified-architecture`: Rust owns deterministic coordination,
-TypeScript owns the brain island and platform adapters, and Den is product
-data plus observability rather than the coordination bus.
+## Findings At Closeout
 
-## Current Findings
+### Wake brain and scheduler — landed
 
-### Wake brain and scheduler
+The production wake path is wired. `CoreEngine::route_agent_message()` and
+`run_scheduler_tick()` evaluate `DefaultWakeThreshold` and emit
+`BrainWakeRequested` for active wake-capable sessions; delegated session
+creation emits `BrainWakeRequested` through the direct delegation lifecycle.
+Brain implementations are registered through `register_brain_implementation`;
+`wakeBrainFromBridgeRequest` (`ts/packages/brain-island/src/bridge-wake.ts`)
+hydrates the three runtime-buffer handles, calls the registered brain's
+`wake`, and releases each handle exactly once; brain events and action
+batches return through `submit_brain_event` / `submit_brain_actions`.
 
-Still true: production `wake_brain` is not wired through the native bridge.
-`NativeBridge::wake_brain` validates the three runtime buffer handles, then
-returns `not_implemented("wake_brain")`. The TypeScript native facade also
-exports `wakeBrain` as unavailable.
+Note: the `NativeBridge::wake_brain` manifest operation itself still returns
+`not_implemented("wake_brain")` — it validates the handle/buffer request shape
+only, because the transport-neutral callback story is waiting on bridge
+codegen. This is an intentional explicit-unavailable operation documented by
+the bridge surface decisions, not a missing wake path. The live wake path runs
+through the registered-brain executor binding and the Rust `openai-responses`
+brain (`run_openai_responses_brain_json`), see ADR 0021.
 
-Stale or changed: the audit says `CoreEngine` never emits
-`BrainWakeRequested`. Current `CoreEngine::spawn_delegated_workers` now creates
-delegated sessions and publishes `BrainWakeRequested` for wake-capable delegated
-sessions. The remaining gap is the production scheduler/body loop that observes
-events, evaluates thresholds, builds wake payloads, and dispatches through the
-registered brain implementation.
+Decision references: `adr/0004-wake-scheduler-ownership.md`,
+`adr/0013-wake-buffer-assembly-ownership.md`, `production-wake-path-contract.md`.
 
-Tracked by: tasks 2988, 2830, 2831, 2832, 2833, and 2838.
+### Bridge wake buffers — decided and landed
 
-### Bridge wake buffers
-
-Still true: the runtime buffer ownership protocol exists and is tested.
+The runtime buffer ownership protocol is implemented and tested.
 `RuntimeBufferStore::build_brain_wake_request` leases `body_state`,
-`system_prompt`, and `role_assembly` buffers, and
-`wakeBrainFromBridgeRequest` hydrates and releases each handle exactly once.
+`system_prompt`, and `role_assembly` buffers; `wakeBrainFromBridgeRequest`
+hydrates and releases each handle exactly once. The single-owner question is
+decided by ADR 0013: Rust produces `body_state`; registered brain/profile input
+supplies `system_prompt`; profile/role assembly supplies `role_assembly`; the
+bridge owns buffer creation, leases, hydration, and release.
 
-Still open: production code has not yet decided the single owner that produces
-the three wake payloads. The diagnostic helper `project_body_state_json`
-serializes `BodyState`, but the production wake path needs an explicit builder:
-Rust projects the body state; profile/role assembly must be produced from the
-registered brain/profile configuration without inventing a second buffer
-protocol.
+Decision reference: `adr/0013-wake-buffer-assembly-ownership.md`,
+`runtime-buffer-ownership.md`.
 
-Tracked by: tasks 2989, 2830, 2832, and 2836.
+### ToolProfile enforcement — decided and landed
 
-### ToolProfile enforcement
+`SessionState` retains a `ToolProfile`; the native bridge mirrors registered
+brain profile tools into the Rust engine; delegated sessions resolve their
+tool surface from the requested profile; the TS pi-agent brain accepts a
+resolver for concrete tools and filters its result back to the
+Rust-projected `ToolProfile`. Tool availability is profile-based, not a
+runtime `WorkerPolicy` allow/deny model.
 
-Partly resolved by task 2846: `SessionState` now retains a `ToolProfile`, the
-native bridge mirrors registered brain profile tools into the Rust engine, and
-delegated sessions resolve their tool surface from the requested profile.
-The TS pi-agent brain accepts a resolver for concrete tools and filters its
-result back to the `ToolProfile` descriptors projected by Rust.
+Decision reference: `adr/0014-tool-profile-enforcement.md`,
+`tool-architecture-registry-rules.md`.
 
-The remaining design direction is still profile-based tool enablement, not a
-runtime `WorkerPolicy` allow/deny model. Future work should continue to keep
-Rust as the canonical selected profile/session binding while TS supplies only
-the concrete tools named by that selected profile.
+### Delegation receiver / rusty-core replacement — decided and landed
 
-Tracked by: tasks 2990 and the 2815 children, especially 2855, 2858, 2861,
-2862, and 2864.
-
-### Delegation receiver / rusty-core replacement
-
-Changed: the old self-addressed string receiver concern is no longer the whole
-story. `RequestDelegation` now causes Rust to create delegated sessions, persist
-requested worker-run records, route the prompt to the delegated agent, and emit
-`BrainWakeRequested`.
-
-Still open: delegated sessions do not yet wake through the production
-scheduler and bridge path. The runtime model should stay prime-agent plus
-subagent delegation first, with worker pools as a later capability rather than
+`RequestDelegation` causes Rust to create delegated sessions, persist
+requested worker-run records, route the prompt to the delegated agent, and
+emit `BrainWakeRequested`. Delegated sessions wake through the same production
+scheduler and bridge path as full sessions. The runtime model is prime-agent
+plus subagent delegation first; worker pools are a later capacity layer, not
 the central abstraction.
 
-Tracked by: tasks 2991, 2840, 2843, 2844, and 2852.
+Decision references: `adr/0006`–`0010`, `end-to-end-delegated-slice.md`
+(run locally with `npm run build:native` and `npm run smoke:delegated-slice`).
 
-### MemoryDenProjectionSink.failNext and test seams
+### MemoryDenProjectionSink.failNext and test seams — decided and landed
 
-Still true: `MemoryDenProjectionSink.failNext` is part of the public TS
-interface exported from `adapter-den`. It is useful for smoke tests, but the
-package boundary should distinguish production adapter exports from test-only
-failure injection seams.
+Failure-injection helpers are behind explicit test-support exports, not root
+production entrypoints. `@rusty-crew/adapter-den/test-support` exposes
+`createMemoryDenProjectionSink`, `MemoryDenProjectionSink`,
+`createSimulatedDenChannelsTransport`, and `SimulatedDenChannelsTransport`;
+`@rusty-crew/brain-island/test-support` exposes memory observation/admin
+audit/lifecycle sinks. Smokes import failure-injection helpers from
+test-support paths.
 
-Tracked by: tasks 2992 and 2995.
+Decision references: `adr/0015-test-seams-and-public-exports.md`,
+`stubs-fakes-placeholders-policy.md`. Closeout audit: `2825-stub-fake-audit.md`
+(task 3036 resolved).
 
-### CoreEngine::now placeholder
+### CoreEngine::now placeholder — fixed
 
-Still true: `CoreEngine::now()` returns the literal
-`system-clock-placeholder` for `ClockConfig::System`. This will corrupt
-non-test session timestamps and worker-run timestamps.
+Resolved. `CoreEngine::now()` returns `OffsetDateTime::now_utc()` formatted as
+RFC3339 for `ClockConfig::System`; `ClockConfig::Fixed` remains the
+deterministic test seam. The old `system-clock-placeholder` bug is closed as
+stale against current code.
 
-Tracked by: tasks 2993 and 2826.
+Decision reference: `adr/0016-runtime-clock-policy.md`. Closeout audit:
+`2825-stub-fake-audit.md` (item 2826).
 
-### Multiple engines per process
+### Multiple engines per process — decided
 
-Current code has two different scopes:
+v1 has one `CoreEngine` per service process. Many agents, sessions, profiles,
+adapters, brain registrations, and scoped resources live inside that engine.
+`EngineRegistry` is only a future expansion point if concrete in-process
+tenancy or lifecycle isolation requirements appear.
 
-- `CoreEngine` supports allocating multiple `EngineHandle` values through a
-  process-global atomic.
-- `NativeBridge` stores a single `Option<CoreEngine>` and rejects a second
-  `initialize_engine` call.
+Decision reference: `adr/0012-single-engine-service-scope.md`.
 
-The unified architecture says Rusty Crew is a single-process fleet: one runtime
-service manages many full and worker sessions through one in-process bus. The
-near-term architecture should keep one engine per service process and host many
-agents/sessions inside it. An `EngineRegistry` is a future expansion point only
-if a concrete need appears for hard in-process tenancy boundaries.
+### Steering and follow-up — decided
 
-Tracked by: task 2987.
+v1 uses frozen wake snapshots plus body-owned next-wake deltas with aggressive
+TTL/cap behavior. pi-agent steering/follow-up queues may be used as transient
+turn-boundary mechanics but are not durable coordination state; expired
+messages are inspectable but not redeliverable.
 
-### Steering and follow-up
+Decision references: `adr/0003-mid-turn-delta-policy.md`,
+`adr/0011-steer-followup-frozen-snapshot.md`, `queued-message-retention-state.md`.
 
-Already decided for v1: ADR 0003 accepts frozen snapshots plus a body-owned
-next-wake queue with aggressive TTL. pi-agent steering/follow-up queues may be
-used as transient turn-boundary mechanics, but they are not durable
-coordination state and must not replay expired instructions.
+## Implementation Sequencing — complete
 
-Tracked by: task 2994 and the queue behavior design note.
-
-## Implementation Sequencing
-
-The dependency chain `2986 -> 2988 -> 2830 -> 2831 -> 2832 -> 2833 -> 2838`
-is the right spine. After `2838` proves the production wake path, higher-level
-capabilities such as delegated-session integration and first local-tool proof
-can build on real activation instead of diagnostic bridge helpers.
+The dependency chain `2986 -> 2988 -> 2830 -> 2831 -> 2832 -> 2833 -> 2838` has
+been worked through to a real registered-brain wake path. Higher-level
+capabilities (delegated-session integration, local-tool proof, Rust
+`openai-responses` brain) build on real activation rather than diagnostic
+bridge helpers.

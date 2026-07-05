@@ -1,6 +1,13 @@
 # PostgreSQL High-Volume Repository Coverage Plan
 
-Status: planning output for task 3474
+Status: planning output for task 3474. Update 2026-07-05: the coverage planned
+here has substantially landed. The live service at `/home/system/rusty-crew`
+(port 9347) runs PostgreSQL as the long-lived-agent backend, and the
+PostgreSQL store now implements transcript/conversation tree, dense profile
+memory, typed memory spaces, roleplay lore, runtime search, attachments,
+data-bank scopes, and provider wire state. Treat the sections below as the
+contract principles and per-repository coverage reference; the "should remain
+unsupported for PostgreSQL service boot" framing is historical.
 
 Date: 2026-06-26
 
@@ -8,7 +15,8 @@ Date: 2026-06-26
 
 This document plans the PostgreSQL repository coverage needed before Rusty Crew
 can treat PostgreSQL as production-ready for many-agent or roleplay-heavy
-deployments.
+deployments. The coverage has since landed; this file remains as the
+portability-contract reference for those repositories.
 
 Task 3419 proved a narrow runtime-counter slice. That proof does not cover the
 high-volume stores that will dominate roleplay and long-lived agent use:
@@ -21,6 +29,9 @@ high-volume stores that will dominate roleplay and long-lived agent use:
 
 These repositories should remain unsupported for PostgreSQL service boot until
 their API-level contracts and conformance tests are in place.
+
+(2026-07-05: these repositories are now implemented in the PostgreSQL store and
+the live service boots against PostgreSQL for long-lived agents.)
 
 ## Contract Principles
 

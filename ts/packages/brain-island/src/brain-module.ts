@@ -293,6 +293,7 @@ export const piAgentCoreBrainModule: BrainModule = {
         maxReviewCycles:
           context.profile.profile.roleplayNarrator?.review.maxReviewCycles,
         reviewEnabled: context.profile.profile.roleplayNarrator?.review.enabled,
+        narratorConfig: context.profile.profile.roleplayNarrator,
         submitEvent: context.bridge
           ? async (event) => {
               await context.bridge?.submitBrainEvent(event);

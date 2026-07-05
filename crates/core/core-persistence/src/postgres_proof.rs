@@ -3941,6 +3941,16 @@ impl PostgresRuntimeCounterProofStore {
         query_roleplay_lore_records(&mut *client, &schema, query)
     }
 
+    pub fn get_roleplay_lore_record(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreRecord>> {
+        validate_roleplay_lore_record_id(record_id)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        get_roleplay_lore_record(&mut *client, &schema, record_id)
+    }
+
     pub fn roleplay_lore_provenance_events(
         &self,
         record_id: &str,

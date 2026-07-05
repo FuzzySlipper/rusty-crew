@@ -133,6 +133,7 @@ export interface RoleplayNarratorConfig {
   explicitness: RoleplayNarratorExplicitness;
   pacing: RoleplayNarratorPacing;
   memoryDepth: RoleplayNarratorMemoryDepth;
+  stylePrompt?: string;
   exemplar?: string;
   review: RoleplayNarratorReviewConfig;
 }
@@ -844,7 +845,8 @@ function roleplayNarratorConfig(
     explicitness: narratorExplicitness(raw.explicitness) ?? "romantic",
     pacing: narratorPacing(raw.pacing) ?? "balanced",
     memoryDepth: narratorMemoryDepth(raw.memoryDepth) ?? "medium",
-    exemplar: optionalString(raw.exemplar),
+    stylePrompt: optionalString(raw.stylePrompt ?? raw.style_prompt),
+    exemplar: optionalString(raw.exemplar ?? raw.styleExemplar),
     review: {
       enabled: review.enabled === true,
       maxReviewCycles: optionalNumber(review.maxReviewCycles) ?? 1,

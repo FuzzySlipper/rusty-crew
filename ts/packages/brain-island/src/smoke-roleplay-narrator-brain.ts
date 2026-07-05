@@ -44,6 +44,22 @@ async function runSmoke(): Promise<void> {
         },
       } satisfies BrainAction,
     ],
+    narratorConfig: {
+      tone: "wry",
+      pacing: "leisurely",
+      explicitness: "romantic",
+      memoryDepth: "deep",
+      stylePrompt:
+        "Favor crisp emotional interiority and let physical detail carry tension.",
+      exemplar: "Rain softened the window-glow around her hands.",
+      review: {
+        enabled: false,
+        maxReviewCycles: 1,
+        checkGravityDrift: true,
+        checkCharacterVoice: true,
+        checkContinuity: true,
+      },
+    },
   });
 
   const result = await brain.wake(wakeInput("roleplay-narrator-wake"));
@@ -107,6 +123,18 @@ async function runSmoke(): Promise<void> {
     "get_scene_state",
     "update_scene_state",
   ]);
+  assert.match(
+    agentFactory.calls[1]?.systemPrompt ?? "",
+    /Direct narrator style prompt:\nFavor crisp emotional interiority/,
+  );
+  assert.match(
+    agentFactory.calls[1]?.systemPrompt ?? "",
+    /Style exemplar\/reference prose:\nRain softened the window-glow/,
+  );
+  assert.match(
+    agentFactory.calls[1]?.systemPrompt ?? "",
+    /Treat the direct style prompt above as style guidance\/instructions, not as prose to copy/,
+  );
   assert.equal(
     result.actions.find((action) => action.type === "deliver_completion")
       ?.packet.summary,

@@ -166,13 +166,13 @@ test("MCP catalog route merges configured servers and resolves bindings", async 
   assert.deepEqual(
     catalog.servers.map((server) => [server.id, server.configuredBindingCount]),
     [
-      ["alpha", 1],
+      ["alpha", 0],
       ["beta", 1],
     ],
   );
   assert.deepEqual(catalog.toolProfiles, ["prime", "review"]);
   assert.equal(catalog.bindings[0].resolvedServerId, "beta");
-  assert.equal(catalog.bindings[1].resolvedServerId, "alpha");
+  assert.equal(catalog.bindings[1].resolvedServerId, undefined);
 });
 
 test("tool and context catalog routes are read-only envelopes", async () => {

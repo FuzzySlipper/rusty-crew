@@ -798,6 +798,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn get_roleplay_lore_record(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_roleplay_lore_record(record_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_roleplay_lore_record(record_id),
+        }
+    }
+
     pub fn roleplay_lore_provenance_events(
         &self,
         record_id: &str,
@@ -2204,6 +2215,13 @@ impl MemoryRepositorySet<'_> {
         query: &RoleplayLoreQuery,
     ) -> CoreResult<Vec<RoleplayLoreRecord>> {
         self.store.query_roleplay_lore_records(query)
+    }
+
+    pub fn get_roleplay_lore_record(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreRecord>> {
+        self.store.get_roleplay_lore_record(record_id)
     }
 
     pub fn replace_profile_memory(

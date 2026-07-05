@@ -9,6 +9,9 @@
   "scripts": {
     "build:native": "npm run build:native -w @rusty-crew/native-bridge",
     "build": "npm run typecheck",
+    "verify:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "verify:ts": "npm run typecheck && npm run test:unit && npm run format && npm run smoke:architecture-boundaries && npm run smoke:runtime-config-parity && npm run smoke:bridge-fixture-drift && npm run smoke:bridge-validation",
+    "verify:offline": "npm run verify:rust && npm run verify:ts",
     "measure:napi": "npm run measure:napi -w @rusty-crew/native-bridge",
     "codegen:bridge-fixtures": "cargo run -p rusty-crew-core-bridge-codegen -- emit-fixtures > ts/packages/native-bridge/bridge-validation-rust-fixtures.json",
     "smoke": "node tools/smoke-runner.mjs",

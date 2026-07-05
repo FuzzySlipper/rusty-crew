@@ -317,8 +317,7 @@ async function runQualitySpike(): Promise<void> {
   console.log(`   recall_lore called: ${hasLoreRecall}`);
 
   const hasSceneState = exploreToolCalls.some(
-    (e) =>
-      e.kind === "tool_call_started" && toolName(e) === "get_scene_state",
+    (e) => e.kind === "tool_call_started" && toolName(e) === "get_scene_state",
   );
   console.log(`   scene state queried: ${hasSceneState}`);
 
@@ -366,8 +365,7 @@ async function runQualitySpike(): Promise<void> {
   const captureEvents = getToolCalls(captureResult.events);
   const hasCapture = captureEvents.some(
     (e) =>
-      e.kind === "tool_call_completed" &&
-      toolName(e) === "capture_lore_fact",
+      e.kind === "tool_call_completed" && toolName(e) === "capture_lore_fact",
   );
   console.log(`   capture_lore_fact called: ${hasCapture}`);
 
@@ -399,8 +397,7 @@ async function runQualitySpike(): Promise<void> {
   const continuityEvents = getToolCalls(continuityResult.events);
   const sceneStateUpdated = continuityEvents.some(
     (e) =>
-      e.kind === "tool_call_completed" &&
-      toolName(e) === "update_scene_state",
+      e.kind === "tool_call_completed" && toolName(e) === "update_scene_state",
   );
   const recallInLaterTurn = continuityEvents.some(
     (e) => e.kind === "tool_call_started" && toolName(e) === "recall_lore",

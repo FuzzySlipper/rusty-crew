@@ -267,6 +267,8 @@ backgroundReview:
           explicitness: "romantic",
           pacing: "leisurely",
           memoryDepth: "deep",
+          stylePrompt:
+            "Use clipped sensory beats before major emotional turns.",
           exemplar: "The rain softened every edge of the room.",
           review: {
             enabled: true,
@@ -293,6 +295,14 @@ backgroundReview:
   assert.equal(narrator.profile.roleplayNarrator?.explicitness, "romantic");
   assert.equal(narrator.profile.roleplayNarrator?.pacing, "leisurely");
   assert.equal(narrator.profile.roleplayNarrator?.memoryDepth, "deep");
+  assert.equal(
+    narrator.profile.roleplayNarrator?.stylePrompt,
+    "Use clipped sensory beats before major emotional turns.",
+  );
+  assert.equal(
+    narrator.profile.roleplayNarrator?.exemplar,
+    "The rain softened every edge of the room.",
+  );
   assert.equal(narrator.profile.roleplayNarrator?.review.enabled, true);
   assert.equal(narrator.profile.roleplayNarrator?.review.maxReviewCycles, 2);
   assert.equal(

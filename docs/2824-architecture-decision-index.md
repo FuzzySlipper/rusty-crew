@@ -1,6 +1,8 @@
 # 2824 Architecture Decision Index
 
-Status: Closeout index for task 2824
+Status: Closeout index for task 2824. All 2824 open questions are closed;
+this index records the final outcome for each. Updated 2026-07-05 to clear
+implementation deferrals that have since landed.
 
 Date: 2026-06-20
 
@@ -31,8 +33,10 @@ suppression, body projection, queue TTL/cap policy, and action execution. The
 bridge/runtime owns the transport callback into TypeScript and runtime buffer
 leases.
 
-Implementation continues through the production wake path tasks rather than a
-new detached spike.
+Implementation landed through the production wake path tasks: registered
+brain implementations, Rust-owned scheduling, buffered wake requests, and the
+`wakeBrainFromBridgeRequest` executor binding. See
+`production-wake-path-contract.md` and `parity-open-questions-grounding.md`.
 
 ### Wake Buffer Assembly
 
@@ -83,7 +87,7 @@ capacity infrastructure.
 
 ### Test Seams And Public Fakes
 
-Outcome: decided, with implementation follow-up.
+Outcome: decided and implemented (follow-up task 3036 resolved).
 
 References:
 
@@ -91,7 +95,7 @@ References:
 - `docs/adr/0015-test-seams-and-public-exports.md`
 - Den doc `rusty-crew/stubs-fakes-placeholders-policy`
 - Task 2992
-- Follow-up task 3036
+- Follow-up task 3036 (resolved; see `docs/2825-stub-fake-audit.md`)
 
 Decision: failure-injection helpers such as `.failNext()` are test-support APIs,
 not production APIs. Existing public fakes may remain during scaffolding, but
@@ -147,11 +151,17 @@ not redeliverable.
 The following decisions intentionally defer implementation:
 
 - `EngineRegistry`: deferred until real in-process tenancy/isolation need.
-- test-support export split: tracked by task 3036.
-- full profile prompt/role assembly: should land through production wake and
-  profile-loading work; ADR 0013 defines the owner boundary.
 - worker pools: deferred by ADR 0007 until direct delegated sessions and prime
   agent flows are solid.
+
+Previously listed deferrals that have since landed:
+
+- test-support export split (task 3036): resolved. Failure-injection helpers
+  live behind `*/test-support` exports; see `2825-stub-fake-audit.md`.
+- full profile prompt/role assembly: landed in
+  `ts/packages/brain-island/src/profile-loading.ts` (system, instructions,
+  soul, memory prompt fragments) and wired through the registered-brain wake
+  path per ADR 0013.
 
 ## Closeout
 

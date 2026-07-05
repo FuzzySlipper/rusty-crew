@@ -74,9 +74,7 @@ const DEFAULT_LIMITS: ProviderRequestDebugLimits = {
 const REDACTED_KEY_PATTERN =
   /(?:api[_-]?key|authorization|bearer|credential|password|secret|token)/i;
 
-export class MemoryProviderRequestDebugStore
-  implements ProviderRequestDebugStore
-{
+export class MemoryProviderRequestDebugStore implements ProviderRequestDebugStore {
   readonly limits: ProviderRequestDebugLimits;
   private readonly now: () => string;
   private readonly records = new Map<string, ProviderRequestDebugRecord>();
@@ -91,9 +89,7 @@ export class MemoryProviderRequestDebugStore
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  record(
-    input: RecordProviderRequestDebugInput,
-  ): ProviderRequestDebugRecord {
+  record(input: RecordProviderRequestDebugInput): ProviderRequestDebugRecord {
     this.cleanup();
     const recordedAt = this.now();
     const request = boundedValue(input.request, this.limits.maxJsonChars);

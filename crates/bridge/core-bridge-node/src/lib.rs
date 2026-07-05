@@ -529,6 +529,13 @@ impl NativeBridge {
         self.engine()?.query_roleplay_lore_records(query)
     }
 
+    pub fn get_roleplay_lore_record(
+        &self,
+        record_id: &str,
+    ) -> CoreResult<Option<RoleplayLoreRecord>> {
+        self.engine()?.get_roleplay_lore_record(record_id)
+    }
+
     pub fn roleplay_lore_provenance_events(
         &self,
         record_id: &str,
@@ -3614,6 +3621,15 @@ impl NativeBridgeBinding {
             .query_roleplay_lore_records(&query)
             .map_err(to_napi_error)?;
         serialize_json(&records, "roleplay lore records")
+    }
+
+    #[napi]
+    pub fn get_lore_entry_json(&self, record_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .get_roleplay_lore_record(&record_id)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "roleplay lore record")
     }
 
     #[napi]
