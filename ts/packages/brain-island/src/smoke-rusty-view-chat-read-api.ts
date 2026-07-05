@@ -219,6 +219,19 @@ try {
     streamedEvents.some((event) => event.kind === "tool_call_completed"),
     "active stream should receive tool completion while wake is live",
   );
+  const streamedToolEvents = streamedEvents.filter(
+    (event) =>
+      event.kind === "tool_call_started" ||
+      event.kind === "tool_call_completed",
+  );
+  assert.ok(
+    streamedToolEvents.every(
+      (event) =>
+        typeof event.payload?.tool_call_id === "string" &&
+        event.payload.tool_call_id.length > 0,
+    ),
+    "streamed tool events should include stable tool_call_id values",
+  );
   assert.ok(
     streamedEvents.some(
       (event) =>
@@ -1384,6 +1397,12 @@ function withLiveWakeEventsBridge(
               event: {
                 type: "tool_call_started",
                 toolName: "rusty_view_live_tool",
+                metadata: {
+                  source: "local",
+                  serverNames: [],
+                  sourceToolName: "rusty_view_live_tool",
+                  debugDetailId: "tooldbg_live_tool_1",
+                },
               },
             },
             {
@@ -1393,6 +1412,12 @@ function withLiveWakeEventsBridge(
                 type: "tool_call_finished",
                 toolName: "rusty_view_live_tool",
                 isError: false,
+                metadata: {
+                  source: "local",
+                  serverNames: [],
+                  sourceToolName: "rusty_view_live_tool",
+                  debugDetailId: "tooldbg_live_tool_1",
+                },
               },
             },
           ]);

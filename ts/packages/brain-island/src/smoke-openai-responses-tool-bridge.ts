@@ -51,7 +51,12 @@ try {
     runOpenAiResponsesBrain: async () => {
       throw new Error("blocking Responses runner should not be used");
     },
-    startOpenAiResponsesBrain: native.startOpenAiResponsesBrain.bind(native),
+    startOpenAiResponsesBrain: async (
+      input: Parameters<NativeBridgeModule["startOpenAiResponsesBrain"]>[0],
+    ) => {
+      capturedInstructions = input.config.instructions;
+      return native.startOpenAiResponsesBrain(input);
+    },
     drainOpenAiResponsesBrainStream:
       native.drainOpenAiResponsesBrainStream.bind(native),
     submitOpenAiResponsesToolOutput:
@@ -64,6 +69,7 @@ try {
   const toolCallDebugStore = new MemoryToolCallDebugStore({
     now: () => "2026-07-04T00:00:00.000Z",
   });
+  let capturedInstructions: string | undefined;
 
   const brain = await openAiResponsesBrainModule.createBrain({
     bridge,
@@ -96,6 +102,9 @@ try {
   const result = await brain.wake(wakeInput(toolProfile));
   const providerStateText = JSON.stringify(result.providerState);
 
+  assert.match(capturedInstructions ?? "", /System instruction marker/);
+  assert.match(capturedInstructions ?? "", /Role inventory marker/);
+  assert.match(capturedInstructions ?? "", /den_get_document/);
   assert.match(providerStateText, /SENTINEL_REAL_TOOL_OUTPUT/);
   assert.doesNotMatch(providerStateText, /completed by Rust Responses bridge/);
   assert.doesNotMatch(providerStateText, /deterministic field scaffold/);
@@ -187,9 +196,10 @@ function wakeInput(toolProfile: {
   return {
     wakeId: "responses-tool-bridge-wake",
     sessionId: "responses-tool-bridge-session" as SessionId,
-    systemPrompt: "Use the sentinel tool once.",
+    systemPrompt: "System instruction marker: use the sentinel tool once.",
     roleAssembly: {
-      instructions: "Use the sentinel tool once.",
+      instructions:
+        "Role inventory marker: MCP document tools include den_get_document.",
     },
     state: {
       session: {

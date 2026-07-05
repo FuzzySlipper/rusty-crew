@@ -31,6 +31,7 @@ import type {
   SessionKind,
   SessionState,
   SubscriptionHandle,
+  ToolCallMetadata,
 } from "@rusty-crew/contracts";
 import {
   loadNativeBridge,
@@ -11788,6 +11789,7 @@ function appendBrainEventToChatLog(
         kind: "tool_call_started",
         payload: {
           wake_id: wakeId,
+          tool_call_id: chatToolCallId(wakeId, event.toolName, event.metadata),
           tool_name: event.toolName,
           debug_detail_id: event.metadata?.debugDetailId,
           metadata: event.metadata,
@@ -11799,6 +11801,7 @@ function appendBrainEventToChatLog(
         kind: event.isError ? "tool_call_failed" : "tool_call_completed",
         payload: {
           wake_id: wakeId,
+          tool_call_id: chatToolCallId(wakeId, event.toolName, event.metadata),
           tool_name: event.toolName,
           is_error: event.isError,
           debug_detail_id: event.metadata?.debugDetailId,
@@ -11813,6 +11816,22 @@ function appendBrainEventToChatLog(
       });
       return;
   }
+}
+
+function chatToolCallId(
+  wakeId: string | undefined,
+  toolName: string,
+  metadata: ToolCallMetadata | undefined,
+): string {
+  if (metadata?.debugDetailId) return metadata.debugDetailId;
+  return [
+    wakeId ?? "wake",
+    metadata?.source ?? "tool",
+    metadata?.bindingId ?? "local",
+    metadata?.sourceToolName ?? toolName,
+  ]
+    .map((part) => part.replace(/[^A-Za-z0-9_.:-]+/g, "_"))
+    .join(":");
 }
 
 function ensureChatWakeTerminalEvents(

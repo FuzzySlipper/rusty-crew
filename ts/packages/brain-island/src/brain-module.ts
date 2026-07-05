@@ -300,7 +300,6 @@ export const piAgentCoreBrainModule: BrainModule = {
       createAgent,
       planActions: context.planActions,
       resolveTools: context.toolResolver,
-      toolProfile: context.profile.toolSelection.toolProfile,
       toolCallDebugStore: context.toolCallDebugStore,
       submitEvent: context.bridge
         ? async (event) => {
@@ -391,7 +390,7 @@ export function openAiResponsesStreamIdleTimeoutMs(
   if (Number.isFinite(configured) && configured > 0) {
     return configured;
   }
-  return openAiResponsesClientMode(env) === "live" ? 120_000 : 30_000;
+  return openAiResponsesClientMode(env) === "live" ? 300_000 : 30_000;
 }
 
 type OpenAiResponsesClientConfig = NonNullable<
@@ -1034,7 +1033,7 @@ export const openAiResponsesBrainModule: BrainModule = {
           providerStateAbsence: wake.providerStateAbsence,
           config: {
             model: context.profile.profile.modelConfig.modelName,
-            instructions: wake.systemPrompt,
+            instructions: responsesInstructions(wake),
             streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
           },
           client: responsesClientConfig,
@@ -1055,3 +1054,9 @@ export const openAiResponsesBrainModule: BrainModule = {
     };
   },
 };
+
+function responsesInstructions(wake: BrainWakeInput): string {
+  return [wake.systemPrompt, wake.roleAssembly.instructions]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+}
