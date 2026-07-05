@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -1980,6 +1981,13 @@ export class NativeBridgeContractError extends Error {
   }
 }
 
+export class NativeBridgeLoadError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "NativeBridgeLoadError";
+  }
+}
+
 export async function loadNativeBridge(): Promise<NativeBridgeModule> {
   const addon = loadNativeAddon();
   if (!addon) {
@@ -2332,14 +2340,26 @@ function loadNativeAddon(): NativeAddon | undefined {
     return undefined;
   }
 
+  const artifactPath = fileURLToPath(
+    new URL(`../native/${artifactName}`, import.meta.url),
+  );
+  if (!existsSync(artifactPath)) {
+    return undefined;
+  }
+
   try {
     const nativeRequire = createRequire(import.meta.url);
-    const artifactPath = fileURLToPath(
-      new URL(`../native/${artifactName}`, import.meta.url),
-    );
     return nativeRequire(artifactPath) as NativeAddon;
-  } catch {
-    return undefined;
+  } catch (error) {
+    throw new NativeBridgeLoadError(
+      [
+        `native bridge addon ${artifactName} exists but failed to load`,
+        `path: ${artifactPath}`,
+        `error: ${errorMessage(error)}`,
+        "rebuild the native bridge binary with npm run build:native",
+      ].join("; "),
+      { cause: error },
+    );
   }
 }
 
