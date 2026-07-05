@@ -165,7 +165,10 @@ npm run smoke -- brain
 ```
 
 Smoke categories, environment-requirement flags, and the rule for moving new
-smokes out of package `src/` are documented in `docs/smoke-test-inventory.md`.
+smokes out of package `src/` are documented in
+`docs/smoke-test-inventory.md`. Use `npm run smoke -- --list --lane offline`
+or another lane filter when deciding whether a check is CI-safe, local-service
+only, live-provider backed, or a Rusty View certification run.
 
 Common focused checks:
 

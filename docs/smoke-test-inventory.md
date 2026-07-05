@@ -15,16 +15,19 @@ Use the discoverable runner for new work:
 npm run smoke -- --list
 npm run smoke -- --list --package brain-island
 npm run smoke -- --list --category service-host
+npm run smoke -- --list --lane offline
+npm run smoke -- --list --lane live-provider
 npm run smoke -- --list --tag memory
 npm run smoke -- brain
 npm run smoke -- adapter-den:default
 ```
 
 The runner reads root `smoke:*` aliases and package-local smoke scripts, then
-adds category, tag, and environment-requirement metadata. Important historical
-aliases such as `npm run smoke:brain`, `npm run smoke:den`,
-`npm run smoke:bridge-wake`, `npm run smoke:delegated-slice`, and
-`npm run smoke:mid-turn` remain valid during the transition.
+adds category, execution lane, tag, and environment-requirement metadata.
+Important historical aliases such as `npm run smoke:brain`,
+`npm run smoke:den`, `npm run smoke:bridge-wake`,
+`npm run smoke:delegated-slice`, and `npm run smoke:mid-turn` remain valid
+during the transition.
 
 Architecture boundary work should also run:
 
@@ -67,6 +70,45 @@ safe to run locally without extra setup.
 | `openai-oauth`     | Requires direct OpenAI OAuth Responses provider state.          |
 | `telegram-config`  | Requires Telegram adapter configuration.                        |
 
+## Execution Lanes
+
+Use lane filters when deciding what can run in CI, what requires local service
+roots, and what belongs to live deliverable certification.
+
+| Lane                       | Meaning                                                                  |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `offline`                  | Pure deterministic smoke; no service, native addon, Den, provider, or UI. |
+| `native-offline`           | Deterministic but requires a built native addon or Rust bridge fixture.   |
+| `local-service`            | Requires or starts a local Rusty Crew service path.                       |
+| `debug-service`            | Targets the disposable debug service/root rather than durable live state.  |
+| `local-infrastructure`     | Requires local infra such as Den services, den-router, or Postgres.       |
+| `live-provider`            | Requires a real model/provider/token path or external live adapter.       |
+| `rusty-view-certification` | Requires Rusty View/browser evidence and live-test artifact inspection.   |
+
+The CI/offline gate is `npm run verify:offline`. It intentionally runs
+deterministic Rust tests, TypeScript unit tests, boundary smokes, runtime-config
+parity, and bridge validation. It must not require the live service root,
+debug-service root, Den, PostgreSQL, Rusty View, Telegram, or a real provider.
+
+Use `npm run smoke -- --list --lane <lane>` to find checks by execution
+environment. Do not treat a lane listing as a command to run everything in that
+lane blindly; some lanes contain expensive or operator-facing checks that should
+be selected by task relevance.
+
+## Live Certification
+
+Deterministic checks are necessary before handoff, but they do not certify
+rendered chat behavior. Work that changes streamed transcript rendering,
+reasoning/tool/command/debug blocks, profile/session selection, browser controls,
+or user-visible Rusty View behavior requires Rusty View live certification.
+
+Use Rusty View's live testing process in
+`/home/dev/rusty-view/docs/live-testing.md` through the Den Playwright broker.
+The debug service at `/home/system/rusty-crew-debug` is the normal backend for
+testing noise; the live service at `/home/system/rusty-crew` is for durable
+agents and should not be used for broad smoke churn unless the task is
+explicitly about the live deployment.
+
 ## Current Inventory Shape
 
 The current smoke population is discoverable with:
@@ -100,7 +142,7 @@ Choose the narrowest layer that proves the behavior:
    `ts/packages/<package>/smokes/*.ts`.
 3. Cross-package or operator smokes belong in `ts/smokes/*.ts`.
 4. Live rendered chat behavior belongs in Rusty View live certification, with
-   evidence recorded using `docs/live-deliverable-certification.md`.
+   evidence recorded using Rusty View's `docs/live-testing.md` packet format.
 
 Do not add new smoke files under package `src/`. Existing `src/smoke-*.ts`
 files remain supported until they are moved in focused follow-up patches.

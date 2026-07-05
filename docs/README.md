@@ -189,8 +189,9 @@ Postgres, a running Rusty Crew service, or Rusty View. The architecture
 boundary portion runs
 `rust-crate-boundaries`, `ts-package-boundaries`, `storage-scope`, and
 `production-fake-guard`; those checks live in `tools/`. See
-`smoke-test-inventory.md` for the full smoke catalogue and the separate
-live/infrastructure lanes.
+`smoke-test-inventory.md` for the full smoke catalogue and execution lanes
+(`offline`, `native-offline`, `local-service`, `debug-service`,
+`local-infrastructure`, `live-provider`, and `rusty-view-certification`).
 
 ## LLM boundary decision
 

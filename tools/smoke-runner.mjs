@@ -19,7 +19,7 @@ function scriptNameFromKey(scriptKey) {
   return scriptKey === "smoke" ? "default" : scriptKey.replace(/^smoke:/, "");
 }
 
-function classifySmoke(entry) {
+export function classifySmoke(entry) {
   const text =
     `${entry.name} ${entry.package} ${entry.script} ${entry.command}`.toLowerCase();
   const requirements = new Set();
@@ -107,12 +107,40 @@ function classifySmoke(entry) {
 
   return {
     category,
+    lane: smokeExecutionLane({ category, requirements, text }),
     requirements: [...requirements].sort(),
     tags: [...tags].sort(),
   };
 }
 
-function buildCatalog() {
+export function smokeExecutionLane({ category, requirements, text = "" }) {
+  if (requirements.has("rusty-view")) {
+    return "rusty-view-certification";
+  }
+  if (
+    requirements.has("live-provider") ||
+    requirements.has("openai-oauth") ||
+    requirements.has("telegram-config")
+  ) {
+    return "live-provider";
+  }
+  if (requirements.has("service-startup")) {
+    return text.includes("debug") ? "debug-service" : "local-service";
+  }
+  if (
+    requirements.has("den") ||
+    requirements.has("local-router") ||
+    requirements.has("postgres")
+  ) {
+    return "local-infrastructure";
+  }
+  if (category === "native-bridge" || requirements.has("native-build")) {
+    return "native-offline";
+  }
+  return "offline";
+}
+
+export function buildCatalog() {
   const entries = [];
   const rootPackage = readJson(join(repoRoot, "package.json"));
 
@@ -171,7 +199,7 @@ function sourcePathFromCommand(packageDir, command) {
   );
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const parsed = {
     list: false,
     json: false,
@@ -198,12 +226,18 @@ function parseArgs(argv) {
       parsed.help = true;
       continue;
     }
-    const flagMatch = arg.match(/^--(package|category|tag|requirement)=(.+)$/);
+    const flagMatch = arg.match(
+      /^--(package|category|lane|tag|requirement)=(.+)$/,
+    );
     if (flagMatch) {
       parsed.filters[flagMatch[1]] = flagMatch[2];
       continue;
     }
-    if (["--package", "--category", "--tag", "--requirement"].includes(arg)) {
+    if (
+      ["--package", "--category", "--lane", "--tag", "--requirement"].includes(
+        arg,
+      )
+    ) {
       const key = arg.replace(/^--/, "");
       parsed.filters[key] = argv[index + 1];
       index += 1;
@@ -219,7 +253,7 @@ function parseArgs(argv) {
   return parsed;
 }
 
-function matchesFilters(entry, filters) {
+export function matchesFilters(entry, filters) {
   if (
     filters.package &&
     entry.package !== filters.package &&
@@ -228,6 +262,9 @@ function matchesFilters(entry, filters) {
     return false;
   }
   if (filters.category && entry.category !== filters.category) {
+    return false;
+  }
+  if (filters.lane && entry.lane !== filters.lane) {
     return false;
   }
   if (filters.tag && !entry.tags.includes(filters.tag)) {
@@ -244,11 +281,13 @@ function matchesFilters(entry, filters) {
 
 function printHelp() {
   console.log(`Usage:
-  npm run smoke -- --list [--package <pkg>] [--category <category>] [--tag <tag>]
+  npm run smoke -- --list [--package <pkg>] [--category <category>] [--lane <lane>] [--tag <tag>]
   npm run smoke -- <name> [-- additional args]
 
 Examples:
   npm run smoke -- --list --package brain-island
+  npm run smoke -- --list --lane offline
+  npm run smoke -- --list --lane rusty-view-certification
   npm run smoke -- brain
   npm run smoke -- adapter-den:default
 `);
@@ -264,6 +303,7 @@ function printList(entries, json) {
     name: entry.name,
     package: packageSlug(entry.package),
     category: entry.category,
+    lane: entry.lane,
     requirements: entry.requirements.join(","),
     tags: entry.tags.join(","),
   }));
@@ -277,6 +317,7 @@ function printList(entries, json) {
       "category".length,
       ...rows.map((row) => row.category.length),
     ),
+    lane: Math.max("lane".length, ...rows.map((row) => row.lane.length)),
     requirements: Math.max(
       "requirements".length,
       ...rows.map((row) => row.requirements.length),
@@ -284,19 +325,19 @@ function printList(entries, json) {
   };
 
   console.log(
-    `${"name".padEnd(widths.name)}  ${"package".padEnd(widths.package)}  ${"category".padEnd(widths.category)}  ${"requirements".padEnd(widths.requirements)}  tags`,
+    `${"name".padEnd(widths.name)}  ${"package".padEnd(widths.package)}  ${"category".padEnd(widths.category)}  ${"lane".padEnd(widths.lane)}  ${"requirements".padEnd(widths.requirements)}  tags`,
   );
   console.log(
-    `${"-".repeat(widths.name)}  ${"-".repeat(widths.package)}  ${"-".repeat(widths.category)}  ${"-".repeat(widths.requirements)}  ----`,
+    `${"-".repeat(widths.name)}  ${"-".repeat(widths.package)}  ${"-".repeat(widths.category)}  ${"-".repeat(widths.lane)}  ${"-".repeat(widths.requirements)}  ----`,
   );
   for (const row of rows) {
     console.log(
-      `${row.name.padEnd(widths.name)}  ${row.package.padEnd(widths.package)}  ${row.category.padEnd(widths.category)}  ${row.requirements.padEnd(widths.requirements)}  ${row.tags}`,
+      `${row.name.padEnd(widths.name)}  ${row.package.padEnd(widths.package)}  ${row.category.padEnd(widths.category)}  ${row.lane.padEnd(widths.lane)}  ${row.requirements.padEnd(widths.requirements)}  ${row.tags}`,
     );
   }
 }
 
-function resolveEntry(entries, name) {
+export function resolveEntry(entries, name) {
   const exact = entries.filter((entry) => entry.name === name);
   if (exact.length === 1) {
     return exact[0];
@@ -326,7 +367,7 @@ async function runCommand(entry, passThrough) {
       : entry.command;
   console.log(`[smoke] ${entry.name}`);
   console.log(
-    `[smoke] category=${entry.category} requirements=${entry.requirements.join(",")} tags=${entry.tags.join(",") || "none"}`,
+    `[smoke] category=${entry.category} lane=${entry.lane} requirements=${entry.requirements.join(",")} tags=${entry.tags.join(",") || "none"}`,
   );
   console.log(`[smoke] ${command}`);
   const child = spawn(command, {
@@ -346,26 +387,30 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-const args = parseArgs(process.argv.slice(2));
-const catalog = buildCatalog();
-const filtered = catalog.filter((entry) => matchesFilters(entry, args.filters));
-
-if (args.help || (!args.list && !args.name)) {
-  printHelp();
-  process.exit(args.help ? 0 : 1);
-}
-
-if (args.list) {
-  printList(filtered, args.json);
-  process.exit(0);
-}
-
-const entry = resolveEntry(filtered, args.name);
-if (!entry) {
-  console.error(
-    `Unknown smoke "${args.name}". Use "npm run smoke -- --list" to inspect available smokes.`,
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = parseArgs(process.argv.slice(2));
+  const catalog = buildCatalog();
+  const filtered = catalog.filter((entry) =>
+    matchesFilters(entry, args.filters),
   );
-  process.exit(1);
-}
 
-await runCommand(entry, args.passThrough);
+  if (args.help || (!args.list && !args.name)) {
+    printHelp();
+    process.exit(args.help ? 0 : 1);
+  }
+
+  if (args.list) {
+    printList(filtered, args.json);
+    process.exit(0);
+  }
+
+  const entry = resolveEntry(filtered, args.name);
+  if (!entry) {
+    console.error(
+      `Unknown smoke "${args.name}". Use "npm run smoke -- --list" to inspect available smokes.`,
+    );
+    process.exit(1);
+  }
+
+  await runCommand(entry, args.passThrough);
+}

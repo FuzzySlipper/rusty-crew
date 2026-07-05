@@ -145,7 +145,7 @@
     "smoke:debug-tui": "npm run smoke:debug-tui -w @rusty-crew/adapter-tui",
     "smoke:operator-surfaces-e2e": "tsx ts/smokes/operator-surfaces-e2e.ts",
     "smoke:mid-turn": "npm run smoke:mid-turn -w @rusty-crew/brain-island",
-    "test:unit": "npm run test:unit -w @rusty-crew/brain-island",
+    "test:unit": "npm run test:unit -w @rusty-crew/brain-island && node --test tools/*.test.mjs",
     "typecheck": "tsc --noEmit -p ts/packages/contracts && tsc --noEmit -p ts/packages/native-bridge && tsc --noEmit -p ts/packages/brain-island && tsc --noEmit -p ts/packages/adapter-den && tsc --noEmit -p ts/packages/adapter-telegram && tsc --noEmit -p ts/packages/adapter-mcp && tsc --noEmit -p ts/packages/adapter-tui && tsc --noEmit -p ts/packages/service-host",
     "generate:tool-registry-artifact": "npm run generate:tool-registry-artifact -w @rusty-crew/brain-island",
     "format": "prettier --check .",
