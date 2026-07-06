@@ -10712,6 +10712,7 @@ async function dispatchWake(
         profile: profileContext.profile,
       }),
     );
+    const wakeTimeoutController = new AbortController();
     const observed = await withWakeTimeout(
       observeWakeEvents(
         state,
@@ -10729,11 +10730,13 @@ async function dispatchWake(
           return state.bridge.wakeBrain(request);
         },
         (events) => appendCoreEventsToChatLog(state, session, wakeId, events),
+        wakeTimeoutController.signal,
       ),
       {
         wakeId,
         sessionId,
         timeoutMs: turnTimeoutMs,
+        onTimeout: () => wakeTimeoutController.abort(),
       },
     );
     await publishWakeToolActivity({
@@ -10866,6 +10869,7 @@ async function observeWakeEvents<T>(
   sessionId: SessionId,
   callback: () => Promise<T>,
   onEvents?: (events: readonly CoreEvent[]) => void,
+  signal?: AbortSignal,
 ): Promise<{ accepted: T; events: CoreEvent[] }> {
   const subscription = await state.bridge.subscribeEvents({
     eventKinds: [
@@ -10886,11 +10890,20 @@ async function observeWakeEvents<T>(
       });
 
     while (!callbackSettled) {
+      if (signal?.aborted) {
+        throw new Error(`wake event observation aborted for ${sessionId}`);
+      }
       await delay(25);
+      if (signal?.aborted) {
+        throw new Error(`wake event observation aborted for ${sessionId}`);
+      }
       const chunk = await drainSubscriptionEventsUntilIdle(
         state.bridge,
         subscription,
       );
+      if (signal?.aborted) {
+        throw new Error(`wake event observation aborted for ${sessionId}`);
+      }
       if (chunk.length > 0) {
         events.push(...chunk);
         onEvents?.(chunk);

@@ -56,6 +56,7 @@ try {
       input: Parameters<NativeBridgeModule["startOpenAiResponsesBrain"]>[0],
     ) => {
       capturedInstructions = input.config.instructions;
+      capturedWakeTimeoutMs = input.config.wakeTimeoutMs;
       return native.startOpenAiResponsesBrain(input);
     },
     drainOpenAiResponsesBrainStream:
@@ -71,6 +72,7 @@ try {
     now: () => "2026-07-04T00:00:00.000Z",
   });
   let capturedInstructions: string | undefined;
+  let capturedWakeTimeoutMs: number | undefined;
 
   const brain = await openAiResponsesBrainModule.createBrain({
     bridge,
@@ -86,6 +88,9 @@ try {
           module: "openai-responses",
           strategy: "replay",
         },
+        runtime: {
+          maxTurnDurationMs: 45_000,
+        },
       },
       skills: [],
       toolSelection: {
@@ -93,6 +98,14 @@ try {
         toolProfile,
       },
     } as unknown as LoadedProfileContext,
+    runtimeConfig: {
+      sessions: [
+        {
+          sessionId: "responses-tool-bridge-session",
+          turnTimeoutMs: 12_000,
+        },
+      ],
+    } as never,
     toolResolver: () => [sentinelTool],
     providerStateScope: {
       profileFingerprint: "profile-smoke",
@@ -106,6 +119,7 @@ try {
   assert.match(capturedInstructions ?? "", /System instruction marker/);
   assert.match(capturedInstructions ?? "", /Role inventory marker/);
   assert.match(capturedInstructions ?? "", /den_get_document/);
+  assert.equal(capturedWakeTimeoutMs, 12_000);
   assert.match(providerStateText, /SENTINEL_REAL_TOOL_OUTPUT/);
   assert.doesNotMatch(providerStateText, /completed by Rust Responses bridge/);
   assert.doesNotMatch(providerStateText, /deterministic field scaffold/);

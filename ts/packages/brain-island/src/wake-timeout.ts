@@ -27,11 +27,13 @@ export function withWakeTimeout<T>(
     wakeId: string;
     sessionId: SessionId;
     timeoutMs?: number;
+    onTimeout?: () => void;
   },
 ): Promise<T> {
   if (input.timeoutMs === undefined) return promise;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      input.onTimeout?.();
       reject(
         new WakeDispatchTimeoutError(
           input.wakeId,

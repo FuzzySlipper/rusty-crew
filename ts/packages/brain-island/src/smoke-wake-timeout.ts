@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import type { SessionId } from "@rusty-crew/contracts";
 import {
+  DEFAULT_WAKE_TIMEOUT_MS,
+  effectiveWakeTimeoutMs,
+} from "./service-runtime-config.js";
+import {
   effectiveTurnTimeoutMs,
   WakeDispatchTimeoutError,
   withWakeTimeout,
@@ -10,6 +14,23 @@ assert.equal(effectiveTurnTimeoutMs(undefined), undefined);
 assert.equal(effectiveTurnTimeoutMs(0), undefined);
 assert.equal(effectiveTurnTimeoutMs(-1), undefined);
 assert.equal(effectiveTurnTimeoutMs(12.9), 12);
+assert.equal(effectiveWakeTimeoutMs({ profile: {} }), DEFAULT_WAKE_TIMEOUT_MS);
+assert.equal(
+  effectiveWakeTimeoutMs({
+    session: { turnTimeoutMs: 2_500 },
+    profile: { runtime: { maxTurnDurationMs: 8_000 } },
+  }),
+  2_500,
+);
+assert.equal(
+  effectiveWakeTimeoutMs({
+    profile: {
+      runtime: { maxTurnDurationMs: 8_000 },
+      sessionDefaults: { turnTimeoutMs: 4_000 },
+    },
+  }),
+  8_000,
+);
 
 const sessionId = "timeout-session" as SessionId;
 const success = await withWakeTimeout(Promise.resolve("ok"), {
@@ -36,11 +57,27 @@ await assert.rejects(
   },
 );
 
+let timeoutCallbackCalled = false;
+await assert.rejects(
+  () =>
+    withWakeTimeout(new Promise((resolve) => setTimeout(resolve, 50)), {
+      wakeId: "wake-timeout-callback",
+      sessionId,
+      timeoutMs: 5,
+      onTimeout: () => {
+        timeoutCallbackCalled = true;
+      },
+    }),
+  WakeDispatchTimeoutError,
+);
+assert.equal(timeoutCallbackCalled, true);
+
 console.log(
   JSON.stringify(
     {
       success,
       timeout: "wake_timeout",
+      defaultWakeTimeoutMs: DEFAULT_WAKE_TIMEOUT_MS,
       floorMs: effectiveTurnTimeoutMs(12.9),
     },
     null,

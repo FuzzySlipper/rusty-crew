@@ -23,7 +23,11 @@ import type { LoadedProfileContext } from "./profile-loading.js";
 import { createRoleplayNarratorBrain } from "./narrator-brain.js";
 import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
-import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
+import {
+  effectiveWakeTimeoutMs,
+  type RustyCrewRuntimeConfig,
+} from "./service-runtime-config.js";
+import { effectiveTurnTimeoutMs } from "./wake-timeout.js";
 import type {
   BrainActionPlanner,
   BrainImplementation,
@@ -1220,6 +1224,7 @@ export const openAiResponsesBrainModule: BrainModule = {
             model: context.profile.profile.modelConfig.modelName,
             instructions: responsesInstructions(wake),
             streamIdleTimeoutMs: openAiResponsesStreamIdleTimeoutMs(),
+            wakeTimeoutMs: openAiResponsesWakeTimeoutMs(context, wake),
           },
           client: responsesClientConfig,
         };
@@ -1287,6 +1292,21 @@ function responsesInstructions(wake: BrainWakeInput): string {
   return [wake.systemPrompt, wake.roleAssembly.instructions]
     .filter((part): part is string => Boolean(part))
     .join("\n\n");
+}
+
+function openAiResponsesWakeTimeoutMs(
+  context: BrainModuleContext,
+  wake: BrainWakeInput,
+): number | undefined {
+  const configuredSession = context.runtimeConfig?.sessions.find(
+    (session) => session.sessionId === wake.sessionId,
+  );
+  return effectiveTurnTimeoutMs(
+    effectiveWakeTimeoutMs({
+      session: configuredSession,
+      profile: context.profile.profile,
+    }),
+  );
 }
 
 function providerRequestDebugEvent(

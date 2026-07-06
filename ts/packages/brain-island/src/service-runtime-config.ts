@@ -153,6 +153,8 @@ export interface EffectiveSessionDefaults {
   turnTimeoutMs?: number;
 }
 
+export const DEFAULT_WAKE_TIMEOUT_MS = 120_000;
+
 export type RustyCrewScheduledJobShape =
   | "host_job"
   | "session_wake"
@@ -1167,11 +1169,12 @@ export function effectiveSessionDefaults(
 export function effectiveWakeTimeoutMs(input: {
   session?: Pick<RustyCrewConfiguredSession, "turnTimeoutMs">;
   profile: Pick<ProfileConfig, "runtime" | "sessionDefaults">;
-}): number | undefined {
+}): number {
   return (
     input.session?.turnTimeoutMs ??
     input.profile.runtime?.maxTurnDurationMs ??
-    input.profile.sessionDefaults?.turnTimeoutMs
+    input.profile.sessionDefaults?.turnTimeoutMs ??
+    DEFAULT_WAKE_TIMEOUT_MS
   );
 }
 

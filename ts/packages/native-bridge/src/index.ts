@@ -614,6 +614,7 @@ export interface OpenAiResponsesBrainRunInput {
     model: string;
     instructions?: string;
     streamIdleTimeoutMs?: number;
+    wakeTimeoutMs?: number;
   };
   client?:
     | { mode: "fake" }
