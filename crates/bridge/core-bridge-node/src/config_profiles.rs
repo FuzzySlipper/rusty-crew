@@ -133,3 +133,101 @@ impl NativeBridge {
         self.engine()?.model_provider_refresh_impact(request)
     }
 }
+
+pub(crate) fn to_profile_registry_query(
+    query: WireProfileRegistryQuery,
+) -> napi::Result<ProfileRegistryQuery> {
+    Ok(ProfileRegistryQuery {
+        lifecycle_status: query
+            .lifecycle_status
+            .as_deref()
+            .map(profile_registry_lifecycle_status_from_str)
+            .transpose()?,
+        page: Some(rusty_crew_core_persistence::QueryPage {
+            limit: query.limit,
+            offset: query.offset,
+        }),
+    })
+}
+
+pub(crate) fn profile_registry_lifecycle_status_from_str(
+    raw: &str,
+) -> napi::Result<ProfileRegistryLifecycleStatus> {
+    match raw {
+        "active" => Ok(ProfileRegistryLifecycleStatus::Active),
+        "paused" => Ok(ProfileRegistryLifecycleStatus::Paused),
+        "decommissioned" => Ok(ProfileRegistryLifecycleStatus::Decommissioned),
+        "archived" => Ok(ProfileRegistryLifecycleStatus::Archived),
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unsupported profile registry lifecycle status {other}"),
+        )),
+    }
+}
+
+pub(crate) fn to_brain_registration(
+    registration: JsBrainImplementationRegistration,
+) -> napi::Result<BrainImplementationRegistration> {
+    Ok(BrainImplementationRegistration {
+        implementation_id: rusty_crew_core_bridge_api::BrainImplementationId::new(
+            registration.implementation_id,
+        ),
+        profile_id: rusty_crew_core_bridge_api::ProfileId::new(registration.profile_id),
+        tool_profile: rusty_crew_core_bridge_api::ToolProfile {
+            tools: registration
+                .tool_profile
+                .tools
+                .into_iter()
+                .map(|tool| rusty_crew_core_bridge_api::ToolDescriptor {
+                    name: tool.name,
+                    description: tool.description,
+                    input_schema: tool
+                        .input_schema
+                        .map(|handle| RuntimeBufferHandle::new(handle as u64)),
+                })
+                .collect(),
+        },
+        model_config: rusty_crew_core_bridge_api::BrainModelConfig {
+            provider: registration.model_config.provider,
+            model_name: registration.model_config.model_name,
+            temperature_milli: registration.model_config.temperature_milli,
+            max_output_tokens: registration.model_config.max_output_tokens,
+        },
+        strategy: registration
+            .strategy
+            .map(to_brain_strategy_metadata)
+            .transpose()?,
+        provider_state_scope: registration.provider_state_scope.map(|scope| {
+            rusty_crew_core_bridge_api::BrainProviderStateScope {
+                profile_fingerprint: scope.profile_fingerprint,
+                provider_fingerprint: scope.provider_fingerprint,
+            }
+        }),
+    })
+}
+
+pub(crate) fn to_brain_strategy_metadata(
+    strategy: JsBrainStrategyMetadata,
+) -> napi::Result<rusty_crew_core_bridge_api::BrainStrategyMetadata> {
+    Ok(rusty_crew_core_bridge_api::BrainStrategyMetadata {
+        module_id: strategy.module_id,
+        strategy_id: strategy.strategy_id,
+        provider_state: rusty_crew_core_bridge_api::BrainProviderStateStrategyMetadata {
+            mode: parse_provider_state_mode(&strategy.provider_state.mode)?,
+        },
+    })
+}
+
+pub(crate) fn parse_provider_state_mode(
+    mode: &str,
+) -> napi::Result<rusty_crew_core_bridge_api::ProviderStateMode> {
+    match mode {
+        "unused" => Ok(rusty_crew_core_bridge_api::ProviderStateMode::Unused),
+        "optional" => Ok(rusty_crew_core_bridge_api::ProviderStateMode::Optional),
+        "required" => Ok(rusty_crew_core_bridge_api::ProviderStateMode::Required),
+        _ => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unknown provider state mode {mode}"),
+        )),
+    }
+}

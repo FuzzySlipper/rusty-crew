@@ -166,3 +166,115 @@ impl NativeBridge {
         })
     }
 }
+
+pub(crate) fn parse_brain_provider_state_output_json(
+    raw: &str,
+) -> CoreResult<BrainWakeProviderStateOutput> {
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum WireOutput {
+        Unchanged,
+        Replace { state: WireUpdate },
+        Clear { reason: WireClearReason },
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct WireUpdate {
+        module_id: String,
+        strategy_id: String,
+        profile_fingerprint: String,
+        provider_fingerprint: String,
+        payload_version: String,
+        payload: serde_json::Value,
+        ttl_ms: Option<u64>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum WireClearReason {
+        BrainRequestedClear,
+    }
+
+    let parsed = serde_json::from_str::<WireOutput>(raw).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("invalid provider state output json: {error}"),
+        )
+    })?;
+    Ok(match parsed {
+        WireOutput::Unchanged => BrainWakeProviderStateOutput::Unchanged,
+        WireOutput::Replace { state } => BrainWakeProviderStateOutput::Replace {
+            state: rusty_crew_core_bridge_api::BrainWakeProviderStateUpdate {
+                module_id: state.module_id,
+                strategy_id: state.strategy_id,
+                profile_fingerprint: state.profile_fingerprint,
+                provider_fingerprint: state.provider_fingerprint,
+                payload_version: state.payload_version,
+                payload: state.payload,
+                ttl_ms: state.ttl_ms,
+            },
+        },
+        WireOutput::Clear { reason } => BrainWakeProviderStateOutput::Clear {
+            reason: match reason {
+                WireClearReason::BrainRequestedClear => {
+                    rusty_crew_core_bridge_api::ProviderStateClearReason::BrainRequestedClear
+                }
+            },
+        },
+    })
+}
+
+pub(crate) fn provider_state_absence_reason_as_str(
+    reason: &rusty_crew_core_bridge_api::ProviderStateAbsenceReason,
+) -> &'static str {
+    match reason {
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::NotConfigured => "not_configured",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Missing => "missing",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Expired => "expired",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Invalidated => "invalidated",
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::ModuleDoesNotUseState => {
+            "module_does_not_use_state"
+        }
+        rusty_crew_core_bridge_api::ProviderStateAbsenceReason::LoadFailed => "load_failed",
+    }
+}
+
+pub(crate) fn parse_provider_state_absence_reason(
+    raw: &str,
+) -> CoreResult<rusty_crew_core_bridge_api::ProviderStateAbsenceReason> {
+    Ok(match raw {
+        "not_configured" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::NotConfigured,
+        "missing" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Missing,
+        "expired" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Expired,
+        "invalidated" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::Invalidated,
+        "module_does_not_use_state" => {
+            rusty_crew_core_bridge_api::ProviderStateAbsenceReason::ModuleDoesNotUseState
+        }
+        "load_failed" => rusty_crew_core_bridge_api::ProviderStateAbsenceReason::LoadFailed,
+        other => {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("invalid provider state absence reason {other}"),
+            ))
+        }
+    })
+}
+
+pub(crate) fn provider_wire_state_status(
+    invalidated_at: Option<&String>,
+    invalidation_reason: Option<&str>,
+    expires_at: Option<&String>,
+    now: &String,
+) -> &'static str {
+    if invalidation_reason == Some("expired") {
+        return "expired";
+    }
+    if invalidated_at.is_some() {
+        return "invalidated";
+    }
+    if expires_at.is_some_and(|expires| expires <= now) {
+        return "expired";
+    }
+    "valid"
+}

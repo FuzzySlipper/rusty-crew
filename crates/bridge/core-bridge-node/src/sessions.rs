@@ -39,3 +39,81 @@ impl NativeBridge {
         })
     }
 }
+
+pub(crate) fn to_js_session_state(
+    state: rusty_crew_core_bridge_api::SessionState,
+) -> JsSessionState {
+    JsSessionState {
+        handle: state.handle.get() as f64,
+        session_id: state.session_id.0,
+        agent_id: state.agent_id.0,
+        profile_id: state.profile_id.0,
+        kind: format!("{:?}", state.kind).to_ascii_lowercase(),
+        status: format!("{:?}", state.status).to_ascii_lowercase(),
+        history_window: state.history_window.map(|window| JsSessionHistoryWindow {
+            max_messages: window.max_messages,
+        }),
+    }
+}
+
+pub(crate) fn parse_session_kind(
+    raw: &str,
+) -> napi::Result<rusty_crew_core_bridge_api::SessionKind> {
+    match raw {
+        "full" => Ok(rusty_crew_core_bridge_api::SessionKind::Full),
+        "worker" => Ok(rusty_crew_core_bridge_api::SessionKind::Worker),
+        "delegated" => Ok(rusty_crew_core_bridge_api::SessionKind::Delegated),
+        other => Err(napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("unsupported session kind {other}"),
+        )),
+    }
+}
+
+pub(crate) fn js_session_config(
+    config: JsSessionConfig,
+) -> napi::Result<rusty_crew_core_bridge_api::SessionConfig> {
+    let resource_limits = config.resource_limits;
+    let tool_profile = config.tool_profile;
+    let history_window = config.history_window;
+    Ok(rusty_crew_core_bridge_api::SessionConfig {
+        session_id: rusty_crew_core_bridge_api::SessionId::new(config.session_id),
+        agent_id: rusty_crew_core_bridge_api::AgentId::new(config.agent_id),
+        profile_id: rusty_crew_core_bridge_api::ProfileId::new(config.profile_id),
+        kind: parse_session_kind(&config.kind)?,
+        delegation: None,
+        resource_limits: match resource_limits {
+            Some(limits) => rusty_crew_core_bridge_api::ResourceLimits {
+                workdir: limits.workdir,
+                max_duration_ms: limits.max_duration_ms,
+                max_delegation_depth: limits.max_delegation_depth,
+            },
+            None => rusty_crew_core_bridge_api::ResourceLimits {
+                workdir: None,
+                max_duration_ms: None,
+                max_delegation_depth: None,
+            },
+        },
+        tool_profile: match tool_profile {
+            Some(profile) => rusty_crew_core_bridge_api::ToolProfile {
+                tools: profile
+                    .tools
+                    .into_iter()
+                    .map(|tool| rusty_crew_core_bridge_api::ToolDescriptor {
+                        name: tool.name,
+                        description: tool.description,
+                        input_schema: tool
+                            .input_schema
+                            .map(|handle| RuntimeBufferHandle::new(handle as u64)),
+                    })
+                    .collect(),
+            },
+            None => rusty_crew_core_bridge_api::ToolProfile { tools: Vec::new() },
+        },
+        history_window: history_window.map(|window| {
+            rusty_crew_core_bridge_api::SessionHistoryWindow {
+                max_messages: window.max_messages,
+            }
+        }),
+    })
+}
