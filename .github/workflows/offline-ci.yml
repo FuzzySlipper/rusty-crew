@@ -41,3 +41,44 @@ jobs:
 
       - name: Run offline verification
         run: npm run verify:offline
+
+  verify-postgres-backend:
+    name: Verify Postgres Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rusty_crew
+          POSTGRES_PASSWORD: rusty_crew
+          POSTGRES_DB: rusty_crew_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusty_crew -d rusty_crew_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL: postgres://rusty_crew:rusty_crew@127.0.0.1:5432/rusty_crew_test
+      RUSTY_CREW_POSTGRES_HARNESS_NO_CONTAINER: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run PostgreSQL backend conformance
+        run: npm run test:postgres-backend

@@ -133,26 +133,38 @@ SQLite-to-PostgreSQL migration.
 
 ## PostgreSQL Test Commands
 
-The Postgres feature has a no-database test slice suitable for local and CI
-checks:
+The preferred live validation command is:
 
 ```bash
-cargo test -p rusty-crew-core-persistence --features postgres postgres_migration_catalog
+npm run test:postgres-backend
 ```
 
-Live Postgres repository conformance tests still require an actual database,
-but they do not require sourcing a machine-private env file. Provide a throwaway
-database URL directly through one of the supported env vars:
+The command first uses `RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL`,
+`RUSTY_CREW_DATABASE_URL`, or `RUSTY_CREW_APP_DATABASE_URL` when one is set. If
+none is set, it starts a disposable Docker/Podman `postgres:16` container,
+waits for readiness, runs the tests, and stops the container. Set
+`RUSTY_CREW_POSTGRES_HARNESS_NO_CONTAINER=1` in CI when the database is supplied
+by a service container so a missing URL fails loudly.
+
+The harness runs the no-database migration catalog tests plus the ignored live
+PostgreSQL repository conformance tests:
+
+```bash
+cargo test -p rusty-crew-core-persistence --features postgres-backend postgres_migration_catalog
+cargo test -p rusty-crew-core-persistence --features postgres-backend postgres_ -- --ignored --nocapture
+```
+
+To target an existing throwaway database directly:
 
 ```bash
 RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL='postgres://user:password@host:5432/rusty_crew_test' \
-  cargo test -p rusty-crew-core-persistence --features postgres-backend \
-  postgres_runtime_counter_backend_matches_typed_counter_contract -- --ignored --nocapture
+  npm run test:postgres-backend
 ```
 
-The ignored live tests create unique schemas per run. Use a disposable database
-or CI service database and clean old `rusty_crew_*_backend_*` schemas as part of
-normal maintenance.
+The ignored live tests create unique `rusty_crew_*_backend_*` schemas per run
+and drop them when each test passes. Use a disposable database or CI service
+database and clean stale `rusty_crew_*_backend_*` schemas after interrupted
+runs.
 
 ## Migration And Logical Export/Import
 

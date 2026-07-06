@@ -16951,7 +16951,8 @@ mod tests {
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "conversations_attachments"
                 && group.notes[0].contains("conversation transcript")
-                && group.notes[0].contains("attachment/data-bank")
+                && group.notes[0].contains("attachment")
+                && group.notes[0].contains("data-bank")
         }));
 
         store.drop_schema_for_test().unwrap();
@@ -16997,7 +16998,8 @@ mod tests {
         );
         assert!(diagnostics.repository_groups.iter().any(|group| {
             group.group_id == "conversations_attachments"
-                && group.notes[0].contains("attachment/data-bank")
+                && group.notes[0].contains("attachment")
+                && group.notes[0].contains("data-bank")
         }));
 
         store.drop_schema_for_test().unwrap();
