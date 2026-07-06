@@ -2909,6 +2909,21 @@ fn bool_to_sql(value: bool) -> i64 {
     }
 }
 
+fn sql_bool(value: i64) -> bool {
+    value != 0
+}
+
+fn sqlite_like_contains(value: &str) -> String {
+    format!("%{}%", escape_sqlite_like(value))
+}
+
+fn escape_sqlite_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
