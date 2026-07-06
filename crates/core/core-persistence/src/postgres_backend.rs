@@ -85,7 +85,7 @@ use crate::{
     WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery, WorkerRunRecord,
     WorkerRunStatus,
 };
-use postgres::{types::ToSql, Client, GenericClient, NoTls, Row, Transaction};
+use postgres::{types::ToSql, Client, GenericClient, Row, Transaction};
 use rusty_crew_core_protocol::{
     session_memory_space_descriptor, BrainEvent, CompletionPacket, CompletionStatus,
     FanOutFailurePolicy, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
@@ -14293,6 +14293,7 @@ mod tests {
         RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
         RoleplayLoreVisibility,
     };
+    use postgres::NoTls;
     use rusty_crew_core_protocol::{
         AgentMessage, BrainEvent, MemoryEvidenceRef, MemoryProposalSource,
         ModelProviderCredentialKind, ProfileRegistryImportExportMetadata, ResourceLimits,
