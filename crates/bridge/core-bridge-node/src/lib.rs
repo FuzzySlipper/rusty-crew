@@ -80,6 +80,7 @@ mod roleplay;
 mod scheduler;
 mod sessions;
 mod storage_admin;
+mod wire_helpers;
 mod wire_types;
 
 use registries::{BrainImplementationRegistry, PlatformAdapterRegistry, SubscriptionRegistry};
@@ -90,12 +91,13 @@ use responses::{
 };
 #[cfg(test)]
 use responses::{normalize_responses_tool_schema, run_openai_responses_brain_json_blocking};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+pub(crate) use wire_helpers::*;
 pub(crate) use wire_types::*;
 
 #[derive(Debug)]
@@ -3089,40 +3091,6 @@ fn parse_event_kind(raw: &str) -> napi::Result<rusty_crew_core_bridge_api::CoreE
             format!("unsupported event kind {other}"),
         )),
     }
-}
-
-fn handle_to_u32(handle: RuntimeBufferHandle) -> napi::Result<u32> {
-    u32::try_from(handle.get()).map_err(|_| {
-        napi::Error::new(
-            napi::Status::InvalidArg,
-            format!("runtime buffer handle {} does not fit in u32", handle.get()),
-        )
-    })
-}
-
-fn to_napi_error(error: CoreError) -> napi::Error {
-    napi::Error::new(
-        napi::Status::GenericFailure,
-        format!("{:?}: {}", error.kind, error.message),
-    )
-}
-
-fn parse_json<T: DeserializeOwned>(raw: &str, label: &str) -> napi::Result<T> {
-    serde_json::from_str(raw).map_err(|error| {
-        napi::Error::new(
-            napi::Status::InvalidArg,
-            format!("invalid {label} json: {error}"),
-        )
-    })
-}
-
-fn serialize_json<T: Serialize>(value: &T, label: &str) -> napi::Result<String> {
-    serde_json::to_string(value).map_err(|error| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("serialize {label}: {error}"),
-        )
-    })
 }
 
 #[cfg(test)]
