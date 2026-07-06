@@ -42,14 +42,14 @@ const forbidden = [
 const allowed = [
   {
     id: "rust-responses-echo-tool-output",
-    path: "crates/bridge/core-bridge-node/src/lib.rs",
+    path: "crates/bridge/core-bridge-node/src/responses.rs",
     count: 1,
     reason:
       "legacy blocking bridge fixture hook; service brain uses buffered submit-output path",
   },
   {
     id: "responses-module-scaffold-success",
-    path: "crates/bridge/core-bridge-node/src/lib.rs",
+    path: "crates/bridge/core-bridge-node/src/responses.rs",
     count: 2,
     reason:
       "fake Responses client used by explicit fake-mode smokes through the native bridge",
