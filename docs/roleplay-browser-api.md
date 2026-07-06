@@ -22,6 +22,8 @@ Canonical routes:
 - `PATCH /v1/admin/roleplay/lore/layers/{layerId}`
 - `DELETE /v1/admin/roleplay/lore/layers/{layerId}`
 - `GET /v1/admin/roleplay/lore/layers/{layerId}/entries`
+- `GET /v1/admin/roleplay/lore/layers/{layerId}/entries/{entryId}`
+- `PATCH /v1/admin/roleplay/lore/layers/{layerId}/entries/{entryId}`
 - `GET /v1/admin/roleplay/lore/entries/search`
 - `POST /v1/admin/roleplay/lore/entries`
 - `GET /v1/admin/roleplay/lore/entries/{entryId}`
@@ -111,7 +113,37 @@ response.
     "record_id": "entry-id",
     "revision": 2,
     "title": "Clockmaker Song",
-    "body": "..."
+    "body": "...",
+    "primary_keys": ["clockmaker"],
+    "secondary_keys": ["silver leaves"],
+    "enabled": true,
+    "scan_depth": 4,
+    "insertion_position": "lore_block",
+    "insertion_order": 0,
+    "probability": 1,
+    "retrieval_role": "system",
+    "lore_controls": {
+      "primary_keys": ["clockmaker"],
+      "secondary_keys": ["silver leaves"],
+      "enabled": true,
+      "constant": false,
+      "scan_depth": 4,
+      "insertion_position": "lore_block",
+      "insertion_order": 0,
+      "probability": 1,
+      "retrieval_role": "system"
+    },
+    "lore_control_support": {
+      "primary_keys": "stored_only",
+      "secondary_keys": "stored_only",
+      "enabled": "stored_only",
+      "scan_depth": "stored_only",
+      "insertion_position": "stored_only",
+      "probability": "stored_only",
+      "retrieval_role": "stored_only",
+      "constant": "layer_entry_recall",
+      "insertion_order": "layer_entry_priority_recall"
+    }
   },
   "provenance": [
     {
@@ -126,7 +158,14 @@ response.
     "supersedes": null,
     "supersededBy": null
   },
-  "layerEntries": [{ "layer_id": "world-main", "record_id": "entry-id" }],
+  "layerEntries": [
+    {
+      "layer_id": "world-main",
+      "record_id": "entry-id",
+      "constant": false,
+      "insertion_order": 0
+    }
+  ],
   "layers": [{ "layer_id": "world-main", "name": "World" }],
   "layerContext": {
     "source": "explicit",
@@ -138,12 +177,42 @@ response.
 }
 ```
 
+### Lore Trigger And Insertion Controls
+
+Lore entry create/update accepts stable trigger/insertion controls either as
+top-level fields, under `controls`, or under `lore_controls`. The canonical
+stored shape is `content.lore_controls`; read/search/detail responses also
+mirror the fields onto the browser-safe `entry` object for simple UI binding.
+
+Supported request fields:
+
+- `primary_keys`: string array or comma-separated string.
+- `secondary_keys`: string array or comma-separated string.
+- `enabled`: boolean, default `true`.
+- `constant`: boolean, default `false`. On entry create, this also seeds the
+  layer-entry `is_constant` link unless `is_constant` / `isConstant` is supplied.
+- `scan_depth`: integer `0..200`, default `4`.
+- `insertion_position`: one of `before_history`, `after_history`,
+  `before_author_note`, `after_author_note`, `system`, or `lore_block`.
+- `insertion_order`: integer `-1000000..1000000`, default `0`. On entry create,
+  this also seeds the layer-entry `priority` link unless `priority` is supplied.
+- `probability`: number `0..1`, default `1`.
+- `retrieval_role`: one of `system`, `user`, `assistant`, or `narrator`.
+
+Current recall support is explicit in `lore_control_support`: layer-entry
+`constant` participates in `recall_lore` as always-on lore, and
+`insertion_order` participates as layer-entry priority ordering. Trigger keys,
+scan depth, insertion position, probability, enabled state, and retrieval role
+are validated and stored for editor compatibility, but are `stored_only` until a
+later scorer/prompt-insertion slice implements them.
+
 `POST /v1/admin/roleplay/lore/entries` creates a manual entry and links it to a
 layer. The request accepts `layer_id` / `layerId`, optional `is_constant` /
-`isConstant`, optional `priority`, and either a native `write` object or flat
-entry fields. If `record_id` is omitted, the service generates one. The service
-defaults `shape` to `{ "shape_id": "lore_entry", "version": 1 }`, `source` to
-`ui`, and adds a browser-admin UI evidence ref when none is supplied.
+`isConstant` / `constant`, optional `priority` / `insertion_order`, stable lore
+controls, and either a native `write` object or flat entry fields. If
+`record_id` is omitted, the service generates one. The service defaults `shape`
+to `{ "shape_id": "lore_entry", "version": 1 }`, `source` to `ui`, and adds a
+browser-admin UI evidence ref when none is supplied.
 
 ```json
 {
@@ -175,9 +244,15 @@ defaults `shape` to `{ "shape_id": "lore_entry", "version": 1 }`, `source` to
 place through the native revision-checked replace path. `expected_revision` /
 `expectedRevision` is required. The body may provide a nested `write` object or
 flat partial fields such as `title`, `body`, `canon_status`, `visibility`,
-`entity_id`, `content`, `evidence_refs`, `confidence`, and
+`entity_id`, `content`, lore controls, `evidence_refs`, `confidence`, and
 `durability_rationale`. The response uses the same detail shape as `GET`, so
 the frontend can refresh the edited entry directly.
+
+`GET /v1/admin/roleplay/lore/layers/{layerId}/entries/{entryId}` returns one
+layer-entry join. `PATCH` on the same route updates layer-scoped controls:
+`is_constant` / `isConstant` / `constant` and `priority` / `insertion_order`.
+Use this route when an entry is linked to more than one layer and the UI is
+editing the controls for a specific layer membership.
 
 `POST /v1/admin/roleplay/lore/entries/{entryId}/promote` promotes an
 auto-captured or otherwise lower-layer entry into a durable target layer through

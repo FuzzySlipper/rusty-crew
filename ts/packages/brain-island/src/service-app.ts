@@ -1517,9 +1517,38 @@ async function handleAdminRoleplayLoreRequest(
       const entries = await state.bridge.listEntriesByLayer(layerId);
       return successRoute(requestIdValue, {
         layerId,
-        entries,
+        entries: entries.map(browserSafeLoreLayerEntry),
         total: entries.length,
       });
+    }
+
+    const layerEntryMatch = url.pathname.match(
+      /^\/v1\/admin\/roleplay\/lore\/layers\/([^/]+)\/entries\/([^/]+)\/?$/,
+    );
+    if (layerEntryMatch) {
+      const layerId = decodeURIComponent(layerEntryMatch[1]);
+      const entryId = decodeURIComponent(layerEntryMatch[2]);
+      if (method === "GET") {
+        return roleplayLoreLayerEntryReadResult(
+          requestIdValue,
+          state,
+          layerId,
+          entryId,
+        );
+      }
+      if (method === "PATCH") {
+        return roleplayLoreLayerEntryPatchResult(
+          requestIdValue,
+          state,
+          layerId,
+          entryId,
+          recordBody(await readJsonBody(request)),
+        );
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay lore layer entry item supports GET and PATCH",
+      );
     }
 
     const layerMatch = url.pathname.match(
@@ -1818,7 +1847,7 @@ async function roleplayLoreEntryCreateResult(
   }
 
   const write = roleplayLoreWriteFromBody(
-    recordBody(body.write ?? body),
+    roleplayLoreWriteBodyFromRequest(body),
     undefined,
     state.now(),
     {
@@ -1829,14 +1858,23 @@ async function roleplayLoreEntryCreateResult(
     },
   );
   const entry = await state.bridge.addLoreEntry(write);
+  const entryControls = roleplayLoreControlsForEntry(entry);
   await state.bridge.addEntryToLayer({
     layer_id: layerId,
     record_id: String(entry.record_id),
     is_constant:
       optionalBoolean(body.is_constant) ??
       optionalBoolean(body.isConstant) ??
+      optionalBoolean(body.constant) ??
+      optionalBoolean(entryControls.constant) ??
       false,
-    priority: Math.trunc(optionalNumber(body.priority) ?? 0),
+    priority: Math.trunc(
+      optionalNumber(body.priority) ??
+        optionalNumber(body.insertion_order) ??
+        optionalNumber(body.insertionOrder) ??
+        optionalNumber(entryControls.insertion_order) ??
+        0,
+    ),
     added_at: write.now,
   });
   return successRoute(requestIdValue, {
@@ -1890,7 +1928,7 @@ async function roleplayLoreEntryPatchResult(
   }
   const replace: NativeRoleplayLoreReplace = {
     write: roleplayLoreWriteFromBody(
-      recordBody(body.write ?? body),
+      roleplayLoreWriteBodyFromRequest(body),
       existing,
       state.now(),
       {
@@ -2025,6 +2063,73 @@ async function roleplayLoreEntryPromoteResult(
       recordId: newRecordId,
     },
   });
+}
+
+async function roleplayLoreLayerEntryReadResult(
+  requestIdValue: string,
+  state: ServiceState,
+  layerId: string,
+  entryId: string,
+): Promise<AdminRouteResult> {
+  const layerEntry = await roleplayLoreLayerEntryById(state, layerId, entryId);
+  if (layerEntry === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_layer_entry_not_found",
+      message: `roleplay lore entry ${entryId} was not found in layer ${layerId}`,
+      retryable: false,
+    });
+  }
+  return successRoute(requestIdValue, {
+    layerId,
+    recordId: entryId,
+    layerEntry: browserSafeLoreLayerEntry(layerEntry),
+  });
+}
+
+async function roleplayLoreLayerEntryPatchResult(
+  requestIdValue: string,
+  state: ServiceState,
+  layerId: string,
+  entryId: string,
+  body: Record<string, unknown>,
+): Promise<AdminRouteResult> {
+  const existing = await roleplayLoreLayerEntryById(state, layerId, entryId);
+  if (existing === undefined) {
+    return failure(404, requestIdValue, {
+      code: "not_found",
+      reason_code: "roleplay_lore_layer_entry_not_found",
+      message: `roleplay lore entry ${entryId} was not found in layer ${layerId}`,
+      retryable: false,
+    });
+  }
+  await state.bridge.addEntryToLayer(
+    roleplayLoreLayerEntryLinkFromBody(body, existing, state.now()),
+  );
+  const updated = await roleplayLoreLayerEntryById(state, layerId, entryId);
+  if (updated === undefined) {
+    return failure(500, requestIdValue, {
+      code: "internal_error",
+      reason_code: "roleplay_lore_layer_entry_unreadable",
+      message: `roleplay lore layer entry ${layerId}:${entryId} was not readable after update`,
+      retryable: false,
+    });
+  }
+  return successRoute(requestIdValue, {
+    layerId,
+    recordId: entryId,
+    layerEntry: browserSafeLoreLayerEntry(updated),
+    updated: true,
+  });
+}
+
+async function roleplayLoreLayerEntryById(
+  state: ServiceState,
+  layerId: string,
+  entryId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const entries = await state.bridge.listEntriesByLayer(layerId);
+  return entries.find((entry) => String(entry.record_id) === entryId);
 }
 
 async function roleplayLorePromotionSourceLayerId(
@@ -2193,7 +2298,7 @@ async function roleplayLoreEntryDetailData(
         ? browserSafeLoreEntry(supersededBy)
         : undefined,
     },
-    layerEntries: layerContext.layerEntries,
+    layerEntries: layerContext.layerEntries.map(browserSafeLoreLayerEntry),
     layers: layerContext.layers,
     layerContext: {
       source: layerContext.source,
@@ -2460,7 +2565,39 @@ function optionalBooleanQuery(
 function browserSafeLoreEntry(
   entry: Record<string, unknown>,
 ): Record<string, unknown> {
-  return { ...entry };
+  const loreControls = roleplayLoreControlsForEntry(entry);
+  return {
+    ...entry,
+    primary_keys: loreControls.primary_keys,
+    secondary_keys: loreControls.secondary_keys,
+    enabled: loreControls.enabled,
+    scan_depth: loreControls.scan_depth,
+    insertion_position: loreControls.insertion_position,
+    insertion_order: loreControls.insertion_order,
+    probability: loreControls.probability,
+    retrieval_role: loreControls.retrieval_role,
+    lore_controls: loreControls,
+    lore_control_support: roleplayLoreControlSupport(),
+  };
+}
+
+function browserSafeLoreLayerEntry(
+  entry: Record<string, unknown>,
+): Record<string, unknown> {
+  const record = recordBody(entry.record);
+  const safeRecord = browserSafeLoreEntry(record);
+  const layerControls = roleplayLoreControlsForEntry(record, {
+    constant: optionalBoolean(entry.is_constant),
+    insertionOrder: optionalNumber(entry.priority),
+  });
+  return {
+    ...entry,
+    record: safeRecord,
+    constant: layerControls.constant,
+    insertion_order: layerControls.insertion_order,
+    lore_controls: layerControls,
+    lore_control_support: roleplayLoreControlSupport(),
+  };
 }
 
 function withEntryCount(
@@ -2626,7 +2763,359 @@ function roleplayLoreContentFromBody(
   content.body = fields.body;
   content.canon_status = fields.canonStatus;
   content.visibility = fields.visibility;
+  const controls = roleplayLoreControlsFromBody(body, content);
+  if (controls !== undefined) {
+    content.lore_controls = controls;
+  }
   return content;
+}
+
+function roleplayLoreWriteBodyFromRequest(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Object.hasOwn(body, "write")) return body;
+  const write = { ...recordBody(body.write) };
+  for (const key of roleplayLoreControlRequestKeys()) {
+    if (Object.hasOwn(write, key) || !Object.hasOwn(body, key)) continue;
+    write[key] = body[key];
+  }
+  return write;
+}
+
+function roleplayLoreControlRequestKeys(): readonly string[] {
+  return [
+    "controls",
+    "lore_controls",
+    "loreControls",
+    "primary_keys",
+    "primaryKeys",
+    "secondary_keys",
+    "secondaryKeys",
+    "enabled",
+    "constant",
+    "is_constant",
+    "isConstant",
+    "scan_depth",
+    "scanDepth",
+    "insertion_position",
+    "insertionPosition",
+    "insertion_order",
+    "insertionOrder",
+    "probability",
+    "retrieval_role",
+    "retrievalRole",
+  ];
+}
+
+function roleplayLoreLayerEntryLinkFromBody(
+  body: Record<string, unknown>,
+  existing: Record<string, unknown>,
+  now: string,
+): Record<string, unknown> {
+  const controls = roleplayLoreControlsFromBody(
+    body,
+    recordBody(existing.record),
+  );
+  return {
+    layer_id: requiredRouteString(
+      optionalString(existing.layer_id),
+      "layer_id",
+    ),
+    record_id: requiredRouteString(
+      optionalString(existing.record_id),
+      "record_id",
+    ),
+    is_constant:
+      optionalBoolean(body.is_constant) ??
+      optionalBoolean(body.isConstant) ??
+      optionalBoolean(body.constant) ??
+      optionalBoolean(controls?.constant) ??
+      optionalBoolean(existing.is_constant) ??
+      false,
+    priority: Math.trunc(
+      optionalNumber(body.priority) ??
+        optionalNumber(body.insertion_order) ??
+        optionalNumber(body.insertionOrder) ??
+        optionalNumber(controls?.insertion_order) ??
+        optionalNumber(existing.priority) ??
+        0,
+    ),
+    added_at: optionalString(existing.added_at) ?? now,
+  };
+}
+
+function roleplayLoreControlsFromBody(
+  body: Record<string, unknown>,
+  existingSource: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const existingContent = recordBody(
+    Object.hasOwn(existingSource ?? {}, "content")
+      ? existingSource?.content
+      : existingSource,
+  );
+  const existingControls = recordBody(
+    existingContent.lore_controls ?? existingContent.loreControls,
+  );
+  const explicitControls = Object.hasOwn(body, "lore_controls")
+    ? recordBody(body.lore_controls)
+    : Object.hasOwn(body, "loreControls")
+      ? recordBody(body.loreControls)
+      : Object.hasOwn(body, "controls")
+        ? recordBody(body.controls)
+        : undefined;
+  const hasDirectControl = [
+    "primary_keys",
+    "primaryKeys",
+    "secondary_keys",
+    "secondaryKeys",
+    "enabled",
+    "constant",
+    "is_constant",
+    "isConstant",
+    "scan_depth",
+    "scanDepth",
+    "insertion_position",
+    "insertionPosition",
+    "insertion_order",
+    "insertionOrder",
+    "probability",
+    "retrieval_role",
+    "retrievalRole",
+  ].some((key) => Object.hasOwn(body, key));
+  if (explicitControls === undefined && !hasDirectControl) {
+    return Object.keys(existingControls).length === 0
+      ? undefined
+      : normalizeRoleplayLoreControls(existingControls);
+  }
+  return normalizeRoleplayLoreControls({
+    ...existingControls,
+    ...(explicitControls ?? {}),
+    ...roleplayLoreDirectControlsPatch(body),
+  });
+}
+
+function roleplayLoreDirectControlsPatch(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  copyFirstPresent(
+    body,
+    patch,
+    ["primary_keys", "primaryKeys"],
+    "primary_keys",
+  );
+  copyFirstPresent(
+    body,
+    patch,
+    ["secondary_keys", "secondaryKeys"],
+    "secondary_keys",
+  );
+  copyFirstPresent(body, patch, ["enabled"], "enabled");
+  copyFirstPresent(
+    body,
+    patch,
+    ["constant", "is_constant", "isConstant"],
+    "constant",
+  );
+  copyFirstPresent(body, patch, ["scan_depth", "scanDepth"], "scan_depth");
+  copyFirstPresent(
+    body,
+    patch,
+    ["insertion_position", "insertionPosition"],
+    "insertion_position",
+  );
+  copyFirstPresent(
+    body,
+    patch,
+    ["insertion_order", "insertionOrder"],
+    "insertion_order",
+  );
+  copyFirstPresent(body, patch, ["probability"], "probability");
+  copyFirstPresent(
+    body,
+    patch,
+    ["retrieval_role", "retrievalRole"],
+    "retrieval_role",
+  );
+  return patch;
+}
+
+function copyFirstPresent(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>,
+  keys: readonly string[],
+  targetKey: string,
+): void {
+  for (const key of keys) {
+    if (!Object.hasOwn(source, key)) continue;
+    target[targetKey] = source[key];
+    return;
+  }
+}
+
+function normalizeRoleplayLoreControls(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    primary_keys: optionalControlStringList(
+      raw.primary_keys ?? raw.primaryKeys,
+      "primary_keys",
+    ),
+    secondary_keys: optionalControlStringList(
+      raw.secondary_keys ?? raw.secondaryKeys,
+      "secondary_keys",
+    ),
+    enabled: optionalBoolean(raw.enabled) ?? true,
+    constant: optionalBoolean(raw.constant) ?? false,
+    scan_depth: optionalBoundedInteger(raw.scan_depth ?? raw.scanDepth, {
+      fieldName: "scan_depth",
+      minimum: 0,
+      maximum: 200,
+      fallback: 4,
+    }),
+    insertion_position: optionalEnumString(
+      raw.insertion_position ?? raw.insertionPosition,
+      "insertion_position",
+      [
+        "before_history",
+        "after_history",
+        "before_author_note",
+        "after_author_note",
+        "system",
+        "lore_block",
+      ],
+      "lore_block",
+    ),
+    insertion_order: optionalBoundedInteger(
+      raw.insertion_order ?? raw.insertionOrder,
+      {
+        fieldName: "insertion_order",
+        minimum: -1_000_000,
+        maximum: 1_000_000,
+        fallback: 0,
+      },
+    ),
+    probability: optionalBoundedNumber(raw.probability, {
+      fieldName: "probability",
+      minimum: 0,
+      maximum: 1,
+      fallback: 1,
+    }),
+    retrieval_role: optionalEnumString(
+      raw.retrieval_role ?? raw.retrievalRole,
+      "retrieval_role",
+      ["system", "user", "assistant", "narrator"],
+      "system",
+    ),
+  };
+}
+
+function roleplayLoreControlsForEntry(
+  entry: Record<string, unknown>,
+  layerOverrides: { constant?: boolean; insertionOrder?: number } = {},
+): Record<string, unknown> {
+  const controls = normalizeRoleplayLoreControls(
+    recordBody(recordBody(entry.content).lore_controls),
+  );
+  return {
+    ...controls,
+    constant: layerOverrides.constant ?? controls.constant,
+    insertion_order: layerOverrides.insertionOrder ?? controls.insertion_order,
+  };
+}
+
+function roleplayLoreControlSupport(): Record<string, string> {
+  return {
+    primary_keys: "stored_only",
+    secondary_keys: "stored_only",
+    enabled: "stored_only",
+    scan_depth: "stored_only",
+    insertion_position: "stored_only",
+    probability: "stored_only",
+    retrieval_role: "stored_only",
+    constant: "layer_entry_recall",
+    insertion_order: "layer_entry_priority_recall",
+  };
+}
+
+function optionalControlStringList(
+  value: unknown,
+  fieldName: string,
+): string[] {
+  if (value === undefined) return [];
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array of strings`);
+  }
+  return value.map((item, index) =>
+    requiredRouteString(optionalString(item), `${fieldName}[${index}]`),
+  );
+}
+
+function optionalBoundedInteger(
+  value: unknown,
+  options: {
+    fieldName: string;
+    minimum: number;
+    maximum: number;
+    fallback: number;
+  },
+): number {
+  if (value === undefined) return options.fallback;
+  const parsed = optionalNumber(value);
+  if (
+    parsed === undefined ||
+    !Number.isSafeInteger(parsed) ||
+    parsed < options.minimum ||
+    parsed > options.maximum
+  ) {
+    throw new Error(
+      `${options.fieldName} must be an integer between ${options.minimum} and ${options.maximum}`,
+    );
+  }
+  return parsed;
+}
+
+function optionalBoundedNumber(
+  value: unknown,
+  options: {
+    fieldName: string;
+    minimum: number;
+    maximum: number;
+    fallback: number;
+  },
+): number {
+  if (value === undefined) return options.fallback;
+  const parsed = optionalNumber(value);
+  if (
+    parsed === undefined ||
+    parsed < options.minimum ||
+    parsed > options.maximum
+  ) {
+    throw new Error(
+      `${options.fieldName} must be a number between ${options.minimum} and ${options.maximum}`,
+    );
+  }
+  return parsed;
+}
+
+function optionalEnumString(
+  value: unknown,
+  fieldName: string,
+  allowed: readonly string[],
+  fallback: string,
+): string {
+  const text = optionalString(value);
+  if (text === undefined) return fallback;
+  if (!allowed.includes(text)) {
+    throw new Error(`${fieldName} must be one of ${allowed.join(", ")}`);
+  }
+  return text;
 }
 
 function roleplayLoreEvidenceRefsFromBody(

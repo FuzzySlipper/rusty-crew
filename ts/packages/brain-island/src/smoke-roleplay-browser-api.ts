@@ -3,12 +3,14 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-roleplay-api-"));
 const port = await openPort();
 const token = "roleplay-browser-smoke-token";
 writeRuntimeConfig(root);
+const bridge = await loadNativeBridge();
 
 const host = await startRustyCrewServiceHost({
   env: {
@@ -20,6 +22,7 @@ const host = await startRustyCrewServiceHost({
     RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "1000",
     RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "1000",
   },
+  bridge,
 });
 
 try {
@@ -281,6 +284,17 @@ try {
         body: "The manual entry starts as a browser-created draft.",
         canon_status: "draft",
         visibility: "public",
+        lore_controls: {
+          primary_keys: ["manual key"],
+          secondary_keys: ["secondary smoke"],
+          enabled: true,
+          constant: true,
+          scan_depth: 8,
+          insertion_position: "lore_block",
+          insertion_order: 7,
+          probability: 0.75,
+          retrieval_role: "system",
+        },
         metadata_json: { tags: ["editor-smoke"] },
       },
       evidence_refs: [
@@ -298,8 +312,17 @@ try {
   assert.equal(createdEntry.status, 200, JSON.stringify(createdEntry.body));
   assert.equal(createdEntry.body.data.entry.record_id, "rp-manual-entry");
   assert.equal(createdEntry.body.data.entry.revision, 1);
+  assert.deepEqual(createdEntry.body.data.entry.primary_keys, ["manual key"]);
+  assert.equal(createdEntry.body.data.entry.lore_controls.scan_depth, 8);
+  assert.equal(createdEntry.body.data.entry.lore_controls.probability, 0.75);
+  assert.equal(
+    createdEntry.body.data.entry.lore_control_support.primary_keys,
+    "stored_only",
+  );
   assert.equal(createdEntry.body.data.layerEntries.length, 1);
   assert.equal(createdEntry.body.data.layerEntries[0]?.layer_id, "rp-world");
+  assert.equal(createdEntry.body.data.layerEntries[0]?.constant, true);
+  assert.equal(createdEntry.body.data.layerEntries[0]?.insertion_order, 7);
   assert.equal(createdEntry.body.data.provenance.length, 1);
 
   const readEntry = await get(
@@ -307,11 +330,67 @@ try {
   );
   assert.equal(readEntry.status, 200, JSON.stringify(readEntry.body));
   assert.equal(readEntry.body.data.entry.title, "Manual Entry");
+  assert.deepEqual(readEntry.body.data.entry.secondary_keys, [
+    "secondary smoke",
+  ]);
   assert.equal(
     readEntry.body.data.layerEntries[0]?.record_id,
     "rp-manual-entry",
   );
+  assert.equal(
+    readEntry.body.data.layerEntries[0]?.lore_controls.constant,
+    true,
+  );
   assert.equal(readEntry.body.data.provenance[0]?.record_id, "rp-manual-entry");
+
+  const layerEntryPatch = await patch(
+    "/v1/admin/roleplay/lore/layers/rp-world/entries/rp-manual-entry",
+    {
+      is_constant: false,
+      priority: 3,
+    },
+  );
+  assert.equal(
+    layerEntryPatch.status,
+    200,
+    JSON.stringify(layerEntryPatch.body),
+  );
+  assert.equal(layerEntryPatch.body.data.layerEntry.constant, false);
+  assert.equal(layerEntryPatch.body.data.layerEntry.insertion_order, 3);
+
+  const layerEntryRestore = await patch(
+    "/v1/admin/roleplay/lore/layers/rp-world/entries/rp-manual-entry",
+    {
+      constant: true,
+      insertion_order: 2,
+    },
+  );
+  assert.equal(
+    layerEntryRestore.status,
+    200,
+    JSON.stringify(layerEntryRestore.body),
+  );
+  assert.equal(layerEntryRestore.body.data.layerEntry.constant, true);
+  assert.equal(layerEntryRestore.body.data.layerEntry.insertion_order, 2);
+
+  const recall = await bridge.recallLore({
+    chat_id: "rp-session",
+    session_id: "rp-session",
+    query_text: "unrelated query should still include constants",
+    active_subjects: [],
+    excluded_subjects: [],
+    token_budget: 10_000,
+    trace_id: "rp-browser-trigger-controls",
+    record_trace: true,
+    now: new Date("2026-07-05T00:00:00.000Z").toISOString(),
+  });
+  assert.ok(
+    (recall.entries as Array<Record<string, unknown>>).some(
+      (entry) =>
+        (entry.record as Record<string, unknown>).record_id ===
+          "rp-manual-entry" && entry.is_constant === true,
+    ),
+  );
 
   const patchedEntry = await patch(
     "/v1/admin/roleplay/lore/entries/rp-manual-entry?layer_id=rp-world",
@@ -320,6 +399,13 @@ try {
       title: "Manual Entry Revised",
       body: "The manual entry was revised by the browser editor.",
       canon_status: "canon",
+      primary_keys: ["revised primary"],
+      secondary_keys: ["revised secondary"],
+      enabled: true,
+      scan_depth: 5,
+      insertion_position: "after_history",
+      insertion_order: 2,
+      probability: 1,
       content: {
         metadata_json: { tags: ["editor-smoke", "revised"] },
       },
@@ -338,6 +424,13 @@ try {
   assert.equal(patchedEntry.body.data.entry.title, "Manual Entry Revised");
   assert.equal(patchedEntry.body.data.entry.canon_status, "canon");
   assert.equal(patchedEntry.body.data.entry.revision, 2);
+  assert.deepEqual(patchedEntry.body.data.entry.primary_keys, [
+    "revised primary",
+  ]);
+  assert.equal(
+    patchedEntry.body.data.entry.lore_controls.insertion_position,
+    "after_history",
+  );
   assert.equal(patchedEntry.body.data.provenance.length, 2);
   assert.equal(
     patchedEntry.body.data.entry.content.metadata_json.tags[1],
@@ -351,9 +444,18 @@ try {
     (entry: Record<string, unknown>) => entry.record_id === "rp-manual-entry",
   );
   assert.equal(manualJoin?.layer_id, "rp-world");
+  assert.equal(manualJoin?.constant, true);
+  assert.equal(manualJoin?.insertion_order, 2);
   assert.equal(
     (manualJoin?.record as Record<string, unknown> | undefined)?.title,
     "Manual Entry Revised",
+  );
+  assert.deepEqual(
+    (
+      (manualJoin?.record as Record<string, unknown> | undefined)
+        ?.lore_controls as Record<string, unknown> | undefined
+    )?.primary_keys,
+    ["revised primary"],
   );
 
   const character = await post(
