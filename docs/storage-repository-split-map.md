@@ -7,14 +7,14 @@ Rusty Crew owns its service data, but `core-persistence` should not present all
 durable concerns as one undifferentiated `CoordinationStore`. This map turns
 the existing `repositories.rs` catalog into an extraction plan for shrinking
 `crates/core/core-persistence/src/lib.rs` and replacing
-`postgres_proof.rs` with backend-parametric conformance suites.
+`postgres_backend.rs` with backend-parametric conformance suites.
 
 Current shape:
 
 - `core-persistence/src/lib.rs`: about 29k lines, owns most SQLite DDL,
   record types, store methods, row mappers, migrations, maintenance, and tests.
-- `core-persistence/src/postgres_proof.rs`: about 18k lines, owns a parallel
-  PostgreSQL proof store with duplicated repository behavior.
+- `core-persistence/src/postgres_backend.rs`: about 18k lines, owns a parallel
+  PostgreSQL backend store with duplicated repository behavior.
 - `core-persistence/src/repositories.rs`: diagnostic catalog only.
 - `core-persistence/src/module_schema.rs`: module schema descriptor logic.
 
@@ -68,7 +68,7 @@ src/
     runtime_search.rs
 ```
 
-`postgres_proof.rs` should become a thin PostgreSQL harness plus any temporary
+`postgres_backend.rs` should become a thin PostgreSQL harness plus any temporary
 module adapters that have not yet moved. Its duplicated repository methods
 should disappear as each conformance suite is adopted.
 
@@ -291,7 +291,7 @@ Backend coverage:
 
 - SQLite immediately.
 - PostgreSQL immediately. This is one of the core reasons PostgreSQL exists for
-  larger deployments, so claim behavior must be real rather than proof-only.
+  larger deployments, so claim behavior must be real rather than synthetic-only.
 
 ### `repos/workers.rs`
 
@@ -648,7 +648,7 @@ Tests:
 Backend coverage:
 
 - SQLite immediately for `simple_kv`.
-- PostgreSQL conformance for `simple_kv` already exists in proof form and
+- PostgreSQL conformance for `simple_kv` already exists in backend form and
   should become the first backend-parametric module-data suite.
 
 ### `repos/import_export.rs`
@@ -698,7 +698,7 @@ Tests:
 Backend coverage:
 
 - SQLite and PostgreSQL immediately. This is the best first extraction because
-  it is small, already has proof-store methods, and has an existing shared
+  it is small, already has backend-store methods, and has an existing shared
   conformance contract.
 
 ## Public Facade Plan
@@ -767,7 +767,7 @@ The actual harness can refine this shape, but each suite must run against:
 
 - SQLite file store always.
 - SQLite facade path if it remains distinct during the refactor.
-- PostgreSQL when `postgres-proof`/env configuration is enabled.
+- PostgreSQL when `postgres-backend`/env configuration is enabled.
 
 First conformance suites to extract:
 
@@ -779,7 +779,7 @@ First conformance suites to extract:
 6. `scheduler` claim/expiry
 7. `conversation` branch/message persistence
 
-`postgres_proof.rs` should shrink each time a conformance suite lands. Do not
+`postgres_backend.rs` should shrink each time a conformance suite lands. Do not
 keep copy-pasted PostgreSQL behavior after a module owns its backend-neutral
 contract.
 

@@ -1,6 +1,6 @@
-# PostgreSQL Roleplay Lore Proof Slice
+# PostgreSQL Roleplay Lore Backend Slice
 
-Status: implemented proof slice for task 3489.
+Status: implemented backend slice for task 3489.
 
 ## Purpose
 
@@ -11,7 +11,7 @@ PostgreSQL.
 
 ## Scope
 
-The proof stores roleplay lore as typed Rust records with:
+The backend stores roleplay lore as typed Rust records with:
 
 - `world`, `entity`, `lore_entry`, `relationship`, `timeline_event`, and
   `provenance_event` descriptor shapes;
@@ -23,8 +23,8 @@ The proof stores roleplay lore as typed Rust records with:
 - provenance events tied to evidence refs;
 - backend-neutral bounded search.
 
-SQLite uses ordinary text/JSON columns and `LIKE` search for the proof. The
-PostgreSQL proof table uses `JSONB` and an internal generated `tsvector`, but
+SQLite uses ordinary text/JSON columns and `LIKE` search for the backend. The
+PostgreSQL backend table uses `JSONB` and an internal generated `tsvector`, but
 callers still send only typed filters plus plain query text. No `tsquery`, SQL,
 JSONB operator, or physical table name is part of the caller contract.
 
@@ -35,14 +35,14 @@ SQLite:
 - `module_roleplay_lore_records`
 - `module_roleplay_lore_provenance_events`
 
-PostgreSQL proof schema:
+PostgreSQL backend schema:
 
 - `module_roleplay_lore_records`
 - `module_roleplay_lore_provenance_events`
 
 ## Diagnostics
 
-PostgreSQL storage diagnostics now report `roleplay_lore` as a proof
+PostgreSQL storage diagnostics now report `roleplay_lore` as an implemented
 module-owned store. This does not make PostgreSQL a production service backend;
 full service boot remains blocked until required correctness-sensitive
 repository groups are implemented or explicitly unsupported for a deployment
@@ -52,11 +52,11 @@ mode.
 
 ```bash
 cargo test -p rusty-crew-core-persistence \
-  sqlite_roleplay_lore_conformance_matches_postgres_proof_contract \
-  --features postgres-proof
+  sqlite_roleplay_lore_conformance_matches_postgres_backend_contract \
+  --features postgres-backend
 
 source /home/system/database/rusty-crew-postgres.env
 cargo test -p rusty-crew-core-persistence \
-  postgres_roleplay_lore_proof_matches_sqlite_conformance_contract \
-  --features postgres-proof -- --ignored --nocapture
+  postgres_roleplay_lore_backend_matches_sqlite_conformance_contract \
+  --features postgres-backend -- --ignored --nocapture
 ```

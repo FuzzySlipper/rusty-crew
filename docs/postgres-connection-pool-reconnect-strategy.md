@@ -24,8 +24,8 @@ Behavior:
 
 The current strategy intentionally does not replay arbitrary failed writes. Some
 operations are not safely replayable without operation-specific idempotency
-proofs. Repository slices can add targeted retry later where the contract proves
-the operation is idempotent.
+evidence. Repository slices can add targeted retry later where the contract
+proves the operation is idempotent.
 
 ## Diagnostics
 
@@ -45,15 +45,14 @@ render one backend-neutral shape.
 
 ## Live Test
 
-The live reconnect proof terminates an idle PostgreSQL backend connection,
+The live reconnect test terminates an idle PostgreSQL backend connection,
 allows the next operation to observe or discard it, and verifies a subsequent
 operation succeeds without restarting the service:
 
 ```bash
-RUSTY_CREW_POSTGRES_PROOF_DATABASE_URL=... \
+RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL=... \
   cargo test -p rusty-crew-core-persistence \
-  --features postgres-proof \
+  --features postgres-backend \
   postgres_connection_pool_recovers_after_closed_idle_connection \
   -- --ignored --nocapture
 ```
-

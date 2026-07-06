@@ -6,7 +6,7 @@ Task: Den `rusty-crew` #3490.
 
 ## Purpose
 
-Rusty Crew has PostgreSQL proof slices for several high-volume repositories, but
+Rusty Crew has PostgreSQL backend slices for several high-volume repositories, but
 PostgreSQL is not yet the full service coordination backend. The admin
 diagnostics surface must make that obvious instead of letting operators or UI
 clients infer production readiness from the presence of a database URL.
@@ -69,7 +69,7 @@ Unsupported or degraded coverage remains visible for:
 - bindings;
 - profile registry;
 - import/export;
-- generic typed memory spaces beyond the proofed `profile_dense` and
+- generic typed memory spaces beyond the backended `profile_dense` and
   `roleplay_lore` shapes.
 
 `profile_dense` being proofed does not imply generic typed memory spaces are

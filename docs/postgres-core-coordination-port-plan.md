@@ -10,7 +10,7 @@ core coordination store boundary: `CoreEngine` still owns a concrete
 `CoordinationStore`, and `CoordinationStore` is still a SQLite implementation
 with a large public method surface.
 
-The existing PostgreSQL proof store covers useful module and admin slices, but
+The existing PostgreSQL backend store covers useful module and admin slices, but
 it does not yet cover the correctness-sensitive repositories needed for normal
 agent runtime:
 

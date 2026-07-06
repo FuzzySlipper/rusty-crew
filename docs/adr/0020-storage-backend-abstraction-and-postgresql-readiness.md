@@ -61,17 +61,17 @@ persistence boundary:
 - add backend/dialect conformance tests for repository behavior;
 - define logical export/import records for portability and future migrations,
   but do not make migration the first local PostgreSQL cutover path;
-- introduce PostgreSQL only through a narrow low-risk repository proof slice
+- introduce PostgreSQL only through a narrow low-risk repository backend slice
   after the config, capability, and repository boundaries exist.
 
-The first PostgreSQL proof slice should not be queues, scheduler/job claims,
+The first PostgreSQL backend slice should not be queues, scheduler/job claims,
 transcripts, or runtime search. It should be a comparatively low-risk repository
 such as runtime counters, module schema registry records, import batches, or
-another simple append/upsert table. The proof should validate connection,
+another simple append/upsert table. The backend should validate connection,
 migration, typed repository API parity, diagnostics, and export/import shape
 before touching correctness-sensitive runtime coordination.
 
-After SQLite conformance is thoroughly tested and the PostgreSQL proof slice is
+After SQLite conformance is thoroughly tested and the PostgreSQL backend slice is
 credible, the local service should be tested against the existing den-k8
 PostgreSQL service as a new empty database. That test is intentionally a clean
 backend switch, not a migration of the current SQLite service data.
@@ -194,7 +194,7 @@ Recommended internal repository groups:
 - runtime counters.
 
 This can start as Rust modules under `core-persistence` without introducing a
-public trait explosion. Introduce traits only where the second backend proof
+public trait explosion. Introduce traits only where the second backend implementation
 needs them.
 
 ## SQL Portability Risks
@@ -291,7 +291,7 @@ Import should support:
    capability contracts per repository group.
 3. Add repository conformance fixtures that verify current SQLite behavior
    through backend-neutral APIs.
-4. Add a narrow PostgreSQL proof slice for a low-risk repository, tested against
+4. Add a narrow PostgreSQL backend slice for a low-risk repository, tested against
    a fresh PostgreSQL database.
 5. Exercise the local service against the den-k8 PostgreSQL service as an
    empty-db backend switch, not a migration.
@@ -302,8 +302,8 @@ Import should support:
    SQLite to PostgreSQL.
 
 This order keeps SQLite strong for small deployments, gives PostgreSQL a real
-first-class empty-db path, and avoids making migration pain the first proof of
-the backend abstraction.
+first-class empty-db path, and avoids making migration pain the first validation
+of the backend abstraction.
 
 ## Non-Goals
 

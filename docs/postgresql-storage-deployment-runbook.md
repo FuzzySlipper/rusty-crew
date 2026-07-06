@@ -145,13 +145,13 @@ but they do not require sourcing a machine-private env file. Provide a throwaway
 database URL directly through one of the supported env vars:
 
 ```bash
-RUSTY_CREW_POSTGRES_PROOF_DATABASE_URL='postgres://user:password@host:5432/rusty_crew_test' \
-  cargo test -p rusty-crew-core-persistence --features postgres-proof \
-  postgres_runtime_counter_proof_matches_typed_counter_contract -- --ignored --nocapture
+RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL='postgres://user:password@host:5432/rusty_crew_test' \
+  cargo test -p rusty-crew-core-persistence --features postgres-backend \
+  postgres_runtime_counter_backend_matches_typed_counter_contract -- --ignored --nocapture
 ```
 
 The ignored live tests create unique schemas per run. Use a disposable database
-or CI service database and clean old `rusty_crew_*_proof_*` schemas as part of
+or CI service database and clean old `rusty_crew_*_backend_*` schemas as part of
 normal maintenance.
 
 ## Migration And Logical Export/Import

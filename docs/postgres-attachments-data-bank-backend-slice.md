@@ -1,19 +1,19 @@
-# PostgreSQL Attachments And Data-Bank Proof Slice
+# PostgreSQL Attachments And Data-Bank Backend Slice
 
-Status: implemented as a PostgreSQL proof repository slice.
+Status: implemented as a PostgreSQL backend repository slice.
 
 Task: Den `rusty-crew` #3487.
 
 ## What This Proves
 
-The PostgreSQL proof store now covers the attachment/data-bank part of the
+The PostgreSQL backend store now covers the attachment/data-bank part of the
 conversation repository group:
 
 - `attachments`
 - `attachment_links`
 - `data_bank_scopes`
 
-The proof store preserves the same typed API shape used by SQLite:
+The backend store preserves the same typed API shape used by SQLite:
 
 - save attachment plus optional initial link in one transaction;
 - query attachments by session, message, block, scope, removed visibility, and
@@ -24,7 +24,7 @@ The proof store preserves the same typed API shape used by SQLite:
 - save, query, and remove data-bank scopes by typed status.
 
 The same conformance fixture runs against SQLite and PostgreSQL. That keeps the
-API backend-neutral while PostgreSQL is still a proof backend rather than the
+API backend-neutral while PostgreSQL is still a backend rather than the
 service default.
 
 ## Explicit Bounds
@@ -53,23 +53,23 @@ Removal remains an explicit status transition.
 - `data_bank_scopes`
 
 The `conversations_attachments` repository-group diagnostic now distinguishes
-the conversation transcript proof surface from the attachment/data-bank proof
-surface instead of claiming attachments are unsupported.
+the conversation transcript backend surface from the attachment/data-bank
+backend surface instead of claiming attachments are unsupported.
 
 ## Verification
 
-Run the normal local proof suite:
+Run the normal local backend suite:
 
 ```bash
-cargo test -p rusty-crew-core-persistence --features postgres-proof
+cargo test -p rusty-crew-core-persistence --features postgres-backend
 ```
 
-Run the live PostgreSQL attachment/data-bank proof after sourcing the local dev
+Run the live PostgreSQL attachment/data-bank backend conformance after sourcing the local dev
 database env:
 
 ```bash
 source /home/system/database/rusty-crew-postgres.env
-cargo test -p rusty-crew-core-persistence --features postgres-proof \
-  postgres_attachment_data_bank_proof_matches_sqlite_conformance_contract \
+cargo test -p rusty-crew-core-persistence --features postgres-backend \
+  postgres_attachment_data_bank_backend_matches_sqlite_conformance_contract \
   -- --ignored
 ```

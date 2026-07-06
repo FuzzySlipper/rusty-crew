@@ -18,7 +18,7 @@ can treat PostgreSQL as production-ready for many-agent or roleplay-heavy
 deployments. The coverage has since landed; this file remains as the
 portability-contract reference for those repositories.
 
-Task 3419 proved a narrow runtime-counter slice. That proof does not cover the
+Task 3419 proved a narrow runtime-counter slice. That backend conformance does not cover the
 high-volume stores that will dominate roleplay and long-lived agent use:
 
 - transcript and conversation tree records;
@@ -222,7 +222,7 @@ separate slices:
 3. Conversation transcript/tree PostgreSQL repository and conflict tests.
 4. Attachments and data-bank PostgreSQL repository and retention tests.
 5. Dense profile memory / typed memory-space PostgreSQL repository coverage.
-6. Roleplay lore module/memory-space PostgreSQL proof.
+6. Roleplay lore module/memory-space PostgreSQL backend.
 7. High-volume repository diagnostics and production-readiness gates.
 
 ## Production Readiness Gate

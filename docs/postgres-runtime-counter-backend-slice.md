@@ -1,12 +1,12 @@
-# PostgreSQL Runtime Counter Proof Slice
+# PostgreSQL Runtime Counter Backend Slice
 
-Status: implemented as an optional proof slice for task 3414.
+Status: implemented as an optional backend slice for task 3414.
 
 Design source: ADR 0020, `storage-backend-abstraction-and-postgresql-readiness`.
 
 ## Repository Choice
 
-The first PostgreSQL proof repository is `runtime_counters`.
+The first PostgreSQL backend repository is `runtime_counters`.
 
 Reasons:
 
@@ -15,29 +15,29 @@ Reasons:
 - the SQL shape is simple enough to prove connection, migration, upsert, paging, and diagnostics;
 - it avoids correctness-sensitive queue TTL, scheduler claim, transcript, and runtime search semantics.
 
-This proof does not make PostgreSQL a full `CoordinationStore` backend.
+This backend conformance does not make PostgreSQL a full `CoordinationStore` backend.
 `RUSTY_CREW_STORAGE_BACKEND=postgres` should continue to fail closed in the
 service until the full coordination repository set has a backend implementation.
 
 ## Implementation
 
-The proof lives behind the Rust feature `postgres-proof`:
+The backend lives behind the Rust feature `postgres-backend`:
 
-- `crates/core/core-persistence/src/postgres_proof.rs`
-- public type: `PostgresRuntimeCounterProofStore`
-- config type: `PostgresRuntimeCounterProofConfig`
+- `crates/core/core-persistence/src/postgres_backend.rs`
+- public type: `PostgresBackendStore`
+- config type: `PostgresBackendConfig`
 
 The store can connect through an environment-variable reference:
 
 ```rust
-let config = PostgresRuntimeCounterProofConfig {
+let config = PostgresBackendConfig {
     database_url_env: "RUSTY_CREW_DATABASE_URL".to_string(),
-    schema: "rusty_crew_counter_proof".to_string(),
+    schema: "rusty_crew_counter_backend".to_string(),
 };
-let store = PostgresRuntimeCounterProofStore::connect_from_env(&config)?;
+let store = PostgresBackendStore::connect_from_env(&config)?;
 ```
 
-The migration creates only proof-owned objects:
+The migration creates only backend-owned objects:
 
 - `<schema>.rusty_crew_storage_metadata`
 - `<schema>.runtime_counters`
@@ -53,8 +53,8 @@ the database URL env is available.
 set -a
 . /home/system/database/rusty-crew-postgres.env
 set +a
-cargo test -p rusty-crew-core-persistence --features postgres-proof \
-  postgres_runtime_counter_proof_matches_typed_counter_contract -- --ignored --nocapture
+cargo test -p rusty-crew-core-persistence --features postgres-backend \
+  postgres_runtime_counter_backend_matches_typed_counter_contract -- --ignored --nocapture
 ```
 
 The test creates a unique temporary schema and drops it afterward.

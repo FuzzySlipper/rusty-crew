@@ -1,7 +1,6 @@
 //! PostgreSQL durable storage backend.
 //!
-//! The file name is historical from the first proof slices. The implementation
-//! is now the selectable PostgreSQL backend for Rust-owned Crew service data,
+//! The implementation is the selectable PostgreSQL backend for Rust-owned Crew service data,
 //! so it must fail closed on schema incompatibility and report capabilities
 //! honestly while repository split/parity work continues.
 
@@ -105,7 +104,7 @@ const DEFAULT_POSTGRES_POOL_SIZE: usize = 4;
 const MAX_POSTGRES_POOL_SIZE: usize = 64;
 
 #[allow(dead_code)]
-const POSTGRES_PROOF_SCHEMA_VERSION: i64 = POSTGRES_SCHEMA_VERSION;
+const POSTGRES_BACKEND_SCHEMA_VERSION: i64 = POSTGRES_SCHEMA_VERSION;
 
 struct PostgresSchemaMigration {
     version: i64,
@@ -197,12 +196,12 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PostgresRuntimeCounterProofConfig {
+pub struct PostgresBackendConfig {
     pub database_url_env: String,
     pub schema: String,
 }
 
-impl Default for PostgresRuntimeCounterProofConfig {
+impl Default for PostgresBackendConfig {
     fn default() -> Self {
         Self {
             database_url_env: "RUSTY_CREW_DATABASE_URL".to_string(),
@@ -212,11 +211,11 @@ impl Default for PostgresRuntimeCounterProofConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PostgresRuntimeCounterProofDiagnostics {
+pub struct PostgresBackendDiagnostics {
     pub backend: String,
     pub backend_label: String,
     pub schema: String,
-    pub proof_repository: String,
+    pub repository_coverage: String,
     pub schema_version: i64,
     pub supported_schema_version: i64,
     pub migrations: Vec<SchemaMigrationRecord>,
@@ -226,7 +225,7 @@ pub struct PostgresRuntimeCounterProofDiagnostics {
     pub connection_health: RuntimeStorageConnectionHealth,
 }
 
-pub struct PostgresRuntimeCounterProofStore {
+pub struct PostgresBackendStore {
     schema: String,
     pool: PostgresConnectionPool,
 }
@@ -416,17 +415,17 @@ impl DerefMut for PostgresClientLease<'_> {
     }
 }
 
-impl std::fmt::Debug for PostgresRuntimeCounterProofStore {
+impl std::fmt::Debug for PostgresBackendStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("PostgresRuntimeCounterProofStore")
+            .debug_struct("PostgresBackendStore")
             .field("schema", &self.schema)
             .finish_non_exhaustive()
     }
 }
 
-impl PostgresRuntimeCounterProofStore {
-    pub fn connect_from_env(config: &PostgresRuntimeCounterProofConfig) -> CoreResult<Self> {
+impl PostgresBackendStore {
+    pub fn connect_from_env(config: &PostgresBackendConfig) -> CoreResult<Self> {
         let database_url = std::env::var(&config.database_url_env).map_err(|error| {
             CoreError::new(
                 CoreErrorKind::PersistenceFailure,
@@ -3229,12 +3228,12 @@ impl PostgresRuntimeCounterProofStore {
         Ok(changed)
     }
 
-    pub fn storage_diagnostics(&self) -> CoreResult<PostgresRuntimeCounterProofDiagnostics> {
-        Ok(PostgresRuntimeCounterProofDiagnostics {
+    pub fn storage_diagnostics(&self) -> CoreResult<PostgresBackendDiagnostics> {
+        Ok(PostgresBackendDiagnostics {
             backend: "postgres".to_string(),
             backend_label: "PostgreSQL durable backend".to_string(),
             schema: self.schema.clone(),
-            proof_repository:
+            repository_coverage:
                 "sessions,events,queued_messages,scheduled_jobs,worker_runs,worker_pool_capacity,completion_packets,tool_call_history,runtime_counters,module_simple_kv_entries,runtime_search,provider_wire_states,model_providers,conversations,attachments,data_bank_scopes,profile_memory,roleplay_lore,roleplay_lore_layers"
                     .to_string(),
             schema_version: self.schema_version()?,
@@ -3418,8 +3417,8 @@ impl PostgresRuntimeCounterProofStore {
                     rows: self.table_rows("module_roleplay_lore_layer_config")?,
                 },
             ],
-            capabilities: postgres_proof_capabilities(),
-            repository_groups: postgres_proof_repository_groups(),
+            capabilities: postgres_backend_capabilities(),
+            repository_groups: postgres_backend_repository_groups(),
             connection_health: self.pool.health()?,
         })
     }
@@ -7014,7 +7013,7 @@ fn apply_postgres_baseline_schema(tx: &mut Transaction<'_>, schema: &str) -> Cor
             .map_err(|error| postgres_error("migrate PostgreSQL durable backend baseline", error))
 }
 
-impl PostgresRuntimeCounterProofStore {
+impl PostgresBackendStore {
     fn insert_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
         let value_json = to_json_text(&write.value_json)?;
         let schema = self.quoted_schema();
@@ -7934,7 +7933,7 @@ fn load_postgres_schema_migration_records<C: GenericClient>(
         .collect())
 }
 
-fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
+fn postgres_backend_capabilities() -> Vec<RuntimeStorageCapability> {
     [
         (
             "transactions",
@@ -7964,7 +7963,7 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
         (
             "runtime_full_text_search",
             true,
-            "PostgreSQL runtime search proof uses tsvector behind the typed RuntimeSearchFilter API",
+            "PostgreSQL runtime search backend uses tsvector behind the typed RuntimeSearchFilter API",
         ),
         (
             "logical_export_import",
@@ -7986,7 +7985,7 @@ fn postgres_proof_capabilities() -> Vec<RuntimeStorageCapability> {
     .collect()
 }
 
-fn postgres_proof_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
+fn postgres_backend_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
     repositories::core_repository_group_diagnostics()
         .into_iter()
         .map(|mut group| {
@@ -9458,7 +9457,7 @@ fn postgres_scheduled_run_trigger_from_str(raw: &str) -> CoreResult<ScheduledRun
     }
 }
 
-impl crate::repos::runtime_counters::RuntimeCounterRepository for PostgresRuntimeCounterProofStore {
+impl crate::repos::runtime_counters::RuntimeCounterRepository for PostgresBackendStore {
     #[cfg(test)]
     fn record_runtime_counter_delta(
         &self,
@@ -9467,21 +9466,21 @@ impl crate::repos::runtime_counters::RuntimeCounterRepository for PostgresRuntim
         amount: u64,
         now: &IsoTimestamp,
     ) -> CoreResult<()> {
-        PostgresRuntimeCounterProofStore::increment_counter(self, scope, counter_name, amount, now)
+        PostgresBackendStore::increment_counter(self, scope, counter_name, amount, now)
     }
 
     fn runtime_counters(
         &self,
         scope: Option<&RuntimeCounterScope>,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
-        PostgresRuntimeCounterProofStore::runtime_counters(self, scope)
+        PostgresBackendStore::runtime_counters(self, scope)
     }
 
     fn query_runtime_counters(
         &self,
         query: &RuntimeCounterQuery,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
-        PostgresRuntimeCounterProofStore::query_runtime_counters(self, query)
+        PostgresBackendStore::query_runtime_counters(self, query)
     }
 
     fn reset_runtime_counters(
@@ -9489,7 +9488,7 @@ impl crate::repos::runtime_counters::RuntimeCounterRepository for PostgresRuntim
         query: &RuntimeCounterQuery,
         now: IsoTimestamp,
     ) -> CoreResult<u64> {
-        PostgresRuntimeCounterProofStore::reset_runtime_counters(self, query, now)
+        PostgresBackendStore::reset_runtime_counters(self, query, now)
     }
 }
 
@@ -15381,16 +15380,16 @@ mod tests {
         }
     }
 
-    impl SimpleKvConformanceStore for PostgresRuntimeCounterProofStore {
+    impl SimpleKvConformanceStore for PostgresBackendStore {
         fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
-            PostgresRuntimeCounterProofStore::put_simple_kv(self, write)
+            PostgresBackendStore::put_simple_kv(self, write)
         }
 
         fn compare_and_swap_simple_kv(
             &self,
             compare_and_swap: &SimpleKvCompareAndSwap,
         ) -> CoreResult<SimpleKvRecord> {
-            PostgresRuntimeCounterProofStore::compare_and_swap_simple_kv(self, compare_and_swap)
+            PostgresBackendStore::compare_and_swap_simple_kv(self, compare_and_swap)
         }
 
         fn get_simple_kv(
@@ -15399,94 +15398,94 @@ mod tests {
             key: &str,
             now: Option<&IsoTimestamp>,
         ) -> CoreResult<Option<SimpleKvRecord>> {
-            PostgresRuntimeCounterProofStore::get_simple_kv(self, scope, key, now)
+            PostgresBackendStore::get_simple_kv(self, scope, key, now)
         }
 
         fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
-            PostgresRuntimeCounterProofStore::list_simple_kv(self, query)
+            PostgresBackendStore::list_simple_kv(self, query)
         }
 
         fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
-            PostgresRuntimeCounterProofStore::delete_simple_kv(self, delete)
+            PostgresBackendStore::delete_simple_kv(self, delete)
         }
 
         fn expire_simple_kv(&self, now: &IsoTimestamp) -> CoreResult<u64> {
-            PostgresRuntimeCounterProofStore::expire_simple_kv(self, now)
+            PostgresBackendStore::expire_simple_kv(self, now)
         }
     }
 
-    impl SessionEventConformanceStore for PostgresRuntimeCounterProofStore {
+    impl SessionEventConformanceStore for PostgresBackendStore {
         fn save_session_with_config(
             &self,
             state: &SessionState,
             config: &SessionConfig,
         ) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_session_with_config(self, state, config)
+            PostgresBackendStore::save_session_with_config(self, state, config)
         }
 
         fn load_sessions(&self) -> CoreResult<Vec<SessionState>> {
-            PostgresRuntimeCounterProofStore::load_sessions(self)
+            PostgresBackendStore::load_sessions(self)
         }
 
         fn load_session_configs(&self) -> CoreResult<Vec<SessionConfigRecord>> {
-            PostgresRuntimeCounterProofStore::load_session_configs(self)
+            PostgresBackendStore::load_session_configs(self)
         }
 
         fn load_session_identities(&self) -> CoreResult<Vec<SessionIdentityRecord>> {
-            PostgresRuntimeCounterProofStore::load_session_identities(self)
+            PostgresBackendStore::load_session_identities(self)
         }
 
         fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_event(self, sequence, event)
+            PostgresBackendStore::save_event(self, sequence, event)
         }
 
         fn load_event_history(&self) -> CoreResult<Vec<PersistedEvent>> {
-            PostgresRuntimeCounterProofStore::load_event_history(self)
+            PostgresBackendStore::load_event_history(self)
         }
 
         fn query_events(&self, filter: &RuntimeEventFilter) -> CoreResult<Vec<RuntimeEventRecord>> {
-            PostgresRuntimeCounterProofStore::query_events(self, filter)
+            PostgresBackendStore::query_events(self, filter)
         }
     }
 
-    impl QueueConformanceStore for PostgresRuntimeCounterProofStore {
+    impl QueueConformanceStore for PostgresBackendStore {
         fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_queued_message(self, record)
+            PostgresBackendStore::save_queued_message(self, record)
         }
 
         fn expire_queued_messages_at(
             &self,
             now: &IsoTimestamp,
         ) -> CoreResult<Vec<QueuedMessageRecord>> {
-            PostgresRuntimeCounterProofStore::expire_queued_messages_at(self, now)
+            PostgresBackendStore::expire_queued_messages_at(self, now)
         }
 
         fn load_queued_messages(
             &self,
             filter: &QueuedMessageFilter,
         ) -> CoreResult<Vec<QueuedMessageRecord>> {
-            PostgresRuntimeCounterProofStore::load_queued_messages(self, filter)
+            PostgresBackendStore::load_queued_messages(self, filter)
         }
 
         fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
-            PostgresRuntimeCounterProofStore::runtime_summary(self, scope)
+            PostgresBackendStore::runtime_summary(self, scope)
         }
     }
 
-    impl SchedulerConformanceStore for PostgresRuntimeCounterProofStore {
+    impl SchedulerConformanceStore for PostgresBackendStore {
         fn upsert_scheduled_job(&self, record: &ScheduledJobRecord) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::upsert_scheduled_job(self, record)
+            PostgresBackendStore::upsert_scheduled_job(self, record)
         }
 
         fn load_scheduled_job(&self, job_id: &str) -> CoreResult<Option<ScheduledJobRecord>> {
-            PostgresRuntimeCounterProofStore::load_scheduled_job(self, job_id)
+            PostgresBackendStore::load_scheduled_job(self, job_id)
         }
 
         fn query_scheduled_jobs(
             &self,
             query: &ScheduledJobQuery,
         ) -> CoreResult<Vec<ScheduledJobRecord>> {
-            PostgresRuntimeCounterProofStore::query_scheduled_jobs(self, query)
+            PostgresBackendStore::query_scheduled_jobs(self, query)
         }
 
         fn claim_scheduled_run(
@@ -15494,7 +15493,7 @@ mod tests {
             run: &ScheduledRunRecord,
             next_due_at: Option<&IsoTimestamp>,
         ) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::claim_scheduled_run(self, run, next_due_at)
+            PostgresBackendStore::claim_scheduled_run(self, run, next_due_at)
         }
 
         fn complete_scheduled_run(
@@ -15505,7 +15504,7 @@ mod tests {
             output_json: &serde_json::Value,
             error: Option<&str>,
         ) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::complete_scheduled_run(
+            PostgresBackendStore::complete_scheduled_run(
                 self,
                 run_id,
                 status,
@@ -15519,7 +15518,7 @@ mod tests {
             &self,
             query: &ScheduledRunQuery,
         ) -> CoreResult<Vec<ScheduledRunRecord>> {
-            PostgresRuntimeCounterProofStore::query_scheduled_runs(self, query)
+            PostgresBackendStore::query_scheduled_runs(self, query)
         }
 
         fn expire_stale_scheduled_runs(
@@ -15527,31 +15526,28 @@ mod tests {
             stale_before: &IsoTimestamp,
             now: &IsoTimestamp,
         ) -> CoreResult<Vec<ScheduledRunRecord>> {
-            PostgresRuntimeCounterProofStore::expire_stale_scheduled_runs(self, stale_before, now)
+            PostgresBackendStore::expire_stale_scheduled_runs(self, stale_before, now)
         }
     }
 
-    impl WorkerLifecycleConformanceStore for PostgresRuntimeCounterProofStore {
+    impl WorkerLifecycleConformanceStore for PostgresBackendStore {
         fn save_worker_run_requested(&self, record: &WorkerRunRecord) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_worker_run_requested(self, record)
+            PostgresBackendStore::save_worker_run_requested(self, record)
         }
 
         fn load_worker_run(&self, run_id: &RunId) -> CoreResult<Option<WorkerRunRecord>> {
-            PostgresRuntimeCounterProofStore::load_worker_run(self, run_id)
+            PostgresBackendStore::load_worker_run(self, run_id)
         }
 
         fn load_worker_run_by_delegated_session(
             &self,
             delegated_session_id: &SessionId,
         ) -> CoreResult<Option<WorkerRunRecord>> {
-            PostgresRuntimeCounterProofStore::load_worker_run_by_delegated_session(
-                self,
-                delegated_session_id,
-            )
+            PostgresBackendStore::load_worker_run_by_delegated_session(self, delegated_session_id)
         }
 
         fn query_worker_runs(&self, query: &WorkerRunQuery) -> CoreResult<Vec<WorkerRunRecord>> {
-            PostgresRuntimeCounterProofStore::query_worker_runs(self, query)
+            PostgresBackendStore::query_worker_runs(self, query)
         }
 
         fn update_worker_run_status_by_delegated_session(
@@ -15560,7 +15556,7 @@ mod tests {
             status: WorkerRunStatus,
             now: IsoTimestamp,
         ) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::update_worker_run_status_by_delegated_session(
+            PostgresBackendStore::update_worker_run_status_by_delegated_session(
                 self,
                 delegated_session_id,
                 status,
@@ -15574,91 +15570,88 @@ mod tests {
             status: WorkerRunStatus,
             now: IsoTimestamp,
         ) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::update_worker_run_status(self, run_id, status, now)
+            PostgresBackendStore::update_worker_run_status(self, run_id, status, now)
         }
 
         fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_event(self, sequence, event)
+            PostgresBackendStore::save_event(self, sequence, event)
         }
 
         fn query_completion_packets(
             &self,
             query: &CompletionPacketQuery,
         ) -> CoreResult<Vec<CompletionPacketRecord>> {
-            PostgresRuntimeCounterProofStore::query_completion_packets(self, query)
+            PostgresBackendStore::query_completion_packets(self, query)
         }
 
         fn delegated_completions_for_parent(
             &self,
             parent_session_id: &SessionId,
         ) -> CoreResult<Vec<DelegatedCompletion>> {
-            PostgresRuntimeCounterProofStore::delegated_completions_for_parent(
-                self,
-                parent_session_id,
-            )
+            PostgresBackendStore::delegated_completions_for_parent(self, parent_session_id)
         }
     }
 
-    impl TelemetryMaintenanceConformanceStore for PostgresRuntimeCounterProofStore {
+    impl TelemetryMaintenanceConformanceStore for PostgresBackendStore {
         fn save_session_with_config(
             &self,
             state: &SessionState,
             config: &SessionConfig,
         ) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_session_with_config(self, state, config)
+            PostgresBackendStore::save_session_with_config(self, state, config)
         }
 
         fn save_event(&self, sequence: u64, event: &CoreEvent) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_event(self, sequence, event)
+            PostgresBackendStore::save_event(self, sequence, event)
         }
 
         fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
-            PostgresRuntimeCounterProofStore::runtime_summary(self, scope)
+            PostgresBackendStore::runtime_summary(self, scope)
         }
 
         fn load_tool_call_history(&self) -> CoreResult<Vec<ToolCallRecord>> {
-            PostgresRuntimeCounterProofStore::load_tool_call_history(self)
+            PostgresBackendStore::load_tool_call_history(self)
         }
 
         fn save_queued_message(&self, record: &QueuedMessageRecord) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_queued_message(self, record)
+            PostgresBackendStore::save_queued_message(self, record)
         }
 
         fn load_queued_messages(
             &self,
             filter: &QueuedMessageFilter,
         ) -> CoreResult<Vec<QueuedMessageRecord>> {
-            PostgresRuntimeCounterProofStore::load_queued_messages(self, filter)
+            PostgresBackendStore::load_queued_messages(self, filter)
         }
 
         fn save_provider_wire_state(
             &self,
             write: &ProviderWireStateWrite,
         ) -> CoreResult<ProviderWireStateRecord> {
-            PostgresRuntimeCounterProofStore::save_provider_wire_state(self, write)
+            PostgresBackendStore::save_provider_wire_state(self, write)
         }
 
         fn run_maintenance(
             &self,
             policy: &RuntimeMaintenancePolicy,
         ) -> CoreResult<RuntimeMaintenanceReport> {
-            PostgresRuntimeCounterProofStore::run_maintenance(self, policy)
+            PostgresBackendStore::run_maintenance(self, policy)
         }
     }
 
-    impl ProviderWireStateConformanceStore for PostgresRuntimeCounterProofStore {
+    impl ProviderWireStateConformanceStore for PostgresBackendStore {
         fn save_provider_wire_state(
             &self,
             write: &ProviderWireStateWrite,
         ) -> CoreResult<ProviderWireStateRecord> {
-            PostgresRuntimeCounterProofStore::save_provider_wire_state(self, write)
+            PostgresBackendStore::save_provider_wire_state(self, write)
         }
 
         fn load_provider_wire_state_for_wake(
             &self,
             lookup: &ProviderWireStateWakeLookup,
         ) -> CoreResult<ProviderWireStateWakeResult> {
-            PostgresRuntimeCounterProofStore::load_provider_wire_state_for_wake(self, lookup)
+            PostgresBackendStore::load_provider_wire_state_for_wake(self, lookup)
         }
 
         fn clear_provider_wire_state(
@@ -15667,82 +15660,82 @@ mod tests {
             now: &IsoTimestamp,
             reason: ProviderWireStateInvalidationReason,
         ) -> CoreResult<Option<ProviderWireStateRecord>> {
-            PostgresRuntimeCounterProofStore::clear_provider_wire_state(self, key, now, reason)
+            PostgresBackendStore::clear_provider_wire_state(self, key, now, reason)
         }
 
         fn expire_provider_wire_states_at(
             &self,
             now: &IsoTimestamp,
         ) -> CoreResult<Vec<ProviderWireStateRecord>> {
-            PostgresRuntimeCounterProofStore::expire_provider_wire_states_at(self, now)
+            PostgresBackendStore::expire_provider_wire_states_at(self, now)
         }
 
         fn list_provider_wire_state_diagnostics(
             &self,
             limit: u32,
         ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
-            PostgresRuntimeCounterProofStore::list_provider_wire_state_diagnostics(self, limit)
+            PostgresBackendStore::list_provider_wire_state_diagnostics(self, limit)
         }
     }
 
-    impl ModelProviderConformanceStore for PostgresRuntimeCounterProofStore {
+    impl ModelProviderConformanceStore for PostgresBackendStore {
         fn upsert_model_provider(
             &self,
             write: &ModelProviderWrite,
         ) -> CoreResult<ModelProviderRecord> {
-            PostgresRuntimeCounterProofStore::upsert_model_provider(self, write)
+            PostgresBackendStore::upsert_model_provider(self, write)
         }
 
         fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
-            PostgresRuntimeCounterProofStore::get_model_provider_secret(self, alias)
+            PostgresBackendStore::get_model_provider_secret(self, alias)
         }
     }
 
-    impl ConversationConformanceStore for PostgresRuntimeCounterProofStore {
+    impl ConversationConformanceStore for PostgresBackendStore {
         fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
-            PostgresRuntimeCounterProofStore::save_message_slot(self, slot)
+            PostgresBackendStore::save_message_slot(self, slot)
         }
 
         fn save_message_variant(
             &self,
             variant: &MessageVariantWrite,
         ) -> CoreResult<MessageVariantRecord> {
-            PostgresRuntimeCounterProofStore::save_message_variant(self, variant)
+            PostgresBackendStore::save_message_variant(self, variant)
         }
 
         fn query_message_slots(
             &self,
             query: &MessageSlotQuery,
         ) -> CoreResult<Vec<MessageSlotRecord>> {
-            PostgresRuntimeCounterProofStore::query_message_slots(self, query)
+            PostgresBackendStore::query_message_slots(self, query)
         }
 
         fn query_message_variants(
             &self,
             query: &MessageVariantQuery,
         ) -> CoreResult<Vec<MessageVariantRecord>> {
-            PostgresRuntimeCounterProofStore::query_message_variants(self, query)
+            PostgresBackendStore::query_message_variants(self, query)
         }
 
         fn select_active_message_variant(
             &self,
             request: &SelectActiveVariantRequest,
         ) -> CoreResult<SelectActiveVariantResult> {
-            PostgresRuntimeCounterProofStore::select_active_message_variant(self, request)
+            PostgresBackendStore::select_active_message_variant(self, request)
         }
 
         fn save_conversation_branch(
             &self,
             branch: &ConversationBranchWrite,
         ) -> CoreResult<ConversationBranchRecord> {
-            PostgresRuntimeCounterProofStore::save_conversation_branch(self, branch)
+            PostgresBackendStore::save_conversation_branch(self, branch)
         }
 
         fn query_conversation_branches(
             &self,
             query: &ConversationBranchQuery,
         ) -> CoreResult<Vec<ConversationBranchRecord>> {
-            PostgresRuntimeCounterProofStore::query_conversation_branches(self, query)
+            PostgresBackendStore::query_conversation_branches(self, query)
         }
 
         fn get_conversation_branch_state(
@@ -15750,7 +15743,7 @@ mod tests {
             session_id: &SessionId,
             default_updated_at: &IsoTimestamp,
         ) -> CoreResult<ConversationBranchStateRecord> {
-            PostgresRuntimeCounterProofStore::get_conversation_branch_state(
+            PostgresBackendStore::get_conversation_branch_state(
                 self,
                 session_id,
                 default_updated_at,
@@ -15761,45 +15754,45 @@ mod tests {
             &self,
             request: &SelectActiveBranchRequest,
         ) -> CoreResult<SelectActiveBranchResult> {
-            PostgresRuntimeCounterProofStore::select_active_conversation_branch(self, request)
+            PostgresBackendStore::select_active_conversation_branch(self, request)
         }
 
         fn update_conversation_branch_head(
             &self,
             request: &UpdateBranchHeadRequest,
         ) -> CoreResult<UpdateBranchHeadResult> {
-            PostgresRuntimeCounterProofStore::update_conversation_branch_head(self, request)
+            PostgresBackendStore::update_conversation_branch_head(self, request)
         }
 
         fn save_conversation_snapshot(
             &self,
             snapshot: &ConversationSnapshotWrite,
         ) -> CoreResult<ConversationSnapshotRecord> {
-            PostgresRuntimeCounterProofStore::save_conversation_snapshot(self, snapshot)
+            PostgresBackendStore::save_conversation_snapshot(self, snapshot)
         }
 
         fn query_conversation_snapshots(
             &self,
             query: &ConversationSnapshotQuery,
         ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
-            PostgresRuntimeCounterProofStore::query_conversation_snapshots(self, query)
+            PostgresBackendStore::query_conversation_snapshots(self, query)
         }
 
         fn resolve_conversation_jump(
             &self,
             request: &ConversationJumpRequest,
         ) -> CoreResult<ConversationJumpResult> {
-            PostgresRuntimeCounterProofStore::resolve_conversation_jump(self, request)
+            PostgresBackendStore::resolve_conversation_jump(self, request)
         }
     }
 
-    impl AttachmentDataBankConformanceStore for PostgresRuntimeCounterProofStore {
+    impl AttachmentDataBankConformanceStore for PostgresBackendStore {
         fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
-            PostgresRuntimeCounterProofStore::save_attachment(self, attachment)
+            PostgresBackendStore::save_attachment(self, attachment)
         }
 
         fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
-            PostgresRuntimeCounterProofStore::query_attachments(self, query)
+            PostgresBackendStore::query_attachments(self, query)
         }
 
         fn remove_attachment(
@@ -15807,21 +15800,21 @@ mod tests {
             attachment_id: &AttachmentId,
             updated_at: &IsoTimestamp,
         ) -> CoreResult<AttachmentRecord> {
-            PostgresRuntimeCounterProofStore::remove_attachment(self, attachment_id, updated_at)
+            PostgresBackendStore::remove_attachment(self, attachment_id, updated_at)
         }
 
         fn save_data_bank_scope(
             &self,
             scope: &DataBankScopeWrite,
         ) -> CoreResult<DataBankScopeRecord> {
-            PostgresRuntimeCounterProofStore::save_data_bank_scope(self, scope)
+            PostgresBackendStore::save_data_bank_scope(self, scope)
         }
 
         fn query_data_bank_scopes(
             &self,
             query: &DataBankScopeQuery,
         ) -> CoreResult<Vec<DataBankScopeRecord>> {
-            PostgresRuntimeCounterProofStore::query_data_bank_scopes(self, query)
+            PostgresBackendStore::query_data_bank_scopes(self, query)
         }
 
         fn remove_data_bank_scope(
@@ -15829,20 +15822,20 @@ mod tests {
             scope_id: &DataBankScopeId,
             updated_at: &IsoTimestamp,
         ) -> CoreResult<DataBankScopeRecord> {
-            PostgresRuntimeCounterProofStore::remove_data_bank_scope(self, scope_id, updated_at)
+            PostgresBackendStore::remove_data_bank_scope(self, scope_id, updated_at)
         }
     }
 
-    impl ProfileMemoryConformanceStore for PostgresRuntimeCounterProofStore {
+    impl ProfileMemoryConformanceStore for PostgresBackendStore {
         fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
-            PostgresRuntimeCounterProofStore::memory_space_descriptors(self)
+            PostgresBackendStore::memory_space_descriptors(self)
         }
 
         fn list_profile_memory(
             &self,
             query: &ProfileMemoryQuery,
         ) -> CoreResult<Vec<ProfileMemoryRecord>> {
-            PostgresRuntimeCounterProofStore::list_profile_memory(self, query)
+            PostgresBackendStore::list_profile_memory(self, query)
         }
 
         fn get_profile_memory(
@@ -15851,7 +15844,7 @@ mod tests {
             target: &ProfileMemoryTarget,
             key: &str,
         ) -> CoreResult<Option<ProfileMemoryRecord>> {
-            PostgresRuntimeCounterProofStore::get_profile_memory(self, profile_id, target, key)
+            PostgresBackendStore::get_profile_memory(self, profile_id, target, key)
         }
 
         fn add_profile_memory(
@@ -15859,7 +15852,7 @@ mod tests {
             write: &ProfileMemoryWrite,
             caps: &ProfileMemoryCaps,
         ) -> CoreResult<ProfileMemoryRecord> {
-            PostgresRuntimeCounterProofStore::add_profile_memory(self, write, caps)
+            PostgresBackendStore::add_profile_memory(self, write, caps)
         }
 
         fn replace_profile_memory(
@@ -15867,80 +15860,78 @@ mod tests {
             replace: &ProfileMemoryReplace,
             caps: &ProfileMemoryCaps,
         ) -> CoreResult<ProfileMemoryRecord> {
-            PostgresRuntimeCounterProofStore::replace_profile_memory(self, replace, caps)
+            PostgresBackendStore::replace_profile_memory(self, replace, caps)
         }
 
         fn remove_profile_memory(
             &self,
             delete: &ProfileMemoryDelete,
         ) -> CoreResult<ProfileMemoryRecord> {
-            PostgresRuntimeCounterProofStore::remove_profile_memory(self, delete)
+            PostgresBackendStore::remove_profile_memory(self, delete)
         }
     }
 
-    impl RoleplayLoreConformanceStore for PostgresRuntimeCounterProofStore {
+    impl RoleplayLoreConformanceStore for PostgresBackendStore {
         fn memory_space_descriptors(&self) -> Vec<MemorySpaceDescriptor> {
-            PostgresRuntimeCounterProofStore::memory_space_descriptors(self)
+            PostgresBackendStore::memory_space_descriptors(self)
         }
 
         fn add_roleplay_lore_record(
             &self,
             write: &RoleplayLoreWrite,
         ) -> CoreResult<RoleplayLoreRecord> {
-            PostgresRuntimeCounterProofStore::add_roleplay_lore_record(self, write)
+            PostgresBackendStore::add_roleplay_lore_record(self, write)
         }
 
         fn replace_roleplay_lore_record(
             &self,
             replace: &RoleplayLoreReplace,
         ) -> CoreResult<RoleplayLoreRecord> {
-            PostgresRuntimeCounterProofStore::replace_roleplay_lore_record(self, replace)
+            PostgresBackendStore::replace_roleplay_lore_record(self, replace)
         }
 
         fn supersede_roleplay_lore_record(
             &self,
             supersede: &RoleplayLoreSupersede,
         ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)> {
-            PostgresRuntimeCounterProofStore::supersede_roleplay_lore_record(self, supersede)
+            PostgresBackendStore::supersede_roleplay_lore_record(self, supersede)
         }
 
         fn tombstone_roleplay_lore_record(
             &self,
             tombstone: &RoleplayLoreTombstone,
         ) -> CoreResult<RoleplayLoreRecord> {
-            PostgresRuntimeCounterProofStore::tombstone_roleplay_lore_record(self, tombstone)
+            PostgresBackendStore::tombstone_roleplay_lore_record(self, tombstone)
         }
 
         fn query_roleplay_lore_records(
             &self,
             query: &RoleplayLoreQuery,
         ) -> CoreResult<Vec<RoleplayLoreRecord>> {
-            PostgresRuntimeCounterProofStore::query_roleplay_lore_records(self, query)
+            PostgresBackendStore::query_roleplay_lore_records(self, query)
         }
 
         fn roleplay_lore_provenance_events(
             &self,
             record_id: &str,
         ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
-            PostgresRuntimeCounterProofStore::roleplay_lore_provenance_events(self, record_id)
+            PostgresBackendStore::roleplay_lore_provenance_events(self, record_id)
         }
     }
 
     #[test]
     fn validates_schema_identifiers_before_connecting() {
-        let error = match PostgresRuntimeCounterProofStore::connect(
-            "postgres://example.invalid/db",
-            "bad-schema",
-        ) {
-            Ok(_) => panic!("invalid schema unexpectedly connected"),
-            Err(error) => error,
-        };
+        let error =
+            match PostgresBackendStore::connect("postgres://example.invalid/db", "bad-schema") {
+                Ok(_) => panic!("invalid schema unexpectedly connected"),
+                Err(error) => error,
+            };
         assert_eq!(error.kind, CoreErrorKind::InvalidInput);
     }
 
     #[test]
-    fn postgres_proof_repository_groups_mark_unsupported_service_repositories() {
-        let groups = postgres_proof_repository_groups();
+    fn postgres_backend_repository_groups_mark_unsupported_service_repositories() {
+        let groups = postgres_backend_repository_groups();
         assert!(groups.iter().any(|group| group.group_id == "storage_admin"
             && group.notes[0].contains("versioned migrations")));
         assert!(groups
@@ -16019,7 +16010,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_session_event_conformance_matches_postgres_proof_contract() {
+    fn sqlite_session_event_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-session-event-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         session_event_conformance(&store);
@@ -16027,7 +16018,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_queue_conformance_matches_postgres_proof_contract() {
+    fn sqlite_queue_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-queue-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         queue_conformance(&store);
@@ -16035,7 +16026,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_scheduler_conformance_matches_postgres_proof_contract() {
+    fn sqlite_scheduler_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-scheduler-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         scheduler_conformance(&store);
@@ -16043,7 +16034,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_worker_lifecycle_conformance_matches_postgres_proof_contract() {
+    fn sqlite_worker_lifecycle_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-worker-lifecycle-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         worker_lifecycle_conformance(&store);
@@ -16051,7 +16042,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_telemetry_maintenance_conformance_matches_postgres_proof_contract() {
+    fn sqlite_telemetry_maintenance_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-telemetry-maintenance-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         telemetry_maintenance_conformance(&store);
@@ -16059,7 +16050,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_simple_kv_conformance_matches_postgres_proof_contract() {
+    fn sqlite_simple_kv_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-simple-kv-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         simple_kv_conformance(&store);
@@ -16067,7 +16058,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_provider_wire_state_conformance_matches_postgres_proof_contract() {
+    fn sqlite_provider_wire_state_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-provider-wire-state-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         provider_wire_state_conformance(&store);
@@ -16075,7 +16066,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_conversation_conformance_matches_postgres_proof_contract() {
+    fn sqlite_conversation_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-conversation-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         conversation_conformance(&store);
@@ -16083,7 +16074,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_profile_memory_conformance_matches_postgres_proof_contract() {
+    fn sqlite_profile_memory_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-profile-memory-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         profile_memory_conformance(&store);
@@ -16091,7 +16082,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_roleplay_lore_conformance_matches_postgres_proof_contract() {
+    fn sqlite_roleplay_lore_conformance_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-roleplay-lore-conformance");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         roleplay_lore_conformance(&store);
@@ -16099,7 +16090,7 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_model_provider_secret_envelope_matches_postgres_proof_contract() {
+    fn sqlite_model_provider_secret_envelope_matches_postgres_backend_contract() {
         let db_path = temp_sqlite_path("sqlite-model-provider-secret-envelope");
         let store = CoordinationStore::open_file(&db_path).unwrap();
         model_provider_secret_envelope_conformance(&store);
@@ -16108,13 +16099,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_session_event_proof_matches_sqlite_conformance_contract() {
+    fn postgres_session_event_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_session_event_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_session_event_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         session_event_conformance(&store);
         store.drop_schema_for_test().unwrap();
     }
@@ -16124,38 +16115,38 @@ mod tests {
     fn postgres_model_provider_secret_envelope_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
             eprintln!(
-                "skipping PostgreSQL model-provider secret proof; no database URL env is set"
+                "skipping PostgreSQL model-provider secret backend; no database URL env is set"
             );
             return;
         };
-        let schema = unique_schema("rusty_crew_model_provider_secret_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_model_provider_secret_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         model_provider_secret_envelope_conformance(&store);
         store.drop_schema_for_test().unwrap();
     }
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_queue_proof_matches_sqlite_conformance_contract() {
+    fn postgres_queue_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_queue_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_queue_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         queue_conformance(&store);
         store.drop_schema_for_test().unwrap();
     }
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_scheduler_proof_matches_sqlite_conformance_contract() {
+    fn postgres_scheduler_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL scheduler proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL scheduler backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_scheduler_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_scheduler_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         scheduler_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -16187,18 +16178,18 @@ mod tests {
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
     fn postgres_profile_registry_and_session_memory_governance_are_implemented() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL memory proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL memory backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_profile_memory_governance_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_profile_memory_governance_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
 
         let created = store
             .create_profile_registry_record(&ProfileRegistryWrite {
                 profile_id: ProfileId::new("runner_profile"),
                 lifecycle_status: ProfileRegistryLifecycleStatus::Active,
                 display_name: Some("Runner Profile".to_string()),
-                summary: Some("PostgreSQL proof profile".to_string()),
+                summary: Some("PostgreSQL backend profile".to_string()),
                 default_session_kind: Some(SessionKind::Full),
                 agent_id: Some(AgentId::new("runner_agent")),
                 owner_id: Some("patch".to_string()),
@@ -16244,7 +16235,7 @@ mod tests {
             operation: MemoryOperation::Add,
             scope: MemoryScope {
                 scope_type: MemoryScopeType::Session,
-                scope_id: "session-memory-proof".to_string(),
+                scope_id: "session-memory-backend".to_string(),
             },
             shape: MemoryRecordShapeRef {
                 shape_id: MemoryRecordShapeId::unchecked("session_fact"),
@@ -16253,20 +16244,20 @@ mod tests {
             content: json!({
                 "record_id": "session_fact_one",
                 "content": "Postgres memory proposals can apply.",
-                "fact_kind": "proof",
+                "fact_kind": "backend",
                 "confidence": 0.91,
-                "source_summary": "ignored proof test",
+                "source_summary": "ignored backend test",
                 "created_at": "2026-06-27T01:01:00Z",
                 "updated_at": "2026-06-27T01:01:00Z"
             }),
             evidence_refs: vec![MemoryEvidenceRef {
                 evidence_type: MemoryEvidenceKind::Wake,
-                ref_id: "wake-proof".to_string(),
-                label: Some("wake proof".to_string()),
+                ref_id: "wake-backend".to_string(),
+                label: Some("wake backend".to_string()),
             }],
             confidence: 0.91,
             durability_rationale: Some(
-                "The user explicitly asked to preserve this proof fact.".to_string(),
+                "The user explicitly asked to preserve this backend fact.".to_string(),
             ),
             governance_mode: MemoryGovernanceMode::ManualReview,
             source: MemoryProposalSource::Human,
@@ -16288,7 +16279,7 @@ mod tests {
                     evidence_refs: proposal.evidence_refs.clone(),
                     policy_mode: MemoryGovernanceMode::ManualReview,
                     confidence: Some(0.95),
-                    message: Some("approve proof add".to_string()),
+                    message: Some("approve backend add".to_string()),
                     resulting_revision: None,
                     decided_at: None,
                 },
@@ -16306,7 +16297,7 @@ mod tests {
                     evidence_refs: proposal.evidence_refs.clone(),
                     policy_mode: MemoryGovernanceMode::ManualReview,
                     confidence: Some(0.95),
-                    message: Some("apply proof add".to_string()),
+                    message: Some("apply backend add".to_string()),
                     resulting_revision: None,
                     decided_at: None,
                 },
@@ -16317,14 +16308,14 @@ mod tests {
 
         let records = store
             .query_session_memory_records(&SessionMemoryQuery {
-                session_id: Some(SessionId::new("session-memory-proof")),
+                session_id: Some(SessionId::new("session-memory-backend")),
                 ..SessionMemoryQuery::default()
             })
             .unwrap();
         assert_eq!(records.len(), 1);
         let context = store
             .build_session_memory_prompt_context(&BranchAwareSessionMemoryQuery {
-                session_id: SessionId::new("session-memory-proof"),
+                session_id: SessionId::new("session-memory-backend"),
                 active_branch_id: None,
                 include_ancestors: true,
                 include_siblings: false,
@@ -16376,11 +16367,11 @@ mod tests {
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
     fn postgres_external_bindings_are_scoped_per_agent_without_secret_material() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL bindings proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL bindings backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_bindings_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_bindings_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
 
         let base_provenance = ExternalBindingProvenance {
             source_system: Some("den-channels".to_string()),
@@ -16544,11 +16535,11 @@ mod tests {
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
     fn postgres_message_variant_reorder_and_delete_are_implemented() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL message variant proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL message variant backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_variant_mutation_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_variant_mutation_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         seed_conversation_base_fixture(&store, "session-conversation", "slot-conversation");
 
         let reordered = store
@@ -16600,13 +16591,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_worker_lifecycle_proof_matches_sqlite_conformance_contract() {
+    fn postgres_worker_lifecycle_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL worker lifecycle proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL worker lifecycle backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_worker_lifecycle_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_worker_lifecycle_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         worker_lifecycle_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -16636,20 +16627,20 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_telemetry_maintenance_proof_matches_sqlite_conformance_contract() {
+    fn postgres_telemetry_maintenance_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
             eprintln!(
-                "skipping PostgreSQL telemetry/maintenance proof; no database URL env is set"
+                "skipping PostgreSQL telemetry/maintenance backend; no database URL env is set"
             );
             return;
         };
-        let schema = unique_schema("rusty_crew_telemetry_maintenance_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_telemetry_maintenance_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         telemetry_maintenance_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
         assert_eq!(diagnostics.backend, "postgres");
-        assert_eq!(diagnostics.schema_version, POSTGRES_PROOF_SCHEMA_VERSION);
+        assert_eq!(diagnostics.schema_version, POSTGRES_BACKEND_SCHEMA_VERSION);
         assert!(diagnostics
             .table_counts
             .iter()
@@ -16664,13 +16655,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_runtime_counter_proof_matches_typed_counter_contract() {
+    fn postgres_runtime_counter_backend_matches_typed_counter_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_counter_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_counter_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
 
         store
             .increment_counter(
@@ -16731,10 +16722,10 @@ mod tests {
 
         let diagnostics = store.storage_diagnostics().unwrap();
         assert_eq!(diagnostics.backend, "postgres");
-        assert_eq!(diagnostics.schema_version, POSTGRES_PROOF_SCHEMA_VERSION);
+        assert_eq!(diagnostics.schema_version, POSTGRES_BACKEND_SCHEMA_VERSION);
         assert_eq!(
             diagnostics.supported_schema_version,
-            POSTGRES_PROOF_SCHEMA_VERSION
+            POSTGRES_BACKEND_SCHEMA_VERSION
         );
         assert_eq!(
             diagnostics.migrations.len(),
@@ -16745,7 +16736,7 @@ mod tests {
                 .migrations
                 .last()
                 .map(|migration| migration.version),
-            Some(POSTGRES_PROOF_SCHEMA_VERSION)
+            Some(POSTGRES_BACKEND_SCHEMA_VERSION)
         );
         assert_eq!(diagnostics.repository_groups[0].group_id, "storage_admin");
         assert_eq!(
@@ -16765,12 +16756,12 @@ mod tests {
     fn postgres_runtime_counter_repository_matches_shared_contract() {
         let Some(database_url) = postgres_test_database_url() else {
             eprintln!(
-                "skipping PostgreSQL runtime counter repository proof; no database URL env is set"
+                "skipping PostgreSQL runtime counter repository backend; no database URL env is set"
             );
             return;
         };
         let schema = unique_schema("rusty_crew_counter_repo_contract");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
 
         crate::repos::runtime_counters::tests::runtime_counter_repository_conformance(&store);
 
@@ -16781,16 +16772,13 @@ mod tests {
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
     fn postgres_connection_pool_recovers_after_closed_idle_connection() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL connection pool proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL connection pool backend; no database URL env is set");
             return;
         };
         let schema = unique_schema("rusty_crew_connection_pool");
-        let store = PostgresRuntimeCounterProofStore::connect_with_pool_options(
-            &database_url,
-            &schema,
-            Some(1),
-        )
-        .unwrap();
+        let store =
+            PostgresBackendStore::connect_with_pool_options(&database_url, &schema, Some(1))
+                .unwrap();
 
         let backend_pid = {
             let mut client = store.client().unwrap();
@@ -16848,13 +16836,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_simple_kv_proof_matches_sqlite_conformance_contract() {
+    fn postgres_simple_kv_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL simple_kv proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL simple_kv backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_simple_kv_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_simple_kv_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         simple_kv_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -16875,13 +16863,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_runtime_search_proof_matches_typed_search_contract() {
+    fn postgres_runtime_search_backend_matches_typed_search_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL runtime search proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL runtime search backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_runtime_search_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_runtime_search_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         runtime_search_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -16905,13 +16893,15 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_provider_wire_state_proof_matches_sqlite_conformance_contract() {
+    fn postgres_provider_wire_state_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL provider wire-state proof; no database URL env is set");
+            eprintln!(
+                "skipping PostgreSQL provider wire-state backend; no database URL env is set"
+            );
             return;
         };
-        let schema = unique_schema("rusty_crew_provider_state_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_provider_state_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         provider_wire_state_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -16932,13 +16922,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_conversation_proof_matches_sqlite_conformance_contract() {
+    fn postgres_conversation_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL conversation proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL conversation backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_conversation_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_conversation_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         conversation_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -16969,13 +16959,15 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_attachment_data_bank_proof_matches_sqlite_conformance_contract() {
+    fn postgres_attachment_data_bank_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL attachment/data-bank proof; no database URL env is set");
+            eprintln!(
+                "skipping PostgreSQL attachment/data-bank backend; no database URL env is set"
+            );
             return;
         };
-        let schema = unique_schema("rusty_crew_attachment_data_bank_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_attachment_data_bank_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         run_attachment_data_bank_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -17013,13 +17005,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_profile_memory_proof_matches_sqlite_conformance_contract() {
+    fn postgres_profile_memory_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL profile memory proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL profile memory backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_profile_memory_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_profile_memory_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         profile_memory_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -17042,13 +17034,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
-    fn postgres_roleplay_lore_proof_matches_sqlite_conformance_contract() {
+    fn postgres_roleplay_lore_backend_matches_sqlite_conformance_contract() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL roleplay lore proof; no database URL env is set");
+            eprintln!("skipping PostgreSQL roleplay lore backend; no database URL env is set");
             return;
         };
-        let schema = unique_schema("rusty_crew_roleplay_lore_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_roleplay_lore_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         roleplay_lore_conformance(&store);
 
         let diagnostics = store.storage_diagnostics().unwrap();
@@ -17076,11 +17068,13 @@ mod tests {
     #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
     fn postgres_roleplay_lore_layers_and_recall_are_implemented() {
         let Some(database_url) = postgres_test_database_url() else {
-            eprintln!("skipping PostgreSQL roleplay lore layer proof; no database URL env is set");
+            eprintln!(
+                "skipping PostgreSQL roleplay lore layer backend; no database URL env is set"
+            );
             return;
         };
-        let schema = unique_schema("rusty_crew_roleplay_lore_layers_proof");
-        let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_roleplay_lore_layers_backend");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
 
         store
             .create_lore_layer(&RoleplayLoreLayerWrite {
@@ -17275,16 +17269,16 @@ mod tests {
     fn postgres_conversation_conflicts_apply_once_across_connections() {
         let Some(database_url) = postgres_test_database_url() else {
             eprintln!(
-                "skipping PostgreSQL conversation conflict proof; no database URL env is set"
+                "skipping PostgreSQL conversation conflict backend; no database URL env is set"
             );
             return;
         };
-        let schema = unique_schema("rusty_crew_conversation_conflict_proof");
-        let setup = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let schema = unique_schema("rusty_crew_conversation_conflict_backend");
+        let setup = PostgresBackendStore::connect(&database_url, &schema).unwrap();
         seed_conversation_conflict_fixture(&setup);
 
-        let first = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
-        let second = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
+        let first = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let second = PostgresBackendStore::connect(&database_url, &schema).unwrap();
 
         let active_branch_first = first
             .select_active_conversation_branch(&SelectActiveBranchRequest {
@@ -17356,8 +17350,8 @@ mod tests {
     }
 
     fn session_event_conformance(store: &dyn SessionEventConformanceStore) {
-        let session = proof_session_state();
-        let config = proof_session_config();
+        let session = backend_session_state();
+        let config = backend_session_config();
         store.save_session_with_config(&session, &config).unwrap();
 
         let sessions = store.load_sessions().unwrap();
@@ -17458,7 +17452,7 @@ mod tests {
         assert_eq!(by_wake[0].source_wake_ids, vec!["wake-conformance"]);
     }
 
-    fn proof_session_state() -> SessionState {
+    fn backend_session_state() -> SessionState {
         SessionState {
             handle: SessionHandle::new(1),
             session_id: SessionId::new("session-alpha"),
@@ -17466,8 +17460,8 @@ mod tests {
             profile_id: ProfileId::new("full-profile"),
             kind: SessionKind::Full,
             delegation: None,
-            resource_limits: proof_resource_limits(),
-            tool_profile: proof_tool_profile(),
+            resource_limits: backend_resource_limits(),
+            tool_profile: backend_tool_profile(),
             history_window: None,
             status: SessionStatus::Idle,
             brain_turn_count: 0,
@@ -17476,20 +17470,20 @@ mod tests {
         }
     }
 
-    fn proof_session_config() -> SessionConfig {
+    fn backend_session_config() -> SessionConfig {
         SessionConfig {
             session_id: SessionId::new("session-alpha"),
             agent_id: AgentId::new("agent-alpha"),
             profile_id: ProfileId::new("full-profile"),
             kind: SessionKind::Full,
             delegation: None,
-            resource_limits: proof_resource_limits(),
-            tool_profile: proof_tool_profile(),
+            resource_limits: backend_resource_limits(),
+            tool_profile: backend_tool_profile(),
             history_window: None,
         }
     }
 
-    fn proof_resource_limits() -> ResourceLimits {
+    fn backend_resource_limits() -> ResourceLimits {
         ResourceLimits {
             workdir: Some("/tmp/rusty-crew-test".to_string()),
             max_duration_ms: Some(60_000),
@@ -17497,7 +17491,7 @@ mod tests {
         }
     }
 
-    fn proof_tool_profile() -> ToolProfile {
+    fn backend_tool_profile() -> ToolProfile {
         ToolProfile {
             tools: vec![ToolDescriptor {
                 name: "apply_patch".to_string(),
@@ -17854,8 +17848,8 @@ mod tests {
     }
 
     fn telemetry_maintenance_conformance(store: &dyn TelemetryMaintenanceConformanceStore) {
-        let session = proof_session_state();
-        let config = proof_session_config();
+        let session = backend_session_state();
+        let config = backend_session_config();
         store.save_session_with_config(&session, &config).unwrap();
 
         let metadata = ToolCallMetadata {
@@ -18195,7 +18189,7 @@ mod tests {
             .is_empty());
     }
 
-    fn runtime_search_conformance(store: &PostgresRuntimeCounterProofStore) {
+    fn runtime_search_conformance(store: &PostgresBackendStore) {
         for entry in runtime_search_fixture() {
             store.upsert_runtime_search_entry(&entry).unwrap();
         }
@@ -18460,7 +18454,7 @@ mod tests {
                 label: Some("Checkpoint".to_string()),
                 summary: Some("Conversation checkpoint".to_string()),
                 source: ConversationSnapshotSource::User,
-                metadata_json: json!({"proof": "conversation"}),
+                metadata_json: json!({"backend": "conversation"}),
                 created_at: "2026-06-26T02:05:00Z".to_string(),
                 updated_at: "2026-06-26T02:05:00Z".to_string(),
             })
@@ -18556,7 +18550,7 @@ mod tests {
                 session_id: session.clone(),
                 primary_variant_id: primary_variant.clone(),
                 active_variant_id: None,
-                metadata_json: json!({"slot": "proof"}),
+                metadata_json: json!({"slot": "backend"}),
                 created_at: "2026-06-26T02:00:00Z".to_string(),
                 updated_at: "2026-06-26T02:00:00Z".to_string(),
             })
@@ -18612,7 +18606,7 @@ mod tests {
             .unwrap();
     }
 
-    fn seed_conversation_conflict_fixture(store: &PostgresRuntimeCounterProofStore) {
+    fn seed_conversation_conflict_fixture(store: &PostgresBackendStore) {
         let session = SessionId::new("session-conflict");
         for branch_id in ["branch-conflict-a", "branch-conflict-b"] {
             store
@@ -18694,11 +18688,11 @@ mod tests {
                 branch_id: None,
                 parent_message_id: None,
                 previous_message_id: None,
-                author_id: "agent-proof".to_string(),
+                author_id: "agent-backend".to_string(),
                 author_role: "assistant".to_string(),
                 status: DurableMessageStatus::Completed,
                 body: body.to_string(),
-                metadata_json: json!({"provider": "proof"}),
+                metadata_json: json!({"provider": "backend"}),
                 created_at: "2026-06-26T02:00:00Z".to_string(),
                 blocks: vec![MessageBlockWrite {
                     block_id: crate::MessageBlockId::new(format!("{message_id}:block-1")),
@@ -18735,7 +18729,7 @@ mod tests {
             .operations
             .contains(&MemoryOperation::CandidateOnly));
 
-        let profile = ProfileId::new("profile-memory-proof");
+        let profile = ProfileId::new("profile-memory-backend");
         let other_profile = ProfileId::new("profile-memory-other");
         let caps = ProfileMemoryCaps {
             max_records_per_profile: 2,
@@ -19767,7 +19761,7 @@ mod tests {
 
     fn postgres_test_database_url() -> Option<String> {
         for key in [
-            "RUSTY_CREW_POSTGRES_PROOF_DATABASE_URL",
+            "RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL",
             "RUSTY_CREW_DATABASE_URL",
             "RUSTY_CREW_APP_DATABASE_URL",
         ] {

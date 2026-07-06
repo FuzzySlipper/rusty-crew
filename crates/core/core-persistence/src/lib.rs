@@ -5,7 +5,7 @@
 
 pub mod module_schema;
 #[cfg(feature = "postgres")]
-pub mod postgres_proof;
+pub mod postgres_backend;
 mod repos;
 mod repositories;
 
@@ -288,7 +288,7 @@ pub enum CoreCoordinationStoreBackend {
 pub enum CoreCoordinationStore {
     Sqlite(CoordinationStore),
     #[cfg(feature = "postgres")]
-    Postgres(Arc<postgres_proof::PostgresRuntimeCounterProofStore>),
+    Postgres(Arc<postgres_backend::PostgresBackendStore>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -357,7 +357,7 @@ impl CoreCoordinationStore {
         max_connections: Option<u32>,
     ) -> CoreResult<Self> {
         Ok(Self::Postgres(Arc::new(
-            postgres_proof::PostgresRuntimeCounterProofStore::connect_with_pool_options(
+            postgres_backend::PostgresBackendStore::connect_with_pool_options(
                 database_url,
                 schema,
                 max_connections,

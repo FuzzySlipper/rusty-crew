@@ -17,7 +17,7 @@ is useful, but it also makes the dangerous cases easier to trigger:
 - two workers can claim the same scheduled run;
 - a stale worker can complete a run after another reconciler already expired it.
 
-The current PostgreSQL proof slices intentionally do not implement these
+The current PostgreSQL backend slices intentionally do not implement these
 repositories. `queues_messages` and `scheduler_jobs` must remain unsupported for
 PostgreSQL service boot until the tests named here pass against a real
 PostgreSQL backend.
@@ -330,7 +330,7 @@ in-process mock or SQLite compatibility path.
 ## Implementation Gates
 
 Do not port queue or scheduler repositories as a casual follow-on to the
-existing PostgreSQL proof slices.
+existing PostgreSQL backend slices.
 
 Before enabling either group:
 

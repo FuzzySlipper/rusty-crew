@@ -8,27 +8,27 @@ Design sources:
 
 - ADR 0020, `storage-backend-abstraction-and-postgresql-readiness`
 - Den doc `den-network/rusty-crew-postgres-service`
-- `docs/postgres-runtime-counter-proof-slice.md`
+- `docs/postgres-runtime-counter-backend-slice.md`
 
 ## Result
 
 The den-k8 PostgreSQL development service was exercised through the implemented
-PostgreSQL runtime-counter proof slice. This is a fresh-backend proof, not a
+PostgreSQL runtime-counter backend slice. This is fresh-backend conformance, not a
 SQLite migration and not a full service cutover.
 
-The proof used the existing PostgreSQL env file:
+The backend used the existing PostgreSQL env file:
 
 ```bash
 set -a
 . /home/system/database/rusty-crew-postgres.env
 set +a
-cargo test -p rusty-crew-core-persistence --features postgres-proof \
-  postgres_runtime_counter_proof_matches_typed_counter_contract -- --ignored --nocapture
+cargo test -p rusty-crew-core-persistence --features postgres-backend \
+  postgres_runtime_counter_backend_matches_typed_counter_contract -- --ignored --nocapture
 ```
 
-The test passed. It creates a unique temporary schema, migrates only proof-owned
+The test passed. It creates a unique temporary schema, migrates only backend-owned
 objects, exercises typed runtime-counter increment/query/reset/summary behavior,
-checks PostgreSQL proof diagnostics, and drops the schema afterward.
+checks PostgreSQL backend diagnostics, and drops the schema afterward.
 
 No SQLite service data was migrated or mutated.
 
@@ -46,11 +46,11 @@ cover repositories that have not been ported.
 
 Current implemented PostgreSQL surface:
 
-- runtime counter proof store;
-- proof-owned migration table;
-- proof-owned `runtime_counters` table;
+- runtime counter backend store;
+- backend-owned migration table;
+- backend-owned `runtime_counters` table;
 - runtime counter typed API parity for increment, query, reset, and summary;
-- proof diagnostics with backend label, schema version, table counts,
+- backend diagnostics with backend label, schema version, table counts,
   capabilities, and the `runtime_counters` repository group.
 
 Current unsupported surface:
@@ -66,7 +66,7 @@ Current unsupported surface:
 - runtime search;
 - transcript/conversation trees and attachments;
 - profile registry and dense memory;
-- module schema registry beyond the proof-owned metadata table;
+- module schema registry beyond the backend-owned metadata table;
 - import/export and migration.
 
 ## Production Readiness Boundary

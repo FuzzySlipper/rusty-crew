@@ -343,7 +343,7 @@ const storage: StorageDiagnosticsProjection = {
           detail: "counter increments must be atomic",
         },
       ],
-      notes: ["Runtime counter proof is available."],
+      notes: ["Runtime counter backend is available."],
     },
     {
       groupId: "module_schema_registry",
@@ -356,7 +356,7 @@ const storage: StorageDiagnosticsProjection = {
           detail: "module-owned table changes must be transactional",
         },
       ],
-      notes: ["Module-owned simple_kv proof table is available."],
+      notes: ["Module-owned simple_kv backend table is available."],
     },
     {
       groupId: "queues_messages",

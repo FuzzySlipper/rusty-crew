@@ -13,7 +13,7 @@ facades.
 The first concrete boundary is runtime counters:
 
 - `RuntimeCounterRepository` lives in `repos/runtime_counters.rs`.
-- SQLite `CoordinationStore` and PostgreSQL `PostgresRuntimeCounterProofStore`
+- SQLite `CoordinationStore` and PostgreSQL `PostgresBackendStore`
   both implement that trait.
 - `CoreCoordinationStore` routes runtime-counter query, summary, and reset calls
   through one repository accessor instead of repeated two-arm enum dispatch.

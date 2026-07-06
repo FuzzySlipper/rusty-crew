@@ -88,12 +88,12 @@ binary loads silently and fails as `undefined is not a function` at call
 time. `MANIFEST_VERSION = 1` in `core-bridge-api` is never bumped or checked
 across the boundary.
 
-### 3. The Postgres backend is mislabeled, schema-frozen, and effectively untested
+### 3. The Postgres backend is too monolithic and needs stronger test gates
 
-`crates/core/core-persistence/src/postgres_proof.rs` (19,124 lines, 711
-functions) says in its header it is "intentionally not the full
-CoordinationStore backend" — but it **is** the production backend for the
-live service (`open_postgres()` instantiates `PostgresRuntimeCounterProofStore`).
+`crates/core/core-persistence/src/postgres_backend.rs` (19,124 lines, 711
+functions) is the production PostgreSQL backend for the live service
+(`open_postgres()` instantiates `PostgresBackendStore`), but much of the
+repository implementation still sits in one large file.
 
 - **No repository trait**: `CoreCoordinationStore` is an enum with 119
   hand-written two-arm match dispatches in `lib.rs` (17,443 lines); ~870 SQL
@@ -228,11 +228,10 @@ decisions, but routine change rationale is externalized and non-durable.
    default-on in dev/CI and extend coverage past ~20 types. Stop committing
    the `.node` binary (or commit its loader/types with it) and assert
    `manifestVersion` at binding load.
-3. **Rescue the Postgres backend** — rename `postgres_proof` and fix the
-   false doc header; introduce a versioned Postgres migration chain (or
-   derive both schemas from one source); run the Postgres tests against an
-   ephemeral container in CI; add reconnection (and ideally pooling) to the
-   single blocking `Client`.
+3. **Rescue the Postgres backend** — continue splitting `postgres_backend`
+   into repository modules; keep the versioned Postgres migration chain honest
+   (or derive both schemas from one source); run the Postgres tests against an
+   ephemeral container in CI; keep reconnection and pooling under active test.
 4. **Decompose the composition layer** — move the HTTP app/router/drain
    loops from `service-app.ts` into `service-host` (making the README true),
    split the barrel `index.ts` into a types module + explicit exports to

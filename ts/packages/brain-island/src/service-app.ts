@@ -6237,7 +6237,7 @@ function postgresStorageCapabilities(
       name: "row_level_claims",
       supported: postgresConnected,
       detail: postgresConnected
-        ? "Scheduler stale-run expiry uses PostgreSQL row-level claim semantics in the proof slice."
+        ? "Scheduler stale-run expiry uses PostgreSQL row-level claim semantics in the backend slice."
         : "Row-level claim support requires active PostgreSQL service mode.",
     },
     {
@@ -6371,7 +6371,7 @@ function postgresSearchDiagnostics(
       status: "proof",
       degraded: false,
       detail:
-        "Runtime search has a PostgreSQL proof slice behind typed APIs; backend tsquery syntax is not exposed through admin or tool routes.",
+        "Runtime search has a PostgreSQL backend slice behind typed APIs; backend tsquery syntax is not exposed through admin or tool routes.",
     };
   }
   if (bootMode === "active") {
@@ -6388,7 +6388,7 @@ function postgresSearchDiagnostics(
     status: "unsupported",
     degraded: true,
     detail:
-      "PostgreSQL runtime search is unavailable for full service boot until the proof repository is wired behind the service backend.",
+      "PostgreSQL runtime search is unavailable for full service boot until the backend repository is wired behind the service backend.",
   };
 }
 

@@ -1,18 +1,18 @@
-# PostgreSQL Profile Memory Proof Slice
+# PostgreSQL Profile Memory Backend Slice
 
-Status: implemented as a PostgreSQL proof repository slice.
+Status: implemented as a PostgreSQL backend repository slice.
 
 Task: Den `rusty-crew` #3488.
 
 ## What This Proves
 
-The PostgreSQL proof store now covers the dense profile memory compatibility
+The PostgreSQL backend store now covers the dense profile memory compatibility
 path and its typed memory-space descriptor projection:
 
 - `profile_memories`
 - `profile_dense` descriptor projection
 
-The proof store preserves the same Rust API contract used by SQLite:
+The backend store preserves the same Rust API contract used by SQLite:
 
 - `add_profile_memory`
 - `replace_profile_memory`
@@ -42,7 +42,7 @@ memory remains Rust-owned persistence.
 
 ## Descriptor Scope
 
-The proof store exposes `memory_space_descriptors()` with `profile_dense`.
+The backend store exposes `memory_space_descriptors()` with `profile_dense`.
 This is intentionally a projection for the existing dense-memory compatibility
 surface, not a generic memory-space CRUD repository yet.
 
@@ -59,24 +59,24 @@ surface, not a generic memory-space CRUD repository yet.
 `storage_diagnostics()` now reports a `profile_memories` row count.
 
 The `profile_memory` repository-group diagnostic now reports implemented
-PostgreSQL proof coverage for `profile_dense` descriptor projection and dense
-profile memory conformance. It remains a proof slice and is not yet the full
+PostgreSQL backend coverage for `profile_dense` descriptor projection and dense
+profile memory conformance. It remains a backend slice and is not yet the full
 service backend.
 
 ## Verification
 
-Run the normal local proof suite:
+Run the normal local backend suite:
 
 ```bash
-cargo test -p rusty-crew-core-persistence --features postgres-proof
+cargo test -p rusty-crew-core-persistence --features postgres-backend
 ```
 
-Run the live PostgreSQL profile-memory proof after sourcing the local dev
+Run the live PostgreSQL profile-memory backend conformance after sourcing the local dev
 database env:
 
 ```bash
 source /home/system/database/rusty-crew-postgres.env
-cargo test -p rusty-crew-core-persistence --features postgres-proof \
-  postgres_profile_memory_proof_matches_sqlite_conformance_contract \
+cargo test -p rusty-crew-core-persistence --features postgres-backend \
+  postgres_profile_memory_backend_matches_sqlite_conformance_contract \
   -- --ignored
 ```

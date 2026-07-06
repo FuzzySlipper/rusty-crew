@@ -1,18 +1,18 @@
-# PostgreSQL Conversation Transcript Proof Slice
+# PostgreSQL Conversation Transcript Backend Slice
 
 Date: 2026-06-27
 
 ## Purpose
 
-Task 3486 adds PostgreSQL proof coverage for conversation transcript storage.
-This is a typed proof slice, not the full Rusty Crew PostgreSQL service
+Task 3486 adds PostgreSQL backend coverage for conversation transcript storage.
+This is a typed backend slice, not the full Rusty Crew PostgreSQL service
 backend. It proves that branch and transcript operations can preserve SQLite
 API behavior on PostgreSQL before the broader storage backend is selectable for
 ordinary service boot.
 
 ## Covered Tables
 
-The proof schema now owns:
+The backend schema now owns:
 
 - `message_slots`
 - `messages`
@@ -35,7 +35,7 @@ The implementation covers:
 
 ## Conflict Semantics
 
-The PostgreSQL proof keeps the same typed conflict behavior as SQLite:
+The PostgreSQL backend keeps the same typed conflict behavior as SQLite:
 
 - active branch selection with a stale expectation returns
   `ActiveBranchConflict`;
@@ -53,7 +53,7 @@ The repository catalog group is `conversations_attachments`, but this task only
 implements the conversation transcript/tree portion. PostgreSQL diagnostics
 therefore report this group as partially implemented:
 
-- conversation branches/messages/variants/snapshots/jumps are proofed;
+- conversation branches/messages/variants/snapshots/jumps are covered;
 - attachments and data-bank scopes remain unsupported.
 
 Future attachment/data-bank tasks must not treat this slice as full completion
@@ -64,18 +64,18 @@ of the combined repository group.
 Local tests:
 
 ```bash
-cargo test -p rusty-crew-core-persistence --features postgres-proof
-cargo clippy -p rusty-crew-core-persistence --all-targets --features postgres-proof -- -D warnings
+cargo test -p rusty-crew-core-persistence --features postgres-backend
+cargo clippy -p rusty-crew-core-persistence --all-targets --features postgres-backend -- -D warnings
 ```
 
-Live PostgreSQL proof:
+Live PostgreSQL backend:
 
 ```bash
 source /home/system/database/rusty-crew-postgres.env
-cargo test -p rusty-crew-core-persistence --features postgres-proof \
+cargo test -p rusty-crew-core-persistence --features postgres-backend \
   postgres_conversation -- --ignored --nocapture
 ```
 
-The live test creates a unique proof schema, runs shared SQLite/PostgreSQL
+The live test creates a unique backend schema, runs shared SQLite/PostgreSQL
 conversation conformance, runs cross-connection conflict checks, and drops the
 schema afterward.

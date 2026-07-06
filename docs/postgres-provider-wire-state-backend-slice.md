@@ -1,10 +1,10 @@
-# PostgreSQL Provider Wire-State Proof Slice
+# PostgreSQL Provider Wire-State Backend Slice
 
 Date: 2026-06-26
 
 ## Purpose
 
-Task 3485 adds provider wire-state coverage to the narrow PostgreSQL proof
+Task 3485 adds provider wire-state coverage to the narrow PostgreSQL backend
 store. This is still not the full service backend. It proves that the
 provider-state repository can preserve the SQLite API contract on PostgreSQL
 before the broader runtime is wired to use PostgreSQL for ordinary service
@@ -33,9 +33,9 @@ Wake lookup must never return stale current state:
 - looking up another module or strategy for the same session invalidates the
   previous current row and returns `Missing` for the requested key.
 
-## PostgreSQL Proof Table
+## PostgreSQL Backend Table
 
-The proof schema owns `provider_wire_states` with:
+The backend schema owns `provider_wire_states` with:
 
 - `row_id BIGSERIAL PRIMARY KEY`
 - stable key columns: `session_id`, `module_id`, `strategy_id`
@@ -54,7 +54,7 @@ WHERE invalidated_at IS NULL;
 
 ## Verification
 
-The shared conformance test runs against SQLite and the PostgreSQL proof store.
+The shared conformance test runs against SQLite and the PostgreSQL backend store.
 It covers:
 
 - replacement and supersession;
@@ -70,12 +70,12 @@ Local PostgreSQL verification:
 
 ```bash
 source /home/system/database/rusty-crew-postgres.env
-cargo test -p rusty-crew-core-persistence --features postgres-proof \
-  postgres_provider_wire_state_proof_matches_sqlite_conformance_contract \
+cargo test -p rusty-crew-core-persistence --features postgres-backend \
+  postgres_provider_wire_state_backend_matches_sqlite_conformance_contract \
   -- --ignored --nocapture
 ```
 
-The proof diagnostics mark repository group `provider_state` as implemented for
+The backend diagnostics mark repository group `provider_state` as implemented for
 this typed conformance surface only. Full service boot must still fail closed
 for unsupported PostgreSQL repositories until later integration tasks wire the
 backend through the service.
