@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "source": "den-successor-gateway",
+  "scenario": "conversation-readback",
+  "capturedAt": "2026-07-05T00:00:00Z",
+  "redaction": "Headers, bearer tokens, cookies, and operator-specific message text are excluded. IDs and timestamps are representative shape values.",
+  "interactions": [
+    {
+      "name": "health",
+      "request": {
+        "method": "GET",
+        "path": "/health"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": "ok",
+          "service_name": "gateway",
+          "version": "successor-redacted"
+        }
+      }
+    },
+    {
+      "name": "runtime-instance",
+      "request": {
+        "method": "GET",
+        "path": "/v1/runtime/instances/rusty-crew-runner%40rusty-crew"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "instance_id": "rusty-crew-runner@rusty-crew",
+          "profile_identity": "rusty-crew-runner",
+          "host": "den-k8plus",
+          "pid": 12345,
+          "state": "active",
+          "started_at": "2026-07-05T18:00:00Z",
+          "last_heartbeat_at": "2026-07-05T18:00:30Z"
+        }
+      }
+    },
+    {
+      "name": "pending-delivery-intents",
+      "request": {
+        "method": "GET",
+        "path": "/v1/delivery/intents?state=pending"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 7001,
+            "target_identity": {
+              "profile": "rusty-crew-runner",
+              "instance_id": "rusty-crew-runner@rusty-crew",
+              "session_key": "rusty-crew-runner-session"
+            },
+            "state": "pending",
+            "idempotency_key": "wake:channel:rusty-crew-runner:redacted",
+            "created_at": "2026-07-05T18:00:01Z",
+            "expires_at": "2026-07-05T18:05:01Z",
+            "source_ref": "conversation:message:77001",
+            "channel_message_id": 77001
+          }
+        ]
+      }
+    },
+    {
+      "name": "conversation-channels",
+      "request": {
+        "method": "GET",
+        "path": "/v1/conversation/channels?project_id=rusty-crew&kind=agent_channel&limit=25"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 42,
+            "slug": "rusty-crew",
+            "display_name": "Rusty Crew",
+            "kind": "agent_channel",
+            "project_id": "rusty-crew",
+            "created_by": "den-web",
+            "visibility": "channel",
+            "settings": {
+              "topic": "redacted"
+            },
+            "created_at": "2026-07-05T17:59:00Z",
+            "updated_at": "2026-07-05T18:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "conversation-memberships",
+      "request": {
+        "method": "GET",
+        "path": "/v1/conversation/memberships?channel_id=42&member_identity=rusty-crew-runner&membership_purpose=ordinary&include_left=true&limit=10"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 9101,
+            "channel_id": 42,
+            "member_type": "agent",
+            "member_identity": "rusty-crew-runner",
+            "profile_identity": "rusty-crew-runner",
+            "membership_status": "active",
+            "wake_policy": "subscription",
+            "can_send": true,
+            "can_react": true,
+            "can_invite": false,
+            "membership_purpose": "ordinary",
+            "settings": {},
+            "created_at": "2026-07-05T17:59:05Z",
+            "updated_at": "2026-07-05T18:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "conversation-messages",
+      "request": {
+        "method": "GET",
+        "path": "/v1/conversation/channels/42/messages?limit=5"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 77001,
+            "channel_id": 42,
+            "sender_type": "human",
+            "sender_identity": "operator-redacted",
+            "body": "Redacted operator message body.",
+            "message_kind": "message",
+            "source_kind": "conversation",
+            "profile_identity": "rusty-crew-runner",
+            "agent_instance_id": "rusty-crew-runner@rusty-crew",
+            "session_id": "rusty-crew-runner-session",
+            "summary": "Redacted message summary.",
+            "metadata": {
+              "redacted": true
+            },
+            "dedupe_key": "conversation:77001",
+            "created_at": "2026-07-05T18:00:01Z"
+          }
+        ]
+      }
+    }
+  ]
+}

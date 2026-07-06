@@ -142,8 +142,11 @@ npm run test:unit
 npm run format
 npm run smoke:architecture-boundaries
 npm run smoke:runtime-config-parity
+npm run smoke:external-cassettes
 npm run smoke:bridge-contract-parity
+npm run smoke:bridge-native-surface
 npm run smoke:bridge-fixture-drift
+npm run smoke:bridge-fingerprint-drift
 npm run smoke:bridge-validation
 ```
 
@@ -154,6 +157,13 @@ or live providers. Use smokes for broader integration paths, and use Rusty
 View live certification for substantial chat/runtime deliverables where the
 user-visible path matters. The Crew-side live evidence rule and completion
 template are documented in `docs/live-deliverable-certification.md`.
+
+External response-shape cassettes live under `fixtures/external-cassettes/`.
+They are committed only after headers, tokens, cookies, provider secrets, and
+overly-large prompt/provider payloads are removed or normalized. Offline
+cassette smokes, such as `npm run smoke:external-cassettes`, preserve shape
+evidence from Den/provider/UI integrations without making CI depend on live
+systems.
 
 Use the smoke runner to inspect and run integration proofs without adding more
 one-off root aliases:

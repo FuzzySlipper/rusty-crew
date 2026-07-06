@@ -90,6 +90,12 @@ deterministic Rust tests, TypeScript unit tests, boundary smokes, runtime-config
 parity, and bridge validation. It must not require the live service root,
 debug-service root, Den, PostgreSQL, Rusty View, Telegram, or a real provider.
 
+Offline cassette-backed checks are allowed in this gate when they validate only
+committed, redacted fixture artifacts. They preserve response-shape evidence
+from external systems without making CI depend on those systems being reachable.
+The cassette home and refresh/redaction procedure are documented in
+`fixtures/external-cassettes/README.md`.
+
 Use `npm run smoke -- --list --lane <lane>` to find checks by execution
 environment. Do not treat a lane listing as a command to run everything in that
 lane blindly; some lanes contain expensive or operator-facing checks that should
@@ -108,6 +114,26 @@ The debug service at `/home/system/rusty-crew-debug` is the normal backend for
 testing noise; the live service at `/home/system/rusty-crew` is for durable
 agents and should not be used for broad smoke churn unless the task is
 explicitly about the live deployment.
+
+## External Cassettes
+
+Use external cassettes when an integration shape is learned from live Den,
+provider, Telegram, or Rusty View traffic but can be validated deterministically
+after redaction. Cassettes live under `fixtures/external-cassettes/<system>/`
+and should be consumed by package-local smoke scripts named with `cassette` so
+the runner classifies them as offline fixture checks.
+
+Good cassette candidates:
+
+- response envelopes from Den successor Gateway routes;
+- provider response item shapes after prompts and secrets are removed;
+- Rusty View API readback shapes that do not require rendered browser proof;
+- adapter webhook payloads with identifying text normalized.
+
+Do not use cassettes as a replacement for live certification when behavior is
+rendered, streamed, stateful, or model-visible. A substantial chat/runtime
+change still needs the live evidence packet from
+`docs/live-deliverable-certification.md`.
 
 ## Current Inventory Shape
 
@@ -141,7 +167,9 @@ Choose the narrowest layer that proves the behavior:
 2. Package-local integration smokes belong in
    `ts/packages/<package>/smokes/*.ts`.
 3. Cross-package or operator smokes belong in `ts/smokes/*.ts`.
-4. Live rendered chat behavior belongs in Rusty View live certification, with
+4. Redacted external response-shape checks may use fixtures in
+   `fixtures/external-cassettes/` and package-local `cassette` smokes.
+5. Live rendered chat behavior belongs in Rusty View live certification, with
    evidence recorded using Rusty View's `docs/live-testing.md` packet format.
 
 Do not add new smoke files under package `src/`. Existing `src/smoke-*.ts`

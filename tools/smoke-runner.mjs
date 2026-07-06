@@ -25,6 +25,11 @@ export function classifySmoke(entry) {
   const requirements = new Set();
   const tags = new Set();
   let category = "package-integration";
+  const cassetteBacked = text.includes("cassette");
+
+  if (cassetteBacked) {
+    tags.add("fixtures");
+  }
 
   if (text.includes("postgres")) {
     category = "storage";
@@ -42,11 +47,12 @@ export function classifySmoke(entry) {
     tags.add("service");
   }
   if (
-    text.includes("den") ||
-    text.includes("channel") ||
-    text.includes("observation") ||
-    text.includes("assignment") ||
-    text.includes("successor")
+    !cassetteBacked &&
+    (text.includes("den") ||
+      text.includes("channel") ||
+      text.includes("observation") ||
+      text.includes("assignment") ||
+      text.includes("successor"))
   ) {
     category = "den-adapter";
     requirements.add("den");

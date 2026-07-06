@@ -51,6 +51,20 @@ test("classifies offline, native, service, live, and Rusty View smoke lanes", ()
       .lane,
     "rusty-view-certification",
   );
+  assert.deepEqual(
+    classifySmoke(
+      smoke({
+        name: "adapter-den:successor-gateway-cassettes",
+        package: "@rusty-crew/adapter-den",
+      }),
+    ),
+    {
+      category: "package-integration",
+      lane: "offline",
+      requirements: ["none"],
+      tags: ["fixtures"],
+    },
+  );
 });
 
 test("parses and applies lane filters", () => {
