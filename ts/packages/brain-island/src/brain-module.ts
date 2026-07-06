@@ -288,6 +288,7 @@ export const piAgentCoreBrainModule: BrainModule = {
         createAgent,
         planActions: context.planActions,
         resolveTools: context.toolResolver,
+        toolProfile: context.profile.toolSelection.toolProfile,
         toolCallDebugStore: context.toolCallDebugStore,
         providerRequestDebugStore: context.providerRequestDebugStore,
         maxReviewCycles:
@@ -305,6 +306,7 @@ export const piAgentCoreBrainModule: BrainModule = {
       createAgent,
       planActions: context.planActions,
       resolveTools: context.toolResolver,
+      toolProfile: context.profile.toolSelection.toolProfile,
       toolCallDebugStore: context.toolCallDebugStore,
       providerRequestDebugStore: context.providerRequestDebugStore,
       submitEvent: context.bridge
@@ -562,6 +564,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   const toolSelection = resolveToolSession({
     wake,
     resolveTools: context.toolResolver,
+    toolProfile: context.profile.toolSelection.toolProfile,
     actions: selectionActions,
   });
   const toolsByName = new Map(

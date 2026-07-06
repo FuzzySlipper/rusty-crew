@@ -6008,6 +6008,36 @@ function createServiceControlExecutor(
               eventType: "new_session_runtime_config_bindings_moved",
               summary: `New session moved ${replacement.channelBindings.bindingIds.length} channel binding(s), ${replacement.mcpBindings.bindingIds.length} MCP binding(s), and ${replacement.scheduledJobs.jobIds.length} scheduled job(s).`,
             });
+            if (replacement.mcpBindings.bindingIds.length > 0) {
+              const rebuild = await applyServiceRuntimeRebuild(state, {
+                ...command,
+                name: "apply_runtime_rebuild",
+                target: {
+                  scope: "profile",
+                  profileId: oldSession.profileId,
+                },
+                reason:
+                  command.reason ??
+                  "New session moved MCP bindings; refreshing live brain catalog",
+                body: {
+                  ...command.body,
+                  skipSessionReplacement: true,
+                },
+              });
+              recordServiceEvent(state, {
+                source: "service-host",
+                eventType:
+                  rebuild.apply.status === "completed"
+                    ? "new_session_brain_catalog_rebuilt"
+                    : "new_session_brain_catalog_rebuild_blocked",
+                severity:
+                  rebuild.apply.status === "completed" ? undefined : "warning",
+                summary:
+                  rebuild.apply.status === "completed"
+                    ? `New session rebuilt brain catalog for profile ${oldSession.profileId} after moving MCP bindings.`
+                    : `New session could not rebuild brain catalog for profile ${oldSession.profileId}: ${rebuild.apply.reasonCode}.`,
+              });
+            }
           }
         },
         rebindChannel: () => undefined,

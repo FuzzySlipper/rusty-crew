@@ -60,6 +60,18 @@ async function smokeSuccessfulNewSessionConfigMove(): Promise<void> {
       sessions.find((session) => session.sessionId === newSessionId)?.status,
       "idle",
     );
+    const events = await get(port, token, "/v1/admin/events/recent?limit=40");
+    assert.equal(events.status, 200, JSON.stringify(events.body));
+    const eventTypes = (
+      (events.body.data?.items ?? []) as Array<{
+        eventType?: string;
+        event_type?: string;
+      }>
+    ).map((event) => event.eventType ?? event.event_type);
+    assert.ok(
+      eventTypes.includes("new_session_brain_catalog_rebuilt"),
+      "moving MCP bindings through /new should rebuild the live brain catalog",
+    );
   } finally {
     await host.stop();
   }
@@ -149,6 +161,22 @@ async function post(
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: (await response.json()) as any,
+  };
+}
+
+async function get(
+  port: number,
+  token: string,
+  path: string,
+): Promise<{ status: number; body: any }> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
   });
   return {
     status: response.status,

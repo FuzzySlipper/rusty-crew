@@ -7,6 +7,7 @@ import type {
   BrainPhase,
   BodyState,
   ToolDescriptor,
+  ToolProfile,
 } from "@rusty-crew/contracts";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type {
@@ -32,6 +33,7 @@ export interface RoleplayNarratorBrainOptions {
   maxReviewCycles?: number;
   reviewEnabled?: boolean;
   narratorConfig?: RoleplayNarratorConfig;
+  toolProfile?: ToolProfile;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
 }
@@ -58,6 +60,7 @@ export function createRoleplayNarratorBrain(
       exploreInstructions,
     ),
     resolveTools: filteringResolver(options.resolveTools, EXPLORE_TOOLS),
+    toolProfile: filterToolProfile(options.toolProfile, EXPLORE_TOOLS),
     toolCallDebugStore: options.toolCallDebugStore,
     providerRequestDebugStore: options.providerRequestDebugStore,
   });
@@ -67,6 +70,7 @@ export function createRoleplayNarratorBrain(
       composeSystemInstructions(options.narratorConfig),
     ),
     resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
+    toolProfile: filterToolProfile(options.toolProfile, COMPOSE_TOOLS),
     submitEvent: options.submitEvent,
     planActions: options.planActions,
     toolCallDebugStore: options.toolCallDebugStore,
@@ -78,6 +82,7 @@ export function createRoleplayNarratorBrain(
       composeSystemInstructions(options.narratorConfig),
     ),
     resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
+    toolProfile: filterToolProfile(options.toolProfile, COMPOSE_TOOLS),
     toolCallDebugStore: options.toolCallDebugStore,
     providerRequestDebugStore: options.providerRequestDebugStore,
   });
@@ -90,6 +95,7 @@ export function createRoleplayNarratorBrain(
             reviewSystemInstructions,
           ),
           resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
+          toolProfile: filterToolProfile(options.toolProfile, COMPOSE_TOOLS),
           toolCallDebugStore: options.toolCallDebugStore,
           providerRequestDebugStore: options.providerRequestDebugStore,
         })
@@ -115,6 +121,7 @@ export function createRoleplayNarratorBrain(
       const explorePrelude = await runMandatoryExplorePrelude(
         input,
         options.resolveTools,
+        options.toolProfile,
         emitEvent,
       );
       const exploreResult = await exploreBrain.wake(
@@ -228,9 +235,10 @@ function reviewRequestsRevision(feedback: string | undefined): boolean {
 async function runMandatoryExplorePrelude(
   input: BrainWakeInput,
   resolver: BrainToolResolver | undefined,
+  toolProfile: ToolProfile | undefined,
   emitEvent: (event: BrainEvent) => Promise<void>,
 ): Promise<string> {
-  const tools = resolveMandatoryExploreTools(input, resolver);
+  const tools = resolveMandatoryExploreTools(input, resolver, toolProfile);
   const observations: MandatoryExploreObservation[] = [];
   for (const request of mandatoryExploreRequests(input)) {
     const tool = tools.get(request.toolName);
@@ -258,11 +266,13 @@ async function runMandatoryExplorePrelude(
 function resolveMandatoryExploreTools(
   input: BrainWakeInput,
   resolver: BrainToolResolver | undefined,
+  toolProfile: ToolProfile | undefined,
 ): Map<string, BrainTool> {
   const wake = withFilteredTools(input, EXPLORE_TOOLS);
   const selection = resolveToolSession({
     wake,
     resolveTools: filteringResolver(resolver, EXPLORE_TOOLS),
+    toolProfile: filterToolProfile(toolProfile, EXPLORE_TOOLS),
   });
   return new Map(selection.tools.map((tool) => [tool.name, tool]));
 }
@@ -616,6 +626,16 @@ function filterToolDescriptors(
   allowedNames: ReadonlySet<string>,
 ): ToolDescriptor[] {
   return tools.filter((tool) => allowedNames.has(tool.name));
+}
+
+function filterToolProfile(
+  toolProfile: ToolProfile | undefined,
+  allowedNames: ReadonlySet<string>,
+): ToolProfile | undefined {
+  if (toolProfile === undefined) return undefined;
+  return {
+    tools: filterToolDescriptors(toolProfile.tools, allowedNames),
+  };
 }
 
 function brainEventEnvelope(

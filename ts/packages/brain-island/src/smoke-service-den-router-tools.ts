@@ -21,6 +21,7 @@ import {
   loadRustyCrewRuntimeConfig,
 } from "./service-runtime-config.js";
 import type { DenRouterAgentOptions } from "./den-router-agent.js";
+import type { DenMemoryClient } from "./service-adapter-ports.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;
@@ -57,6 +58,14 @@ const requestedToolNames = [
   "todo",
   "web_search",
 ].sort();
+let toolCallPlan: Array<{ name: string; params: Record<string, unknown> }> = [
+  {
+    name: "memory_recall",
+    params: { prompt: "What memory guidance is relevant?" },
+  },
+  { name: "field_search", params: { query: "runner mcp tools" } },
+  { name: "git_status", params: {} },
+];
 
 class ToolCallingFakeAgent {
   private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
@@ -84,11 +93,9 @@ class ToolCallingFakeAgent {
     _input: PiAgentMessage | PiAgentMessage[] | string,
   ): Promise<void> {
     await this.emit({ type: "agent_start" } as PiAgentEvent);
-    await this.callTool("memory_recall", {
-      prompt: "What memory guidance is relevant?",
-    });
-    await this.callTool("field_search", { query: "runner mcp tools" });
-    await this.callTool("git_status", {});
+    for (const planned of toolCallPlan) {
+      await this.callTool(planned.name, planned.params);
+    }
     await this.emit({ type: "agent_end", messages: [] } as PiAgentEvent);
   }
 
@@ -271,6 +278,9 @@ try {
         denRouterOptions.push(options ?? {});
         return (agentOptions) =>
           new ToolCallingFakeAgent(agentOptions, outputs, selectedToolNames);
+      },
+      adapterFactories: {
+        createDenMemoryClient: (input) => fakeDenMemoryClient(input),
       },
     });
     const brain = applyResult.brainHandlesByProfileId["field-profile"];
@@ -461,6 +471,32 @@ try {
       ["field-mcp", "field-mcp"],
     );
 
+    selectedToolNames.length = 0;
+    toolCallPlan = [{ name: "git_status", params: {} }];
+    await native.createSession({
+      sessionId: "field-manual-session" as SessionId,
+      agentId: "field-agent" as AgentId,
+      profileId: "field-profile" as ProfileId,
+      kind: "full",
+    });
+    const manualRequest = await native.buildBrainWakeRequestForSession({
+      brain,
+      sessionId: "field-manual-session" as SessionId,
+      systemPrompt: "Use the configured tools from the profile.",
+      roleAssemblyJson: encoder.encode(
+        JSON.stringify({
+          instructions:
+            "Call the same tool set even though this session has no stored ToolProfile.",
+        }),
+      ),
+      wakeId: "service-den-router-tools-manual-session-wake",
+    });
+    await native.wakeBrain(manualRequest);
+    assert.ok(
+      selectedToolNames.includes("git_status"),
+      "profile-selected local tools should remain callable when the session record has an empty ToolProfile",
+    );
+
     console.log(
       JSON.stringify(
         {
@@ -569,6 +605,51 @@ function header(
   return Object.entries(headers).find(
     ([key]) => key.toLowerCase() === name,
   )?.[1];
+}
+
+function fakeDenMemoryClient(input: {
+  baseUrl: string;
+  bearerToken?: string;
+  paths?: { recall?: string };
+}): DenMemoryClient {
+  return {
+    async recall(request) {
+      const response = await fetch(
+        `${input.baseUrl}${input.paths?.recall ?? "/memory/recall"}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(input.bearerToken === undefined
+              ? {}
+              : { authorization: `Bearer ${input.bearerToken}` }),
+          },
+          body: JSON.stringify(request),
+        },
+      );
+      if (!response.ok) throw new Error(`fake memory HTTP ${response.status}`);
+      const payload = (await response.json()) as {
+        data?: { memories?: unknown[]; total?: number; nextCursor?: string };
+      };
+      return {
+        memories: (payload.data?.memories ?? []) as never,
+        total: payload.data?.total,
+        nextCursor: payload.data?.nextCursor,
+      };
+    },
+    async read() {
+      throw new Error("fake memory read was not expected");
+    },
+    async search() {
+      throw new Error("fake memory search was not expected");
+    },
+    async store() {
+      throw new Error("fake memory store was not expected");
+    },
+    async propose() {
+      throw new Error("fake memory propose was not expected");
+    },
+  };
 }
 
 function jsonRpcResponse(id: unknown, result: unknown): Response {
