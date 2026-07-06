@@ -263,6 +263,7 @@ interface NativeBridgeBinding {
   validateRuntimeConfigDraftJson(inputJson: string): string;
   planRuntimeConfigJson(inputJson: string): string;
   planCreateProfileJson(inputJson: string): string;
+  planProfileRegistryMutationJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
     drainTimeoutMs: number,
@@ -1541,6 +1542,34 @@ export interface NativeProfileRegistryUpdate {
   expectedRevision: number;
 }
 
+export interface NativeProfileRegistryMutationRequest {
+  profileId: string;
+  kind: "update" | "lifecycle" | "prompt";
+  mode: "plan" | "apply";
+  current: NativeProfileRegistryRecord;
+  bodyJson: unknown;
+  now: string;
+}
+
+export interface NativeProfileRegistryMutationPlan {
+  ok: boolean;
+  profileId: string;
+  kind: "update" | "lifecycle" | "prompt";
+  mode: "plan" | "apply";
+  expectedRevision: number;
+  current: NativeProfileRegistryRecord;
+  next: NativeProfileRegistryRecord;
+  nextWrite: NativeProfileRegistryWrite;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  implications: {
+    registryRevisionWillIncrement: boolean;
+    profileFilesUnchanged: boolean;
+    serviceConfigUnchanged: boolean;
+    runtimeRebuildRecommended: boolean;
+    lifecycleEffects: "none" | "archive_active_sessions_and_unregister_brain";
+  };
+}
+
 export interface NativeCreateProfileFileAssetAction {
   kind: "write_profile_json";
   profileId: string;
@@ -1657,6 +1686,9 @@ export interface NativeBridgeModule {
   planCreateProfile(
     input: NativeCreateProfilePlanInput,
   ): Promise<NativeCreateProfilePlan>;
+  planProfileRegistryMutation(
+    input: NativeProfileRegistryMutationRequest,
+  ): Promise<NativeProfileRegistryMutationPlan>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   cancelDelegatedSession(
@@ -2078,6 +2110,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
     planRuntimeConfig: unavailable("plan_runtime_config"),
     planCreateProfile: unavailable("plan_create_profile"),
+    planProfileRegistryMutation: unavailable("plan_profile_registry_mutation"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
@@ -2753,6 +2786,14 @@ function createNativeBridgeModule(
             JSON.stringify(toNativeCreateProfilePlanInput(input)),
           ),
         ) as RawCreateProfilePlan,
+      ),
+    planProfileRegistryMutation: async (input) =>
+      toNativeProfileRegistryMutationPlan(
+        JSON.parse(
+          binding.planProfileRegistryMutationJson(
+            JSON.stringify(toRawProfileRegistryMutationRequest(input)),
+          ),
+        ) as RawProfileRegistryMutationPlan,
       ),
     injectExternalEvent: async (event) =>
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
@@ -4318,6 +4359,46 @@ function toRawProfileRegistryUpdate(
   };
 }
 
+function toRawProfileRegistryMutationRequest(
+  request: NativeProfileRegistryMutationRequest,
+): RawProfileRegistryMutationRequest {
+  return {
+    profile_id: request.profileId,
+    kind: request.kind,
+    mode: request.mode,
+    current: toRawProfileRegistryRecord(request.current),
+    body_json: request.bodyJson,
+    now: request.now,
+  };
+}
+
+function toNativeProfileRegistryMutationPlan(
+  plan: RawProfileRegistryMutationPlan,
+): NativeProfileRegistryMutationPlan {
+  return {
+    ok: plan.ok,
+    profileId: plan.profile_id,
+    kind: plan.kind,
+    mode: plan.mode,
+    expectedRevision: plan.expected_revision,
+    current: toNativeProfileRegistryRecord(plan.current),
+    next: toNativeProfileRegistryRecord(plan.next),
+    nextWrite: toNativeProfileRegistryWrite(plan.next_write),
+    diagnostics: plan.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      path: diagnostic.path ?? "",
+    })),
+    implications: {
+      registryRevisionWillIncrement:
+        plan.implications.registry_revision_will_increment,
+      profileFilesUnchanged: plan.implications.profile_files_unchanged,
+      serviceConfigUnchanged: plan.implications.service_config_unchanged,
+      runtimeRebuildRecommended: plan.implications.runtime_rebuild_recommended,
+      lifecycleEffects: plan.implications.lifecycle_effects,
+    },
+  };
+}
+
 function toNativeProfileRegistryRecord(
   record: RawProfileRegistryRecord,
 ): NativeProfileRegistryRecord {
@@ -5407,6 +5488,34 @@ interface RawProfileRegistryWrite {
 interface RawProfileRegistryUpdate {
   write: RawProfileRegistryWrite;
   expected_revision: number;
+}
+
+interface RawProfileRegistryMutationRequest {
+  profile_id: string;
+  kind: "update" | "lifecycle" | "prompt";
+  mode: "plan" | "apply";
+  current: RawProfileRegistryRecord;
+  body_json: unknown;
+  now: string;
+}
+
+interface RawProfileRegistryMutationPlan {
+  ok: boolean;
+  profile_id: string;
+  kind: "update" | "lifecycle" | "prompt";
+  mode: "plan" | "apply";
+  expected_revision: number;
+  current: RawProfileRegistryRecord;
+  next: RawProfileRegistryRecord;
+  next_write: RawProfileRegistryWrite;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  implications: {
+    registry_revision_will_increment: boolean;
+    profile_files_unchanged: boolean;
+    service_config_unchanged: boolean;
+    runtime_rebuild_recommended: boolean;
+    lifecycle_effects: "none" | "archive_active_sessions_and_unregister_brain";
+  };
 }
 
 interface RawCreateProfileFileAssetAction {

@@ -33,7 +33,7 @@ import {
   type NativeModelProviderRecord,
   type NativeModelProviderWrite,
   type NativeProfilePurgeReport,
-  type NativeProfileRegistryLifecycleStatus,
+  type NativeProfileRegistryMutationPlan,
   type NativeProfileRegistryRecord,
   type NativeProfileRegistryWrite,
   type NativeRoleplayChatLayersWrite,
@@ -1332,29 +1332,7 @@ function positiveInteger(value: unknown, fieldName: string): number {
   return value;
 }
 
-interface ProfileRegistryWritePlan {
-  ok: boolean;
-  profileId: string;
-  kind: "update" | "lifecycle" | "prompt";
-  mode: "plan" | "apply";
-  expectedRevision: number;
-  current: NativeProfileRegistryRecord;
-  next: NativeProfileRegistryRecord;
-  nextWrite: NativeProfileRegistryWrite;
-  diagnostics: Array<{
-    severity: "error" | "warning" | "info";
-    code: string;
-    path: string;
-    message: string;
-  }>;
-  implications: {
-    registryRevisionWillIncrement: true;
-    profileFilesUnchanged: true;
-    serviceConfigUnchanged: true;
-    runtimeRebuildRecommended: boolean;
-    lifecycleEffects: "none" | "archive_active_sessions_and_unregister_brain";
-  };
-}
+type ProfileRegistryWritePlan = NativeProfileRegistryMutationPlan;
 
 interface ProfileRegistryRuntimeConfigPlan {
   ok: boolean;
@@ -1411,51 +1389,17 @@ async function planProfileRegistryWrite(
       `profile registry record ${route.profileId} was not found; create or import a DB-backed profile before registry mutation`,
     );
   }
-  const expectedRevision = requiredRevision(body);
-  const diagnostics: ProfileRegistryWritePlan["diagnostics"] = [];
-  if (expectedRevision !== current.revision) {
-    diagnostics.push({
-      severity: "error",
-      code: "profile_registry_revision_mismatch",
-      path: "expectedRevision",
-      message: `expected revision ${expectedRevision}, found ${current.revision}`,
-    });
+  if (route.kind === "runtime-config") {
+    throw new Error("runtime-config writes use the runtime-config planner");
   }
-  const next =
-    route.kind === "lifecycle"
-      ? nextProfileRegistryLifecycleRecord(current, body, state.now())
-      : route.kind === "prompt"
-        ? nextProfileRegistryPromptRecord(current, body, state.now())
-        : nextProfileRegistryFieldRecord(current, body, state.now());
-  const nextWrite = profileRegistryRecordToWrite(next, state.now());
-  return {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+  return state.bridge.planProfileRegistryMutation({
     profileId: route.profileId,
-    kind: route.kind as "update" | "lifecycle" | "prompt",
+    kind: route.kind,
     mode: route.mode,
-    expectedRevision,
     current,
-    next,
-    nextWrite,
-    diagnostics,
-    implications: {
-      registryRevisionWillIncrement: true,
-      profileFilesUnchanged: true,
-      serviceConfigUnchanged: true,
-      runtimeRebuildRecommended:
-        route.kind === "lifecycle" ||
-        JSON.stringify(current.activeRuntimeSettingsJson) !==
-          JSON.stringify(next.activeRuntimeSettingsJson) ||
-        current.defaultSessionKind !== next.defaultSessionKind ||
-        current.agentId !== next.agentId ||
-        current.promptSoulMarkdown !== next.promptSoulMarkdown ||
-        current.promptMemoryMarkdown !== next.promptMemoryMarkdown,
-      lifecycleEffects:
-        route.kind === "lifecycle" && next.lifecycleStatus !== "active"
-          ? "archive_active_sessions_and_unregister_brain"
-          : "none",
-    },
-  };
+    bodyJson: body,
+    now: state.now(),
+  });
 }
 
 async function planProfileRegistryRuntimeConfigWrite(
@@ -1529,29 +1473,6 @@ async function planProfileRegistryRuntimeConfigWrite(
   };
 }
 
-function nextProfileRegistryFieldRecord(
-  current: NativeProfileRegistryRecord,
-  body: Record<string, unknown>,
-  now: string,
-): NativeProfileRegistryRecord {
-  return {
-    ...current,
-    displayName: bodyFieldString(body, "displayName", current.displayName),
-    summary: bodyFieldString(body, "summary", current.summary),
-    defaultSessionKind: bodySessionKind(
-      body,
-      "defaultSessionKind",
-      current.defaultSessionKind,
-    ),
-    agentId: bodyFieldString(body, "agentId", current.agentId),
-    ownerId: bodyFieldString(body, "ownerId", current.ownerId),
-    activeRuntimeSettingsJson: Object.hasOwn(body, "activeRuntimeSettingsJson")
-      ? (body.activeRuntimeSettingsJson ?? {})
-      : current.activeRuntimeSettingsJson,
-    updatedAt: now,
-  };
-}
-
 function nextProfileRegistryRuntimeConfigRecord(
   current: NativeProfileRegistryRecord,
   runtimeConfig: EditableProfileRuntimeConfig,
@@ -1579,49 +1500,6 @@ function nextProfileRegistryRuntimeConfigRecord(
         },
       })),
     ],
-    updatedAt: now,
-  };
-}
-
-function nextProfileRegistryPromptRecord(
-  current: NativeProfileRegistryRecord,
-  body: Record<string, unknown>,
-  now: string,
-): NativeProfileRegistryRecord {
-  return {
-    ...current,
-    promptSoulMarkdown: bodyMarkdownField(
-      body,
-      "soulMarkdown",
-      "promptSoulMarkdown",
-      current.promptSoulMarkdown,
-    ),
-    promptMemoryMarkdown: bodyMarkdownField(
-      body,
-      "memoryMarkdown",
-      "promptMemoryMarkdown",
-      current.promptMemoryMarkdown,
-    ),
-    updatedAt: now,
-  };
-}
-
-function nextProfileRegistryLifecycleRecord(
-  current: NativeProfileRegistryRecord,
-  body: Record<string, unknown>,
-  now: string,
-): NativeProfileRegistryRecord {
-  const lifecycleStatus = profileRegistryLifecycleStatusFromBody(
-    body.lifecycleStatus ?? body.lifecycle_status,
-  );
-  return {
-    ...current,
-    lifecycleStatus,
-    derivedRuntimeRefs: current.derivedRuntimeRefs.map((ref) => ({
-      ...ref,
-      status: derivedRuntimeRefStatusForLifecycle(lifecycleStatus),
-      updatedAt: now,
-    })),
     updatedAt: now,
   };
 }
@@ -2161,74 +2039,6 @@ function requiredRevision(body: Record<string, unknown>): number {
     );
   }
   return Number(value);
-}
-
-function bodyFieldString(
-  body: Record<string, unknown>,
-  key: string,
-  current: string | undefined,
-): string | undefined {
-  if (!Object.hasOwn(body, key)) return current;
-  const value = body[key];
-  if (value === null) return undefined;
-  if (typeof value === "string") return value.trim() ? value.trim() : undefined;
-  throw new Error(`${key} must be a string or null`);
-}
-
-function bodyMarkdownField(
-  body: Record<string, unknown>,
-  camelKey: string,
-  registryKey: string,
-  current: string | undefined,
-): string | undefined {
-  const key = Object.hasOwn(body, camelKey)
-    ? camelKey
-    : Object.hasOwn(body, registryKey)
-      ? registryKey
-      : undefined;
-  if (key === undefined) return current;
-  const value = body[key];
-  if (value === null) return undefined;
-  if (typeof value === "string") return value;
-  throw new Error(`${camelKey} must be a string or null`);
-}
-
-function bodySessionKind(
-  body: Record<string, unknown>,
-  key: string,
-  current: "full" | "worker" | "delegated" | undefined,
-): "full" | "worker" | "delegated" | undefined {
-  if (!Object.hasOwn(body, key)) return current;
-  const value = body[key];
-  if (value === null) return undefined;
-  if (value === "full" || value === "worker" || value === "delegated") {
-    return value;
-  }
-  throw new Error(`${key} must be full, worker, delegated, or null`);
-}
-
-function profileRegistryLifecycleStatusFromBody(
-  value: unknown,
-): NativeProfileRegistryLifecycleStatus {
-  if (
-    value === "active" ||
-    value === "paused" ||
-    value === "decommissioned" ||
-    value === "archived"
-  ) {
-    return value;
-  }
-  throw new Error(
-    "lifecycleStatus must be active, paused, decommissioned, or archived",
-  );
-}
-
-function derivedRuntimeRefStatusForLifecycle(
-  status: NativeProfileRegistryLifecycleStatus,
-): string {
-  if (status === "active") return "active";
-  if (status === "paused") return "paused";
-  return "disabled";
 }
 
 async function modelProviderRefreshAfterWrite(input: {

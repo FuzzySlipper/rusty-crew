@@ -16,7 +16,8 @@ use rusty_crew_core_bridge_api::{
 };
 use rusty_crew_core_config::{
     plan_create_profile, plan_runtime_config, validate_runtime_config_input, CreateProfilePlan,
-    CreateProfilePlanInput, RuntimeConfigPlan, RuntimeConfigValidationInput,
+    CreateProfilePlanInput, ProfileRegistryMutationPlan, ProfileRegistryMutationRequest,
+    RuntimeConfigPlan, RuntimeConfigValidationInput,
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
@@ -121,6 +122,13 @@ impl NativeBridge {
 
     pub fn plan_create_profile(&self, input: CreateProfilePlanInput) -> CreateProfilePlan {
         plan_create_profile(&input)
+    }
+
+    pub fn plan_profile_registry_mutation(
+        &self,
+        input: ProfileRegistryMutationRequest,
+    ) -> Result<ProfileRegistryMutationPlan, String> {
+        rusty_crew_core_config::plan_profile_registry_mutation(&input)
     }
 
     pub fn plan_runtime_config(&self, input: RuntimeConfigValidationInput) -> RuntimeConfigPlan {
@@ -2614,6 +2622,23 @@ impl NativeBridgeBinding {
         })?;
         let bridge = self.bridge()?;
         let plan = bridge.plan_create_profile(input);
+        serde_json::to_string(&plan)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
+    pub fn plan_profile_registry_mutation_json(&self, input_json: String) -> napi::Result<String> {
+        let input: ProfileRegistryMutationRequest =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid profile registry mutation plan input JSON: {error}"),
+                )
+            })?;
+        let bridge = self.bridge()?;
+        let plan = bridge
+            .plan_profile_registry_mutation(input)
+            .map_err(|error| napi::Error::new(napi::Status::InvalidArg, error))?;
         serde_json::to_string(&plan)
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }

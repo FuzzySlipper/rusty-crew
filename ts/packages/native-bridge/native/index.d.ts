@@ -7,6 +7,7 @@ export declare class NativeBridgeBinding {
   get wireShapeFingerprint(): string
   validateRuntimeConfigDraftJson(inputJson: string): string
   planCreateProfileJson(inputJson: string): string
+  planProfileRegistryMutationJson(inputJson: string): string
   planRuntimeConfigJson(inputJson: string): string
   initializeEngine(config: JsEngineConfig): number
   shutdownEngine(engine: number, drainTimeoutMs: number): JsShutdownSummary

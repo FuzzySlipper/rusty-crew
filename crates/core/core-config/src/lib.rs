@@ -7,8 +7,8 @@
 use rusty_crew_core_protocol::{
     AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ProfileId,
     ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
-    ProfileRegistryLifecycleStatus, ProfileRegistrySourceAssetRef, ProfileRegistryWrite,
-    ResourceLimits, SessionHistoryWindow, SessionId, SessionKind,
+    ProfileRegistryLifecycleStatus, ProfileRegistryRecord, ProfileRegistrySourceAssetRef,
+    ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -133,6 +133,54 @@ impl CreateProfilePlan {
             .iter()
             .any(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileRegistryMutationKind {
+    Update,
+    Lifecycle,
+    Prompt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileRegistryMutationMode {
+    Plan,
+    Apply,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryMutationRequest {
+    pub profile_id: ProfileId,
+    pub kind: ProfileRegistryMutationKind,
+    pub mode: ProfileRegistryMutationMode,
+    pub current: ProfileRegistryRecord,
+    pub body_json: Value,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryMutationImplications {
+    pub registry_revision_will_increment: bool,
+    pub profile_files_unchanged: bool,
+    pub service_config_unchanged: bool,
+    pub runtime_rebuild_recommended: bool,
+    pub lifecycle_effects: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRegistryMutationPlan {
+    pub ok: bool,
+    pub profile_id: ProfileId,
+    pub kind: ProfileRegistryMutationKind,
+    pub mode: ProfileRegistryMutationMode,
+    pub expected_revision: u64,
+    pub current: ProfileRegistryRecord,
+    pub next: ProfileRegistryRecord,
+    pub next_write: ProfileRegistryWrite,
+    pub diagnostics: Vec<RuntimeConfigDiagnostic>,
+    pub implications: ProfileRegistryMutationImplications,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1123,6 +1171,281 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
     }
 }
 
+pub fn plan_profile_registry_mutation(
+    input: &ProfileRegistryMutationRequest,
+) -> Result<ProfileRegistryMutationPlan, String> {
+    let body = input
+        .body_json
+        .as_object()
+        .ok_or_else(|| "profile registry write body must be an object".to_string())?;
+    if input.current.profile_id != input.profile_id {
+        return Err(format!(
+            "profile registry plan profile id mismatch: route={}, current={}",
+            input.profile_id, input.current.profile_id
+        ));
+    }
+    let expected_revision = required_revision(body)?;
+    let mut diagnostics = Vec::new();
+    if expected_revision != input.current.revision {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "profile_registry_revision_mismatch",
+            "expectedRevision",
+            format!(
+                "expected revision {expected_revision}, found {}",
+                input.current.revision
+            ),
+        ));
+    }
+
+    let next = match input.kind {
+        ProfileRegistryMutationKind::Update => {
+            next_profile_registry_field_record(&input.current, body, &input.now)?
+        }
+        ProfileRegistryMutationKind::Lifecycle => {
+            next_profile_registry_lifecycle_record(&input.current, body, &input.now)?
+        }
+        ProfileRegistryMutationKind::Prompt => {
+            next_profile_registry_prompt_record(&input.current, body, &input.now)?
+        }
+    };
+    let next_write = profile_registry_record_to_write(&next, &input.now);
+    let runtime_rebuild_recommended = matches!(input.kind, ProfileRegistryMutationKind::Lifecycle)
+        || input.current.active_runtime_settings_json != next.active_runtime_settings_json
+        || input.current.default_session_kind != next.default_session_kind
+        || input.current.agent_id != next.agent_id
+        || input.current.prompt_soul_markdown != next.prompt_soul_markdown
+        || input.current.prompt_memory_markdown != next.prompt_memory_markdown;
+    let lifecycle_effects = if matches!(input.kind, ProfileRegistryMutationKind::Lifecycle)
+        && next.lifecycle_status != ProfileRegistryLifecycleStatus::Active
+    {
+        "archive_active_sessions_and_unregister_brain"
+    } else {
+        "none"
+    };
+
+    Ok(ProfileRegistryMutationPlan {
+        ok: !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error),
+        profile_id: input.profile_id.clone(),
+        kind: input.kind.clone(),
+        mode: input.mode.clone(),
+        expected_revision,
+        current: input.current.clone(),
+        next,
+        next_write,
+        diagnostics,
+        implications: ProfileRegistryMutationImplications {
+            registry_revision_will_increment: true,
+            profile_files_unchanged: true,
+            service_config_unchanged: true,
+            runtime_rebuild_recommended,
+            lifecycle_effects: lifecycle_effects.to_string(),
+        },
+    })
+}
+
+fn required_revision(body: &serde_json::Map<String, Value>) -> Result<u64, String> {
+    body.get("expectedRevision")
+        .or_else(|| body.get("expected_revision"))
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "expectedRevision is required and must be a positive integer".to_string())
+}
+
+fn next_profile_registry_field_record(
+    current: &ProfileRegistryRecord,
+    body: &serde_json::Map<String, Value>,
+    now: &str,
+) -> Result<ProfileRegistryRecord, String> {
+    let mut next = current.clone();
+    next.display_name = body_field_string(body, "displayName", current.display_name.clone())?;
+    next.summary = body_field_string(body, "summary", current.summary.clone())?;
+    next.default_session_kind = body_session_kind(
+        body,
+        "defaultSessionKind",
+        current.default_session_kind.clone(),
+    )?;
+    next.agent_id = body_field_string(
+        body,
+        "agentId",
+        current.agent_id.as_ref().map(ToString::to_string),
+    )?
+    .map(AgentId::new);
+    next.owner_id = body_field_string(body, "ownerId", current.owner_id.clone())?;
+    if body.contains_key("activeRuntimeSettingsJson") {
+        next.active_runtime_settings_json = body
+            .get("activeRuntimeSettingsJson")
+            .cloned()
+            .unwrap_or(Value::Null);
+    }
+    next.updated_at = now.to_string();
+    Ok(next)
+}
+
+fn next_profile_registry_prompt_record(
+    current: &ProfileRegistryRecord,
+    body: &serde_json::Map<String, Value>,
+    now: &str,
+) -> Result<ProfileRegistryRecord, String> {
+    let mut next = current.clone();
+    next.prompt_soul_markdown = body_markdown_field(
+        body,
+        "soulMarkdown",
+        "promptSoulMarkdown",
+        current.prompt_soul_markdown.clone(),
+    )?;
+    next.prompt_memory_markdown = body_markdown_field(
+        body,
+        "memoryMarkdown",
+        "promptMemoryMarkdown",
+        current.prompt_memory_markdown.clone(),
+    )?;
+    next.updated_at = now.to_string();
+    Ok(next)
+}
+
+fn next_profile_registry_lifecycle_record(
+    current: &ProfileRegistryRecord,
+    body: &serde_json::Map<String, Value>,
+    now: &str,
+) -> Result<ProfileRegistryRecord, String> {
+    let lifecycle_status = body
+        .get("lifecycleStatus")
+        .or_else(|| body.get("lifecycle_status"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            "lifecycleStatus must be active, paused, decommissioned, or archived".to_string()
+        })
+        .and_then(profile_registry_lifecycle_status_from_str)?;
+    let mut next = current.clone();
+    next.lifecycle_status = lifecycle_status;
+    next.derived_runtime_refs = current
+        .derived_runtime_refs
+        .iter()
+        .cloned()
+        .map(|mut runtime_ref| {
+            runtime_ref.status =
+                derived_runtime_ref_status_for_lifecycle(next.lifecycle_status).to_string();
+            runtime_ref.updated_at = Some(now.to_string());
+            runtime_ref
+        })
+        .collect();
+    next.updated_at = now.to_string();
+    Ok(next)
+}
+
+fn profile_registry_record_to_write(
+    record: &ProfileRegistryRecord,
+    now: &str,
+) -> ProfileRegistryWrite {
+    ProfileRegistryWrite {
+        profile_id: record.profile_id.clone(),
+        lifecycle_status: record.lifecycle_status,
+        display_name: record.display_name.clone(),
+        summary: record.summary.clone(),
+        default_session_kind: record.default_session_kind.clone(),
+        agent_id: record.agent_id.clone(),
+        owner_id: record.owner_id.clone(),
+        prompt_soul_markdown: record.prompt_soul_markdown.clone(),
+        prompt_memory_markdown: record.prompt_memory_markdown.clone(),
+        active_runtime_settings_json: record.active_runtime_settings_json.clone(),
+        source_asset_refs: record.source_asset_refs.clone(),
+        derived_runtime_refs: record.derived_runtime_refs.clone(),
+        import_export: record.import_export.clone(),
+        now: now.to_string(),
+    }
+}
+
+fn body_field_string(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+    current: Option<String>,
+) -> Result<Option<String>, String> {
+    let Some(value) = body.get(key) else {
+        return Ok(current);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let raw = value
+        .as_str()
+        .ok_or_else(|| format!("{key} must be a string or null"))?
+        .trim()
+        .to_string();
+    Ok((!raw.is_empty()).then_some(raw))
+}
+
+fn body_markdown_field(
+    body: &serde_json::Map<String, Value>,
+    camel_key: &str,
+    registry_key: &str,
+    current: Option<String>,
+) -> Result<Option<String>, String> {
+    let key = if body.contains_key(camel_key) {
+        Some(camel_key)
+    } else if body.contains_key(registry_key) {
+        Some(registry_key)
+    } else {
+        None
+    };
+    let Some(key) = key else {
+        return Ok(current);
+    };
+    let value = &body[key];
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(
+        value
+            .as_str()
+            .ok_or_else(|| format!("{camel_key} must be a string or null"))?
+            .to_string(),
+    ))
+}
+
+fn body_session_kind(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+    current: Option<SessionKind>,
+) -> Result<Option<SessionKind>, String> {
+    let Some(value) = body.get(key) else {
+        return Ok(current);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    match value.as_str() {
+        Some("full") => Ok(Some(SessionKind::Full)),
+        Some("worker") => Ok(Some(SessionKind::Worker)),
+        Some("delegated") => Ok(Some(SessionKind::Delegated)),
+        _ => Err(format!("{key} must be full, worker, delegated, or null")),
+    }
+}
+
+fn profile_registry_lifecycle_status_from_str(
+    value: &str,
+) -> Result<ProfileRegistryLifecycleStatus, String> {
+    match value {
+        "active" => Ok(ProfileRegistryLifecycleStatus::Active),
+        "paused" => Ok(ProfileRegistryLifecycleStatus::Paused),
+        "decommissioned" => Ok(ProfileRegistryLifecycleStatus::Decommissioned),
+        "archived" => Ok(ProfileRegistryLifecycleStatus::Archived),
+        _ => Err("lifecycleStatus must be active, paused, decommissioned, or archived".to_string()),
+    }
+}
+
+fn derived_runtime_ref_status_for_lifecycle(
+    status: ProfileRegistryLifecycleStatus,
+) -> &'static str {
+    match status {
+        ProfileRegistryLifecycleStatus::Active => "active",
+        ProfileRegistryLifecycleStatus::Paused => "paused",
+        ProfileRegistryLifecycleStatus::Decommissioned
+        | ProfileRegistryLifecycleStatus::Archived => "disabled",
+    }
+}
+
 fn create_profile_runtime_settings_json(
     provider_alias: &str,
     brain: &ProfileBrainMetadata,
@@ -1832,6 +2155,93 @@ mod tests {
     use super::*;
 
     #[test]
+    fn profile_registry_mutation_reports_revision_mismatch() {
+        let plan = plan_profile_registry_mutation(&ProfileRegistryMutationRequest {
+            profile_id: ProfileId::new("runner"),
+            kind: ProfileRegistryMutationKind::Update,
+            mode: ProfileRegistryMutationMode::Plan,
+            current: registry_record("runner"),
+            body_json: json!({
+                "expectedRevision": 3,
+                "displayName": "Updated Runner"
+            }),
+            now: "2026-07-06T00:00:00.000Z".to_string(),
+        })
+        .expect("profile registry mutation should plan");
+
+        assert!(!plan.ok);
+        assert_eq!(plan.expected_revision, 3);
+        assert_eq!(plan.next.display_name.as_deref(), Some("Updated Runner"));
+        assert_codes(
+            &RuntimeConfigValidationResult {
+                diagnostics: plan.diagnostics,
+            },
+            &["profile_registry_revision_mismatch"],
+        );
+    }
+
+    #[test]
+    fn profile_registry_lifecycle_plan_updates_runtime_refs_and_effects() {
+        let plan = plan_profile_registry_mutation(&ProfileRegistryMutationRequest {
+            profile_id: ProfileId::new("runner"),
+            kind: ProfileRegistryMutationKind::Lifecycle,
+            mode: ProfileRegistryMutationMode::Apply,
+            current: registry_record("runner"),
+            body_json: json!({
+                "expectedRevision": 7,
+                "lifecycleStatus": "decommissioned"
+            }),
+            now: "2026-07-06T00:00:00.000Z".to_string(),
+        })
+        .expect("profile registry lifecycle should plan");
+
+        assert!(plan.ok, "{:?}", plan.diagnostics);
+        assert_eq!(
+            plan.next.lifecycle_status,
+            ProfileRegistryLifecycleStatus::Decommissioned
+        );
+        assert!(plan
+            .next
+            .derived_runtime_refs
+            .iter()
+            .all(|reference| reference.status == "disabled"));
+        assert_eq!(
+            plan.implications.lifecycle_effects,
+            "archive_active_sessions_and_unregister_brain"
+        );
+        assert!(plan.implications.runtime_rebuild_recommended);
+    }
+
+    #[test]
+    fn profile_registry_prompt_plan_preserves_markdown_and_next_write() {
+        let plan = plan_profile_registry_mutation(&ProfileRegistryMutationRequest {
+            profile_id: ProfileId::new("runner"),
+            kind: ProfileRegistryMutationKind::Prompt,
+            mode: ProfileRegistryMutationMode::Apply,
+            current: registry_record("runner"),
+            body_json: json!({
+                "expectedRevision": 7,
+                "soulMarkdown": "# Soul\n\nKeep exact spacing.  ",
+                "memoryMarkdown": null
+            }),
+            now: "2026-07-06T00:00:00.000Z".to_string(),
+        })
+        .expect("profile registry prompt should plan");
+
+        assert!(plan.ok, "{:?}", plan.diagnostics);
+        assert_eq!(
+            plan.next.prompt_soul_markdown.as_deref(),
+            Some("# Soul\n\nKeep exact spacing.  ")
+        );
+        assert_eq!(plan.next.prompt_memory_markdown, None);
+        assert_eq!(
+            plan.next_write.prompt_soul_markdown.as_deref(),
+            Some("# Soul\n\nKeep exact spacing.  ")
+        );
+        assert_eq!(plan.next_write.now, "2026-07-06T00:00:00.000Z");
+    }
+
+    #[test]
     fn validates_a_runtime_config_graph() {
         let result = validate_runtime_config_draft(&valid_draft(), &[profile("runner")]);
         assert!(result.ok(), "{:?}", result.diagnostics);
@@ -2509,6 +2919,56 @@ mod tests {
             channel_defaults: Some(ProfileChannelDefaults {
                 wake_policy: Some(ChannelWakePolicy::Subscription),
             }),
+        }
+    }
+
+    fn registry_record(profile_id: &str) -> ProfileRegistryRecord {
+        ProfileRegistryRecord {
+            profile_id: ProfileId::new(profile_id),
+            lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+            display_name: Some("Runner".to_string()),
+            summary: Some("Runs work".to_string()),
+            default_session_kind: Some(SessionKind::Full),
+            agent_id: Some(AgentId::new("runner-agent")),
+            owner_id: Some("owner".to_string()),
+            prompt_soul_markdown: Some("old soul".to_string()),
+            prompt_memory_markdown: Some("old memory".to_string()),
+            active_runtime_settings_json: json!({
+                "providerAlias": "default",
+            }),
+            source_asset_refs: vec![ProfileRegistrySourceAssetRef {
+                asset_kind: "profile_json".to_string(),
+                path: "runner.json".to_string(),
+                content_hash: None,
+                last_seen_at: None,
+                metadata_json: json!({}),
+            }],
+            derived_runtime_refs: vec![
+                ProfileRegistryDerivedRuntimeRef {
+                    ref_kind: "session".to_string(),
+                    ref_id: "runner-session".to_string(),
+                    status: "active".to_string(),
+                    updated_at: None,
+                    metadata_json: json!({}),
+                },
+                ProfileRegistryDerivedRuntimeRef {
+                    ref_kind: "brain".to_string(),
+                    ref_id: "runner-brain".to_string(),
+                    status: "active".to_string(),
+                    updated_at: None,
+                    metadata_json: json!({}),
+                },
+            ],
+            import_export: ProfileRegistryImportExportMetadata {
+                imported_from: None,
+                imported_at: None,
+                exported_to: None,
+                exported_at: None,
+                metadata_json: json!({}),
+            },
+            revision: 7,
+            created_at: "2026-07-05T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-05T00:00:00.000Z".to_string(),
         }
     }
 

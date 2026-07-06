@@ -200,6 +200,15 @@ errors = "core_protocol::CoreError"
 summary = "Plan runtime/profile seed defaults for an admin create-profile request without writing files or mutating engine state."
 
 [[operation]]
+name = "plan_profile_registry_mutation"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::ProfileRegistryMutationRequest"
+output = "core_config::ProfileRegistryMutationPlan"
+errors = "core_protocol::CoreError"
+summary = "Plan profile registry field, prompt, and lifecycle mutations from a frozen current record without mutating files or engine state."
+
+[[operation]]
 name = "inject_external_event"
 surface = "stable"
 direction = "ts_to_rust"

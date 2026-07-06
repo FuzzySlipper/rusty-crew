@@ -1565,6 +1565,7 @@ export const manifestOperationNames = [
   "validate_runtime_config_draft",
   "plan_runtime_config",
   "plan_create_profile",
+  "plan_profile_registry_mutation",
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
