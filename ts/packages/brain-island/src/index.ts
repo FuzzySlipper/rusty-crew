@@ -12,6 +12,12 @@ export {
   envelope,
   registerBrainImplementationRuntime,
 } from "./local-brain.js";
+export * from "./package-surface/service.js";
+export * from "./package-surface/observation.js";
+export * from "./package-surface/diagnostics.js";
+export * from "./package-surface/admin.js";
+export * from "./package-surface/background.js";
+export * from "./package-surface/debug.js";
 
 export type {
   PiAgentBrainOptions,
@@ -33,28 +39,6 @@ export type {
   ProviderRequestDebugStore,
 } from "./provider-request-debug-store.js";
 export { MemoryProviderRequestDebugStore } from "./provider-request-debug-store.js";
-export {
-  acquireRustyCrewServiceLock,
-  ensureRustyCrewServiceDirectories,
-  loadRustyCrewServiceConfig,
-  RUSTY_CREW_DEFAULT_ADMIN_HOST,
-  RUSTY_CREW_DEFAULT_ADMIN_PORT,
-  RUSTY_CREW_DEFAULT_DATA_DIR,
-  validateRustyCrewServiceConfig,
-} from "./service-config.js";
-export type {
-  RustyCrewBackgroundConfig,
-  RustyCrewAdminConfig,
-  RustyCrewServiceConfig,
-  RustyCrewServiceEnv,
-  RustyCrewServiceLock,
-  RustyCrewServicePaths,
-} from "./service-config.js";
-export { createRustyCrewServiceApp } from "./service-app.js";
-export type {
-  RustyCrewServiceApp,
-  RustyCrewServiceAppOptions,
-} from "./service-app.js";
 export {
   combineResolvers,
   resolveToolSession,
@@ -98,65 +82,6 @@ export {
 } from "./mid-turn-delta.js";
 export type { DrainResult, QueuedMidTurnMessage } from "./mid-turn-delta.js";
 export {
-  adapterActivity,
-  adminCommandActivity,
-  AgentActivityObservationProducer,
-  createAgentActivityObservationEvent,
-  createMemoryAgentActivityObservationSink,
-  sessionActivity,
-  toolActivity,
-  workActivity,
-} from "./agent-activity-observation.js";
-export type {
-  AgentActivityEventInput,
-  AgentActivityEventType,
-  AgentActivityObservationEvent,
-  AgentActivityObservationSink,
-  AgentActivityPayload,
-  AgentActivityPublishResult,
-  AgentActivityResultRef,
-  AgentActivitySeverity,
-  AgentActivityVisibility,
-  AgentActivityWorkRef,
-  AgentObservationIdentity,
-  MemoryAgentActivityObservationSink,
-  ObservationSourceDomain,
-} from "./agent-activity-observation.js";
-export {
-  createRuntimeActivityObserver,
-  RuntimeActivityObserver,
-} from "./runtime-activity-observer.js";
-export type {
-  RuntimeActivityObserverOptions,
-  RuntimeActivityResult,
-  RuntimeAdapterActivityInput,
-  RuntimeSessionActivityInput,
-  RuntimeToolActivityInput,
-  RuntimeWorkActivityInput,
-} from "./runtime-activity-observer.js";
-export { publishBackgroundGovernanceObservation } from "./background-governance-observation.js";
-export type {
-  BackgroundGovernanceLoopKind,
-  BackgroundGovernanceObservationInput,
-  BackgroundGovernancePhase,
-} from "./background-governance-observation.js";
-export { buildBackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
-export type {
-  BackgroundReviewDiagnostics,
-  BackgroundServiceDiagnosticsInput,
-  BackgroundServiceDiagnosticsProjection,
-  BackgroundServiceHealth,
-  BackgroundServiceIssue,
-  CleanupBackgroundDiagnostics,
-  CuratorBackgroundDiagnostics,
-  SchedulerBackgroundDiagnostics,
-} from "./background-service-diagnostics.js";
-export { createBackgroundAdminControlExecutor } from "./background-admin-control.js";
-export type {
-  BackgroundAdminControlOptions,
-  SchedulerAdminControlOptions,
-} from "./background-admin-control.js";
-export {
   createDenRouterPiAgentFactory,
   resolveDenRouterModel,
 } from "./den-router-agent.js";
@@ -175,24 +100,6 @@ export type {
   DelegatedRoleInput,
   DelegationRoleContext,
 } from "./delegated-role-assembly.js";
-export {
-  CronExpression,
-  CronExpressionError,
-  nextCronDueAt,
-} from "./cron-expression.js";
-export type { CronFieldRange, CronNextOptions } from "./cron-expression.js";
-export { parseCronArgs, runRustyCrewCronCli } from "./cron-cli.js";
-export type { CronCliCommand, CronCliOptions } from "./cron-cli.js";
-export {
-  executeScheduledHostRun,
-  RUNTIME_DIAGNOSTICS_SNAPSHOT_JOB_KIND,
-  runScheduledHostExecutors,
-  scheduledHostJobKinds,
-} from "./scheduled-host-executors.js";
-export type {
-  ScheduledHostExecutorContext,
-  ScheduledHostExecutorReport,
-} from "./scheduled-host-executors.js";
 export {
   gitDiffTool,
   gitStatusTool,
@@ -441,49 +348,6 @@ export type {
   WebDiagnosticsInput,
   WebProviderDiagnostics,
 } from "./web-browser-diagnostics.js";
-export { buildAdapterDiagnosticsProjection } from "./adapter-diagnostics.js";
-export type {
-  AdapterDiagnosticsInput,
-  AdapterDiagnosticsProjection,
-  AdapterHealthStatus,
-  ChannelAdapterBindingDiagnostics,
-  ChannelProjectionFailureRecord,
-  McpAdapterSurfaceDiagnostics,
-} from "./adapter-diagnostics.js";
-export { buildRuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
-export type {
-  DiagnosticsHealth,
-  DiagnosticsIssue,
-  DiagnosticsReasonCode,
-  ObservationDiagnosticsInput,
-  ObservationDiagnosticsProjection,
-  PersistenceDiagnosticsInput,
-  PersistenceDiagnosticsProjection,
-  QueueDiagnosticsInput,
-  QueueDiagnosticsProjection,
-  RuntimeCounterSummary,
-  RuntimeDelegationDiagnostics,
-  RuntimeDiagnosticError,
-  RuntimeDiagnosticsInput,
-  RuntimeDiagnosticsProjection,
-  RuntimeSessionDiagnostics,
-  StorageDiagnosticsProjection,
-  ToolDiagnosticsProjection,
-} from "./runtime-diagnostics.js";
-export { buildRuntimeHealthProjection, issueDomain } from "./runtime-health.js";
-export type {
-  RuntimeDegradedStatus,
-  RuntimeHealthDomain,
-  RuntimeHealthDomainStatus,
-  RuntimeHealthProbe,
-  RuntimeHealthProjection,
-  RuntimeMetricSample,
-  RuntimeReadinessProbe,
-} from "./runtime-health.js";
-export {
-  buildToolContextDiagnosticsReport,
-  formatToolContextDiagnosticsMarkdown,
-} from "./tool-context-diagnostics.js";
 export {
   discoverCuratorCandidates,
   renderCuratorCandidateReport,
@@ -544,13 +408,6 @@ export type {
   CuratorAdminControlOptions,
   CuratorAdminStatus,
 } from "./curator-admin-control.js";
-export { runDelegatedResourceCleanup } from "./delegated-resource-cleanup.js";
-export type {
-  AdapterCleanupResult,
-  DelegatedResourceAdapterCleanup,
-  DelegatedResourceCleanupInput,
-  DelegatedResourceCleanupResult,
-} from "./delegated-resource-cleanup.js";
 export { runBackgroundMemorySkillReview } from "./background-memory-skill-review.js";
 export type {
   BackgroundReviewCandidateKind,
@@ -596,64 +453,6 @@ export type {
   CaptureProducerProviderResult,
   CaptureProviderJsonTransport,
 } from "./capture-producer-provider.js";
-export type {
-  TextSurfaceSummary,
-  ToolContextAdapterSummary,
-  ToolContextAssemblySummary,
-  ToolContextDiagnosticTool,
-  ToolContextDiagnosticsInput,
-  ToolContextDiagnosticsIssue,
-  ToolContextDiagnosticsReport,
-  ToolContextDiagnosticsSession,
-  ToolContextMemorySkillsPlanningInput,
-  ToolContextMemorySkillsPlanningSummary,
-  ToolContextDiagnosticsSummary,
-  ToolContextPolicySummary,
-  ToolContextReasonCode,
-  ToolContextResourceSummary,
-  ToolContextSkillSummary,
-  ToolContextToolStatus,
-  DenMemoryDiagnosticsInput,
-  DenseProfileMemoryDiagnosticsInput,
-  RuntimeCounterDiagnosticsInput,
-  SessionSearchDiagnosticsInput,
-  SkillRootDiagnosticsInput,
-  TodoDiagnosticsInput,
-} from "./tool-context-diagnostics.js";
-export {
-  inspectDirectDebugSession,
-  requestDirectDebugTurn,
-} from "./direct-debug-service.js";
-export type {
-  DirectDebugContextView,
-  DirectDebugControlSummary,
-  DirectDebugErrorCode,
-  DirectDebugInspectRequest,
-  DirectDebugMessageSummary,
-  DirectDebugRecentEventSummary,
-  DirectDebugResult,
-  DirectDebugRuntimeSummary,
-  DirectDebugServiceContext,
-  DirectDebugSessionSource,
-  DirectDebugSessionSummary,
-  DirectDebugSessionView,
-  DirectDebugTurnExecutor,
-  DirectDebugTurnExecutorInput,
-  DirectDebugTurnOutcome,
-  DirectDebugTurnRequest,
-} from "./direct-debug-service.js";
-export {
-  createDebugApiClient,
-  DebugApiClientError,
-} from "./debug-api-client.js";
-export type {
-  DebugApiClient,
-  DebugApiClientOptions,
-  DebugApiFetch,
-  DebugApiQuery,
-  DebugDiagnosticsBundle,
-  DirectDebugContextRequest,
-} from "./debug-api-client.js";
 export {
   BrowserSessionManager,
   createChromiumBrowserLauncher,
@@ -702,111 +501,6 @@ export type {
   BrowserToolResolverContext,
   BrowserVisionDetails,
 } from "./browser-tools.js";
-export { handleAdminDiagnosticsRequest } from "./admin-diagnostics-api.js";
-export type {
-  AdminAgentDiagnostics,
-  AdminApiEnvelope,
-  AdminApiMeta,
-  AdminDiagnosticsContext,
-  AdminDiagnosticsRouteRequest,
-  AdminErrorCode,
-  AdminPage,
-  AdminRecentEvent,
-  AdminRouteResult,
-} from "./admin-diagnostics-api.js";
-export {
-  executeStorageQuery,
-  handleStorageQueryRequest,
-  storageQueryCatalog,
-  storageQueryCatalogTool,
-  storageQueryExecuteTool,
-} from "./storage-query-catalog.js";
-export type {
-  StorageQueryCatalog,
-  StorageQueryContext,
-  StorageQueryDescriptor,
-  StorageQueryExecuteToolDetails,
-  StorageQueryId,
-  StorageQueryParameter,
-  StorageQueryResult,
-  StorageQueryRouteRequest,
-} from "./storage-query-catalog.js";
-export {
-  createMemoryAdminControlAuditSink,
-  handleAdminControlRequest,
-} from "./admin-control-api.js";
-export type {
-  AdminControlActor,
-  AdminControlAuditEvent,
-  AdminControlAuditSink,
-  AdminControlAuthConfig,
-  AdminControlCommand,
-  AdminControlCommandName,
-  AdminControlContext,
-  AdminControlExecutor,
-  AdminControlOutcome,
-  AdminControlResponse,
-  AdminControlRouteRequest,
-  AdminControlStatus,
-  MemoryAdminControlAuditSink,
-} from "./admin-control-api.js";
-export {
-  API_CAPABILITIES,
-  ADMIN_CONTROL_CAPABILITIES,
-  SLASH_COMMAND_REGISTRY,
-  apiCapabilityRegistry,
-  chatApiCapabilityPaths,
-  chatCommandAutocomplete,
-  chatCommandRegistry,
-  findSlashCommandDescriptor,
-  slashCommandNames,
-} from "./api-command-registry.js";
-export type {
-  ApiCapabilityAuth,
-  ApiCapabilityDescriptor,
-  ApiCapabilityMutation,
-  ApiCapabilityRegistry,
-  ApiCapabilityScope,
-  ApiCapabilityStability,
-  ChatCommandArgumentDescriptor,
-  ChatCommandArgumentType,
-  ChatCommandAutocompleteResult,
-  ChatCommandDescriptor,
-  ChatCommandEnumValue,
-  ChatCommandRegistry,
-  ChatCommandSource,
-  ChatCommandSurface,
-  SlashCommandDescriptor,
-} from "./api-command-registry.js";
-export { routeSlashCommand } from "./slash-command-router.js";
-export type {
-  SlashCommandActor,
-  SlashCommandControlRequest,
-  SlashCommandInput,
-  SlashCommandName,
-  SlashCommandResponse,
-  SlashCommandRouteResult,
-  SlashCommandRouterOptions,
-  SlashCommandSession,
-  SlashCommandStatus,
-} from "./slash-command-router.js";
-export { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
-export type { SlashCommandResponseContext } from "./slash-command-responses.js";
-export { createNewSessionLifecycleExecutor } from "./new-session-lifecycle.js";
-export type {
-  NewSessionLifecycleAuditEvent,
-  NewSessionLifecycleAuditSink,
-  NewSessionLifecycleOptions,
-  NewSessionLifecyclePhase,
-  NewSessionTemplate,
-} from "./new-session-lifecycle.js";
-export { createReloadMcpControlExecutor } from "./reload-mcp-control.js";
-export type {
-  ReloadMcpControlOptions,
-  ReloadMcpLifecycleAuditEvent,
-  ReloadMcpLifecycleAuditSink,
-  ReloadMcpLifecyclePhase,
-} from "./reload-mcp-control.js";
 export {
   assertValidToolRegistry,
   buildToolInventory,
@@ -974,4 +668,3 @@ export type {
   ContextCompactionTriggerDecision,
   ContextCompactionTriggerInput,
 } from "./context-compaction-trigger.js";
-export type { ServiceAdapterFactories } from "./service-adapter-ports.js";
