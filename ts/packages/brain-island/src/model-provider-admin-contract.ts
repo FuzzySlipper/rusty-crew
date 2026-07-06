@@ -1,0 +1,121 @@
+export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.1.0";
+
+export const MODEL_PROVIDER_ADMIN_OPENAPI_PATH =
+  "docs/model-provider-admin-api-v0.openapi.json";
+
+export const MODEL_PROVIDER_TEMPERATURE_MILLI_SCALE = 1_000;
+
+export const MODEL_PROVIDER_STATUS_VALUES = [
+  "active",
+  "disabled",
+  "archived",
+] as const;
+
+export const MODEL_PROVIDER_PROTOCOL_VALUES = [
+  "responses",
+  "chat_completions",
+] as const;
+
+export const MODEL_PROVIDER_REFRESH_MODE_VALUES = [
+  "none",
+  "plan",
+  "apply",
+] as const;
+
+export const MODEL_PROVIDER_CREDENTIAL_KIND_VALUES = [
+  "api_key",
+  "openai_oauth",
+  "legacy_raw_api_key",
+] as const;
+
+export const MODEL_PROVIDER_ADMIN_PATHS = {
+  listCreate: "/v1/admin/model-providers",
+  getUpdate: "/v1/admin/model-providers/{alias}",
+  openAiOauthStatus: "/v1/admin/model-providers/{alias}/oauth/openai/status",
+  openAiOauthStart: "/v1/admin/model-providers/{alias}/oauth/openai/start",
+  openAiOauthComplete:
+    "/v1/admin/model-providers/{alias}/oauth/openai/complete",
+  openAiOauthClear: "/v1/admin/model-providers/{alias}/oauth/openai/clear",
+} as const;
+
+export const MODEL_PROVIDER_ADMIN_REASON_CODES = {
+  invalidStatus: "invalid_model_provider_status",
+  notFound: "model_provider_not_found",
+  revisionMismatch: "model_provider_revision_mismatch",
+  methodNotAllowed: "model_provider_method_not_allowed",
+  oauthMethodNotAllowed: "openai_oauth_provider_method_not_allowed",
+  oauthUnregisteredRedirectUri: "openai_oauth_unregistered_redirect_uri",
+  oauthInvalidCallbackUrl: "openai_oauth_invalid_callback_url",
+  oauthCallbackError: "openai_oauth_callback_error",
+  oauthPendingLoginNotFound: "openai_oauth_pending_login_not_found",
+  oauthStateMismatch: "openai_oauth_state_mismatch",
+  oauthTestModeRequired: "openai_oauth_test_mode_required",
+} as const;
+
+export const MODEL_PROVIDER_API_RECORD_REQUIRED_FIELDS = [
+  "alias",
+  "status",
+  "protocol",
+  "providerKind",
+  "modelId",
+  "credential",
+  "metadataJson",
+  "revision",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+export const MODEL_PROVIDER_REVISION_CONFLICT_DATA_FIELDS = [
+  "provider",
+  "expectedRevision",
+  "currentRevision",
+] as const;
+
+export const OPENAI_OAUTH_LOGIN_CONFIG_REQUIRED_FIELDS = [
+  "issuer",
+  "clientId",
+  "redirectUri",
+  "redirectUriOverrideAllowed",
+  "redirectUriMode",
+  "callbackUrlCompletionAccepted",
+  "callbackUrlCompletionField",
+  "pendingLoginIdRequiredForCallbackUrl",
+  "remoteOperatorFlow",
+] as const;
+
+export const OPENAI_OAUTH_PENDING_LOGIN_PUBLIC_FIELDS = [
+  "pendingLoginId",
+  "providerAlias",
+  "issuer",
+  "clientId",
+  "redirectUri",
+  "scopes",
+  "codeChallenge",
+  "authorizationUrl",
+  "createdAt",
+  "expiresAt",
+] as const;
+
+export function isModelProviderStatusContractValue(
+  value: string,
+): value is (typeof MODEL_PROVIDER_STATUS_VALUES)[number] {
+  return MODEL_PROVIDER_STATUS_VALUES.includes(
+    value as (typeof MODEL_PROVIDER_STATUS_VALUES)[number],
+  );
+}
+
+export function isModelProviderProtocolContractValue(
+  value: string,
+): value is (typeof MODEL_PROVIDER_PROTOCOL_VALUES)[number] {
+  return MODEL_PROVIDER_PROTOCOL_VALUES.includes(
+    value as (typeof MODEL_PROVIDER_PROTOCOL_VALUES)[number],
+  );
+}
+
+export function isModelProviderRefreshModeContractValue(
+  value: string,
+): value is (typeof MODEL_PROVIDER_REFRESH_MODE_VALUES)[number] {
+  return MODEL_PROVIDER_REFRESH_MODE_VALUES.includes(
+    value as (typeof MODEL_PROVIDER_REFRESH_MODE_VALUES)[number],
+  );
+}

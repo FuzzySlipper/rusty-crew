@@ -9,6 +9,13 @@ import type {
   NativeOpenAiOauthCodeExchangeResult,
 } from "@rusty-crew/native-bridge";
 import type { AdminRouteResult } from "./admin-diagnostics-api.js";
+import {
+  MODEL_PROVIDER_ADMIN_REASON_CODES,
+  MODEL_PROVIDER_TEMPERATURE_MILLI_SCALE,
+  isModelProviderProtocolContractValue,
+  isModelProviderRefreshModeContractValue,
+  isModelProviderStatusContractValue,
+} from "./model-provider-admin-contract.js";
 import type { RustyCrewOpenAiOauthConfig } from "./service-config.js";
 import { failure, successRoute } from "./service-route-results.js";
 
@@ -112,7 +119,7 @@ export async function handleModelProviderAdminRequest(
     if (status === "invalid") {
       return failure(400, request.requestId, {
         code: "invalid_input",
-        reason_code: "invalid_model_provider_status",
+        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.invalidStatus,
         message: "invalid model provider status filter",
         retryable: false,
       });
@@ -137,7 +144,7 @@ export async function handleModelProviderAdminRequest(
     if (!provider) {
       return failure(404, request.requestId, {
         code: "not_found",
-        reason_code: "model_provider_not_found",
+        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.notFound,
         message: `model provider ${alias} was not found`,
         retryable: false,
       });
@@ -179,7 +186,7 @@ export async function handleModelProviderAdminRequest(
 
   return failure(405, request.requestId, {
     code: "method_not_allowed",
-    reason_code: "model_provider_method_not_allowed",
+    reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.methodNotAllowed,
     message:
       "model provider routes support GET list/get, POST create/upsert, and PATCH update",
     retryable: false,
@@ -194,7 +201,8 @@ export function modelProviderApiRecord(
   }
   return {
     ...provider,
-    temperature: provider.temperatureMilli / 1_000,
+    temperature:
+      provider.temperatureMilli / MODEL_PROVIDER_TEMPERATURE_MILLI_SCALE,
   };
 }
 
@@ -212,7 +220,7 @@ async function handleOpenAiOauthProviderAdminRequest(
   if (!provider) {
     return failure(404, request.requestId, {
       code: "not_found",
-      reason_code: "model_provider_not_found",
+      reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.notFound,
       message: `model provider ${request.alias} was not found`,
       retryable: false,
     });
@@ -237,7 +245,8 @@ async function handleOpenAiOauthProviderAdminRequest(
     ) {
       return failure(400, request.requestId, {
         code: "invalid_input",
-        reason_code: "openai_oauth_unregistered_redirect_uri",
+        reason_code:
+          MODEL_PROVIDER_ADMIN_REASON_CODES.oauthUnregisteredRedirectUri,
         message:
           "OpenAI OAuth redirectUri override is disabled; use the configured registered redirectUri from status/start response",
         retryable: false,
@@ -271,7 +280,7 @@ async function handleOpenAiOauthProviderAdminRequest(
     } catch {
       return failure(400, request.requestId, {
         code: "invalid_input",
-        reason_code: "openai_oauth_invalid_callback_url",
+        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthInvalidCallbackUrl,
         message:
           "OpenAI OAuth callbackUrl must be a full callback URL or query string containing code and state",
         retryable: false,
@@ -280,7 +289,7 @@ async function handleOpenAiOauthProviderAdminRequest(
     if (callback?.error !== undefined) {
       return failure(400, request.requestId, {
         code: "invalid_input",
-        reason_code: "openai_oauth_callback_error",
+        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthCallbackError,
         message: `OpenAI OAuth callback returned error ${callback.error}`,
         retryable: false,
       });
@@ -303,7 +312,8 @@ async function handleOpenAiOauthProviderAdminRequest(
     if (!pending || pending.providerAlias !== provider.alias) {
       return failure(404, request.requestId, {
         code: "not_found",
-        reason_code: "openai_oauth_pending_login_not_found",
+        reason_code:
+          MODEL_PROVIDER_ADMIN_REASON_CODES.oauthPendingLoginNotFound,
         message: "OpenAI OAuth pending login was not found",
         retryable: false,
       });
@@ -311,7 +321,7 @@ async function handleOpenAiOauthProviderAdminRequest(
     if (stateValue !== pending.state) {
       return failure(400, request.requestId, {
         code: "invalid_input",
-        reason_code: "openai_oauth_state_mismatch",
+        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthStateMismatch,
         message: "OpenAI OAuth callback state did not match the pending login",
         retryable: false,
       });
@@ -328,7 +338,7 @@ async function handleOpenAiOauthProviderAdminRequest(
       ) {
         return failure(400, request.requestId, {
           code: "invalid_input",
-          reason_code: "openai_oauth_test_mode_required",
+          reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthTestModeRequired,
           message:
             "OpenAI OAuth fakeTokenResponse completion requires explicit testMode=true",
           retryable: false,
@@ -411,7 +421,7 @@ async function handleOpenAiOauthProviderAdminRequest(
 
   return failure(405, request.requestId, {
     code: "method_not_allowed",
-    reason_code: "openai_oauth_provider_method_not_allowed",
+    reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.oauthMethodNotAllowed,
     message:
       "OpenAI OAuth provider routes support GET status and POST start/complete/clear",
     retryable: false,
@@ -748,7 +758,7 @@ function modelProviderRevisionConflictRoute(
       ok: false,
       error: {
         code: "conflict",
-        reason_code: "model_provider_revision_mismatch",
+        reason_code: MODEL_PROVIDER_ADMIN_REASON_CODES.revisionMismatch,
         message: `model provider ${mismatch.alias} revision mismatch: expected ${mismatch.expected}, found ${mismatch.found}`,
         retryable: false,
       },
@@ -773,7 +783,7 @@ function modelProviderRefreshMode(
     url.searchParams.get("refresh") ??
     (isRecord(body) ? optionalString(body.refresh) : undefined) ??
     "none";
-  if (raw === "none" || raw === "plan" || raw === "apply") return raw;
+  if (isModelProviderRefreshModeContractValue(raw)) return raw;
   throw new Error("model provider refresh must be none, plan, or apply");
 }
 
@@ -781,16 +791,14 @@ function modelProviderStatusParam(
   value: string | null,
 ): NativeModelProviderStatus | "invalid" | undefined {
   if (value === null || value.trim() === "") return undefined;
-  return value === "active" || value === "disabled" || value === "archived"
-    ? value
-    : "invalid";
+  return isModelProviderStatusContractValue(value) ? value : "invalid";
 }
 
 function modelProviderProtocolFromBody(
   value: unknown,
 ): NativeModelProviderProtocol {
   const protocol = optionalString(value) ?? "chat_completions";
-  if (protocol === "responses" || protocol === "chat_completions") {
+  if (isModelProviderProtocolContractValue(protocol)) {
     return protocol;
   }
   throw new Error(
@@ -1003,7 +1011,9 @@ function optionalTemperatureMilli(
       return temperatureMilli;
     }
     if (temperatureMilli >= 0 && temperatureMilli <= 10) {
-      return Math.round(temperatureMilli * 1_000);
+      return Math.round(
+        temperatureMilli * MODEL_PROVIDER_TEMPERATURE_MILLI_SCALE,
+      );
     }
     throw new Error(
       "model provider temperatureMilli must be an integer millivalue; use temperature for decimal temperatures",
@@ -1017,7 +1027,7 @@ function optionalTemperatureMilli(
   if (temperature < 0) {
     throw new Error("model provider temperature must be non-negative");
   }
-  return Math.round(temperature * 1_000);
+  return Math.round(temperature * MODEL_PROVIDER_TEMPERATURE_MILLI_SCALE);
 }
 
 function randomBase64Url(byteLength: number): string {

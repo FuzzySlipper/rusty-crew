@@ -1,0 +1,769 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rusty Crew Model Provider Admin API",
+    "version": "0.1.0",
+    "description": "Admin contract for model-provider configuration, revision-aware writes, and OpenAI OAuth credential setup."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:9348",
+      "description": "Local Rusty Crew debug/test service"
+    },
+    {
+      "url": "http://127.0.0.1:9347",
+      "description": "Local Rusty Crew live service"
+    }
+  ],
+  "paths": {
+    "/v1/admin/model-providers": {
+      "get": {
+        "operationId": "listModelProviders",
+        "summary": "List model providers",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/ModelProviderStatus" }
+          },
+          {
+            "name": "aliasPrefix",
+            "in": "query",
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model provider page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelProviderListPage"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ErrorEnvelope" }
+        }
+      },
+      "post": {
+        "operationId": "upsertModelProvider",
+        "summary": "Create or upsert a model provider",
+        "parameters": [{ "$ref": "#/components/parameters/Refresh" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ModelProviderWrite" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model provider write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelProviderWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/RevisionConflictEnvelope" }
+        }
+      }
+    },
+    "/v1/admin/model-providers/{alias}": {
+      "get": {
+        "operationId": "getModelProvider",
+        "summary": "Read a model provider",
+        "parameters": [{ "$ref": "#/components/parameters/Alias" }],
+        "responses": {
+          "200": {
+            "description": "Model provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelProviderRecord"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/ErrorEnvelope" }
+        }
+      },
+      "patch": {
+        "operationId": "patchModelProvider",
+        "summary": "Update a model provider",
+        "parameters": [
+          { "$ref": "#/components/parameters/Alias" },
+          { "$ref": "#/components/parameters/Refresh" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ModelProviderPatch" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model provider write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelProviderWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/RevisionConflictEnvelope" }
+        }
+      }
+    },
+    "/v1/admin/model-providers/{alias}/oauth/openai/status": {
+      "get": {
+        "operationId": "getOpenAiOauthProviderStatus",
+        "summary": "Read OpenAI OAuth login state for a provider",
+        "parameters": [{ "$ref": "#/components/parameters/Alias" }],
+        "responses": {
+          "200": {
+            "description": "OpenAI OAuth status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/OpenAiOauthProviderStatus"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/model-providers/{alias}/oauth/openai/start": {
+      "post": {
+        "operationId": "startOpenAiOauthProviderLogin",
+        "summary": "Start OpenAI OAuth for a provider",
+        "parameters": [{ "$ref": "#/components/parameters/Alias" }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OpenAiOauthStartRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Started pending login",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/OpenAiOauthStartResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/model-providers/{alias}/oauth/openai/complete": {
+      "post": {
+        "operationId": "completeOpenAiOauthProviderLogin",
+        "summary": "Complete OpenAI OAuth for a provider",
+        "parameters": [{ "$ref": "#/components/parameters/Alias" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenAiOauthCompleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed OAuth login",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/OpenAiOauthCompleteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/RevisionConflictEnvelope" }
+        }
+      }
+    },
+    "/v1/admin/model-providers/{alias}/oauth/openai/clear": {
+      "post": {
+        "operationId": "clearOpenAiOauthProviderCredential",
+        "summary": "Clear OpenAI OAuth credentials for a provider",
+        "parameters": [{ "$ref": "#/components/parameters/Alias" }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OpenAiOauthClearRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cleared credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ApiEnvelope" },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/OpenAiOauthClearResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/RevisionConflictEnvelope" }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Alias": {
+        "name": "alias",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 0, "default": 100 }
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 0, "default": 0 }
+      },
+      "Refresh": {
+        "name": "refresh",
+        "in": "query",
+        "schema": { "$ref": "#/components/schemas/ModelProviderRefreshMode" }
+      }
+    },
+    "responses": {
+      "ErrorEnvelope": {
+        "description": "Error envelope",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiEnvelope" }
+          }
+        }
+      },
+      "RevisionConflictEnvelope": {
+        "description": "Revision conflict envelope",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                { "$ref": "#/components/schemas/ApiEnvelope" },
+                {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelProviderRevisionConflict"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ApiEnvelope": {
+        "type": "object",
+        "required": ["ok", "meta"],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "data": {},
+          "error": { "$ref": "#/components/schemas/ApiError" },
+          "meta": { "$ref": "#/components/schemas/ApiMeta" }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "required": ["code", "reason_code", "message", "retryable"],
+        "properties": {
+          "code": { "type": "string" },
+          "reason_code": { "$ref": "#/components/schemas/ModelProviderReasonCode" },
+          "message": { "type": "string" },
+          "retryable": { "type": "boolean" }
+        }
+      },
+      "ApiMeta": {
+        "type": "object",
+        "required": ["request_id", "schema_version"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "schema_version": { "type": "integer", "const": 1 }
+        }
+      },
+      "ModelProviderStatus": {
+        "type": "string",
+        "enum": ["active", "disabled", "archived"]
+      },
+      "ModelProviderProtocol": {
+        "type": "string",
+        "enum": ["responses", "chat_completions"]
+      },
+      "ModelProviderRefreshMode": {
+        "type": "string",
+        "enum": ["none", "plan", "apply"]
+      },
+      "ModelProviderCredentialKind": {
+        "type": "string",
+        "enum": ["api_key", "openai_oauth", "legacy_raw_api_key"]
+      },
+      "ModelProviderReasonCode": {
+        "type": "string",
+        "enum": [
+          "invalid_model_provider_status",
+          "model_provider_not_found",
+          "model_provider_revision_mismatch",
+          "model_provider_method_not_allowed",
+          "openai_oauth_provider_method_not_allowed",
+          "openai_oauth_unregistered_redirect_uri",
+          "openai_oauth_invalid_callback_url",
+          "openai_oauth_callback_error",
+          "openai_oauth_pending_login_not_found",
+          "openai_oauth_state_mismatch",
+          "openai_oauth_test_mode_required"
+        ]
+      },
+      "ModelProviderCredential": {
+        "type": "object",
+        "required": ["hasSecret"],
+        "properties": {
+          "hasSecret": { "type": "boolean" },
+          "secretRef": { "type": "string" },
+          "updatedAt": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/ModelProviderCredentialKind" }
+        },
+        "additionalProperties": false
+      },
+      "ModelProviderRecord": {
+        "type": "object",
+        "required": [
+          "alias",
+          "status",
+          "protocol",
+          "providerKind",
+          "modelId",
+          "credential",
+          "metadataJson",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "alias": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/ModelProviderStatus" },
+          "protocol": { "$ref": "#/components/schemas/ModelProviderProtocol" },
+          "providerKind": { "type": "string" },
+          "displayName": { "type": "string" },
+          "description": { "type": "string" },
+          "baseUrl": { "type": "string" },
+          "modelId": { "type": "string" },
+          "contextWindowTokens": { "type": "number" },
+          "maxOutputTokens": { "type": "number" },
+          "temperatureMilli": { "type": "number" },
+          "temperature": {
+            "type": "number",
+            "description": "Decimal readback projected from temperatureMilli / 1000."
+          },
+          "reasoningEffort": { "type": "string" },
+          "reasoningFormat": { "type": "string" },
+          "credential": { "$ref": "#/components/schemas/ModelProviderCredential" },
+          "metadataJson": {},
+          "revision": { "type": "number" },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ModelProviderListPage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ModelProviderRecord" }
+          },
+          "total": { "type": "number" },
+          "limit": { "type": "number" },
+          "offset": { "type": "number" }
+        }
+      },
+      "ModelProviderWrite": {
+        "type": "object",
+        "required": ["alias", "modelId"],
+        "properties": {
+          "alias": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/ModelProviderStatus" },
+          "protocol": { "$ref": "#/components/schemas/ModelProviderProtocol" },
+          "providerKind": { "type": "string", "default": "custom" },
+          "displayName": { "type": "string" },
+          "description": { "type": "string" },
+          "baseUrl": { "type": "string" },
+          "modelId": { "type": "string" },
+          "model": { "type": "string" },
+          "contextWindowTokens": { "type": "number" },
+          "maxOutputTokens": { "type": "number" },
+          "temperatureMilli": {
+            "type": "number",
+            "description": "Integer millivalue. Decimal values in the 0..10 range are accepted as compatibility input and normalized."
+          },
+          "temperature": {
+            "type": "number",
+            "description": "Decimal temperature normalized to temperatureMilli by multiplying by 1000."
+          },
+          "reasoningEffort": { "type": "string" },
+          "reasoningFormat": { "type": "string" },
+          "secret": { "type": "string" },
+          "apiKey": { "type": "string" },
+          "credentialSecret": { "$ref": "#/components/schemas/ModelProviderCredentialSecret" },
+          "clearSecret": { "type": "boolean" },
+          "metadataJson": { "type": "object" },
+          "expectedRevision": { "type": "number" },
+          "refresh": { "$ref": "#/components/schemas/ModelProviderRefreshMode" }
+        },
+        "additionalProperties": true
+      },
+      "ModelProviderPatch": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ModelProviderWrite" },
+          { "required": ["modelId"] }
+        ]
+      },
+      "ModelProviderCredentialSecret": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/ApiKeyCredentialSecret" },
+          { "$ref": "#/components/schemas/OpenAiOauthCredentialSecret" }
+        ]
+      },
+      "ApiKeyCredentialSecret": {
+        "type": "object",
+        "required": ["kind", "value"],
+        "properties": {
+          "kind": { "const": "api_key" },
+          "version": { "type": "number", "default": 1 },
+          "value": { "type": "string" },
+          "apiKey": { "type": "string" },
+          "api_key": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "OpenAiOauthCredentialSecret": {
+        "type": "object",
+        "required": ["kind", "issuer", "clientId", "idToken", "accessToken", "refreshToken"],
+        "properties": {
+          "kind": { "const": "openai_oauth" },
+          "version": { "type": "number", "default": 1 },
+          "issuer": { "type": "string" },
+          "clientId": { "type": "string" },
+          "client_id": { "type": "string" },
+          "idToken": { "type": "string" },
+          "id_token": { "type": "string" },
+          "accessToken": { "type": "string" },
+          "access_token": { "type": "string" },
+          "refreshToken": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "exchangedApiToken": { "type": "string" },
+          "exchanged_api_token": { "type": "string" },
+          "lastRefreshAt": { "type": "string" },
+          "last_refresh_at": { "type": "string" },
+          "accountId": { "type": "string" },
+          "account_id": { "type": "string" },
+          "email": { "type": "string" },
+          "planType": { "type": "string" },
+          "plan_type": { "type": "string" },
+          "isFedrampAccount": { "type": "boolean" },
+          "is_fedramp_account": { "type": "boolean" },
+          "accessTokenExpiresAt": { "type": "string" },
+          "access_token_expires_at": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ModelProviderWriteResult": {
+        "type": "object",
+        "required": ["provider", "refresh"],
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/ModelProviderRecord" },
+          "refresh": { "$ref": "#/components/schemas/ModelProviderRefreshResult" }
+        }
+      },
+      "ModelProviderRefreshResult": {
+        "type": "object",
+        "required": ["mode", "affectedProfiles", "outcomes"],
+        "properties": {
+          "mode": { "$ref": "#/components/schemas/ModelProviderRefreshMode" },
+          "affectedProfiles": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ModelProviderAffectedProfile" }
+          },
+          "outcomes": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ModelProviderRefreshOutcome" }
+          }
+        }
+      },
+      "ModelProviderAffectedProfile": {
+        "type": "object",
+        "required": ["profileId", "sessionIds", "configuredSessionIds", "activeSessionIds"],
+        "properties": {
+          "profileId": { "type": "string" },
+          "sessionIds": { "type": "array", "items": { "type": "string" } },
+          "configuredSessionIds": { "type": "array", "items": { "type": "string" } },
+          "activeSessionIds": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ModelProviderRefreshOutcome": {
+        "type": "object",
+        "required": ["profileId", "status", "summary"],
+        "properties": {
+          "profileId": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["planned", "applied", "blocked", "failed"]
+          },
+          "summary": { "type": "string" },
+          "reasonCode": { "type": "string" },
+          "result": {}
+        }
+      },
+      "ModelProviderRevisionConflict": {
+        "type": "object",
+        "required": ["expectedRevision", "currentRevision"],
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/ModelProviderRecord" },
+          "expectedRevision": { "type": "number" },
+          "currentRevision": { "type": "number" }
+        }
+      },
+      "OpenAiOauthLoginConfig": {
+        "type": "object",
+        "required": [
+          "issuer",
+          "clientId",
+          "redirectUri",
+          "redirectUriOverrideAllowed",
+          "redirectUriMode",
+          "callbackUrlCompletionAccepted",
+          "callbackUrlCompletionField",
+          "pendingLoginIdRequiredForCallbackUrl",
+          "remoteOperatorFlow"
+        ],
+        "properties": {
+          "issuer": { "type": "string" },
+          "clientId": { "type": "string" },
+          "redirectUri": { "type": "string" },
+          "redirectUriOverrideAllowed": { "type": "boolean" },
+          "redirectUriMode": {
+            "type": "string",
+            "enum": ["fixed_registered", "operator_configured"]
+          },
+          "callbackUrlCompletionAccepted": { "type": "boolean" },
+          "callbackUrlCompletionField": { "type": "string", "const": "callbackUrl" },
+          "pendingLoginIdRequiredForCallbackUrl": { "type": "boolean" },
+          "remoteOperatorFlow": { "type": "string", "const": "paste_callback_url" }
+        }
+      },
+      "OpenAiOauthPendingLogin": {
+        "type": "object",
+        "required": [
+          "pendingLoginId",
+          "providerAlias",
+          "issuer",
+          "clientId",
+          "redirectUri",
+          "scopes",
+          "codeChallenge",
+          "authorizationUrl",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "pendingLoginId": { "type": "string" },
+          "providerAlias": { "type": "string" },
+          "issuer": { "type": "string" },
+          "clientId": { "type": "string" },
+          "redirectUri": { "type": "string" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "codeChallenge": { "type": "string" },
+          "authorizationUrl": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "expiresAt": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "OpenAiOauthProviderStatus": {
+        "type": "object",
+        "required": ["provider", "credential", "pendingLogins", "loginConfig"],
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/ModelProviderRecord" },
+          "credential": { "$ref": "#/components/schemas/ModelProviderCredential" },
+          "pendingLogins": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OpenAiOauthPendingLogin" }
+          },
+          "loginConfig": { "$ref": "#/components/schemas/OpenAiOauthLoginConfig" }
+        }
+      },
+      "OpenAiOauthStartRequest": {
+        "type": "object",
+        "properties": {
+          "issuer": { "type": "string" },
+          "clientId": { "type": "string" },
+          "client_id": { "type": "string" },
+          "redirectUri": { "type": "string" },
+          "redirect_uri": { "type": "string" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "allowedWorkspaceIds": { "type": "array", "items": { "type": "string" } },
+          "allowed_workspace_ids": { "type": "array", "items": { "type": "string" } },
+          "originator": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "OpenAiOauthStartResult": {
+        "type": "object",
+        "required": ["provider", "loginConfig", "pendingLogin"],
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/ModelProviderRecord" },
+          "loginConfig": { "$ref": "#/components/schemas/OpenAiOauthLoginConfig" },
+          "pendingLogin": { "$ref": "#/components/schemas/OpenAiOauthPendingLogin" }
+        }
+      },
+      "OpenAiOauthCompleteRequest": {
+        "type": "object",
+        "properties": {
+          "callbackUrl": { "type": "string" },
+          "callback_url": { "type": "string" },
+          "authorizationResponseUrl": { "type": "string" },
+          "authorization_response_url": { "type": "string" },
+          "state": { "type": "string" },
+          "pendingLoginId": { "type": "string" },
+          "pending_login_id": { "type": "string" },
+          "code": { "type": "string" },
+          "expectedRevision": { "type": "number" },
+          "expected_revision": { "type": "number" },
+          "testMode": { "type": "boolean" },
+          "test_mode": { "type": "boolean" },
+          "allowFakeTokenResponse": { "type": "boolean" },
+          "fakeTokenResponse": { "type": "object" },
+          "fake_token_response": { "type": "object" }
+        },
+        "additionalProperties": true
+      },
+      "OpenAiOauthCompleteResult": {
+        "type": "object",
+        "required": ["provider", "credential", "completionMode", "pendingLoginId"],
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/ModelProviderRecord" },
+          "credential": { "$ref": "#/components/schemas/ModelProviderCredential" },
+          "completionMode": { "type": "string", "enum": ["real", "test"] },
+          "oauthSummary": {},
+          "pendingLoginId": { "type": "string" }
+        }
+      },
+      "OpenAiOauthClearRequest": {
+        "type": "object",
+        "properties": {
+          "expectedRevision": { "type": "number" },
+          "expected_revision": { "type": "number" }
+        },
+        "additionalProperties": false
+      },
+      "OpenAiOauthClearResult": {
+        "type": "object",
+        "required": ["provider", "credential"],
+        "properties": {
+          "provider": { "$ref": "#/components/schemas/ModelProviderRecord" },
+          "credential": { "$ref": "#/components/schemas/ModelProviderCredential" }
+        }
+      }
+    }
+  }
+}
