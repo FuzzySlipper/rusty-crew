@@ -263,6 +263,27 @@ fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
                 rust_type: "rusty_crew_core_protocol::ModelProviderRecord".to_owned(),
                 value: serde_json::to_value(sample_model_provider_record())?,
             },
+            BridgeValidationFixture {
+                name: "memory_space_descriptor_v1".to_owned(),
+                operation: "list_memory_space_descriptors".to_owned(),
+                direction: "rust_to_ts".to_owned(),
+                rust_type: "rusty_crew_core_protocol::MemorySpaceDescriptor".to_owned(),
+                value: serde_json::to_value(sample_memory_space_descriptor())?,
+            },
+            BridgeValidationFixture {
+                name: "memory_proposal_record_v1".to_owned(),
+                operation: "list_memory_proposals".to_owned(),
+                direction: "rust_to_ts".to_owned(),
+                rust_type: "rusty_crew_core_protocol::MemoryProposalRecord".to_owned(),
+                value: serde_json::to_value(sample_memory_proposal_record())?,
+            },
+            BridgeValidationFixture {
+                name: "memory_governance_decision_record_v1".to_owned(),
+                operation: "record_memory_governance_decision".to_owned(),
+                direction: "rust_to_ts".to_owned(),
+                rust_type: "rusty_crew_core_protocol::MemoryGovernanceDecisionRecord".to_owned(),
+                value: serde_json::to_value(sample_memory_governance_decision_record())?,
+            },
         ],
     })
 }
@@ -619,6 +640,82 @@ fn sample_model_provider_record() -> ModelProviderRecord {
         revision: 5,
         created_at: sample_timestamp(),
         updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_memory_space_descriptor() -> MemorySpaceDescriptor {
+    session_memory_space_descriptor()
+}
+
+fn sample_memory_proposal() -> MemoryProposalEnvelope {
+    MemoryProposalEnvelope {
+        proposal_id: "proposal_one".to_owned(),
+        space_id: MemorySpaceId::unchecked("session_memory"),
+        operation: MemoryOperation::Add,
+        scope: MemoryScope {
+            scope_type: MemoryScopeType::Session,
+            scope_id: sample_session_id().to_string(),
+        },
+        shape: MemoryRecordShapeRef {
+            shape_id: MemoryRecordShapeId::unchecked("session_fact"),
+            version: 1,
+        },
+        content: json!({
+            "record_id": "session-fact-one",
+            "content": "The user prefers compact bridge validation notes.",
+            "fact_kind": "preference",
+            "confidence": 0.8,
+            "source_summary": "Captured from validation fixture.",
+            "created_at": sample_timestamp(),
+            "updated_at": sample_timestamp(),
+            "tags": ["bridge", "validation"],
+            "metadata_json": {"fixture": true}
+        }),
+        evidence_refs: vec![MemoryEvidenceRef {
+            evidence_type: MemoryEvidenceKind::Wake,
+            ref_id: "wake-validation".to_owned(),
+            label: Some("Validation wake".to_owned()),
+        }],
+        confidence: 0.8,
+        durability_rationale: Some("Fixture verifies memory proposal wire shape.".to_owned()),
+        governance_mode: MemoryGovernanceMode::Candidate,
+        source: MemoryProposalSource::InWakeTool,
+        dedupe_key: Some("session_fact:validation".to_owned()),
+        created_at: Some(sample_timestamp()),
+    }
+}
+
+fn sample_memory_proposal_record() -> MemoryProposalRecord {
+    MemoryProposalRecord {
+        proposal: sample_memory_proposal(),
+        status: MemoryProposalReviewStatus::Approved,
+        selected_governance_mode: MemoryGovernanceMode::ManualReview,
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+        decided_at: Some(sample_timestamp()),
+        applied_at: None,
+        resulting_revision: Some(7),
+        duplicate_of: None,
+    }
+}
+
+fn sample_memory_governance_decision_record() -> MemoryGovernanceDecisionRecord {
+    MemoryGovernanceDecisionRecord {
+        decision_id: "decision_one".to_owned(),
+        proposal_id: "proposal_one".to_owned(),
+        decision: MemoryGovernanceDecisionKind::Approved,
+        actor: "validation-reviewer".to_owned(),
+        source: MemoryProposalSource::Human,
+        evidence_refs: vec![MemoryEvidenceRef {
+            evidence_type: MemoryEvidenceKind::Ui,
+            ref_id: "review-validation".to_owned(),
+            label: Some("Validation review".to_owned()),
+        }],
+        policy_mode: MemoryGovernanceMode::ManualReview,
+        confidence: Some(0.9),
+        message: Some("Approved by bridge validation fixture.".to_owned()),
+        resulting_revision: Some(7),
+        decided_at: sample_timestamp(),
     }
 }
 

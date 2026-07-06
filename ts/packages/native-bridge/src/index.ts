@@ -532,7 +532,10 @@ export type NativeBridgeRoundTripFixtureName =
   | "list_sessions_v1"
   | "brain_wake_stream_result_v1"
   | "profile_registry_record_v1"
-  | "model_provider_record_v1";
+  | "model_provider_record_v1"
+  | "memory_space_descriptor_v1"
+  | "memory_proposal_record_v1"
+  | "memory_governance_decision_record_v1";
 
 export interface OpenAiResponsesTransportMetrics {
   effectiveTransport: string;
@@ -1993,6 +1996,10 @@ export function roundTripNativeBridgeFixture(input: {
       return toRawModelProviderRecord(
         toNativeModelProviderRecord(input.value as RawModelProviderRecord),
       );
+    case "memory_space_descriptor_v1":
+    case "memory_proposal_record_v1":
+    case "memory_governance_decision_record_v1":
+      return input.value;
   }
 }
 

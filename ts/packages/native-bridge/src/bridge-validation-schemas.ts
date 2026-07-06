@@ -541,6 +541,174 @@ export const rawModelProviderRecordArraySchema = Type.Array(
   rawModelProviderRecordSchema,
 );
 
+const memoryEvidenceRefSchema = Type.Object(
+  {
+    evidence_type: Type.String(),
+    ref_id: Type.String(),
+    label: Type.Optional(nullableString),
+  },
+  { additionalProperties: true },
+);
+
+const memoryRecordShapeRefSchema = Type.Object(
+  {
+    shape_id: Type.String(),
+    version: Type.Number(),
+  },
+  { additionalProperties: true },
+);
+
+const memoryScopeSchema = Type.Object(
+  {
+    scope_type: Type.String(),
+    scope_id: Type.String(),
+  },
+  { additionalProperties: true },
+);
+
+export const rawMemorySpaceDescriptorSchema = Type.Object(
+  {
+    space_id: Type.String(),
+    schema_version: Type.Number(),
+    module_id: Type.Optional(nullableString),
+    description: Type.String(),
+    record_shapes: Type.Array(
+      Type.Object(
+        {
+          shape_id: Type.String(),
+          version: Type.Number(),
+          description: Type.String(),
+          fields: Type.Array(
+            Type.Object(
+              {
+                field_name: Type.String(),
+                field_type: Type.String(),
+                required: Type.Boolean(),
+                description: Type.String(),
+              },
+              { additionalProperties: true },
+            ),
+          ),
+        },
+        { additionalProperties: true },
+      ),
+    ),
+    scope_model: Type.Object(
+      {
+        allowed_scopes: Type.Array(Type.String()),
+        primary_scope: Type.String(),
+      },
+      { additionalProperties: true },
+    ),
+    visibility_model: Type.String(),
+    retrieval_strategies: Type.Array(Type.String()),
+    indexing: Type.Object(
+      {
+        required_capabilities: Type.Array(Type.String()),
+        optional_capabilities: Type.Array(Type.String()),
+      },
+      { additionalProperties: true },
+    ),
+    prompt_policy: Type.String(),
+    write_policy: Type.Object(
+      {
+        default_mode: Type.String(),
+        operation_policies: Type.Array(
+          Type.Object(
+            {
+              operation: Type.String(),
+              governance_mode: Type.String(),
+              requires_expected_revision: Type.Boolean(),
+              min_confidence: Type.Optional(nullableNumber),
+            },
+            { additionalProperties: true },
+          ),
+        ),
+      },
+      { additionalProperties: true },
+    ),
+    operations: Type.Array(Type.String()),
+    provenance_policy: Type.Object(
+      {
+        required_evidence: Type.Array(Type.String()),
+        source_required: Type.Boolean(),
+        rationale_required: Type.Boolean(),
+      },
+      { additionalProperties: true },
+    ),
+    retention_policy: Type.String(),
+    conflict_policy: Type.String(),
+    diagnostics: Type.Object(
+      {
+        expose_catalog: Type.Boolean(),
+        expose_record_counts: Type.Boolean(),
+        expose_policy_decisions: Type.Boolean(),
+      },
+      { additionalProperties: true },
+    ),
+    export_import: Type.Object(
+      {
+        export_supported: Type.Boolean(),
+        import_supported: Type.Boolean(),
+        import_governance_mode: Type.String(),
+      },
+      { additionalProperties: true },
+    ),
+  },
+  { additionalProperties: true },
+);
+
+export const rawMemoryProposalEnvelopeSchema = Type.Object(
+  {
+    proposal_id: Type.String(),
+    space_id: Type.String(),
+    operation: Type.String(),
+    scope: memoryScopeSchema,
+    shape: memoryRecordShapeRefSchema,
+    content: Type.Unknown(),
+    evidence_refs: Type.Array(memoryEvidenceRefSchema),
+    confidence: Type.Number(),
+    durability_rationale: Type.Optional(nullableString),
+    governance_mode: Type.String(),
+    source: Type.String(),
+    dedupe_key: Type.Optional(nullableString),
+    created_at: Type.Optional(nullableString),
+  },
+  { additionalProperties: true },
+);
+
+export const rawMemoryProposalRecordSchema = Type.Object(
+  {
+    proposal: rawMemoryProposalEnvelopeSchema,
+    status: Type.String(),
+    selected_governance_mode: Type.String(),
+    created_at: Type.String(),
+    updated_at: Type.String(),
+    decided_at: Type.Optional(nullableString),
+    applied_at: Type.Optional(nullableString),
+    resulting_revision: Type.Optional(nullableNumber),
+    duplicate_of: Type.Optional(nullableString),
+  },
+  { additionalProperties: true },
+);
+
+export const rawMemoryGovernanceDecisionRecordSchema = Type.Object(
+  {
+    decision_id: Type.String(),
+    proposal_id: Type.String(),
+    decision: Type.String(),
+    actor: Type.String(),
+    source: Type.String(),
+    evidence_refs: Type.Array(memoryEvidenceRefSchema),
+    policy_mode: Type.String(),
+    confidence: Type.Optional(nullableNumber),
+    message: Type.Optional(nullableString),
+    resulting_revision: Type.Optional(nullableNumber),
+    decided_at: Type.String(),
+  },
+  { additionalProperties: true },
+);
+
 const openAiResponsesClientSchema = Type.Union([
   Type.Object(
     {

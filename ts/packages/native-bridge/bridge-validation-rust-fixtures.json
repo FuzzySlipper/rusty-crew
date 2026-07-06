@@ -224,6 +224,487 @@
         "temperature_milli": 500,
         "updated_at": "2026-07-02T00:00:00.000Z"
       }
+    },
+    {
+      "name": "memory_space_descriptor_v1",
+      "operation": "list_memory_space_descriptors",
+      "direction": "rust_to_ts",
+      "rust_type": "rusty_crew_core_protocol::MemorySpaceDescriptor",
+      "value": {
+        "conflict_policy": "supersession",
+        "description": "Crew-owned session and branch memory; not Den memory and not transcript storage.",
+        "diagnostics": {
+          "expose_catalog": true,
+          "expose_policy_decisions": true,
+          "expose_record_counts": true
+        },
+        "export_import": {
+          "export_supported": true,
+          "import_governance_mode": "manual_review",
+          "import_supported": true
+        },
+        "indexing": {
+          "optional_capabilities": ["branch_aware_lookup", "query_search"],
+          "required_capabilities": ["session_scope_lookup"]
+        },
+        "module_id": "runtime_memory",
+        "operations": [
+          "read",
+          "list",
+          "add",
+          "replace",
+          "merge",
+          "supersede",
+          "archive"
+        ],
+        "prompt_policy": "summary_context",
+        "provenance_policy": {
+          "rationale_required": true,
+          "required_evidence": ["wake"],
+          "source_required": true
+        },
+        "record_shapes": [
+          {
+            "description": "Durable fact observed inside one session.",
+            "fields": [
+              {
+                "description": "record_id field",
+                "field_name": "record_id",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "content field",
+                "field_name": "content",
+                "field_type": "markdown",
+                "required": true
+              },
+              {
+                "description": "fact_kind field",
+                "field_name": "fact_kind",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "confidence field",
+                "field_name": "confidence",
+                "field_type": "float",
+                "required": true
+              },
+              {
+                "description": "source_summary field",
+                "field_name": "source_summary",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "created_at field",
+                "field_name": "created_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "updated_at field",
+                "field_name": "updated_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "subject field",
+                "field_name": "subject",
+                "field_type": "string",
+                "required": false
+              },
+              {
+                "description": "expires_at field",
+                "field_name": "expires_at",
+                "field_type": "timestamp",
+                "required": false
+              },
+              {
+                "description": "supersedes_record_id field",
+                "field_name": "supersedes_record_id",
+                "field_type": "string",
+                "required": false
+              },
+              {
+                "description": "tags field",
+                "field_name": "tags",
+                "field_type": "json",
+                "required": false
+              },
+              {
+                "description": "metadata_json field",
+                "field_name": "metadata_json",
+                "field_type": "json",
+                "required": false
+              }
+            ],
+            "shape_id": "session_fact",
+            "version": 1
+          },
+          {
+            "description": "Rolling or checkpoint summary of the durable session.",
+            "fields": [
+              {
+                "description": "record_id field",
+                "field_name": "record_id",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "summary field",
+                "field_name": "summary",
+                "field_type": "markdown",
+                "required": true
+              },
+              {
+                "description": "coverage_start field",
+                "field_name": "coverage_start",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "coverage_end field",
+                "field_name": "coverage_end",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "summary_kind field",
+                "field_name": "summary_kind",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "created_at field",
+                "field_name": "created_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "updated_at field",
+                "field_name": "updated_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "token_estimate field",
+                "field_name": "token_estimate",
+                "field_type": "integer",
+                "required": false
+              },
+              {
+                "description": "source_record_ids field",
+                "field_name": "source_record_ids",
+                "field_type": "json",
+                "required": false
+              },
+              {
+                "description": "supersedes_record_id field",
+                "field_name": "supersedes_record_id",
+                "field_type": "string",
+                "required": false
+              },
+              {
+                "description": "metadata_json field",
+                "field_name": "metadata_json",
+                "field_type": "json",
+                "required": false
+              }
+            ],
+            "shape_id": "session_summary",
+            "version": 1
+          },
+          {
+            "description": "Conversation branch summary.",
+            "fields": [
+              {
+                "description": "record_id field",
+                "field_name": "record_id",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "summary field",
+                "field_name": "summary",
+                "field_type": "markdown",
+                "required": true
+              },
+              {
+                "description": "branch_id field",
+                "field_name": "branch_id",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "head_message_id field",
+                "field_name": "head_message_id",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "coverage_start field",
+                "field_name": "coverage_start",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "coverage_end field",
+                "field_name": "coverage_end",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "created_at field",
+                "field_name": "created_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "updated_at field",
+                "field_name": "updated_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "parent_branch_id field",
+                "field_name": "parent_branch_id",
+                "field_type": "string",
+                "required": false
+              },
+              {
+                "description": "ancestor_branch_ids field",
+                "field_name": "ancestor_branch_ids",
+                "field_type": "json",
+                "required": false
+              },
+              {
+                "description": "supersedes_record_id field",
+                "field_name": "supersedes_record_id",
+                "field_type": "string",
+                "required": false
+              },
+              {
+                "description": "token_estimate field",
+                "field_name": "token_estimate",
+                "field_type": "integer",
+                "required": false
+              },
+              {
+                "description": "metadata_json field",
+                "field_name": "metadata_json",
+                "field_type": "json",
+                "required": false
+              }
+            ],
+            "shape_id": "branch_summary",
+            "version": 1
+          },
+          {
+            "description": "Durable user choice inside a session or branch.",
+            "fields": [
+              {
+                "description": "record_id field",
+                "field_name": "record_id",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "choice field",
+                "field_name": "choice",
+                "field_type": "markdown",
+                "required": true
+              },
+              {
+                "description": "choice_kind field",
+                "field_name": "choice_kind",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "chosen_at field",
+                "field_name": "chosen_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "status field",
+                "field_name": "status",
+                "field_type": "string",
+                "required": true
+              },
+              {
+                "description": "created_at field",
+                "field_name": "created_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "updated_at field",
+                "field_name": "updated_at",
+                "field_type": "timestamp",
+                "required": true
+              },
+              {
+                "description": "alternatives field",
+                "field_name": "alternatives",
+                "field_type": "json",
+                "required": false
+              },
+              {
+                "description": "supersedes_record_id field",
+                "field_name": "supersedes_record_id",
+                "field_type": "string",
+                "required": false
+              },
+              {
+                "description": "reverted_by_record_id field",
+                "field_name": "reverted_by_record_id",
+                "field_type": "string",
+                "required": false
+              },
+              {
+                "description": "metadata_json field",
+                "field_name": "metadata_json",
+                "field_type": "json",
+                "required": false
+              }
+            ],
+            "shape_id": "user_choice",
+            "version": 1
+          }
+        ],
+        "retention_policy": "compact",
+        "retrieval_strategies": [
+          "direct_lookup",
+          "recency",
+          "branch_aware",
+          "query_search"
+        ],
+        "schema_version": 1,
+        "scope_model": {
+          "allowed_scopes": ["session", "conversation_branch"],
+          "primary_scope": "session"
+        },
+        "space_id": "session_memory",
+        "visibility_model": "session_scoped",
+        "write_policy": {
+          "default_mode": "candidate",
+          "operation_policies": [
+            {
+              "governance_mode": "candidate",
+              "min_confidence": 0.5,
+              "operation": "add",
+              "requires_expected_revision": false
+            },
+            {
+              "governance_mode": "curator_route",
+              "min_confidence": 0.5,
+              "operation": "replace",
+              "requires_expected_revision": true
+            },
+            {
+              "governance_mode": "curator_route",
+              "min_confidence": 0.5,
+              "operation": "merge",
+              "requires_expected_revision": true
+            },
+            {
+              "governance_mode": "curator_route",
+              "min_confidence": 0.5,
+              "operation": "supersede",
+              "requires_expected_revision": true
+            },
+            {
+              "governance_mode": "manual_review",
+              "min_confidence": 0.5,
+              "operation": "archive",
+              "requires_expected_revision": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "memory_proposal_record_v1",
+      "operation": "list_memory_proposals",
+      "direction": "rust_to_ts",
+      "rust_type": "rusty_crew_core_protocol::MemoryProposalRecord",
+      "value": {
+        "applied_at": null,
+        "created_at": "2026-07-02T00:00:00.000Z",
+        "decided_at": "2026-07-02T00:00:00.000Z",
+        "duplicate_of": null,
+        "proposal": {
+          "confidence": 0.800000011920929,
+          "content": {
+            "confidence": 0.8,
+            "content": "The user prefers compact bridge validation notes.",
+            "created_at": "2026-07-02T00:00:00.000Z",
+            "fact_kind": "preference",
+            "metadata_json": {
+              "fixture": true
+            },
+            "record_id": "session-fact-one",
+            "source_summary": "Captured from validation fixture.",
+            "tags": ["bridge", "validation"],
+            "updated_at": "2026-07-02T00:00:00.000Z"
+          },
+          "created_at": "2026-07-02T00:00:00.000Z",
+          "dedupe_key": "session_fact:validation",
+          "durability_rationale": "Fixture verifies memory proposal wire shape.",
+          "evidence_refs": [
+            {
+              "evidence_type": "wake",
+              "label": "Validation wake",
+              "ref_id": "wake-validation"
+            }
+          ],
+          "governance_mode": "candidate",
+          "operation": "add",
+          "proposal_id": "proposal_one",
+          "scope": {
+            "scope_id": "validation-session",
+            "scope_type": "session"
+          },
+          "shape": {
+            "shape_id": "session_fact",
+            "version": 1
+          },
+          "source": "in_wake_tool",
+          "space_id": "session_memory"
+        },
+        "resulting_revision": 7,
+        "selected_governance_mode": "manual_review",
+        "status": "approved",
+        "updated_at": "2026-07-02T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "memory_governance_decision_record_v1",
+      "operation": "record_memory_governance_decision",
+      "direction": "rust_to_ts",
+      "rust_type": "rusty_crew_core_protocol::MemoryGovernanceDecisionRecord",
+      "value": {
+        "actor": "validation-reviewer",
+        "confidence": 0.8999999761581421,
+        "decided_at": "2026-07-02T00:00:00.000Z",
+        "decision": "approved",
+        "decision_id": "decision_one",
+        "evidence_refs": [
+          {
+            "evidence_type": "ui",
+            "label": "Validation review",
+            "ref_id": "review-validation"
+          }
+        ],
+        "message": "Approved by bridge validation fixture.",
+        "policy_mode": "manual_review",
+        "proposal_id": "proposal_one",
+        "resulting_revision": 7,
+        "source": "human"
+      }
     }
   ]
 }

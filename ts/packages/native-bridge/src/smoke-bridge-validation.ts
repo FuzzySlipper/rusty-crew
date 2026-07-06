@@ -16,6 +16,9 @@ import {
   eventReceiptSchema,
   openAiResponsesBrainRunInputSchema,
   rawBodyStateSchema,
+  rawMemoryGovernanceDecisionRecordSchema,
+  rawMemoryProposalRecordSchema,
+  rawMemorySpaceDescriptorSchema,
   rawModelProviderRecordSchema,
   rawOpenAiResponsesBrainRunResultSchema,
   rawProfileRegistryRecordSchema,
@@ -472,6 +475,24 @@ validateRustFixture({
   operation: "rust_fixture_model_provider_record",
   schema: rawModelProviderRecordSchema,
   name: "model_provider_record_v1",
+});
+
+validateRustFixture({
+  operation: "rust_fixture_memory_space_descriptor",
+  schema: rawMemorySpaceDescriptorSchema,
+  name: "memory_space_descriptor_v1",
+});
+
+validateRustFixture({
+  operation: "rust_fixture_memory_proposal_record",
+  schema: rawMemoryProposalRecordSchema,
+  name: "memory_proposal_record_v1",
+});
+
+validateRustFixture({
+  operation: "rust_fixture_memory_governance_decision_record",
+  schema: rawMemoryGovernanceDecisionRecordSchema,
+  name: "memory_governance_decision_record_v1",
 });
 
 try {

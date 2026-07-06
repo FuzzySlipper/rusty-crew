@@ -133,6 +133,21 @@ Checker-backed Rust fixtures currently cover:
 | --- | --- | --- |
 | Wake/session/action | `project_body_state`, `list_sessions`, Responses-style brain wake stream result | `rawBodyStateSchema`, `rawSessionStateArraySchema`, `rawOpenAiResponsesBrainRunResultSchema` |
 | Profile/model admin | profile registry records and model provider records returned by admin bridge methods | `rawProfileRegistryRecordSchema`, `rawModelProviderRecordSchema` |
+| Memory/governance | memory-space descriptors, memory proposal records, and governance decision records | `rawMemorySpaceDescriptorSchema`, `rawMemoryProposalRecordSchema`, `rawMemoryGovernanceDecisionRecordSchema` |
+
+Not yet fixture-backed:
+
+- conversation/message variant records and branch/snapshot/jump records;
+- attachment and data-bank records;
+- scheduler/runtime diagnostics and maintenance reports;
+- roleplay lore records and recall traces;
+- runtime search/counter records;
+- session activity digests and context-compaction artifact records.
+
+Until those families are covered, bump `MANIFEST_VERSION` for any breaking or
+renaming change to their Rust/TS wire keys, enum tags, required fields, or
+return envelope semantics. Add fixture coverage instead of relying on a version
+bump when the family becomes active across a user-facing UI or live agent path.
 
 Runtime validation currently wraps:
 
