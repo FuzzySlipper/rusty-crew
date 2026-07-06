@@ -2,109 +2,47 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { apiCapabilityRegistry } from "./api-command-registry.js";
+import {
+  RUSTY_VIEW_CHAT_EVENT_KIND_VALUES,
+  RUSTY_VIEW_CHAT_EVENT_REQUIRED_FIELDS,
+  RUSTY_VIEW_CHAT_OPENAPI_PATH,
+  RUSTY_VIEW_CHAT_PATHS,
+  RUSTY_VIEW_MESSAGE_SLOT_REQUIRED_FIELDS,
+} from "./rusty-view-chat-contract.js";
+
 const contractPath = resolve(
   process.cwd(),
-  "../../../docs/rusty-view-chat-api-v0.openapi.json",
+  "../../../",
+  RUSTY_VIEW_CHAT_OPENAPI_PATH,
 );
 const contract = JSON.parse(readFileSync(contractPath, "utf8")) as OpenApiDoc;
 
-const requiredPaths = [
-  "/v1/chat/sessions",
-  "/v1/chat/sessions/{session_id}",
-  "/v1/chat/sessions/{session_id}/events",
-  "/v1/chat/sessions/{session_id}/stream",
-  "/v1/chat/sessions/{session_id}/messages",
-  "/v1/chat/sessions/{session_id}/slots",
-  "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants",
-  "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/{variant_id}",
-  "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/reorder",
-  "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant",
-  "/v1/chat/sessions/{session_id}/tree",
-  "/v1/chat/sessions/{session_id}/jump",
-  "/v1/chat/sessions/{session_id}/search",
-  "/v1/chat/search",
-  "/v1/chat/sessions/{session_id}/branches",
-  "/v1/chat/sessions/{session_id}/branches/active",
-  "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
-  "/v1/chat/sessions/{session_id}/snapshots",
-  "/v1/chat/sessions/{session_id}/attachments",
-  "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
-  "/v1/chat/sessions/{session_id}/data-bank/scopes",
-  "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}",
-  "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments",
-  "/v1/chat/commands",
-  "/v1/chat/commands/{command_name}/autocomplete",
-  "/v1/chat/sessions/{session_id}/commands",
-];
-
-for (const path of requiredPaths) {
+for (const path of Object.values(RUSTY_VIEW_CHAT_PATHS)) {
   assert.ok(contract.paths[path], `missing path ${path}`);
 }
 
 assert.equal(contract.openapi, "3.1.0");
 assert.equal(
-  contract.paths["/v1/chat/sessions/{session_id}/stream"]?.get?.responses["200"]
+  contract.paths[RUSTY_VIEW_CHAT_PATHS.stream]?.get?.responses["200"]
     ?.content?.["text/event-stream"]?.schema?.type,
   "string",
 );
 
 const chatEvent = schema("ChatEvent");
 assert.deepEqual(chatEvent.required, [
-  "event_id",
-  "session_id",
-  "sequence_id",
-  "created_at",
-  "kind",
-  "payload",
+  ...RUSTY_VIEW_CHAT_EVENT_REQUIRED_FIELDS,
 ]);
 
-const eventKinds = schema("ChatEventKind").enum ?? [];
-for (const kind of [
-  "message_created",
-  "assistant_turn_started",
-  "assistant_text_delta",
-  "assistant_reasoning_delta",
-  "assistant_message_completed",
-  "assistant_turn_finished",
-  "tool_call_started",
-  "tool_call_completed",
-  "tool_call_failed",
-  "command_started",
-  "command_completed",
-  "command_failed",
-  "message_slot_created",
-  "message_variant_created",
-  "message_variant_deleted",
-  "message_variants_reordered",
-  "message_active_variant_selected",
-  "conversation_branch_created",
-  "conversation_active_branch_selected",
-  "conversation_branch_head_updated",
-  "conversation_snapshot_created",
-  "attachment_uploaded",
-  "attachment_linked",
-  "attachment_removed",
-  "attachment_updated",
-  "data_bank_scope_created",
-  "data_bank_scope_removed",
-  "unknown",
-]) {
-  assert.ok(eventKinds.includes(kind), `missing event kind ${kind}`);
-}
+assert.deepEqual(schema("ChatEventKind").enum, [
+  ...RUSTY_VIEW_CHAT_EVENT_KIND_VALUES,
+]);
 
 assert.ok(schema("ChatSessionOpenResult").properties?.message_slots);
 assert.ok(schema("SendChatMessageResult").properties?.slot_id);
 assert.ok(schema("SendChatMessageResult").properties?.primary_variant_id);
 assert.deepEqual(schema("MessageSlotRecord").required, [
-  "slot_id",
-  "session_id",
-  "primary_variant_id",
-  "metadata_json",
-  "created_at",
-  "updated_at",
-  "version",
-  "primary",
-  "alternates",
+  ...RUSTY_VIEW_MESSAGE_SLOT_REQUIRED_FIELDS,
 ]);
 assert.ok(schema("MessageVariantRecord").properties?.message);
 assert.ok(schema("ActiveVariantExpectation").oneOf?.length);
@@ -142,12 +80,21 @@ assert.ok(schema("ChatCommandAutocompleteResult").properties?.items);
 assert.ok(schema("ChatCommandSurface").enum?.includes("chat-input"));
 assert.ok(schema("ChatCommandSource").enum?.includes("frontend-local"));
 
+const capabilityPaths = new Set(
+  apiCapabilityRegistry().capabilities.map(
+    (capability) => capability.path_template,
+  ),
+);
+for (const path of Object.values(RUSTY_VIEW_CHAT_PATHS)) {
+  assert.ok(capabilityPaths.has(path), `capability registry missing ${path}`);
+}
+
 console.log(
   JSON.stringify(
     {
       title: contract.info.title,
-      paths: requiredPaths.length,
-      eventKinds: eventKinds.length,
+      paths: Object.values(RUSTY_VIEW_CHAT_PATHS).length,
+      eventKinds: RUSTY_VIEW_CHAT_EVENT_KIND_VALUES.length,
     },
     null,
     2,

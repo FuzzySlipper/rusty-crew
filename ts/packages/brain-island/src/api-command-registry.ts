@@ -1,5 +1,6 @@
 import type { AdminControlCommandName } from "./admin-control-api.js";
 import { PROFILE_REGISTRY_ADMIN_PATHS } from "./profile-registry-admin-contract.js";
+import { RUSTY_VIEW_CHAT_PATHS } from "./rusty-view-chat-contract.js";
 
 export type SlashCommandName =
   | "help"
@@ -551,7 +552,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.list",
     "GET",
-    "/v1/chat/sessions",
+    RUSTY_VIEW_CHAT_PATHS.sessions,
     "List Rusty View chat sessions.",
     "chat",
     ["chat", "session"],
@@ -559,7 +560,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.open",
     "GET",
-    "/v1/chat/sessions/{session_id}",
+    RUSTY_VIEW_CHAT_PATHS.session,
     "Open a chat session.",
     "chat",
     ["chat", "session"],
@@ -567,7 +568,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.events",
     "GET",
-    "/v1/chat/sessions/{session_id}/events",
+    RUSTY_VIEW_CHAT_PATHS.events,
     "List chat events for a session.",
     "chat",
     ["chat", "session"],
@@ -575,7 +576,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.stream",
     "GET",
-    "/v1/chat/sessions/{session_id}/stream",
+    RUSTY_VIEW_CHAT_PATHS.stream,
     "Stream chat events for a session.",
     "chat",
     ["chat", "session"],
@@ -583,7 +584,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.tool_calls.debug.get",
     "GET",
-    "/v1/chat/sessions/{session_id}/tool-calls/{debug_detail_id}",
+    RUSTY_VIEW_CHAT_PATHS.toolCallDebug,
     "Read bounded redacted raw tool-call debug detail for a session.",
     "chat",
     ["chat", "session", "diagnostics", "tool"],
@@ -591,7 +592,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.provider_requests.debug.get",
     "GET",
-    "/v1/chat/sessions/{session_id}/provider-requests/{debug_detail_id}",
+    RUSTY_VIEW_CHAT_PATHS.providerRequestDebug,
     "Read bounded redacted provider request debug detail for a session.",
     "chat",
     ["chat", "session", "diagnostics"],
@@ -599,7 +600,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.messages.create",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/messages",
+    path_template: RUSTY_VIEW_CHAT_PATHS.messages,
     description: "Send a message to a chat session.",
     auth: "chat",
     mutation: "write",
@@ -610,7 +611,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.slots.list",
     "GET",
-    "/v1/chat/sessions/{session_id}/slots",
+    RUSTY_VIEW_CHAT_PATHS.slots,
     "List primary message slots for a chat session.",
     "chat",
     ["chat", "session", "conversation"],
@@ -618,7 +619,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.slots.create",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/slots",
+    path_template: RUSTY_VIEW_CHAT_PATHS.slots,
     description: "Create a primary message slot and primary variant.",
     auth: "chat",
     mutation: "write",
@@ -629,7 +630,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.slots.variants.list",
     "GET",
-    "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants",
+    RUSTY_VIEW_CHAT_PATHS.slotVariants,
     "Lazy-load non-deleted variants for one message slot.",
     "chat",
     ["chat", "session", "conversation"],
@@ -637,7 +638,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.slots.variants.create",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants",
+    path_template: RUSTY_VIEW_CHAT_PATHS.slotVariants,
     description: "Create an alternate variant for one message slot.",
     auth: "chat",
     mutation: "write",
@@ -648,8 +649,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.slots.variants.delete",
     method: "DELETE",
-    path_template:
-      "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/{variant_id}",
+    path_template: RUSTY_VIEW_CHAT_PATHS.slotVariant,
     description: "Delete an alternate message variant.",
     auth: "chat",
     mutation: "write",
@@ -660,8 +660,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.slots.variants.reorder",
     method: "POST",
-    path_template:
-      "/v1/chat/sessions/{session_id}/slots/{slot_id}/variants/reorder",
+    path_template: RUSTY_VIEW_CHAT_PATHS.reorderSlotVariants,
     description: "Reorder alternate variants for one message slot.",
     auth: "chat",
     mutation: "write",
@@ -672,8 +671,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.slots.active_variant.select",
     method: "POST",
-    path_template:
-      "/v1/chat/sessions/{session_id}/slots/{slot_id}/active-variant",
+    path_template: RUSTY_VIEW_CHAT_PATHS.activeSlotVariant,
     description:
       "Select the active variant for one message slot with conflict detection.",
     auth: "chat",
@@ -685,7 +683,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.tree.open",
     "GET",
-    "/v1/chat/sessions/{session_id}/tree",
+    RUSTY_VIEW_CHAT_PATHS.tree,
     "Read the conversation branch and snapshot projection for a session.",
     "chat",
     ["chat", "session", "conversation"],
@@ -693,7 +691,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.jump.resolve",
     "GET",
-    "/v1/chat/sessions/{session_id}/jump",
+    RUSTY_VIEW_CHAT_PATHS.jump,
     "Resolve a message, branch, snapshot, or cursor jump target.",
     "chat",
     ["chat", "session", "conversation"],
@@ -701,7 +699,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.search",
     "GET",
-    "/v1/chat/sessions/{session_id}/search",
+    RUSTY_VIEW_CHAT_PATHS.sessionSearch,
     "Search persisted transcript messages for one chat session.",
     "chat",
     ["chat", "session", "conversation", "search"],
@@ -709,7 +707,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.search",
     "GET",
-    "/v1/chat/search",
+    RUSTY_VIEW_CHAT_PATHS.search,
     "Search persisted transcript messages across chat sessions.",
     "chat",
     ["chat", "conversation", "search"],
@@ -717,7 +715,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.branches.upsert",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/branches",
+    path_template: RUSTY_VIEW_CHAT_PATHS.branches,
     description: "Create or update a conversation branch.",
     auth: "chat",
     mutation: "write",
@@ -728,7 +726,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.branches.active.select",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/branches/active",
+    path_template: RUSTY_VIEW_CHAT_PATHS.activeBranch,
     description:
       "Select the active conversation branch with conflict detection.",
     auth: "chat",
@@ -740,7 +738,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.branches.head.update",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/branches/{branch_id}/head",
+    path_template: RUSTY_VIEW_CHAT_PATHS.branchHead,
     description: "Update a branch head message with conflict detection.",
     auth: "chat",
     mutation: "write",
@@ -751,7 +749,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.snapshots.upsert",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/snapshots",
+    path_template: RUSTY_VIEW_CHAT_PATHS.snapshots,
     description: "Create or update a conversation snapshot.",
     auth: "chat",
     mutation: "write",
@@ -762,7 +760,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.attachments.list",
     "GET",
-    "/v1/chat/sessions/{session_id}/attachments",
+    RUSTY_VIEW_CHAT_PATHS.attachments,
     "List generic attachments for a chat session.",
     "chat",
     ["chat", "session", "attachment"],
@@ -770,7 +768,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.attachments.create",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/attachments",
+    path_template: RUSTY_VIEW_CHAT_PATHS.attachments,
     description:
       "Register uploaded attachment metadata and optional message, block, or scope links.",
     auth: "chat",
@@ -782,7 +780,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.attachments.remove",
     method: "DELETE",
-    path_template: "/v1/chat/sessions/{session_id}/attachments/{attachment_id}",
+    path_template: RUSTY_VIEW_CHAT_PATHS.attachment,
     description: "Mark a chat attachment removed.",
     auth: "chat",
     mutation: "write",
@@ -793,7 +791,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.data_bank.scopes.list",
     "GET",
-    "/v1/chat/sessions/{session_id}/data-bank/scopes",
+    RUSTY_VIEW_CHAT_PATHS.dataBankScopes,
     "List reusable file scopes for a chat session.",
     "chat",
     ["chat", "session", "attachment"],
@@ -801,7 +799,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.data_bank.scopes.create",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/data-bank/scopes",
+    path_template: RUSTY_VIEW_CHAT_PATHS.dataBankScopes,
     description: "Create or update a reusable file scope.",
     auth: "chat",
     mutation: "write",
@@ -812,7 +810,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.sessions.data_bank.scopes.remove",
     method: "DELETE",
-    path_template: "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}",
+    path_template: RUSTY_VIEW_CHAT_PATHS.dataBankScope,
     description: "Mark a reusable file scope removed.",
     auth: "chat",
     mutation: "write",
@@ -823,7 +821,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.data_bank.scopes.attachments.list",
     "GET",
-    "/v1/chat/sessions/{session_id}/data-bank/scopes/{scope_id}/attachments",
+    RUSTY_VIEW_CHAT_PATHS.dataBankScopeAttachments,
     "List attachments linked to one reusable file scope.",
     "chat",
     ["chat", "session", "attachment"],
@@ -831,7 +829,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.commands.list",
     "GET",
-    "/v1/chat/commands",
+    RUSTY_VIEW_CHAT_PATHS.commands,
     "List browser-safe chat slash commands.",
     "chat",
     ["chat"],
@@ -839,7 +837,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.commands.autocomplete",
     "GET",
-    "/v1/chat/commands/{command_name}/autocomplete",
+    RUSTY_VIEW_CHAT_PATHS.commandAutocomplete,
     "Resolve backend-provided autocomplete values for a chat slash command argument.",
     "chat",
     ["chat"],
@@ -847,7 +845,7 @@ export const API_CAPABILITIES = [
   readCapability(
     "chat.sessions.context",
     "GET",
-    "/v1/chat/sessions/{session_id}/context",
+    RUSTY_VIEW_CHAT_PATHS.context,
     "Read browser-safe model/provider/brain and approximate context usage diagnostics for a chat session.",
     "chat",
     ["chat", "session", "diagnostics"],
@@ -855,7 +853,7 @@ export const API_CAPABILITIES = [
   {
     id: "chat.commands.execute",
     method: "POST",
-    path_template: "/v1/chat/sessions/{session_id}/commands",
+    path_template: RUSTY_VIEW_CHAT_PATHS.sessionCommands,
     description: "Execute a chat slash command.",
     auth: "chat",
     mutation: "control",
