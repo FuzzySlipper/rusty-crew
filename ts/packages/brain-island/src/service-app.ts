@@ -121,6 +121,7 @@ import {
   staticServingEnabled,
   staticSiteRootFromPaths,
 } from "./service-static-site-routes.js";
+import { startServiceBackgroundLoopTimers } from "./service-background-loops.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import {
   handleAdminRoleplayRequest,
@@ -629,7 +630,34 @@ export async function createRustyCrewServiceApp(
     await startDenObservationProjection(state);
     await ensureDenConversationChannels(state);
     await startTelegramConnector(state);
-    startServiceBackgroundLoops(state);
+    startServiceBackgroundLoopTimers({
+      timers: state.timers,
+      intervals: {
+        schedulerTickIntervalMs:
+          state.config.background.schedulerTickIntervalMs,
+        wakeDispatchIntervalMs: state.config.background.wakeDispatchIntervalMs,
+        denRuntimeHeartbeatIntervalMs:
+          state.config.background.denRuntimeHeartbeatIntervalMs,
+        denDeliveryPollIntervalMs:
+          state.config.background.denDeliveryPollIntervalMs,
+        telegramOutboundDrainIntervalMs: state.config.telegram.pollIntervalMs,
+      },
+      denGatewayAvailable: state.denGatewayClient !== undefined,
+      telegramConnectorAvailable: state.telegramConnector !== undefined,
+      callbacks: {
+        runSchedulerHeartbeat: () => runSchedulerHeartbeat(state),
+        recordSchedulerHeartbeatFailure: (error) =>
+          recordSchedulerHeartbeatFailure(state, error),
+        drainAndDispatchWakes: () => drainAndDispatchWakes(state, "background"),
+        heartbeatDenRuntimeInstances: () => heartbeatDenRuntimeInstances(state),
+        pollDenDeliveryIntents: () => pollDenDeliveryIntents(state),
+        drainTelegramOutboundMessages: () =>
+          drainTelegramOutboundMessages(state),
+        recordFailure: (failureRecord) =>
+          recordServiceEvent(state, failureRecord),
+        errorMessage,
+      },
+    });
 
     return {
       config,
@@ -7563,82 +7591,6 @@ interface ServiceWakeObservationContext {
 }
 
 type ServiceWakeSource = "background" | "direct_debug" | "delivery" | "chat";
-
-function startServiceBackgroundLoops(state: ServiceState): void {
-  if (state.config.background.schedulerTickIntervalMs > 0) {
-    const timer = setInterval(() => {
-      void runSchedulerHeartbeat(state).catch((error) => {
-        recordSchedulerHeartbeatFailure(state, error);
-      });
-    }, state.config.background.schedulerTickIntervalMs);
-    state.timers.add(timer);
-  }
-
-  if (state.config.background.wakeDispatchIntervalMs > 0) {
-    const timer = setInterval(() => {
-      void drainAndDispatchWakes(state, "background").catch((error) =>
-        recordServiceEvent(state, {
-          source: "service-host",
-          eventType: "wake_dispatch_failed",
-          severity: "error",
-          summary: errorMessage(error, "wake dispatch failed"),
-        }),
-      );
-    }, state.config.background.wakeDispatchIntervalMs);
-    state.timers.add(timer);
-  }
-
-  if (
-    state.denGatewayClient !== undefined &&
-    state.config.background.denRuntimeHeartbeatIntervalMs > 0
-  ) {
-    const timer = setInterval(() => {
-      void heartbeatDenRuntimeInstances(state).catch((error) =>
-        recordServiceEvent(state, {
-          source: "den-successor-gateway",
-          eventType: "den_runtime_heartbeat_failed",
-          severity: "error",
-          summary: errorMessage(error, "Den Runtime heartbeat failed"),
-        }),
-      );
-    }, state.config.background.denRuntimeHeartbeatIntervalMs);
-    state.timers.add(timer);
-  }
-
-  if (
-    state.denGatewayClient !== undefined &&
-    state.config.background.denDeliveryPollIntervalMs > 0
-  ) {
-    const timer = setInterval(() => {
-      void pollDenDeliveryIntents(state).catch((error) =>
-        recordServiceEvent(state, {
-          source: "den-successor-gateway",
-          eventType: "den_delivery_poll_failed",
-          severity: "error",
-          summary: errorMessage(error, "Den Delivery poll failed"),
-        }),
-      );
-    }, state.config.background.denDeliveryPollIntervalMs);
-    state.timers.add(timer);
-  }
-
-  if (state.telegramConnector !== undefined) {
-    const timer = setInterval(
-      () => {
-        void drainTelegramOutboundMessages(state).catch((error) =>
-          recordServiceEvent(state, {
-            source: "telegram",
-            eventType: "telegram_outbound_drain_failed",
-            severity: "error",
-            summary: errorMessage(error, "Telegram outbound drain failed"),
-          }),
-        );
-      },
-      Math.max(250, state.config.telegram.pollIntervalMs),
-    );
-    state.timers.add(timer);
-  }
-}
 
 async function heartbeatDenRuntimeInstances(
   state: ServiceState,
