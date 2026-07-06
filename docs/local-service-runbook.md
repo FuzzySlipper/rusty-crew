@@ -378,6 +378,12 @@ background heartbeat.
   longer looks like a Rusty Crew service. The systemd templates run
   `npm run service:preflight` before `service:start` so hard-kill stale locks
   are handled before systemd enters a restart loop.
+- The live and debug source-run systemd units use `Type=notify`,
+  `NotifyAccess=all`, and `WatchdogSec=45s`. `service:start` reports ready with
+  `systemd-notify` only after the HTTP host is listening, then sends watchdog
+  heartbeats while `/v1/admin/healthz` responds healthy. `NotifyAccess=all` is
+  intentional for the npm/tsx source-run shape; a later packaged binary unit can
+  tighten this once the Node service process is the direct systemd main PID.
 - If preflight still reports an existing lock, inspect the lock file before
   removing it. It records the pid and creation time.
 - Do not copy only the SQLite main database file while the service is running.

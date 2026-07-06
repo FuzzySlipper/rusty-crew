@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 
 import { startRustyCrewServiceHost } from "./index.js";
+import { createSystemdNotifier, systemdHealthCheck } from "./systemd-notify.js";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -8,9 +9,21 @@ function errorMessage(error: unknown, fallback: string): string {
 
 async function main(): Promise<void> {
   const host = await startRustyCrewServiceHost();
+  const notifier = createSystemdNotifier({
+    healthCheck: () => systemdHealthCheck(host.url),
+  });
+  await notifier.ready(`rusty-crew service listening on ${host.url}`);
+  const stopWatchdog = notifier.startWatchdog(
+    `rusty-crew service healthy on ${host.url}`,
+  );
   console.log(`rusty-crew service listening on ${host.url}`);
   const shutdown = () => {
-    void host.stop().finally(() => process.exit(0));
+    stopWatchdog();
+    void notifier
+      .stopping("rusty-crew service stopping")
+      .catch(() => undefined)
+      .finally(() => host.stop())
+      .finally(() => process.exit(0));
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

@@ -29,7 +29,12 @@ import type {
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { createDebugApiClient } from "./debug-api-client.js";
-import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
+import {
+  createSystemdNotifier,
+  localHealthBaseUrl,
+  startRustyCrewServiceHost,
+  watchdogIntervalFromUsec,
+} from "@rusty-crew/service-host";
 
 const blockedPostgresRoot = mkdtempSync(
   join(tmpdir(), "rusty-crew-service-host-postgres-blocked-"),
@@ -101,6 +106,7 @@ try {
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-host-"));
 const port = await openPort();
 const token = "local-field-test-token";
+await assertSystemdNotifierSmoke();
 writeRuntimeConfig(root);
 writeStaticSite(root);
 let host = await startHost(root, port, token);
@@ -2297,6 +2303,56 @@ async function rawHttpGet(path: string, requestPort = port): Promise<string> {
       socket.write(`GET ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n`);
     });
   });
+}
+
+async function assertSystemdNotifierSmoke(): Promise<void> {
+  const calls: string[][] = [];
+  let intervalCallback: (() => void) | undefined;
+  let intervalMs: number | undefined;
+  let cleared = false;
+  let healthy = true;
+  const fakeTimer = { unref() {} } as NodeJS.Timeout;
+  const notifier = createSystemdNotifier({
+    env: { NOTIFY_SOCKET: "/tmp/rusty-crew-notify", WATCHDOG_USEC: "4000000" },
+    notify: async (args) => {
+      calls.push(args);
+    },
+    healthCheck: async () => healthy,
+    setIntervalFn: ((callback: () => void, ms?: number) => {
+      intervalCallback = callback;
+      intervalMs = ms;
+      return fakeTimer;
+    }) as typeof setInterval,
+    clearIntervalFn: ((timer: NodeJS.Timeout) => {
+      assert.equal(timer, fakeTimer);
+      cleared = true;
+    }) as typeof clearInterval,
+  });
+
+  assert.equal(watchdogIntervalFromUsec("4000000"), 2000);
+  assert.equal(notifier.enabled, true);
+  assert.equal(notifier.watchdogIntervalMs, 2000);
+  await notifier.ready("ready");
+  const stop = notifier.startWatchdog("healthy");
+  assert.equal(intervalMs, 2000);
+  assert.equal(
+    localHealthBaseUrl("http://0.0.0.0:9347"),
+    "http://127.0.0.1:9347/",
+  );
+  intervalCallback?.();
+  await Promise.resolve();
+  healthy = false;
+  intervalCallback?.();
+  await Promise.resolve();
+  stop();
+  await notifier.stopping("stopping");
+
+  assert.equal(cleared, true);
+  assert.deepEqual(calls, [
+    ["--ready", "--status=ready"],
+    ["WATCHDOG=1", "--status=healthy"],
+    ["--stopping", "--status=stopping"],
+  ]);
 }
 
 async function startHost(root: string, port: number, token: string) {

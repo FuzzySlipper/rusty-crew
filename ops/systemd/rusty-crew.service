@@ -5,7 +5,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=all
 WorkingDirectory=/home/dev/rusty-crew
 EnvironmentFile=/home/system/database/rusty-crew-postgres.env
 EnvironmentFile=/home/system/rusty-crew/config/service.env
@@ -14,6 +15,7 @@ ExecStartPre=/usr/bin/env npm run service:preflight
 ExecStart=/usr/bin/env npm run service:start
 Restart=on-failure
 RestartSec=5s
+WatchdogSec=45s
 KillSignal=SIGTERM
 TimeoutStopSec=30s
 

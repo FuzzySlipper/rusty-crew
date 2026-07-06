@@ -31,6 +31,14 @@ import {
 import type { AdapterId, EngineHandle } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
+export {
+  createSystemdNotifier,
+  localHealthBaseUrl,
+  watchdogIntervalFromUsec,
+  type SystemdNotifier,
+  type SystemdNotifierOptions,
+} from "./systemd-notify.js";
+
 export interface RustyCrewServiceHostOptions extends Omit<
   RustyCrewServiceAppOptions,
   "adapterFactories"
