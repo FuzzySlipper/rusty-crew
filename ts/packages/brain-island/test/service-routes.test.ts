@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
-import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
+import type {
+  AgentId,
+  ProfileId,
+  SessionId,
+  SessionState,
+} from "@rusty-crew/contracts";
+import type {
+  NativeModelProviderRecord,
+  NativeProfileRegistryRecord,
+  NativeProfileRegistryWrite,
+} from "@rusty-crew/native-bridge";
 import type { AdminRouteResult } from "../src/admin-diagnostics-api.js";
+import {
+  adminPanelResponse,
+  isAdminPanelRoute,
+} from "../src/service-admin-panel-routes.js";
 import { handleAdminContextStrategiesRequest } from "../src/service-context-strategy-routes.js";
 import {
   handleAdminMcpCatalogRequest,
@@ -21,12 +37,494 @@ import {
   handleAdminLocalToolProfilesRequest,
   localToolProfileIdFromPath,
 } from "../src/service-local-tool-profile-routes.js";
+import {
+  handleStaticSiteRequest,
+  resolveStaticSitePath,
+  staticCacheControl,
+  staticContentType,
+  staticSiteRootFromPaths,
+} from "../src/service-static-site-routes.js";
+import {
+  handleModelProviderAdminRequest,
+  type ModelProviderAdminRouteContext,
+} from "../src/service-model-provider-routes.js";
+import {
+  handleRustyViewChatStreamRequest,
+  isChatRoute,
+  writeSseEvent,
+  type ChatStreamSubscriber,
+  type RustyViewChatStreamRouteContext,
+} from "../src/service-chat-stream-routes.js";
+import {
+  handleProfileRegistryWriteRequest,
+  isProfileRegistryWriteRoute,
+  parseProfileRegistryWriteRoute,
+  type ProfileRegistryRoutePlan,
+  type ProfileRegistryWriteRouteContext,
+} from "../src/service-profile-registry-routes.js";
+import type { ChatEvent } from "../src/rusty-view-chat-api.js";
 import type {
   LocalToolProfile,
   LocalToolProfileList,
   LocalToolProfileStore,
   LocalToolProfileWrite,
 } from "../src/local-tool-profiles.js";
+
+test("admin panel route helpers render the static diagnostics shell", () => {
+  assert.equal(isAdminPanelRoute("/admin", true), true);
+  assert.equal(isAdminPanelRoute("/", false), true);
+  assert.equal(isAdminPanelRoute("/", true), false);
+
+  const response = adminPanelResponse(true);
+  if ("kind" in response) {
+    assert.fail("admin panel response should be an HTML route response");
+  }
+  if (typeof response.body !== "string") {
+    assert.fail("admin panel response should have an HTML string body");
+  }
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers["content-type"], "text/html; charset=utf-8");
+  assert.match(response.body, /Rusty Crew Admin/);
+  assert.match(response.body, /tokenForm/);
+});
+
+test("static site route helpers keep serving rules bounded", async () => {
+  assert.equal(
+    staticSiteRootFromPaths({ dataDir: "/srv/rusty-crew" }),
+    "/srv/rusty-crew/site",
+  );
+  assert.equal(
+    staticContentType("bundle.js"),
+    "application/javascript; charset=utf-8",
+  );
+  assert.equal(staticContentType("unknown.bin"), "application/octet-stream");
+  assert.equal(
+    staticCacheControl(
+      "/srv/rusty-crew/site",
+      "/srv/rusty-crew/site/index.html",
+    ),
+    "no-cache",
+  );
+  assert.equal(
+    staticCacheControl(
+      "/srv/rusty-crew/site",
+      "/srv/rusty-crew/site/app-1234567890abcdef.js",
+    ),
+    "public, max-age=31536000, immutable",
+  );
+
+  assert.deepEqual(
+    resolveStaticSitePath("/srv/rusty-crew/site", "/assets/app.js"),
+    {
+      ok: true,
+      path: "/srv/rusty-crew/site/assets/app.js",
+    },
+  );
+  assert.deepEqual(
+    resolveStaticSitePath("/srv/rusty-crew/site", "/../secret.txt"),
+    {
+      ok: false,
+      reasonCode: "static_path_forbidden",
+      message: "static path contains a forbidden segment",
+    },
+  );
+
+  const methodFailure = await handleStaticSiteRequest(
+    {
+      method: "POST",
+      pathname: "/",
+      requestId: "req-static",
+    },
+    { root: "/srv/rusty-crew/site" },
+  );
+  if ("kind" in methodFailure) {
+    assert.fail("method failure should return an admin route envelope");
+  }
+  if (typeof methodFailure.body === "string") {
+    assert.fail("method failure should return a JSON admin route envelope");
+  }
+  const adminFailure = methodFailure as AdminRouteResult;
+  assert.equal(adminFailure.status, 405);
+  assert.equal(errorReason(adminFailure), "static_method_not_allowed");
+});
+
+test("model provider admin routes list, project records, and report revision conflicts", async () => {
+  const context = modelProviderRouteContext([
+    modelProviderRecord({
+      alias: "deepseek-flash",
+      temperatureMilli: 500,
+      revision: 2,
+    }),
+  ]);
+
+  const invalidStatus = await handleModelProviderAdminRequest(
+    {
+      method: "GET",
+      url: "http://local/v1/admin/model-providers?status=bogus",
+      requestId: "req-model-provider",
+    },
+    context,
+  );
+  assert.equal(invalidStatus.status, 400);
+  assert.equal(errorReason(invalidStatus), "invalid_model_provider_status");
+
+  const listed = await handleModelProviderAdminRequest(
+    {
+      method: "GET",
+      url: "http://local/v1/admin/model-providers?status=active&limit=5&offset=1",
+      requestId: "req-model-provider",
+    },
+    context,
+  );
+  assert.deepEqual(context.observedQueries, [
+    { status: "active", aliasPrefix: undefined, limit: 5, offset: 1 },
+  ]);
+  const listData = okData<{
+    items: Array<NativeModelProviderRecord & { temperature?: number }>;
+    total: number;
+    limit: number;
+    offset: number;
+  }>(listed);
+  assert.equal(listData.total, 1);
+  assert.equal(listData.limit, 5);
+  assert.equal(listData.offset, 1);
+  assert.equal(listData.items[0]?.alias, "deepseek-flash");
+  assert.equal(listData.items[0]?.temperature, 0.5);
+
+  const conflict = await handleModelProviderAdminRequest(
+    {
+      method: "PATCH",
+      url: "http://local/v1/admin/model-providers/deepseek-flash",
+      requestId: "req-model-provider",
+      body: {
+        modelId: "deepseek/deepseek-chat",
+        expectedRevision: 1,
+      },
+    },
+    context,
+  );
+  assert.equal(conflict.status, 409);
+  assert.equal(errorReason(conflict), "model_provider_revision_mismatch");
+  const conflictData = (
+    conflict.body as {
+      data: {
+        provider?: NativeModelProviderRecord & { temperature?: number };
+        expectedRevision: number;
+        currentRevision: number;
+      };
+    }
+  ).data;
+  assert.equal(conflictData.provider?.alias, "deepseek-flash");
+  assert.equal(conflictData.provider?.temperature, 0.5);
+  assert.equal(conflictData.expectedRevision, 1);
+  assert.equal(conflictData.currentRevision, 2);
+});
+
+test("model provider OpenAI OAuth routes expose status and start without leaking verifier", async () => {
+  const context = modelProviderRouteContext([
+    modelProviderRecord({
+      alias: "gpt",
+      protocol: "responses",
+      providerKind: "openai",
+      modelId: "gpt-5",
+      credential: { hasSecret: true, kind: "openai_oauth" },
+    }),
+  ]);
+
+  const status = await handleModelProviderAdminRequest(
+    {
+      method: "GET",
+      url: "http://local/v1/admin/model-providers/gpt/oauth/openai/status",
+      requestId: "req-openai-oauth",
+    },
+    context,
+  );
+  assert.equal(status.status, 200);
+  const statusData = okData<{
+    provider: NativeModelProviderRecord;
+    credential: NativeModelProviderRecord["credential"];
+    loginConfig: { remoteOperatorFlow: string; redirectUri: string };
+    pendingLogins: unknown[];
+  }>(status);
+  assert.equal(statusData.provider.alias, "gpt");
+  assert.equal(statusData.credential.kind, "openai_oauth");
+  assert.equal(statusData.loginConfig.remoteOperatorFlow, "paste_callback_url");
+  assert.equal(
+    statusData.loginConfig.redirectUri,
+    "http://localhost:1455/auth/callback",
+  );
+  assert.deepEqual(statusData.pendingLogins, []);
+
+  const start = await handleModelProviderAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/model-providers/gpt/oauth/openai/start",
+      requestId: "req-openai-oauth",
+      body: { allowedWorkspaceIds: ["workspace-a"] },
+    },
+    context,
+  );
+  assert.equal(start.status, 200);
+  const startData = okData<{
+    pendingLogin: {
+      pendingLoginId: string;
+      providerAlias: string;
+      codeChallenge: string;
+      authorizationUrl: string;
+      codeVerifier?: string;
+    };
+  }>(start);
+  assert.equal(startData.pendingLogin.providerAlias, "gpt");
+  assert.equal(startData.pendingLogin.codeVerifier, undefined);
+  assert.match(startData.pendingLogin.pendingLoginId, /^openai-oauth:gpt:/);
+  assert.match(
+    startData.pendingLogin.authorizationUrl,
+    /id_token_add_organizations=true/,
+  );
+  assert.match(
+    startData.pendingLogin.authorizationUrl,
+    /codex_cli_simplified_flow=true/,
+  );
+  assert.equal(context.pendingLogins.size, 1);
+});
+
+test("profile registry write route wrapper plans, applies, and maps missing records", async () => {
+  assert.deepEqual(
+    parseProfileRegistryWriteRoute(
+      "/v1/admin/profiles/registry/field-profile/runtime-config/apply",
+    ),
+    {
+      profileId: "field-profile",
+      kind: "runtime-config",
+      mode: "apply",
+    },
+  );
+  assert.equal(
+    isProfileRegistryWriteRoute(
+      "/v1/admin/profiles/registry/field-profile/prompt/plan",
+    ),
+    true,
+  );
+  assert.equal(
+    isProfileRegistryWriteRoute("/v1/admin/profiles/registry/field-profile"),
+    false,
+  );
+
+  const context = profileRegistryRouteContext();
+  const methodFailure = await handleProfileRegistryWriteRequest(
+    {
+      method: "GET",
+      url: "http://local/v1/admin/profiles/registry/field-profile/update/plan",
+      requestId: "req-profile-registry",
+    },
+    context,
+  );
+  assert.equal(methodFailure.status, 405);
+  assert.equal(
+    errorReason(methodFailure),
+    "profile_registry_write_requires_post_or_patch",
+  );
+
+  const missingRoute = await handleProfileRegistryWriteRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/profiles/registry/field-profile/unknown/plan",
+      requestId: "req-profile-registry",
+    },
+    context,
+  );
+  assert.equal(missingRoute.status, 404);
+  assert.equal(
+    errorReason(missingRoute),
+    "unknown_profile_registry_write_route",
+  );
+
+  context.failMissing = true;
+  const missingRecord = await handleProfileRegistryWriteRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/profiles/registry/missing-profile/update/plan",
+      requestId: "req-profile-registry",
+      body: { expectedRevision: 1 },
+    },
+    context,
+  );
+  assert.equal(missingRecord.status, 404);
+  assert.equal(errorReason(missingRecord), "profile_registry_record_missing");
+
+  context.failMissing = false;
+  context.calls.length = 0;
+  const plan = await handleProfileRegistryWriteRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/profiles/registry/field-profile/update/plan",
+      requestId: "req-profile-registry",
+      body: { expectedRevision: 1 },
+    },
+    context,
+  );
+  assert.equal(plan.status, 200);
+  assert.equal(okData<{ mode: string; kind: string }>(plan).mode, "plan");
+  assert.deepEqual(context.calls, ["plan:update:plan"]);
+
+  const blockedApply = await handleProfileRegistryWriteRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/profiles/registry/field-profile/prompt/apply",
+      requestId: "req-profile-registry",
+      body: { expectedRevision: 1, forceInvalidPlan: true },
+    },
+    context,
+  );
+  assert.equal(blockedApply.status, 200);
+  assert.equal(okData<{ ok: boolean }>(blockedApply).ok, false);
+  assert.deepEqual(context.calls.slice(-1), ["plan:prompt:apply"]);
+
+  const lifecycleApply = await handleProfileRegistryWriteRequest(
+    {
+      method: "PATCH",
+      url: "http://local/v1/admin/profiles/registry/field-profile/lifecycle/apply",
+      requestId: "req-profile-registry",
+      body: { expectedRevision: 1 },
+    },
+    context,
+  );
+  assert.equal(lifecycleApply.status, 200);
+  const lifecycleData = okData<{
+    applied: boolean;
+    record: NativeProfileRegistryRecord;
+    effects: unknown;
+  }>(lifecycleApply);
+  assert.equal(lifecycleData.applied, true);
+  assert.equal(lifecycleData.record.profileId, "field-profile");
+  assert.deepEqual(lifecycleData.effects, { lifecycleEffects: true });
+
+  const runtimeApply = await handleProfileRegistryWriteRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/profiles/registry/field-profile/runtime-config/apply",
+      requestId: "req-profile-registry",
+      body: { expectedRevision: 2 },
+    },
+    context,
+  );
+  assert.equal(runtimeApply.status, 200);
+  assert.equal(
+    okData<{ effects: unknown }>(runtimeApply).effects,
+    context.runtimeEffects,
+  );
+  assert.deepEqual(
+    context.calls.slice(-5),
+    [
+      "plan:update:plan",
+      "plan:prompt:apply",
+      "plan:lifecycle:apply",
+      "update:field-profile:1",
+      "lifecycle:field-profile",
+      "runtime-plan:runtime-config:apply",
+      "update:field-profile:2",
+      "runtime:field-profile",
+    ].slice(-5),
+  );
+});
+
+test("Rusty View chat stream route validates, replays once, and cleans subscribers", async () => {
+  assert.equal(isChatRoute("/v1/chat"), true);
+  assert.equal(isChatRoute("/v1/chat/sessions/field-session"), true);
+  assert.equal(isChatRoute("/v1/admin/chat"), false);
+
+  const context = chatStreamContext();
+  const notStream = await handleRustyViewChatStreamRequest(
+    requestLike("GET"),
+    new URL("http://local/v1/chat/sessions/field-session/events"),
+    context,
+  );
+  assert.equal(notStream, undefined);
+
+  const methodFailure = await handleRustyViewChatStreamRequest(
+    requestLike("POST", { "x-request-id": "req-chat-stream" }),
+    new URL("http://local/v1/chat/sessions/field-session/stream"),
+    context,
+  );
+  if (methodFailure === undefined || "kind" in methodFailure) {
+    assert.fail("method failure should return an admin route envelope");
+  }
+  if (typeof methodFailure.body === "string") {
+    assert.fail("method failure should not return a string route response");
+  }
+  assert.equal(methodFailure.status, 405);
+  assert.equal(
+    errorReason(methodFailure as AdminRouteResult),
+    "chat_stream_requires_get",
+  );
+
+  const missing = await handleRustyViewChatStreamRequest(
+    requestLike("GET", { "x-request-id": "req-chat-stream" }),
+    new URL("http://local/v1/chat/sessions/missing-session/stream"),
+    context,
+  );
+  if (missing === undefined || "kind" in missing) {
+    assert.fail("missing session should return an admin route envelope");
+  }
+  if (typeof missing.body === "string") {
+    assert.fail("missing session should not return a string route response");
+  }
+  assert.equal(missing.status, 404);
+  assert.equal(
+    errorReason(missing as AdminRouteResult),
+    "chat_session_not_found",
+  );
+
+  const replayOnly = await handleRustyViewChatStreamRequest(
+    requestLike("GET", { origin: "http://view.test" }),
+    new URL("http://local/v1/chat/sessions/field-session/stream?once=true"),
+    context,
+  );
+  assert.equal(replayOnly && "kind" in replayOnly, true);
+  const replayResponse = fakeResponse();
+  if (replayOnly && "kind" in replayOnly) replayOnly.write(replayResponse);
+  assert.equal(replayResponse.statusCode, 200);
+  assert.equal(
+    replayResponse.headers["content-type"],
+    "text/event-stream; charset=utf-8",
+  );
+  assert.equal(
+    replayResponse.headers["access-control-allow-origin"],
+    "http://view.test",
+  );
+  assert.match(replayResponse.body, /: connected/);
+  assert.match(replayResponse.body, /event: message_created/);
+  assert.match(replayResponse.body, /hello from replay/);
+  assert.equal(replayResponse.ended, true);
+  assert.equal(context.subscribers.size, 0);
+
+  const live = await handleRustyViewChatStreamRequest(
+    requestLike("GET"),
+    new URL("http://local/v1/chat/sessions/field-session/stream"),
+    context,
+  );
+  const liveResponse = fakeResponse();
+  if (live && "kind" in live) live.write(liveResponse);
+  assert.equal(context.subscribers.size, 1);
+  const subscriber = [...context.subscribers][0];
+  subscriber?.write(
+    chatEvent("field-session", 7, "assistant_text_delta", { text: "live" }),
+  );
+  assert.match(liveResponse.body, /event: assistant_text_delta/);
+  liveResponse.emit("close");
+  assert.equal(context.subscribers.size, 0);
+  assert.equal(context.deletedSubscriberSessions[0], "field-session");
+
+  const directResponse = fakeResponse();
+  writeSseEvent(
+    directResponse,
+    chatEvent("field-session", 8, "assistant_turn_finished", {
+      status: "completed",
+    }),
+  );
+  assert.match(directResponse.body, /id: field-session:8/);
+});
 
 test("scheduler diagnostics routes validate methods and filters", async () => {
   const methodFailure = await handleSchedulerReadRequest(
@@ -316,6 +814,357 @@ function schedulerContext() {
   return {
     listScheduledJobs: async (input: unknown) => [input],
     listScheduledRuns: async (input: unknown) => [input],
+  };
+}
+
+function chatStreamContext() {
+  const session = sessionState("field-session");
+  const subscribers = new Set<ChatStreamSubscriber>();
+  const deletedSubscriberSessions: string[] = [];
+  const context: RustyViewChatStreamRouteContext & {
+    subscribers: Set<ChatStreamSubscriber>;
+    deletedSubscriberSessions: string[];
+  } = {
+    subscribers,
+    deletedSubscriberSessions,
+    timers: new Set(),
+    async listSessions() {
+      return [session];
+    },
+    streamReplayEvents(replaySession, cursor, url) {
+      assert.equal(replaySession.sessionId, "field-session");
+      assert.equal(cursor, undefined);
+      assert.equal(url.pathname, "/v1/chat/sessions/field-session/stream");
+      return [
+        chatEvent("field-session", 1, "message_created", {
+          body: "hello from replay",
+        }),
+      ];
+    },
+    subscribersForSession(sessionId) {
+      assert.equal(sessionId, "field-session");
+      return subscribers;
+    },
+    deleteSubscribersForSession(sessionId) {
+      deletedSubscriberSessions.push(sessionId);
+    },
+    corsHeaders(request) {
+      return {
+        "access-control-allow-origin":
+          typeof request.headers.origin === "string"
+            ? request.headers.origin
+            : "*",
+      };
+    },
+  };
+  return context;
+}
+
+function sessionState(sessionId: string): SessionState {
+  return {
+    sessionId: sessionId as SessionId,
+    agentId: "field-agent" as AgentId,
+    profileId: "field-profile" as ProfileId,
+    kind: "full",
+    resourceLimits: {},
+    toolProfile: { allowedTools: [] },
+    handle: 1 as never,
+    status: "idle",
+    brainTurnCount: 0,
+    createdAt: "2026-07-05T00:00:00.000Z",
+    lastActiveAt: "2026-07-05T00:00:00.000Z",
+  } as unknown as SessionState;
+}
+
+function chatEvent(
+  sessionId: string,
+  sequence: number,
+  kind: ChatEvent["kind"],
+  payload: Record<string, unknown>,
+): ChatEvent {
+  return {
+    event_id: `${sessionId}:${sequence}`,
+    session_id: sessionId,
+    sequence_id: sequence,
+    created_at: "2026-07-05T00:00:00.000Z",
+    kind,
+    payload,
+  };
+}
+
+function requestLike(
+  method: string,
+  headers: Record<string, string> = {},
+): IncomingMessage {
+  return { method, headers } as IncomingMessage;
+}
+
+function fakeResponse(): ServerResponse & {
+  body: string;
+  headers: Record<string, string>;
+  ended: boolean;
+} {
+  const response = new EventEmitter() as ServerResponse & {
+    body: string;
+    headers: Record<string, string>;
+    ended: boolean;
+  };
+  response.body = "";
+  response.headers = {};
+  response.ended = false;
+  response.destroyed = false;
+  response.writeHead = (statusCode, headers) => {
+    response.statusCode = statusCode;
+    response.headers = Object.fromEntries(
+      Object.entries(headers ?? {}).map(([key, value]) => [key, String(value)]),
+    );
+    return response;
+  };
+  response.write = (chunk: unknown) => {
+    response.body += String(chunk);
+    return true;
+  };
+  response.end = (chunk?: unknown) => {
+    if (chunk !== undefined) response.body += String(chunk);
+    response.ended = true;
+    return response;
+  };
+  return response;
+}
+
+function profileRegistryRouteContext() {
+  const calls: string[] = [];
+  const runtimeEffects = { runtimeEffects: true };
+  const context: ProfileRegistryWriteRouteContext & {
+    calls: string[];
+    failMissing: boolean;
+    runtimeEffects: unknown;
+  } = {
+    calls,
+    failMissing: false,
+    runtimeEffects,
+    async planRegistryWrite(route, body) {
+      calls.push(`plan:${route.kind}:${route.mode}`);
+      if (context.failMissing)
+        throw missingProfileRegistryRecord(route.profileId);
+      const record = profileRegistryRecord(route.profileId);
+      return {
+        ok: !(
+          typeof body === "object" &&
+          body !== null &&
+          "forceInvalidPlan" in body
+        ),
+        profileId: route.profileId,
+        kind: route.kind,
+        mode: route.mode,
+        expectedRevision: 1,
+        current: record,
+        next: record,
+        nextWrite: profileRegistryWrite(record),
+        diagnostics: [],
+      } as ProfileRegistryRoutePlan & Record<string, unknown>;
+    },
+    async planRuntimeConfigWrite(route) {
+      calls.push(`runtime-plan:${route.kind}:${route.mode}`);
+      if (context.failMissing)
+        throw missingProfileRegistryRecord(route.profileId);
+      const record = profileRegistryRecord(route.profileId, { revision: 2 });
+      return {
+        ok: true,
+        profileId: route.profileId,
+        mode: route.mode,
+        expectedRevision: 2,
+        current: record,
+        next: record,
+        nextWrite: profileRegistryWrite(record),
+        runtimeConfig: { providerAlias: "default", mcpBindings: [] },
+        diagnostics: [],
+      } as ProfileRegistryRoutePlan & Record<string, unknown>;
+    },
+    async updateProfileRegistryRecord(input) {
+      calls.push(`update:${input.write.profileId}:${input.expectedRevision}`);
+      return profileRegistryRecord(input.write.profileId, {
+        revision: input.expectedRevision + 1,
+      });
+    },
+    async applyLifecycleEffects(record) {
+      calls.push(`lifecycle:${record.profileId}`);
+      return { lifecycleEffects: true };
+    },
+    async applyRuntimeConfigEffects(record) {
+      calls.push(`runtime:${record.profileId}`);
+      return runtimeEffects;
+    },
+  };
+  return context;
+}
+
+function missingProfileRegistryRecord(profileId: string): Error {
+  return new Error(
+    `profile registry record ${profileId} was not found; create or import a DB-backed profile before registry mutation`,
+  );
+}
+
+function profileRegistryRecord(
+  profileId: string,
+  overrides: Partial<NativeProfileRegistryRecord> = {},
+): NativeProfileRegistryRecord {
+  return {
+    profileId,
+    lifecycleStatus: overrides.lifecycleStatus ?? "active",
+    displayName: overrides.displayName,
+    summary: overrides.summary,
+    defaultSessionKind: overrides.defaultSessionKind ?? "full",
+    agentId: overrides.agentId ?? `${profileId}-agent`,
+    ownerId: overrides.ownerId,
+    promptSoulMarkdown: overrides.promptSoulMarkdown,
+    promptMemoryMarkdown: overrides.promptMemoryMarkdown,
+    activeRuntimeSettingsJson: overrides.activeRuntimeSettingsJson ?? {},
+    sourceAssetRefs: overrides.sourceAssetRefs ?? [],
+    derivedRuntimeRefs: overrides.derivedRuntimeRefs ?? [],
+    importExport: overrides.importExport ?? { metadataJson: {} },
+    revision: overrides.revision ?? 1,
+    createdAt: overrides.createdAt ?? "2026-07-05T00:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-07-05T00:00:00.000Z",
+  };
+}
+
+function profileRegistryWrite(
+  record: NativeProfileRegistryRecord,
+): NativeProfileRegistryWrite {
+  return {
+    profileId: record.profileId,
+    lifecycleStatus: record.lifecycleStatus,
+    displayName: record.displayName,
+    summary: record.summary,
+    defaultSessionKind: record.defaultSessionKind,
+    agentId: record.agentId,
+    ownerId: record.ownerId,
+    promptSoulMarkdown: record.promptSoulMarkdown,
+    promptMemoryMarkdown: record.promptMemoryMarkdown,
+    activeRuntimeSettingsJson: record.activeRuntimeSettingsJson,
+    sourceAssetRefs: record.sourceAssetRefs,
+    derivedRuntimeRefs: record.derivedRuntimeRefs,
+    importExport: record.importExport,
+    now: "2026-07-05T00:00:00.000Z",
+  };
+}
+
+function modelProviderRouteContext(providers: NativeModelProviderRecord[]) {
+  const items = new Map(
+    providers.map((provider) => [provider.alias, provider] as const),
+  );
+  const pendingLogins = new Map();
+  const observedQueries: unknown[] = [];
+  const context: ModelProviderAdminRouteContext & {
+    observedQueries: unknown[];
+  } = {
+    observedQueries,
+    pendingLogins,
+    openAiOauth: {
+      issuer: "https://auth.openai.com",
+      clientId: "rusty-crew-test",
+      redirectUri: "http://localhost:1455/auth/callback",
+      allowRedirectUriOverride: false,
+      originator: "rusty-crew-test",
+    },
+    now: () => "2026-07-05T00:00:00.000Z",
+    async listModelProviders(query) {
+      observedQueries.push(query);
+      return [...items.values()].filter(
+        (provider) =>
+          query.status === undefined || provider.status === query.status,
+      );
+    },
+    async getModelProvider(alias) {
+      return items.get(alias);
+    },
+    async upsertModelProvider(write) {
+      const current = items.get(write.alias);
+      if (
+        current !== undefined &&
+        write.expectedRevision !== undefined &&
+        write.expectedRevision !== current.revision
+      ) {
+        throw new Error(
+          `model provider ${write.alias} revision mismatch: expected ${write.expectedRevision}, found ${current.revision}`,
+        );
+      }
+      const provider = modelProviderRecord({
+        ...(current ?? {}),
+        alias: write.alias,
+        status: write.status,
+        protocol: write.protocol,
+        providerKind: write.providerKind,
+        displayName: write.displayName,
+        description: write.description,
+        baseUrl: write.baseUrl,
+        modelId: write.modelId,
+        contextWindowTokens: write.contextWindowTokens,
+        maxOutputTokens: write.maxOutputTokens,
+        temperatureMilli: write.temperatureMilli,
+        reasoningEffort: write.reasoningEffort,
+        reasoningFormat: write.reasoningFormat,
+        metadataJson: write.metadataJson ?? current?.metadataJson ?? {},
+        revision: (current?.revision ?? 0) + 1,
+        credential:
+          write.clearSecret === true
+            ? { hasSecret: false }
+            : write.secret !== undefined
+              ? { hasSecret: true, kind: "api_key" }
+              : (current?.credential ?? { hasSecret: false }),
+        createdAt: current?.createdAt ?? write.now,
+        updatedAt: write.now,
+      });
+      items.set(provider.alias, provider);
+      return provider;
+    },
+    async exchangeOpenAiOauthCode() {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          reasonCode: "test_exchange_not_configured",
+          message: "test exchange not configured",
+          retryable: false,
+        },
+      };
+    },
+    async refreshAfterWrite({ refreshMode }) {
+      return {
+        refresh: {
+          mode: refreshMode,
+          affectedProfiles: [],
+          outcomes: [],
+        },
+      };
+    },
+  };
+  return context;
+}
+
+function modelProviderRecord(
+  overrides: Partial<NativeModelProviderRecord> & { alias: string },
+): NativeModelProviderRecord {
+  return {
+    alias: overrides.alias,
+    status: overrides.status ?? "active",
+    protocol: overrides.protocol ?? "chat_completions",
+    providerKind: overrides.providerKind ?? "custom",
+    displayName: overrides.displayName,
+    description: overrides.description,
+    baseUrl: overrides.baseUrl ?? "http://model-provider.test/v1",
+    modelId: overrides.modelId ?? "test-model",
+    contextWindowTokens: overrides.contextWindowTokens,
+    maxOutputTokens: overrides.maxOutputTokens,
+    temperatureMilli: overrides.temperatureMilli,
+    reasoningEffort: overrides.reasoningEffort,
+    reasoningFormat: overrides.reasoningFormat,
+    credential: overrides.credential ?? { hasSecret: false },
+    metadataJson: overrides.metadataJson ?? {},
+    revision: overrides.revision ?? 1,
+    createdAt: overrides.createdAt ?? "2026-07-05T00:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-07-05T00:00:00.000Z",
   };
 }
 

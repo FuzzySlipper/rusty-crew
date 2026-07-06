@@ -17,6 +17,24 @@ the route if-chain, many admin handlers, service drain loops, scheduler glue,
 roleplay browser API, and private helper types. This is workable only while the
 code remains under active remediation; new code should make extraction easier.
 
+Before extracting a route family, classify its code into three buckets:
+
+1. **TypeScript glue:** HTTP method/path dispatch, adapter/provider SDK calls,
+   model-callable tool glue, and route-local response shaping. This may remain
+   in TypeScript when kept behind explicit ports.
+2. **Rust authority:** durable validation, coordination decisions, lifecycle
+   state transitions, storage semantics, runtime rebuild planning, and anything
+   that should be enforced rather than suggested. These pieces should move
+   toward Rust crates or bridge-backed operations instead of becoming a smaller
+   TypeScript authority island.
+3. **Generated contract surface:** request/response envelopes, Rust/TS wire
+   shapes, and API catalog metadata that can drift when hand-maintained. These
+   should be candidates for bridge/OpenAPI/codegen once the shape is stable.
+
+Extraction should reduce TypeScript authority, not merely move it to a new
+file. A route module is good when it makes the remaining TypeScript look more
+like code-as-config around Rust-owned state and narrow external-adapter glue.
+
 ## Target Modules
 
 Use narrow, framework-neutral route modules first. A route module should accept
@@ -85,6 +103,83 @@ The handler now receives:
 This keeps the route testable without a live service, bridge, or HTTP server.
 `service-app.ts` remains the dispatcher for now and composes the real store from
 `state.bridge` plus `state.now`.
+
+Task 4325 started the second wave by moving shared route-result types into
+`service-route-results.ts` and extracting static site serving into
+`service-static-site-routes.ts`. That slice deliberately moved filesystem/path
+serving glue only; the embedded admin panel HTML remains in `service-app.ts`
+until it can move in a focused UI/static-resource slice.
+
+Task 4332 then moved the embedded admin-panel HTML and route decision helpers
+into `service-admin-panel-routes.ts`. This is intentionally low-authority
+TypeScript: static HTML/resource projection, not service behavior.
+
+Task 4333 moved model-provider CRUD and OpenAI OAuth admin routing into
+`service-model-provider-routes.ts`. The new module owns HTTP path/method
+dispatch, OAuth authorization/pending-login glue, credential-secret envelope
+shaping, provider API read projection, and route-local error mapping through
+explicit ports. It does not receive `ServiceState`.
+
+The 4333 authority split is:
+
+- **TypeScript glue now extracted:** route parsing, OAuth start/status/complete
+  provider glue, redacted pending-login projection, decimal `temperature`
+  request/readback mapping, and revision-conflict route envelopes.
+- **Rust authority still visible in `service-app.ts`:** provider/profile
+  runtime rebuild impact planning and profile/session refresh application. This
+  remains intentionally unhidden until it moves behind a Rust/control-plane
+  operation.
+- **Generated contract candidates:** model-provider write/read envelopes,
+  revision-conflict response shape, OAuth status/start/complete/clear request
+  bodies, and the public `temperature`/`temperatureMilli` projection. These
+  should become generated/OpenAPI or bridge-owned contracts rather than another
+  manually maintained UI/backend handshake.
+
+Task 4334 moved the profile-registry write route wrapper into
+`service-profile-registry-routes.ts`. This is intentionally a route-shell
+extraction: the module owns method/path validation, missing-record error
+mapping, plan-vs-apply orchestration, and lifecycle/runtime effect dispatch
+through explicit ports. It does not own profile validation, runtime-config
+mutation semantics, or lifecycle authority.
+
+The 4334 authority split is:
+
+- **TypeScript glue now extracted:** profile registry write-route parsing,
+  method/unknown-route envelopes, missing DB-backed profile mapping, and
+  deciding whether a successful apply should call lifecycle or runtime-config
+  effect ports.
+- **Authority still visible in `service-app.ts`:** registry field/prompt/
+  lifecycle next-record planning, editable runtime-config composition, local
+  tool profile validation, MCP binding synthesis, profile JSON writes, runtime
+  config file mutation, session archiving, and brain unregister behavior. These
+  are too semantic to hide in another TypeScript module as cleanup.
+- **Rust/codegen candidates:** profile registry write plans, editable
+  runtime-config request/response envelopes, revision/lifecycle error shapes,
+  profile/session referential-integrity checks, and runtime config replacement
+  apply plans.
+
+Task 4335 moved Rusty View chat route dispatch and SSE stream handling into
+`service-chat-stream-routes.ts`. The module now owns `/v1/chat` dispatch order
+(stream route first, then the existing chat API handler), stream method/session
+validation, SSE serialization, replay-on-connect, heartbeat setup, subscriber
+cleanup, and CORS projection for chat responses. `service-app.ts` supplies the
+same chat capability ports as before.
+
+The 4335 authority split is:
+
+- **TypeScript glue now extracted:** chat route detection, stream route parsing,
+  SSE framing, stream replay wiring, subscriber cleanup, chat CORS projection,
+  and the dispatch from stream route to the existing Rusty View chat API
+  handler.
+- **Authority still visible outside the route module:** session identity,
+  transcript/event persistence, message variant/branch mutation semantics,
+  slash-command execution, wake submission, provider/tool debug detail lookup,
+  and context usage estimation. Those remain behind existing service ports and
+  should move only through Rust/control-plane or generated contract work, not
+  as hidden route cleanup.
+- **Generated contract candidates:** SSE event catalog, chat API OpenAPI
+  schemas, command output envelopes, debug-detail payloads, message
+  slot/variant/branch schemas, and stream cursor/replay semantics.
 
 ## Validation Pattern
 

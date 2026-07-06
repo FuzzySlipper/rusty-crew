@@ -38,6 +38,18 @@ npm run smoke:architecture-boundaries
 That alias runs the Rust crate dependency firewall, TypeScript package boundary
 check, and storage-scope ownership check together.
 
+The default CI smoke selection is guarded by:
+
+```sh
+npm run smoke:validation-audit
+```
+
+That audit inspects the `verify:ts` smoke aliases and fails if the deterministic
+offline gate starts depending on Den, local routers, service startup,
+PostgreSQL, Rusty View, Telegram, OpenAI OAuth, or live providers. It also
+prints catalogue counts so validation drift is visible without forcing every
+historical smoke into CI.
+
 ## Categories
 
 Use these categories when adding or reclassifying smokes.
@@ -89,6 +101,9 @@ The CI/offline gate is `npm run verify:offline`. It intentionally runs
 deterministic Rust tests, TypeScript unit tests, boundary smokes, runtime-config
 parity, and bridge validation. It must not require the live service root,
 debug-service root, Den, PostgreSQL, Rusty View, Telegram, or a real provider.
+`npm run smoke:validation-audit` enforces that expectation for the smoke aliases
+called by `verify:ts`; native bridge checks are allowed because they are
+deterministic and build local artifacts.
 
 Offline cassette-backed checks are allowed in this gate when they validate only
 committed, redacted fixture artifacts. They preserve response-shape evidence
@@ -157,6 +172,12 @@ The broad buckets at the start of this transition are:
   `ts/packages/native-bridge/src/smoke-*.ts` contain contract and bridge
   compatibility proofs.
 - `ts/smokes/*.ts` is the current home for cross-package/operator smokes.
+
+As of task 4330, the discoverable catalogue contains 260 smoke entries: 126
+root aliases and 134 package entries. The default validation gate does not run
+that full catalogue. It runs only the curated deterministic subset in
+`verify:ts`, and the validation audit blocks accidental promotion of
+live/service/infrastructure smokes into that subset.
 
 ## Adding A New Check
 

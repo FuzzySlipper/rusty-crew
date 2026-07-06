@@ -197,6 +197,9 @@ boundary portion runs
 `smoke-test-inventory.md` for the full smoke catalogue and execution lanes
 (`offline`, `native-offline`, `local-service`, `debug-service`,
 `local-infrastructure`, `live-provider`, and `rusty-view-certification`).
+The TypeScript gate also runs `npm run smoke:validation-audit`, which keeps the
+curated offline smoke subset from accidentally gaining Den/service/Postgres/UI
+or live-provider requirements.
 
 ## LLM boundary decision
 

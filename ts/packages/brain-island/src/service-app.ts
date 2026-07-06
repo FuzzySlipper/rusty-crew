@@ -1,16 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createHash, randomBytes } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import {
-  basename,
-  dirname,
-  extname,
-  join,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type {
   BrainEvent,
   BrainImplementationId,
@@ -39,9 +31,6 @@ import {
   type NativeBridgeModule,
   type NativeCreateProfilePlan,
   type NativeModelProviderRecord,
-  type NativeModelProviderProtocol,
-  type NativeModelProviderQuery,
-  type NativeModelProviderStatus,
   type NativeModelProviderWrite,
   type NativeProfilePurgeReport,
   type NativeProfileRegistryLifecycleStatus,
@@ -114,11 +103,36 @@ import {
   handleAdminMcpCatalogRequest,
   mcpServerCatalogEntries,
 } from "./service-mcp-catalog-routes.js";
-import { failure, successRoute } from "./service-route-results.js";
+import {
+  adminPanelResponse,
+  isAdminPanelRoute,
+} from "./service-admin-panel-routes.js";
+import {
+  failure,
+  isRawServiceRouteResult,
+  successRoute,
+  type ServiceRouteResult,
+} from "./service-route-results.js";
 import { handleSchedulerReadRequest } from "./service-scheduler-routes.js";
 import { handleAdminToolsCatalogRequest } from "./service-tool-catalog-routes.js";
 import { handleAdminLocalToolProfilesRequest } from "./service-local-tool-profile-routes.js";
+import {
+  handleStaticSiteRequest,
+  staticServingEnabled,
+  staticSiteRootFromPaths,
+} from "./service-static-site-routes.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
+import {
+  handleModelProviderAdminRequest,
+  type ModelProviderRefreshMode,
+  type ModelProviderWriteRefreshResult,
+  type OpenAiOauthPendingLogin,
+} from "./service-model-provider-routes.js";
+import {
+  handleProfileRegistryWriteRequest,
+  isProfileRegistryWriteRoute,
+  type ProfileRegistryWriteRoute,
+} from "./service-profile-registry-routes.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
 import {
@@ -177,7 +191,6 @@ import {
   type StorageDiagnosticsProjection,
 } from "./runtime-diagnostics.js";
 import {
-  handleRustyViewChatRequest,
   cursorSequence,
   type AttachmentMutationResult,
   type AttachmentPage,
@@ -235,6 +248,11 @@ import {
   type UpdateConversationBranchHeadInput,
   type UpdateConversationBranchHeadResult,
 } from "./rusty-view-chat-api.js";
+import {
+  handleRustyViewChatRouteRequest,
+  isChatRoute,
+  type ChatStreamSubscriber,
+} from "./service-chat-stream-routes.js";
 import { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
 import {
   routeSlashCommand,
@@ -470,21 +488,6 @@ interface BrowserRoleplayNarratorConfig {
   };
 }
 
-interface OpenAiOauthPendingLogin {
-  pendingLoginId: string;
-  providerAlias: string;
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  scopes: string[];
-  state: string;
-  codeVerifier: string;
-  codeChallenge: string;
-  authorizationUrl: string;
-  createdAt: string;
-  expiresAt: string;
-}
-
 interface DenConversationChannelResolution {
   channelId: number;
   projectId: string;
@@ -546,20 +549,6 @@ interface RuntimePauseRecord {
   affectedSessionIds: string[];
   inFlightWakeCount: number;
 }
-
-interface RawServiceRouteResult {
-  kind: "raw";
-  write(response: ServerResponse): void;
-}
-
-type ServiceRouteResult =
-  | AdminRouteResult
-  | RawServiceRouteResult
-  | {
-      status: number;
-      headers: Record<string, string>;
-      body: string;
-    };
 
 const CONTROL_ROUTE_PREFIX = "/v1/admin/control/";
 const DEV_NO_AUTH_CONTROL_TOKEN = "__rusty_crew_dev_no_auth__";
@@ -769,8 +758,9 @@ async function handleHttpRequest(
   state: ServiceState,
 ): Promise<ServiceRouteResult> {
   const url = new URL(request.url ?? "/", "http://rusty-crew.local");
-  if (isAdminPanelRoute(url.pathname, staticServingEnabled(state))) {
-    return htmlResponse(adminPanelHtml(configRequiresAuth(state.config)));
+  const staticSiteRoot = staticSiteRootFromPaths(state.config.paths);
+  if (isAdminPanelRoute(url.pathname, staticServingEnabled(staticSiteRoot))) {
+    return adminPanelResponse(configRequiresAuth(state.config));
   }
 
   if (url.pathname === "/v1/admin/healthz") {
@@ -793,8 +783,18 @@ async function handleHttpRequest(
     return chatCorsPreflightResponse(request);
   }
 
-  if (!url.pathname.startsWith("/v1/") && staticServingEnabled(state)) {
-    return handleStaticSiteRequest(request, url, state);
+  if (
+    !url.pathname.startsWith("/v1/") &&
+    staticServingEnabled(staticSiteRoot)
+  ) {
+    return handleStaticSiteRequest(
+      {
+        method: request.method,
+        pathname: url.pathname,
+        requestId: requestId(request),
+      },
+      { root: staticSiteRoot },
+    );
   }
 
   if (!isAuthorized(request, state.config.admin.token, state)) {
@@ -835,25 +835,18 @@ async function handleHttpRequest(
   }
 
   if (isChatRoute(url.pathname)) {
-    const streamResult = await handleRustyViewChatStreamRequest(
-      request,
-      url,
-      state,
-    );
-    if (streamResult !== undefined) return withChatCors(streamResult, request);
-    const body =
-      (request.method ?? "GET").toUpperCase() === "POST"
-        ? await readJsonBody(request)
-        : undefined;
-    const result = await handleRustyViewChatRequest(
-      {
-        method: request.method ?? "GET",
-        url: url.toString(),
-        headers: headers(request),
-        body,
-        requestId: requestId(request),
+    return handleRustyViewChatRouteRequest(request, url, {
+      stream: {
+        listSessions: () => state.bridge.listSessions(),
+        streamReplayEvents: (session, cursor, streamUrl) =>
+          streamReplayEvents(state, session, cursor, streamUrl),
+        subscribersForSession: (sessionId) => chatSubscribers(state, sessionId),
+        deleteSubscribersForSession: (sessionId) =>
+          state.chatSubscribersBySession.delete(sessionId),
+        timers: state.timers,
+        corsHeaders: (corsRequest) => chatCorsHeaders(corsRequest),
       },
-      {
+      chat: {
         listSessions: () => state.bridge.listSessions(),
         projectBodyStateJson: (sessionId) =>
           state.bridge.projectBodyStateJson(sessionId),
@@ -903,8 +896,10 @@ async function handleHttpRequest(
           removeRustyViewDataBankScope(state, input),
         now: state.now,
       },
-    );
-    return withChatCors(result, request);
+      readJsonBody,
+      requestId,
+      headers,
+    });
   }
 
   if (url.pathname.startsWith("/v1/debug/")) {
@@ -1012,7 +1007,23 @@ async function handleHttpRequest(
         body,
         requestId: requestId(request),
       },
-      state,
+      {
+        listModelProviders: (query) => state.bridge.listModelProviders(query),
+        getModelProvider: (alias) => state.bridge.getModelProvider(alias),
+        upsertModelProvider: (write) => state.bridge.upsertModelProvider(write),
+        exchangeOpenAiOauthCode: (input) =>
+          state.bridge.exchangeOpenAiOauthCode(input),
+        openAiOauth: state.config.openAiOauth,
+        pendingLogins: state.openAiOauthPendingLogins,
+        now: state.now,
+        refreshAfterWrite: (input) =>
+          modelProviderRefreshAfterWrite({
+            state,
+            requestId: input.requestId,
+            provider: input.provider,
+            refreshMode: input.refreshMode,
+          }),
+      },
     );
   }
 
@@ -1029,7 +1040,22 @@ async function handleHttpRequest(
         body,
         requestId: requestId(request),
       },
-      state,
+      {
+        planRegistryWrite: (route, bodyValue) =>
+          planProfileRegistryWrite(state, route, bodyValue),
+        planRuntimeConfigWrite: (route, bodyValue) =>
+          planProfileRegistryRuntimeConfigWrite(state, route, bodyValue),
+        updateProfileRegistryRecord: (input) =>
+          state.bridge.updateProfileRegistryRecord(input),
+        applyLifecycleEffects: (record) =>
+          applyProfileRegistryLifecycleEffects(state, record),
+        applyRuntimeConfigEffects: (record, plan) =>
+          applyProfileRegistryRuntimeConfigEffects(
+            state,
+            record,
+            plan as ProfileRegistryRuntimeConfigPlan,
+          ),
+      },
     );
   }
 
@@ -4199,89 +4225,6 @@ function requiredPositiveInteger(value: unknown, fieldName: string): number {
   return parsed;
 }
 
-async function handleProfileRegistryWriteRequest(
-  request: {
-    method: string;
-    url: string;
-    body?: unknown;
-    requestId: string;
-  },
-  state: ServiceState,
-): Promise<AdminRouteResult> {
-  const method = request.method.toUpperCase();
-  if (method !== "POST" && method !== "PATCH") {
-    return failure(405, request.requestId, {
-      code: "method_not_allowed",
-      reason_code: "profile_registry_write_requires_post_or_patch",
-      message: "profile registry write routes support POST or PATCH",
-      retryable: false,
-    });
-  }
-  const route = parseProfileRegistryWriteRoute(new URL(request.url).pathname);
-  if (route === undefined) {
-    return failure(404, request.requestId, {
-      code: "not_found",
-      reason_code: "unknown_profile_registry_write_route",
-      message: "unknown profile registry write route",
-      retryable: false,
-    });
-  }
-  let plan: ProfileRegistryWritePlan | ProfileRegistryRuntimeConfigPlan;
-  try {
-    plan =
-      route.kind === "runtime-config"
-        ? await planProfileRegistryRuntimeConfigWrite(
-            state,
-            route,
-            request.body,
-          )
-        : await planProfileRegistryWrite(state, route, request.body);
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes(
-        "was not found; create or import a DB-backed profile",
-      )
-    ) {
-      return failure(404, request.requestId, {
-        code: "not_found",
-        reason_code: "profile_registry_record_missing",
-        message: error.message,
-        retryable: false,
-      });
-    }
-    throw error;
-  }
-  if (route.mode === "plan") return successRoute(request.requestId, plan);
-  if (!plan.ok) return successRoute(request.requestId, plan);
-  const updated = await state.bridge.updateProfileRegistryRecord({
-    write: plan.nextWrite,
-    expectedRevision: plan.expectedRevision,
-  });
-  const effects =
-    route.kind === "lifecycle"
-      ? await applyProfileRegistryLifecycleEffects(state, updated)
-      : route.kind === "runtime-config"
-        ? await applyProfileRegistryRuntimeConfigEffects(
-            state,
-            updated,
-            plan as ProfileRegistryRuntimeConfigPlan,
-          )
-        : undefined;
-  return successRoute(request.requestId, {
-    ...plan,
-    applied: true,
-    record: updated,
-    effects,
-  });
-}
-
-interface ProfileRegistryWriteRoute {
-  profileId: string;
-  kind: "update" | "lifecycle" | "prompt" | "runtime-config";
-  mode: "plan" | "apply";
-}
-
 interface ProfileRegistryWritePlan {
   ok: boolean;
   profileId: string;
@@ -4345,37 +4288,6 @@ interface EditableProfileRuntimeConfig {
     transport?: string;
     toolProfileKey?: string;
   }>;
-}
-
-function parseProfileRegistryWriteRoute(
-  pathname: string,
-): ProfileRegistryWriteRoute | undefined {
-  const parts = pathname.split("/").filter(Boolean);
-  if (
-    parts.length !== 7 ||
-    parts[0] !== "v1" ||
-    parts[1] !== "admin" ||
-    parts[2] !== "profiles" ||
-    parts[3] !== "registry"
-  ) {
-    return undefined;
-  }
-  const kind = parts[5];
-  const mode = parts[6];
-  if (
-    (kind !== "update" &&
-      kind !== "lifecycle" &&
-      kind !== "prompt" &&
-      kind !== "runtime-config") ||
-    (mode !== "plan" && mode !== "apply")
-  ) {
-    return undefined;
-  }
-  return {
-    profileId: decodeURIComponent(parts[4] ?? ""),
-    kind: kind === "runtime-config" ? "runtime-config" : kind,
-    mode,
-  };
 }
 
 async function planProfileRegistryWrite(
@@ -5212,719 +5124,6 @@ function derivedRuntimeRefStatusForLifecycle(
   return "disabled";
 }
 
-async function handleModelProviderAdminRequest(
-  request: {
-    method: string;
-    url: string;
-    body?: unknown;
-    requestId: string;
-  },
-  state: ServiceState,
-): Promise<AdminRouteResult> {
-  const url = new URL(request.url);
-  const method = request.method.toUpperCase();
-  const relativePath = url.pathname.replace(
-    /^\/v1\/admin\/model-providers\/?/,
-    "",
-  );
-  const segments = relativePath
-    .split("/")
-    .filter((segment) => segment.length > 0)
-    .map((segment) => decodeURIComponent(segment));
-  const alias = segments[0] ?? "";
-
-  if (alias && segments[1] === "oauth" && segments[2] === "openai") {
-    return handleOpenAiOauthProviderAdminRequest(
-      {
-        method,
-        alias,
-        action: segments[3] ?? "status",
-        body: request.body,
-        requestId: request.requestId,
-      },
-      state,
-    );
-  }
-
-  if (method === "GET" && !alias) {
-    const status = modelProviderStatusParam(url.searchParams.get("status"));
-    if (status === "invalid") {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: "invalid_model_provider_status",
-        message: "invalid model provider status filter",
-        retryable: false,
-      });
-    }
-    const query: NativeModelProviderQuery = {
-      status,
-      aliasPrefix: stringParam(url, "aliasPrefix"),
-      limit: numberParam(url, "limit"),
-      offset: numberParam(url, "offset"),
-    };
-    const items = await state.bridge.listModelProviders(query);
-    return successRoute(request.requestId, {
-      items: items.map(modelProviderApiRecord),
-      total: items.length,
-      limit: query.limit ?? 100,
-      offset: query.offset ?? 0,
-    });
-  }
-
-  if (method === "GET" && alias) {
-    const provider = await state.bridge.getModelProvider(alias);
-    if (!provider) {
-      return failure(404, request.requestId, {
-        code: "not_found",
-        reason_code: "model_provider_not_found",
-        message: `model provider ${alias} was not found`,
-        retryable: false,
-      });
-    }
-    return successRoute(request.requestId, modelProviderApiRecord(provider));
-  }
-
-  if ((method === "POST" && !alias) || (method === "PATCH" && alias)) {
-    const write = modelProviderWriteFromBody(
-      request.body,
-      alias || undefined,
-      state.now(),
-    );
-    let provider: NativeModelProviderRecord;
-    try {
-      provider = await state.bridge.upsertModelProvider(write);
-    } catch (error) {
-      const mismatch = modelProviderRevisionMismatch(error);
-      if (mismatch !== undefined && mismatch.alias === write.alias) {
-        const currentProvider = await state.bridge.getModelProvider(
-          write.alias,
-        );
-        return modelProviderRevisionConflictRoute(
-          request.requestId,
-          mismatch,
-          currentProvider,
-        );
-      }
-      throw error;
-    }
-    const refresh = await modelProviderRefreshAfterWrite({
-      state,
-      requestId: request.requestId,
-      provider,
-      refreshMode: modelProviderRefreshMode(url, request.body),
-    });
-    return successRoute(request.requestId, {
-      provider: modelProviderApiRecord(provider),
-      ...refresh,
-    });
-  }
-
-  return failure(405, request.requestId, {
-    code: "method_not_allowed",
-    reason_code: "model_provider_method_not_allowed",
-    message:
-      "model provider routes support GET list/get, POST create/upsert, and PATCH update",
-    retryable: false,
-  });
-}
-
-async function handleOpenAiOauthProviderAdminRequest(
-  request: {
-    method: string;
-    alias: string;
-    action: string;
-    body?: unknown;
-    requestId: string;
-  },
-  state: ServiceState,
-): Promise<AdminRouteResult> {
-  const provider = await state.bridge.getModelProvider(request.alias);
-  if (!provider) {
-    return failure(404, request.requestId, {
-      code: "not_found",
-      reason_code: "model_provider_not_found",
-      message: `model provider ${request.alias} was not found`,
-      retryable: false,
-    });
-  }
-
-  if (request.action === "status" && request.method === "GET") {
-    return successRoute(
-      request.requestId,
-      openAiOauthProviderStatus(provider, state),
-    );
-  }
-
-  if (request.action === "start" && request.method === "POST") {
-    const body = optionalRecord(request.body) ?? {};
-    const requestedRedirectUri = optionalString(
-      body.redirectUri ?? body.redirect_uri,
-    );
-    if (
-      requestedRedirectUri !== undefined &&
-      requestedRedirectUri !== state.config.openAiOauth.redirectUri &&
-      !state.config.openAiOauth.allowRedirectUriOverride
-    ) {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: "openai_oauth_unregistered_redirect_uri",
-        message:
-          "OpenAI OAuth redirectUri override is disabled; use the configured registered redirectUri from status/start response",
-        retryable: false,
-      });
-    }
-    const pending = startOpenAiOauthLogin(provider, state, body);
-    state.openAiOauthPendingLogins.set(pending.pendingLoginId, pending);
-    return successRoute(request.requestId, {
-      provider: modelProviderApiRecord(provider),
-      loginConfig: openAiOauthLoginConfig(state),
-      pendingLogin: redactedOpenAiOauthPendingLogin(pending),
-    });
-  }
-
-  if (request.action === "complete" && request.method === "POST") {
-    const body = requiredRecord(
-      request.body,
-      "OpenAI OAuth complete request body",
-    );
-    const callbackUrl = optionalString(
-      body.callbackUrl ??
-        body.callback_url ??
-        body.authorizationResponseUrl ??
-        body.authorization_response_url,
-    );
-    let callback: ReturnType<typeof parseOpenAiOauthCallbackUrl> | undefined;
-    try {
-      callback = callbackUrl
-        ? parseOpenAiOauthCallbackUrl(callbackUrl)
-        : undefined;
-    } catch {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: "openai_oauth_invalid_callback_url",
-        message:
-          "OpenAI OAuth callbackUrl must be a full callback URL or query string containing code and state",
-        retryable: false,
-      });
-    }
-    if (callback?.error !== undefined) {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: "openai_oauth_callback_error",
-        message: `OpenAI OAuth callback returned error ${callback.error}`,
-        retryable: false,
-      });
-    }
-    const stateValue = requiredString(
-      body.state ?? callback?.state,
-      "OpenAI OAuth state",
-    );
-    const pendingLoginId = optionalString(
-      body.pendingLoginId ?? body.pending_login_id,
-    );
-    const pending =
-      pendingLoginId !== undefined
-        ? state.openAiOauthPendingLogins.get(pendingLoginId)
-        : findOpenAiOauthPendingLoginByState(provider.alias, stateValue, state);
-    if (!pending || pending.providerAlias !== provider.alias) {
-      return failure(404, request.requestId, {
-        code: "not_found",
-        reason_code: "openai_oauth_pending_login_not_found",
-        message: "OpenAI OAuth pending login was not found",
-        retryable: false,
-      });
-    }
-    if (stateValue !== pending.state) {
-      return failure(400, request.requestId, {
-        code: "invalid_input",
-        reason_code: "openai_oauth_state_mismatch",
-        message: "OpenAI OAuth callback state did not match the pending login",
-        retryable: false,
-      });
-    }
-    const fakeTokenResponse =
-      body.fakeTokenResponse ?? body.fake_token_response;
-    let completionMode: "real" | "test";
-    let credentialSecret: Record<string, unknown> | string;
-    let oauthSummary: unknown;
-    if (fakeTokenResponse !== undefined) {
-      if (
-        optionalBoolean(body.testMode ?? body.test_mode) !== true &&
-        optionalBoolean(body.allowFakeTokenResponse) !== true
-      ) {
-        return failure(400, request.requestId, {
-          code: "invalid_input",
-          reason_code: "openai_oauth_test_mode_required",
-          message:
-            "OpenAI OAuth fakeTokenResponse completion requires explicit testMode=true",
-          retryable: false,
-        });
-      }
-      completionMode = "test";
-      credentialSecret = openAiOauthCredentialSecretFromFakeCompletion(
-        pending,
-        body,
-        state.now(),
-      );
-    } else {
-      completionMode = "real";
-      const code = requiredString(
-        body.code ?? callback?.code,
-        "OpenAI OAuth code",
-      );
-      const exchange = await state.bridge.exchangeOpenAiOauthCode({
-        issuer: pending.issuer,
-        clientId: pending.clientId,
-        redirectUri: pending.redirectUri,
-        code,
-        codeVerifier: pending.codeVerifier,
-        now: state.now(),
-      });
-      if (!exchange.ok) {
-        return failure(
-          exchange.error.retryable ? 502 : 400,
-          request.requestId,
-          {
-            code: exchange.error.retryable ? "internal_error" : "invalid_input",
-            reason_code: exchange.error.reasonCode,
-            message: exchange.error.message,
-            retryable: exchange.error.retryable,
-          },
-        );
-      }
-      credentialSecret = exchange.secret;
-      oauthSummary = exchange.summary;
-    }
-    const updated = await upsertModelProviderCredentialSecret({
-      state,
-      provider,
-      credentialSecret,
-      expectedRevision: optionalNumber(
-        body.expectedRevision ?? body.expected_revision,
-      ),
-      now: state.now(),
-    });
-    state.openAiOauthPendingLogins.delete(pending.pendingLoginId);
-    return successRoute(request.requestId, {
-      provider: modelProviderApiRecord(updated),
-      credential: updated.credential,
-      completionMode,
-      oauthSummary,
-      pendingLoginId: pending.pendingLoginId,
-    });
-  }
-
-  if (request.action === "clear" && request.method === "POST") {
-    const body = optionalRecord(request.body) ?? {};
-    const updated = await clearModelProviderCredential({
-      state,
-      provider,
-      expectedRevision: optionalNumber(
-        body.expectedRevision ?? body.expected_revision,
-      ),
-      now: state.now(),
-    });
-    for (const [pendingLoginId, pending] of state.openAiOauthPendingLogins) {
-      if (pending.providerAlias === provider.alias) {
-        state.openAiOauthPendingLogins.delete(pendingLoginId);
-      }
-    }
-    return successRoute(request.requestId, {
-      provider: modelProviderApiRecord(updated),
-      credential: updated.credential,
-    });
-  }
-
-  return failure(405, request.requestId, {
-    code: "method_not_allowed",
-    reason_code: "openai_oauth_provider_method_not_allowed",
-    message:
-      "OpenAI OAuth provider routes support GET status and POST start/complete/clear",
-    retryable: false,
-  });
-}
-
-function openAiOauthProviderStatus(
-  provider: NativeModelProviderRecord,
-  state: ServiceState,
-): {
-  provider: NativeModelProviderRecord & { temperature?: number };
-  credential: NativeModelProviderRecord["credential"];
-  pendingLogins: Array<ReturnType<typeof redactedOpenAiOauthPendingLogin>>;
-  loginConfig: ReturnType<typeof openAiOauthLoginConfig>;
-} {
-  return {
-    provider: modelProviderApiRecord(provider),
-    credential: provider.credential,
-    loginConfig: openAiOauthLoginConfig(state),
-    pendingLogins: [...state.openAiOauthPendingLogins.values()]
-      .filter((pending) => pending.providerAlias === provider.alias)
-      .map(redactedOpenAiOauthPendingLogin),
-  };
-}
-
-function startOpenAiOauthLogin(
-  provider: NativeModelProviderRecord,
-  state: ServiceState,
-  body: Record<string, unknown>,
-): OpenAiOauthPendingLogin {
-  const issuer = optionalString(body.issuer) ?? state.config.openAiOauth.issuer;
-  const clientId =
-    optionalString(body.clientId ?? body.client_id) ??
-    state.config.openAiOauth.clientId;
-  const redirectUri =
-    optionalString(body.redirectUri ?? body.redirect_uri) ??
-    state.config.openAiOauth.redirectUri;
-  const scopes = optionalStringArray(
-    body.scopes,
-    [
-      "openid",
-      "profile",
-      "email",
-      "offline_access",
-      "api.connectors.read",
-      "api.connectors.invoke",
-    ],
-    "OpenAI OAuth scopes",
-  );
-  const stateValue = randomBase64Url(32);
-  const codeVerifier = randomBase64Url(64);
-  const codeChallenge = base64Url(
-    createHash("sha256").update(codeVerifier).digest(),
-  );
-  const createdAt = state.now();
-  const expiresAt = addMilliseconds(createdAt, 10 * 60 * 1000);
-  const pendingLoginId = `openai-oauth:${provider.alias}:${randomBase64Url(18)}`;
-  const authorizationUrl = openAiOauthAuthorizationUrl({
-    issuer,
-    clientId,
-    redirectUri,
-    scopes,
-    state: stateValue,
-    codeChallenge,
-    allowedWorkspaceIds: optionalStringArray(
-      body.allowedWorkspaceIds ?? body.allowed_workspace_ids,
-      [],
-      "OpenAI OAuth allowedWorkspaceIds",
-    ),
-    originator:
-      optionalString(body.originator) ?? state.config.openAiOauth.originator,
-  });
-  return {
-    pendingLoginId,
-    providerAlias: provider.alias,
-    issuer,
-    clientId,
-    redirectUri,
-    scopes,
-    state: stateValue,
-    codeVerifier,
-    codeChallenge,
-    authorizationUrl,
-    createdAt,
-    expiresAt,
-  };
-}
-
-function openAiOauthLoginConfig(state: ServiceState): {
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  redirectUriOverrideAllowed: boolean;
-  redirectUriMode: "fixed_registered" | "operator_configured";
-  callbackUrlCompletionAccepted: boolean;
-  callbackUrlCompletionField: "callbackUrl";
-  pendingLoginIdRequiredForCallbackUrl: boolean;
-  remoteOperatorFlow: "paste_callback_url";
-} {
-  return {
-    issuer: state.config.openAiOauth.issuer,
-    clientId: state.config.openAiOauth.clientId,
-    redirectUri: state.config.openAiOauth.redirectUri,
-    redirectUriOverrideAllowed:
-      state.config.openAiOauth.allowRedirectUriOverride,
-    redirectUriMode: state.config.openAiOauth.allowRedirectUriOverride
-      ? "operator_configured"
-      : "fixed_registered",
-    callbackUrlCompletionAccepted: true,
-    callbackUrlCompletionField: "callbackUrl",
-    pendingLoginIdRequiredForCallbackUrl: false,
-    remoteOperatorFlow: "paste_callback_url",
-  };
-}
-
-function findOpenAiOauthPendingLoginByState(
-  providerAlias: string,
-  stateValue: string,
-  serviceState: ServiceState,
-): OpenAiOauthPendingLogin | undefined {
-  for (const pending of serviceState.openAiOauthPendingLogins.values()) {
-    if (
-      pending.providerAlias === providerAlias &&
-      pending.state === stateValue
-    ) {
-      return pending;
-    }
-  }
-  return undefined;
-}
-
-function parseOpenAiOauthCallbackUrl(value: string): {
-  code?: string;
-  state?: string;
-  error?: string;
-  errorDescription?: string;
-} {
-  const trimmed = value.trim();
-  const url = new URL(
-    trimmed.startsWith("?")
-      ? `http://localhost:1455/auth/callback${trimmed}`
-      : trimmed,
-  );
-  return {
-    code: optionalString(url.searchParams.get("code")),
-    state: optionalString(url.searchParams.get("state")),
-    error: optionalString(url.searchParams.get("error")),
-    errorDescription: optionalString(url.searchParams.get("error_description")),
-  };
-}
-
-function redactedOpenAiOauthPendingLogin(pending: OpenAiOauthPendingLogin): {
-  pendingLoginId: string;
-  providerAlias: string;
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  scopes: string[];
-  codeChallenge: string;
-  authorizationUrl: string;
-  createdAt: string;
-  expiresAt: string;
-} {
-  return {
-    pendingLoginId: pending.pendingLoginId,
-    providerAlias: pending.providerAlias,
-    issuer: pending.issuer,
-    clientId: pending.clientId,
-    redirectUri: pending.redirectUri,
-    scopes: pending.scopes,
-    codeChallenge: pending.codeChallenge,
-    authorizationUrl: pending.authorizationUrl,
-    createdAt: pending.createdAt,
-    expiresAt: pending.expiresAt,
-  };
-}
-
-function openAiOauthAuthorizationUrl(input: {
-  issuer: string;
-  clientId: string;
-  redirectUri: string;
-  scopes: string[];
-  state: string;
-  codeChallenge: string;
-  allowedWorkspaceIds: string[];
-  originator: string;
-}): string {
-  const url = new URL("/oauth/authorize", input.issuer);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", input.clientId);
-  url.searchParams.set("redirect_uri", input.redirectUri);
-  url.searchParams.set("scope", input.scopes.join(" "));
-  url.searchParams.set("code_challenge", input.codeChallenge);
-  url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("id_token_add_organizations", "true");
-  url.searchParams.set("codex_cli_simplified_flow", "true");
-  url.searchParams.set("state", input.state);
-  url.searchParams.set("originator", input.originator);
-  if (input.allowedWorkspaceIds.length > 0) {
-    url.searchParams.set(
-      "allowed_workspace_id",
-      input.allowedWorkspaceIds.join(","),
-    );
-  }
-  return url.toString();
-}
-
-function openAiOauthCredentialSecretFromFakeCompletion(
-  pending: OpenAiOauthPendingLogin,
-  body: Record<string, unknown>,
-  now: string,
-): Record<string, unknown> {
-  const fake = requiredRecord(
-    body.fakeTokenResponse ?? body.fake_token_response,
-    "OpenAI OAuth fakeTokenResponse",
-  );
-  return {
-    kind: "openai_oauth",
-    version: 1,
-    issuer: pending.issuer,
-    client_id: pending.clientId,
-    id_token: requiredString(fake.idToken ?? fake.id_token, "fake idToken"),
-    access_token: requiredString(
-      fake.accessToken ?? fake.access_token,
-      "fake accessToken",
-    ),
-    refresh_token: requiredString(
-      fake.refreshToken ?? fake.refresh_token,
-      "fake refreshToken",
-    ),
-    exchanged_api_token: optionalString(
-      fake.exchangedApiToken ?? fake.exchanged_api_token,
-    ),
-    last_refresh_at:
-      optionalString(fake.lastRefreshAt ?? fake.last_refresh_at) ?? now,
-    account_id: optionalString(fake.accountId ?? fake.account_id),
-    email: optionalString(fake.email),
-    plan_type: optionalString(fake.planType ?? fake.plan_type),
-    is_fedramp_account:
-      optionalBoolean(fake.isFedrampAccount ?? fake.is_fedramp_account) ??
-      false,
-    access_token_expires_at: optionalString(
-      fake.accessTokenExpiresAt ?? fake.access_token_expires_at,
-    ),
-  };
-}
-
-async function upsertModelProviderCredentialSecret(input: {
-  state: ServiceState;
-  provider: NativeModelProviderRecord;
-  credentialSecret: Record<string, unknown> | string;
-  expectedRevision: number | undefined;
-  now: string;
-}): Promise<NativeModelProviderRecord> {
-  return input.state.bridge.upsertModelProvider({
-    ...modelProviderWriteFromRecord(input.provider, input.now),
-    secret:
-      typeof input.credentialSecret === "string"
-        ? input.credentialSecret
-        : JSON.stringify(input.credentialSecret),
-    expectedRevision: input.expectedRevision ?? input.provider.revision,
-  });
-}
-
-async function clearModelProviderCredential(input: {
-  state: ServiceState;
-  provider: NativeModelProviderRecord;
-  expectedRevision: number | undefined;
-  now: string;
-}): Promise<NativeModelProviderRecord> {
-  return input.state.bridge.upsertModelProvider({
-    ...modelProviderWriteFromRecord(input.provider, input.now),
-    clearSecret: true,
-    expectedRevision: input.expectedRevision ?? input.provider.revision,
-  });
-}
-
-function modelProviderWriteFromRecord(
-  provider: NativeModelProviderRecord,
-  now: string,
-): NativeModelProviderWrite {
-  return {
-    alias: provider.alias,
-    status: provider.status,
-    protocol: provider.protocol,
-    providerKind: provider.providerKind,
-    displayName: provider.displayName,
-    description: provider.description,
-    baseUrl: provider.baseUrl,
-    modelId: provider.modelId,
-    contextWindowTokens: provider.contextWindowTokens,
-    maxOutputTokens: provider.maxOutputTokens,
-    temperatureMilli: provider.temperatureMilli,
-    reasoningEffort: provider.reasoningEffort,
-    reasoningFormat: provider.reasoningFormat,
-    clearSecret: false,
-    metadataJson: provider.metadataJson,
-    now,
-  };
-}
-
-type ModelProviderRefreshMode = "none" | "plan" | "apply";
-
-interface ModelProviderRevisionMismatch {
-  alias: string;
-  expected: number;
-  found: number;
-}
-
-function modelProviderRevisionMismatch(
-  error: unknown,
-): ModelProviderRevisionMismatch | undefined {
-  const message = errorMessage(error, "");
-  const match =
-    /model provider ([^ ]+) revision mismatch: expected (\d+), found (\d+)/.exec(
-      message,
-    );
-  if (match === null) {
-    return undefined;
-  }
-  return {
-    alias: match[1] ?? "",
-    expected: Number(match[2]),
-    found: Number(match[3]),
-  };
-}
-
-function modelProviderRevisionConflictRoute(
-  requestIdValue: string,
-  mismatch: ModelProviderRevisionMismatch,
-  currentProvider: NativeModelProviderRecord | undefined,
-): AdminRouteResult {
-  return {
-    status: 409,
-    headers: { "content-type": "application/json" },
-    body: {
-      ok: false,
-      error: {
-        code: "conflict",
-        reason_code: "model_provider_revision_mismatch",
-        message: `model provider ${mismatch.alias} revision mismatch: expected ${mismatch.expected}, found ${mismatch.found}`,
-        retryable: false,
-      },
-      data: {
-        provider:
-          currentProvider === undefined
-            ? undefined
-            : modelProviderApiRecord(currentProvider),
-        expectedRevision: mismatch.expected,
-        currentRevision: mismatch.found,
-      },
-      meta: { request_id: requestIdValue, schema_version: 1 },
-    } as AdminRouteResult["body"],
-  };
-}
-
-function modelProviderApiRecord(
-  provider: NativeModelProviderRecord,
-): NativeModelProviderRecord & { temperature?: number } {
-  if (provider.temperatureMilli === undefined) {
-    return provider;
-  }
-  return {
-    ...provider,
-    temperature: provider.temperatureMilli / 1_000,
-  };
-}
-
-interface ModelProviderWriteRefreshResult {
-  refresh: {
-    mode: ModelProviderRefreshMode;
-    affectedProfiles: Array<{
-      profileId: string;
-      sessionIds: string[];
-      configuredSessionIds: string[];
-      activeSessionIds: string[];
-    }>;
-    outcomes: Array<{
-      profileId: string;
-      status: "planned" | "applied" | "blocked" | "failed";
-      summary: string;
-      reasonCode?: string;
-      result?: unknown;
-    }>;
-  };
-}
-
 async function modelProviderRefreshAfterWrite(input: {
   state: ServiceState;
   requestId: string;
@@ -6036,18 +5235,6 @@ async function modelProviderAffectedProfiles(
     });
   }
   return affected;
-}
-
-function modelProviderRefreshMode(
-  url: URL,
-  body: unknown,
-): ModelProviderRefreshMode {
-  const raw =
-    url.searchParams.get("refresh") ??
-    (isRecord(body) ? optionalString(body.refresh) : undefined) ??
-    "none";
-  if (raw === "none" || raw === "plan" || raw === "apply") return raw;
-  throw new Error("model provider refresh must be none, plan, or apply");
 }
 
 async function handleDirectDebugRequest(
@@ -6219,116 +5406,6 @@ async function handleDirectDebugRequest(
   });
 }
 
-async function handleRustyViewChatStreamRequest(
-  request: IncomingMessage,
-  url: URL,
-  state: ServiceState,
-): Promise<ServiceRouteResult | undefined> {
-  const parts = url.pathname.split("/").filter(Boolean);
-  if (
-    parts.length !== 5 ||
-    parts[0] !== "v1" ||
-    parts[1] !== "chat" ||
-    parts[2] !== "sessions" ||
-    parts[4] !== "stream"
-  ) {
-    return undefined;
-  }
-
-  const requestIdValue = requestId(request);
-  if ((request.method ?? "GET").toUpperCase() !== "GET") {
-    return failure(405, requestIdValue, {
-      code: "method_not_allowed",
-      reason_code: "chat_stream_requires_get",
-      message: "Rusty View chat stream routes only support GET",
-      retryable: false,
-    });
-  }
-
-  const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
-  const sessions = await state.bridge.listSessions();
-  const session = sessions.find(
-    (candidate) => candidate.sessionId === sessionId,
-  );
-  if (!session) {
-    return failure(404, requestIdValue, {
-      code: "not_found",
-      reason_code: "chat_session_not_found",
-      message: `chat session ${sessionId} was not found`,
-      retryable: false,
-    });
-  }
-
-  const cursor =
-    stringHeader(request, "last-event-id") ?? stringParam(url, "cursor");
-  const replay = streamReplayEvents(state, session, cursor, url);
-  const closeAfterReplay =
-    url.searchParams.get("once") === "true" ||
-    url.searchParams.get("close_after_replay") === "true";
-  return {
-    kind: "raw",
-    write(response) {
-      writeRustyViewChatSseStream({
-        state,
-        session,
-        replay,
-        closeAfterReplay,
-        request,
-        response,
-      });
-    },
-  };
-}
-
-function writeRustyViewChatSseStream(input: {
-  state: ServiceState;
-  session: SessionState;
-  replay: readonly ChatEvent[];
-  closeAfterReplay: boolean;
-  request: IncomingMessage;
-  response: ServerResponse;
-}): void {
-  const { state, session, response } = input;
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-cache, no-transform",
-    connection: "keep-alive",
-    "x-accel-buffering": "no",
-    ...chatCorsHeaders(input.request),
-  });
-  response.write(": connected\n\n");
-  for (const event of input.replay) {
-    writeSseEvent(response, event);
-  }
-  if (input.closeAfterReplay) {
-    response.end();
-    return;
-  }
-
-  const subscriber: ChatStreamSubscriber = {
-    write(event) {
-      writeSseEvent(response, event);
-    },
-  };
-  const subscribers = chatSubscribers(state, session.sessionId);
-  subscribers.add(subscriber);
-  const heartbeat = setInterval(() => {
-    if (!response.destroyed) response.write(": keep-alive\n\n");
-  }, 15_000);
-  state.timers.add(heartbeat);
-
-  const cleanup = () => {
-    clearInterval(heartbeat);
-    state.timers.delete(heartbeat);
-    subscribers.delete(subscriber);
-    if (subscribers.size === 0) {
-      state.chatSubscribersBySession.delete(session.sessionId);
-    }
-  };
-  response.on("close", cleanup);
-  response.on("error", cleanup);
-}
-
 async function buildDiagnosticsContext(
   state: ServiceState,
   options: { includeProfileRegistry?: boolean } = {},
@@ -6470,20 +5547,6 @@ function isProfileRegistryAdminRoute(pathname: string): boolean {
     pathname === "/v1/admin/diagnostics/profiles" ||
     pathname === "/v1/admin/profiles/registry" ||
     pathname.startsWith("/v1/admin/profiles/registry/")
-  );
-}
-
-function isProfileRegistryWriteRoute(pathname: string): boolean {
-  return (
-    pathname.startsWith("/v1/admin/profiles/registry/") &&
-    (pathname.endsWith("/update/plan") ||
-      pathname.endsWith("/update/apply") ||
-      pathname.endsWith("/lifecycle/plan") ||
-      pathname.endsWith("/lifecycle/apply") ||
-      pathname.endsWith("/prompt/plan") ||
-      pathname.endsWith("/prompt/apply") ||
-      pathname.endsWith("/runtime-config/plan") ||
-      pathname.endsWith("/runtime-config/apply"))
   );
 }
 
@@ -11440,10 +10503,6 @@ interface ServiceWakeDispatchReport {
   completionPacket?: CompletionPacket;
 }
 
-interface ChatStreamSubscriber {
-  write(event: ChatEvent): void;
-}
-
 interface ServiceWakeObservationContext {
   deliveryIntentId?: number;
   channelId?: number;
@@ -13900,13 +12959,6 @@ function chatSubscribers(
   return subscribers;
 }
 
-function writeSseEvent(response: ServerResponse, event: ChatEvent): void {
-  if (response.destroyed) return;
-  response.write(`id: ${event.event_id}\n`);
-  response.write(`event: ${event.kind}\n`);
-  response.write(`data: ${JSON.stringify(event)}\n\n`);
-}
-
 async function submitServiceTurn(
   state: ServiceState,
   input: {
@@ -15343,10 +14395,6 @@ function writeJsonResponse(
   );
 }
 
-function isChatRoute(pathname: string): boolean {
-  return pathname === "/v1/chat" || pathname.startsWith("/v1/chat/");
-}
-
 function isRoleplayBrowserRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/v1/admin/roleplay/") ||
@@ -15395,737 +14443,6 @@ function chatCorsHeaders(request: IncomingMessage): Record<string, string> {
   };
 }
 
-function isRawServiceRouteResult(
-  result: ServiceRouteResult,
-): result is RawServiceRouteResult {
-  return "kind" in result && result.kind === "raw";
-}
-
-function isAdminPanelRoute(pathname: string, staticEnabled: boolean): boolean {
-  return (
-    pathname === "/admin" ||
-    pathname === "/admin/" ||
-    (!staticEnabled && pathname === "/")
-  );
-}
-
-function htmlResponse(body: string): ServiceRouteResult {
-  return {
-    status: 200,
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-    },
-    body,
-  };
-}
-
-function staticServingEnabled(state: ServiceState): boolean {
-  const root = effectiveStaticSiteRoot(state);
-  return root !== undefined && existsSync(root);
-}
-
-async function handleStaticSiteRequest(
-  request: IncomingMessage,
-  url: URL,
-  state: ServiceState,
-): Promise<ServiceRouteResult> {
-  if ((request.method ?? "GET").toUpperCase() !== "GET") {
-    return failure(405, requestId(request), {
-      code: "method_not_allowed",
-      reason_code: "static_method_not_allowed",
-      message: "static files only support GET",
-      retryable: false,
-    });
-  }
-  const root = effectiveStaticSiteRoot(state);
-  if (root === undefined) {
-    return failure(404, requestId(request), {
-      code: "not_found",
-      reason_code: "static_site_disabled",
-      message: "static site serving is not configured",
-      retryable: false,
-    });
-  }
-  const candidate = resolveStaticSitePath(root, url.pathname);
-  if (!candidate.ok) {
-    return failure(403, requestId(request), {
-      code: "forbidden",
-      reason_code: candidate.reasonCode,
-      message: candidate.message,
-      retryable: false,
-    });
-  }
-
-  const filePath = await existingStaticFile(candidate.path);
-  if (filePath !== undefined) return staticFileResponse(root, filePath);
-
-  const indexPath = resolve(root, "index.html");
-  if (await isReadableFile(indexPath))
-    return staticFileResponse(root, indexPath);
-
-  return failure(404, requestId(request), {
-    code: "not_found",
-    reason_code: "static_index_missing",
-    message: `static site index.html was not found in ${root}`,
-    retryable: false,
-  });
-}
-
-function effectiveStaticSiteRoot(state: ServiceState): string | undefined {
-  return (
-    state.config.paths.staticDir ?? join(state.config.paths.dataDir, "site")
-  );
-}
-
-function resolveStaticSitePath(
-  root: string,
-  pathname: string,
-):
-  | { ok: true; path: string }
-  | { ok: false; reasonCode: string; message: string } {
-  let decodedSegments: string[];
-  try {
-    decodedSegments = pathname
-      .split("/")
-      .filter(Boolean)
-      .map((segment) => decodeURIComponent(segment));
-  } catch {
-    return {
-      ok: false,
-      reasonCode: "static_path_invalid",
-      message: "static path contains invalid percent encoding",
-    };
-  }
-
-  if (
-    decodedSegments.some(
-      (segment) =>
-        segment === "." || segment === ".." || segment.startsWith("."),
-    )
-  ) {
-    return {
-      ok: false,
-      reasonCode: "static_path_forbidden",
-      message: "static path contains a forbidden segment",
-    };
-  }
-
-  const resolvedRoot = resolve(root);
-  const resolvedPath =
-    decodedSegments.length === 0
-      ? resolve(resolvedRoot, "index.html")
-      : resolve(resolvedRoot, ...decodedSegments);
-  const relativePath = relative(resolvedRoot, resolvedPath);
-  if (
-    relativePath === ".." ||
-    relativePath.startsWith(`..${sep}`) ||
-    resolve(resolvedPath) === resolvedRoot
-  ) {
-    return {
-      ok: false,
-      reasonCode: "static_path_traversal",
-      message: "static path escapes the configured static directory",
-    };
-  }
-  return { ok: true, path: resolvedPath };
-}
-
-async function existingStaticFile(path: string): Promise<string | undefined> {
-  if (await isReadableFile(path)) return path;
-  const indexPath = resolve(path, "index.html");
-  return (await isReadableFile(indexPath)) ? indexPath : undefined;
-}
-
-async function isReadableFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function staticFileResponse(
-  root: string,
-  filePath: string,
-): RawServiceRouteResult {
-  return {
-    kind: "raw",
-    write(response) {
-      response.statusCode = 200;
-      response.setHeader("content-type", staticContentType(filePath));
-      response.setHeader("cache-control", staticCacheControl(root, filePath));
-      createReadStream(filePath).pipe(response);
-    },
-  };
-}
-
-function staticContentType(path: string): string {
-  switch (extname(path).toLowerCase()) {
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-      return "application/javascript; charset=utf-8";
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml";
-    case ".ico":
-      return "image/x-icon";
-    case ".png":
-      return "image/png";
-    case ".woff2":
-      return "font/woff2";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-function staticCacheControl(root: string, filePath: string): string {
-  const relativePath = relative(root, filePath);
-  if (relativePath === "index.html" || basename(filePath) === "index.html") {
-    return "no-cache";
-  }
-  return /-[a-z0-9]{16,}\./i.test(basename(filePath))
-    ? "public, max-age=31536000, immutable"
-    : "no-cache";
-}
-
-function adminPanelHtml(authRequired: boolean): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rusty Crew Admin</title>
-  <style>
-    :root {
-      color-scheme: light;
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --panel-strong: #eef2f6;
-      --text: #17202a;
-      --muted: #607083;
-      --border: #d7dee7;
-      --good: #147a4a;
-      --warn: #9c5a00;
-      --bad: #b42318;
-      --accent: #2457a6;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
-      line-height: 1.45;
-    }
-
-    header {
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .shell {
-      width: min(1180px, calc(100% - 32px));
-      margin: 0 auto;
-    }
-
-    .topbar {
-      display: grid;
-      grid-template-columns: minmax(180px, 1fr) minmax(280px, 520px);
-      gap: 20px;
-      align-items: center;
-      padding: 22px 0;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: 0;
-    }
-
-    .subtitle {
-      margin: 4px 0 0;
-      color: var(--muted);
-    }
-
-    .token-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
-    }
-
-    input {
-      min-width: 0;
-      height: 38px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0 10px;
-      font: inherit;
-      background: #fff;
-      color: var(--text);
-    }
-
-    button {
-      height: 38px;
-      border: 1px solid #1f4f95;
-      border-radius: 6px;
-      padding: 0 14px;
-      background: var(--accent);
-      color: #fff;
-      font: inherit;
-      font-weight: 650;
-      cursor: pointer;
-    }
-
-    button.secondary {
-      border-color: var(--border);
-      background: #fff;
-      color: var(--text);
-    }
-
-    main {
-      padding: 20px 0 32px;
-    }
-
-    .status-line {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 14px;
-      color: var(--muted);
-    }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 26px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 3px 10px;
-      background: var(--panel);
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .pill.good {
-      border-color: #9fd7b8;
-      color: var(--good);
-      background: #eefaf3;
-    }
-
-    .pill.warn {
-      border-color: #f0c982;
-      color: var(--warn);
-      background: #fff7e8;
-    }
-
-    .pill.bad {
-      border-color: #f1a39d;
-      color: var(--bad);
-      background: #fff1f0;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      gap: 12px;
-    }
-
-    .panel {
-      grid-column: span 6;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .panel.wide {
-      grid-column: span 12;
-    }
-
-    .panel h2 {
-      margin: 0;
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border);
-      background: var(--panel-strong);
-      font-size: 15px;
-      letter-spacing: 0;
-    }
-
-    .panel-body {
-      padding: 12px 14px;
-    }
-
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 8px;
-    }
-
-    .metric {
-      min-height: 72px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px;
-      background: #fbfcfd;
-    }
-
-    .metric span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .metric strong {
-      display: block;
-      margin-top: 4px;
-      font-size: 20px;
-      font-weight: 720;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }
-
-    th,
-    td {
-      border-bottom: 1px solid var(--border);
-      padding: 8px 6px;
-      text-align: left;
-      vertical-align: top;
-      overflow-wrap: anywhere;
-    }
-
-    th {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    tr:last-child td {
-      border-bottom: 0;
-    }
-
-    .empty,
-    .error {
-      color: var(--muted);
-      padding: 12px 0;
-    }
-
-    .error {
-      color: var(--bad);
-    }
-
-    pre {
-      max-height: 280px;
-      overflow: auto;
-      margin: 0;
-      padding: 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: #101820;
-      color: #e8eef5;
-      font-size: 12px;
-      line-height: 1.5;
-      white-space: pre-wrap;
-    }
-
-    @media (max-width: 800px) {
-      .topbar,
-      .token-row {
-        grid-template-columns: 1fr;
-      }
-
-      .panel {
-        grid-column: span 12;
-      }
-
-      button {
-        width: 100%;
-      }
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="shell topbar">
-      <div>
-        <h1>Rusty Crew Admin</h1>
-        <p class="subtitle">Service diagnostics for the local field-test runtime</p>
-      </div>
-      <form id="tokenForm" class="token-row"${authRequired ? "" : " hidden"}>
-        <input id="tokenInput" name="token" type="password" autocomplete="current-password" placeholder="Admin bearer token">
-        <button type="submit">Refresh</button>
-        <button id="clearToken" class="secondary" type="button">Clear</button>
-      </form>
-    </div>
-  </header>
-  <main class="shell">
-    <div class="status-line" id="statusLine"></div>
-    <section class="grid">
-      <article class="panel wide">
-        <h2>Overview</h2>
-        <div class="panel-body">
-          <div class="metrics" id="overviewMetrics"></div>
-        </div>
-      </article>
-      <article class="panel">
-        <h2>Persistence</h2>
-        <div class="panel-body" id="persistencePanel"></div>
-      </article>
-      <article class="panel">
-        <h2>Queues And Health</h2>
-        <div class="panel-body" id="healthPanel"></div>
-      </article>
-      <article class="panel">
-        <h2>Channels</h2>
-        <div class="panel-body" id="channelsPanel"></div>
-      </article>
-      <article class="panel">
-        <h2>MCP</h2>
-        <div class="panel-body" id="mcpPanel"></div>
-      </article>
-      <article class="panel wide">
-        <h2>Recent Events</h2>
-        <div class="panel-body" id="eventsPanel"></div>
-      </article>
-      <article class="panel wide">
-        <h2>Raw Diagnostics</h2>
-        <div class="panel-body"><pre id="rawPanel">Waiting for diagnostics...</pre></div>
-      </article>
-    </section>
-  </main>
-  <script>
-    (function () {
-      var authRequired = ${authRequired ? "true" : "false"};
-      var tokenInput = document.getElementById("tokenInput");
-      var statusLine = document.getElementById("statusLine");
-      var savedToken = authRequired ? (localStorage.getItem("rustyCrewAdminToken") || "") : "";
-      tokenInput.value = savedToken;
-
-      document.getElementById("tokenForm").addEventListener("submit", function (event) {
-        event.preventDefault();
-        var token = tokenInput.value.trim();
-        if (token) localStorage.setItem("rustyCrewAdminToken", token);
-        refresh();
-      });
-
-      document.getElementById("clearToken").addEventListener("click", function () {
-        localStorage.removeItem("rustyCrewAdminToken");
-        tokenInput.value = "";
-        refresh();
-      });
-
-      function headers() {
-        var token = tokenInput.value.trim();
-        return authRequired && token ? { authorization: "Bearer " + token } : {};
-      }
-
-      async function api(path, auth) {
-        var response = await fetch(path, { headers: auth ? headers() : {} });
-        var body = await response.json();
-        if (!response.ok || !body.ok) {
-          var message = body.error ? body.error.message : response.statusText;
-          throw new Error(message || ("request failed: " + response.status));
-        }
-        return body.data;
-      }
-
-      function pill(text, kind) {
-        var span = document.createElement("span");
-        span.className = "pill " + (kind || "");
-        span.textContent = text;
-        return span;
-      }
-
-      function setStatus(items) {
-        statusLine.replaceChildren.apply(statusLine, items);
-      }
-
-      function metric(label, value) {
-        var node = document.createElement("div");
-        node.className = "metric";
-        var labelNode = document.createElement("span");
-        labelNode.textContent = label;
-        var valueNode = document.createElement("strong");
-        valueNode.textContent = value === undefined || value === null ? "n/a" : String(value);
-        node.append(labelNode, valueNode);
-        return node;
-      }
-
-      function renderMetrics(id, entries) {
-        var target = document.getElementById(id);
-        target.replaceChildren.apply(target, entries.map(function (entry) {
-          return metric(entry[0], entry[1]);
-        }));
-      }
-
-      function renderObjectTable(id, data) {
-        var target = document.getElementById(id);
-        if (!data) {
-          target.innerHTML = '<div class="empty">No data reported.</div>';
-          return;
-        }
-        var table = document.createElement("table");
-        Object.keys(data).sort().forEach(function (key) {
-          var row = document.createElement("tr");
-          var name = document.createElement("th");
-          var value = document.createElement("td");
-          name.textContent = key;
-          value.textContent = typeof data[key] === "object" ? JSON.stringify(data[key]) : String(data[key]);
-          row.append(name, value);
-          table.append(row);
-        });
-        target.replaceChildren(table);
-      }
-
-      function renderItemsTable(id, items, columns) {
-        var target = document.getElementById(id);
-        if (!items || items.length === 0) {
-          target.innerHTML = '<div class="empty">No records reported.</div>';
-          return;
-        }
-        var table = document.createElement("table");
-        var head = document.createElement("tr");
-        columns.forEach(function (column) {
-          var th = document.createElement("th");
-          th.textContent = column.label;
-          head.append(th);
-        });
-        table.append(head);
-        items.forEach(function (item) {
-          var row = document.createElement("tr");
-          columns.forEach(function (column) {
-            var td = document.createElement("td");
-            var value = column.value(item);
-            td.textContent = value === undefined || value === null || value === "" ? "n/a" : String(value);
-            row.append(td);
-          });
-          table.append(row);
-        });
-        target.replaceChildren(table);
-      }
-
-      function setPanelError(id, error) {
-        document.getElementById(id).innerHTML = '<div class="error">' + escapeHtml(error.message || String(error)) + '</div>';
-      }
-
-      function escapeHtml(value) {
-        return String(value).replace(/[&<>"']/g, function (char) {
-          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char];
-        });
-      }
-
-      async function refresh() {
-        var token = tokenInput.value.trim();
-        setStatus([pill("Loading", "warn")]);
-        try {
-          var health = await api("/v1/admin/healthz", false);
-          var statusPills = [
-            pill("Liveness: " + health.status, health.status === "live" ? "good" : "bad")
-          ];
-          if (authRequired && !token) {
-            setStatus(statusPills.concat([pill("Enter token for diagnostics", "warn")]));
-            return;
-          }
-
-          var results = await Promise.allSettled([
-            api("/v1/admin/readyz", true),
-            api("/v1/admin/diagnostics", true),
-            api("/v1/admin/diagnostics/persistence", true),
-            api("/v1/admin/diagnostics/channels", true),
-            api("/v1/admin/diagnostics/mcp", true),
-            api("/v1/admin/events/recent", true)
-          ]);
-
-          var ready = unwrap(results[0]);
-          var diagnostics = unwrap(results[1]);
-          var persistence = unwrap(results[2]);
-          var channels = unwrap(results[3]);
-          var mcp = unwrap(results[4]);
-          var events = unwrap(results[5]);
-          var overview = diagnostics.overview || {};
-          var summary = overview.summary || {};
-
-          statusPills.push(pill("Readiness: " + ready.status, ready.status === "ready" ? "good" : "warn"));
-          statusPills.push(pill("Generated: " + (overview.generatedAt || "n/a")));
-          if (overview.degraded) statusPills.push(pill("Degraded", "warn"));
-          setStatus(statusPills);
-
-          renderMetrics("overviewMetrics", [
-            ["Sessions", summary.sessions],
-            ["Active", summary.activeSessions],
-            ["Idle", summary.idleSessions],
-            ["Queued", summary.queueDepth],
-            ["Agents", summary.agents],
-            ["Tools", summary.tools],
-            ["Recent errors", summary.recentErrors]
-          ]);
-
-          renderObjectTable("persistencePanel", Object.assign({}, persistence, {
-            tableCounts: JSON.stringify((persistence && persistence.tableCounts) || {})
-          }));
-
-          renderObjectTable("healthPanel", {
-            runtimeHealth: overview.health,
-            degraded: overview.degraded,
-            reasonCodes: (overview.reasonCodes || []).join(", ") || "none",
-            queues: overview.queues ? JSON.stringify(overview.queues) : "none"
-          });
-
-          renderItemsTable("channelsPanel", channels.items || [], [
-            { label: "Binding", value: function (item) { return item.bindingId; } },
-            { label: "Agent", value: function (item) { return item.agentId; } },
-            { label: "Status", value: function (item) { return item.status; } },
-            { label: "Channel", value: function (item) { return item.externalChannelId; } }
-          ]);
-
-          renderItemsTable("mcpPanel", mcp.items || [], [
-            { label: "Binding", value: function (item) { return item.bindingId; } },
-            { label: "Agent", value: function (item) { return item.agentId; } },
-            { label: "Status", value: function (item) { return item.status; } },
-            { label: "Servers", value: function (item) { return (item.serverNames || []).join(", "); } }
-          ]);
-
-          renderItemsTable("eventsPanel", events.items || [], [
-            { label: "Time", value: function (item) { return item.createdAt; } },
-            { label: "Source", value: function (item) { return item.source; } },
-            { label: "Type", value: function (item) { return item.eventType; } },
-            { label: "Summary", value: function (item) { return item.summary; } }
-          ]);
-
-          document.getElementById("rawPanel").textContent = JSON.stringify(diagnostics, null, 2);
-        } catch (error) {
-          setStatus([pill("Diagnostics error", "bad"), pill(error.message || String(error), "bad")]);
-          setPanelError("healthPanel", error);
-        }
-      }
-
-      function unwrap(result) {
-        if (result.status === "fulfilled") return result.value;
-        throw result.reason;
-      }
-
-      refresh();
-      setInterval(refresh, 15000);
-    }());
-  </script>
-</body>
-</html>`;
-}
-
 function stringParam(url: URL, key: string): string | undefined {
   const value = url.searchParams.get(key);
   return value === null || value.trim() === "" ? undefined : value;
@@ -16136,149 +14453,6 @@ function numberParam(url: URL, key: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
-function modelProviderStatusParam(
-  value: string | null,
-): NativeModelProviderStatus | "invalid" | undefined {
-  if (value === null || value.trim() === "") return undefined;
-  return value === "active" || value === "disabled" || value === "archived"
-    ? value
-    : "invalid";
-}
-
-function modelProviderProtocolFromBody(
-  value: unknown,
-): NativeModelProviderProtocol {
-  const protocol = optionalString(value) ?? "chat_completions";
-  if (protocol === "responses" || protocol === "chat_completions") {
-    return protocol;
-  }
-  throw new Error(
-    "model provider protocol must be responses or chat_completions",
-  );
-}
-
-function modelProviderSecretFromBody(
-  body: Record<string, unknown>,
-): string | undefined {
-  const credentialSecret = body.credentialSecret ?? body.credential_secret;
-  if (credentialSecret !== undefined) {
-    return JSON.stringify(
-      modelProviderCredentialSecretEnvelope(credentialSecret),
-    );
-  }
-  return optionalString(body.secret ?? body.apiKey);
-}
-
-function modelProviderCredentialSecretEnvelope(
-  value: unknown,
-): Record<string, unknown> {
-  if (!isRecord(value)) {
-    throw new Error("model provider credentialSecret must be an object");
-  }
-  const kind = requiredString(
-    value.kind,
-    "model provider credentialSecret.kind",
-  );
-  const version = optionalNumber(value.version) ?? 1;
-  if (version !== 1) {
-    throw new Error("model provider credentialSecret.version must be 1");
-  }
-  if (kind === "api_key") {
-    return {
-      kind,
-      version,
-      value: requiredString(
-        value.value ?? value.apiKey ?? value.api_key,
-        "model provider credentialSecret.value",
-      ),
-    };
-  }
-  if (kind === "openai_oauth") {
-    return {
-      kind,
-      version,
-      issuer: requiredString(
-        value.issuer,
-        "model provider credentialSecret.issuer",
-      ),
-      client_id: requiredString(
-        value.clientId ?? value.client_id,
-        "model provider credentialSecret.clientId",
-      ),
-      id_token: requiredString(
-        value.idToken ?? value.id_token,
-        "model provider credentialSecret.idToken",
-      ),
-      access_token: requiredString(
-        value.accessToken ?? value.access_token,
-        "model provider credentialSecret.accessToken",
-      ),
-      refresh_token: requiredString(
-        value.refreshToken ?? value.refresh_token,
-        "model provider credentialSecret.refreshToken",
-      ),
-      exchanged_api_token: optionalString(
-        value.exchangedApiToken ?? value.exchanged_api_token,
-      ),
-      last_refresh_at: optionalString(
-        value.lastRefreshAt ?? value.last_refresh_at,
-      ),
-      account_id: optionalString(value.accountId ?? value.account_id),
-      email: optionalString(value.email),
-      plan_type: optionalString(value.planType ?? value.plan_type),
-      is_fedramp_account:
-        optionalBoolean(value.isFedrampAccount ?? value.is_fedramp_account) ??
-        false,
-      access_token_expires_at: optionalString(
-        value.accessTokenExpiresAt ?? value.access_token_expires_at,
-      ),
-    };
-  }
-  throw new Error(
-    "model provider credentialSecret.kind must be api_key or openai_oauth",
-  );
-}
-
-function modelProviderWriteFromBody(
-  body: unknown,
-  pathAlias: string | undefined,
-  now: string,
-): NativeModelProviderWrite {
-  if (!isRecord(body)) {
-    throw new Error("model provider request body must be an object");
-  }
-  const alias = pathAlias ?? requiredString(body.alias, "model provider alias");
-  const status = modelProviderStatusParam(optionalString(body.status) ?? null);
-  if (status === "invalid") {
-    throw new Error(
-      "model provider status must be active, disabled, or archived",
-    );
-  }
-  return {
-    alias,
-    status: status ?? "active",
-    protocol: modelProviderProtocolFromBody(body.protocol),
-    providerKind: optionalString(body.providerKind) ?? "custom",
-    displayName: optionalString(body.displayName),
-    description: optionalString(body.description),
-    baseUrl: optionalString(body.baseUrl),
-    modelId: requiredString(
-      body.modelId ?? body.model,
-      "model provider modelId",
-    ),
-    contextWindowTokens: optionalNumber(body.contextWindowTokens),
-    maxOutputTokens: optionalNumber(body.maxOutputTokens),
-    temperatureMilli: optionalTemperatureMilli(body),
-    reasoningEffort: optionalString(body.reasoningEffort),
-    reasoningFormat: optionalString(body.reasoningFormat),
-    secret: modelProviderSecretFromBody(body),
-    clearSecret: optionalBoolean(body.clearSecret),
-    metadataJson: isRecord(body.metadataJson) ? body.metadataJson : {},
-    expectedRevision: optionalNumber(body.expectedRevision),
-    now,
-  };
 }
 
 async function resolveModelProviderForBrain(
@@ -16423,18 +14597,6 @@ function requiredRecord(
     throw new Error(`${fieldName} must be an object`);
   }
   return record;
-}
-
-function randomBase64Url(byteLength: number): string {
-  return base64Url(randomBytes(byteLength));
-}
-
-function base64Url(bytes: Buffer): string {
-  return bytes
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
 }
 
 function addMilliseconds(isoTimestamp: string, milliseconds: number): string {

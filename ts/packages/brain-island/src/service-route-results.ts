@@ -1,4 +1,19 @@
+import type { ServerResponse } from "node:http";
 import type { AdminRouteResult } from "./admin-diagnostics-api.js";
+
+export interface RawServiceRouteResult {
+  kind: "raw";
+  write(response: ServerResponse): void;
+}
+
+export type ServiceRouteResult =
+  | AdminRouteResult
+  | RawServiceRouteResult
+  | {
+      status: number;
+      headers: Record<string, string>;
+      body: string;
+    };
 
 export interface ServiceRouteError {
   code:
@@ -59,4 +74,10 @@ export function readOnlyMethod(
     message,
     retryable: false,
   });
+}
+
+export function isRawServiceRouteResult(
+  result: ServiceRouteResult,
+): result is RawServiceRouteResult {
+  return "kind" in result && result.kind === "raw";
 }
