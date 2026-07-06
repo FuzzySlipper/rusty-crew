@@ -2,7 +2,10 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { manifestOperationNames } from "@rusty-crew/contracts";
+import {
+  bridgeWireShapeFingerprint,
+  manifestOperationNames,
+} from "@rusty-crew/contracts";
 
 import {
   validateBridgeJsonText,
@@ -119,6 +122,7 @@ interface NativeAddon {
 interface NativeBridgeBinding {
   readonly manifestVersion: number;
   readonly operationNames: string[];
+  readonly wireShapeFingerprint: string;
   initializeEngine(config: {
     engineDataDir: string;
     fixedClock?: string;
@@ -1591,6 +1595,7 @@ export interface NativeProviderStateDiagnostic {
 export interface NativeBridgeModule {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
+  readonly wireShapeFingerprint: string;
   initializeEngine(config: EngineConfig): Promise<EngineHandle>;
   shutdownEngine(request: ShutdownRequest): Promise<ShutdownSummary>;
   registerBrainImplementation(
@@ -1961,6 +1966,7 @@ export interface NativeBridgeModule {
 
 export const nativeManifestOperationNames = manifestOperationNames;
 export const nativeManifestVersion = 1;
+export const nativeWireShapeFingerprint = bridgeWireShapeFingerprint;
 
 export function roundTripNativeBridgeFixture(input: {
   name: NativeBridgeRoundTripFixtureName;
@@ -2019,6 +2025,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
   return {
     manifestVersion: nativeManifestVersion,
     operationNames: nativeManifestOperationNames,
+    wireShapeFingerprint: nativeWireShapeFingerprint,
     initializeEngine: unavailable("initialize_engine"),
     shutdownEngine: unavailable("shutdown_engine"),
     registerBrainImplementation: unavailable("register_brain_implementation"),
@@ -2396,28 +2403,32 @@ function assertNativeBridgeContract(binding: NativeBridgeBinding): void {
 
   const actual = [...binding.operationNames];
   const expected = [...nativeManifestOperationNames];
-  if (arraysEqual(actual, expected)) {
-    return;
+  if (!arraysEqual(actual, expected)) {
+    const actualSet = new Set(actual);
+    const expectedSet = new Set<string>(expected);
+    const missing = expected.filter((name) => !actualSet.has(name));
+    const extra = actual.filter((name) => !expectedSet.has(name));
+    const firstDiff = firstArrayDifference(actual, expected);
+    const firstDiffDetail =
+      firstDiff === undefined
+        ? "none"
+        : `index ${firstDiff}: native has ${actual[firstDiff] ?? "<missing>"}, contracts expect ${expected[firstDiff] ?? "<missing>"}`;
+
+    throw new NativeBridgeContractError(
+      [
+        "native bridge operation inventory mismatch; rebuild the native bridge binary with npm run build:native",
+        `first difference: ${firstDiffDetail}`,
+        `missing from native: ${missing.length === 0 ? "[]" : JSON.stringify(missing)}`,
+        `extra in native: ${extra.length === 0 ? "[]" : JSON.stringify(extra)}`,
+      ].join("; "),
+    );
   }
 
-  const actualSet = new Set(actual);
-  const expectedSet = new Set<string>(expected);
-  const missing = expected.filter((name) => !actualSet.has(name));
-  const extra = actual.filter((name) => !expectedSet.has(name));
-  const firstDiff = firstArrayDifference(actual, expected);
-  const firstDiffDetail =
-    firstDiff === undefined
-      ? "none"
-      : `index ${firstDiff}: native has ${actual[firstDiff] ?? "<missing>"}, contracts expect ${expected[firstDiff] ?? "<missing>"}`;
-
-  throw new NativeBridgeContractError(
-    [
-      "native bridge operation inventory mismatch; rebuild the native bridge binary with npm run build:native",
-      `first difference: ${firstDiffDetail}`,
-      `missing from native: ${missing.length === 0 ? "[]" : JSON.stringify(missing)}`,
-      `extra in native: ${extra.length === 0 ? "[]" : JSON.stringify(extra)}`,
-    ].join("; "),
-  );
+  if (binding.wireShapeFingerprint !== nativeWireShapeFingerprint) {
+    throw new NativeBridgeContractError(
+      `native bridge wire-shape fingerprint mismatch: expected ${nativeWireShapeFingerprint}, got ${binding.wireShapeFingerprint}; run npm run codegen:bridge-fingerprint and npm run build:native, then commit the regenerated fingerprint and native bridge binary`,
+    );
+  }
 }
 
 function arraysEqual(
@@ -2492,6 +2503,7 @@ function createNativeBridgeModule(
   const module: NativeBridgeModule = {
     manifestVersion: binding.manifestVersion,
     operationNames: binding.operationNames as ManifestOperationName[],
+    wireShapeFingerprint: binding.wireShapeFingerprint,
     initializeEngine: async (config) =>
       binding.initializeEngine({
         engineDataDir: config.engineDataDir,

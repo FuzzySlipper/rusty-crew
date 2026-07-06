@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusty_crew_core_bridge_api::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, env, fs, path::Path};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -45,6 +46,19 @@ fn main() -> Result<()> {
             check_fixtures(Path::new(&path))?;
             println!("bridge validation Rust fixture drift check passed");
         }
+        Some("emit-fingerprint") => {
+            println!("{}", bridge_wire_shape_fingerprint()?);
+        }
+        Some("check-fingerprint") => {
+            let fingerprint_path = args
+                .next()
+                .context("check-fingerprint requires a fingerprint file path")?;
+            let contracts_path = args
+                .next()
+                .context("check-fingerprint requires a TypeScript contracts index path")?;
+            check_fingerprint(Path::new(&fingerprint_path), Path::new(&contracts_path))?;
+            println!("bridge wire-shape fingerprint drift check passed");
+        }
         Some("check-contracts") => {
             let path = args
                 .next()
@@ -78,6 +92,8 @@ Commands:
   summary                         Print manifest operation count.
   emit-fixtures                   Emit Rust-authored bridge validation fixtures as JSON.
   check-fixtures <path>           Compare <path> with freshly emitted fixtures.
+  emit-fingerprint                Emit SHA-256 wire-shape fingerprint for fixture-backed bridge shapes.
+  check-fingerprint <path> <ts>   Compare <path> and TypeScript export with fresh fingerprint.
   check-contracts <path>          Check manifest/Rust/TS operation inventory parity.
   check-native-surface <path>     Check generated napi *Json methods have manifest entries.
 
@@ -102,6 +118,54 @@ fn check_fixtures(path: &Path) -> Result<()> {
             "bridge validation fixture drift detected for {}; run `cargo run -p rusty-crew-core-bridge-codegen -- emit-fixtures > {}`",
             path.display(),
             path.display()
+        );
+    }
+    Ok(())
+}
+
+fn bridge_wire_shape_fingerprint() -> Result<String> {
+    let payload = json!({
+        "format": "rusty-crew-bridge-wire-shape-fingerprint-v1",
+        "manifest_operation_names": operation_names_from_manifest(MANIFEST_TEXT)?,
+        "fixtures": bridge_validation_fixture_file()?,
+    });
+    let bytes = serde_json::to_vec(&payload)?;
+    let digest = Sha256::digest(bytes);
+    Ok(hex_digest(&digest))
+}
+
+fn check_fingerprint(fingerprint_path: &Path, contracts_index_path: &Path) -> Result<()> {
+    let expected = bridge_wire_shape_fingerprint()?;
+    let file_value = fs::read_to_string(fingerprint_path)
+        .with_context(|| {
+            format!(
+                "failed to read bridge wire-shape fingerprint file {}",
+                fingerprint_path.display()
+            )
+        })?
+        .trim()
+        .to_owned();
+    if file_value != expected {
+        bail!(
+            "bridge wire-shape fingerprint drift detected for {}; expected {}; run `npm run codegen:bridge-fingerprint` and update the TypeScript bridgeWireShapeFingerprint export",
+            fingerprint_path.display(),
+            expected
+        );
+    }
+
+    let contracts_source = fs::read_to_string(contracts_index_path).with_context(|| {
+        format!(
+            "failed to read TypeScript contracts file {}",
+            contracts_index_path.display()
+        )
+    })?;
+    let ts_value = wire_shape_fingerprint_from_ts_contracts(&contracts_source)?;
+    if ts_value != expected {
+        bail!(
+            "TypeScript bridgeWireShapeFingerprint drift detected in {}; expected {}; update the export to match {}",
+            contracts_index_path.display(),
+            expected,
+            fingerprint_path.display()
         );
     }
     Ok(())
@@ -250,6 +314,23 @@ fn operation_names_from_ts_contracts(source: &str) -> Result<Vec<String>> {
     Ok(names)
 }
 
+fn wire_shape_fingerprint_from_ts_contracts(source: &str) -> Result<String> {
+    let marker = "export const bridgeWireShapeFingerprint";
+    let start = source
+        .find(marker)
+        .context("failed to find bridgeWireShapeFingerprint export in TypeScript contracts")?
+        + marker.len();
+    let rest = &source[start..];
+    let quote = rest
+        .find('"')
+        .context("failed to find bridgeWireShapeFingerprint string literal")?;
+    let value = &rest[quote + 1..];
+    let end = value
+        .find('"')
+        .context("failed to find end of bridgeWireShapeFingerprint export")?;
+    Ok(value[..end].to_owned())
+}
+
 fn operation_names_from_native_json_methods(source: &str) -> Result<Vec<String>> {
     let marker = "export declare class NativeBridgeBinding {";
     let start = source
@@ -321,6 +402,16 @@ fn ensure_no_duplicate_operations(label: &str, names: &[String]) -> Result<()> {
         bail!("{label} has duplicate bridge operations: {duplicates:?}");
     }
     Ok(())
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 fn compare_operation_sets(

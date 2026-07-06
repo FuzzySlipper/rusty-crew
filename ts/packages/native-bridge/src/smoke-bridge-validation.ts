@@ -25,6 +25,7 @@ import {
   loadNativeBridge,
   nativeManifestOperationNames,
   nativeManifestVersion,
+  nativeWireShapeFingerprint,
   roundTripNativeBridgeFixture,
   type NativeBridgeRoundTripFixtureName,
   type OpenAiResponsesBrainRunInput,
@@ -70,6 +71,11 @@ assertArrayEqual(
   nativeBridge.operationNames,
   nativeManifestOperationNames,
 );
+if (nativeBridge.wireShapeFingerprint !== nativeWireShapeFingerprint) {
+  throw new Error(
+    `loaded native bridge wire-shape fingerprint ${nativeBridge.wireShapeFingerprint} does not match expected ${nativeWireShapeFingerprint}`,
+  );
+}
 
 function rustFixture(name: string): unknown {
   const value = rustFixtureValues.get(name);

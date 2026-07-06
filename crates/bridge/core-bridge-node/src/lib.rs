@@ -5,14 +5,14 @@
 //! transport dependencies into core crates.
 
 use rusty_crew_core_bridge_api::{
-    manifest_summary, ActionBatchReceipt, BrainActionBatch, BrainEventEnvelope,
-    BrainImplementationHandle, BrainImplementationRegistration, BrainWakeAccepted,
-    BrainWakeBufferInput, BrainWakeProviderStateOutput, BrainWakeRequest, BridgeManifestSummary,
-    CoreError, CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate, EngineConfig, EngineHandle,
-    EngineStorageConfig, EventReceipt, EventSubscription, ExternalEvent, PlatformAdapterHandle,
-    PlatformAdapterRegistration, ProfileId, RuntimeBufferHandle, RuntimeBufferStore,
-    RuntimeBufferView, SessionId, ShutdownRequest, ShutdownSummary, SubscriptionHandle, Unit,
-    MANIFEST_VERSION, OPERATION_NAMES,
+    manifest_summary, wire_shape_fingerprint, ActionBatchReceipt, BrainActionBatch,
+    BrainEventEnvelope, BrainImplementationHandle, BrainImplementationRegistration,
+    BrainWakeAccepted, BrainWakeBufferInput, BrainWakeProviderStateOutput, BrainWakeRequest,
+    BridgeManifestSummary, CoreError, CoreErrorKind, CoreEvent, CoreResult, DenDataUpdate,
+    EngineConfig, EngineHandle, EngineStorageConfig, EventReceipt, EventSubscription,
+    ExternalEvent, PlatformAdapterHandle, PlatformAdapterRegistration, ProfileId,
+    RuntimeBufferHandle, RuntimeBufferStore, RuntimeBufferView, SessionId, ShutdownRequest,
+    ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
     plan_create_profile, plan_runtime_config, validate_runtime_config_input, CreateProfilePlan,
@@ -101,6 +101,10 @@ impl NativeBridge {
 
     pub fn operation_names(&self) -> &'static [&'static str] {
         OPERATION_NAMES
+    }
+
+    pub fn wire_shape_fingerprint(&self) -> &'static str {
+        wire_shape_fingerprint()
     }
 
     pub fn manifest_summary(&self) -> BridgeManifestSummary {
@@ -2570,6 +2574,11 @@ impl NativeBridgeBinding {
             .iter()
             .map(|name| name.to_string())
             .collect()
+    }
+
+    #[napi(getter)]
+    pub fn wire_shape_fingerprint(&self) -> String {
+        wire_shape_fingerprint().to_string()
     }
 
     #[napi]
@@ -6041,6 +6050,7 @@ mod tests {
 
         assert_eq!(bridge.manifest_version(), MANIFEST_VERSION);
         assert_eq!(bridge.operation_names(), OPERATION_NAMES);
+        assert_eq!(bridge.wire_shape_fingerprint(), wire_shape_fingerprint());
         assert!(bridge.operation_names().contains(&"get_buffer"));
         assert!(bridge.operation_names().contains(&"release_buffer"));
         assert_eq!(

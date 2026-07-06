@@ -4,6 +4,7 @@ export declare class NativeBridgeBinding {
   constructor()
   get manifestVersion(): number
   get operationNames(): Array<string>
+  get wireShapeFingerprint(): string
   validateRuntimeConfigDraftJson(inputJson: string): string
   planCreateProfileJson(inputJson: string): string
   planRuntimeConfigJson(inputJson: string): string

@@ -17,6 +17,7 @@ pub use rusty_crew_core_protocol::*;
 
 pub const MANIFEST_VERSION: u32 = 1;
 pub const MANIFEST_TEXT: &str = include_str!("../bridge-manifest.toml");
+pub const WIRE_SHAPE_FINGERPRINT_TEXT: &str = include_str!("../bridge-wire-shape-fingerprint.txt");
 pub const OPERATION_NAMES: &[&str] = &[
     "initialize_engine",
     "shutdown_engine",
@@ -155,4 +156,8 @@ pub fn manifest_summary() -> BridgeManifestSummary {
         native_package: "@rusty-crew/native-bridge",
         operation_names: OPERATION_NAMES,
     }
+}
+
+pub fn wire_shape_fingerprint() -> &'static str {
+    WIRE_SHAPE_FINGERPRINT_TEXT.trim()
 }

@@ -25,7 +25,11 @@ To update it after intentional protocol shape changes:
 ```bash
 npm run smoke:bridge-contract-parity
 npm run codegen:bridge-fixtures
+npm run codegen:bridge-fingerprint
+# Update ts/packages/contracts/src/index.ts bridgeWireShapeFingerprint
+# to match crates/bridge/core-bridge-api/bridge-wire-shape-fingerprint.txt.
 npm run smoke:bridge-fixture-drift
+npm run smoke:bridge-fingerprint-drift
 npm run smoke:bridge-validation
 ```
 
@@ -57,10 +61,11 @@ adding a field to a covered Rust protocol shape fails until the TS schema is
 updated, even when runtime validation remains permissive for forward
 compatibility.
 
-The native bridge loader also asserts `manifestVersion` and exact operation
-inventory when a co-located `.node` binary is loaded. A stale committed binary
-now fails during `loadNativeBridge()` with a `NativeBridgeContractError`
-instead of failing later as a missing native function.
+The native bridge loader also asserts `manifestVersion`, exact operation
+inventory, and the checked-in wire-shape fingerprint when a co-located `.node`
+binary is loaded. A stale committed binary now fails during
+`loadNativeBridge()` with a `NativeBridgeContractError` instead of failing later
+as a missing native function or stale payload shape.
 
 ## Wire-Shape Versioning Policy
 
@@ -79,6 +84,27 @@ guard is a generated **wire-shape fingerprint**:
    wire-shape fingerprint before returning a usable bridge module.
 5. `verify:offline` runs a fingerprint drift check so a Rust wire-shape change
    fails until fixtures and the checked-in fingerprint are regenerated.
+
+The checked-in fingerprint file is:
+
+```text
+crates/bridge/core-bridge-api/bridge-wire-shape-fingerprint.txt
+```
+
+Regenerate it with:
+
+```bash
+npm run codegen:bridge-fixtures
+npm run codegen:bridge-fingerprint
+```
+
+Then copy the generated value into the `bridgeWireShapeFingerprint` export in
+`ts/packages/contracts/src/index.ts`, rebuild the native bridge, and run:
+
+```bash
+npm run smoke:bridge-fingerprint-drift
+npm run smoke:bridge-validation
+```
 
 This fingerprint is a stale-binary guard, not a replacement for schema
 coverage. It protects only the wire families represented in the Rust fixture

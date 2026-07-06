@@ -1669,4 +1669,7 @@ export const manifestOperationNames = [
   "release_buffer",
 ] as const;
 
+export const bridgeWireShapeFingerprint =
+  "7321321a2563b168e3de8fcb7e2ae5a5205eb8e65b52e01887c69fcc9b6196dc";
+
 export type ManifestOperationName = (typeof manifestOperationNames)[number];
