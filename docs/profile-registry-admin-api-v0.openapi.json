@@ -1,0 +1,609 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rusty Crew Profile Registry Admin API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/admin/profiles/registry/{profile_id}/update/plan": {
+      "post": {
+        "operationId": "planProfileRegistryUpdate",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryFieldUpdate" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryMutationPlan" } }
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/update/apply": {
+      "post": {
+        "operationId": "applyProfileRegistryUpdate",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryFieldUpdate" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryMutationApply" } }
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/lifecycle/plan": {
+      "post": {
+        "operationId": "planProfileRegistryLifecycle",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryLifecycle" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryMutationPlan" } }
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/lifecycle/apply": {
+      "post": {
+        "operationId": "applyProfileRegistryLifecycle",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryLifecycle" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryLifecycleApply" } }
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/prompt/plan": {
+      "post": {
+        "operationId": "planProfileRegistryPrompt",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryPrompt" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryMutationPlan" } }
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/prompt/apply": {
+      "post": {
+        "operationId": "applyProfileRegistryPrompt",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryPrompt" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryMutationApply" } }
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/runtime-config/plan": {
+      "post": {
+        "operationId": "planProfileRegistryRuntimeConfig",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryRuntimeConfig" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryRuntimeConfigPlan" } }
+      }
+    },
+    "/v1/admin/profiles/registry/{profile_id}/runtime-config/apply": {
+      "post": {
+        "operationId": "applyProfileRegistryRuntimeConfig",
+        "parameters": [{ "$ref": "#/components/parameters/ProfileId" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ProfileRegistryRuntimeConfig" },
+        "responses": { "200": { "$ref": "#/components/responses/ProfileRegistryRuntimeConfigApply" } }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "ProfileId": {
+        "name": "profile_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      }
+    },
+    "requestBodies": {
+      "ProfileRegistryFieldUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryFieldUpdateRequest" }
+          }
+        }
+      },
+      "ProfileRegistryLifecycle": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryLifecycleRequest" }
+          }
+        }
+      },
+      "ProfileRegistryPrompt": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryPromptRequest" }
+          }
+        }
+      },
+      "ProfileRegistryRuntimeConfig": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigRequest" }
+          }
+        }
+      }
+    },
+    "responses": {
+      "ProfileRegistryMutationPlan": {
+        "description": "Profile registry mutation plan envelope.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryMutationPlanEnvelope" }
+          }
+        }
+      },
+      "ProfileRegistryMutationApply": {
+        "description": "Profile registry mutation apply envelope.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryMutationApplyEnvelope" }
+          }
+        }
+      },
+      "ProfileRegistryLifecycleApply": {
+        "description": "Profile registry lifecycle apply envelope.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryLifecycleApplyEnvelope" }
+          }
+        }
+      },
+      "ProfileRegistryRuntimeConfigPlan": {
+        "description": "Profile runtime-config mutation plan envelope.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigPlanEnvelope" }
+          }
+        }
+      },
+      "ProfileRegistryRuntimeConfigApply": {
+        "description": "Profile runtime-config mutation apply envelope.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigApplyEnvelope" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "AdminEnvelopeMeta": {
+        "type": "object",
+        "required": ["request_id", "schema_version"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "schema_version": { "type": "integer", "const": 1 }
+        },
+        "additionalProperties": true
+      },
+      "AdminSuccessEnvelope": {
+        "type": "object",
+        "required": ["ok", "data", "meta"],
+        "properties": {
+          "ok": { "type": "boolean", "const": true },
+          "data": { "type": "object" },
+          "meta": { "$ref": "#/components/schemas/AdminEnvelopeMeta" }
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryReasonCode": {
+        "type": "string",
+        "enum": [
+          "profile_registry_write_requires_post_or_patch",
+          "unknown_profile_registry_write_route",
+          "profile_registry_record_missing",
+          "profile_registry_revision_mismatch",
+          "model_provider_not_found",
+          "model_provider_not_active",
+          "inline_tool_policy_rejects_mcp_toolset",
+          "inline_tool_policy_unknown_toolset",
+          "inline_tool_policy_unknown_tool"
+        ]
+      },
+      "ProfileRegistryLifecycleStatus": {
+        "type": "string",
+        "enum": ["active", "paused", "decommissioned", "archived"]
+      },
+      "ProfileRegistrySessionKind": {
+        "type": "string",
+        "enum": ["full", "worker", "delegated"]
+      },
+      "ProfileRegistryWriteKind": {
+        "type": "string",
+        "enum": ["update", "lifecycle", "prompt", "runtime-config"]
+      },
+      "ProfileRegistryWriteMode": {
+        "type": "string",
+        "enum": ["plan", "apply"]
+      },
+      "ProfileRegistryDiagnostic": {
+        "type": "object",
+        "required": ["severity", "code", "path", "message"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+          "code": { "$ref": "#/components/schemas/ProfileRegistryReasonCode" },
+          "path": { "type": "string" },
+          "message": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistrySourceAssetRef": {
+        "type": "object",
+        "required": ["assetKind", "path", "metadataJson"],
+        "properties": {
+          "assetKind": { "type": "string" },
+          "path": { "type": "string" },
+          "contentHash": { "type": ["string", "null"] },
+          "lastSeenAt": { "type": ["string", "null"] },
+          "metadataJson": {}
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryDerivedRuntimeRef": {
+        "type": "object",
+        "required": ["refKind", "refId", "status", "metadataJson"],
+        "properties": {
+          "refKind": { "type": "string" },
+          "refId": { "type": "string" },
+          "status": { "type": "string" },
+          "updatedAt": { "type": ["string", "null"] },
+          "metadataJson": {}
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryImportExportMetadata": {
+        "type": "object",
+        "required": ["metadataJson"],
+        "properties": {
+          "importedFrom": { "type": ["string", "null"] },
+          "importedAt": { "type": ["string", "null"] },
+          "exportedTo": { "type": ["string", "null"] },
+          "exportedAt": { "type": ["string", "null"] },
+          "metadataJson": {}
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryRecord": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "lifecycleStatus",
+          "activeRuntimeSettingsJson",
+          "sourceAssetRefs",
+          "derivedRuntimeRefs",
+          "importExport",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "profileId": { "type": "string" },
+          "lifecycleStatus": { "$ref": "#/components/schemas/ProfileRegistryLifecycleStatus" },
+          "displayName": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "defaultSessionKind": { "oneOf": [{ "$ref": "#/components/schemas/ProfileRegistrySessionKind" }, { "type": "null" }] },
+          "agentId": { "type": ["string", "null"] },
+          "ownerId": { "type": ["string", "null"] },
+          "promptSoulMarkdown": { "type": ["string", "null"] },
+          "promptMemoryMarkdown": { "type": ["string", "null"] },
+          "activeRuntimeSettingsJson": {},
+          "sourceAssetRefs": { "type": "array", "items": { "$ref": "#/components/schemas/ProfileRegistrySourceAssetRef" } },
+          "derivedRuntimeRefs": { "type": "array", "items": { "$ref": "#/components/schemas/ProfileRegistryDerivedRuntimeRef" } },
+          "importExport": { "$ref": "#/components/schemas/ProfileRegistryImportExportMetadata" },
+          "revision": { "type": "integer" },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryWrite": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "lifecycleStatus",
+          "activeRuntimeSettingsJson",
+          "sourceAssetRefs",
+          "derivedRuntimeRefs",
+          "importExport",
+          "now"
+        ],
+        "properties": {
+          "profileId": { "type": "string" },
+          "lifecycleStatus": { "$ref": "#/components/schemas/ProfileRegistryLifecycleStatus" },
+          "displayName": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "defaultSessionKind": { "oneOf": [{ "$ref": "#/components/schemas/ProfileRegistrySessionKind" }, { "type": "null" }] },
+          "agentId": { "type": ["string", "null"] },
+          "ownerId": { "type": ["string", "null"] },
+          "promptSoulMarkdown": { "type": ["string", "null"] },
+          "promptMemoryMarkdown": { "type": ["string", "null"] },
+          "activeRuntimeSettingsJson": {},
+          "sourceAssetRefs": { "type": "array", "items": { "$ref": "#/components/schemas/ProfileRegistrySourceAssetRef" } },
+          "derivedRuntimeRefs": { "type": "array", "items": { "$ref": "#/components/schemas/ProfileRegistryDerivedRuntimeRef" } },
+          "importExport": { "$ref": "#/components/schemas/ProfileRegistryImportExportMetadata" },
+          "now": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryFieldUpdateRequest": {
+        "type": "object",
+        "required": ["expectedRevision"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 1 },
+          "displayName": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "defaultSessionKind": { "oneOf": [{ "$ref": "#/components/schemas/ProfileRegistrySessionKind" }, { "type": "null" }] },
+          "agentId": { "type": ["string", "null"] },
+          "ownerId": { "type": ["string", "null"] },
+          "activeRuntimeSettingsJson": {}
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryLifecycleRequest": {
+        "type": "object",
+        "required": ["expectedRevision", "lifecycleStatus"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 1 },
+          "lifecycleStatus": { "$ref": "#/components/schemas/ProfileRegistryLifecycleStatus" }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryPromptRequest": {
+        "type": "object",
+        "required": ["expectedRevision"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 1 },
+          "soulMarkdown": { "type": ["string", "null"] },
+          "promptSoulMarkdown": { "type": ["string", "null"] },
+          "memoryMarkdown": { "type": ["string", "null"] },
+          "promptMemoryMarkdown": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryToolPolicy": {
+        "type": "object",
+        "properties": {
+          "requestedToolsets": { "type": "array", "items": { "type": "string" } },
+          "requestedTools": { "type": "array", "items": { "type": "string" } },
+          "deniedTools": { "type": "array", "items": { "type": "string" } },
+          "includeDeprecated": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryBrainConfig": {
+        "type": "object",
+        "properties": {
+          "module": { "type": "string" },
+          "strategy": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryMcpBindingEdit": {
+        "type": "object",
+        "required": ["serverId"],
+        "properties": {
+          "serverId": { "type": "string" },
+          "bindingId": { "type": "string" },
+          "adapterId": { "type": "string" },
+          "serverNames": { "type": "array", "items": { "type": "string" } },
+          "transport": { "type": "string" },
+          "toolProfileKey": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryRuntimeConfigEdit": {
+        "type": "object",
+        "required": ["providerAlias", "contextPolicy", "mcpBindings"],
+        "properties": {
+          "providerAlias": { "type": "string" },
+          "brain": { "$ref": "#/components/schemas/ProfileRegistryBrainConfig" },
+          "localToolProfileId": { "type": ["string", "null"] },
+          "toolPolicy": { "$ref": "#/components/schemas/ProfileRegistryToolPolicy" },
+          "contextPolicy": { "type": "object", "additionalProperties": true },
+          "mcpBindings": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ProfileRegistryMcpBindingEdit" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryRuntimeConfigRequest": {
+        "type": "object",
+        "required": ["expectedRevision"],
+        "properties": {
+          "expectedRevision": { "type": "integer", "minimum": 1 },
+          "providerAlias": { "type": "string" },
+          "brain": { "$ref": "#/components/schemas/ProfileRegistryBrainConfig" },
+          "localToolProfileId": { "type": ["string", "null"] },
+          "toolPolicy": { "$ref": "#/components/schemas/ProfileRegistryToolPolicy" },
+          "contextPolicy": { "type": "object", "additionalProperties": true },
+          "mcpBindings": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ProfileRegistryMcpBindingEdit" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryMutationImplications": {
+        "type": "object",
+        "required": [
+          "registryRevisionWillIncrement",
+          "profileFilesUnchanged",
+          "serviceConfigUnchanged",
+          "runtimeRebuildRecommended",
+          "lifecycleEffects"
+        ],
+        "properties": {
+          "registryRevisionWillIncrement": { "type": "boolean" },
+          "profileFilesUnchanged": { "type": "boolean" },
+          "serviceConfigUnchanged": { "type": "boolean" },
+          "runtimeRebuildRecommended": { "type": "boolean" },
+          "lifecycleEffects": {
+            "type": "string",
+            "enum": ["none", "archive_active_sessions_and_unregister_brain"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryMutationPlan": {
+        "type": "object",
+        "required": [
+          "ok",
+          "profileId",
+          "kind",
+          "mode",
+          "expectedRevision",
+          "current",
+          "next",
+          "nextWrite",
+          "diagnostics",
+          "implications"
+        ],
+        "properties": {
+          "ok": { "type": "boolean" },
+          "profileId": { "type": "string" },
+          "kind": { "$ref": "#/components/schemas/ProfileRegistryWriteKind" },
+          "mode": { "$ref": "#/components/schemas/ProfileRegistryWriteMode" },
+          "expectedRevision": { "type": "integer" },
+          "current": { "$ref": "#/components/schemas/ProfileRegistryRecord" },
+          "next": { "$ref": "#/components/schemas/ProfileRegistryRecord" },
+          "nextWrite": { "$ref": "#/components/schemas/ProfileRegistryWrite" },
+          "diagnostics": { "type": "array", "items": { "$ref": "#/components/schemas/ProfileRegistryDiagnostic" } },
+          "implications": { "$ref": "#/components/schemas/ProfileRegistryMutationImplications" }
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryRuntimeConfigImplications": {
+        "type": "object",
+        "required": [
+          "registryRevisionWillIncrement",
+          "profileFileWillChange",
+          "serviceConfigWillChange",
+          "configReloadRequired",
+          "runtimeRebuildRecommended",
+          "mcpRefreshRecommended"
+        ],
+        "properties": {
+          "registryRevisionWillIncrement": { "type": "boolean" },
+          "profileFileWillChange": { "type": "boolean" },
+          "serviceConfigWillChange": { "type": "boolean" },
+          "configReloadRequired": { "type": "boolean" },
+          "runtimeRebuildRecommended": { "type": "boolean" },
+          "mcpRefreshRecommended": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      },
+      "ProfileRegistryRuntimeConfigPlan": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ProfileRegistryMutationPlan" },
+          {
+            "type": "object",
+            "required": ["runtimeConfig", "implications"],
+            "properties": {
+              "kind": { "type": "string", "const": "runtime-config" },
+              "runtimeConfig": { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigEdit" },
+              "implications": { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigImplications" }
+            }
+          }
+        ]
+      },
+      "ProfileRegistryLifecycleEffects": {
+        "type": "object",
+        "required": ["sessionsArchived", "brainHandle"],
+        "properties": {
+          "sessionsArchived": { "type": "array", "items": { "type": "string" } },
+          "brainHandle": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryRuntimeConfigEffects": {
+        "type": "object",
+        "required": ["profilePath", "runtimeConfigPath", "mcpBindings", "applyResult"],
+        "properties": {
+          "profilePath": { "type": "string" },
+          "runtimeConfigPath": { "type": "string" },
+          "mcpBindings": {
+            "type": "object",
+            "required": ["removed", "added"],
+            "properties": {
+              "removed": { "type": "integer" },
+              "added": { "type": "integer" }
+            }
+          },
+          "applyResult": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": true
+      },
+      "ProfileRegistryMutationPlanEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AdminSuccessEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "data": { "$ref": "#/components/schemas/ProfileRegistryMutationPlan" }
+            }
+          }
+        ]
+      },
+      "ProfileRegistryMutationApplyEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AdminSuccessEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "allOf": [
+                  { "$ref": "#/components/schemas/ProfileRegistryMutationPlan" },
+                  {
+                    "type": "object",
+                    "required": ["applied", "record"],
+                    "properties": {
+                      "applied": { "type": "boolean", "const": true },
+                      "record": { "$ref": "#/components/schemas/ProfileRegistryRecord" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "ProfileRegistryLifecycleApplyEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ProfileRegistryMutationApplyEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "required": ["effects"],
+                "properties": {
+                  "effects": { "$ref": "#/components/schemas/ProfileRegistryLifecycleEffects" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ProfileRegistryRuntimeConfigPlanEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AdminSuccessEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "data": { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigPlan" }
+            }
+          }
+        ]
+      },
+      "ProfileRegistryRuntimeConfigApplyEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigPlanEnvelope" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "required": ["applied", "record", "effects"],
+                "properties": {
+                  "applied": { "type": "boolean", "const": true },
+                  "record": { "$ref": "#/components/schemas/ProfileRegistryRecord" },
+                  "effects": { "$ref": "#/components/schemas/ProfileRegistryRuntimeConfigEffects" }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import type { AdminControlCommandName } from "./admin-control-api.js";
+import { PROFILE_REGISTRY_ADMIN_PATHS } from "./profile-registry-admin-contract.js";
 
 export type SlashCommandName =
   | "help"
@@ -1116,7 +1117,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.update_plan",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/update/plan",
+    PROFILE_REGISTRY_ADMIN_PATHS.updatePlan,
     "Plan DB-backed profile registry field changes without editing profile files or service.json.",
     "admin",
     ["profile", "config"],
@@ -1124,7 +1125,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.update_apply",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/update/apply",
+    PROFILE_REGISTRY_ADMIN_PATHS.updateApply,
     "Apply DB-backed profile registry field changes with revision checking.",
     "admin",
     ["profile", "config"],
@@ -1132,7 +1133,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.lifecycle_plan",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/lifecycle/plan",
+    PROFILE_REGISTRY_ADMIN_PATHS.lifecyclePlan,
     "Plan a DB-backed profile lifecycle transition.",
     "admin",
     ["profile", "config"],
@@ -1140,7 +1141,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.lifecycle_apply",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/lifecycle/apply",
+    PROFILE_REGISTRY_ADMIN_PATHS.lifecycleApply,
     "Apply a DB-backed profile lifecycle transition and run safe runtime effects.",
     "admin",
     ["profile", "config"],
@@ -1148,7 +1149,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.prompt_plan",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/prompt/plan",
+    PROFILE_REGISTRY_ADMIN_PATHS.promptPlan,
     "Plan DB-backed profile soul and memory prompt text changes.",
     "admin",
     ["profile", "config", "prompt"],
@@ -1156,7 +1157,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.prompt_apply",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/prompt/apply",
+    PROFILE_REGISTRY_ADMIN_PATHS.promptApply,
     "Apply DB-backed profile soul and memory prompt text changes with revision checking.",
     "admin",
     ["profile", "config", "prompt"],
@@ -1164,7 +1165,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.runtime_config_plan",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/runtime-config/plan",
+    PROFILE_REGISTRY_ADMIN_PATHS.runtimeConfigPlan,
     "Plan DB-backed profile provider, built-in tool policy, and MCP binding changes without applying them.",
     "admin",
     ["profile", "config", "tool", "mcp"],
@@ -1172,7 +1173,7 @@ export const API_CAPABILITIES = [
   mutationCapability(
     "admin.profiles.registry.runtime_config_apply",
     "POST",
-    "/v1/admin/profiles/registry/{profile_id}/runtime-config/apply",
+    PROFILE_REGISTRY_ADMIN_PATHS.runtimeConfigApply,
     "Apply DB-backed profile provider, built-in tool policy, and MCP binding changes with revision checking and runtime reload.",
     "admin",
     ["profile", "config", "tool", "mcp"],
