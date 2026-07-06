@@ -68,6 +68,7 @@ use rusty_crew_openai_responses_brain::{
     OpenAiOauthSecretStore, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
+mod binding_manifest;
 mod config_profiles;
 mod conversation;
 mod delegation;
@@ -196,24 +197,6 @@ impl NativeBridgeBinding {
         Self {
             inner: Mutex::new(NativeBridge::new()),
         }
-    }
-
-    #[napi(getter)]
-    pub fn manifest_version(&self) -> u32 {
-        MANIFEST_VERSION
-    }
-
-    #[napi(getter)]
-    pub fn operation_names(&self) -> Vec<String> {
-        OPERATION_NAMES
-            .iter()
-            .map(|name| name.to_string())
-            .collect()
-    }
-
-    #[napi(getter)]
-    pub fn wire_shape_fingerprint(&self) -> String {
-        wire_shape_fingerprint().to_string()
     }
 
     #[napi]
