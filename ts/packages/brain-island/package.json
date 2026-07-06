@@ -61,6 +61,7 @@
     "smoke:session-history-window": "tsx src/smoke-session-history-window.ts",
     "smoke:post-turn-maintenance": "tsx src/smoke-post-turn-maintenance.ts",
     "smoke:rusty-view-chat-contract": "tsx src/smoke-rusty-view-chat-contract.ts",
+    "smoke:rusty-view-chat-authority-boundary": "tsx src/smoke-rusty-view-chat-authority-boundary.ts",
     "smoke:model-provider-admin-contract": "tsx src/smoke-model-provider-admin-contract.ts",
     "smoke:rusty-view-chat-context": "tsx src/smoke-rusty-view-chat-context.ts",
     "smoke:provider-request-debug-cache": "tsx src/smoke-provider-request-debug-cache.ts",

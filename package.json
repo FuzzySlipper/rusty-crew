@@ -144,6 +144,7 @@
     "smoke:session-history-window": "npm run smoke:session-history-window -w @rusty-crew/brain-island",
     "smoke:post-turn-maintenance": "npm run smoke:post-turn-maintenance -w @rusty-crew/brain-island",
     "smoke:rusty-view-chat-contract": "npm run smoke:rusty-view-chat-contract -w @rusty-crew/brain-island",
+    "smoke:rusty-view-chat-authority-boundary": "npm run smoke:rusty-view-chat-authority-boundary -w @rusty-crew/brain-island",
     "smoke:model-provider-admin-contract": "npm run smoke:model-provider-admin-contract -w @rusty-crew/brain-island",
     "smoke:profile-registry-admin-contract": "npm run smoke:profile-registry-admin-contract -w @rusty-crew/brain-island",
     "smoke:rusty-view-chat-context": "npm run smoke:rusty-view-chat-context -w @rusty-crew/brain-island",

@@ -1460,24 +1460,13 @@ async function handleSendMessage(
     });
   }
   const parts = url.pathname.split("/").filter(Boolean);
-  const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
-  const sessions = await context.listSessions();
-  const session = sessions.find(
-    (candidate) => candidate.sessionId === sessionId,
-  );
-  if (!session) {
-    return failure(404, requestId, {
-      code: "not_found",
-      reason_code: "chat_session_not_found",
-      message: `chat session ${sessionId} was not found`,
-      retryable: false,
-    });
-  }
-  if (session.status === "archived") {
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
+  if (session.session.status === "archived") {
     return failure(412, requestId, {
       code: "failed_precondition",
       reason_code: "chat_session_archived",
-      message: `chat session ${sessionId} is archived`,
+      message: `chat session ${session.session.sessionId} is archived`,
       retryable: false,
     });
   }
@@ -1494,9 +1483,9 @@ async function handleSendMessage(
     request.headers?.["idempotency-key"] ??
     request.headers?.["Idempotency-Key"] ??
     parsed.value.client_message_id ??
-    `${sessionId}:${requestId}`;
+    `${session.session.sessionId}:${requestId}`;
   const result = await context.sendMessage({
-    session,
+    session: session.session,
     actor: parsed.value.actor,
     body: parsed.value.body.trim(),
     clientMessageId: parsed.value.client_message_id,
@@ -1530,19 +1519,8 @@ async function handleExecuteCommand(
     });
   }
   const parts = url.pathname.split("/").filter(Boolean);
-  const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
-  const sessions = await context.listSessions();
-  const session = sessions.find(
-    (candidate) => candidate.sessionId === sessionId,
-  );
-  if (!session) {
-    return failure(404, requestId, {
-      code: "not_found",
-      reason_code: "chat_session_not_found",
-      message: `chat session ${sessionId} was not found`,
-      retryable: false,
-    });
-  }
+  const session = await chatSessionFromParts(context, requestId, parts);
+  if (!session.ok) return session.result;
 
   const parsed = parseExecuteCommandRequest(request.body);
   if (!parsed.ok) {
@@ -1555,7 +1533,7 @@ async function handleExecuteCommand(
   }
 
   const result = await context.executeCommand({
-    session,
+    session: session.session,
     command: parsed.value.command,
     actor: parsed.value.actor ?? { id: "rusty-view", kind: "human" },
     requestId,
