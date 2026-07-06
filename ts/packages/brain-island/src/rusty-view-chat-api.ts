@@ -332,12 +332,32 @@ export interface SessionContextUsageResult {
     context_window_tokens?: number;
     estimated_prompt_tokens?: number;
     estimated_remaining_tokens?: number;
+    system_tokens?: number;
+    lore_tokens?: number;
+    history_tokens?: number;
     max_output_tokens?: number;
     reserved_response_tokens?: number;
     safety_margin_tokens?: number;
     usable_input_tokens?: number;
     sampled_event_count: number;
     sampled_message_count: number;
+    token_segments?: {
+      estimate_quality: "exact" | "approximate" | "unavailable";
+      estimate_method: string;
+      estimator_id: string;
+      system_tokens?: number;
+      lore_tokens?: number;
+      history_tokens?: number;
+      prompt_tokens?: number;
+      reserved_response_tokens?: number;
+      safety_margin_tokens?: number;
+      estimated_remaining_tokens?: number;
+      notes: Array<{
+        segment: "system" | "lore" | "history";
+        status: "estimated" | "unavailable";
+        message: string;
+      }>;
+    };
   };
   latest_compaction_artifact?: {
     artifact_id: string;

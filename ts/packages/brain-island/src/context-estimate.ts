@@ -40,11 +40,9 @@ export function estimateContextUsage(
   input: ContextEstimateInput,
 ): ContextUsageEstimate {
   const budget = contextTokenBudget(input.provider);
-  const sampledText = input.textFragments.join("\n");
-  const estimatedPromptTokens =
-    sampledText.trim().length === 0
-      ? 0
-      : estimateApproximateTokens(sampledText);
+  const estimatedPromptTokens = estimateTextFragmentsTokens(
+    input.textFragments,
+  );
   return {
     estimateQuality:
       input.provider === undefined ? "unavailable" : "approximate",
@@ -108,6 +106,17 @@ export function estimateApproximateTokens(text: string): number {
     text.trim().split(/\s+/).filter(Boolean).length * 1.33,
   );
   return Math.max(chars, words);
+}
+
+export function estimateTextFragmentsTokens(
+  fragments: readonly string[],
+): number {
+  return fragments.reduce((total, fragment) => {
+    const trimmed = fragment.trim();
+    return (
+      total + (trimmed.length === 0 ? 0 : estimateApproximateTokens(trimmed))
+    );
+  }, 0);
 }
 
 function optionalString(value: unknown): string | undefined {

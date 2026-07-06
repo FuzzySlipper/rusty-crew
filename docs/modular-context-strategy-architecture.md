@@ -12,6 +12,16 @@ single first-class strategy boundary:
   brain wake request inputs.
 - `/v1/chat/sessions/{session_id}/context` reports a browser-safe estimate, but
   the estimate is diagnostic-only and does not drive wake shaping.
+- The same `/context` route reports approximate token segments for
+  `system_tokens`, `lore_tokens`, `history_tokens`,
+  `reserved_response_tokens`, `safety_margin_tokens`, and
+  `estimated_remaining_tokens`. Segment estimates use the same fallback
+  estimator as the aggregate prompt estimate, so
+  `estimated_prompt_tokens = system_tokens + lore_tokens + history_tokens`
+  whenever all three segments are available. `lore_tokens` currently covers the
+  roleplay session setup/lore metadata injected before wake; tool-recalled lore
+  selected during the model turn is not knowable before the turn and is noted as
+  approximate/partial in `token_segments.notes`.
 - Runtime maintenance can compact `session_memory_records`, but that is not the
   same as automatic model-context compaction for long chats.
 

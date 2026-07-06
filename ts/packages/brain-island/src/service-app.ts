@@ -150,6 +150,7 @@ import {
 } from "./context-strategy.js";
 import {
   estimateContextUsage,
+  estimateTextFragmentsTokens,
   textFragmentsFromPayload,
 } from "./context-estimate.js";
 import {
@@ -11555,11 +11556,93 @@ async function rustyViewSessionContextUsage(
       event.kind === "message_created" ||
       event.kind === "assistant_message_completed",
   ).length;
+  const historyFragments = sampledEvents.flatMap((event) =>
+    textFragmentsFromPayload(event.payload),
+  );
+  const systemFragments: string[] = [];
+  const segmentNotes: NonNullable<
+    SessionContextUsageResult["context"]["token_segments"]
+  >["notes"] = [];
+  const profileContext = await loadProfileContext({
+    profilesDir: state.runtimeConfig.profilesDir,
+    skillsDir: state.runtimeConfig.skillsDir,
+    profileId: input.session.profileId,
+    modelProviderResolver: (alias) =>
+      resolveModelProviderForBrain(state.bridge, alias),
+  }).catch((error) => {
+    diagnostics.push({
+      severity: "warning",
+      code: "profile_context_load_failed",
+      message: errorMessage(error, "profile context load failed"),
+    });
+    segmentNotes.push({
+      segment: "system",
+      status: "unavailable",
+      message:
+        "profile role assembly could not be loaded, so system/narrator prompt tokens are unavailable",
+    });
+    return undefined;
+  });
+  if (profileContext !== undefined) {
+    const role = buildProfileRoleAssembly(profileContext, {
+      includeSkillBodies: false,
+    });
+    systemFragments.push(
+      ...[role.systemPrompt, role.roleAssembly.instructions].filter(
+        (fragment): fragment is string => typeof fragment === "string",
+      ),
+    );
+    segmentNotes.push({
+      segment: "system",
+      status: "estimated",
+      message:
+        "system/narrator prompt tokens are approximate fallback estimates from profile role assembly without live provider tokenizer",
+    });
+  }
+  const roleplayContext = await roleplayPromptContextForSession(
+    state,
+    input.session,
+  ).catch((error) => {
+    diagnostics.push({
+      severity: "warning",
+      code: "roleplay_context_load_failed",
+      message: errorMessage(error, "roleplay context load failed"),
+    });
+    segmentNotes.push({
+      segment: "lore",
+      status: "unavailable",
+      message:
+        "roleplay session lore/setup context could not be loaded, so lore tokens are unavailable",
+    });
+    return undefined;
+  });
+  const loreFragments = roleplayContext === undefined ? [] : [roleplayContext];
+  segmentNotes.push({
+    segment: "lore",
+    status: loreFragments.length === 0 ? "unavailable" : "estimated",
+    message:
+      loreFragments.length === 0
+        ? "no roleplay session lore/setup context is active for this session"
+        : "lore tokens are approximate fallback estimates from roleplay session setup context; tool-recalled lore is selected during the model turn and is not pre-counted here",
+  });
+  segmentNotes.push({
+    segment: "history",
+    status: "estimated",
+    message:
+      "history tokens are approximate fallback estimates from sampled chat event text",
+  });
+  const systemTokens =
+    systemFragments.length === 0
+      ? undefined
+      : estimateTextFragmentsTokens(systemFragments);
+  const loreTokens =
+    loreFragments.length === 0
+      ? undefined
+      : estimateTextFragmentsTokens(loreFragments);
+  const historyTokens = estimateTextFragmentsTokens(historyFragments);
   const contextUsage = estimateContextUsage({
     provider,
-    textFragments: sampledEvents.flatMap((event) =>
-      textFragmentsFromPayload(event.payload),
-    ),
+    textFragments: [...systemFragments, ...loreFragments, ...historyFragments],
     sampledEventCount: sampledEvents.length,
     sampledMessageCount,
   });
@@ -11648,12 +11731,28 @@ async function rustyViewSessionContextUsage(
       context_window_tokens: contextUsage.budget.contextWindowTokens,
       estimated_prompt_tokens: contextUsage.estimatedPromptTokens,
       estimated_remaining_tokens: contextUsage.estimatedRemainingTokens,
+      system_tokens: systemTokens,
+      lore_tokens: loreTokens,
+      history_tokens: historyTokens,
       max_output_tokens: contextUsage.budget.maxOutputTokens,
       reserved_response_tokens: contextUsage.budget.reservedResponseTokens,
       safety_margin_tokens: contextUsage.budget.safetyMarginTokens,
       usable_input_tokens: contextUsage.budget.usableInputTokens,
       sampled_event_count: contextUsage.sampledEventCount,
       sampled_message_count: contextUsage.sampledMessageCount,
+      token_segments: {
+        estimate_quality: contextUsage.estimateQuality,
+        estimate_method: contextUsage.estimateMethod,
+        estimator_id: contextUsage.estimatorId,
+        system_tokens: systemTokens,
+        lore_tokens: loreTokens,
+        history_tokens: historyTokens,
+        prompt_tokens: contextUsage.estimatedPromptTokens,
+        reserved_response_tokens: contextUsage.budget.reservedResponseTokens,
+        safety_margin_tokens: contextUsage.budget.safetyMarginTokens,
+        estimated_remaining_tokens: contextUsage.estimatedRemainingTokens,
+        notes: segmentNotes,
+      },
     },
     latest_compaction_artifact:
       latestCompactionArtifact === undefined

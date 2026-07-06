@@ -30,6 +30,58 @@ try {
     reasoningFormat: "none",
   });
   assert.ok(provider.status === 200 || provider.status === 201);
+  const loreLayer = await post("/v1/profile/chat-profile/layers", token, {
+    layerId: "chat-world",
+    name: "Chat World",
+    description: "Context smoke lore layer.",
+    purpose: "world",
+    writePolicy: "auto_capture",
+  });
+  assert.equal(loreLayer.status, 200, JSON.stringify(loreLayer.body));
+  const character = await post(
+    "/v1/admin/roleplay/profiles/chat-profile/characters",
+    token,
+    {
+      id: "chat-hero",
+      name: "Chat Hero",
+      description: "A context-smoke roleplay character.",
+      personality: "careful and curious",
+      scenario: "Measuring token segments.",
+      firstMessage: "Ready for context diagnostics.",
+      alternateGreetings: ["Still ready for diagnostics."],
+      exampleMessages: ["We should keep the lore budget visible."],
+      tags: ["context"],
+    },
+  );
+  assert.equal(character.status, 200, JSON.stringify(character.body));
+  const narrator = await patch(
+    "/v1/admin/roleplay/profiles/chat-profile/narrator-config",
+    token,
+    {
+      tone: "wry",
+      pacing: "balanced",
+      explicitness: "romantic",
+      memoryDepth: "deep",
+      stylePrompt: "Keep context diagnostics visible and concise.",
+      exemplar: "A precise narrator keeps lore in view.",
+      review: { enabled: true, maxReviewCycles: 1 },
+    },
+  );
+  assert.equal(narrator.status, 200, JSON.stringify(narrator.body));
+  const roleplaySession = await patch(
+    "/v1/admin/roleplay/sessions/chat-session",
+    token,
+    {
+      displayName: "Context Smoke Session",
+      characterId: "chat-hero",
+      activeLayerIds: ["chat-world"],
+    },
+  );
+  assert.equal(
+    roleplaySession.status,
+    200,
+    JSON.stringify(roleplaySession.body),
+  );
   await bridge.saveContextCompactionArtifact({
     artifact_id: "context_artifact_smoke",
     session_id: "chat-session" as SessionId,
@@ -76,6 +128,28 @@ try {
   assert.equal(contextUsage.body.data.context.reserved_response_tokens, 4_096);
   assert.equal(contextUsage.body.data.context.safety_margin_tokens, 2_560);
   assert.equal(contextUsage.body.data.context.usable_input_tokens, 121_344);
+  assert.equal(typeof contextUsage.body.data.context.system_tokens, "number");
+  assert.equal(typeof contextUsage.body.data.context.lore_tokens, "number");
+  assert.equal(typeof contextUsage.body.data.context.history_tokens, "number");
+  assert.ok(contextUsage.body.data.context.system_tokens > 0);
+  assert.ok(contextUsage.body.data.context.lore_tokens > 0);
+  assert.equal(contextUsage.body.data.context.history_tokens, 0);
+  assert.equal(
+    contextUsage.body.data.context.estimated_prompt_tokens,
+    contextUsage.body.data.context.system_tokens +
+      contextUsage.body.data.context.lore_tokens +
+      contextUsage.body.data.context.history_tokens,
+  );
+  assert.equal(
+    contextUsage.body.data.context.token_segments.estimate_quality,
+    "approximate",
+  );
+  assert.ok(
+    contextUsage.body.data.context.token_segments.notes.some(
+      (note: { segment: string; status: string }) =>
+        note.segment === "lore" && note.status === "estimated",
+    ),
+  );
   assert.equal(typeof contextUsage.body.data.brain.backend, "string");
   assert.equal(
     contextUsage.body.data.context_strategy.strategy_id,
@@ -173,6 +247,21 @@ async function get(path: string, bearer?: string) {
 async function post(path: string, bearer: string, body: unknown) {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: "POST",
+    headers: {
+      authorization: `Bearer ${bearer}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    body: (await response.json()) as any,
+  };
+}
+
+async function patch(path: string, bearer: string, body: unknown) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "PATCH",
     headers: {
       authorization: `Bearer ${bearer}`,
       "content-type": "application/json",
