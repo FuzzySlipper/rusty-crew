@@ -331,8 +331,9 @@ impl CoreCoordinationStore {
             Some(EngineStorageConfig::Postgres {
                 database_url,
                 schema,
+                max_connections,
                 ..
-            }) => Self::open_postgres(database_url, schema),
+            }) => Self::open_postgres_with_options(database_url, schema, *max_connections),
         }
     }
 
@@ -346,13 +347,38 @@ impl CoreCoordinationStore {
 
     #[cfg(feature = "postgres")]
     pub fn open_postgres(database_url: &str, schema: &str) -> CoreResult<Self> {
+        Self::open_postgres_with_options(database_url, schema, None)
+    }
+
+    #[cfg(feature = "postgres")]
+    pub fn open_postgres_with_options(
+        database_url: &str,
+        schema: &str,
+        max_connections: Option<u32>,
+    ) -> CoreResult<Self> {
         Ok(Self::Postgres(Arc::new(
-            postgres_proof::PostgresRuntimeCounterProofStore::connect(database_url, schema)?,
+            postgres_proof::PostgresRuntimeCounterProofStore::connect_with_pool_options(
+                database_url,
+                schema,
+                max_connections,
+            )?,
         )))
     }
 
     #[cfg(not(feature = "postgres"))]
     pub fn open_postgres(_database_url: &str, _schema: &str) -> CoreResult<Self> {
+        Err(CoreError::new(
+            CoreErrorKind::AdapterUnavailable,
+            "PostgreSQL coordination backend is not compiled into this build",
+        ))
+    }
+
+    #[cfg(not(feature = "postgres"))]
+    pub fn open_postgres_with_options(
+        _database_url: &str,
+        _schema: &str,
+        _max_connections: Option<u32>,
+    ) -> CoreResult<Self> {
         Err(CoreError::new(
             CoreErrorKind::AdapterUnavailable,
             "PostgreSQL coordination backend is not compiled into this build",
@@ -612,6 +638,7 @@ impl CoreCoordinationStore {
                     table_counts: diagnostics.table_counts,
                     capabilities: diagnostics.capabilities,
                     repository_groups: diagnostics.repository_groups,
+                    connection_health: diagnostics.connection_health,
                     module_registry,
                     index_checks: Vec::new(),
                     search_healthy: true,
@@ -3908,6 +3935,22 @@ pub struct RuntimeStoragePressureSignal {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStorageConnectionHealth {
+    pub backend: String,
+    pub status: String,
+    pub max_connections: u32,
+    pub active_connections: u32,
+    pub idle_connections: u32,
+    pub total_opened: u64,
+    pub checkout_count: u64,
+    pub checkout_reuse_count: u64,
+    pub reconnect_attempts: u64,
+    pub reconnect_successes: u64,
+    pub closed_connections_discarded: u64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeStorageDiagnostics {
     pub backend: String,
     pub backend_label: String,
@@ -3918,6 +3961,7 @@ pub struct RuntimeStorageDiagnostics {
     pub table_counts: Vec<RuntimeStorageTableCount>,
     pub capabilities: Vec<RuntimeStorageCapability>,
     pub repository_groups: Vec<RuntimeRepositoryGroupDiagnostic>,
+    pub connection_health: RuntimeStorageConnectionHealth,
     pub module_registry: RuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<RuntimeQueryPlanCheck>,
     pub search_healthy: bool,
@@ -5069,6 +5113,20 @@ impl CoordinationStore {
             table_counts,
             capabilities: sqlite_storage_capabilities(),
             repository_groups: repositories::core_repository_group_diagnostics(),
+            connection_health: RuntimeStorageConnectionHealth {
+                backend: "sqlite".to_string(),
+                status: "healthy".to_string(),
+                max_connections: 1,
+                active_connections: 0,
+                idle_connections: 1,
+                total_opened: 1,
+                checkout_count: 0,
+                checkout_reuse_count: 0,
+                reconnect_attempts: 0,
+                reconnect_successes: 0,
+                closed_connections_discarded: 0,
+                last_error: None,
+            },
             module_registry,
             index_checks,
             search_healthy,

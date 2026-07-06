@@ -63,15 +63,15 @@ use crate::{
     RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
     RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
     RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability, RuntimeStorageTableCount,
-    ScheduledJobQuery, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery,
-    ScheduledRunRecord, ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
-    SelectActiveVariantResult, SessionConfig, SessionConfigRecord, SessionId,
-    SessionIdentityRecord, SessionKind, SessionMemoryArchive, SessionMemoryCompactionReport,
-    SessionMemoryPromptContext, SessionMemoryPromptContextPolicy, SessionMemoryPromptDiagnostics,
-    SessionMemoryPromptExcludedCounts, SessionMemoryQuery, SessionMemoryRecord,
-    SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
+    RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
+    RuntimeStorageConnectionHealth, RuntimeStorageTableCount, ScheduledJobQuery,
+    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunQuery, ScheduledRunRecord,
+    ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult, SessionConfig,
+    SessionConfigRecord, SessionId, SessionIdentityRecord, SessionKind, SessionMemoryArchive,
+    SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
+    SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
+    SessionMemoryRecord, SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionState, SessionStatus,
     SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
     SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
@@ -96,10 +96,13 @@ use rusty_crew_core_protocol::{
     SessionActivityDigestQuery,
 };
 use std::collections::BTreeSet;
-use std::sync::{Mutex, MutexGuard};
+use std::ops::{Deref, DerefMut};
+use std::sync::Mutex;
 
 const POSTGRES_SCHEMA_VERSION: i64 = 16;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
+const DEFAULT_POSTGRES_POOL_SIZE: usize = 4;
+const MAX_POSTGRES_POOL_SIZE: usize = 64;
 
 #[allow(dead_code)]
 const POSTGRES_PROOF_SCHEMA_VERSION: i64 = POSTGRES_SCHEMA_VERSION;
@@ -220,11 +223,197 @@ pub struct PostgresRuntimeCounterProofDiagnostics {
     pub table_counts: Vec<RuntimeStorageTableCount>,
     pub capabilities: Vec<RuntimeStorageCapability>,
     pub repository_groups: Vec<RuntimeRepositoryGroupDiagnostic>,
+    pub connection_health: RuntimeStorageConnectionHealth,
 }
 
 pub struct PostgresRuntimeCounterProofStore {
     schema: String,
-    client: Mutex<Client>,
+    pool: PostgresConnectionPool,
+}
+
+struct PostgresConnectionPool {
+    database_url: String,
+    state: Mutex<PostgresConnectionPoolState>,
+}
+
+struct PostgresConnectionPoolState {
+    idle: Vec<Client>,
+    active_connections: usize,
+    max_connections: usize,
+    total_opened: u64,
+    checkout_count: u64,
+    checkout_reuse_count: u64,
+    reconnect_attempts: u64,
+    reconnect_successes: u64,
+    closed_connections_discarded: u64,
+    last_error: Option<String>,
+}
+
+struct PostgresClientLease<'a> {
+    pool: &'a PostgresConnectionPool,
+    client: Option<Client>,
+}
+
+impl PostgresConnectionPool {
+    fn new(database_url: &str, max_connections: Option<u32>) -> Self {
+        let max_connections = max_connections
+            .map(|value| value.max(1) as usize)
+            .unwrap_or(DEFAULT_POSTGRES_POOL_SIZE)
+            .min(MAX_POSTGRES_POOL_SIZE);
+        Self {
+            database_url: database_url.to_string(),
+            state: Mutex::new(PostgresConnectionPoolState {
+                idle: Vec::new(),
+                active_connections: 0,
+                max_connections,
+                total_opened: 0,
+                checkout_count: 0,
+                checkout_reuse_count: 0,
+                reconnect_attempts: 0,
+                reconnect_successes: 0,
+                closed_connections_discarded: 0,
+                last_error: None,
+            }),
+        }
+    }
+
+    fn checkout(&self) -> CoreResult<PostgresClientLease<'_>> {
+        loop {
+            let mut state = self.state.lock().map_err(|_| {
+                CoreError::new(
+                    CoreErrorKind::PersistenceFailure,
+                    "PostgreSQL durable backend connection pool mutex poisoned",
+                )
+            })?;
+            state.checkout_count += 1;
+            if let Some(client) = state.idle.pop() {
+                if client.is_closed() {
+                    state.closed_connections_discarded += 1;
+                    state.last_error =
+                        Some("discarded closed idle PostgreSQL connection".to_string());
+                    continue;
+                }
+                state.checkout_reuse_count += 1;
+                state.active_connections += 1;
+                return Ok(PostgresClientLease {
+                    pool: self,
+                    client: Some(client),
+                });
+            }
+
+            if state.active_connections >= state.max_connections {
+                let error = format!(
+                    "transient PostgreSQL connection pool exhausted: active={} max={}",
+                    state.active_connections, state.max_connections
+                );
+                state.last_error = Some(error.clone());
+                return Err(CoreError::new(CoreErrorKind::PersistenceFailure, error));
+            }
+
+            state.active_connections += 1;
+            state.reconnect_attempts += 1;
+            break;
+        }
+
+        match Client::connect(&self.database_url, NoTls) {
+            Ok(client) => {
+                let mut state = self.state.lock().map_err(|_| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        "PostgreSQL durable backend connection pool mutex poisoned",
+                    )
+                })?;
+                state.total_opened += 1;
+                state.reconnect_successes += 1;
+                state.last_error = None;
+                drop(state);
+                Ok(PostgresClientLease {
+                    pool: self,
+                    client: Some(client),
+                })
+            }
+            Err(error) => {
+                let mut state = self.state.lock().map_err(|_| {
+                    CoreError::new(
+                        CoreErrorKind::PersistenceFailure,
+                        "PostgreSQL durable backend connection pool mutex poisoned",
+                    )
+                })?;
+                state.active_connections = state.active_connections.saturating_sub(1);
+                let message = format!("transient PostgreSQL connection failure: {error}");
+                state.last_error = Some(message.clone());
+                Err(CoreError::new(CoreErrorKind::PersistenceFailure, message))
+            }
+        }
+    }
+
+    fn health(&self) -> CoreResult<RuntimeStorageConnectionHealth> {
+        let state = self.state.lock().map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::PersistenceFailure,
+                "PostgreSQL durable backend connection pool mutex poisoned",
+            )
+        })?;
+        let status = if state.active_connections >= state.max_connections && state.idle.is_empty() {
+            "exhausted"
+        } else if state.last_error.is_some() {
+            "degraded"
+        } else {
+            "healthy"
+        };
+        Ok(RuntimeStorageConnectionHealth {
+            backend: "postgres".to_string(),
+            status: status.to_string(),
+            max_connections: state.max_connections as u32,
+            active_connections: state.active_connections as u32,
+            idle_connections: state.idle.len() as u32,
+            total_opened: state.total_opened,
+            checkout_count: state.checkout_count,
+            checkout_reuse_count: state.checkout_reuse_count,
+            reconnect_attempts: state.reconnect_attempts,
+            reconnect_successes: state.reconnect_successes,
+            closed_connections_discarded: state.closed_connections_discarded,
+            last_error: state.last_error.clone(),
+        })
+    }
+}
+
+impl Drop for PostgresClientLease<'_> {
+    fn drop(&mut self) {
+        let Some(client) = self.client.take() else {
+            return;
+        };
+        let Ok(mut state) = self.pool.state.lock() else {
+            return;
+        };
+        state.active_connections = state.active_connections.saturating_sub(1);
+        if client.is_closed() {
+            state.closed_connections_discarded += 1;
+            state.last_error = Some("discarded closed PostgreSQL connection".to_string());
+            return;
+        }
+        if state.idle.len() < state.max_connections {
+            state.idle.push(client);
+        }
+    }
+}
+
+impl Deref for PostgresClientLease<'_> {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        self.client
+            .as_ref()
+            .expect("PostgreSQL client lease always contains a client until drop")
+    }
+}
+
+impl DerefMut for PostgresClientLease<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.client
+            .as_mut()
+            .expect("PostgreSQL client lease always contains a client until drop")
+    }
 }
 
 impl std::fmt::Debug for PostgresRuntimeCounterProofStore {
@@ -251,12 +440,18 @@ impl PostgresRuntimeCounterProofStore {
     }
 
     pub fn connect(database_url: &str, schema: &str) -> CoreResult<Self> {
+        Self::connect_with_pool_options(database_url, schema, None)
+    }
+
+    pub fn connect_with_pool_options(
+        database_url: &str,
+        schema: &str,
+        max_connections: Option<u32>,
+    ) -> CoreResult<Self> {
         validate_postgres_identifier("postgres schema", schema)?;
-        let client = Client::connect(database_url, NoTls)
-            .map_err(|error| postgres_error("connect PostgreSQL runtime counter proof", error))?;
         let store = Self {
             schema: schema.to_string(),
-            client: Mutex::new(client),
+            pool: PostgresConnectionPool::new(database_url, max_connections),
         };
         store.migrate()?;
         Ok(store)
@@ -3225,6 +3420,7 @@ impl PostgresRuntimeCounterProofStore {
             ],
             capabilities: postgres_proof_capabilities(),
             repository_groups: postgres_proof_repository_groups(),
+            connection_health: self.pool.health()?,
         })
     }
 
@@ -7521,13 +7717,8 @@ impl PostgresRuntimeCounterProofStore {
         quote_postgres_identifier(&self.schema)
     }
 
-    fn client(&self) -> CoreResult<MutexGuard<'_, Client>> {
-        self.client.lock().map_err(|_| {
-            CoreError::new(
-                CoreErrorKind::PersistenceFailure,
-                "PostgreSQL durable backend connection mutex poisoned",
-            )
-        })
+    fn client(&self) -> CoreResult<PostgresClientLease<'_>> {
+        self.pool.checkout()
     }
 }
 
@@ -14391,10 +14582,13 @@ fn postgres_purge_delete(
 }
 
 fn postgres_error(context: &str, error: postgres::Error) -> CoreError {
-    CoreError::new(
-        CoreErrorKind::PersistenceFailure,
-        format!("{context}: {error}"),
-    )
+    let raw = error.to_string();
+    let message = if error.is_closed() || raw.contains("error communicating with the server") {
+        format!("transient PostgreSQL connection failure during {context}: {raw}")
+    } else {
+        format!("{context}: {raw}")
+    };
+    CoreError::new(CoreErrorKind::PersistenceFailure, message)
 }
 
 #[cfg(test)]
@@ -16579,6 +16773,75 @@ mod tests {
         let store = PostgresRuntimeCounterProofStore::connect(&database_url, &schema).unwrap();
 
         crate::repos::runtime_counters::tests::runtime_counter_repository_conformance(&store);
+
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env; source /home/system/database/rusty-crew-postgres.env or set RUSTY_CREW_DATABASE_URL"]
+    fn postgres_connection_pool_recovers_after_closed_idle_connection() {
+        let Some(database_url) = postgres_test_database_url() else {
+            eprintln!("skipping PostgreSQL connection pool proof; no database URL env is set");
+            return;
+        };
+        let schema = unique_schema("rusty_crew_connection_pool");
+        let store = PostgresRuntimeCounterProofStore::connect_with_pool_options(
+            &database_url,
+            &schema,
+            Some(1),
+        )
+        .unwrap();
+
+        let backend_pid = {
+            let mut client = store.client().unwrap();
+            client
+                .query_one("SELECT pg_backend_pid()", &[])
+                .unwrap()
+                .get::<_, i32>(0)
+        };
+        let initial_health = store.storage_diagnostics().unwrap().connection_health;
+        assert_eq!(initial_health.max_connections, 1);
+        assert!(initial_health.idle_connections >= 1);
+
+        let mut killer = Client::connect(&database_url, NoTls).unwrap();
+        let terminated = killer
+            .query_one("SELECT pg_terminate_backend($1)", &[&backend_pid])
+            .unwrap()
+            .get::<_, bool>(0);
+        assert!(terminated);
+
+        let mut saw_transient_failure = false;
+        let mut closed_discarded = false;
+        for _ in 0..20 {
+            match store.schema_version() {
+                Ok(_) => {}
+                Err(error) => {
+                    let message = error.to_string();
+                    assert!(
+                        message.contains("transient PostgreSQL connection failure"),
+                        "unexpected PostgreSQL error after terminated backend: {message}"
+                    );
+                    saw_transient_failure = true;
+                }
+            }
+            let health = store.pool.health().unwrap();
+            closed_discarded = health.closed_connections_discarded > 0;
+            if closed_discarded {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        assert!(closed_discarded);
+        assert!(store.schema_version().unwrap() >= 1);
+        let recovered_health = store.storage_diagnostics().unwrap().connection_health;
+        assert_eq!(recovered_health.status, "healthy");
+        assert_eq!(recovered_health.max_connections, 1);
+        assert!(recovered_health.reconnect_successes >= 2);
+        assert!(
+            saw_transient_failure || recovered_health.closed_connections_discarded > 0,
+            "pool should either report a transient failure or discard a closed idle connection"
+        );
 
         store.drop_schema_for_test().unwrap();
     }

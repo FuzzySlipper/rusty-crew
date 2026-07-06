@@ -44,9 +44,9 @@ use rusty_crew_core_persistence::{
     RuntimeModuleSchemaRegistryDiagnostics, RuntimeModuleTransferHookDiagnostic,
     RuntimeRepositoryBackendRequirement, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
     RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
-    RuntimeStorageDiagnostics, RuntimeStoragePressureSignal, RuntimeStorageTableCount,
-    ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord, ScheduledRunStatus,
-    ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
+    RuntimeStorageConnectionHealth, RuntimeStorageDiagnostics, RuntimeStoragePressureSignal,
+    RuntimeStorageTableCount, ScheduledJobRecord, ScheduledJobStatus, ScheduledRunRecord,
+    ScheduledRunStatus, ScheduledRunTrigger, SchemaMigrationRecord, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryQuery,
     SessionMemoryRecord, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
@@ -2030,6 +2030,22 @@ pub struct JsRuntimeStoragePressureSignal {
 }
 
 #[napi_derive::napi(object)]
+pub struct JsRuntimeStorageConnectionHealth {
+    pub backend: String,
+    pub status: String,
+    pub max_connections: f64,
+    pub active_connections: f64,
+    pub idle_connections: f64,
+    pub total_opened: f64,
+    pub checkout_count: f64,
+    pub checkout_reuse_count: f64,
+    pub reconnect_attempts: f64,
+    pub reconnect_successes: f64,
+    pub closed_connections_discarded: f64,
+    pub last_error: Option<String>,
+}
+
+#[napi_derive::napi(object)]
 pub struct JsRuntimeStorageDiagnostics {
     pub backend: String,
     pub backend_label: String,
@@ -2040,6 +2056,7 @@ pub struct JsRuntimeStorageDiagnostics {
     pub table_counts: Vec<JsRuntimeStorageTableCount>,
     pub capabilities: Vec<JsRuntimeStorageCapability>,
     pub repository_groups: Vec<JsRuntimeRepositoryGroupDiagnostic>,
+    pub connection_health: JsRuntimeStorageConnectionHealth,
     pub module_registry: JsRuntimeModuleSchemaRegistryDiagnostics,
     pub index_checks: Vec<JsRuntimeQueryPlanCheck>,
     pub search_healthy: bool,
@@ -5202,6 +5219,25 @@ fn to_js_runtime_storage_pressure_signal(
     }
 }
 
+fn to_js_runtime_storage_connection_health(
+    health: RuntimeStorageConnectionHealth,
+) -> JsRuntimeStorageConnectionHealth {
+    JsRuntimeStorageConnectionHealth {
+        backend: health.backend,
+        status: health.status,
+        max_connections: health.max_connections as f64,
+        active_connections: health.active_connections as f64,
+        idle_connections: health.idle_connections as f64,
+        total_opened: health.total_opened as f64,
+        checkout_count: health.checkout_count as f64,
+        checkout_reuse_count: health.checkout_reuse_count as f64,
+        reconnect_attempts: health.reconnect_attempts as f64,
+        reconnect_successes: health.reconnect_successes as f64,
+        closed_connections_discarded: health.closed_connections_discarded as f64,
+        last_error: health.last_error,
+    }
+}
+
 fn to_js_runtime_storage_diagnostics(
     diagnostics: RuntimeStorageDiagnostics,
 ) -> JsRuntimeStorageDiagnostics {
@@ -5231,6 +5267,7 @@ fn to_js_runtime_storage_diagnostics(
             .into_iter()
             .map(to_js_runtime_repository_group_diagnostic)
             .collect(),
+        connection_health: to_js_runtime_storage_connection_health(diagnostics.connection_health),
         module_registry: to_js_runtime_module_schema_registry_diagnostics(
             diagnostics.module_registry,
         ),

@@ -426,6 +426,7 @@ function storageTableCounts(
     data: {
       backend: diagnostics.backend,
       backendLabel: diagnostics.backendLabel,
+      connectionHealth: diagnostics.connectionHealth,
       pressure: diagnostics.pressure,
       pressureSignals: diagnostics.pressureSignals,
       size: diagnostics.size,

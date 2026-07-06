@@ -518,6 +518,21 @@ export interface JsRuntimeStorageCapability {
   detail: string
 }
 
+export interface JsRuntimeStorageConnectionHealth {
+  backend: string
+  status: string
+  maxConnections: number
+  activeConnections: number
+  idleConnections: number
+  totalOpened: number
+  checkoutCount: number
+  checkoutReuseCount: number
+  reconnectAttempts: number
+  reconnectSuccesses: number
+  closedConnectionsDiscarded: number
+  lastError?: string
+}
+
 export interface JsRuntimeStorageDiagnostics {
   backend: string
   backendLabel: string
@@ -528,6 +543,7 @@ export interface JsRuntimeStorageDiagnostics {
   tableCounts: Array<JsRuntimeStorageTableCount>
   capabilities: Array<JsRuntimeStorageCapability>
   repositoryGroups: Array<JsRuntimeRepositoryGroupDiagnostic>
+  connectionHealth: JsRuntimeStorageConnectionHealth
   moduleRegistry: JsRuntimeModuleSchemaRegistryDiagnostics
   indexChecks: Array<JsRuntimeQueryPlanCheck>
   searchHealthy: boolean

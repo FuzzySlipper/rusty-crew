@@ -416,6 +416,20 @@ export interface StorageDiagnosticsProjection {
     }[];
     notes: string[];
   }[];
+  connectionHealth: {
+    backend: string;
+    status: string;
+    maxConnections: number;
+    activeConnections: number;
+    idleConnections: number;
+    totalOpened: number;
+    checkoutCount: number;
+    checkoutReuseCount: number;
+    reconnectAttempts: number;
+    reconnectSuccesses: number;
+    closedConnectionsDiscarded: number;
+    lastError?: string;
+  };
   indexChecks: {
     name: string;
     usesIndex: boolean;

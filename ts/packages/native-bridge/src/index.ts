@@ -1221,6 +1221,21 @@ export interface NativeRuntimeStoragePressureSignal {
   detail: string;
 }
 
+export interface NativeRuntimeStorageConnectionHealth {
+  backend: string;
+  status: string;
+  maxConnections: number;
+  activeConnections: number;
+  idleConnections: number;
+  totalOpened: number;
+  checkoutCount: number;
+  checkoutReuseCount: number;
+  reconnectAttempts: number;
+  reconnectSuccesses: number;
+  closedConnectionsDiscarded: number;
+  lastError?: string;
+}
+
 export interface NativeRuntimeStorageDiagnostics {
   backend: string;
   backendLabel: string;
@@ -1231,6 +1246,7 @@ export interface NativeRuntimeStorageDiagnostics {
   tableCounts: NativeRuntimeStorageTableCount[];
   capabilities: NativeRuntimeStorageCapability[];
   repositoryGroups: NativeRuntimeRepositoryGroupDiagnostic[];
+  connectionHealth: NativeRuntimeStorageConnectionHealth;
   moduleRegistry: NativeRuntimeModuleSchemaRegistryDiagnostics;
   indexChecks: NativeRuntimeQueryPlanCheck[];
   searchHealthy: boolean;

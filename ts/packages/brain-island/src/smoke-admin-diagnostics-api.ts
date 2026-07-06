@@ -390,6 +390,19 @@ const storage: StorageDiagnosticsProjection = {
       notes: ["Runtime search is a diagnostics read model."],
     },
   ],
+  connectionHealth: {
+    backend: "sqlite",
+    status: "healthy",
+    maxConnections: 1,
+    activeConnections: 0,
+    idleConnections: 1,
+    totalOpened: 1,
+    checkoutCount: 0,
+    checkoutReuseCount: 0,
+    reconnectAttempts: 0,
+    reconnectSuccesses: 0,
+    closedConnectionsDiscarded: 0,
+  },
   indexChecks: [
     {
       name: "pending_queue_by_agent",
