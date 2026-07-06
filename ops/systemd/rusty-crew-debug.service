@@ -7,6 +7,11 @@ Wants=network-online.target
 [Service]
 Type=notify
 NotifyAccess=all
+SyslogIdentifier=rusty-crew-debug
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=2000
 WorkingDirectory=/home/dev/rusty-crew
 EnvironmentFile=/home/system/rusty-crew-debug/config/service.env
 EnvironmentFile=-/home/system/rusty-crew-debug/config/adapter-secrets.env

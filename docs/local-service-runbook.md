@@ -254,6 +254,30 @@ systemctl --user status rusty-crew.service
 journalctl --user -u rusty-crew.service -f
 ```
 
+Logs stay in the user journal for the current source-run deployment. The repo
+does not write or rotate separate service log files yet; journald retention is
+the active policy for both live and debug services. The unit identifiers are
+deliberately different:
+
+```bash
+# Live service, durable agent infrastructure on PostgreSQL.
+journalctl --user -u rusty-crew.service --since today
+journalctl --user -t rusty-crew-live -f
+
+# Debug/test service, noisy SQLite-backed smoke target.
+journalctl --user -u rusty-crew-debug.service --since -2h
+journalctl --user -t rusty-crew-debug -f
+```
+
+Treat `rusty-crew.service` / `rusty-crew-live` as the operational source of
+truth for live agent health. Debug logs are for smoke and reproduction traffic
+only; do not use them to infer live-service health. The debug unit has a lower
+per-unit journal burst limit than live so noisy test loops cannot dominate the
+user journal. If future deployments need file logs for shipping or long
+retention, add explicit logrotate assets then; until that exists,
+`RUSTY_CREW_LOG_DIR` is reserved for future service-owned artifacts, not the
+primary process log.
+
 Restart:
 
 ```bash
