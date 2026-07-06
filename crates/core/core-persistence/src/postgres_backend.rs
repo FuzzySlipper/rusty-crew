@@ -4,8 +4,10 @@
 //! so it must fail closed on schema incompatibility and report capabilities
 //! honestly while repository split/parity work continues.
 
+mod capabilities;
 mod pool;
 
+use self::capabilities::{postgres_backend_capabilities, postgres_backend_repository_groups};
 use self::pool::{PostgresClientLease, PostgresConnectionPool};
 use crate::repos::runtime_counters::{
     COUNTER_BRAIN_TURNS, COUNTER_COMPLETIONS, COUNTER_DELEGATIONS_CANCELLED,
@@ -16,7 +18,7 @@ use crate::repos::runtime_counters::{
 use crate::{
     default_lore_layer_config, estimate_lore_tokens, excluded_subject_match, from_json_text,
     lore_recall_config_snapshot, memory_proposal_source_as_str, normalized_optional_text,
-    profile_memory_target_parts, repositories, roleplay_lore_canon_status_as_str,
+    profile_memory_target_parts, roleplay_lore_canon_status_as_str,
     roleplay_lore_layer_purpose_as_str, roleplay_lore_layer_write_policy_as_str,
     roleplay_lore_memory_space_descriptor, roleplay_lore_record_status_as_str,
     roleplay_lore_visibility_as_str, score_lore_recall_entry, to_json_text,
@@ -7747,133 +7749,6 @@ fn load_postgres_schema_migration_records<C: GenericClient>(
             applied_at: row.get(2),
         })
         .collect())
-}
-
-fn postgres_backend_capabilities() -> Vec<RuntimeStorageCapability> {
-    [
-        (
-            "transactions",
-            true,
-            "PostgreSQL transactions are available for durable service repositories",
-        ),
-        (
-            "json_metadata",
-            true,
-            "PostgreSQL stores structured metadata in JSON/JSONB columns behind typed repository APIs",
-        ),
-        (
-            "concurrent_writers",
-            true,
-            "PostgreSQL supports concurrent writers for durable service repositories",
-        ),
-        (
-            "estimated_table_size",
-            true,
-            "the backend exposes row counts for Crew-owned tables",
-        ),
-        (
-            "row_level_claims",
-            true,
-            "PostgreSQL scheduler expiry uses FOR UPDATE SKIP LOCKED row-level claim semantics",
-        ),
-        (
-            "runtime_full_text_search",
-            true,
-            "PostgreSQL runtime search backend uses tsvector behind the typed RuntimeSearchFilter API",
-        ),
-        (
-            "logical_export_import",
-            false,
-            "logical cross-backend export/import remains future work",
-        ),
-        (
-            "online_migrations",
-            false,
-            "schema migrations run during service startup/open and fail closed on unsupported versions",
-        ),
-    ]
-    .into_iter()
-    .map(|(name, supported, detail)| RuntimeStorageCapability {
-        name: name.to_string(),
-        supported,
-        detail: detail.to_string(),
-    })
-    .collect()
-}
-
-fn postgres_backend_repository_groups() -> Vec<RuntimeRepositoryGroupDiagnostic> {
-    repositories::core_repository_group_diagnostics()
-        .into_iter()
-        .map(|mut group| {
-            if group.group_id == "storage_admin" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: startup applies versioned migrations and reports storage diagnostics.".to_string(),
-                );
-            } else if group.group_id == "sessions_identities" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for session/config/identity hydration conformance.".to_string(),
-                );
-            } else if group.group_id == "events_projections" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for event history and typed event-index query conformance.".to_string(),
-                );
-            } else if group.group_id == "queues_messages" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for queued-message TTL and no-resurrection conformance.".to_string(),
-                );
-            } else if group.group_id == "scheduler_jobs" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for scheduled jobs, scheduled run claim/completion, stale-run expiry, and row-level claim conformance.".to_string(),
-                );
-            } else if group.group_id == "worker_runs_completions" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for worker run lifecycle, delegated completion lookup, completion packet persistence, and terminal-status conformance.".to_string(),
-                );
-            } else if group.group_id == "module_schema_registry" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: module schema diagnostics are projected from the compiled registry; module simple_kv storage is implemented.".to_string(),
-                );
-            } else if group.group_id == "runtime_counters" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for runtime counters.".to_string(),
-                );
-            } else if group.group_id == "runtime_search" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for runtime search entries through the typed search API.".to_string(),
-                );
-            } else if group.group_id == "provider_state" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for provider wire-state conformance through the typed provider-state API.".to_string(),
-                );
-            } else if group.group_id == "conversations_attachments" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for conversation transcript, attachment, and data-bank repository surfaces.".to_string(),
-                );
-            } else if group.group_id == "profile_memory" {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: implemented for profile_dense descriptor projection, dense profile memory conformance, and roleplay_lore record/layer physical schema.".to_string(),
-                );
-            } else {
-                group.notes.insert(
-                    0,
-                    "PostgreSQL durable backend status: repository group still needs parity review before it can be considered stable under load.".to_string(),
-                );
-            }
-            group
-        })
-        .collect()
 }
 
 fn postgres_session_kind_as_str(kind: &SessionKind) -> &'static str {
