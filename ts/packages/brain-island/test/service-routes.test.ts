@@ -17,6 +17,16 @@ import {
   scheduledRunTriggerParam,
 } from "../src/service-scheduler-routes.js";
 import { handleAdminToolsCatalogRequest } from "../src/service-tool-catalog-routes.js";
+import {
+  handleAdminLocalToolProfilesRequest,
+  localToolProfileIdFromPath,
+} from "../src/service-local-tool-profile-routes.js";
+import type {
+  LocalToolProfile,
+  LocalToolProfileList,
+  LocalToolProfileStore,
+  LocalToolProfileWrite,
+} from "../src/local-tool-profiles.js";
 
 test("scheduler diagnostics routes validate methods and filters", async () => {
   const methodFailure = await handleSchedulerReadRequest(
@@ -216,10 +226,161 @@ test("tool and context catalog routes are read-only envelopes", async () => {
   );
 });
 
+test("local tool profile routes create, read, delete, and report store errors", async () => {
+  const store = inMemoryLocalToolProfileStore();
+  assert.equal(
+    localToolProfileIdFromPath("/v1/admin/local-tool-profiles/full-agent"),
+    "full-agent",
+  );
+  assert.equal(
+    localToolProfileIdFromPath("/v1/admin/local-tool-profiles/full/extra"),
+    undefined,
+  );
+
+  const methodFailure = await handleAdminLocalToolProfilesRequest(
+    {
+      method: "PUT",
+      requestId: "req-local-tools",
+      url: new URL("http://local/v1/admin/local-tool-profiles"),
+      readBody: async () => undefined,
+    },
+    { store },
+  );
+  assert.equal(methodFailure.status, 405);
+  assert.equal(
+    errorReason(methodFailure),
+    "local_tool_profiles_method_not_allowed",
+  );
+
+  const create = await handleAdminLocalToolProfilesRequest(
+    {
+      method: "POST",
+      requestId: "req-local-tools",
+      url: new URL("http://local/v1/admin/local-tool-profiles"),
+      readBody: async () => ({
+        id: "full-agent",
+        displayName: "Full Agent",
+        toolsets: ["default"],
+        tools: ["read_file"],
+      }),
+    },
+    { store },
+  );
+  assert.equal(create.status, 200);
+  assert.equal(
+    okData<{ profile: LocalToolProfile }>(create).profile.id,
+    "full-agent",
+  );
+
+  const get = await handleAdminLocalToolProfilesRequest(
+    {
+      method: "GET",
+      requestId: "req-local-tools",
+      url: new URL("http://local/v1/admin/local-tool-profiles/full-agent"),
+      readBody: async () => undefined,
+    },
+    { store },
+  );
+  assert.equal(get.status, 200);
+  assert.deepEqual(
+    okData<{ profile: LocalToolProfile }>(get).profile.toolsets,
+    ["default"],
+  );
+
+  const missing = await handleAdminLocalToolProfilesRequest(
+    {
+      method: "GET",
+      requestId: "req-local-tools",
+      url: new URL("http://local/v1/admin/local-tool-profiles/missing"),
+      readBody: async () => undefined,
+    },
+    { store },
+  );
+  assert.equal(missing.status, 404);
+  assert.equal(errorReason(missing), "local_tool_profile_not_found");
+
+  const deleted = await handleAdminLocalToolProfilesRequest(
+    {
+      method: "DELETE",
+      requestId: "req-local-tools",
+      url: new URL("http://local/v1/admin/local-tool-profiles/full-agent"),
+      readBody: async () => undefined,
+    },
+    { store },
+  );
+  assert.equal(deleted.status, 200);
+  assert.equal(okData<{ deleted: boolean }>(deleted).deleted, true);
+});
+
 function schedulerContext() {
   return {
     listScheduledJobs: async (input: unknown) => [input],
     listScheduledRuns: async (input: unknown) => [input],
+  };
+}
+
+function inMemoryLocalToolProfileStore(): LocalToolProfileStore {
+  const items = new Map<string, LocalToolProfile>();
+  const now = "2026-07-05T00:00:00.000Z";
+  const toProfile = (
+    write: LocalToolProfileWrite,
+    current?: LocalToolProfile,
+  ): LocalToolProfile => ({
+    schemaVersion: 1,
+    id: write.id ?? current?.id ?? "missing",
+    displayName: write.displayName ?? current?.displayName ?? "Missing",
+    description: write.description ?? current?.description,
+    enabled: write.enabled ?? current?.enabled ?? true,
+    system: current?.system ?? false,
+    readOnly: current?.readOnly ?? false,
+    toolsets: write.toolsets ?? current?.toolsets ?? [],
+    tools: write.tools ?? current?.tools ?? [],
+    createdAt: current?.createdAt ?? now,
+    updatedAt: now,
+    revision: (current?.revision ?? 0) + 1,
+  });
+  return {
+    async list(): Promise<LocalToolProfileList> {
+      return {
+        schemaVersion: 1,
+        catalogId: "local-tool-profiles",
+        builtInCatalogId: "default-local-tools",
+        items: [...items.values()],
+        total: items.size,
+      };
+    },
+    async get(id) {
+      return items.get(id);
+    },
+    async create(write) {
+      const profile = toProfile(write);
+      items.set(profile.id, profile);
+      return profile;
+    },
+    async update(id, write) {
+      const current = items.get(id);
+      if (current === undefined) throw new Error("test profile missing");
+      const profile = toProfile({ ...write, id }, current);
+      items.set(id, profile);
+      return profile;
+    },
+    async delete(id) {
+      const current = items.get(id);
+      if (current === undefined) throw new Error("test profile missing");
+      items.delete(id);
+      return current;
+    },
+    async resolve(id) {
+      const profile = items.get(id);
+      if (profile === undefined) throw new Error("test profile missing");
+      return {
+        id,
+        toolPolicy: {
+          requestedToolsets: profile.toolsets,
+          requestedTools: profile.tools,
+        },
+      };
+    },
   };
 }
 

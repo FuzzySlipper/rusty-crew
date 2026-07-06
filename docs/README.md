@@ -65,6 +65,11 @@ historical audit context only; they are not an implementation recommendation.
    - `0006`/`0007`/`0008`/`0009`/`0010` — delegation runtime, optional worker
      pools, lifecycle guardrails, bounded fan-out, and Den observability.
 
+   Companion implementation notes:
+   - `service-composition-decomposition-plan.md` — current migration path for
+     moving service composition out of the oversized brain-island service app
+     without breaking the working service.
+
 2. **Two brain surfaces, one contract.** Rust coordination wakes a brain with a
    frozen `BodyState` snapshot; brain implementations emit
    `BrainWakeStreamItem`s, `BrainEvent`s, `BrainAction`s, and provider-state

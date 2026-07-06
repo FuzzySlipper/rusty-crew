@@ -102,7 +102,6 @@ import { createDefaultMcpDiscoveryClient } from "./service-mcp-tools.js";
 import {
   createLocalToolProfileStore,
   LocalToolProfileError,
-  type LocalToolProfileWrite,
 } from "./local-tool-profiles.js";
 import {
   handleAdminDiagnosticsRequest,
@@ -118,6 +117,7 @@ import {
 import { failure, successRoute } from "./service-route-results.js";
 import { handleSchedulerReadRequest } from "./service-scheduler-routes.js";
 import { handleAdminToolsCatalogRequest } from "./service-tool-catalog-routes.js";
+import { handleAdminLocalToolProfilesRequest } from "./service-local-tool-profile-routes.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
@@ -959,7 +959,20 @@ async function handleHttpRequest(
     url.pathname === "/v1/admin/local-tool-profiles" ||
     url.pathname.startsWith("/v1/admin/local-tool-profiles/")
   ) {
-    return handleAdminLocalToolProfilesRequest(request, state, url);
+    return handleAdminLocalToolProfilesRequest(
+      {
+        method: request.method ?? "GET",
+        requestId: requestId(request),
+        url,
+        readBody: () => readJsonBody(request),
+      },
+      {
+        store: createLocalToolProfileStore({
+          bridge: state.bridge,
+          now: state.now,
+        }),
+      },
+    );
   }
 
   if (isRoleplayBrowserRoute(url.pathname)) {
@@ -1302,100 +1315,6 @@ function positiveInteger(value: unknown, fieldName: string): number {
     throw new Error(`${fieldName} must be a positive integer`);
   }
   return value;
-}
-
-async function handleAdminLocalToolProfilesRequest(
-  request: IncomingMessage,
-  state: ServiceState,
-  url: URL,
-): Promise<AdminRouteResult> {
-  const requestIdValue = requestId(request);
-  const method = (request.method ?? "GET").toUpperCase();
-  const store = createLocalToolProfileStore({
-    bridge: state.bridge,
-    now: state.now,
-  });
-  const profileId = localToolProfileIdFromPath(url.pathname);
-  try {
-    if (url.pathname === "/v1/admin/local-tool-profiles") {
-      if (method === "GET") {
-        return successRoute(requestIdValue, await store.list());
-      }
-      if (method === "POST") {
-        const body = (await readJsonBody(request)) as LocalToolProfileWrite;
-        return successRoute(requestIdValue, {
-          profile: await store.create(body),
-        });
-      }
-      return failure(405, requestIdValue, {
-        code: "method_not_allowed",
-        reason_code: "local_tool_profiles_method_not_allowed",
-        message: "local tool profile collection supports GET and POST",
-        retryable: false,
-      });
-    }
-
-    if (profileId === undefined) {
-      return failure(404, requestIdValue, {
-        code: "not_found",
-        reason_code: "unknown_local_tool_profile_route",
-        message: `unknown local tool profile route ${url.pathname}`,
-        retryable: false,
-      });
-    }
-
-    if (method === "GET") {
-      const profile = await store.get(profileId);
-      if (profile === undefined) {
-        return failure(404, requestIdValue, {
-          code: "not_found",
-          reason_code: "local_tool_profile_not_found",
-          message: `local tool profile ${profileId} was not found`,
-          retryable: false,
-        });
-      }
-      return successRoute(requestIdValue, { profile });
-    }
-
-    if (method === "PATCH") {
-      const body = (await readJsonBody(request)) as LocalToolProfileWrite;
-      return successRoute(requestIdValue, {
-        profile: await store.update(profileId, body),
-      });
-    }
-
-    if (method === "DELETE") {
-      return successRoute(requestIdValue, {
-        profile: await store.delete(profileId),
-        deleted: true,
-      });
-    }
-
-    return failure(405, requestIdValue, {
-      code: "method_not_allowed",
-      reason_code: "local_tool_profile_method_not_allowed",
-      message: "local tool profile item routes support GET, PATCH, and DELETE",
-      retryable: false,
-    });
-  } catch (error) {
-    if (error instanceof LocalToolProfileError) {
-      return failure(error.statusCode, requestIdValue, {
-        code: error.statusCode === 404 ? "not_found" : "invalid_input",
-        reason_code: error.reasonCode,
-        message: error.message,
-        retryable: false,
-      });
-    }
-    throw error;
-  }
-}
-
-function localToolProfileIdFromPath(pathname: string): string | undefined {
-  const prefix = "/v1/admin/local-tool-profiles/";
-  if (!pathname.startsWith(prefix)) return undefined;
-  const rest = pathname.slice(prefix.length);
-  if (!rest || rest.includes("/")) return undefined;
-  return decodeURIComponent(rest);
 }
 
 async function handleAdminRoleplayRequest(
