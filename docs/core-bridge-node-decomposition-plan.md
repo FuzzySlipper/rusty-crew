@@ -1,6 +1,6 @@
 # Core Bridge Node Decomposition Plan
 
-Status: planning record for Den task `#4328`
+Status: implemented record for Den task `#4328`
 
 `crates/bridge/core-bridge-node/src/lib.rs` is the native Node transport
 boundary. It must stay explicit: bridge operation names, napi wrappers, and wire
@@ -65,6 +65,34 @@ definitions or exported binding methods.
 Later slices should move one operation domain at a time. Each slice should keep
 the public `NativeBridgeBinding` method names and signatures stable, then move
 only the private implementation it delegates to.
+
+## Final Outcome
+
+The `#4435`-`#4440` implementation slices moved the operation-domain code into
+focused Rust modules:
+
+- `registries.rs`
+- `engine.rs`
+- `sessions.rs`
+- `events.rs`
+- `delegation.rs`
+- `config_profiles.rs`
+- `storage_admin.rs`
+- `memory.rs`
+- `conversation.rs`
+- `roleplay.rs`
+- `responses.rs`
+
+`lib.rs` remains the native transport entrypoint. It still owns module
+declarations, the `NativeBridge` state constructor, napi object definitions,
+explicit `NativeBridgeBinding` exported wrappers, bridge wire conversion
+helpers, and native bridge tests. That remaining shape is deliberate for this
+series: the exported napi surface stays obvious, and the next conversion/test
+split should be driven by bridge contract/codegen safety rather than line count
+alone.
+
+Follow-up `#4442` tracks the remaining conversion helper, napi object type, and
+test module extraction design.
 
 ## Validation Gates
 
