@@ -21,6 +21,7 @@ import {
   openAiResponsesBrainRunInputSchema,
   providerStateDiagnosticArraySchema,
   rawBodyStateSchema,
+  rawModelProviderRefreshImpactSchema,
   rawModelProviderRecordArraySchema,
   rawModelProviderRecordSchema,
   rawOpenAiResponsesBrainRunResultSchema,
@@ -455,6 +456,7 @@ interface NativeBridgeBinding {
   listModelProvidersJson(queryJson: string): string;
   getModelProviderJson(alias: string): string;
   getModelProviderSecretJson(alias: string): string;
+  modelProviderRefreshImpactJson(requestJson: string): string;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
@@ -533,6 +535,7 @@ export type NativeBridgeRoundTripFixtureName =
   | "brain_wake_stream_result_v1"
   | "profile_registry_record_v1"
   | "model_provider_record_v1"
+  | "model_provider_refresh_impact_v1"
   | "memory_space_descriptor_v1"
   | "memory_proposal_record_v1"
   | "memory_governance_decision_record_v1";
@@ -922,6 +925,22 @@ export interface NativeModelProviderQuery {
   aliasPrefix?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface NativeModelProviderAffectedProfile {
+  profileId: string;
+  sessionIds: string[];
+  configuredSessionIds: string[];
+  activeSessionIds: string[];
+}
+
+export interface NativeModelProviderRefreshImpact {
+  providerAlias: string;
+  affectedProfiles: NativeModelProviderAffectedProfile[];
+}
+
+export interface NativeModelProviderRefreshImpactRequest {
+  providerAlias: string;
 }
 
 export type NativeRoleplayLoreRecord = Record<string, unknown>;
@@ -1763,6 +1782,9 @@ export interface NativeBridgeModule {
     alias: string,
   ): Promise<NativeModelProviderRecord | undefined>;
   getModelProviderSecret(alias: string): Promise<string | undefined>;
+  modelProviderRefreshImpact(
+    request: NativeModelProviderRefreshImpactRequest,
+  ): Promise<NativeModelProviderRefreshImpact>;
   createLoreLayer(
     write: NativeRoleplayLoreLayerWrite,
   ): Promise<NativeRoleplayLoreLayerRecord>;
@@ -1996,6 +2018,12 @@ export function roundTripNativeBridgeFixture(input: {
       return toRawModelProviderRecord(
         toNativeModelProviderRecord(input.value as RawModelProviderRecord),
       );
+    case "model_provider_refresh_impact_v1":
+      return toRawModelProviderRefreshImpact(
+        toNativeModelProviderRefreshImpact(
+          input.value as RawModelProviderRefreshImpact,
+        ),
+      );
     case "memory_space_descriptor_v1":
     case "memory_proposal_record_v1":
     case "memory_governance_decision_record_v1":
@@ -2094,6 +2122,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listModelProviders: unavailable("initialize_engine"),
     getModelProvider: unavailable("initialize_engine"),
     getModelProviderSecret: unavailable("initialize_engine"),
+    modelProviderRefreshImpact: unavailable("initialize_engine"),
     createLoreLayer: unavailable("initialize_engine"),
     getLoreLayer: unavailable("initialize_engine"),
     listLoreLayers: unavailable("initialize_engine"),
@@ -3082,6 +3111,19 @@ function createNativeBridgeModule(
       (JSON.parse(binding.getModelProviderSecretJson(alias)) as
         | string
         | null) ?? undefined,
+    modelProviderRefreshImpact: async (request) =>
+      toNativeModelProviderRefreshImpact(
+        validateBridgeValue<RawModelProviderRefreshImpact>({
+          operation: "model_provider_refresh_impact",
+          direction: "rust_to_ts",
+          schema: rawModelProviderRefreshImpactSchema,
+          value: JSON.parse(
+            binding.modelProviderRefreshImpactJson(
+              JSON.stringify({ provider_alias: request.providerAlias }),
+            ),
+          ),
+        }),
+      ),
     createLoreLayer: async (write) =>
       JSON.parse(
         binding.createLoreLayerJson(JSON.stringify(write)),
@@ -4380,6 +4422,34 @@ function toRawModelProviderWrite(
   };
 }
 
+function toNativeModelProviderRefreshImpact(
+  impact: RawModelProviderRefreshImpact,
+): NativeModelProviderRefreshImpact {
+  return {
+    providerAlias: impact.provider_alias,
+    affectedProfiles: impact.affected_profiles.map((profile) => ({
+      profileId: profile.profile_id,
+      sessionIds: profile.session_ids,
+      configuredSessionIds: profile.configured_session_ids,
+      activeSessionIds: profile.active_session_ids,
+    })),
+  };
+}
+
+function toRawModelProviderRefreshImpact(
+  impact: NativeModelProviderRefreshImpact,
+): RawModelProviderRefreshImpact {
+  return {
+    provider_alias: impact.providerAlias,
+    affected_profiles: impact.affectedProfiles.map((profile) => ({
+      profile_id: profile.profileId,
+      session_ids: profile.sessionIds,
+      configured_session_ids: profile.configuredSessionIds,
+      active_session_ids: profile.activeSessionIds,
+    })),
+  };
+}
+
 function toNativeModelProviderRecord(
   record: RawModelProviderRecord,
 ): NativeModelProviderRecord {
@@ -5481,6 +5551,18 @@ interface RawModelProviderQuery {
   alias_prefix?: string;
   limit?: number;
   offset?: number;
+}
+
+interface RawModelProviderAffectedProfile {
+  profile_id: string;
+  session_ids: string[];
+  configured_session_ids: string[];
+  active_session_ids: string[];
+}
+
+interface RawModelProviderRefreshImpact {
+  provider_alias: string;
+  affected_profiles: RawModelProviderAffectedProfile[];
 }
 
 interface RawRuntimeConfigDraft {

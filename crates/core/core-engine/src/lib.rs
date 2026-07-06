@@ -50,12 +50,12 @@ use rusty_crew_core_protocol::{
     ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ModelProviderQuery, ModelProviderRecord, ModelProviderWrite, ParentConsumptionPolicy,
-    ProfileId, ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryWrite,
-    ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId,
-    SessionActivityDigest, SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind,
-    SessionState, SessionStatus, ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy,
-    WorkerPoolCapacityRequest,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderRefreshImpact,
+    ModelProviderRefreshImpactRequest, ModelProviderWrite, ParentConsumptionPolicy, ProfileId,
+    ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionActivityDigest,
+    SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
+    ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -698,6 +698,74 @@ impl CoreEngine {
         query: &ModelProviderQuery,
     ) -> CoreResult<Vec<ModelProviderRecord>> {
         self.store.service_data().list_model_providers(query)
+    }
+
+    pub fn model_provider_refresh_impact(
+        &self,
+        request: &ModelProviderRefreshImpactRequest,
+    ) -> CoreResult<ModelProviderRefreshImpact> {
+        let provider_alias = request.provider_alias.trim();
+        if provider_alias.is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "model provider refresh impact provider_alias is required",
+            ));
+        }
+
+        let profiles = self
+            .store
+            .service_data()
+            .list_profile_registry_records(&ProfileRegistryQuery::default())?;
+        let sessions = self.sessions.all_sessions()?;
+        let mut affected_profiles = Vec::new();
+
+        for profile in profiles {
+            if profile_registry_provider_alias(&profile).as_deref() != Some(provider_alias) {
+                continue;
+            }
+
+            let configured_session_ids = profile
+                .derived_runtime_refs
+                .iter()
+                .filter(|runtime_ref| {
+                    runtime_ref.ref_kind == "session"
+                        && runtime_ref.status != "archived"
+                        && runtime_ref.status != "disabled"
+                })
+                .map(|runtime_ref| SessionId::new(runtime_ref.ref_id.clone()))
+                .collect::<HashSet<_>>();
+            let active_session_ids = sessions
+                .iter()
+                .filter(|session| {
+                    session.profile_id == profile.profile_id
+                        && session.status != SessionStatus::Archived
+                })
+                .map(|session| session.session_id.clone())
+                .collect::<HashSet<_>>();
+            let mut session_ids = configured_session_ids
+                .union(&active_session_ids)
+                .cloned()
+                .collect::<Vec<_>>();
+            session_ids.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut configured_session_ids = configured_session_ids.into_iter().collect::<Vec<_>>();
+            configured_session_ids.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut active_session_ids = active_session_ids.into_iter().collect::<Vec<_>>();
+            active_session_ids.sort_by(|left, right| left.0.cmp(&right.0));
+
+            affected_profiles.push(rusty_crew_core_protocol::ModelProviderAffectedProfile {
+                profile_id: profile.profile_id,
+                session_ids,
+                configured_session_ids,
+                active_session_ids,
+            });
+        }
+
+        affected_profiles.sort_by(|left, right| left.profile_id.0.cmp(&right.profile_id.0));
+
+        Ok(ModelProviderRefreshImpact {
+            provider_alias: provider_alias.to_string(),
+            affected_profiles,
+        })
     }
 
     pub fn add_roleplay_lore_record(
@@ -2251,6 +2319,17 @@ fn next_queued_message_id(session_id: &SessionId) -> String {
         .map_or(0, |duration| duration.as_nanos());
     let sequence = NEXT_QUEUED_MESSAGE.fetch_add(1, Ordering::Relaxed);
     format!("follow-up:{session_id}:{nanos}:{sequence}")
+}
+
+fn profile_registry_provider_alias(record: &ProfileRegistryRecord) -> Option<String> {
+    record
+        .active_runtime_settings_json
+        .get("providerAlias")
+        .or_else(|| record.active_runtime_settings_json.get("provider_alias"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn provider_wire_state_key(
@@ -5481,6 +5560,78 @@ mod tests {
         assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
     }
 
+    #[test]
+    fn model_provider_refresh_impact_uses_profile_registry_and_session_state() {
+        let engine = test_engine();
+        engine
+            .create_profile_registry_record(&profile_registry_write(
+                "planner-profile",
+                "alternate",
+                "configured-planner-session",
+            ))
+            .unwrap();
+        engine
+            .create_profile_registry_record(&profile_registry_write(
+                "other-profile",
+                "default",
+                "other-session",
+            ))
+            .unwrap();
+        engine
+            .create_session(session_config(
+                "active-planner-session",
+                "planner",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .create_session(session_config(
+                "archived-planner-session",
+                "planner-archived",
+                "planner-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .archive_session(&SessionId::new("archived-planner-session"))
+            .unwrap();
+        engine
+            .create_session(session_config(
+                "active-other-session",
+                "other",
+                "other-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+
+        let impact = engine
+            .model_provider_refresh_impact(&ModelProviderRefreshImpactRequest {
+                provider_alias: "alternate".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(impact.provider_alias, "alternate");
+        assert_eq!(impact.affected_profiles.len(), 1);
+        let affected = &impact.affected_profiles[0];
+        assert_eq!(affected.profile_id, ProfileId::new("planner-profile"));
+        assert_eq!(
+            affected.configured_session_ids,
+            vec![SessionId::new("configured-planner-session")]
+        );
+        assert_eq!(
+            affected.active_session_ids,
+            vec![SessionId::new("active-planner-session")]
+        );
+        assert_eq!(
+            affected.session_ids,
+            vec![
+                SessionId::new("active-planner-session"),
+                SessionId::new("configured-planner-session")
+            ]
+        );
+    }
+
     fn test_engine() -> CoreEngine {
         test_engine_with_data_dir(unique_data_dir("engine"))
     }
@@ -5638,6 +5789,45 @@ mod tests {
                 }],
             },
             history_window: None,
+        }
+    }
+
+    fn profile_registry_write(
+        profile_id: &str,
+        provider_alias: &str,
+        configured_session_id: &str,
+    ) -> ProfileRegistryWrite {
+        ProfileRegistryWrite {
+            profile_id: ProfileId::new(profile_id),
+            lifecycle_status: rusty_crew_core_protocol::ProfileRegistryLifecycleStatus::Active,
+            display_name: None,
+            summary: None,
+            default_session_kind: Some(SessionKind::Full),
+            agent_id: Some(AgentId::new(profile_id)),
+            owner_id: None,
+            prompt_soul_markdown: None,
+            prompt_memory_markdown: None,
+            active_runtime_settings_json: serde_json::json!({
+                "provider_alias": provider_alias,
+            }),
+            source_asset_refs: vec![],
+            derived_runtime_refs: vec![
+                rusty_crew_core_protocol::ProfileRegistryDerivedRuntimeRef {
+                    ref_kind: "session".to_string(),
+                    ref_id: configured_session_id.to_string(),
+                    status: "active".to_string(),
+                    updated_at: None,
+                    metadata_json: serde_json::json!({}),
+                },
+            ],
+            import_export: rusty_crew_core_protocol::ProfileRegistryImportExportMetadata {
+                imported_from: None,
+                imported_at: None,
+                exported_to: None,
+                exported_at: None,
+                metadata_json: serde_json::json!({}),
+            },
+            now: "2026-06-19T00:00:00Z".to_string(),
         }
     }
 }

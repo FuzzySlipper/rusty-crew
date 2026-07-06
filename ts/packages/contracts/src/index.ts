@@ -1621,6 +1621,7 @@ export const manifestOperationNames = [
   "list_model_providers",
   "get_model_provider",
   "get_model_provider_secret",
+  "model_provider_refresh_impact",
   "create_lore_layer",
   "get_lore_layer",
   "list_lore_layers",
@@ -1670,6 +1671,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "fa0a081986d362dc24e11dfc887cbece18103e713c0535c0b426589be2a66785";
+  "8c571c11d6151f63ba69b3d72ee2144d905b5e8b07337275a0396c32cdee68c0";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

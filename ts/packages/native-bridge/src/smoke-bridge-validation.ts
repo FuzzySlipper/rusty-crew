@@ -16,6 +16,7 @@ import {
   eventReceiptSchema,
   openAiResponsesBrainRunInputSchema,
   rawBodyStateSchema,
+  rawModelProviderRefreshImpactSchema,
   rawMemoryGovernanceDecisionRecordSchema,
   rawMemoryProposalRecordSchema,
   rawMemorySpaceDescriptorSchema,
@@ -475,6 +476,12 @@ validateRustFixture({
   operation: "rust_fixture_model_provider_record",
   schema: rawModelProviderRecordSchema,
   name: "model_provider_record_v1",
+});
+
+validateRustFixture({
+  operation: "rust_fixture_model_provider_refresh_impact",
+  schema: rawModelProviderRefreshImpactSchema,
+  name: "model_provider_refresh_impact_v1",
 });
 
 validateRustFixture({

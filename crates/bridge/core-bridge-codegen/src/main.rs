@@ -264,6 +264,13 @@ fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
                 value: serde_json::to_value(sample_model_provider_record())?,
             },
             BridgeValidationFixture {
+                name: "model_provider_refresh_impact_v1".to_owned(),
+                operation: "model_provider_refresh_impact".to_owned(),
+                direction: "rust_to_ts".to_owned(),
+                rust_type: "rusty_crew_core_protocol::ModelProviderRefreshImpact".to_owned(),
+                value: serde_json::to_value(sample_model_provider_refresh_impact())?,
+            },
+            BridgeValidationFixture {
                 name: "memory_space_descriptor_v1".to_owned(),
                 operation: "list_memory_space_descriptors".to_owned(),
                 direction: "rust_to_ts".to_owned(),
@@ -640,6 +647,21 @@ fn sample_model_provider_record() -> ModelProviderRecord {
         revision: 5,
         created_at: sample_timestamp(),
         updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_model_provider_refresh_impact() -> ModelProviderRefreshImpact {
+    ModelProviderRefreshImpact {
+        provider_alias: "validation-provider".to_owned(),
+        affected_profiles: vec![ModelProviderAffectedProfile {
+            profile_id: ProfileId::new("validation-profile"),
+            session_ids: vec![
+                SessionId::new("validation-active-session"),
+                SessionId::new("validation-configured-session"),
+            ],
+            configured_session_ids: vec![SessionId::new("validation-configured-session")],
+            active_session_ids: vec![SessionId::new("validation-active-session")],
+        }],
     }
 }
 

@@ -959,6 +959,15 @@ errors = "core_protocol::CoreError"
 summary = "Read the stored provider secret payload for provider execution only."
 
 [[operation]]
+name = "model_provider_refresh_impact"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelProviderRefreshImpactRequest"
+output = "core_protocol::ModelProviderRefreshImpact"
+errors = "core_protocol::CoreError"
+summary = "Plan profiles and sessions affected by a model-provider alias update from Rust-owned profile registry and session state."
+
+[[operation]]
 name = "list_simple_kv"
 surface = "stable"
 direction = "ts_to_rust"

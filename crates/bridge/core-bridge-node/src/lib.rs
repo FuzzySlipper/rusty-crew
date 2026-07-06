@@ -57,8 +57,9 @@ use rusty_crew_core_protocol::{
     ContextCompactionArtifact, ContextCompactionArtifactQuery, DataBankScopeId,
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
-    MessageVariantId, ModelProviderQuery, ModelProviderWrite, ProfileRegistryLifecycleStatus,
-    ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
+    MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest, ModelProviderWrite,
+    ProfileRegistryLifecycleStatus, ProfileRegistryUpdate, ProfileRegistryWrite,
+    SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_openai_responses_brain::{
     openai_oauth_envelope_from_exchange_result, resolve_openai_oauth_bearer, FakeResponsesClient,
@@ -496,6 +497,13 @@ impl NativeBridge {
         query: &ModelProviderQuery,
     ) -> CoreResult<Vec<rusty_crew_core_bridge_api::ModelProviderRecord>> {
         self.engine()?.list_model_providers(query)
+    }
+
+    pub fn model_provider_refresh_impact(
+        &self,
+        request: &ModelProviderRefreshImpactRequest,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ModelProviderRefreshImpact> {
+        self.engine()?.model_provider_refresh_impact(request)
     }
 
     pub fn add_roleplay_lore_record(
@@ -3595,6 +3603,19 @@ impl NativeBridgeBinding {
             .get_model_provider_secret(&alias)
             .map_err(to_napi_error)?;
         serialize_json(&secret, "model provider secret")
+    }
+
+    #[napi]
+    pub fn model_provider_refresh_impact_json(&self, request_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<ModelProviderRefreshImpactRequest>(
+            &request_json,
+            "model provider refresh impact request",
+        )?;
+        let impact = bridge
+            .model_provider_refresh_impact(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&impact, "model provider refresh impact")
     }
 
     #[napi]

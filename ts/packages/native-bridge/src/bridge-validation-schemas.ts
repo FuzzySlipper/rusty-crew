@@ -541,6 +541,24 @@ export const rawModelProviderRecordArraySchema = Type.Array(
   rawModelProviderRecordSchema,
 );
 
+const rawModelProviderAffectedProfileSchema = Type.Object(
+  {
+    profile_id: Type.String(),
+    session_ids: Type.Array(Type.String()),
+    configured_session_ids: Type.Array(Type.String()),
+    active_session_ids: Type.Array(Type.String()),
+  },
+  { additionalProperties: true },
+);
+
+export const rawModelProviderRefreshImpactSchema = Type.Object(
+  {
+    provider_alias: Type.String(),
+    affected_profiles: Type.Array(rawModelProviderAffectedProfileSchema),
+  },
+  { additionalProperties: true },
+);
+
 const memoryEvidenceRefSchema = Type.Object(
   {
     evidence_type: Type.String(),

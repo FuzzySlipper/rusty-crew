@@ -5205,36 +5205,10 @@ async function modelProviderAffectedProfiles(
   state: ServiceState,
   alias: string,
 ): Promise<ModelProviderWriteRefreshResult["refresh"]["affectedProfiles"]> {
-  const profileIds = new Set<ProfileId>();
-  for (const brain of state.runtimeConfig.brains)
-    profileIds.add(brain.profileId);
-  for (const session of state.runtimeConfig.sessions)
-    profileIds.add(session.profileId);
-  const activeSessions = await state.bridge.listSessions().catch(() => []);
-  for (const session of activeSessions) profileIds.add(session.profileId);
-
-  const affected: ModelProviderWriteRefreshResult["refresh"]["affectedProfiles"] =
-    [];
-  for (const profileId of [...profileIds].sort()) {
-    const profile = await loadProfileConfig(
-      state.runtimeConfig.profilesDir,
-      profileId,
-    ).catch(() => undefined);
-    if (profile?.providerAlias !== alias) continue;
-    const configuredSessionIds = state.runtimeConfig.sessions
-      .filter((session) => session.profileId === profileId)
-      .map((session) => String(session.sessionId));
-    const activeSessionIds = activeSessions
-      .filter((session) => session.profileId === profileId)
-      .map((session) => String(session.sessionId));
-    affected.push({
-      profileId: String(profileId),
-      sessionIds: [...new Set([...configuredSessionIds, ...activeSessionIds])],
-      configuredSessionIds,
-      activeSessionIds,
-    });
-  }
-  return affected;
+  const impact = await state.bridge.modelProviderRefreshImpact({
+    providerAlias: alias,
+  });
+  return impact.affectedProfiles;
 }
 
 async function handleDirectDebugRequest(

@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "manifest_version": 1,
-  "operation_count": 120,
+  "operation_count": 121,
   "schema_source": "rusty-crew-core-protocol serde wire fixtures",
   "fixtures": [
     {
@@ -223,6 +223,26 @@
         "status": "active",
         "temperature_milli": 500,
         "updated_at": "2026-07-02T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "model_provider_refresh_impact_v1",
+      "operation": "model_provider_refresh_impact",
+      "direction": "rust_to_ts",
+      "rust_type": "rusty_crew_core_protocol::ModelProviderRefreshImpact",
+      "value": {
+        "affected_profiles": [
+          {
+            "active_session_ids": ["validation-active-session"],
+            "configured_session_ids": ["validation-configured-session"],
+            "profile_id": "validation-profile",
+            "session_ids": [
+              "validation-active-session",
+              "validation-configured-session"
+            ]
+          }
+        ],
+        "provider_alias": "validation-provider"
       }
     },
     {

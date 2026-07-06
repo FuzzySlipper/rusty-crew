@@ -1365,6 +1365,25 @@ pub struct ModelProviderQuery {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderRefreshImpactRequest {
+    pub provider_alias: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderAffectedProfile {
+    pub profile_id: ProfileId,
+    pub session_ids: Vec<SessionId>,
+    pub configured_session_ids: Vec<SessionId>,
+    pub active_session_ids: Vec<SessionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderRefreshImpact {
+    pub provider_alias: String,
+    pub affected_profiles: Vec<ModelProviderAffectedProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformAdapterRegistration {
     pub adapter_id: AdapterId,
     pub kind: PlatformAdapterKind,

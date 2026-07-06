@@ -69,6 +69,7 @@ export declare class NativeBridgeBinding {
   listModelProvidersJson(queryJson: string): string
   getModelProviderJson(alias: string): string
   getModelProviderSecretJson(alias: string): string
+  modelProviderRefreshImpactJson(requestJson: string): string
   addLoreEntryJson(inputJson: string): string
   replaceLoreEntryJson(inputJson: string): string
   supersedeLoreEntryJson(inputJson: string): string
