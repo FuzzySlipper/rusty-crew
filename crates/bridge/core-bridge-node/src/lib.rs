@@ -70,9 +70,11 @@ use rusty_crew_openai_responses_brain::{
 };
 mod binding_config_profiles;
 mod binding_conversation;
+mod binding_delegation;
 mod binding_events;
 mod binding_manifest;
 mod binding_memory;
+mod binding_responses;
 mod binding_roleplay;
 mod binding_scheduler;
 mod binding_sessions;
@@ -243,114 +245,6 @@ impl NativeBridgeBinding {
             archived_sessions: summary.archived_sessions,
             dropped_subscriptions: summary.dropped_subscriptions,
         })
-    }
-
-    #[napi]
-    pub fn run_openai_responses_brain_json(
-        &self,
-        input_json: String,
-    ) -> napi::bindgen_prelude::AsyncTask<OpenAiResponsesBrainRunTask> {
-        // The responses brain still uses blocking provider I/O internally.
-        // Running it as a napi task keeps the Node event loop available for
-        // admin APIs, adapters, and SSE while this worker-thread task drains.
-        napi::bindgen_prelude::AsyncTask::new(OpenAiResponsesBrainRunTask::new(input_json))
-    }
-
-    #[napi]
-    pub fn exchange_openai_oauth_code_json(
-        &self,
-        input_json: String,
-    ) -> napi::bindgen_prelude::AsyncTask<OpenAiOauthCodeExchangeTask> {
-        // OAuth code exchange performs blocking provider I/O. Keep it off the
-        // Node event loop just like the live Responses wake path.
-        napi::bindgen_prelude::AsyncTask::new(OpenAiOauthCodeExchangeTask::new(input_json))
-    }
-
-    #[napi]
-    pub fn start_openai_responses_brain_json(&self, input_json: String) -> napi::Result<String> {
-        start_openai_responses_brain_json(input_json)
-    }
-
-    #[napi]
-    pub fn drain_openai_responses_brain_stream_json(
-        &self,
-        wake_id: String,
-        max_items: Option<u32>,
-    ) -> napi::Result<String> {
-        drain_openai_responses_brain_stream_json(wake_id, max_items)
-    }
-
-    #[napi]
-    pub fn submit_openai_responses_tool_output_json(
-        &self,
-        input_json: String,
-    ) -> napi::Result<String> {
-        submit_openai_responses_tool_output_json(input_json)
-    }
-
-    #[napi]
-    pub fn cancel_delegated_session(
-        &self,
-        delegated_session_id: String,
-    ) -> napi::Result<JsSessionState> {
-        let bridge = self.bridge()?;
-        let state = bridge
-            .cancel_delegated_session(SessionId::new(delegated_session_id))
-            .map_err(to_napi_error)?;
-        Ok(to_js_session_state(state))
-    }
-
-    #[napi]
-    pub fn request_delegated_checkpoint(
-        &self,
-        parent_session_id: String,
-        delegated_session_id: String,
-        reason: String,
-    ) -> napi::Result<JsEventReceipt> {
-        let bridge = self.bridge()?;
-        let receipt = bridge
-            .request_delegated_checkpoint(
-                SessionId::new(parent_session_id),
-                SessionId::new(delegated_session_id),
-                reason,
-            )
-            .map_err(to_napi_error)?;
-        Ok(to_js_event_receipt(receipt))
-    }
-
-    #[napi]
-    pub fn drain_delegated_sessions(
-        &self,
-        parent_session_id: Option<String>,
-    ) -> napi::Result<Vec<String>> {
-        let bridge = self.bridge()?;
-        let drained = bridge
-            .drain_delegated_sessions(parent_session_id.map(SessionId::new))
-            .map_err(to_napi_error)?;
-        Ok(drained.into_iter().map(|session_id| session_id.0).collect())
-    }
-
-    #[napi]
-    pub fn cleanup_delegated_resources_json(&self) -> napi::Result<String> {
-        let bridge = self.bridge()?;
-        let report = bridge
-            .cleanup_delegated_resources()
-            .map_err(to_napi_error)?;
-        serde_json::to_string(&report)
-            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
-    }
-
-    #[napi]
-    pub fn delegated_session_status_json(
-        &self,
-        delegated_session_id: String,
-    ) -> napi::Result<String> {
-        let bridge = self.bridge()?;
-        let status = bridge
-            .delegated_session_status(SessionId::new(delegated_session_id))
-            .map_err(to_napi_error)?;
-        serde_json::to_string(&status)
-            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
     }
 
     fn bridge(&self) -> napi::Result<std::sync::MutexGuard<'_, NativeBridge>> {
