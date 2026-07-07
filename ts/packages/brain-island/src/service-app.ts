@@ -331,10 +331,12 @@ import {
   preflightRustyCrewRuntimeConfig,
   rebuildConfiguredBrainRuntime,
   registerConfiguredScheduledJobs,
+  runtimeWakeTimeoutConfig,
   ensureConfiguredSessionForChannelBinding,
   type RustyCrewConfiguredSession,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
+  type RustyCrewWakeTimeoutConfig,
   type ServiceBrainWakeResultObservation,
 } from "./service-runtime-config.js";
 import { createRuntimeActivityObserver } from "./runtime-activity-observer.js";
@@ -4581,6 +4583,82 @@ async function applyServiceRuntimeConfigDraft(
   return { ...plan, applyResult };
 }
 
+async function patchServiceWakeTimeout(
+  state: ServiceState,
+  command: AdminControlCommand,
+): Promise<{
+  ok: true;
+  wakeTimeout: RustyCrewWakeTimeoutConfig;
+  previousWakeTimeout?: RustyCrewWakeTimeoutConfig;
+  preservedSections: Record<string, number | undefined>;
+  safeWritePath: {
+    capabilityId: string;
+    method: "POST";
+    path: "/v1/admin/control/config/wake-timeout";
+    body: "{ wakeTimeout: { mode: 'disabled' } } | { wakeTimeout: { mode: 'default', defaultMs: number } }";
+  };
+  applyResult: RustyCrewRuntimeConfigApplyResult;
+}> {
+  const wakeTimeout = wakeTimeoutFromPatchCommand(command);
+  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
+  const preservedSections = runtimeConfigSectionCounts(runtimeConfigFile.value);
+  const previousWakeTimeout = state.runtimeConfig.wakeTimeout;
+  runtimeConfigFile.value.wakeTimeout = wakeTimeout;
+  await writeJsonFileAtomic(
+    state.config.paths.serviceConfigFile,
+    runtimeConfigFile.value,
+  );
+  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
+    createMissingSessions: false,
+    eventType: "wake_timeout_config_patched",
+    summaryPrefix: "Wake timeout config patched",
+  });
+  return {
+    ok: true,
+    wakeTimeout: state.runtimeConfig.wakeTimeout ?? wakeTimeout,
+    previousWakeTimeout,
+    preservedSections,
+    safeWritePath: {
+      capabilityId: "admin.control.config.wake_timeout.patch",
+      method: "POST",
+      path: "/v1/admin/control/config/wake-timeout",
+      body: "{ wakeTimeout: { mode: 'disabled' } } | { wakeTimeout: { mode: 'default', defaultMs: number } }",
+    },
+    applyResult,
+  };
+}
+
+function wakeTimeoutFromPatchCommand(
+  command: AdminControlCommand,
+): RustyCrewWakeTimeoutConfig {
+  const input = Object.hasOwn(command.body, "wakeTimeout")
+    ? command.body.wakeTimeout
+    : command.body;
+  if (!isRecord(input) || !Object.hasOwn(input, "mode")) {
+    throw new Error(
+      "wakeTimeout patch requires wakeTimeout.mode or top-level mode",
+    );
+  }
+  return runtimeWakeTimeoutConfig(input);
+}
+
+function runtimeConfigSectionCounts(
+  value: Record<string, unknown>,
+): Record<string, number | undefined> {
+  return {
+    brains: sectionCount(value.brains),
+    sessions: sectionCount(value.sessions),
+    scheduledJobs: sectionCount(value.scheduledJobs),
+    channelBindings: sectionCount(value.channelBindings),
+    mcpServers: sectionCount(value.mcpServers),
+    mcpBindings: sectionCount(value.mcpBindings),
+  };
+}
+
+function sectionCount(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
 async function decommissionServiceProfile(
   state: ServiceState,
   command: AdminControlCommand,
@@ -5949,6 +6027,17 @@ function createServiceControlExecutor(
           : "runtime config draft rejected",
         result,
         reasonCode: result.ok ? undefined : "runtime_config_draft_invalid",
+      };
+    },
+    patchWakeTimeout: async (command) => {
+      const result = await patchServiceWakeTimeout(state, command);
+      return {
+        status: "completed",
+        summary:
+          result.wakeTimeout.mode === "default"
+            ? `wake timeout set to ${result.wakeTimeout.defaultMs}ms`
+            : "wake timeout disabled",
+        result,
       };
     },
     planRuntimeRebuild: async (command) => {

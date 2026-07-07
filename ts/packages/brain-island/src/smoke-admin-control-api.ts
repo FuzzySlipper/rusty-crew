@@ -239,6 +239,21 @@ const executor: AdminControlExecutor = {
       result: { ok: true },
     };
   },
+  patchWakeTimeout(command) {
+    return {
+      status: "completed",
+      summary: "Wake timeout patched.",
+      result: {
+        ok: true,
+        wakeTimeout: command.body.wakeTimeout,
+        safeWritePath: {
+          capabilityId: "admin.control.config.wake_timeout.patch",
+          method: "POST",
+          path: "/v1/admin/control/config/wake-timeout",
+        },
+      },
+    };
+  },
   planRuntimeRebuild(command) {
     return {
       status: "completed",
@@ -526,6 +541,28 @@ assert.equal(
   applyRuntimeConfigUpdateData.command.name,
   "apply_runtime_config_update",
 );
+
+const patchWakeTimeout = await handleAdminControlRequest(
+  {
+    method: "POST",
+    url: "/v1/admin/control/config/wake-timeout",
+    headers: authHeaders(),
+    body: { wakeTimeout: { mode: "default", defaultMs: 60_000 } },
+  },
+  context,
+);
+assert.equal(patchWakeTimeout.status, 200);
+const patchWakeTimeoutData = okData<AdminControlResponse>(patchWakeTimeout);
+assert.equal(patchWakeTimeoutData.command.name, "patch_wake_timeout");
+assert.deepEqual(patchWakeTimeoutData.outcome.result, {
+  ok: true,
+  wakeTimeout: { mode: "default", defaultMs: 60_000 },
+  safeWritePath: {
+    capabilityId: "admin.control.config.wake_timeout.patch",
+    method: "POST",
+    path: "/v1/admin/control/config/wake-timeout",
+  },
+});
 
 const decommissionProfile = await handleAdminControlRequest(
   {

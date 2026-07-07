@@ -1879,7 +1879,9 @@ function runtimeStorageConfig(
   return config;
 }
 
-function runtimeWakeTimeoutConfig(input: unknown): RustyCrewWakeTimeoutConfig {
+export function runtimeWakeTimeoutConfig(
+  input: unknown,
+): RustyCrewWakeTimeoutConfig {
   if (input === undefined || input === null) {
     return { mode: "disabled" };
   }

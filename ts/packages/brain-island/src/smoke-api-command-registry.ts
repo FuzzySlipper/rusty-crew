@@ -170,6 +170,16 @@ assertUnique(
   ),
   "admin control route",
 );
+assert.ok(
+  ADMIN_CONTROL_CAPABILITIES.some(
+    (capability) =>
+      capability.id === "admin.control.config.wake_timeout.patch" &&
+      capability.command_name === "patch_wake_timeout" &&
+      capability.method === "POST" &&
+      capability.path_template === "/v1/admin/control/config/wake-timeout",
+  ),
+  "wake-timeout patch capability must advertise the safe config write path",
+);
 
 const contractPath = resolve(
   process.cwd(),
