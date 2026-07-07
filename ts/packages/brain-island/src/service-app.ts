@@ -8822,6 +8822,11 @@ async function createRustyViewMessageSlot(
     stableChatRecordId("slot", `${input.session.sessionId}:${input.requestId}`);
   const variantId =
     input.request.primary_variant_id ?? stableChatRecordId("variant", slotId);
+  const branch = await ensureActiveConversationBranch(
+    state,
+    input.session,
+    now,
+  );
   const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
     roleplayRouteContext(state),
     input.session,
@@ -8860,11 +8865,21 @@ async function createRustyViewMessageSlot(
       ordinal: 0,
       actor: input.request.actor,
       body: input.request.body,
+      branchId: branch.branch_id,
+      parentMessageId: branch.head_message_id ?? undefined,
+      previousMessageId: branch.head_message_id ?? undefined,
       metadataJson: variantMetadata,
       blocks: input.request.blocks,
       now,
     }),
   );
+  await state.bridge.updateConversationBranchHead({
+    branch_id: branch.branch_id,
+    head_message_id:
+      input.request.message_id ?? stableChatRecordId("message", variantId),
+    expected: { type: "any" },
+    updated_at: state.now(),
+  });
   const slot = await requireMessageSlotForSession(
     state,
     input.session.sessionId,

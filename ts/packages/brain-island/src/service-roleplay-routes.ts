@@ -3529,7 +3529,7 @@ async function selectRoleplayAssistantAlternative(
   slotId: string,
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const slot = await requireRoleplayMessageSlot(state, sessionId, slotId);
+  const slot = await roleplayTerminalAssistantSlot(state, sessionId, slotId);
   const activeVariantId =
     optionalString(body.activeVariantId) ??
     optionalString(body.active_variant_id) ??
@@ -3601,38 +3601,75 @@ async function roleplayTerminalAssistantSlot(
   sessionId: string,
   slotId: string | undefined,
 ): Promise<MessageSlotRecord> {
-  if (slotId !== undefined) {
-    return requireRoleplayMessageSlot(state, sessionId, slotId);
-  }
   const slots = await roleplayMessageSlots(state, sessionId);
-  const assistantSlots = slots
-    .filter(
-      (slot) => activeVariantForSlot(slot).message.author_role === "assistant",
-    )
-    .sort((left, right) =>
-      left.created_at === right.created_at
-        ? left.slot_id.localeCompare(right.slot_id)
-        : left.created_at.localeCompare(right.created_at),
-    );
-  const terminal = assistantSlots.at(-1);
+  const terminal =
+    (await roleplayActiveBranchHeadSlot(state, sessionId, slots)) ??
+    orderedRoleplaySlots(slots).at(-1);
   if (terminal === undefined) {
-    throw new Error(`roleplay session ${sessionId} has no assistant slot`);
+    throw new Error(
+      `roleplay session ${sessionId} has no terminal message slot`,
+    );
+  }
+  if (slotId !== undefined) {
+    const explicit = slots.find((slot) => slot.slot_id === slotId);
+    if (explicit === undefined) {
+      throw new Error(`message slot ${slotId} was not found for ${sessionId}`);
+    }
+    const explicitRole = activeVariantForSlot(explicit).message.author_role;
+    if (explicitRole !== "assistant") {
+      throw new Error(
+        `message slot ${slotId} is ${explicitRole}; assistant alternatives are only available for assistant message slots`,
+      );
+    }
+    if (terminal.slot_id !== slotId) {
+      throw new Error(
+        `message slot ${slotId} is not the current terminal assistant slot for ${sessionId}`,
+      );
+    }
+    return terminal;
+  }
+  const terminalRole = activeVariantForSlot(terminal).message.author_role;
+  if (terminalRole !== "assistant") {
+    throw new Error(
+      `roleplay session ${sessionId} terminal message is ${terminalRole}; assistant alternatives are only available for the current terminal assistant message`,
+    );
   }
   return terminal;
 }
 
-async function requireRoleplayMessageSlot(
+async function roleplayActiveBranchHeadSlot(
   state: RoleplayRouteContext,
   sessionId: string,
-  slotId: string,
-): Promise<MessageSlotRecord> {
-  const found = (await roleplayMessageSlots(state, sessionId)).find(
-    (slot) => slot.slot_id === slotId,
-  );
-  if (found === undefined) {
-    throw new Error(`message slot ${slotId} was not found for ${sessionId}`);
+  slots: MessageSlotRecord[],
+): Promise<MessageSlotRecord | undefined> {
+  const branchState = (await state.bridge
+    .getConversationBranchState({
+      session_id: sessionId,
+      default_updated_at: state.now(),
+    })
+    .catch(() => undefined)) as
+    | { active_branch_id?: string | null }
+    | undefined;
+  if (branchState?.active_branch_id == null) {
+    return undefined;
   }
-  return found;
+  const branches = (await state.bridge
+    .queryConversationBranches({
+      session_id: sessionId,
+      page: { limit: 500, offset: 0 },
+    })
+    .catch(() => [])) as ConversationBranchRecord[];
+  const branch = branches.find(
+    (candidate) => candidate.branch_id === branchState.active_branch_id,
+  );
+  if (branch?.head_message_id == null) {
+    return undefined;
+  }
+  return slots.find((slot) =>
+    [slot.primary, ...slot.alternates].some(
+      (variant) => variant.message.message_id === branch.head_message_id,
+    ),
+  );
 }
 
 async function roleplayMessageSlots(
@@ -3644,6 +3681,42 @@ async function roleplayMessageSlots(
     include_alternates: true,
     page: { limit: 1_000, offset: 0 },
   })) as MessageSlotRecord[];
+}
+
+function orderedRoleplaySlots(slots: MessageSlotRecord[]): MessageSlotRecord[] {
+  const byPrevious = new Map<string, MessageSlotRecord[]>();
+  const roots: MessageSlotRecord[] = [];
+  for (const slot of slots) {
+    const previous = activeVariantForSlot(slot).message.previous_message_id;
+    if (previous == null) {
+      roots.push(slot);
+      continue;
+    }
+    const existing = byPrevious.get(previous) ?? [];
+    existing.push(slot);
+    byPrevious.set(previous, existing);
+  }
+  const ordered: MessageSlotRecord[] = [];
+  const visited = new Set<string>();
+  const appendChain = (slot: MessageSlotRecord): void => {
+    if (visited.has(slot.slot_id)) return;
+    visited.add(slot.slot_id);
+    ordered.push(slot);
+    const messageId = activeVariantForSlot(slot).message.message_id;
+    const children = sortRoleplaySlots(byPrevious.get(messageId) ?? []);
+    for (const child of children) appendChain(child);
+  };
+  for (const root of sortRoleplaySlots(roots)) appendChain(root);
+  for (const slot of sortRoleplaySlots(slots)) appendChain(slot);
+  return ordered;
+}
+
+function sortRoleplaySlots(slots: MessageSlotRecord[]): MessageSlotRecord[] {
+  return [...slots].sort((left, right) =>
+    left.created_at === right.created_at
+      ? left.slot_id.localeCompare(right.slot_id)
+      : left.created_at.localeCompare(right.created_at),
+  );
 }
 
 function roleplayAlternativeSlot(

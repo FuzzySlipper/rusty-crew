@@ -618,21 +618,6 @@ try {
     { name: "RP Hero Later" },
   );
   assert.equal(switchedCharacter.status, 200);
-  const laterUserSlot = await post(
-    "/v1/chat/sessions/rp-browser-session/slots",
-    {
-      slot_id: "rp-user-slot-later",
-      primary_variant_id: "rp-user-primary-later",
-      message_id: "rp-message-user-later",
-      actor: { id: "rp-player", kind: "human" },
-      body: "I lower the lantern.",
-    },
-  );
-  assert.equal(
-    laterUserSlot.body.data.slot.primary.message.metadata_json.speaker_identity
-      .display_name,
-    "Browser Player Later",
-  );
   const slotReadback = await get(
     "/v1/chat/sessions/rp-browser-session/slots?include_alternates=true",
   );
@@ -699,6 +684,56 @@ try {
     "rp-alt-2",
   );
 
+  const laterUserSlot = await post(
+    "/v1/chat/sessions/rp-browser-session/slots",
+    {
+      slot_id: "rp-user-slot-later",
+      primary_variant_id: "rp-user-primary-later",
+      message_id: "rp-message-user-later",
+      actor: { id: "rp-player", kind: "human" },
+      body: "I lower the lantern.",
+    },
+  );
+  assert.equal(
+    laterUserSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .display_name,
+    "Browser Player Later",
+  );
+  const staleImplicitAlternatives = await get(
+    "/v1/admin/roleplay/sessions/rp-browser-session/alternatives",
+  );
+  assert.equal(staleImplicitAlternatives.status, 400);
+  assert.match(
+    staleImplicitAlternatives.body.error.message,
+    /terminal message is user/,
+  );
+  const staleExplicitAssistantAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-browser-session/alternatives",
+    {
+      slotId: "rp-assistant-slot",
+      variantId: "rp-alt-stale",
+      body: "This stale alternative should be rejected.",
+    },
+  );
+  assert.equal(staleExplicitAssistantAlternative.status, 400);
+  assert.match(
+    staleExplicitAssistantAlternative.body.error.message,
+    /not the current terminal assistant slot/,
+  );
+  const staleExplicitUserAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-browser-session/alternatives",
+    {
+      slotId: "rp-user-slot-later",
+      variantId: "rp-alt-user-slot",
+      body: "This user-slot alternative should be rejected.",
+    },
+  );
+  assert.equal(staleExplicitUserAlternative.status, 400);
+  assert.match(
+    staleExplicitUserAlternative.body.error.message,
+    /assistant alternatives are only available for assistant message slots/,
+  );
+
   const forkAtOldMessage = await post(
     "/v1/admin/roleplay/sessions/rp-browser-session/fork",
     {
@@ -738,6 +773,18 @@ try {
   assert.equal(
     forkAtSelectedAlternative.body.data.source_message_id,
     "rp-message-assistant-alt-2",
+  );
+  const forkedAlternatives = await get(
+    "/v1/admin/roleplay/sessions/rp-browser-session-fork-selected/alternatives",
+  );
+  assert.equal(
+    forkedAlternatives.status,
+    200,
+    JSON.stringify(forkedAlternatives.body),
+  );
+  assert.equal(
+    forkedAlternatives.body.data.slot.active_variant.message.body,
+    "The lantern reveals a serpent-and-rose crest in the dust.",
   );
 
   const reboundSession = await patch(
