@@ -206,6 +206,15 @@ export async function handleAdminRoleplayRequest(
     parts[0] === "v1" &&
     parts[1] === "admin" &&
     parts[2] === "roleplay" &&
+    parts[3] === "imports" &&
+    parts[4] === "st-packet"
+  ) {
+    return handleRoleplayStPacketImportRequest(request, state);
+  }
+  if (
+    parts[0] === "v1" &&
+    parts[1] === "admin" &&
+    parts[2] === "roleplay" &&
     parts[3] === "profiles" &&
     parts[4]
   ) {
@@ -631,6 +640,35 @@ async function handleRoleplaySessionRequest(
   }
 }
 
+async function handleRoleplayStPacketImportRequest(
+  request: IncomingMessage,
+  state: RoleplayRouteContext,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  if (method !== "POST") {
+    return roleplayLoreMethodNotAllowed(
+      requestIdValue,
+      "roleplay ST packet import supports POST",
+    );
+  }
+  try {
+    return successRoute(
+      requestIdValue,
+      await importRoleplayStPacket(
+        state,
+        recordBody(await readJsonBody(request)),
+      ),
+    );
+  } catch (error) {
+    return roleplayInputError(
+      requestIdValue,
+      "roleplay_st_packet_import_failed",
+      error,
+    );
+  }
+}
+
 async function handleRoleplayNarratorConfigRequest(
   request: IncomingMessage,
   state: RoleplayRouteContext,
@@ -672,6 +710,102 @@ async function handleRoleplayNarratorConfigRequest(
   }
 }
 
+async function importRoleplayStPacket(
+  state: RoleplayRouteContext,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const now = state.now();
+  const profileId = requiredString(
+    body.profileId ?? body.profile_id,
+    "profileId",
+  );
+  const importId =
+    optionalString(body.importId) ??
+    optionalString(body.import_id) ??
+    stableRoleplayRecordId("st-import", `${profileId}:${now}`);
+  const provenance = optionalRecord(body.provenance) ?? {};
+  const rawSource =
+    optionalRecord(body.rawSource) ?? optionalRecord(body.raw_source);
+  const character = await importRoleplayCharacter(state, {
+    profileId,
+    importId,
+    now,
+    provenance,
+    body: optionalRecord(body.character),
+    rawSource,
+  });
+  const persona = await importRoleplayPersona(state, {
+    profileId,
+    importId,
+    now,
+    provenance,
+    body: optionalRecord(body.persona),
+    rawSource,
+  });
+  const lore = await importRoleplayLore(state, {
+    profileId,
+    importId,
+    now,
+    provenance,
+    layer: optionalRecord(body.loreLayer) ?? optionalRecord(body.lore_layer),
+    entries: arrayValue(body.loreEntries ?? body.lore_entries),
+  });
+  const session = await importRoleplayTranscript(state, {
+    profileId,
+    importId,
+    now,
+    provenance,
+    characterId: character?.id,
+    personaId: persona?.id,
+    activeLayerIds: lore.layerId === undefined ? [] : [lore.layerId],
+    session: optionalRecord(body.session),
+    rows: arrayValue(
+      body.transcriptRows ?? body.transcript_rows ?? body.messages,
+    ),
+  });
+  await putRoleplayJson(state, roleplayImportScope(profileId), {
+    key: roleplayImportKey(importId),
+    value: {
+      importId,
+      profileId,
+      provenance,
+      rawSource,
+      importedAt: now,
+      characterId: character?.id,
+      personaId: persona?.id,
+      loreLayerId: lore.layerId,
+      sessionId: session.sessionId,
+      counts: {
+        characters: character === undefined ? 0 : 1,
+        personas: persona === undefined ? 0 : 1,
+        loreEntries: lore.entryCount,
+        messages: session.messageCount,
+        assistantVariantRows: session.assistantVariantRows,
+        assistantMultiSwipeRows: session.assistantMultiSwipeRows,
+        variants: session.variantCount,
+      },
+    },
+  });
+  return {
+    importId,
+    profileId,
+    provenance,
+    character,
+    persona,
+    lore,
+    session,
+    counts: {
+      characters: character === undefined ? 0 : 1,
+      personas: persona === undefined ? 0 : 1,
+      loreEntries: lore.entryCount,
+      messages: session.messageCount,
+      assistantVariantRows: session.assistantVariantRows,
+      assistantMultiSwipeRows: session.assistantMultiSwipeRows,
+      variants: session.variantCount,
+    },
+  };
+}
+
 function roleplayCharacterScope(profileId: string): {
   scopeType: string;
   scopeId: string;
@@ -691,6 +825,17 @@ function roleplaySessionScope(sessionId: string): {
   scopeId: string;
 } {
   return { scopeType: "roleplay_session", scopeId: sessionId };
+}
+
+function roleplayImportScope(profileId: string): {
+  scopeType: string;
+  scopeId: string;
+} {
+  return { scopeType: "roleplay_import", scopeId: profileId };
+}
+
+function roleplayImportKey(importId: string): string {
+  return `st-packet:${importId}`;
 }
 
 function roleplayCharacterKey(characterId: string): string {
@@ -1091,6 +1236,380 @@ async function getRoleplaySessionSummary(
   return session === undefined
     ? undefined
     : roleplaySessionSummary(state, session);
+}
+
+async function importRoleplayCharacter(
+  state: RoleplayRouteContext,
+  input: {
+    profileId: string;
+    importId: string;
+    now: string;
+    provenance: Record<string, unknown>;
+    body?: Record<string, unknown>;
+    rawSource?: Record<string, unknown>;
+  },
+): Promise<RoleplayCharacterRecord | undefined> {
+  if (input.body === undefined) return undefined;
+  const character = (await state.bridge.writeRoleplayCharacter({
+    profile_id: input.profileId,
+    now: input.now,
+    fallback_id: stableRoleplayRecordId("character", input.importId),
+    body: {
+      ...input.body,
+      id:
+        optionalString(input.body.id) ??
+        stableRoleplayRecordId(
+          "character",
+          `${input.profileId}:${optionalString(input.body.name) ?? input.importId}`,
+        ),
+    },
+  })) as RoleplayCharacterRecord;
+  await putRoleplayJson(state, roleplayCharacterScope(input.profileId), {
+    key: roleplayCharacterKey(character.id),
+    value: character,
+  });
+  await putRoleplayJson(state, roleplayImportScope(input.profileId), {
+    key: `${roleplayImportKey(input.importId)}:character:${character.id}`,
+    value: {
+      kind: "character",
+      importId: input.importId,
+      profileId: input.profileId,
+      recordId: character.id,
+      provenance: input.provenance,
+      raw: input.body,
+      rawSource: input.rawSource,
+      importedAt: input.now,
+    },
+  });
+  return character;
+}
+
+async function importRoleplayPersona(
+  state: RoleplayRouteContext,
+  input: {
+    profileId: string;
+    importId: string;
+    now: string;
+    provenance: Record<string, unknown>;
+    body?: Record<string, unknown>;
+    rawSource?: Record<string, unknown>;
+  },
+): Promise<RoleplayPlayerPersonaRecord | undefined> {
+  if (input.body === undefined) return undefined;
+  const persona = (await state.bridge.writeRoleplayPlayerPersona({
+    profile_id: input.profileId,
+    now: input.now,
+    fallback_id: stableRoleplayRecordId("persona", input.importId),
+    body: {
+      ...input.body,
+      id:
+        optionalString(input.body.id) ??
+        stableRoleplayRecordId(
+          "persona",
+          `${input.profileId}:${optionalString(input.body.displayName) ?? optionalString(input.body.name) ?? input.importId}`,
+        ),
+      displayName:
+        optionalString(input.body.displayName) ??
+        optionalString(input.body.display_name) ??
+        optionalString(input.body.name),
+    },
+  })) as RoleplayPlayerPersonaRecord;
+  await putRoleplayJson(state, roleplayPlayerPersonaScope(input.profileId), {
+    key: roleplayPlayerPersonaKey(persona.id),
+    value: persona,
+  });
+  await putRoleplayJson(state, roleplayImportScope(input.profileId), {
+    key: `${roleplayImportKey(input.importId)}:persona:${persona.id}`,
+    value: {
+      kind: "persona",
+      importId: input.importId,
+      profileId: input.profileId,
+      recordId: persona.id,
+      provenance: input.provenance,
+      raw: input.body,
+      rawSource: input.rawSource,
+      importedAt: input.now,
+    },
+  });
+  return persona;
+}
+
+async function importRoleplayLore(
+  state: RoleplayRouteContext,
+  input: {
+    profileId: string;
+    importId: string;
+    now: string;
+    provenance: Record<string, unknown>;
+    layer?: Record<string, unknown>;
+    entries: unknown[];
+  },
+): Promise<{
+  layerId?: string;
+  entryCount: number;
+  createdEntries: number;
+  reusedEntries: number;
+}> {
+  if (input.layer === undefined && input.entries.length === 0) {
+    return { entryCount: 0, createdEntries: 0, reusedEntries: 0 };
+  }
+  const layerId =
+    optionalString(input.layer?.layerId) ??
+    optionalString(input.layer?.layer_id) ??
+    stableRoleplayRecordId("lore-layer", input.importId);
+  const existingLayer = await state.bridge.getLoreLayer(layerId);
+  if (existingLayer === undefined) {
+    await state.bridge.createLoreLayer({
+      layer_id: layerId,
+      profile_id: input.profileId,
+      name:
+        optionalString(input.layer?.name) ??
+        optionalString(input.layer?.title) ??
+        "Imported lorebook",
+      description:
+        optionalString(input.layer?.description) ??
+        "Imported from a normalized SillyTavern packet.",
+      purpose: optionalString(input.layer?.purpose) ?? "mixed",
+      write_policy: optionalString(input.layer?.writePolicy) ?? "manual",
+      now: input.now,
+    });
+  }
+  const linkedRecordIds = new Set(
+    (await state.bridge.listEntriesByLayer(layerId)).map((entry) =>
+      String(entry.record_id),
+    ),
+  );
+  let createdEntries = 0;
+  let reusedEntries = 0;
+  for (const rawEntry of input.entries) {
+    const entry = recordBody(rawEntry);
+    const recordId =
+      optionalString(entry.recordId) ??
+      optionalString(entry.record_id) ??
+      stableRoleplayRecordId(
+        "lore",
+        `${input.importId}:${optionalString(entry.title) ?? createdEntries + reusedEntries}`,
+      );
+    let record = await state.bridge.getLoreEntry(recordId);
+    if (record === undefined) {
+      record = await state.bridge.addLoreEntry(
+        roleplayImportedLoreWrite({
+          profileId: input.profileId,
+          importId: input.importId,
+          now: input.now,
+          provenance: input.provenance,
+          entry,
+          recordId,
+        }),
+      );
+      createdEntries += 1;
+    } else {
+      reusedEntries += 1;
+    }
+    if (!linkedRecordIds.has(recordId)) {
+      await state.bridge.addEntryToLayer({
+        layer_id: layerId,
+        record_id: String(record.record_id),
+        is_constant:
+          booleanValue(entry.isConstant) ??
+          booleanValue(entry.is_constant) ??
+          booleanValue(entry.constant) ??
+          false,
+        priority: integerValue(entry.priority ?? entry.insertion_order) ?? 0,
+        added_at: input.now,
+      });
+      linkedRecordIds.add(recordId);
+    }
+  }
+  return {
+    layerId,
+    entryCount: input.entries.length,
+    createdEntries,
+    reusedEntries,
+  };
+}
+
+async function importRoleplayTranscript(
+  state: RoleplayRouteContext,
+  input: {
+    profileId: string;
+    importId: string;
+    now: string;
+    provenance: Record<string, unknown>;
+    characterId?: string;
+    personaId?: string;
+    activeLayerIds: string[];
+    session?: Record<string, unknown>;
+    rows: unknown[];
+  },
+): Promise<{
+  sessionId: string;
+  messageCount: number;
+  assistantVariantRows: number;
+  assistantMultiSwipeRows: number;
+  variantCount: number;
+}> {
+  const sessionId =
+    optionalString(input.session?.sessionId) ??
+    optionalString(input.session?.session_id) ??
+    stableRoleplayRecordId("session", input.importId);
+  const existingSession = (await state.bridge.listSessions()).find(
+    (session) => session.sessionId === sessionId,
+  );
+  if (existingSession === undefined) {
+    await createRoleplaySession(
+      state,
+      compactRecord({
+        sessionId,
+        profileId: input.profileId,
+        displayName:
+          optionalString(input.session?.displayName) ??
+          optionalString(input.session?.display_name) ??
+          "Imported ST transcript",
+        characterId: input.characterId,
+        playerPersonaId: input.personaId,
+        activeLayerIds: input.activeLayerIds,
+      }),
+    );
+  } else {
+    await updateRoleplaySessionMetadata(
+      state,
+      sessionId,
+      compactRecord({
+        displayName:
+          optionalString(input.session?.displayName) ??
+          optionalString(input.session?.display_name),
+        characterId: input.characterId,
+        playerPersonaId: input.personaId,
+        activeLayerIds: input.activeLayerIds,
+      }),
+    );
+  }
+  let previousActiveMessageId: string | undefined;
+  let assistantVariantRows = 0;
+  let assistantMultiSwipeRows = 0;
+  let variantCount = 0;
+  for (const [index, rawRow] of input.rows.entries()) {
+    const row = recordBody(rawRow);
+    const role = roleplayImportRowRole(row);
+    const actor: ChatActor =
+      role === "assistant"
+        ? { id: input.profileId, kind: "agent" }
+        : role === "system"
+          ? { id: "system", kind: "system" }
+          : { id: input.personaId ?? "user", kind: "human" };
+    const variants = roleplayImportRowVariants(row);
+    const slotId =
+      optionalString(row.slotId) ??
+      optionalString(row.slot_id) ??
+      stableRoleplayRecordId("slot", `${sessionId}:row:${index}`);
+    const primaryVariantId =
+      optionalString(row.primaryVariantId) ??
+      optionalString(row.primary_variant_id) ??
+      stableRoleplayRecordId("variant", `${slotId}:0`);
+    const activeVariantIndex = Math.min(
+      Math.max(
+        integerValue(
+          row.activeVariantIndex ??
+            row.active_variant_index ??
+            row.swipeId ??
+            row.swipe_id,
+        ) ?? 0,
+        0,
+      ),
+      Math.max(variants.length - 1, 0),
+    );
+    const activeVariantId =
+      activeVariantIndex === 0
+        ? null
+        : stableRoleplayRecordId("variant", `${slotId}:${activeVariantIndex}`);
+    await state.bridge.saveMessageSlot({
+      slot_id: slotId,
+      session_id: sessionId,
+      primary_variant_id: primaryVariantId,
+      active_variant_id: null,
+      metadata_json: {
+        source: "st_packet_import",
+        import_id: input.importId,
+        source_index: index,
+        provenance: input.provenance,
+      },
+      created_at:
+        optionalString(row.createdAt) ??
+        optionalString(row.created_at) ??
+        optionalString(row.send_date) ??
+        input.now,
+      updated_at: input.now,
+    });
+    let activeMessageId = "";
+    for (const [variantIndex, variantInput] of variants.entries()) {
+      const variantId =
+        variantIndex === 0
+          ? primaryVariantId
+          : stableRoleplayRecordId("variant", `${slotId}:${variantIndex}`);
+      const messageId =
+        optionalString(variantInput.messageId) ??
+        optionalString(variantInput.message_id) ??
+        stableRoleplayRecordId("message", `${slotId}:${variantIndex}`);
+      if (variantIndex === activeVariantIndex) {
+        activeMessageId = messageId;
+      }
+      await state.bridge.saveMessageVariant(
+        roleplayMessageVariantWrite({
+          sessionId,
+          slotId,
+          variantId,
+          messageId,
+          source: variantIndex === 0 ? "primary" : "alternate",
+          ordinal: variantIndex,
+          actor,
+          body: variantInput.body,
+          previousMessageId: previousActiveMessageId,
+          metadataJson: {
+            source: "st_packet_import",
+            import_id: input.importId,
+            source_index: index,
+            source_variant_index: variantIndex,
+            active_source_variant_index: activeVariantIndex,
+            provenance: input.provenance,
+            ...roleplayImportRowMetadata(row),
+            ...(variantInput.metadata === undefined
+              ? {}
+              : { variant_metadata: variantInput.metadata }),
+          },
+          now:
+            optionalString(variantInput.createdAt) ??
+            optionalString(row.createdAt) ??
+            optionalString(row.created_at) ??
+            optionalString(row.send_date) ??
+            input.now,
+        }),
+      );
+      variantCount += 1;
+    }
+    if (activeVariantId !== null) {
+      await state.bridge.selectActiveMessageVariant({
+        slot_id: slotId,
+        active_variant_id: activeVariantId,
+        expected: { type: "any" },
+        updated_at: input.now,
+      });
+    }
+    previousActiveMessageId =
+      activeMessageId ||
+      stableRoleplayRecordId("message", `${slotId}:${activeVariantIndex}`);
+    if (role === "assistant") {
+      assistantVariantRows += 1;
+      if (variants.length > 1) assistantMultiSwipeRows += 1;
+    }
+  }
+  return {
+    sessionId,
+    messageCount: input.rows.length,
+    assistantVariantRows,
+    assistantMultiSwipeRows,
+    variantCount,
+  };
 }
 
 async function createRoleplaySession(
@@ -1902,6 +2421,205 @@ function roleplayMessageVariantWrite(input: {
   };
 }
 
+function roleplayImportedLoreWrite(input: {
+  profileId: string;
+  importId: string;
+  now: string;
+  provenance: Record<string, unknown>;
+  entry: Record<string, unknown>;
+  recordId: string;
+}): Record<string, unknown> {
+  const controls = optionalRecord(input.entry.controls) ?? {};
+  const rawMetadata =
+    optionalRecord(input.entry.rawMetadata) ??
+    optionalRecord(input.entry.raw_metadata) ??
+    optionalRecord(input.entry.stMetadata) ??
+    optionalRecord(input.entry.st_metadata) ??
+    {};
+  return {
+    record_id: input.recordId,
+    world_id: optionalString(input.entry.worldId) ?? input.profileId,
+    entity_id: optionalString(input.entry.entityId),
+    session_id: optionalString(input.entry.sessionId),
+    branch_id: optionalString(input.entry.branchId),
+    shape: {
+      shape_id: optionalString(input.entry.shapeId) ?? "lore_entry",
+      version: integerValue(input.entry.shapeVersion) ?? 1,
+    },
+    canon_status: optionalString(input.entry.canonStatus) ?? "draft",
+    visibility: optionalString(input.entry.visibility) ?? "public",
+    title:
+      optionalString(input.entry.title) ??
+      optionalString(input.entry.name) ??
+      input.recordId,
+    body:
+      optionalString(input.entry.body) ??
+      optionalString(input.entry.contentText) ??
+      "",
+    content: {
+      ...(optionalRecord(input.entry.content) ?? {}),
+      world_id: optionalString(input.entry.worldId) ?? input.profileId,
+      entity_id: optionalString(input.entry.entityId),
+      title:
+        optionalString(input.entry.title) ??
+        optionalString(input.entry.name) ??
+        input.recordId,
+      body:
+        optionalString(input.entry.body) ??
+        optionalString(input.entry.contentText) ??
+        "",
+      canon_status: optionalString(input.entry.canonStatus) ?? "draft",
+      visibility: optionalString(input.entry.visibility) ?? "public",
+      lore_controls: {
+        primary_keys: stringArray(
+          input.entry.primaryKeys ??
+            input.entry.primary_keys ??
+            input.entry.keys ??
+            controls.primaryKeys ??
+            controls.primary_keys,
+        ),
+        secondary_keys: stringArray(
+          input.entry.secondaryKeys ??
+            input.entry.secondary_keys ??
+            controls.secondaryKeys ??
+            controls.secondary_keys,
+        ),
+        enabled: booleanValue(input.entry.enabled ?? controls.enabled) ?? true,
+        constant:
+          booleanValue(
+            input.entry.constant ??
+              input.entry.isConstant ??
+              input.entry.is_constant ??
+              controls.constant,
+          ) ?? false,
+        scan_depth:
+          integerValue(input.entry.scanDepth ?? input.entry.scan_depth) ?? 4,
+        insertion_position:
+          optionalString(
+            input.entry.insertionPosition ?? input.entry.insertion_position,
+          ) ?? "lore_block",
+        insertion_order:
+          integerValue(
+            input.entry.insertionOrder ?? input.entry.insertion_order,
+          ) ?? 0,
+        probability:
+          optionalNumberValue(
+            input.entry.probability ?? controls.probability,
+          ) ?? 1,
+        retrieval_role:
+          optionalString(
+            input.entry.retrievalRole ?? input.entry.retrieval_role,
+          ) ?? "system",
+      },
+      metadata_json: {
+        ...(optionalRecord(
+          optionalRecord(input.entry.content)?.metadata_json,
+        ) ?? {}),
+        source: "st_packet_import",
+        import_id: input.importId,
+        provenance: input.provenance,
+        st_metadata: rawMetadata,
+      },
+    },
+    evidence_refs: [
+      {
+        evidence_type: "import",
+        ref_id: input.importId,
+        label: "SillyTavern packet import",
+      },
+    ],
+    source: "import",
+    confidence: optionalNumberValue(input.entry.confidence) ?? 0.85,
+    durability_rationale:
+      optionalString(input.entry.durabilityRationale) ??
+      optionalString(input.entry.durability_rationale) ??
+      "Imported from a normalized SillyTavern packet.",
+    supersedes_record_id: optionalString(input.entry.supersedesRecordId),
+    now: input.now,
+  };
+}
+
+function roleplayImportRowRole(row: Record<string, unknown>): string {
+  const role = optionalString(row.role);
+  if (role === "assistant" || role === "system" || role === "user") {
+    return role;
+  }
+  if (booleanValue(row.isUser ?? row.is_user) === true) return "user";
+  if (booleanValue(row.isSystem ?? row.is_system) === true) return "system";
+  return "assistant";
+}
+
+function roleplayImportRowVariants(row: Record<string, unknown>): Array<{
+  body: string;
+  messageId?: string;
+  message_id?: string;
+  createdAt?: string;
+  metadata?: unknown;
+}> {
+  const explicit = arrayValue(row.variants)
+    .map((variant) =>
+      isRecord(variant)
+        ? {
+            body:
+              optionalString(variant.body) ??
+              optionalString(variant.text) ??
+              "",
+            messageId: optionalString(variant.messageId),
+            message_id: optionalString(variant.message_id),
+            createdAt: optionalString(variant.createdAt),
+            metadata:
+              variant.metadata ?? variant.metadata_json ?? variant.extra,
+          }
+        : { body: typeof variant === "string" ? variant : "" },
+    )
+    .filter((variant) => variant.body.length > 0);
+  if (explicit.length > 0) return explicit;
+  const swipeInfo = arrayValue(row.swipe_info);
+  const swipes = arrayValue(row.swipes)
+    .map((swipe, index) => ({
+      body:
+        typeof swipe === "string"
+          ? swipe
+          : (optionalString(optionalRecord(swipe)?.body) ??
+            optionalString(optionalRecord(swipe)?.text) ??
+            ""),
+      metadata: swipeInfo[index],
+    }))
+    .filter((variant) => variant.body.length > 0);
+  if (swipes.length > 0) return swipes;
+  return [
+    {
+      body:
+        optionalString(row.body) ??
+        optionalString(row.text) ??
+        optionalString(row.mes) ??
+        "",
+    },
+  ].filter((variant) => variant.body.length > 0);
+}
+
+function roleplayImportRowMetadata(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  return compactRecord({
+    st_name: row.name,
+    st_send_date: row.send_date,
+    st_extra: row.extra,
+    st_model: row.model ?? optionalRecord(row.extra)?.model,
+    st_api: row.api ?? optionalRecord(row.extra)?.api,
+    st_reasoning:
+      row.reasoning ??
+      row.reasoning_trace ??
+      optionalRecord(row.extra)?.reasoning,
+    st_reasoning_type:
+      row.reasoning_type ?? optionalRecord(row.extra)?.reasoning_type,
+    st_reasoning_duration:
+      row.reasoning_duration ?? optionalRecord(row.extra)?.reasoning_duration,
+    st_time_to_first_token:
+      row.time_to_first_token ?? optionalRecord(row.extra)?.time_to_first_token,
+  });
+}
+
 function stableRoleplayRecordId(prefix: string, raw: string): string {
   return `${prefix}:${raw.replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 160)}`;
 }
@@ -2080,6 +2798,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+}
+
+function integerValue(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function optionalNumberValue(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
 }
 
 function requiredString(value: unknown, fieldName: string): string {

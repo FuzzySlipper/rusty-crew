@@ -350,6 +350,31 @@ Responses include `display_name`, `character_id`, `character_name`,
 Normal chat messages still do not create sessions implicitly. `/new` retains
 archive-and-create semantics through the existing command/control path.
 
+## ST Packet Import
+
+- `POST /v1/admin/roleplay/imports/st-packet`
+
+The ST packet import route accepts a normalized import plan from a frontend or
+importer. The route does not parse arbitrary ST files directly; it owns the
+durable write path once the importer has normalized character, persona, lore,
+prompt/preset provenance, and transcript rows.
+
+The request supports:
+
+- `profileId`, `importId`, `provenance`, and `rawSource`.
+- `character` and `persona` records using the same browser-safe fields as the
+  character/persona admin routes.
+- `loreLayer` plus `loreEntries`; ST trigger/control metadata is preserved under
+  lore entry metadata while supported controls are mirrored into
+  `lore_controls`.
+- `session` plus `transcriptRows`; each row becomes one message slot, and
+  swipes/variants become message variants with active swipe selection.
+
+Response counts include `loreEntries`, `messages`, `assistantVariantRows`,
+`assistantMultiSwipeRows`, and total `variants`. The route stores an import
+summary and raw provenance in the roleplay import KV scope for later audit or
+export work.
+
 `GET /v1/admin/roleplay/sessions/{sessionId}/prompt-stack` returns the
 compiled roleplay prompt preview for the session without waking the agent. The
 response includes:
