@@ -1753,6 +1753,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn variant(
         slot_id: &str,
         variant_id: &str,
