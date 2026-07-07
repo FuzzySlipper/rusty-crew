@@ -13,11 +13,275 @@ use rusty_crew_core_protocol::{
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::time::Duration;
 
 pub const MODULE_ID: &str = "pi-agent-rust";
+pub const DEFAULT_DEN_ROUTER_URL: &str = "http://127.0.0.1:18082";
+pub const DEFAULT_DEN_ROUTER_MODEL_CANDIDATES: [&str; 4] =
+    ["deepseek-flash", "grok", "glm", "local-coder"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DenRouterApi {
+    OpenaiCompletions,
+    OpenaiResponses,
+}
+
+impl DenRouterApi {
+    pub fn parse(raw: &str) -> Result<Self, DenRouterSelectionError> {
+        match raw {
+            "openai-completions" => Ok(Self::OpenaiCompletions),
+            "openai-responses" => Ok(Self::OpenaiResponses),
+            other => Err(DenRouterSelectionError::UnsupportedApi(other.to_string())),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenaiCompletions => "openai-completions",
+            Self::OpenaiResponses => "openai-responses",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DenRouterSelectionOptions {
+    pub requested_model_id: Option<String>,
+    pub requested_api: Option<DenRouterApi>,
+    pub max_tokens: Option<u32>,
+}
+
+impl Default for DenRouterSelectionOptions {
+    fn default() -> Self {
+        Self {
+            requested_model_id: None,
+            requested_api: None,
+            max_tokens: Some(128),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenRouterModelInfo {
+    pub id: String,
+    #[serde(default)]
+    pub context_length: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenRouterRoutes {
+    #[serde(default)]
+    pub models: HashMap<String, DenRouterRouteModel>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenRouterRouteModel {
+    #[serde(default)]
+    pub backends: Vec<DenRouterRouteBackend>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenRouterRouteBackend {
+    #[serde(rename = "type", default)]
+    pub backend_type: Option<String>,
+    #[serde(default)]
+    pub healthy: Option<bool>,
+    #[serde(default)]
+    pub drained: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenRouterModelSelection {
+    pub model_id: String,
+    pub api: DenRouterApi,
+    pub provider: String,
+    pub base_url: String,
+    pub reasoning: bool,
+    pub context_window_tokens: u32,
+    pub max_tokens: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DenRouterSelectionError {
+    #[error("den-router /v1/models returned HTTP {0}")]
+    ModelsHttpStatus(u16),
+    #[error("den-router returned no models")]
+    NoModels,
+    #[error("den-router model {0} is not available")]
+    RequestedModelUnavailable(String),
+    #[error("unsupported den-router api {0}")]
+    UnsupportedApi(String),
+    #[error("malformed den-router {path} response: {message}")]
+    MalformedResponse { path: &'static str, message: String },
+    #[error("den-router transport error: {0}")]
+    Transport(String),
+}
+
+pub trait DenRouterModelSource {
+    fn base_url(&self) -> &str;
+    fn fetch_models(&self) -> Result<Vec<DenRouterModelInfo>, DenRouterSelectionError>;
+    fn fetch_routes(&self) -> Result<Option<DenRouterRoutes>, DenRouterSelectionError>;
+}
+
+pub fn resolve_den_router_model<S: DenRouterModelSource>(
+    source: &S,
+    options: &DenRouterSelectionOptions,
+) -> Result<DenRouterModelSelection, DenRouterSelectionError> {
+    let base_url = normalize_den_router_base_url(source.base_url());
+    let models = source.fetch_models()?;
+    if models.is_empty() {
+        return Err(DenRouterSelectionError::NoModels);
+    }
+    let routes = source.fetch_routes().unwrap_or(None);
+    let selected = select_den_router_model(&models, options.requested_model_id.as_deref())?;
+    let api = options.requested_api.unwrap_or_else(|| {
+        if is_codex_backed(&selected.id, routes.as_ref()) {
+            DenRouterApi::OpenaiResponses
+        } else {
+            DenRouterApi::OpenaiCompletions
+        }
+    });
+    Ok(DenRouterModelSelection {
+        model_id: selected.id.clone(),
+        api,
+        provider: "den-router".to_string(),
+        base_url: format!("{base_url}/v1"),
+        reasoning: api == DenRouterApi::OpenaiResponses,
+        context_window_tokens: selected.context_length.unwrap_or(128_000),
+        max_tokens: options.max_tokens.unwrap_or(128),
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct LiveDenRouterModelSource {
+    base_url: String,
+    client: HttpClient,
+}
+
+impl LiveDenRouterModelSource {
+    pub fn new(base_url: Option<String>) -> Result<Self, DenRouterSelectionError> {
+        let client = HttpClient::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|error| DenRouterSelectionError::Transport(error.to_string()))?;
+        Ok(Self {
+            base_url: normalize_den_router_base_url(
+                base_url.as_deref().unwrap_or(DEFAULT_DEN_ROUTER_URL),
+            ),
+            client,
+        })
+    }
+}
+
+impl DenRouterModelSource for LiveDenRouterModelSource {
+    fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    fn fetch_models(&self) -> Result<Vec<DenRouterModelInfo>, DenRouterSelectionError> {
+        let response = self
+            .client
+            .get(format!("{}/v1/models", self.base_url))
+            .send()
+            .map_err(|error| DenRouterSelectionError::Transport(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(DenRouterSelectionError::ModelsHttpStatus(status.as_u16()));
+        }
+        let value = response.json::<Value>().map_err(|error| {
+            DenRouterSelectionError::MalformedResponse {
+                path: "/v1/models",
+                message: error.to_string(),
+            }
+        })?;
+        den_router_models_from_value(value)
+    }
+
+    fn fetch_routes(&self) -> Result<Option<DenRouterRoutes>, DenRouterSelectionError> {
+        let response = self
+            .client
+            .get(format!("{}/routes", self.base_url))
+            .send()
+            .map_err(|error| DenRouterSelectionError::Transport(error.to_string()))?;
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+        let value = response.json::<Value>().map_err(|error| {
+            DenRouterSelectionError::MalformedResponse {
+                path: "/routes",
+                message: error.to_string(),
+            }
+        })?;
+        den_router_routes_from_value(value).map(Some)
+    }
+}
+
+pub fn normalize_den_router_base_url(raw: &str) -> String {
+    raw.trim_end_matches('/')
+        .strip_suffix("/v1")
+        .unwrap_or_else(|| raw.trim_end_matches('/'))
+        .to_string()
+}
+
+fn select_den_router_model<'a>(
+    models: &'a [DenRouterModelInfo],
+    requested: Option<&str>,
+) -> Result<&'a DenRouterModelInfo, DenRouterSelectionError> {
+    if let Some(requested) = requested {
+        return models
+            .iter()
+            .find(|model| model.id == requested)
+            .ok_or_else(|| DenRouterSelectionError::RequestedModelUnavailable(requested.into()));
+    }
+    for candidate in DEFAULT_DEN_ROUTER_MODEL_CANDIDATES {
+        if let Some(model) = models.iter().find(|model| model.id == candidate) {
+            return Ok(model);
+        }
+    }
+    models.first().ok_or(DenRouterSelectionError::NoModels)
+}
+
+fn is_codex_backed(model_id: &str, routes: Option<&DenRouterRoutes>) -> bool {
+    routes
+        .and_then(|routes| routes.models.get(model_id))
+        .map(|route| {
+            route
+                .backends
+                .iter()
+                .any(|backend| backend.backend_type.as_deref() == Some("codex-oauth"))
+        })
+        .unwrap_or(false)
+}
+
+fn den_router_models_from_value(
+    value: Value,
+) -> Result<Vec<DenRouterModelInfo>, DenRouterSelectionError> {
+    #[derive(Deserialize)]
+    struct ModelsResponse {
+        data: Option<Vec<DenRouterModelInfo>>,
+    }
+
+    let response: ModelsResponse = serde_json::from_value(value).map_err(|error| {
+        DenRouterSelectionError::MalformedResponse {
+            path: "/v1/models",
+            message: error.to_string(),
+        }
+    })?;
+    match response.data {
+        Some(models) if !models.is_empty() => Ok(models),
+        _ => Err(DenRouterSelectionError::NoModels),
+    }
+}
+
+fn den_router_routes_from_value(value: Value) -> Result<DenRouterRoutes, DenRouterSelectionError> {
+    serde_json::from_value(value).map_err(|error| DenRouterSelectionError::MalformedResponse {
+        path: "/routes",
+        message: error.to_string(),
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PiAgentChatConfig {
@@ -1180,6 +1444,200 @@ mod tests {
                     finish_reason: Some("stop".to_string())
                 }
             ]
+        );
+    }
+
+    #[derive(Debug, Clone)]
+    struct FakeDenRouterSource {
+        base_url: String,
+        models: Result<Vec<DenRouterModelInfo>, DenRouterSelectionError>,
+        routes: Result<Option<DenRouterRoutes>, DenRouterSelectionError>,
+    }
+
+    impl FakeDenRouterSource {
+        fn new(models: Vec<DenRouterModelInfo>, routes: Option<DenRouterRoutes>) -> Self {
+            Self {
+                base_url: "http://router.local:18082/v1/".to_string(),
+                models: Ok(models),
+                routes: Ok(routes),
+            }
+        }
+    }
+
+    impl DenRouterModelSource for FakeDenRouterSource {
+        fn base_url(&self) -> &str {
+            &self.base_url
+        }
+
+        fn fetch_models(&self) -> Result<Vec<DenRouterModelInfo>, DenRouterSelectionError> {
+            self.models.clone()
+        }
+
+        fn fetch_routes(&self) -> Result<Option<DenRouterRoutes>, DenRouterSelectionError> {
+            self.routes.clone()
+        }
+    }
+
+    fn model(id: &str) -> DenRouterModelInfo {
+        DenRouterModelInfo {
+            id: id.to_string(),
+            context_length: None,
+        }
+    }
+
+    fn codex_routes(model_id: &str) -> DenRouterRoutes {
+        let mut routes = DenRouterRoutes::default();
+        routes.models.insert(
+            model_id.to_string(),
+            DenRouterRouteModel {
+                backends: vec![DenRouterRouteBackend {
+                    backend_type: Some("codex-oauth".to_string()),
+                    healthy: Some(true),
+                    drained: Some(false),
+                }],
+            },
+        );
+        routes
+    }
+
+    #[test]
+    fn den_router_selection_uses_candidate_order_and_normalized_v1_base_url() {
+        let source = FakeDenRouterSource::new(
+            vec![model("zzz"), model("grok"), model("deepseek-flash")],
+            None,
+        );
+        let selection = resolve_den_router_model(&source, &DenRouterSelectionOptions::default())
+            .expect("selection");
+
+        assert_eq!(selection.model_id, "deepseek-flash");
+        assert_eq!(selection.api, DenRouterApi::OpenaiCompletions);
+        assert_eq!(selection.base_url, "http://router.local:18082/v1");
+        assert!(!selection.reasoning);
+        assert_eq!(selection.context_window_tokens, 128_000);
+        assert_eq!(selection.max_tokens, 128);
+    }
+
+    #[test]
+    fn den_router_selection_honors_requested_model_and_context() {
+        let source = FakeDenRouterSource::new(
+            vec![DenRouterModelInfo {
+                id: "custom".to_string(),
+                context_length: Some(64_000),
+            }],
+            None,
+        );
+        let selection = resolve_den_router_model(
+            &source,
+            &DenRouterSelectionOptions {
+                requested_model_id: Some("custom".to_string()),
+                requested_api: Some(DenRouterApi::OpenaiCompletions),
+                max_tokens: Some(512),
+            },
+        )
+        .expect("selection");
+
+        assert_eq!(selection.model_id, "custom");
+        assert_eq!(selection.context_window_tokens, 64_000);
+        assert_eq!(selection.max_tokens, 512);
+    }
+
+    #[test]
+    fn den_router_selection_rejects_missing_requested_model_and_no_models() {
+        let source = FakeDenRouterSource::new(vec![model("deepseek-flash")], None);
+        let error = resolve_den_router_model(
+            &source,
+            &DenRouterSelectionOptions {
+                requested_model_id: Some("missing".to_string()),
+                ..DenRouterSelectionOptions::default()
+            },
+        )
+        .expect_err("missing model");
+        assert_eq!(
+            error,
+            DenRouterSelectionError::RequestedModelUnavailable("missing".to_string())
+        );
+
+        let source = FakeDenRouterSource::new(Vec::new(), None);
+        assert_eq!(
+            resolve_den_router_model(&source, &DenRouterSelectionOptions::default())
+                .expect_err("no models"),
+            DenRouterSelectionError::NoModels
+        );
+    }
+
+    #[test]
+    fn den_router_selection_detects_codex_backed_responses_and_allows_explicit_override() {
+        let source = FakeDenRouterSource::new(vec![model("gpt")], Some(codex_routes("gpt")));
+        let selection = resolve_den_router_model(&source, &DenRouterSelectionOptions::default())
+            .expect("selection");
+        assert_eq!(selection.api, DenRouterApi::OpenaiResponses);
+        assert!(selection.reasoning);
+
+        let selection = resolve_den_router_model(
+            &source,
+            &DenRouterSelectionOptions {
+                requested_api: Some(DenRouterApi::OpenaiCompletions),
+                ..DenRouterSelectionOptions::default()
+            },
+        )
+        .expect("selection");
+        assert_eq!(selection.api, DenRouterApi::OpenaiCompletions);
+        assert!(!selection.reasoning);
+    }
+
+    #[test]
+    fn den_router_selection_ignores_route_probe_failure_like_ts_factory() {
+        let source = FakeDenRouterSource {
+            base_url: DEFAULT_DEN_ROUTER_URL.to_string(),
+            models: Ok(vec![model("gpt")]),
+            routes: Err(DenRouterSelectionError::MalformedResponse {
+                path: "/routes",
+                message: "bad json".to_string(),
+            }),
+        };
+        let selection = resolve_den_router_model(&source, &DenRouterSelectionOptions::default())
+            .expect("selection");
+        assert_eq!(selection.api, DenRouterApi::OpenaiCompletions);
+    }
+
+    #[test]
+    fn den_router_api_parse_rejects_unsupported_values() {
+        assert_eq!(
+            DenRouterApi::parse("openai-responses").expect("responses"),
+            DenRouterApi::OpenaiResponses
+        );
+        assert_eq!(
+            DenRouterApi::parse("anthropic").expect_err("unsupported"),
+            DenRouterSelectionError::UnsupportedApi("anthropic".to_string())
+        );
+    }
+
+    #[test]
+    fn den_router_model_response_parser_rejects_malformed_or_empty_payloads() {
+        let error = den_router_models_from_value(json!({"data": {"id": "bad"}}))
+            .expect_err("malformed data");
+        assert!(matches!(
+            error,
+            DenRouterSelectionError::MalformedResponse {
+                path: "/v1/models",
+                ..
+            }
+        ));
+        assert_eq!(
+            den_router_models_from_value(json!({"data": []})).expect_err("empty"),
+            DenRouterSelectionError::NoModels
+        );
+    }
+
+    #[test]
+    fn normalize_den_router_base_url_strips_one_v1_suffix_and_slash() {
+        assert_eq!(
+            normalize_den_router_base_url("http://127.0.0.1:18082/v1/"),
+            "http://127.0.0.1:18082"
+        );
+        assert_eq!(
+            normalize_den_router_base_url("http://127.0.0.1:18082/"),
+            "http://127.0.0.1:18082"
         );
     }
 
