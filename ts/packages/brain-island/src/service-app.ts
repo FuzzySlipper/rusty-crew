@@ -7447,6 +7447,7 @@ interface ServiceWakeDispatchReport {
   summary: string;
   reasonCode?: string;
   completionPacket?: CompletionPacket;
+  observedEvents?: readonly CoreEvent[];
 }
 
 interface ServiceWakeObservationContext {
@@ -7912,27 +7913,15 @@ async function generateRoleplayAssistantAlternativeViaWake(
     body: input.prompt,
     correlationId,
     source: "chat",
+    appendChatEvents: false,
   });
   if (wakeReport.status !== "completed") {
     throw new Error(
       `roleplay assistant alternative generation failed: ${wakeReport.summary}`,
     );
   }
-  const wakeEvents = listChatEventsAfterCursor(
-    state,
-    input.session,
-    beforeCursor,
-    500,
-  ).filter((event) => {
-    const payload = event.payload;
-    return (
-      isRecord(payload) &&
-      wakeReport.wakeId !== undefined &&
-      payload.wake_id === wakeReport.wakeId
-    );
-  });
   const generatedBody =
-    assistantTextFromWakeEvents(wakeEvents) ??
+    assistantTextFromCoreEvents(wakeReport.observedEvents ?? []) ??
     wakeReport.completionPacket?.summary ??
     wakeReport.summary;
   return {
@@ -7942,20 +7931,21 @@ async function generateRoleplayAssistantAlternativeViaWake(
     metadataJson: {
       correlation_id: correlationId,
       generator: "service_wake",
+      suppressed_chat_events_after_cursor: beforeCursor,
     },
   };
 }
 
-function assistantTextFromWakeEvents(
-  events: readonly ChatEvent[],
+function assistantTextFromCoreEvents(
+  events: readonly CoreEvent[],
 ): string | undefined {
   const text = events
-    .filter((event) => event.kind === "assistant_text_delta")
-    .map((event) =>
-      isRecord(event.payload) && typeof event.payload.text === "string"
-        ? event.payload.text
-        : "",
+    .filter(
+      (event): event is Extract<CoreEvent, { type: "brain_event_observed" }> =>
+        event.type === "brain_event_observed" &&
+        event.event.type === "text_delta",
     )
+    .map((event) => (event.event.type === "text_delta" ? event.event.text : ""))
     .join("")
     .trim();
   return text.length > 0 ? text : undefined;
@@ -9998,6 +9988,7 @@ async function submitServiceTurn(
     correlationId: string;
     source: Exclude<ServiceWakeSource, "background">;
     observationContext?: ServiceWakeObservationContext;
+    appendChatEvents?: boolean;
   },
 ): Promise<ServiceWakeDispatchReport> {
   const session = (await state.bridge.listSessions().catch(() => [])).find(
@@ -10024,6 +10015,7 @@ async function submitServiceTurn(
       },
       input.source,
       input.observationContext,
+      { appendChatEvents: input.appendChatEvents },
     );
     suppressNextWakeEvent(state, input.sessionId);
     await drainAndDispatchWakes(state, input.source);
@@ -10809,8 +10801,10 @@ async function dispatchWake(
   event: Extract<CoreEvent, { type: "brain_wake_requested" }>,
   source: ServiceWakeSource,
   observationContext?: ServiceWakeObservationContext,
+  options: { appendChatEvents?: boolean } = {},
 ): Promise<ServiceWakeDispatchReport> {
   const sessionId = event.sessionId;
+  const appendChatEvents = options.appendChatEvents !== false;
   let activeWake:
     | {
         session: SessionState;
@@ -10917,7 +10911,10 @@ async function dispatchWake(
             signal: wakeTimeoutController.signal,
           });
         },
-        (events) => appendCoreEventsToChatLog(state, session, wakeId, events),
+        appendChatEvents
+          ? (events) =>
+              appendCoreEventsToChatLog(state, session, wakeId, events)
+          : undefined,
         wakeTimeoutController.signal,
       ),
       {
@@ -10948,8 +10945,9 @@ async function dispatchWake(
           : `wake ${wakeId} was rejected for ${session.agentId}`),
       reasonCode: accepted.accepted ? undefined : "wake_rejected",
       completionPacket,
+      observedEvents: observed.events,
     };
-    if (report.status === "completed") {
+    if (appendChatEvents && report.status === "completed") {
       ensureChatWakeTerminalEvents(state, session, wakeId, observed.events, {
         summary: completionSummary ?? report.summary,
       });
@@ -10994,7 +10992,7 @@ async function dispatchWake(
         ),
         reasonCode: "wake_timeout",
       };
-      if (activeWake !== undefined) {
+      if (appendChatEvents && activeWake !== undefined) {
         ensureChatWakeTerminalEventsFromChatLog(
           state,
           activeWake.session,
@@ -11028,7 +11026,7 @@ async function dispatchWake(
       ),
       reasonCode: "wake_dispatch_failed",
     };
-    if (activeWake !== undefined) {
+    if (appendChatEvents && activeWake !== undefined) {
       ensureChatWakeTerminalEventsFromChatLog(
         state,
         activeWake.session,

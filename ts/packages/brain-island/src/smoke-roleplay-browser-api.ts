@@ -750,9 +750,36 @@ try {
     generatedAlternative.body.data.variant.message.metadata_json.generated,
     true,
   );
+  const generatedWakeId =
+    generatedAlternative.body.data.variant.message.metadata_json.wake_id;
+  assert.equal(typeof generatedWakeId, "string");
   assert.ok(
     generatedAlternative.body.data.variant.message.body.length > 0,
     "generated alternative should persist a non-empty assistant body",
+  );
+  const generatedChatEvents = await get(
+    "/v1/chat/sessions/rp-generated-session/events?limit=200",
+  );
+  assert.equal(
+    generatedChatEvents.status,
+    200,
+    JSON.stringify(generatedChatEvents.body),
+  );
+  const leakedGeneratedWakeEvents = generatedChatEvents.body.data.items.filter(
+    (event: { kind: string; payload?: Record<string, unknown> }) =>
+      event.payload?.wake_id === generatedWakeId &&
+      [
+        "assistant_turn_started",
+        "assistant_text_delta",
+        "assistant_reasoning_delta",
+        "assistant_turn_finished",
+        "assistant_message_completed",
+      ].includes(event.kind),
+  );
+  assert.deepEqual(
+    leakedGeneratedWakeEvents,
+    [],
+    "generated alternatives must not leak a normal assistant wake turn into chat events",
   );
   const selectedGeneratedAlternative = await post(
     "/v1/admin/roleplay/sessions/rp-generated-session/alternatives/rp-generated-assistant-slot/select",
