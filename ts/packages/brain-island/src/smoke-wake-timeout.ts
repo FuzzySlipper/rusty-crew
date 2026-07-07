@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import type { SessionId } from "@rusty-crew/contracts";
-import {
-  DEFAULT_WAKE_TIMEOUT_MS,
-  effectiveWakeTimeoutMs,
-} from "./service-runtime-config.js";
+import { effectiveWakeTimeoutMs } from "./service-runtime-config.js";
 import {
   effectiveTurnTimeoutMs,
   WakeDispatchTimeoutError,
@@ -14,11 +11,26 @@ assert.equal(effectiveTurnTimeoutMs(undefined), undefined);
 assert.equal(effectiveTurnTimeoutMs(0), undefined);
 assert.equal(effectiveTurnTimeoutMs(-1), undefined);
 assert.equal(effectiveTurnTimeoutMs(12.9), 12);
-assert.equal(effectiveWakeTimeoutMs({ profile: {} }), DEFAULT_WAKE_TIMEOUT_MS);
+assert.equal(effectiveWakeTimeoutMs({ profile: {} }), undefined);
+assert.equal(
+  effectiveWakeTimeoutMs({
+    profile: {},
+    service: { mode: "disabled" },
+  }),
+  undefined,
+);
+assert.equal(
+  effectiveWakeTimeoutMs({
+    profile: {},
+    service: { mode: "default", defaultMs: 600_000 },
+  }),
+  600_000,
+);
 assert.equal(
   effectiveWakeTimeoutMs({
     session: { turnTimeoutMs: 2_500 },
     profile: { runtime: { maxTurnDurationMs: 8_000 } },
+    service: { mode: "default", defaultMs: 600_000 },
   }),
   2_500,
 );
@@ -28,6 +40,7 @@ assert.equal(
       runtime: { maxTurnDurationMs: 8_000 },
       sessionDefaults: { turnTimeoutMs: 4_000 },
     },
+    service: { mode: "default", defaultMs: 600_000 },
   }),
   8_000,
 );
@@ -77,7 +90,12 @@ console.log(
     {
       success,
       timeout: "wake_timeout",
-      defaultWakeTimeoutMs: DEFAULT_WAKE_TIMEOUT_MS,
+      noImplicitWakeTimeout:
+        effectiveWakeTimeoutMs({ profile: {} }) === undefined,
+      configuredWakeTimeoutMs: effectiveWakeTimeoutMs({
+        profile: {},
+        service: { mode: "default", defaultMs: 600_000 },
+      }),
       floorMs: effectiveTurnTimeoutMs(12.9),
     },
     null,

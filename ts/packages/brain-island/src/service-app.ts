@@ -2952,6 +2952,7 @@ async function effectiveSessionDefaultsById(
             wakeTimeoutMs: effectiveWakeTimeoutMs({
               session: configured,
               profile,
+              service: state.runtimeConfig.wakeTimeout,
             }),
           },
         ] as const;
@@ -10710,6 +10711,7 @@ async function dispatchWake(
       effectiveWakeTimeoutMs({
         session: configured,
         profile: profileContext.profile,
+        service: state.runtimeConfig.wakeTimeout,
       }),
     );
     const wakeTimeoutController = new AbortController();

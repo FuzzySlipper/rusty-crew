@@ -1,6 +1,9 @@
 {
   "profilesDir": "__FIXTURE_ROOT__/profiles",
   "skillsDir": "__FIXTURE_ROOT__/skills",
+  "wakeTimeout": {
+    "mode": "disabled"
+  },
   "denObservation": {
     "eventFilters": [
       { "eventKind": "session_created" },

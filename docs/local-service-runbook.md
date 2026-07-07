@@ -308,6 +308,9 @@ Minimal shape:
 ```json
 {
   "profilesDir": "/home/system/rusty-crew/config/profiles",
+  "wakeTimeout": {
+    "mode": "disabled"
+  },
   "brains": [{ "profileId": "prime" }],
   "sessions": [
     {
@@ -321,6 +324,12 @@ Minimal shape:
 ```
 
 Profile files live at `${profilesDir}/${profileId}.json`.
+
+`wakeTimeout` controls the service-side ceiling for one dispatched brain turn.
+Use `{ "mode": "disabled" }` for no service-wide ceiling. To set a visible
+service default, use `{ "mode": "default", "defaultMs": 600000 }`. Explicit
+session `turnTimeoutMs`, profile `runtime.maxTurnDurationMs`, and profile
+`sessionDefaults.turnTimeoutMs` override the service default.
 
 ### Create Profile API
 

@@ -232,6 +232,10 @@ try {
             statementTimeoutMs: 12000,
           },
         },
+        wakeTimeout: {
+          mode: "default",
+          defaultMs: 600000,
+        },
       },
       null,
       2,
@@ -251,6 +255,28 @@ try {
   );
   assert.equal(runtimeConfig.storage.postgres.schema, "rusty_runtime");
   assert.equal(runtimeConfig.storage.postgres.bootMode, "blocked");
+  assert.deepEqual(runtimeConfig.wakeTimeout, {
+    mode: "default",
+    defaultMs: 600000,
+  });
+
+  writeFileSync(
+    config.paths.serviceConfigFile,
+    JSON.stringify({ wakeTimeout: { mode: "disabled" } }),
+  );
+  const disabledWakeTimeoutConfig = await loadRustyCrewRuntimeConfig(config);
+  assert.deepEqual(disabledWakeTimeoutConfig.wakeTimeout, {
+    mode: "disabled",
+  });
+
+  writeFileSync(
+    config.paths.serviceConfigFile,
+    JSON.stringify({ wakeTimeout: { mode: "default" } }),
+  );
+  await assert.rejects(
+    () => loadRustyCrewRuntimeConfig(config),
+    /wakeTimeout.defaultMs/,
+  );
 
   writeFileSync(
     config.paths.serviceConfigFile,

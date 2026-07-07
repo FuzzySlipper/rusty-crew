@@ -1305,6 +1305,7 @@ function openAiResponsesWakeTimeoutMs(
     effectiveWakeTimeoutMs({
       session: configuredSession,
       profile: context.profile.profile,
+      service: context.runtimeConfig?.wakeTimeout,
     }),
   );
 }

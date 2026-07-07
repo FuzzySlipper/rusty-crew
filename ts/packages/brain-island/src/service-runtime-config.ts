@@ -153,7 +153,10 @@ export interface EffectiveSessionDefaults {
   turnTimeoutMs?: number;
 }
 
-export const DEFAULT_WAKE_TIMEOUT_MS = 120_000;
+export interface RustyCrewWakeTimeoutConfig {
+  mode: "disabled" | "default";
+  defaultMs?: number;
+}
 
 export type RustyCrewScheduledJobShape =
   | "host_job"
@@ -177,6 +180,7 @@ export interface RustyCrewRuntimeConfig {
   skillsDir?: string;
   storage?: RustyCrewStorageConfig;
   denObservation?: RustyCrewDenObservationConfig;
+  wakeTimeout?: RustyCrewWakeTimeoutConfig;
   brains: RustyCrewConfiguredBrain[];
   sessions: RustyCrewConfiguredSession[];
   scheduledJobs: RustyCrewScheduledJob[];
@@ -621,6 +625,7 @@ function runtimeConfigFromNativeDraft(
     skillsDir: draft.skillsDir,
     storage: original.storage,
     denObservation: original.denObservation,
+    wakeTimeout: original.wakeTimeout,
     brains: draft.brains.map((brain) => ({
       implementationId: brain.implementationId as BrainImplementationId,
       profileId: brain.profileId as ProfileId,
@@ -1169,12 +1174,13 @@ export function effectiveSessionDefaults(
 export function effectiveWakeTimeoutMs(input: {
   session?: Pick<RustyCrewConfiguredSession, "turnTimeoutMs">;
   profile: Pick<ProfileConfig, "runtime" | "sessionDefaults">;
-}): number {
+  service?: RustyCrewWakeTimeoutConfig;
+}): number | undefined {
   return (
     input.session?.turnTimeoutMs ??
     input.profile.runtime?.maxTurnDurationMs ??
     input.profile.sessionDefaults?.turnTimeoutMs ??
-    DEFAULT_WAKE_TIMEOUT_MS
+    (input.service?.mode === "default" ? input.service.defaultMs : undefined)
   );
 }
 
@@ -1665,6 +1671,7 @@ function emptyRuntimeConfig(
     profilesDir: join(serviceConfig.paths.configDir, "profiles"),
     storage: serviceConfig.storage,
     denObservation: runtimeDenObservationConfig(undefined),
+    wakeTimeout: runtimeWakeTimeoutConfig(undefined),
     brains: [],
     sessions: [],
     scheduledJobs: [],
@@ -1692,6 +1699,7 @@ function validateRuntimeConfig(
     skillsDir,
     storage: runtimeStorageConfig(parsed.storage, serviceConfig),
     denObservation: runtimeDenObservationConfig(parsed.denObservation),
+    wakeTimeout: runtimeWakeTimeoutConfig(parsed.wakeTimeout),
     brains: arrayValue(parsed.brains).map((item, index) =>
       configuredBrain(item, index),
     ),
@@ -1864,6 +1872,33 @@ function runtimeStorageConfig(
   };
   validateRuntimeStorageConfig(config);
   return config;
+}
+
+function runtimeWakeTimeoutConfig(input: unknown): RustyCrewWakeTimeoutConfig {
+  if (input === undefined || input === null) {
+    return { mode: "disabled" };
+  }
+  if (!isRecord(input)) {
+    throw new Error("wakeTimeout config must be an object");
+  }
+  const mode = optionalString(input.mode) ?? "disabled";
+  if (mode === "disabled") {
+    return { mode: "disabled" };
+  }
+  if (mode !== "default") {
+    throw new Error("wakeTimeout.mode must be disabled or default");
+  }
+  const defaultMs = optionalPositiveInteger(
+    input.defaultMs,
+    "wakeTimeout.defaultMs",
+  );
+  if (defaultMs === undefined) {
+    throw new Error("wakeTimeout.defaultMs is required when mode is default");
+  }
+  return {
+    mode: "default",
+    defaultMs,
+  };
 }
 
 function runtimeStorageBackend(input: unknown): RustyCrewStorageBackend {

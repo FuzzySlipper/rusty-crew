@@ -173,6 +173,9 @@ Minimum shape:
       "statementTimeoutMs": 30000
     }
   },
+  "wakeTimeout": {
+    "mode": "disabled"
+  },
   "brains": [],
   "sessions": [],
   "channelBindings": [],
