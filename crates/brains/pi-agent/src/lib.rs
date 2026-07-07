@@ -6,7 +6,10 @@
 //! and service-host wiring stay outside this crate.
 
 use reqwest::blocking::Client as HttpClient;
-use rusty_crew_core_protocol::ModelProviderRecord;
+use rusty_crew_core_protocol::{
+    BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeStreamItem,
+    ModelProviderRecord, SessionId,
+};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
@@ -301,6 +304,300 @@ pub enum ChatCompletionsEvent {
         finish_reason: Option<String>,
     },
     ProviderError(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrainEventContext {
+    pub wake_id: String,
+    pub session_id: SessionId,
+}
+
+impl BrainEventContext {
+    pub fn new(wake_id: impl Into<String>, session_id: SessionId) -> Self {
+        Self {
+            wake_id: wake_id.into(),
+            session_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PiAgentFinalMessage {
+    pub text: Option<String>,
+    pub thinking: Option<String>,
+    pub stop_reason: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct PiAgentEventMapper {
+    saw_text_delta: bool,
+    think_scanner: LiteralThinkScanner,
+}
+
+impl PiAgentEventMapper {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn map_started(&self, context: &BrainEventContext) -> Vec<BrainWakeStreamItem> {
+        vec![brain_event_item(context, BrainEvent::Started)]
+    }
+
+    pub fn map_provider_event(
+        &mut self,
+        context: &BrainEventContext,
+        provider_event: &ChatCompletionsEvent,
+    ) -> Vec<BrainWakeStreamItem> {
+        match provider_event {
+            ChatCompletionsEvent::ContentDelta(text) => self.map_text_delta(context, text),
+            ChatCompletionsEvent::ReasoningDelta { text, field } => non_empty_event(
+                context,
+                BrainEvent::ReasoningDelta {
+                    text: text.clone(),
+                    format: Some(format!("chat-completions:{field}")),
+                },
+                !text.is_empty(),
+            ),
+            ChatCompletionsEvent::ProviderError(message) => vec![brain_event_item(
+                context,
+                BrainEvent::ProviderStatus {
+                    level: BrainProviderStatusLevel::Error,
+                    message: format!("Provider error: {message}"),
+                    metadata_json: None,
+                },
+            )],
+            ChatCompletionsEvent::Finished { finish_reason } => {
+                let mut items = self.finish_text_scanner(context);
+                if let Some(reason) = finish_reason {
+                    if reason != "stop" && reason != "tool_calls" {
+                        items.push(brain_event_item(
+                            context,
+                            BrainEvent::ProviderStatus {
+                                level: BrainProviderStatusLevel::Info,
+                                message: format!("Provider finished with reason: {reason}"),
+                                metadata_json: None,
+                            },
+                        ));
+                    }
+                }
+                items.push(brain_event_item(context, BrainEvent::Finished));
+                items
+            }
+            ChatCompletionsEvent::Usage(_)
+            | ChatCompletionsEvent::ToolCallDelta { .. }
+            | ChatCompletionsEvent::ToolCallFinished(_) => Vec::new(),
+        }
+    }
+
+    pub fn map_final_message(
+        &mut self,
+        context: &BrainEventContext,
+        message: PiAgentFinalMessage,
+    ) -> Vec<BrainWakeStreamItem> {
+        if self.saw_text_delta {
+            return Vec::new();
+        }
+
+        let mut items = Vec::new();
+        if let Some(thinking) = message.thinking.filter(|value| !value.trim().is_empty()) {
+            items.push(brain_event_item(
+                context,
+                BrainEvent::ReasoningDelta {
+                    text: thinking,
+                    format: Some("pi-thinking".to_string()),
+                },
+            ));
+        }
+
+        if let Some(text) = message.text.filter(|value| !value.trim().is_empty()) {
+            items.extend(self.map_text_delta(context, &text));
+            items.extend(self.finish_text_scanner(context));
+        }
+
+        if !items.is_empty() {
+            return items;
+        }
+
+        if message.stop_reason.as_deref() == Some("error") {
+            if let Some(error_message) = message.error_message {
+                let trimmed = error_message.trim();
+                if !trimmed.is_empty() {
+                    items.push(brain_event_item(
+                        context,
+                        BrainEvent::TextDelta {
+                            text: format!("LLM error: {trimmed}"),
+                        },
+                    ));
+                }
+            }
+        }
+        items
+    }
+
+    pub fn finish_text_scanner(&mut self, context: &BrainEventContext) -> Vec<BrainWakeStreamItem> {
+        let events = self.think_scanner.finish();
+        self.map_scanner_events(context, events)
+    }
+
+    fn map_text_delta(
+        &mut self,
+        context: &BrainEventContext,
+        text: &str,
+    ) -> Vec<BrainWakeStreamItem> {
+        let events = self.think_scanner.push(text);
+        self.map_scanner_events(context, events)
+    }
+
+    fn map_scanner_events(
+        &mut self,
+        context: &BrainEventContext,
+        events: Vec<LiteralThinkEvent>,
+    ) -> Vec<BrainWakeStreamItem> {
+        events
+            .into_iter()
+            .filter_map(|event| match event {
+                LiteralThinkEvent::Text(text) => {
+                    self.saw_text_delta = true;
+                    Some(brain_event_item(context, BrainEvent::TextDelta { text }))
+                }
+                LiteralThinkEvent::Reasoning(text) => Some(brain_event_item(
+                    context,
+                    BrainEvent::ReasoningDelta {
+                        text,
+                        format: Some("literal-think-tag".to_string()),
+                    },
+                )),
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LiteralThinkEvent {
+    Text(String),
+    Reasoning(String),
+}
+
+#[derive(Debug, Default)]
+struct LiteralThinkScanner {
+    buffer: String,
+    in_think: bool,
+}
+
+impl LiteralThinkScanner {
+    fn push(&mut self, text: &str) -> Vec<LiteralThinkEvent> {
+        self.buffer.push_str(text);
+        self.drain(false)
+    }
+
+    fn finish(&mut self) -> Vec<LiteralThinkEvent> {
+        self.drain(true)
+    }
+
+    fn drain(&mut self, finishing: bool) -> Vec<LiteralThinkEvent> {
+        const OPEN_TAG: &str = "<think>";
+        const CLOSE_TAG: &str = "</think>";
+
+        let mut events = Vec::new();
+        loop {
+            if self.buffer.is_empty() {
+                break;
+            }
+
+            if self.in_think {
+                if let Some(close) = self.buffer.find(CLOSE_TAG) {
+                    push_literal_event(
+                        &mut events,
+                        LiteralThinkEvent::Reasoning(self.buffer[..close].to_string()),
+                    );
+                    self.buffer.replace_range(..close + CLOSE_TAG.len(), "");
+                    self.in_think = false;
+                    continue;
+                }
+
+                let keep = if finishing {
+                    0
+                } else {
+                    partial_tag_suffix_len(&self.buffer, CLOSE_TAG)
+                };
+                let emit_len = self.buffer.len().saturating_sub(keep);
+                if emit_len == 0 {
+                    break;
+                }
+                push_literal_event(
+                    &mut events,
+                    LiteralThinkEvent::Reasoning(self.buffer[..emit_len].to_string()),
+                );
+                self.buffer.replace_range(..emit_len, "");
+                break;
+            }
+
+            if let Some(open) = self.buffer.find(OPEN_TAG) {
+                push_literal_event(
+                    &mut events,
+                    LiteralThinkEvent::Text(self.buffer[..open].to_string()),
+                );
+                self.buffer.replace_range(..open + OPEN_TAG.len(), "");
+                self.in_think = true;
+                continue;
+            }
+
+            let keep = if finishing {
+                0
+            } else {
+                partial_tag_suffix_len(&self.buffer, OPEN_TAG)
+            };
+            let emit_len = self.buffer.len().saturating_sub(keep);
+            if emit_len == 0 {
+                break;
+            }
+            push_literal_event(
+                &mut events,
+                LiteralThinkEvent::Text(self.buffer[..emit_len].to_string()),
+            );
+            self.buffer.replace_range(..emit_len, "");
+            break;
+        }
+        events
+    }
+}
+
+fn partial_tag_suffix_len(text: &str, tag: &str) -> usize {
+    let max = text.len().min(tag.len().saturating_sub(1));
+    for len in (1..=max).rev() {
+        if text.is_char_boundary(text.len() - len) && tag.starts_with(&text[text.len() - len..]) {
+            return len;
+        }
+    }
+    0
+}
+
+fn push_literal_event(events: &mut Vec<LiteralThinkEvent>, event: LiteralThinkEvent) {
+    match &event {
+        LiteralThinkEvent::Text(text) | LiteralThinkEvent::Reasoning(text) if text.is_empty() => {}
+        _ => events.push(event),
+    }
+}
+
+fn brain_event_item(context: &BrainEventContext, event: BrainEvent) -> BrainWakeStreamItem {
+    BrainWakeStreamItem::event(BrainEventEnvelope {
+        wake_id: context.wake_id.clone(),
+        session_id: context.session_id.clone(),
+        event,
+    })
+}
+
+fn non_empty_event(
+    context: &BrainEventContext,
+    event: BrainEvent,
+    emit: bool,
+) -> Vec<BrainWakeStreamItem> {
+    if emit {
+        vec![brain_event_item(context, event)]
+    } else {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -882,6 +1179,247 @@ mod tests {
                 ChatCompletionsEvent::Finished {
                     finish_reason: Some("stop".to_string())
                 }
+            ]
+        );
+    }
+
+    fn context() -> BrainEventContext {
+        BrainEventContext::new("wake-1", SessionId::new("session-1"))
+    }
+
+    fn events(items: &[BrainWakeStreamItem]) -> Vec<BrainEvent> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                BrainWakeStreamItem::Event { event } => Some(event.event.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mapper_splits_literal_think_tags_across_provider_chunks() {
+        let context = context();
+        let mut mapper = PiAgentEventMapper::new();
+
+        let mut items = Vec::new();
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ContentDelta("visible <thi".to_string()),
+        ));
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ContentDelta("nk>secret</thi".to_string()),
+        ));
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ContentDelta("nk> done".to_string()),
+        ));
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            },
+        ));
+
+        assert_eq!(
+            events(&items),
+            vec![
+                BrainEvent::TextDelta {
+                    text: "visible ".to_string()
+                },
+                BrainEvent::ReasoningDelta {
+                    text: "secret".to_string(),
+                    format: Some("literal-think-tag".to_string()),
+                },
+                BrainEvent::TextDelta {
+                    text: " done".to_string()
+                },
+                BrainEvent::Finished,
+            ]
+        );
+    }
+
+    #[test]
+    fn mapper_keeps_unterminated_think_content_as_reasoning_at_finish() {
+        let context = context();
+        let mut mapper = PiAgentEventMapper::new();
+
+        let mut items = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ContentDelta("start <think>still hidden".to_string()),
+        );
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            },
+        ));
+
+        assert_eq!(
+            events(&items),
+            vec![
+                BrainEvent::TextDelta {
+                    text: "start ".to_string()
+                },
+                BrainEvent::ReasoningDelta {
+                    text: "still hidden".to_string(),
+                    format: Some("literal-think-tag".to_string()),
+                },
+                BrainEvent::Finished,
+            ]
+        );
+    }
+
+    #[test]
+    fn mapper_treats_nested_think_like_content_as_reasoning_until_first_close() {
+        let context = context();
+        let mut mapper = PiAgentEventMapper::new();
+
+        let mut items = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ContentDelta("a<think>b<think>c</think>d".to_string()),
+        );
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            },
+        ));
+
+        assert_eq!(
+            events(&items),
+            vec![
+                BrainEvent::TextDelta {
+                    text: "a".to_string()
+                },
+                BrainEvent::ReasoningDelta {
+                    text: "b<think>c".to_string(),
+                    format: Some("literal-think-tag".to_string()),
+                },
+                BrainEvent::TextDelta {
+                    text: "d".to_string()
+                },
+                BrainEvent::Finished,
+            ]
+        );
+    }
+
+    #[test]
+    fn mapper_suppresses_final_message_when_streamed_text_was_seen() {
+        let context = context();
+        let mut mapper = PiAgentEventMapper::new();
+
+        let streamed = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ContentDelta("streamed".to_string()),
+        );
+        let fallback = mapper.map_final_message(
+            &context,
+            PiAgentFinalMessage {
+                text: Some("final duplicate".to_string()),
+                ..PiAgentFinalMessage::default()
+            },
+        );
+
+        assert_eq!(
+            events(&streamed),
+            vec![BrainEvent::TextDelta {
+                text: "streamed".to_string()
+            }]
+        );
+        assert!(fallback.is_empty());
+    }
+
+    #[test]
+    fn mapper_uses_final_message_text_thinking_and_error_fallbacks() {
+        let context = context();
+        let mut mapper = PiAgentEventMapper::new();
+
+        let items = mapper.map_final_message(
+            &context,
+            PiAgentFinalMessage {
+                text: Some("answer <think>trace</think>".to_string()),
+                thinking: Some("native thought".to_string()),
+                ..PiAgentFinalMessage::default()
+            },
+        );
+
+        assert_eq!(
+            events(&items),
+            vec![
+                BrainEvent::ReasoningDelta {
+                    text: "native thought".to_string(),
+                    format: Some("pi-thinking".to_string()),
+                },
+                BrainEvent::TextDelta {
+                    text: "answer ".to_string()
+                },
+                BrainEvent::ReasoningDelta {
+                    text: "trace".to_string(),
+                    format: Some("literal-think-tag".to_string()),
+                },
+            ]
+        );
+
+        let mut mapper = PiAgentEventMapper::new();
+        let items = mapper.map_final_message(
+            &context,
+            PiAgentFinalMessage {
+                stop_reason: Some("error".to_string()),
+                error_message: Some(" provider timed out ".to_string()),
+                ..PiAgentFinalMessage::default()
+            },
+        );
+        assert_eq!(
+            events(&items),
+            vec![BrainEvent::TextDelta {
+                text: "LLM error: provider timed out".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn mapper_projects_provider_reasoning_error_and_finish_reason() {
+        let context = context();
+        let mut mapper = PiAgentEventMapper::new();
+
+        let mut items = mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ReasoningDelta {
+                text: "chain".to_string(),
+                field: "reasoning_content".to_string(),
+            },
+        );
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::ProviderError("bad gateway".to_string()),
+        ));
+        items.extend(mapper.map_provider_event(
+            &context,
+            &ChatCompletionsEvent::Finished {
+                finish_reason: Some("length".to_string()),
+            },
+        ));
+
+        assert_eq!(
+            events(&items),
+            vec![
+                BrainEvent::ReasoningDelta {
+                    text: "chain".to_string(),
+                    format: Some("chat-completions:reasoning_content".to_string()),
+                },
+                BrainEvent::ProviderStatus {
+                    level: BrainProviderStatusLevel::Error,
+                    message: "Provider error: bad gateway".to_string(),
+                    metadata_json: None,
+                },
+                BrainEvent::ProviderStatus {
+                    level: BrainProviderStatusLevel::Info,
+                    message: "Provider finished with reason: length".to_string(),
+                    metadata_json: None,
+                },
+                BrainEvent::Finished,
             ]
         );
     }
