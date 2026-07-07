@@ -27,14 +27,12 @@ try {
     runOpenAiResponsesBrain: async () => {
       throw new Error("blocking Responses runner should not be used");
     },
-    startOpenAiResponsesBrain:
-      native.startOpenAiResponsesBrain.bind(native),
+    startOpenAiResponsesBrain: native.startOpenAiResponsesBrain.bind(native),
     drainOpenAiResponsesBrainStream:
       native.drainOpenAiResponsesBrainStream.bind(native),
     submitOpenAiResponsesToolOutput:
       native.submitOpenAiResponsesToolOutput.bind(native),
-    cancelOpenAiResponsesBrain:
-      native.cancelOpenAiResponsesBrain.bind(native),
+    cancelOpenAiResponsesBrain: native.cancelOpenAiResponsesBrain.bind(native),
     submitBrainEvent: async (event: BrainEventEnvelope) => {
       submittedEvents.push(event);
       return { accepted: true, sequence: submittedEvents.length };
@@ -100,10 +98,7 @@ try {
   );
 } finally {
   restoreEnv("RUSTY_CREW_OPENAI_RESPONSES_LIVE", previousLiveMode);
-  restoreEnv(
-    "RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS",
-    previousFakeDelay,
-  );
+  restoreEnv("RUSTY_CREW_OPENAI_RESPONSES_FAKE_DELAY_MS", previousFakeDelay);
 }
 
 function wakeInput(): BrainWakeInput {

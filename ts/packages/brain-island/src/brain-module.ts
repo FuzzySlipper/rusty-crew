@@ -1231,7 +1231,10 @@ export const openAiResponsesBrainModule: BrainModule = {
   async createBrain(context) {
     let responsesClientConfig = await openAiResponsesClientConfig(context);
     return {
-      async wake(wake, options): Promise<{
+      async wake(
+        wake,
+        options,
+      ): Promise<{
         events: BrainEventEnvelope[];
         actions: BrainAction[];
         providerState?: BrainWakeProviderStateOutput;
