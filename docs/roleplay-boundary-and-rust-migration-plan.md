@@ -44,7 +44,7 @@ Current roleplay route surface after the first extraction:
 | Prompt context and speaker identity snapshots | `crates/roleplay/roleplay-core` via `build_roleplay_prompt_context` and `roleplay_speaker_identity` | Rust deterministic assembly, with TS record fetching/brain glue |
 | Assistant alternative persistence and selection routes | `service-roleplay-routes.ts` | TS route adapter over Rust domain planning and persistence bridge operations |
 | Narrator config API | `crates/roleplay/roleplay-core` via `normalize_roleplay_narrator_config` | Rust deterministic validation/defaulting, with TS route adapter and profile-file persistence |
-| Narrator brain execution | `narrator-brain.ts` | TS brain module until a Rust brain module is deliberately built |
+| Narrator brain execution | `narrator-brain.ts` | Transitional TS executor; deterministic narrator sequencing should move to a Rust `roleplay-core` FSM per `docs/roleplay-narrator-rust-strategy-plan.md` |
 
 ## First Extraction
 
@@ -104,6 +104,10 @@ Good follow-up slices, in priority order:
 4. Keep narrator config validation/defaulting expansion inside
    `normalize_roleplay_narrator_config` before more roleplay-specific runtime
    knobs accumulate.
+5. Move narrator sequencing through the Rust FSM series in
+   `docs/roleplay-narrator-rust-strategy-plan.md`: pure Rust phase planning
+   first, bridge DTOs second, TypeScript executor cutover third, live
+   certification last.
 
 ## Non-Goals
 

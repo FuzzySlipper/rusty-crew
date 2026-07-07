@@ -130,7 +130,7 @@ TypeScript remains the transition owner for:
 | Debug store | TS records a provider request debug snapshot with boundary `pi_agent_options`; tool debug records start/update/finish/fail around TS tool execution. | Preserve operator-visible debug snapshots. For Rust client internals, record request samples at the TS/native boundary as done by `openai-responses`, without leaking secrets. |
 | Live event submission | If `submitEvent` is configured, pi-agent brain submits events as they arrive and returns an empty local event list. | Preserve streaming-first behavior. Rust bridge draining must expose events before the wake completes so Rusty View can update live. |
 | Mid-turn snapshot policy | Current smokes prove frozen pending messages and body-owned next-wake queue behavior; pi-agent sees only the wake snapshot. | Preserve. The Rust brain must not reach into coordination state mid-turn. Tool calls may execute through the bridge, but new body events wait for next wake unless a future policy changes this. |
-| Roleplay narrator | `roleplay_narrator` strategy composes multiple pi-agent turns in TS. | Transitional: keep TS narrator sequencing but invoke Rust pi-agent sub-wakes. Later task may move narrator strategy into Rust. |
+| Roleplay narrator | `roleplay_narrator` strategy composes multiple pi-agent turns through a TS executor. | Transitional after the pi-agent cutover: TS invokes Rust pi-agent sub-wakes. The next migration is a Rust `roleplay-core` narrator FSM with TS only executing phase wakes/tools; see `docs/roleplay-narrator-rust-strategy-plan.md`. |
 
 ## Review Gates For Implementation Tasks
 
