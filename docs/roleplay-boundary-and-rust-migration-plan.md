@@ -38,10 +38,11 @@ Current roleplay route surface after the first extraction:
 | --- | --- | --- |
 | Lore browser API | `ts/packages/brain-island/src/roleplay/lore-routes.ts` | TS route adapter over Rust persistence |
 | Lore storage/query semantics | `crates/core/core-persistence` bridge operations | Rust |
+| Assistant alternative terminal-slot and branch-head planning | `crates/roleplay/roleplay-core` via `plan_roleplay_assistant_alternative` | Rust deterministic domain |
 | Character/persona admin API | `service-roleplay-routes.ts` | Rust roleplay domain plus TS route adapter |
 | Session metadata API | `service-roleplay-routes.ts` | Rust roleplay domain plus TS route adapter |
 | Prompt context and speaker identity snapshots | `service-roleplay-routes.ts` | Rust deterministic assembly, with TS brain glue |
-| Assistant alternatives and branch-head selection | `service-roleplay-routes.ts` | Rust deterministic variant/branch semantics, TS generation glue |
+| Assistant alternative persistence and selection routes | `service-roleplay-routes.ts` | TS route adapter over Rust domain planning and persistence bridge operations |
 | Narrator config API | `service-roleplay-routes.ts` | Rust config/domain validation, TS route adapter |
 | Narrator brain execution | `narrator-brain.ts` | TS brain module until a Rust brain module is deliberately built |
 
@@ -89,9 +90,10 @@ operations, persistence repositories, or brain wake/request construction.
 
 Good follow-up slices, in priority order:
 
-1. Move roleplay alternatives and branch-head semantics behind a Rust-owned
-   deterministic helper or bridge operation. TS may still invoke the model for
-   generated text, but variant selection rules should not live in route glue.
+1. Continue expanding assistant alternative ownership beyond the current
+   `plan_roleplay_assistant_alternative` helper as needed. TS may still invoke
+   the model for generated text, but terminal-slot, branch-head, and
+   no-normal-chat-append invariants now have a Rust domain home.
 2. Move prompt context and speaker identity snapshot assembly to Rust so role
    context can be tested without a service host or Node runtime.
 3. Move character/persona/session metadata validation into a Rust roleplay

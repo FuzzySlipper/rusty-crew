@@ -3,6 +3,24 @@ use super::*;
 #[napi_derive::napi]
 impl NativeBridgeBinding {
     #[napi]
+    pub fn plan_roleplay_assistant_alternative_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<RoleplayAssistantAlternativePlanInput>(
+            &input_json,
+            "roleplay assistant alternative plan input",
+        )?;
+        let plan = plan_assistant_alternative(input).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("{}: {}", error.reason_code, error.message),
+            )
+        })?;
+        serialize_json(&plan, "roleplay assistant alternative plan")
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;

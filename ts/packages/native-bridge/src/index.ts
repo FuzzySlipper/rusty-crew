@@ -208,6 +208,7 @@ interface NativeBridgeBinding {
   submitOpenaiResponsesToolOutputJson(inputJson: string): string;
   cancelOpenaiResponsesBrainJson(inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
+  planRoleplayAssistantAlternativeJson(inputJson: string): string;
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
   queryMessageSlotsJson(inputJson: string): string;
@@ -1935,6 +1936,7 @@ export interface NativeBridgeModule {
   recordMemoryGovernanceDecision(
     decision: MemoryGovernanceDecisionInput,
   ): Promise<MemoryGovernanceDecisionRecord>;
+  planRoleplayAssistantAlternative(input: unknown): Promise<unknown>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
@@ -2218,6 +2220,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     saveContextCompactionArtifact: unavailable("initialize_engine"),
     listContextCompactionArtifacts: unavailable("initialize_engine"),
     recordMemoryGovernanceDecision: unavailable("initialize_engine"),
+    planRoleplayAssistantAlternative: unavailable(
+      "plan_roleplay_assistant_alternative",
+    ),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
     queryMessageSlots: unavailable("query_message_slots"),
@@ -3350,6 +3355,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.recordMemoryGovernanceDecisionJson(JSON.stringify(decision)),
       ) as MemoryGovernanceDecisionRecord,
+    planRoleplayAssistantAlternative: async (input) =>
+      JSON.parse(
+        binding.planRoleplayAssistantAlternativeJson(JSON.stringify(input)),
+      ) as unknown,
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),
     saveMessageVariant: async (input) =>

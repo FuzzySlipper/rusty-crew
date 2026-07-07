@@ -68,6 +68,7 @@ use rusty_crew_openai_responses_brain::{
     OpenAiOauthSecretStore, PendingResponsesFunctionCall, ResponsesBrainConfig, ResponsesEvent,
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
+use rusty_crew_roleplay_core::{plan_assistant_alternative, RoleplayAssistantAlternativePlanInput};
 mod binding_config_profiles;
 mod binding_conversation;
 mod binding_delegation;

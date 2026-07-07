@@ -1274,6 +1274,7 @@ dependencies = [
  "rusty-crew-core-persistence",
  "rusty-crew-core-protocol",
  "rusty-crew-openai-responses-brain",
+ "rusty-crew-roleplay-core",
  "serde",
  "serde_json",
  "time",
@@ -1354,6 +1355,15 @@ dependencies = [
  "serde_json",
  "thiserror",
  "time",
+]
+
+[[package]]
+name = "rusty-crew-roleplay-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

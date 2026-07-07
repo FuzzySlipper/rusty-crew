@@ -115,6 +115,19 @@ interface RoleplaySessionAlternativeSlot {
   variants: MessageVariantRecord[];
 }
 
+interface RoleplayAssistantAlternativePlan {
+  session_id: string;
+  terminal_slot: MessageSlotRecord;
+  active_variant: MessageVariantRecord;
+  variant_projection: RoleplaySessionAlternativeSlot;
+  next_alternate_ordinal: number;
+  branch_id_for_variant?: string | null;
+  parent_message_id?: string | null;
+  previous_message_id?: string | null;
+  branch_head_update?: { branch_id: string; head_message_id: string } | null;
+  append_chat_message: boolean;
+}
+
 export interface RoleplaySpeakerIdentitySnapshot {
   speaker_kind:
     | "player_persona"
@@ -1563,7 +1576,7 @@ async function roleplayTerminalAlternativesResult(
   sessionId: string,
   url: URL,
 ): Promise<Record<string, unknown>> {
-  const slot = await roleplayTerminalAssistantSlot(
+  const plan = await roleplayAssistantAlternativePlan(
     state,
     sessionId,
     optionalString(
@@ -1572,7 +1585,7 @@ async function roleplayTerminalAlternativesResult(
   );
   return {
     session_id: sessionId,
-    slot: roleplayAlternativeSlot(slot),
+    slot: plan.variant_projection,
   };
 }
 
@@ -1582,7 +1595,7 @@ async function createRoleplayAssistantAlternative(
   body: Record<string, unknown>,
   requestIdValue: string,
 ): Promise<Record<string, unknown>> {
-  const slot = await roleplayTerminalAssistantSlot(
+  const plan = await roleplayAssistantAlternativePlan(
     state,
     sessionId,
     optionalString(body.slotId) ?? optionalString(body.slot_id),
@@ -1598,7 +1611,10 @@ async function createRoleplayAssistantAlternative(
   const variantId =
     optionalString(body.variantId) ??
     optionalString(body.variant_id) ??
-    stableRoleplayRecordId("variant", `${slot.slot_id}:${requestIdValue}`);
+    stableRoleplayRecordId(
+      "variant",
+      `${plan.terminal_slot.slot_id}:${requestIdValue}`,
+    );
   const messageId =
     optionalString(body.messageId) ??
     optionalString(body.message_id) ??
@@ -1610,16 +1626,16 @@ async function createRoleplayAssistantAlternative(
   const variant = (await state.bridge.saveMessageVariant(
     roleplayMessageVariantWrite({
       sessionId,
-      slotId: slot.slot_id,
+      slotId: plan.terminal_slot.slot_id,
       variantId,
       messageId,
       source: "alternate",
-      ordinal: slot.alternates.length + 1,
+      ordinal: plan.next_alternate_ordinal,
       actor: { id: "roleplay-assistant", kind: "agent" },
       body: bodyText,
-      branchId: slot.primary.message.branch_id ?? undefined,
-      parentMessageId: slot.primary.message.parent_message_id ?? undefined,
-      previousMessageId: slot.primary.message.previous_message_id ?? undefined,
+      branchId: plan.branch_id_for_variant ?? undefined,
+      parentMessageId: plan.parent_message_id ?? undefined,
+      previousMessageId: plan.previous_message_id ?? undefined,
       metadataJson: {
         source: "roleplay_assistant_alternative",
         generated: false,
@@ -1635,8 +1651,8 @@ async function createRoleplayAssistantAlternative(
     status: "created",
     session_id: sessionId,
     slot: roleplayAlternativeSlot({
-      ...slot,
-      alternates: [...slot.alternates, variant],
+      ...plan.terminal_slot,
+      alternates: [...plan.terminal_slot.alternates, variant],
     }),
     variant,
   };
@@ -1653,21 +1669,22 @@ async function generateRoleplayAssistantAlternative(
       "roleplay assistant alternative generation is not configured",
     );
   }
-  const slot = await roleplayTerminalAssistantSlot(
+  const plan = await roleplayAssistantAlternativePlan(
     state,
     sessionId,
     optionalString(body.slotId) ?? optionalString(body.slot_id),
   );
   const session = await state.serviceSessionById(sessionId);
   const now = state.now();
+  const slots = await roleplayMessageSlots(state, sessionId);
   const prompt = roleplayAssistantAlternativeGenerationPrompt(
-    await roleplayMessageSlots(state, sessionId),
-    slot,
+    slots,
+    plan.terminal_slot,
     optionalString(body.instructions),
   );
   const generated = await state.generateRoleplayAssistantAlternative({
     session,
-    slot,
+    slot: plan.terminal_slot,
     prompt,
     requestId: requestIdValue,
   });
@@ -1681,7 +1698,10 @@ async function generateRoleplayAssistantAlternative(
   const variantId =
     optionalString(body.variantId) ??
     optionalString(body.variant_id) ??
-    stableRoleplayRecordId("variant", `${slot.slot_id}:${requestIdValue}`);
+    stableRoleplayRecordId(
+      "variant",
+      `${plan.terminal_slot.slot_id}:${requestIdValue}`,
+    );
   const messageId =
     optionalString(body.messageId) ??
     optionalString(body.message_id) ??
@@ -1703,22 +1723,22 @@ async function generateRoleplayAssistantAlternative(
   const variant = (await state.bridge.saveMessageVariant(
     roleplayMessageVariantWrite({
       sessionId,
-      slotId: slot.slot_id,
+      slotId: plan.terminal_slot.slot_id,
       variantId,
       messageId,
       source: "alternate",
-      ordinal: slot.alternates.length + 1,
+      ordinal: plan.next_alternate_ordinal,
       actor: { id: "roleplay-assistant", kind: "agent" },
       body: bodyText,
-      branchId: slot.primary.message.branch_id ?? undefined,
-      parentMessageId: slot.primary.message.parent_message_id ?? undefined,
-      previousMessageId: slot.primary.message.previous_message_id ?? undefined,
+      branchId: plan.branch_id_for_variant ?? undefined,
+      parentMessageId: plan.parent_message_id ?? undefined,
+      previousMessageId: plan.previous_message_id ?? undefined,
       metadataJson,
       now,
     }),
   )) as MessageVariantRecord;
   const selected = (await state.bridge.selectActiveMessageVariant({
-    slot_id: slot.slot_id,
+    slot_id: plan.terminal_slot.slot_id,
     active_variant_id: variant.variant_id,
     expected: { type: "any" },
     updated_at: state.now(),
@@ -1750,14 +1770,14 @@ async function selectRoleplayAssistantAlternative(
   slotId: string,
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const slot = await roleplayTerminalAssistantSlot(state, sessionId, slotId);
+  const plan = await roleplayAssistantAlternativePlan(state, sessionId, slotId);
   const activeVariantId =
     optionalString(body.activeVariantId) ??
     optionalString(body.active_variant_id) ??
     optionalString(body.variantId) ??
     optionalString(body.variant_id);
   const result = (await state.bridge.selectActiveMessageVariant({
-    slot_id: slot.slot_id,
+    slot_id: plan.terminal_slot.slot_id,
     active_variant_id: activeVariantId ?? null,
     expected: { type: "any" },
     updated_at: state.now(),
@@ -1817,52 +1837,12 @@ async function canonicalRoleplaySlotsThroughMessage(
   );
 }
 
-async function roleplayTerminalAssistantSlot(
+async function roleplayAssistantAlternativePlan(
   state: RoleplayRouteContext,
   sessionId: string,
   slotId: string | undefined,
-): Promise<MessageSlotRecord> {
+): Promise<RoleplayAssistantAlternativePlan> {
   const slots = await roleplayMessageSlots(state, sessionId);
-  const terminal =
-    (await roleplayActiveBranchHeadSlot(state, sessionId, slots)) ??
-    orderedRoleplaySlots(slots).at(-1);
-  if (terminal === undefined) {
-    throw new Error(
-      `roleplay session ${sessionId} has no terminal message slot`,
-    );
-  }
-  if (slotId !== undefined) {
-    const explicit = slots.find((slot) => slot.slot_id === slotId);
-    if (explicit === undefined) {
-      throw new Error(`message slot ${slotId} was not found for ${sessionId}`);
-    }
-    const explicitRole = activeVariantForSlot(explicit).message.author_role;
-    if (explicitRole !== "assistant") {
-      throw new Error(
-        `message slot ${slotId} is ${explicitRole}; assistant alternatives are only available for assistant message slots`,
-      );
-    }
-    if (terminal.slot_id !== slotId) {
-      throw new Error(
-        `message slot ${slotId} is not the current terminal assistant slot for ${sessionId}`,
-      );
-    }
-    return terminal;
-  }
-  const terminalRole = activeVariantForSlot(terminal).message.author_role;
-  if (terminalRole !== "assistant") {
-    throw new Error(
-      `roleplay session ${sessionId} terminal message is ${terminalRole}; assistant alternatives are only available for the current terminal assistant message`,
-    );
-  }
-  return terminal;
-}
-
-async function roleplayActiveBranchHeadSlot(
-  state: RoleplayRouteContext,
-  sessionId: string,
-  slots: MessageSlotRecord[],
-): Promise<MessageSlotRecord | undefined> {
   const branchState = (await state.bridge
     .getConversationBranchState({
       session_id: sessionId,
@@ -1871,26 +1851,22 @@ async function roleplayActiveBranchHeadSlot(
     .catch(() => undefined)) as
     | { active_branch_id?: string | null }
     | undefined;
-  if (branchState?.active_branch_id == null) {
-    return undefined;
-  }
-  const branches = (await state.bridge
-    .queryConversationBranches({
-      session_id: sessionId,
-      page: { limit: 500, offset: 0 },
-    })
-    .catch(() => [])) as ConversationBranchRecord[];
-  const branch = branches.find(
-    (candidate) => candidate.branch_id === branchState.active_branch_id,
-  );
-  if (branch?.head_message_id == null) {
-    return undefined;
-  }
-  return slots.find((slot) =>
-    [slot.primary, ...slot.alternates].some(
-      (variant) => variant.message.message_id === branch.head_message_id,
-    ),
-  );
+  const branches =
+    branchState?.active_branch_id == null
+      ? []
+      : ((await state.bridge
+          .queryConversationBranches({
+            session_id: sessionId,
+            page: { limit: 500, offset: 0 },
+          })
+          .catch(() => [])) as ConversationBranchRecord[]);
+  return (await state.bridge.planRoleplayAssistantAlternative({
+    session_id: sessionId,
+    requested_slot_id: slotId,
+    slots,
+    active_branch_id: branchState?.active_branch_id ?? null,
+    branches,
+  })) as RoleplayAssistantAlternativePlan;
 }
 
 async function roleplayMessageSlots(

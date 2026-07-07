@@ -986,6 +986,15 @@ errors = "core_protocol::CoreError"
 summary = "Plan profiles and sessions affected by a model-provider alias update from Rust-owned profile registry and session state."
 
 [[operation]]
+name = "plan_roleplay_assistant_alternative"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayAssistantAlternativePlanInput"
+output = "roleplay_core::RoleplayAssistantAlternativePlan"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate roleplay assistant-alternative terminal slot and branch-head invariants without mutating storage."
+
+[[operation]]
 name = "list_simple_kv"
 surface = "stable"
 direction = "ts_to_rust"

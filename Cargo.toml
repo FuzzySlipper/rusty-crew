@@ -14,6 +14,7 @@ members = [
     "crates/bridge/core-bridge-node",
     "crates/bridge/core-bridge-codegen",
     "crates/brains/openai-responses",
+    "crates/roleplay/roleplay-core",
 ]
 
 [workspace.package]

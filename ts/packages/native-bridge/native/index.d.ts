@@ -73,6 +73,7 @@ export declare class NativeBridgeBinding {
   drainOpenaiResponsesBrainStreamJson(wakeId: string, maxItems?: number | undefined | null): string
   submitOpenaiResponsesToolOutputJson(inputJson: string): string
   cancelOpenaiResponsesBrainJson(inputJson: string): string
+  planRoleplayAssistantAlternativeJson(inputJson: string): string
   addLoreEntryJson(inputJson: string): string
   replaceLoreEntryJson(inputJson: string): string
   supersedeLoreEntryJson(inputJson: string): string
