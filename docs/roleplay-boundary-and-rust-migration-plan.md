@@ -108,6 +108,73 @@ Good follow-up slices, in priority order:
    View, then continue moving any newly discovered deterministic roleplay
    behavior into `roleplay-core` instead of expanding the TS executor.
 
+## Task 4584 Follow-Up Series
+
+The TypeScript authority refactor catalog reopened this area after several Rust
+roleplay slices landed. Treat the remaining work as implementation slices, not
+as permission for another broad TS route file.
+
+### 1. Session Lifecycle Planning
+
+Move deterministic roleplay session create, fork, archive, and restore planning
+into `roleplay-core`.
+
+TS may still gather current records, call profile/session bridge APIs, and map
+browser envelopes. Rust should own:
+
+- required identifiers and default names;
+- archived/restored status transitions;
+- fork source validation inputs;
+- copied metadata shape and layer/reference invariants;
+- stable reason codes for lifecycle rejection.
+
+### 2. Chat Layer Binding Side Effects
+
+Chat layer binding currently crosses lore routes and session metadata. Move the
+deterministic write plan into Rust so a browser layer update produces one
+validated plan describing lore-layer writes plus the session metadata patch.
+
+The persistence calls can remain bridge operations, but TS should not decide
+whether a layer binding changes the active session layer list.
+
+### 3. Alternative And Branch/Variant Invariants
+
+`plan_roleplay_assistant_alternative` already gives the terminal-slot and
+branch-head logic a Rust home. Continue expanding that boundary so TS supplies
+records and generated text, while Rust owns:
+
+- terminal slot choice;
+- alternate variant identity and metadata;
+- whether a generation may append to normal chat;
+- active selection and branch-head update plan;
+- conflict/retry reason codes.
+
+### 4. Lore Control Normalization
+
+`roleplay/lore-routes.ts` is route glue over Rust persistence, but it still
+normalizes browser request semantics for search, promotion, layer entry context,
+and scoped pagination. Move deterministic request/control normalization into
+`roleplay-core` or a roleplay contract crate.
+
+Keep HTTP parsing and response projection in TS. Do not move SQL-backed lore
+queries out of `core-persistence`.
+
+### 5. Scene State Tool Domain
+
+The scene state brain tools currently own their state shape and merge behavior
+in TS. Move the deterministic scene-state record shape, update/merge rules, and
+tool result normalization into Rust-owned roleplay domain code or a persistence
+repo if the state becomes durable module data.
+
+TS should remain the brain tool adapter that calls the Rust/domain operation.
+
+### 6. Certification And Ratchets
+
+Every roleplay slice should include a Rust unit test for the moved invariant and
+a browser/API or tool smoke proving the TS route/tool still behaves the same.
+Larger behavior changes should be live-certified through the debug Rusty Crew
+service and Rusty View, especially narrator and alternative-generation flows.
+
 ## Non-Goals
 
 - Do not create a separate service for roleplay.
