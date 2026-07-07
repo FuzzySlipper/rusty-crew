@@ -44,7 +44,7 @@ Current code:
   subscribers, and reports `dropped_subscriptions`.
 - `NativeBridge::shutdown_engine()` passes through `drain_timeout_ms`, delegates
   to `engine.shutdown_with_timeout()`, and clears local subscription handles.
-- The mock bridge delegates to `engine.shutdown()`.
+- The retired mock bridge delegated to `engine.shutdown()`.
 
 Timeout semantics:
 

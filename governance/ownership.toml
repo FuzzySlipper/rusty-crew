@@ -32,7 +32,6 @@ may_not_depend_on = [
   "rusty-crew-core-config",
   "rusty-crew-core-tool-registry",
   "rusty-crew-core-bridge-node",
-  "rusty-crew-core-bridge-mock",
   "rusty-crew-core-bridge-codegen",
 ]
 
@@ -49,6 +48,5 @@ may_not_depend_on = [
   "rusty-crew-core-bus",
   "rusty-crew-core-body",
   "rusty-crew-core-bridge-node",
-  "rusty-crew-core-bridge-mock",
   "rusty-crew-core-bridge-codegen",
 ]

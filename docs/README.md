@@ -113,7 +113,6 @@ historical audit context only; they are not an implementation recommendation.
     /bridge
       /core-bridge-api    # stable bridge-facing facade + manifest scaffold
       /core-bridge-node   # napi-rs native Node boundary
-      /core-bridge-mock   # in-process test bridge
       /core-bridge-codegen # manifest/codegen placeholder
     /brains               # Rust brain modules behind the neutral wake contract
       /openai-responses

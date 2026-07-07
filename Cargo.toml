@@ -10,7 +10,6 @@ members = [
     "crates/core/core-body",
     "crates/core/core-engine",
     "crates/bridge/core-bridge-api",
-    "crates/bridge/core-bridge-mock",
     "crates/bridge/core-bridge-node",
     "crates/bridge/core-bridge-codegen",
     "crates/brains/openai-responses",

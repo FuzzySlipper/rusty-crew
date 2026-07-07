@@ -1255,14 +1255,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rusty-crew-core-bridge-mock"
-version = "0.1.0"
-dependencies = [
- "rusty-crew-core-bridge-api",
- "rusty-crew-core-engine",
-]
-
-[[package]]
 name = "rusty-crew-core-bridge-node"
 version = "0.1.0"
 dependencies = [

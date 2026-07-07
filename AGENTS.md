@@ -85,7 +85,6 @@ not the current planning queue.
     /bridge
       /core-bridge-api    # stable bridge-facing facade + manifest scaffold
       /core-bridge-node   # napi-rs native Node boundary
-      /core-bridge-mock   # in-process test bridge
       /core-bridge-codegen # manifest/codegen placeholder
   /docs                   # architecture notes, ADRs, measurements, smokes
   /governance

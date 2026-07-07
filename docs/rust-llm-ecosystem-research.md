@@ -69,7 +69,7 @@
 
 **Why this matters for pi-crew's manifest:**
 
-The pi-crew manifest's "Structural model" section (per `README.md` §"Structural model") describes a multi-crate workspace with `core-bridge-api` / `core-bridge-node` / `core-bridge-mock` / `core-bridge-codegen`. Claw Code proves this shape works for an *agent* system, not just for an engine-FFI bridge. Specifically:
+The pi-crew manifest's "Structural model" section (per `README.md` §"Structural model") describes a multi-crate workspace with `core-bridge-api` / `core-bridge-node` / `core-bridge-codegen`. Claw Code proves this shape works for an *agent* system, not just for an engine-FFI bridge. Specifically:
 
 | Claw Code crate | pi-crew analog | Notes |
 |-----------------|----------------|-------|
