@@ -60,10 +60,24 @@ interface RoleplayCharacterRecord {
   updatedAt?: string;
 }
 
+interface RoleplayPlayerPersonaRecord {
+  id: string;
+  profileId: string;
+  displayName: string;
+  avatarUrl?: string;
+  avatarAssetRef?: string;
+  description: string;
+  notes: string;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt?: string;
+}
+
 interface RoleplaySessionMetadata {
   sessionId: string;
   profileId: string;
   displayName?: string;
+  playerPersonaId?: string;
   characterId?: string;
   activeLayerIds: string[];
   archived: boolean;
@@ -135,6 +149,9 @@ export async function handleAdminRoleplayRequest(
     const profileId = decodeURIComponent(parts[4]);
     if (parts[5] === "characters") {
       return handleRoleplayCharacterRequest(request, state, url, profileId);
+    }
+    if (parts[5] === "personas") {
+      return handleRoleplayPlayerPersonaRequest(request, state, url, profileId);
     }
     if (parts[5] === "narrator-config") {
       return handleRoleplayNarratorConfigRequest(
@@ -2173,6 +2190,111 @@ async function handleRoleplayCharacterRequest(
   }
 }
 
+async function handleRoleplayPlayerPersonaRequest(
+  request: IncomingMessage,
+  state: RoleplayRouteContext,
+  url: URL,
+  profileId: string,
+): Promise<AdminRouteResult> {
+  const requestIdValue = requestId(request);
+  const method = (request.method ?? "GET").toUpperCase();
+  const parts = url.pathname.split("/").filter(Boolean);
+  const personaId =
+    parts.length >= 7 ? decodeURIComponent(parts[6]) : undefined;
+  try {
+    if (personaId === undefined) {
+      if (method === "GET") {
+        const includeArchived =
+          url.searchParams.get("include_archived") === "true";
+        const personas = (
+          await listRoleplayPlayerPersonas(state, profileId)
+        ).filter((persona) => includeArchived || persona.status !== "archived");
+        return successRoute(requestIdValue, {
+          profileId,
+          items: personas,
+          total: personas.length,
+        });
+      }
+      if (method === "POST") {
+        const persona = roleplayPlayerPersonaFromBody(
+          recordBody(await readJsonBody(request)),
+          profileId,
+          state.now(),
+        );
+        await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
+          key: roleplayPlayerPersonaKey(persona.id),
+          value: persona,
+        });
+        return successRoute(requestIdValue, { persona });
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay player persona collection supports GET and POST",
+      );
+    }
+
+    if (method === "GET") {
+      const persona = await getRoleplayPlayerPersona(
+        state,
+        profileId,
+        personaId,
+      );
+      if (persona === undefined) {
+        return roleplayNotFound(
+          requestIdValue,
+          "roleplay_player_persona_not_found",
+          `roleplay player persona ${personaId} was not found`,
+        );
+      }
+      return successRoute(requestIdValue, { persona });
+    }
+    if (method === "PATCH") {
+      const current = await requireRoleplayPlayerPersona(
+        state,
+        profileId,
+        personaId,
+      );
+      const persona = mergeRoleplayPlayerPersona(
+        current,
+        recordBody(await readJsonBody(request)),
+        state.now(),
+      );
+      await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
+        key: roleplayPlayerPersonaKey(persona.id),
+        value: persona,
+      });
+      return successRoute(requestIdValue, { persona });
+    }
+    if (method === "DELETE") {
+      const current = await requireRoleplayPlayerPersona(
+        state,
+        profileId,
+        personaId,
+      );
+      const persona = {
+        ...current,
+        status: "archived" as const,
+        updatedAt: state.now(),
+      };
+      await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
+        key: roleplayPlayerPersonaKey(persona.id),
+        value: persona,
+      });
+      return successRoute(requestIdValue, { persona });
+    }
+    return roleplayLoreMethodNotAllowed(
+      requestIdValue,
+      "roleplay player persona item supports GET, PATCH, and DELETE",
+    );
+  } catch (error) {
+    return roleplayInputError(
+      requestIdValue,
+      "roleplay_player_persona_request_failed",
+      error,
+    );
+  }
+}
+
 async function handleRoleplaySessionRequest(
   request: IncomingMessage,
   state: RoleplayRouteContext,
@@ -2301,6 +2423,13 @@ function roleplayCharacterScope(profileId: string): {
   return { scopeType: "roleplay_profile", scopeId: profileId };
 }
 
+function roleplayPlayerPersonaScope(profileId: string): {
+  scopeType: string;
+  scopeId: string;
+} {
+  return { scopeType: "roleplay_profile", scopeId: profileId };
+}
+
 function roleplaySessionScope(sessionId: string): {
   scopeType: string;
   scopeId: string;
@@ -2310,6 +2439,10 @@ function roleplaySessionScope(sessionId: string): {
 
 function roleplayCharacterKey(characterId: string): string {
   return `character:${characterId}`;
+}
+
+function roleplayPlayerPersonaKey(personaId: string): string {
+  return `player_persona:${personaId}`;
 }
 
 function roleplaySessionMetadataKey(): string {
@@ -2465,6 +2598,87 @@ function mergeRoleplayCharacter(
   };
 }
 
+function roleplayPlayerPersonaFromBody(
+  body: Record<string, unknown>,
+  profileId: string,
+  now: string,
+): RoleplayPlayerPersonaRecord {
+  const id =
+    optionalString(body.id) ??
+    optionalString(body.persona_id) ??
+    optionalString(body.personaId) ??
+    `persona-${randomBytes(6).toString("hex")}`;
+  const avatarUrl =
+    optionalString(body.avatarUrl) ?? optionalString(body.avatar_url);
+  const avatarAssetRef =
+    optionalString(body.avatarAssetRef) ??
+    optionalString(body.avatar_asset_ref) ??
+    optionalString(body.assetRef) ??
+    optionalString(body.asset_ref);
+  return {
+    id,
+    profileId,
+    displayName: requiredString(
+      body.displayName ?? body.display_name ?? body.name,
+      "displayName",
+    ),
+    ...(avatarUrl ? { avatarUrl } : {}),
+    ...(avatarAssetRef ? { avatarAssetRef } : {}),
+    description: optionalString(body.description) ?? "",
+    notes: optionalString(body.notes) ?? "",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function mergeRoleplayPlayerPersona(
+  current: RoleplayPlayerPersonaRecord,
+  body: Record<string, unknown>,
+  now: string,
+): RoleplayPlayerPersonaRecord {
+  return {
+    ...current,
+    ...(Object.hasOwn(body, "displayName") ||
+    Object.hasOwn(body, "display_name") ||
+    Object.hasOwn(body, "name")
+      ? {
+          displayName: requiredString(
+            body.displayName ?? body.display_name ?? body.name,
+            "displayName",
+          ),
+        }
+      : {}),
+    ...(Object.hasOwn(body, "avatarUrl") || Object.hasOwn(body, "avatar_url")
+      ? {
+          avatarUrl:
+            optionalString(body.avatarUrl) ?? optionalString(body.avatar_url),
+        }
+      : {}),
+    ...(Object.hasOwn(body, "avatarAssetRef") ||
+    Object.hasOwn(body, "avatar_asset_ref") ||
+    Object.hasOwn(body, "assetRef") ||
+    Object.hasOwn(body, "asset_ref")
+      ? {
+          avatarAssetRef:
+            optionalString(body.avatarAssetRef) ??
+            optionalString(body.avatar_asset_ref) ??
+            optionalString(body.assetRef) ??
+            optionalString(body.asset_ref),
+        }
+      : {}),
+    ...(Object.hasOwn(body, "description")
+      ? { description: optionalString(body.description) ?? "" }
+      : {}),
+    ...(Object.hasOwn(body, "notes")
+      ? { notes: optionalString(body.notes) ?? "" }
+      : {}),
+    status:
+      optionalString(body.status) === "archived" ? "archived" : current.status,
+    updatedAt: now,
+  };
+}
+
 async function listRoleplayCharacters(
   state: RoleplayRouteContext,
   profileId: string,
@@ -2498,6 +2712,41 @@ async function requireRoleplayCharacter(
     throw new Error(`roleplay character ${characterId} was not found`);
   }
   return character;
+}
+
+async function listRoleplayPlayerPersonas(
+  state: RoleplayRouteContext,
+  profileId: string,
+): Promise<RoleplayPlayerPersonaRecord[]> {
+  return listRoleplayJson<RoleplayPlayerPersonaRecord>(
+    state,
+    roleplayPlayerPersonaScope(profileId),
+    "player_persona:",
+  );
+}
+
+async function getRoleplayPlayerPersona(
+  state: RoleplayRouteContext,
+  profileId: string,
+  personaId: string,
+): Promise<RoleplayPlayerPersonaRecord | undefined> {
+  return getRoleplayJson<RoleplayPlayerPersonaRecord>(
+    state,
+    roleplayPlayerPersonaScope(profileId),
+    roleplayPlayerPersonaKey(personaId),
+  );
+}
+
+async function requireRoleplayPlayerPersona(
+  state: RoleplayRouteContext,
+  profileId: string,
+  personaId: string,
+): Promise<RoleplayPlayerPersonaRecord> {
+  const persona = await getRoleplayPlayerPersona(state, profileId, personaId);
+  if (persona === undefined) {
+    throw new Error(`roleplay player persona ${personaId} was not found`);
+  }
+  return persona;
 }
 
 async function roleplaySessionMetadata(
@@ -2550,6 +2799,14 @@ async function roleplaySessionSummary(
   session: SessionState,
 ): Promise<Record<string, unknown>> {
   const metadata = await roleplaySessionMetadata(state, session);
+  const playerPersona =
+    metadata.playerPersonaId === undefined
+      ? undefined
+      : await getRoleplayPlayerPersona(
+          state,
+          session.profileId,
+          metadata.playerPersonaId,
+        );
   const character =
     metadata.characterId === undefined
       ? undefined
@@ -2580,6 +2837,11 @@ async function roleplaySessionSummary(
     agent_id: session.agentId,
     status: session.status,
     display_name: metadata.displayName,
+    player_persona_id: metadata.playerPersonaId,
+    player_persona_display_name: playerPersona?.displayName ?? "Player",
+    player_persona_avatar_url: playerPersona?.avatarUrl,
+    player_persona_avatar_asset_ref: playerPersona?.avatarAssetRef,
+    player_persona_source: playerPersona === undefined ? "fallback" : "persona",
     character_id: metadata.characterId,
     character_name: character?.name,
     active_layer_ids: activeLayerIds,
@@ -2603,6 +2865,14 @@ export async function roleplayPromptContextForSession(
     () => undefined,
   );
   if (metadata === undefined) return undefined;
+  const playerPersona =
+    metadata.playerPersonaId === undefined
+      ? undefined
+      : await getRoleplayPlayerPersona(
+          state,
+          session.profileId,
+          metadata.playerPersonaId,
+        ).catch(() => undefined);
   const character =
     metadata.characterId === undefined
       ? undefined
@@ -2611,12 +2881,25 @@ export async function roleplayPromptContextForSession(
           session.profileId,
           metadata.characterId,
         ).catch(() => undefined);
-  if (character === undefined && metadata.activeLayerIds.length === 0) {
+  if (
+    playerPersona === undefined &&
+    character === undefined &&
+    metadata.activeLayerIds.length === 0
+  ) {
     return undefined;
   }
   const lines = [
     "# Roleplay Session Context",
     metadata.displayName ? `Session: ${metadata.displayName}` : undefined,
+    playerPersona
+      ? `Player persona: ${playerPersona.displayName}`
+      : "Player persona: Player (default fallback)",
+    playerPersona?.description
+      ? `Player persona description: ${playerPersona.description}`
+      : undefined,
+    playerPersona?.notes
+      ? `Player persona notes: ${playerPersona.notes}`
+      : undefined,
     character ? `Selected character: ${character.name}` : undefined,
     character?.description
       ? `Description: ${character.description}`
@@ -2704,6 +2987,9 @@ async function createRoleplaySession(
     profileId,
     displayName:
       optionalString(body.displayName) ?? optionalString(body.display_name),
+    playerPersonaId:
+      optionalString(body.playerPersonaId) ??
+      optionalString(body.player_persona_id),
     characterId:
       optionalString(body.characterId) ?? optionalString(body.character_id),
     activeLayerIds,
@@ -2744,6 +3030,14 @@ async function updateRoleplaySessionMetadata(
   ) {
     patch.displayName =
       optionalString(body.displayName) ?? optionalString(body.display_name);
+  }
+  if (
+    Object.hasOwn(body, "playerPersonaId") ||
+    Object.hasOwn(body, "player_persona_id")
+  ) {
+    patch.playerPersonaId =
+      optionalString(body.playerPersonaId) ??
+      optionalString(body.player_persona_id);
   }
   if (
     Object.hasOwn(body, "characterId") ||

@@ -479,6 +479,38 @@ try {
   );
   assert.equal(characters.body.data.items.length, 1);
 
+  const persona = await post(
+    "/v1/admin/roleplay/profiles/rp-profile/personas",
+    {
+      id: "rp-player",
+      displayName: "Browser Player",
+      avatarUrl: "https://example.invalid/player.png",
+      avatarAssetRef: "asset://player/browser",
+      description: "A player-side speaker with persistent identity.",
+      notes: "Prefers curious first-person choices.",
+    },
+  );
+  assert.equal(persona.status, 200, JSON.stringify(persona.body));
+  assert.equal(persona.body.data.persona.id, "rp-player");
+  assert.equal(persona.body.data.persona.profileId, "rp-profile");
+  assert.equal(persona.body.data.persona.status, "active");
+  const personas = await get("/v1/admin/roleplay/profiles/rp-profile/personas");
+  assert.equal(personas.status, 200, JSON.stringify(personas.body));
+  assert.equal(personas.body.data.items.length, 1);
+  assert.equal(personas.body.data.items[0]?.displayName, "Browser Player");
+  const patchedPersona = await patch(
+    "/v1/admin/roleplay/profiles/rp-profile/personas/rp-player",
+    {
+      displayName: "Browser Player Revised",
+      notes: "Persona edits should not affect old transcript snapshots later.",
+    },
+  );
+  assert.equal(patchedPersona.status, 200, JSON.stringify(patchedPersona.body));
+  assert.equal(
+    patchedPersona.body.data.persona.displayName,
+    "Browser Player Revised",
+  );
+
   const narrator = await patch(
     "/v1/admin/roleplay/profiles/rp-profile/narrator-config",
     {
@@ -511,12 +543,36 @@ try {
     sessionId: "rp-browser-session",
     profileId: "rp-profile",
     displayName: "Browser RP Session",
+    playerPersonaId: "rp-player",
     characterId: "rp-hero",
     activeLayerIds: ["rp-world"],
   });
   assert.equal(session.status, 200, JSON.stringify(session.body));
+  assert.equal(session.body.data.session.player_persona_id, "rp-player");
+  assert.equal(
+    session.body.data.session.player_persona_display_name,
+    "Browser Player Revised",
+  );
+  assert.equal(session.body.data.session.player_persona_source, "persona");
   assert.equal(session.body.data.session.character_name, "RP Hero");
   assert.deepEqual(session.body.data.session.active_layer_ids, ["rp-world"]);
+
+  const reboundSession = await patch(
+    "/v1/admin/roleplay/sessions/rp-browser-session",
+    {
+      playerPersonaId: null,
+    },
+  );
+  assert.equal(reboundSession.status, 200, JSON.stringify(reboundSession.body));
+  assert.equal(reboundSession.body.data.session.player_persona_id, undefined);
+  assert.equal(
+    reboundSession.body.data.session.player_persona_display_name,
+    "Player",
+  );
+  assert.equal(
+    reboundSession.body.data.session.player_persona_source,
+    "fallback",
+  );
 
   const archived = await post(
     "/v1/admin/roleplay/sessions/rp-browser-session/archive",
