@@ -9,6 +9,7 @@ import type {
   SessionId,
   ToolDescriptor,
 } from "@rusty-crew/contracts";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { Type } from "typebox";
 import type { BrainTool } from "./brain-tool.js";
 import type { BrainImplementation, BrainWakeInput } from "./index.js";
@@ -16,10 +17,12 @@ import {
   createRoleplayNarratorBrain,
   type RoleplayNarratorPhaseBrainOptions,
 } from "./narrator-brain.js";
+import { createRoleplayNarratorFsmBridge } from "./roleplay-narrator-fsm.js";
 
 const sessionId = "roleplay-narrator-session" as SessionId;
 
 async function runSmoke(): Promise<void> {
+  const narratorFsm = createRoleplayNarratorFsmBridge(await loadNativeBridge());
   const phaseFactory = new RecordingPhaseBrainFactory([
     '{"sceneBrief":{"location":"Moonlit Garden","capturedFacts":["silver locket missing"]}}',
     "Moonlight gathered around Katheryn as her hand closed on empty ribbon.",
@@ -27,6 +30,7 @@ async function runSmoke(): Promise<void> {
   const submittedEvents: BrainEventEnvelope[] = [];
 
   const brain = createRoleplayNarratorBrain({
+    narratorFsm,
     createPhaseBrain: (options) => phaseFactory.create(options),
     resolveTools: () => ALL_TOOLS,
     submitEvent: async (event) => {
@@ -53,9 +57,6 @@ async function runSmoke(): Promise<void> {
       review: {
         enabled: false,
         maxReviewCycles: 1,
-        checkGravityDrift: true,
-        checkCharacterVoice: true,
-        checkContinuity: true,
       },
     },
   });
@@ -181,6 +182,7 @@ async function runSmoke(): Promise<void> {
   ]);
   const reviewSubmittedEvents: BrainEventEnvelope[] = [];
   const reviewBrain = createRoleplayNarratorBrain({
+    narratorFsm,
     createPhaseBrain: (options) => reviewFactory.create(options),
     resolveTools: () => ALL_TOOLS,
     submitEvent: async (event) => {

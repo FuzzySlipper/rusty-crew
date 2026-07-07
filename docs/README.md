@@ -83,8 +83,8 @@ historical audit context only; they are not an implementation recommendation.
      `pi-agent-core` module id through the native bridge.
    - `ts/packages/brain-island` — TypeScript service/brain island. Owns
      model-callable tool implementations and adaptation, profile/role assembly,
-     MCP clients, platform adapters, and transitional roleplay narrator
-     sequencing that invokes Rust brain sub-wakes.
+     MCP clients, platform adapters, and roleplay narrator phase/tool execution
+     over Rust-owned narrator FSM plans.
 
 3. **Historical audit context (read-only, not binding).** The `pi-crew-*` and
    `pi-agent-rust-port-inspiration.md` / `rust-llm-ecosystem-research.md` docs

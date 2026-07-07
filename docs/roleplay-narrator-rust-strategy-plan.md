@@ -1,6 +1,6 @@
 # Roleplay Narrator Rust Strategy Plan
 
-Status: implementation plan for task 4566
+Status: active boundary note for the Rust-owned narrator FSM
 Date: 2026-07-07
 
 Rusty Crew's first Rust pi-agent cutover intentionally left the
@@ -15,22 +15,31 @@ a TypeScript executor.
 
 ## Current Shape
 
-`ts/packages/brain-island/src/narrator-brain.ts` currently owns:
+`crates/roleplay/roleplay-core` owns the narrator FSM and instruction builders.
+`ts/packages/brain-island/src/narrator-brain.ts` is now an executor over Rust
+phase plans.
+
+Rust owns:
 
 - phase order: explore, compose, optional compose draft, review, final compose;
-- phase-change events;
-- mandatory explore tool planning for `get_scene_state` and `recall_lore`;
-- mandatory locket/crest auto-capture planning;
-- tool filtering for explore and compose phases;
+- mandatory explore tool planning for `get_scene_state`, `recall_lore`, and
+  conditional auto-capture layer lookup;
+- mandatory locket/crest auto-capture request planning;
+- allowed tool sets for explore, compose, draft, and review;
 - instruction construction for explore, compose, and review;
-- review feedback interpretation;
-- phase brain invocation through the current brain island.
+- review feedback interpretation and max-cycle enforcement.
 
-The phase brain invocation and tool execution are still naturally TypeScript
-executor work for now. The deterministic phase plan and instruction logic are
-not.
+TypeScript owns:
 
-## Target Boundary
+- phase-change event emission;
+- local/MCP tool resolution and execution for Rust-planned tool requests;
+- Rust pi-agent phase wake invocation;
+- chat/Rusty View event projection and completion action plumbing.
+
+The phase brain invocation and tool execution remain TypeScript executor work.
+The deterministic phase plan and instruction logic do not.
+
+## Boundary
 
 Rust owns the roleplay narrator FSM in `crates/roleplay/roleplay-core`.
 

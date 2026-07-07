@@ -26,6 +26,7 @@ import {
   createRoleplayNarratorBrain,
   type RoleplayNarratorPhaseBrainOptions,
 } from "./narrator-brain.js";
+import { createRoleplayNarratorFsmBridge } from "./roleplay-narrator-fsm.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import {
   effectiveWakeTimeoutMs,
@@ -283,7 +284,11 @@ export const piAgentCoreBrainModule: BrainModule = {
   },
   async createBrain(context) {
     if (context.profile.profile.brain?.strategy === "roleplay_narrator") {
+      if (!context.bridge) {
+        throw new Error("roleplay narrator Rust FSM bridge is required");
+      }
       return createRoleplayNarratorBrain({
+        narratorFsm: createRoleplayNarratorFsmBridge(context.bridge),
         createPhaseBrain: (phase: RoleplayNarratorPhaseBrainOptions) =>
           createRustPiAgentBrainImplementation(context, {
             moduleLabel: "pi-agent-core",

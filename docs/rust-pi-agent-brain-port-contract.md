@@ -98,8 +98,10 @@ TypeScript remains the transition owner for:
 6. Add bridge/native/module wiring so profiles can select the Rust pi-agent
    brain through the normal brain module registry.
 7. Switch `piAgentCoreBrainModule` default strategy to the Rust pi-agent brain.
-8. Keep `roleplay_narrator` as transitional TypeScript sequencing that invokes
-   Rust pi-agent sub-wakes.
+8. Keep `roleplay_narrator` as a TypeScript executor over Rust-owned narrator
+   FSM plans. TypeScript invokes Rust pi-agent sub-wakes and tools;
+   `roleplay-core` owns phase order, instructions, allowed tools, mandatory
+   prelude planning, auto-capture planning, and review decisions.
 9. Delete the TypeScript pi-agent internals and drop `@earendil-works/pi-*`
    runtime dependencies after deterministic and live certification. Completed
    by task 4564, except for private smoke harness helpers retained to test
@@ -130,7 +132,7 @@ TypeScript remains the transition owner for:
 | Debug store | TS records a provider request debug snapshot with boundary `pi_agent_options`; tool debug records start/update/finish/fail around TS tool execution. | Preserve operator-visible debug snapshots. For Rust client internals, record request samples at the TS/native boundary as done by `openai-responses`, without leaking secrets. |
 | Live event submission | If `submitEvent` is configured, pi-agent brain submits events as they arrive and returns an empty local event list. | Preserve streaming-first behavior. Rust bridge draining must expose events before the wake completes so Rusty View can update live. |
 | Mid-turn snapshot policy | Current smokes prove frozen pending messages and body-owned next-wake queue behavior; pi-agent sees only the wake snapshot. | Preserve. The Rust brain must not reach into coordination state mid-turn. Tool calls may execute through the bridge, but new body events wait for next wake unless a future policy changes this. |
-| Roleplay narrator | `roleplay_narrator` strategy composes multiple pi-agent turns through a TS executor. | Transitional after the pi-agent cutover: TS invokes Rust pi-agent sub-wakes. The next migration is a Rust `roleplay-core` narrator FSM with TS only executing phase wakes/tools; see `docs/roleplay-narrator-rust-strategy-plan.md`. |
+| Roleplay narrator | `roleplay_narrator` strategy composes multiple pi-agent turns through a TS executor over Rust FSM plans. | Current boundary: Rust `roleplay-core` owns deterministic narrator sequencing and instructions; TS only executes phase wakes/tools and projects events. Live certification follows in #4607. |
 
 ## Review Gates For Implementation Tasks
 
