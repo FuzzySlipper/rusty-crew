@@ -80,6 +80,11 @@ set +a
 npm run service:start
 ```
 
+`npm run build:native` writes generated runtime artifacts under
+`ts/packages/native-bridge/native/`. Those files are expected local build output
+and should not be committed except for the tracked declaration surface
+`index.d.ts`; see `docs/native-bridge-artifact-strategy.md`.
+
 Health is intentionally shallow and does not require auth:
 
 ```bash

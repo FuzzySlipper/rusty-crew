@@ -6,3 +6,4 @@
 ts/packages/native-bridge/native/*.d.ts
 !ts/packages/native-bridge/native/index.d.ts
 ts/packages/native-bridge/native/*.js
+ts/packages/native-bridge/native/*.node

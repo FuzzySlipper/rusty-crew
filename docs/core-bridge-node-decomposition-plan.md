@@ -115,10 +115,9 @@ npm run smoke:bridge-validation
 ```
 
 If `smoke:bridge-native-surface` rebuilds
-`ts/packages/native-bridge/native/index.linux-x64-gnu.node`, do not commit that
-binary unless the task explicitly intends to update native artifacts. The
-checked-in declaration surface and bridge validation fixture/fingerprint files
-remain CI-visible drift gates.
+`ts/packages/native-bridge/native/index.linux-x64-gnu.node`, leave it as ignored
+build output. The checked-in declaration surface and bridge validation
+fixture/fingerprint files remain CI-visible drift gates.
 
 ## Non-Goals
 

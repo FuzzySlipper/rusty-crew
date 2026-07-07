@@ -152,6 +152,13 @@ npm run smoke:bridge-fingerprint-drift
 npm run smoke:bridge-validation
 ```
 
+Native bridge runtime artifacts are build output. Fresh checkouts build them
+with `npm run build:native`; the repo commits
+`ts/packages/native-bridge/native/index.d.ts` as the declaration surface but
+does not commit generated `.node` or loader `.js` files. The policy and guard
+are documented in `docs/native-bridge-artifact-strategy.md` and checked by
+`npm run smoke:native-artifact-tracking`.
+
 TypeScript unit tests use Node's built-in `node:test` runner through `tsx`.
 Add package-local tests under `ts/packages/<package>/test/*.test.ts` for pure
 logic that should not require a native build, service startup, Den, Rusty View,

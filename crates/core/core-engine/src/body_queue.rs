@@ -210,7 +210,7 @@ mod tests {
                 .iter()
                 .map(|record| (
                     record.message_id.as_str(),
-                    record.state.clone(),
+                    record.state,
                     record.terminal_at.as_deref(),
                     record.state_reason.as_deref(),
                     record.delivery_attempts,
@@ -267,7 +267,7 @@ mod tests {
                 .iter()
                 .map(|record| (
                     record.message_id.as_str(),
-                    record.state.clone(),
+                    record.state,
                     record.state_reason.as_deref(),
                 ))
                 .collect::<Vec<_>>(),

@@ -145,8 +145,9 @@ cargo test -p rusty-crew-openai-responses-brain --lib
 ```
 
 As with the `#4328` slices, `smoke:bridge-native-surface` may rebuild
-`ts/packages/native-bridge/native/index.linux-x64-gnu.node`. Do not commit that
-binary unless a task explicitly updates native artifacts.
+`ts/packages/native-bridge/native/index.linux-x64-gnu.node`. That binary is
+ignored build output; commit only source changes and any intentional
+`index.d.ts` declaration-surface update.
 
 ## Non-Goals
 
