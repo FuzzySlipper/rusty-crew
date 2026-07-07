@@ -1103,6 +1103,51 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Validate and normalize browser/admin roleplay narrator config writes and readbacks."
 
 [[operation]]
+name = "roleplay_narrator_mandatory_explore_requests"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayNarratorMandatoryExploreInput"
+output = "Vec<roleplay_core::RoleplayNarratorToolRequest>"
+errors = "never"
+summary = "Plan mandatory roleplay narrator explore-phase tool requests before TS executes them."
+
+[[operation]]
+name = "roleplay_narrator_auto_capture_request"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayNarratorAutoCaptureInput"
+output = "Option<roleplay_core::RoleplayNarratorToolRequest>"
+errors = "never"
+summary = "Plan an optional roleplay narrator lore auto-capture tool request from pending turn text and layer readback."
+
+[[operation]]
+name = "start_roleplay_narrator_turn"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayNarratorStartInput"
+output = "roleplay_core::RoleplayNarratorPhasePlan"
+errors = "never"
+summary = "Start the Rust-owned roleplay narrator phase FSM and return the initial explore plan."
+
+[[operation]]
+name = "next_roleplay_narrator_phase"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayNarratorNextInput"
+output = "roleplay_core::RoleplayNarratorPhasePlan"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Advance the Rust-owned roleplay narrator phase FSM after TS reports completed phase output."
+
+[[operation]]
+name = "roleplay_narrator_review_requests_revision"
+surface = "stable"
+direction = "ts_to_rust"
+input = "String"
+output = "bool"
+errors = "never"
+summary = "Classify roleplay narrator review feedback as requesting another compose draft or allowing final compose."
+
+[[operation]]
 name = "list_simple_kv"
 surface = "stable"
 direction = "ts_to_rust"

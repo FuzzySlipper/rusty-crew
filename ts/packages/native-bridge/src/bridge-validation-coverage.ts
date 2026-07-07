@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 136;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 141;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 26;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 21;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 115;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 120;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "create_profile_registry_record",
@@ -207,6 +207,11 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "merge_roleplay_player_persona",
       "patch_roleplay_session_metadata",
       "normalize_roleplay_narrator_config",
+      "roleplay_narrator_mandatory_explore_requests",
+      "roleplay_narrator_auto_capture_request",
+      "start_roleplay_narrator_turn",
+      "next_roleplay_narrator_phase",
+      "roleplay_narrator_review_requests_revision",
     ],
   },
   {

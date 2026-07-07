@@ -95,6 +95,53 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn roleplay_narrator_mandatory_explore_requests_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<RoleplayNarratorMandatoryExploreInput>(
+            &input_json,
+            "roleplay narrator mandatory explore input",
+        )?;
+        let requests = narrator_mandatory_explore_requests(input);
+        serialize_json(&requests, "roleplay narrator mandatory explore requests")
+    }
+
+    #[napi]
+    pub fn roleplay_narrator_auto_capture_request_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<RoleplayNarratorAutoCaptureInput>(
+            &input_json,
+            "roleplay narrator auto capture input",
+        )?;
+        let request = narrator_auto_capture_request(input);
+        serialize_json(&request, "roleplay narrator auto capture request")
+    }
+
+    #[napi]
+    pub fn start_roleplay_narrator_turn_json(&self, input_json: String) -> napi::Result<String> {
+        let input =
+            parse_json::<RoleplayNarratorStartInput>(&input_json, "roleplay narrator start input")?;
+        let plan = start_narrator_turn(input);
+        serialize_json(&plan, "roleplay narrator phase plan")
+    }
+
+    #[napi]
+    pub fn next_roleplay_narrator_phase_json(&self, input_json: String) -> napi::Result<String> {
+        let input =
+            parse_json::<RoleplayNarratorNextInput>(&input_json, "roleplay narrator next input")?;
+        let plan = next_narrator_phase(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&plan, "roleplay narrator phase plan")
+    }
+
+    #[napi]
+    pub fn roleplay_narrator_review_requests_revision(&self, feedback: String) -> bool {
+        narrator_review_requests_revision(&feedback)
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;

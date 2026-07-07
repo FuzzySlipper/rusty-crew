@@ -61,6 +61,7 @@ const runtimeExportGroups: Record<string, string[]> = {
     "createDenseProfileMemoryToolResolver",
     "createLoreMemoryToolResolver",
     "createRoleplayNarratorBrain",
+    "createRoleplayNarratorFsmBridge",
     "buildProfileRoleAssembly",
     "createMemorySpaceToolResolver",
     "contextStrategyCatalog",

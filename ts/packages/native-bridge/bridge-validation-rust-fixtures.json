@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "manifest_version": 1,
-  "operation_count": 136,
+  "operation_count": 141,
   "schema_source": "rusty-crew-core-protocol serde wire fixtures",
   "fixtures": [
     {

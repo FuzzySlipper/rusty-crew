@@ -1637,6 +1637,11 @@ export const manifestOperationNames = [
   "merge_roleplay_player_persona",
   "patch_roleplay_session_metadata",
   "normalize_roleplay_narrator_config",
+  "roleplay_narrator_mandatory_explore_requests",
+  "roleplay_narrator_auto_capture_request",
+  "start_roleplay_narrator_turn",
+  "next_roleplay_narrator_phase",
+  "roleplay_narrator_review_requests_revision",
   "create_lore_layer",
   "get_lore_layer",
   "list_lore_layers",
@@ -1686,6 +1691,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "5e654c2f371d0847b78a857961eeac517f8f16a479eeee3b4f038a425ecb22ba";
+  "9b317550eefd3178e00804d9ec3bc78e35ce389618de86359ed5bebc4e65b641";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];
