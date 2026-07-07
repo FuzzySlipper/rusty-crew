@@ -11,6 +11,7 @@
   "scripts": {
     "service:preflight": "tsx src/preflight.ts",
     "service:start": "tsx src/start.ts",
+    "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
     "smoke:admin-diagnostics-api": "tsx ../brain-island/src/smoke-admin-diagnostics-api.ts",
     "smoke:adapter-diagnostics": "tsx ../brain-island/src/smoke-adapter-diagnostics.ts",
     "smoke:den-successor-service": "tsx ../brain-island/src/smoke-den-successor-service.ts",

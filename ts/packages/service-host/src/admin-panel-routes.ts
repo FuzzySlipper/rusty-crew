@@ -1,4 +1,4 @@
-import type { ServiceRouteResult } from "./service-route-results.js";
+import type { HostRouteResult } from "./host-route-results.js";
 
 export function isAdminPanelRoute(
   pathname: string,
@@ -11,11 +11,11 @@ export function isAdminPanelRoute(
   );
 }
 
-export function adminPanelResponse(authRequired: boolean): ServiceRouteResult {
+export function adminPanelResponse(authRequired: boolean): HostRouteResult {
   return htmlResponse(adminPanelHtml(authRequired));
 }
 
-function htmlResponse(body: string): ServiceRouteResult {
+function htmlResponse(body: string): HostRouteResult {
   return {
     status: 200,
     headers: {

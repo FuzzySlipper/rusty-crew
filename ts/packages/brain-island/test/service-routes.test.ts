@@ -14,10 +14,6 @@ import type {
   NativeProfileRegistryWrite,
 } from "@rusty-crew/native-bridge";
 import type { AdminRouteResult } from "../src/admin-diagnostics-api.js";
-import {
-  adminPanelResponse,
-  isAdminPanelRoute,
-} from "../src/service-admin-panel-routes.js";
 import { handleAdminContextStrategiesRequest } from "../src/service-context-strategy-routes.js";
 import {
   handleAdminMcpCatalogRequest,
@@ -37,13 +33,6 @@ import {
   handleAdminLocalToolProfilesRequest,
   localToolProfileIdFromPath,
 } from "../src/service-local-tool-profile-routes.js";
-import {
-  handleStaticSiteRequest,
-  resolveStaticSitePath,
-  staticCacheControl,
-  staticContentType,
-  staticSiteRootFromPaths,
-} from "../src/service-static-site-routes.js";
 import {
   handleModelProviderAdminRequest,
   type ModelProviderAdminRouteContext,
@@ -71,85 +60,6 @@ import type {
   LocalToolProfileStore,
   LocalToolProfileWrite,
 } from "../src/local-tool-profiles.js";
-
-test("admin panel route helpers render the static diagnostics shell", () => {
-  assert.equal(isAdminPanelRoute("/admin", true), true);
-  assert.equal(isAdminPanelRoute("/", false), true);
-  assert.equal(isAdminPanelRoute("/", true), false);
-
-  const response = adminPanelResponse(true);
-  if ("kind" in response) {
-    assert.fail("admin panel response should be an HTML route response");
-  }
-  if (typeof response.body !== "string") {
-    assert.fail("admin panel response should have an HTML string body");
-  }
-  assert.equal(response.status, 200);
-  assert.equal(response.headers["cache-control"], "no-store");
-  assert.equal(response.headers["content-type"], "text/html; charset=utf-8");
-  assert.match(response.body, /Rusty Crew Admin/);
-  assert.match(response.body, /tokenForm/);
-});
-
-test("static site route helpers keep serving rules bounded", async () => {
-  assert.equal(
-    staticSiteRootFromPaths({ dataDir: "/srv/rusty-crew" }),
-    "/srv/rusty-crew/site",
-  );
-  assert.equal(
-    staticContentType("bundle.js"),
-    "application/javascript; charset=utf-8",
-  );
-  assert.equal(staticContentType("unknown.bin"), "application/octet-stream");
-  assert.equal(
-    staticCacheControl(
-      "/srv/rusty-crew/site",
-      "/srv/rusty-crew/site/index.html",
-    ),
-    "no-cache",
-  );
-  assert.equal(
-    staticCacheControl(
-      "/srv/rusty-crew/site",
-      "/srv/rusty-crew/site/app-1234567890abcdef.js",
-    ),
-    "public, max-age=31536000, immutable",
-  );
-
-  assert.deepEqual(
-    resolveStaticSitePath("/srv/rusty-crew/site", "/assets/app.js"),
-    {
-      ok: true,
-      path: "/srv/rusty-crew/site/assets/app.js",
-    },
-  );
-  assert.deepEqual(
-    resolveStaticSitePath("/srv/rusty-crew/site", "/../secret.txt"),
-    {
-      ok: false,
-      reasonCode: "static_path_forbidden",
-      message: "static path contains a forbidden segment",
-    },
-  );
-
-  const methodFailure = await handleStaticSiteRequest(
-    {
-      method: "POST",
-      pathname: "/",
-      requestId: "req-static",
-    },
-    { root: "/srv/rusty-crew/site" },
-  );
-  if ("kind" in methodFailure) {
-    assert.fail("method failure should return an admin route envelope");
-  }
-  if (typeof methodFailure.body === "string") {
-    assert.fail("method failure should return a JSON admin route envelope");
-  }
-  const adminFailure = methodFailure as AdminRouteResult;
-  assert.equal(adminFailure.status, 405);
-  assert.equal(errorReason(adminFailure), "static_method_not_allowed");
-});
 
 test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {
   const calls: string[] = [];

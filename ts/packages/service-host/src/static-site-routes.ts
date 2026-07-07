@@ -3,10 +3,10 @@ import { stat } from "node:fs/promises";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 
 import {
-  failure,
-  type RawServiceRouteResult,
-  type ServiceRouteResult,
-} from "./service-route-results.js";
+  hostFailure,
+  type HostRawRouteResult,
+  type HostRouteResult,
+} from "./host-route-results.js";
 
 export interface StaticSiteRouteRequest {
   method?: string;
@@ -32,9 +32,9 @@ export function staticServingEnabled(root: string | undefined): boolean {
 export async function handleStaticSiteRequest(
   request: StaticSiteRouteRequest,
   context: StaticSiteRouteContext,
-): Promise<ServiceRouteResult> {
+): Promise<HostRouteResult> {
   if ((request.method ?? "GET").toUpperCase() !== "GET") {
-    return failure(405, request.requestId, {
+    return hostFailure(405, request.requestId, {
       code: "method_not_allowed",
       reason_code: "static_method_not_allowed",
       message: "static files only support GET",
@@ -43,7 +43,7 @@ export async function handleStaticSiteRequest(
   }
   const root = context.root;
   if (root === undefined) {
-    return failure(404, request.requestId, {
+    return hostFailure(404, request.requestId, {
       code: "not_found",
       reason_code: "static_site_disabled",
       message: "static site serving is not configured",
@@ -52,7 +52,7 @@ export async function handleStaticSiteRequest(
   }
   const candidate = resolveStaticSitePath(root, request.pathname);
   if (!candidate.ok) {
-    return failure(403, request.requestId, {
+    return hostFailure(403, request.requestId, {
       code: "forbidden",
       reason_code: candidate.reasonCode,
       message: candidate.message,
@@ -68,7 +68,7 @@ export async function handleStaticSiteRequest(
     return staticFileResponse(root, indexPath);
   }
 
-  return failure(404, request.requestId, {
+  return hostFailure(404, request.requestId, {
     code: "not_found",
     reason_code: "static_index_missing",
     message: `static site index.html was not found in ${root}`,
@@ -146,7 +146,7 @@ async function isReadableFile(path: string): Promise<boolean> {
 function staticFileResponse(
   root: string,
   filePath: string,
-): RawServiceRouteResult {
+): HostRawRouteResult {
   return {
     kind: "raw",
     write(response) {

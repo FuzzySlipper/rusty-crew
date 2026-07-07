@@ -31,6 +31,9 @@ import {
 import type { AdapterId, EngineHandle } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
+import { handleHostShellRequest, requestId } from "./host-shell-routes.js";
+import { hostFailure, writeHostRouteResult } from "./host-route-results.js";
+
 export {
   createSystemdNotifier,
   localHealthBaseUrl,
@@ -73,7 +76,7 @@ export async function startRustyCrewServiceHost(
       response.end();
       return;
     }
-    app.handle(request, response);
+    void handleHostHttpRequest(request, response, app);
   });
 
   try {
@@ -103,6 +106,31 @@ export type RustyCrewServiceRequestHandler = (
   request: IncomingMessage,
   response: ServerResponse,
 ) => void;
+
+async function handleHostHttpRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  app: RustyCrewServiceApp,
+): Promise<void> {
+  try {
+    const hostResult = await handleHostShellRequest(request, app.config);
+    if (hostResult !== undefined) {
+      writeHostRouteResult(response, hostResult);
+      return;
+    }
+    app.handle(request, response);
+  } catch (error) {
+    writeHostRouteResult(
+      response,
+      hostFailure(500, requestId(request), {
+        code: "internal_error",
+        reason_code: "service_host_shell_error",
+        message: errorMessage(error, "service host shell request failed"),
+        retryable: false,
+      }),
+    );
+  }
+}
 
 function defaultServiceAdapterFactories(): ServiceAdapterFactories {
   return {
@@ -136,6 +164,10 @@ function defaultServiceAdapterFactories(): ServiceAdapterFactories {
     projectAgentMessageToChannel,
     dispatchChannelMessageProjection,
   };
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {

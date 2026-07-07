@@ -175,7 +175,10 @@ Crate / package roles:
   assembly, and adapter-neutral service ports; also hosts the roleplay narrator
   brain.
 - `ts/packages/service-host` — service process composition root, concrete
-  adapter injection, startup entrypoint, and service-host smoke entrypoints.
+  adapter injection, startup entrypoint, host-level CORS, browser shell/static
+  site mounting, and service-host smoke entrypoints. Some admin/API route
+  wiring and background drain loops are still transitional inside
+  `brain-island` behind explicit ports.
 - `ts/packages/adapter-den`, `adapter-mcp`, `adapter-telegram`, `adapter-tui`
   — platform adapter boundaries.
 

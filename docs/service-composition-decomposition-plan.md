@@ -105,10 +105,8 @@ This keeps the route testable without a live service, bridge, or HTTP server.
 `state.bridge` plus `state.now`.
 
 Task 4325 started the second wave by moving shared route-result types into
-`service-route-results.ts` and extracting static site serving into
-`service-static-site-routes.ts`. That slice deliberately moved filesystem/path
-serving glue only; the embedded admin panel HTML remains in `service-app.ts`
-until it can move in a focused UI/static-resource slice.
+`service-route-results.ts` and extracting static site serving into a small
+route helper. That slice deliberately moved filesystem/path serving glue only.
 
 Task 4332 then moved the embedded admin-panel HTML and route decision helpers
 into `service-admin-panel-routes.ts`. This is intentionally low-authority
@@ -190,9 +188,35 @@ roleplay work should consult that boundary note and prefer Rust crates under
 `crates/roleplay/` for deterministic domain validation, prompt/context
 assembly, branch/variant invariants, and roleplay-specific storage semantics.
 
+Task 4509 moved the browser-shell/static-site mount from `brain-island` into
+`service-host`. `service-host` now pre-handles `/admin`, `/`, and non-`/v1/`
+static asset paths before delegating API/chat/admin JSON routes to
+`brain-island`. The moved files are:
+
+- `ts/packages/service-host/src/admin-panel-routes.ts`
+- `ts/packages/service-host/src/static-site-routes.ts`
+- `ts/packages/service-host/src/host-shell-routes.ts`
+- `ts/packages/service-host/src/host-route-results.ts`
+
+The 4509 authority split is:
+
+- **Host glue now extracted:** browser shell/static dispatch, static path
+  bounding, static content/cache headers, host-local JSON/static response
+  writing, and `/v1/` delegation to the service app.
+- **Authority still visible in `service-app.ts`:** admin/API route table,
+  runtime config/profile/model-provider effects, chat/session mutation,
+  direct-debug routes, background wake/drain loops, and adapter projection
+  callbacks. Those remain next decomposition candidates and should move only
+  behind explicit ports or Rust-owned control-plane operations.
+- **Generated contract candidates:** route catalog metadata for mounted
+  host/API paths and the shared admin error envelope used by host-owned static
+  failures.
+
 ## Validation Pattern
 
-Every route-family extraction should add or extend a unit test in
-`ts/packages/brain-island/test/service-routes.test.ts` or a sibling route test.
-For service-host migrations, keep one smoke proving the mounted HTTP route still
-returns the same envelope shape.
+Every route-family extraction should add or extend a unit test in the owning
+package, such as `ts/packages/brain-island/test/service-routes.test.ts` for
+brain capability/admin API modules or
+`ts/packages/service-host/test/host-shell-routes.test.ts` for host-owned
+browser/static glue. For service-host migrations, keep one smoke proving the
+mounted HTTP route still returns the same envelope shape.

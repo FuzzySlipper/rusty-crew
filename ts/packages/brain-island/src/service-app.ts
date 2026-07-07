@@ -104,10 +104,6 @@ import {
   mcpServerCatalogEntries,
 } from "./service-mcp-catalog-routes.js";
 import {
-  adminPanelResponse,
-  isAdminPanelRoute,
-} from "./service-admin-panel-routes.js";
-import {
   failure,
   isRawServiceRouteResult,
   successRoute,
@@ -116,11 +112,6 @@ import {
 import { handleSchedulerReadRequest } from "./service-scheduler-routes.js";
 import { handleAdminToolsCatalogRequest } from "./service-tool-catalog-routes.js";
 import { handleAdminLocalToolProfilesRequest } from "./service-local-tool-profile-routes.js";
-import {
-  handleStaticSiteRequest,
-  staticServingEnabled,
-  staticSiteRootFromPaths,
-} from "./service-static-site-routes.js";
 import { startServiceBackgroundLoopTimers } from "./service-background-loops.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import {
@@ -749,11 +740,6 @@ async function handleHttpRequest(
   state: ServiceState,
 ): Promise<ServiceRouteResult> {
   const url = new URL(request.url ?? "/", "http://rusty-crew.local");
-  const staticSiteRoot = staticSiteRootFromPaths(state.config.paths);
-  if (isAdminPanelRoute(url.pathname, staticServingEnabled(staticSiteRoot))) {
-    return adminPanelResponse(configRequiresAuth(state.config));
-  }
-
   if (url.pathname === "/v1/admin/healthz") {
     return handleAdminDiagnosticsRequest(
       {
@@ -772,20 +758,6 @@ async function handleHttpRequest(
     (request.method ?? "GET").toUpperCase() === "OPTIONS"
   ) {
     return chatCorsPreflightResponse(request);
-  }
-
-  if (
-    !url.pathname.startsWith("/v1/") &&
-    staticServingEnabled(staticSiteRoot)
-  ) {
-    return handleStaticSiteRequest(
-      {
-        method: request.method,
-        pathname: url.pathname,
-        requestId: requestId(request),
-      },
-      { root: staticSiteRoot },
-    );
   }
 
   if (!isAuthorized(request, state.config.admin.token, state)) {
