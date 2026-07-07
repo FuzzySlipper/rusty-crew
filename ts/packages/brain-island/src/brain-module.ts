@@ -32,6 +32,7 @@ import type {
   BrainActionPlanner,
   BrainImplementation,
   BrainWakeInput,
+  BrainWakeOptions,
 } from "./index.js";
 import {
   localToolCallMetadata,
@@ -343,7 +344,10 @@ export const localBrainModule: BrainModule = {
   },
   async createBrain() {
     return {
-      async wake(wake): Promise<{
+      async wake(
+        wake,
+        options,
+      ): Promise<{
         events: BrainEventEnvelope[];
         actions: BrainAction[];
       }> {
@@ -549,6 +553,7 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   context: BrainModuleContext,
   wake: BrainWakeInput,
   input: Parameters<NativeBridgeModule["runOpenAiResponsesBrain"]>[0],
+  options?: BrainWakeOptions,
 ): Promise<{
   events: BrainEventEnvelope[];
   actions: BrainAction[];
@@ -582,82 +587,105 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
       inputSchema: tool.parameters,
     })),
   });
+  let cancelRequested = false;
+  const cancelBufferedWake = async () => {
+    if (cancelRequested) return;
+    cancelRequested = true;
+    await bridge.cancelOpenAiResponsesBrain({
+      wakeId: started.wakeId,
+      reasonCode: "wake_timeout",
+      summary: `wake ${started.wakeId} was cancelled by service wake timeout policy`,
+    });
+  };
+  const abortListener = () => {
+    void cancelBufferedWake().catch(() => {
+      // A terminal drain may already have removed the buffered run.
+    });
+  };
+  options?.signal?.addEventListener("abort", abortListener, { once: true });
   const streamActions: BrainAction[] = [];
   const brainEventCounts: Record<string, number> = {};
   const brainStreamItemCounts: Record<string, number> = {};
   const toolDebugReferences = createOpenAiResponsesToolDebugReferences();
   const toolFailurePolicy = createOpenAiResponsesToolFailurePolicyState();
 
-  for (;;) {
-    const drained = await bridge.drainOpenAiResponsesBrainStream({
-      wakeId: started.wakeId,
-      maxItems: 32,
-    });
-    const preparedToolRequests = drained.toolRequests.map((request) =>
-      prepareOpenAiResponsesToolRequest(
-        wake,
-        request,
-        toolsByName,
-        context.toolCallDebugStore,
-      ),
-    );
-    addPreparedOpenAiResponsesToolDebugReferences(
-      toolDebugReferences,
-      preparedToolRequests,
-    );
-    for (const item of drained.items) {
-      incrementCount(brainStreamItemCounts, item.type);
-      if (item.type === "event") {
-        incrementCount(brainEventCounts, item.event.event.type);
+  try {
+    for (;;) {
+      if (options?.signal?.aborted) {
+        await cancelBufferedWake();
       }
-      await handleDrainedOpenAiResponsesStreamItem(
-        bridge,
-        withOpenAiResponsesToolDebugReference(item, toolDebugReferences),
-        streamActions,
-      );
-    }
-    for (const request of preparedToolRequests) {
-      const output = await executePreparedOpenAiResponsesToolRequest(
-        wake,
-        request,
-        context.toolCallDebugStore,
-      );
-      await bridge.submitOpenAiResponsesToolOutput({
+      const drained = await bridge.drainOpenAiResponsesBrainStream({
         wakeId: started.wakeId,
-        callId: request.request.callId,
-        output: output.output,
-        isError: output.isError,
+        maxItems: 32,
       });
-      const stopReport = recordOpenAiResponsesToolFailure(
-        toolFailurePolicy,
-        output.failure,
+      const preparedToolRequests = drained.toolRequests.map((request) =>
+        prepareOpenAiResponsesToolRequest(
+          wake,
+          request,
+          toolsByName,
+          context.toolCallDebugStore,
+        ),
       );
-      if (stopReport !== undefined) {
-        await submitOpenAiResponsesBrainEvent(bridge, wake, {
-          type: "provider_status",
-          level: "error",
-          message: stopReport,
-        });
-        throw new Error(stopReport);
+      addPreparedOpenAiResponsesToolDebugReferences(
+        toolDebugReferences,
+        preparedToolRequests,
+      );
+      for (const item of drained.items) {
+        incrementCount(brainStreamItemCounts, item.type);
+        if (item.type === "event") {
+          incrementCount(brainEventCounts, item.event.event.type);
+        }
+        await handleDrainedOpenAiResponsesStreamItem(
+          bridge,
+          withOpenAiResponsesToolDebugReference(item, toolDebugReferences),
+          streamActions,
+        );
       }
+      for (const request of preparedToolRequests) {
+        const output = await executePreparedOpenAiResponsesToolRequest(
+          wake,
+          request,
+          context.toolCallDebugStore,
+        );
+        await bridge.submitOpenAiResponsesToolOutput({
+          wakeId: started.wakeId,
+          callId: request.request.callId,
+          output: output.output,
+          isError: output.isError,
+        });
+        const stopReport = recordOpenAiResponsesToolFailure(
+          toolFailurePolicy,
+          output.failure,
+        );
+        if (stopReport !== undefined) {
+          await submitOpenAiResponsesBrainEvent(bridge, wake, {
+            type: "provider_status",
+            level: "error",
+            message: stopReport,
+          });
+          throw new Error(stopReport);
+        }
+      }
+      if (drained.error !== undefined) {
+        throw new Error(
+          `OpenAI Responses buffered wake ${started.wakeId} failed: ${drained.error}`,
+        );
+      }
+      if (drained.terminal) {
+        return {
+          events: [],
+          actions: [...selectionActions.actions, ...streamActions],
+          providerState: drained.providerState,
+          transportMetrics: drained.transportMetrics,
+          brainEventCounts,
+          brainStreamItemCounts,
+          credentialSecretUpdate: drained.credentialSecretUpdate,
+        };
+      }
+      await delay(25);
     }
-    if (drained.error !== undefined) {
-      throw new Error(
-        `OpenAI Responses buffered wake ${started.wakeId} failed: ${drained.error}`,
-      );
-    }
-    if (drained.terminal) {
-      return {
-        events: [],
-        actions: [...selectionActions.actions, ...streamActions],
-        providerState: drained.providerState,
-        transportMetrics: drained.transportMetrics,
-        brainEventCounts,
-        brainStreamItemCounts,
-        credentialSecretUpdate: drained.credentialSecretUpdate,
-      };
-    }
-    await delay(25);
+  } finally {
+    options?.signal?.removeEventListener("abort", abortListener);
   }
 }
 
@@ -1203,7 +1231,7 @@ export const openAiResponsesBrainModule: BrainModule = {
   async createBrain(context) {
     let responsesClientConfig = await openAiResponsesClientConfig(context);
     return {
-      async wake(wake): Promise<{
+      async wake(wake, options): Promise<{
         events: BrainEventEnvelope[];
         actions: BrainAction[];
         providerState?: BrainWakeProviderStateOutput;
@@ -1263,6 +1291,7 @@ export const openAiResponsesBrainModule: BrainModule = {
           context,
           wake,
           input,
+          options,
         );
         const exactDebug = recordOpenAiResponsesProviderRequestSamples(
           context,

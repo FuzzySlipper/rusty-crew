@@ -206,6 +206,7 @@ interface NativeBridgeBinding {
     maxItems?: number,
   ): string;
   submitOpenaiResponsesToolOutputJson(inputJson: string): string;
+  cancelOpenaiResponsesBrainJson(inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
@@ -636,6 +637,12 @@ export interface OpenAiResponsesToolRequest {
   argumentsJson: string;
 }
 
+export interface OpenAiResponsesBufferedCancellation {
+  reasonCode: string;
+  summary: string;
+  cancelledAt: string;
+}
+
 interface NativeBrainWakeProviderStateInput {
   module_id: string;
   strategy_id: string;
@@ -650,6 +657,7 @@ export interface BrainWakeExecutor {
   wake(
     request: BrainWakeRequest,
     buffers: BridgeBufferClient,
+    options?: { signal?: AbortSignal },
   ): Promise<BrainWakeExecutionResult> | BrainWakeExecutionResult;
 }
 
@@ -1672,7 +1680,10 @@ export interface NativeBridgeModule {
     sessionId: SessionId;
     wakeId: string;
   }): Promise<Unit>;
-  wakeBrain(request: BrainWakeRequest): Promise<BrainWakeAccepted>;
+  wakeBrain(
+    request: BrainWakeRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<BrainWakeAccepted>;
   submitBrainEvent(event: BrainEventEnvelope): Promise<EventReceipt>;
   submitBrainActions(batch: BrainActionBatch): Promise<ActionBatchReceipt>;
   registerPlatformAdapter(
@@ -1968,6 +1979,7 @@ export interface NativeBridgeModule {
     providerState?: BrainWakeProviderStateOutput;
     transportMetrics?: OpenAiResponsesTransportMetrics;
     credentialSecretUpdate?: OpenAiResponsesCredentialSecretUpdate;
+    cancellation?: OpenAiResponsesBufferedCancellation;
     error?: string;
   }>;
   submitOpenAiResponsesToolOutput(input: {
@@ -1976,6 +1988,17 @@ export interface NativeBridgeModule {
     output: string;
     isError: boolean;
   }): Promise<{ ok: true; wakeId: string; callId: string }>;
+  cancelOpenAiResponsesBrain(input: {
+    wakeId: string;
+    reasonCode: string;
+    summary: string;
+  }): Promise<{
+    ok: true;
+    wakeId: string;
+    cancelled: boolean;
+    terminal: boolean;
+    cancellation?: OpenAiResponsesBufferedCancellation;
+  }>;
   listProfileMemory(
     query: NativeProfileMemoryQuery,
   ): Promise<NativeProfileMemoryRecord[]>;
@@ -2226,6 +2249,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     startOpenAiResponsesBrain: unavailable("wake_brain"),
     drainOpenAiResponsesBrainStream: unavailable("wake_brain"),
     submitOpenAiResponsesToolOutput: unavailable("wake_brain"),
+    cancelOpenAiResponsesBrain: unavailable("wake_brain"),
     listProfileMemory: unavailable("initialize_engine"),
     getProfileMemory: unavailable("initialize_engine"),
     addProfileMemory: unavailable("initialize_engine"),
@@ -2645,7 +2669,7 @@ function createNativeBridgeModule(
       );
       return {};
     },
-    wakeBrain: async (request) => {
+    wakeBrain: async (request, options) => {
       const validatedRequest = validateBridgeValue<BrainWakeRequest>({
         operation: "wake_brain",
         direction: "ts_to_rust",
@@ -2659,7 +2683,7 @@ function createNativeBridgeModule(
         );
       }
 
-      const result = await executor.wake(validatedRequest, module);
+      const result = await executor.wake(validatedRequest, module, options);
       for (const item of brainWakeStreamItemsFromExecutionResult(
         validatedRequest,
         result,
@@ -3509,6 +3533,13 @@ function createNativeBridgeModule(
               secret: raw.credential_secret_update.secret,
             }
           : undefined,
+        cancellation: raw.cancellation
+          ? {
+              reasonCode: raw.cancellation.reason_code,
+              summary: raw.cancellation.summary,
+              cancelledAt: raw.cancellation.cancelled_at,
+            }
+          : undefined,
         error: typeof raw.error === "string" ? raw.error : undefined,
       };
     },
@@ -3531,6 +3562,30 @@ function createNativeBridgeModule(
         ok: true,
         wakeId: raw.wake_id,
         callId: raw.call_id,
+      };
+    },
+    cancelOpenAiResponsesBrain: async (input) => {
+      const raw = JSON.parse(
+        binding.cancelOpenaiResponsesBrainJson(
+          JSON.stringify({
+            wakeId: input.wakeId,
+            reasonCode: input.reasonCode,
+            summary: input.summary,
+          }),
+        ),
+      ) as RawOpenAiResponsesBufferedCancelResult;
+      return {
+        ok: true,
+        wakeId: raw.wake_id,
+        cancelled: raw.cancelled,
+        terminal: raw.terminal,
+        cancellation: raw.cancellation
+          ? {
+              reasonCode: raw.cancellation.reason_code,
+              summary: raw.cancellation.summary,
+              cancelledAt: raw.cancellation.cancelled_at,
+            }
+          : undefined,
       };
     },
     listProfileMemory: async (query) => binding.listProfileMemory(query),
@@ -5951,6 +6006,21 @@ interface RawOpenAiResponsesBufferedDrainResult {
   transport_metrics?: OpenAiResponsesTransportMetrics;
   credential_secret_update?: RawOpenAiResponsesCredentialSecretUpdate;
   error?: string | null;
+  cancellation?: RawOpenAiResponsesBufferedCancellation | null;
+}
+
+interface RawOpenAiResponsesBufferedCancellation {
+  reason_code: string;
+  summary: string;
+  cancelled_at: string;
+}
+
+interface RawOpenAiResponsesBufferedCancelResult {
+  ok: true;
+  wake_id: string;
+  cancelled: boolean;
+  terminal: boolean;
+  cancellation?: RawOpenAiResponsesBufferedCancellation | null;
 }
 
 type RawBrainWakeStreamItem =

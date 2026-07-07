@@ -36,6 +36,10 @@ export interface BrainWakeInput {
   providerStateAbsence?: ProviderStateAbsenceReason;
 }
 
+export interface BrainWakeOptions {
+  signal?: AbortSignal;
+}
+
 export interface BrainWakeResult {
   events: BrainEventEnvelope[];
   actions: BrainAction[];
@@ -47,15 +51,18 @@ export interface BrainWakeResult {
 }
 
 export interface BrainImplementation {
-  wake(input: BrainWakeInput): Promise<BrainWakeResult>;
+  wake(
+    input: BrainWakeInput,
+    options?: BrainWakeOptions,
+  ): Promise<BrainWakeResult>;
 }
 
 export function createBrainWakeExecutor(
   brain: BrainImplementation,
 ): BrainWakeExecutor {
   return {
-    wake(request, buffers): Promise<BrainWakeResult> {
-      return wakeBrainFromBridgeRequest(buffers, brain, request);
+    wake(request, buffers, options): Promise<BrainWakeResult> {
+      return wakeBrainFromBridgeRequest(buffers, brain, request, options);
     },
   };
 }

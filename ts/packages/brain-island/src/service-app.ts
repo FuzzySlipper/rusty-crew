@@ -820,6 +820,18 @@ async function handleHttpRequest(
   }
 
   if (isChatRoute(url.pathname)) {
+    let chatEffectiveDefaults:
+      | Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>>
+      | undefined;
+    const effectiveDefaultsForChatSession = async (session: SessionState) => {
+      chatEffectiveDefaults ??= state.bridge
+        .listSessions()
+        .then((sessions) => effectiveSessionDefaultsById(state, sessions));
+      return chatEffectiveDefaults.then((defaults) => {
+        const value = defaults.get(session.sessionId);
+        return value === undefined ? undefined : { ...value };
+      });
+    };
     return handleRustyViewChatRouteRequest(request, url, {
       stream: {
         listSessions: () => state.bridge.listSessions(),
@@ -835,6 +847,7 @@ async function handleHttpRequest(
         listSessions: () => state.bridge.listSessions(),
         projectBodyStateJson: (sessionId) =>
           state.bridge.projectBodyStateJson(sessionId),
+        effectiveSessionDefaults: effectiveDefaultsForChatSession,
         listChatEvents: (session, cursor, limit) =>
           listChatEventsAfterCursor(state, session, cursor, limit),
         getToolCallDebugDetail: (input) =>
@@ -5282,6 +5295,9 @@ function runtimeConfigDraftFromCommand(
     ...(optionalString(draft.skillsDir) === undefined
       ? {}
       : { skillsDir: optionalString(draft.skillsDir) }),
+    wakeTimeout: Object.hasOwn(draft, "wakeTimeout")
+      ? (draft.wakeTimeout as RustyCrewRuntimeConfig["wakeTimeout"])
+      : state.runtimeConfig.wakeTimeout,
     brains: arrayValue(draft.brains).map((brain, index) =>
       runtimeConfigBrainDraft(brain, index),
     ),
@@ -5315,6 +5331,9 @@ function runtimeConfigDraftFromFileValue(
       : { skillsDir: optionalString(draft.skillsDir) }),
     storage: state.runtimeConfig.storage,
     denObservation: state.runtimeConfig.denObservation,
+    wakeTimeout: Object.hasOwn(draft, "wakeTimeout")
+      ? (draft.wakeTimeout as RustyCrewRuntimeConfig["wakeTimeout"])
+      : state.runtimeConfig.wakeTimeout,
     brains: arrayValue(draft.brains).map((brain, index) =>
       runtimeConfigBrainDraft(brain, index),
     ),
@@ -9599,6 +9618,7 @@ function ensureChatWakeTerminalEventsFromChatLog(
     source: string;
     requireCompletion?: boolean;
     requireFinished?: boolean;
+    allowWithoutAssistantTurn?: boolean;
   },
 ): void {
   const events = state.chatEventsBySession.get(session.sessionId) ?? [];
@@ -9616,7 +9636,7 @@ function ensureChatWakeTerminalEventsFromChatLog(
       "tool_call_failed",
     ].includes(event.kind),
   );
-  if (!hasAssistantTurn) return;
+  if (!hasAssistantTurn && input.allowWithoutAssistantTurn !== true) return;
 
   const needsCompletion =
     input.requireCompletion !== false &&
@@ -10828,7 +10848,9 @@ async function dispatchWake(
             ),
             wakeId,
           });
-          return state.bridge.wakeBrain(request);
+          return state.bridge.wakeBrain(request, {
+            signal: wakeTimeoutController.signal,
+          });
         },
         (events) => appendCoreEventsToChatLog(state, session, wakeId, events),
         wakeTimeoutController.signal,
@@ -10917,6 +10939,7 @@ async function dispatchWake(
             summary: report.summary,
             reasonCode: report.reasonCode,
             source: "wake_timeout",
+            allowWithoutAssistantTurn: true,
           },
         );
       }
@@ -10950,6 +10973,7 @@ async function dispatchWake(
           summary: report.summary,
           reasonCode: report.reasonCode,
           source: "wake_dispatch_failed",
+          allowWithoutAssistantTurn: true,
         },
       );
     }

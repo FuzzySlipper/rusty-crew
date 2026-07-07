@@ -3,6 +3,7 @@ export type {
   BrainImplementation,
   BrainRoleAssembly,
   BrainWakeInput,
+  BrainWakeOptions,
   BrainWakeResult,
 } from "./local-brain.js";
 export {

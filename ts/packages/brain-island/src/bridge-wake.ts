@@ -15,6 +15,7 @@ import type {
 import type {
   BrainImplementation,
   BrainRoleAssembly,
+  BrainWakeOptions,
   BrainWakeResult,
 } from "./index.js";
 
@@ -27,6 +28,7 @@ export async function wakeBrainFromBridgeRequest(
   buffers: BridgeBufferClient,
   brain: BrainImplementation,
   request: BrainWakeRequest,
+  options?: BrainWakeOptions,
 ): Promise<BrainWakeResult> {
   const handles = [
     request.bodyState,
@@ -43,15 +45,18 @@ export async function wakeBrainFromBridgeRequest(
         buffers.getBuffer(request.roleAssembly),
       ]);
 
-    return await brain.wake({
-      wakeId: request.wakeId,
-      sessionId: request.sessionId,
-      state: parseBodyStateBuffer(bodyStateView),
-      systemPrompt: decodeBuffer(systemPromptView),
-      roleAssembly: parseJsonBuffer<BrainRoleAssembly>(roleAssemblyView),
-      providerState: request.providerState,
-      providerStateAbsence: request.providerStateAbsence,
-    });
+    return await brain.wake(
+      {
+        wakeId: request.wakeId,
+        sessionId: request.sessionId,
+        state: parseBodyStateBuffer(bodyStateView),
+        systemPrompt: decodeBuffer(systemPromptView),
+        roleAssembly: parseJsonBuffer<BrainRoleAssembly>(roleAssemblyView),
+        providerState: request.providerState,
+        providerStateAbsence: request.providerStateAbsence,
+      },
+      options,
+    );
   } catch (error) {
     wakeFailed = true;
     throw error;

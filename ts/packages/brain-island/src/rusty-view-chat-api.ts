@@ -36,6 +36,12 @@ export interface RustyViewChatRouteRequest {
 export interface RustyViewChatContext {
   listSessions(): Promise<SessionState[]>;
   projectBodyStateJson(sessionId: SessionId): Promise<Uint8Array>;
+  effectiveSessionDefaults?(
+    session: SessionState,
+  ):
+    | Promise<Record<string, unknown> | undefined>
+    | Record<string, unknown>
+    | undefined;
   listChatEvents?(
     session: SessionState,
     cursor: string | undefined,
@@ -2127,6 +2133,7 @@ async function sessionPage(
           (slotCount === undefined
             ? undefined
             : cursorFor(session.sessionId, slotCount)),
+        effectiveDefaults: await context.effectiveSessionDefaults?.(session),
       });
     }),
   );
@@ -2182,6 +2189,7 @@ async function openSessionResult(
           ? stats.messageCount
           : fallbackMessageCount,
         latestCursor: stats.latestCursor ?? fallbackLatestCursor,
+        effectiveDefaults: await context.effectiveSessionDefaults?.(session),
       }),
     },
   };
@@ -2205,6 +2213,7 @@ async function openSessionResult(
         ? stats.messageCount
         : fallbackMessageCount,
       latestCursor: stats.latestCursor ?? fallbackLatestCursor,
+      effectiveDefaults: await context.effectiveSessionDefaults?.(session),
     }),
     events,
     ...(messageSlots === undefined ? {} : { message_slots: messageSlots }),
@@ -2330,8 +2339,14 @@ function sessionSummary(
   options: {
     messageCount: number;
     latestCursor?: string;
+    effectiveDefaults?: Record<string, unknown>;
   },
 ): ChatSessionSummary {
+  const effectiveDefaults = {
+    historyWindow: session.historyWindow,
+    resourceLimits: session.resourceLimits,
+    ...(options.effectiveDefaults ?? {}),
+  };
   return {
     session_id: session.sessionId,
     agent_id: session.agentId,
@@ -2345,10 +2360,7 @@ function sessionSummary(
     updated_at: session.lastActiveAt,
     message_count: options.messageCount,
     tool_event_count: session.toolProfile.tools.length,
-    effective_defaults: {
-      historyWindow: session.historyWindow,
-      resourceLimits: session.resourceLimits,
-    },
+    effective_defaults: effectiveDefaults,
   };
 }
 

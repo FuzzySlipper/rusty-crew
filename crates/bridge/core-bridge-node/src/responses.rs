@@ -126,6 +126,14 @@ struct JsOpenAiResponsesToolOutputInput {
     is_error: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsOpenAiResponsesCancelInput {
+    wake_id: String,
+    reason_code: String,
+    summary: String,
+}
+
 #[derive(Debug)]
 struct BufferedOpenAiResponsesRun {
     items: VecDeque<BrainWakeStreamItem>,
@@ -138,6 +146,14 @@ struct BufferedOpenAiResponsesRun {
     transport_metrics: Option<ResponsesTransportMetrics>,
     credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
     error: Option<String>,
+    cancellation: Option<BufferedOpenAiResponsesCancellation>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BufferedOpenAiResponsesCancellation {
+    reason_code: String,
+    summary: String,
+    cancelled_at: String,
 }
 
 impl BufferedOpenAiResponsesRun {
@@ -153,12 +169,33 @@ impl BufferedOpenAiResponsesRun {
             transport_metrics: None,
             credential_secret_update: None,
             error: None,
+            cancellation: None,
         }
     }
 
     fn is_timed_out(&self) -> bool {
         let elapsed = OffsetDateTime::now_utc() - self.started_at;
         elapsed.whole_milliseconds() as u64 > self.wake_timeout_ms
+    }
+
+    fn cancel(&mut self, reason_code: String, summary: String) {
+        if self.cancellation.is_none() {
+            self.cancellation = Some(BufferedOpenAiResponsesCancellation {
+                reason_code,
+                summary: summary.clone(),
+                cancelled_at: OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .unwrap_or_else(|_| "unknown".to_string()),
+            });
+        }
+        self.pending_tool_requests.clear();
+        self.submitted_tool_outputs.clear();
+        self.error = Some(summary);
+        self.terminal = true;
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancellation.is_some()
     }
 }
 
@@ -341,6 +378,7 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
         "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
         "credential_secret_update": terminal.then(|| run.credential_secret_update.clone()).flatten(),
         "error": terminal.then(|| run.error.clone()).flatten(),
+        "cancellation": terminal.then(|| run.cancellation.clone()).flatten(),
     });
     if terminal {
         runs.remove(&wake_id);
@@ -349,6 +387,45 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
         napi::Error::new(
             napi::Status::GenericFailure,
             format!("serialize OpenAI Responses buffered wake drain: {error}"),
+        )
+    })
+}
+
+pub(crate) fn cancel_openai_responses_brain_json(input_json: String) -> napi::Result<String> {
+    let input: JsOpenAiResponsesCancelInput =
+        serde_json::from_str(&input_json).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid OpenAI Responses cancel JSON: {error}"),
+            )
+        })?;
+    let mut runs = openai_responses_buffered_runs().lock().map_err(|_| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            "openai responses buffered run registry is poisoned",
+        )
+    })?;
+    let run = runs.get_mut(&input.wake_id).ok_or_else(|| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!(
+                "OpenAI Responses buffered wake {} was not found",
+                input.wake_id
+            ),
+        )
+    })?;
+    run.cancel(input.reason_code, input.summary);
+    serde_json::to_string(&json!({
+        "ok": true,
+        "wake_id": input.wake_id,
+        "cancelled": true,
+        "terminal": run.terminal,
+        "cancellation": run.cancellation.clone(),
+    }))
+    .map_err(|error| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("serialize OpenAI Responses cancel receipt: {error}"),
         )
     })
 }
@@ -403,6 +480,9 @@ fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
             .lock()
             .expect("openai responses buffered run registry poisoned");
         if let Some(run) = runs.get_mut(&sink_wake_id) {
+            if run.is_cancelled() {
+                return;
+            }
             run.items.push_back(item);
         }
     };
@@ -414,6 +494,9 @@ fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
     let Some(run) = runs.get_mut(&wake_id) else {
         return;
     };
+    if run.is_cancelled() {
+        return;
+    }
     match result {
         Ok(output) => {
             run.provider_state = output.provider_state;
@@ -480,6 +563,15 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         is_error: true,
                     };
                 };
+                if let Some(cancellation) = run.cancellation.clone() {
+                    return NeutralToolOutput {
+                        output: format!(
+                            "OpenAI Responses buffered wake {} cancelled before tool output {}: {}",
+                            self.wake_id, call.call_id, cancellation.summary
+                        ),
+                        is_error: true,
+                    };
+                }
                 if let Some(output) = run.submitted_tool_outputs.remove(&call.call_id) {
                     return output;
                 }

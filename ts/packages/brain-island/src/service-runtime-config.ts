@@ -1604,8 +1604,13 @@ function toBridgeWakeExecutor(
   } = {},
 ): BrainWakeExecutor {
   return {
-    async wake(request, buffers) {
-      const result = await wakeBrainFromBridgeRequest(buffers, brain, request);
+    async wake(request, buffers, wakeOptions) {
+      const result = await wakeBrainFromBridgeRequest(
+        buffers,
+        brain,
+        request,
+        wakeOptions,
+      );
       if (
         options.profileId !== undefined &&
         result.transportMetrics !== undefined

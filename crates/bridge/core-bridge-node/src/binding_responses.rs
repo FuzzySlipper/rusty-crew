@@ -44,4 +44,9 @@ impl NativeBridgeBinding {
     ) -> napi::Result<String> {
         submit_openai_responses_tool_output_json(input_json)
     }
+
+    #[napi]
+    pub fn cancel_openai_responses_brain_json(&self, input_json: String) -> napi::Result<String> {
+        cancel_openai_responses_brain_json(input_json)
+    }
 }

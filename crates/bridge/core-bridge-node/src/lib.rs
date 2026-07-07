@@ -100,9 +100,9 @@ pub(crate) use events::*;
 pub(crate) use memory::*;
 use registries::{BrainImplementationRegistry, PlatformAdapterRegistry, SubscriptionRegistry};
 use responses::{
-    drain_openai_responses_brain_stream_json, start_openai_responses_brain_json,
-    submit_openai_responses_tool_output_json, OpenAiOauthCodeExchangeTask,
-    OpenAiResponsesBrainRunTask,
+    cancel_openai_responses_brain_json, drain_openai_responses_brain_stream_json,
+    start_openai_responses_brain_json, submit_openai_responses_tool_output_json,
+    OpenAiOauthCodeExchangeTask, OpenAiResponsesBrainRunTask,
 };
 #[cfg(test)]
 use responses::{normalize_responses_tool_schema, run_openai_responses_brain_json_blocking};
