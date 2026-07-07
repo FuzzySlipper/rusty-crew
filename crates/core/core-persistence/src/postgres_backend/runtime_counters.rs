@@ -136,7 +136,13 @@ impl PostgresBackendStore {
                     value = runtime_counters.value + EXCLUDED.value,
                     updated_at = EXCLUDED.updated_at"
             ),
-            &[&scope_type, &scope_id, &counter_name, &(amount as i64), &now],
+            &[
+                &scope_type,
+                &scope_id,
+                &counter_name,
+                &(amount as i64),
+                &now,
+            ],
         )
         .map_err(|error| postgres_error("increment PostgreSQL runtime counter in tx", error))?;
         Ok(())
