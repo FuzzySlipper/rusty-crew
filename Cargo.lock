@@ -1358,6 +1358,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusty-crew-pi-agent-brain"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "rusty-crew-core-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "rusty-crew-roleplay-core"
 version = "0.1.0"
 dependencies = [
