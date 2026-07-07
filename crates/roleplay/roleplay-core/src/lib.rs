@@ -28,6 +28,129 @@ impl RoleplayDomainError {
 pub type RoleplayDomainResult<T> = Result<T, RoleplayDomainError>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayPromptContextInput {
+    pub metadata: RoleplaySessionMetadata,
+    #[serde(default)]
+    pub player_persona: Option<RoleplayPlayerPersona>,
+    #[serde(default)]
+    pub character: Option<RoleplayCharacter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayPromptContextOutput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_context: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySpeakerIdentityInput {
+    pub actor: RoleplayChatActor,
+    pub now: String,
+    #[serde(default)]
+    pub metadata: Option<RoleplaySessionMetadata>,
+    #[serde(default)]
+    pub player_persona: Option<RoleplayPlayerPersona>,
+    #[serde(default)]
+    pub character: Option<RoleplayCharacter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySpeakerIdentitySnapshot {
+    pub speaker_kind: String,
+    pub role: String,
+    pub source_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_asset_ref: Option<String>,
+    pub snapshot_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayChatActor {
+    pub id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionMetadata {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+    #[serde(alias = "profileId")]
+    pub profile_id: String,
+    #[serde(default, alias = "displayName")]
+    pub display_name: Option<String>,
+    #[serde(default, alias = "playerPersonaId")]
+    pub player_persona_id: Option<String>,
+    #[serde(default, alias = "characterId")]
+    pub character_id: Option<String>,
+    #[serde(default, alias = "activeLayerIds")]
+    pub active_layer_ids: Vec<String>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(alias = "createdAt")]
+    pub created_at: String,
+    #[serde(alias = "updatedAt")]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayPlayerPersona {
+    pub id: String,
+    #[serde(alias = "profileId")]
+    pub profile_id: String,
+    #[serde(alias = "displayName")]
+    pub display_name: String,
+    #[serde(default, alias = "avatarUrl")]
+    pub avatar_url: Option<String>,
+    #[serde(default, alias = "avatarAssetRef")]
+    pub avatar_asset_ref: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default = "active_status")]
+    pub status: String,
+    #[serde(alias = "createdAt")]
+    pub created_at: String,
+    #[serde(default, alias = "updatedAt")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayCharacter {
+    pub id: String,
+    #[serde(alias = "profileId")]
+    pub profile_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub personality: String,
+    #[serde(default)]
+    pub scenario: String,
+    #[serde(default, alias = "firstMessage")]
+    pub first_message: String,
+    #[serde(default, alias = "alternateGreetings")]
+    pub alternate_greetings: Vec<String>,
+    #[serde(default, alias = "exampleMessages")]
+    pub example_messages: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default, alias = "avatarUrl")]
+    pub avatar_url: Option<String>,
+    #[serde(default = "active_status")]
+    pub status: String,
+    #[serde(alias = "createdAt")]
+    pub created_at: String,
+    #[serde(default, alias = "updatedAt")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleplayAssistantAlternativePlanInput {
     pub session_id: String,
     #[serde(default)]
@@ -181,6 +304,151 @@ pub fn plan_assistant_alternative(
         terminal_slot: terminal,
         append_chat_message: false,
     })
+}
+
+pub fn build_prompt_context(input: RoleplayPromptContextInput) -> RoleplayPromptContextOutput {
+    let player_persona = active_persona(input.player_persona.as_ref());
+    let character = active_character(input.character.as_ref());
+    if player_persona.is_none() && character.is_none() && input.metadata.active_layer_ids.is_empty()
+    {
+        return RoleplayPromptContextOutput {
+            prompt_context: None,
+        };
+    }
+
+    let mut lines = vec!["# Roleplay Session Context".to_string()];
+    if let Some(display_name) = non_empty(input.metadata.display_name.as_deref()) {
+        lines.push(format!("Session: {display_name}"));
+    }
+    match player_persona {
+        Some(persona) => {
+            lines.push(format!("Player persona: {}", persona.display_name));
+            if let Some(description) = non_empty(Some(persona.description.as_str())) {
+                lines.push(format!("Player persona description: {description}"));
+            }
+            if let Some(notes) = non_empty(Some(persona.notes.as_str())) {
+                lines.push(format!("Player persona notes: {notes}"));
+            }
+        }
+        None => lines.push("Player persona: Player (default fallback)".to_string()),
+    }
+    if let Some(character) = character {
+        lines.push(format!("Selected character: {}", character.name));
+        if let Some(description) = non_empty(Some(character.description.as_str())) {
+            lines.push(format!("Description: {description}"));
+        }
+        if let Some(personality) = non_empty(Some(character.personality.as_str())) {
+            lines.push(format!("Personality: {personality}"));
+        }
+        if let Some(scenario) = non_empty(Some(character.scenario.as_str())) {
+            lines.push(format!("Scenario: {scenario}"));
+        }
+        if let Some(first_message) = non_empty(Some(character.first_message.as_str())) {
+            lines.push(format!("First message: {first_message}"));
+        }
+        if !character.alternate_greetings.is_empty() {
+            lines.push(format!(
+                "Alternate greetings: {}",
+                character.alternate_greetings.join(" | ")
+            ));
+        }
+        if !character.example_messages.is_empty() {
+            lines.push(format!(
+                "Example messages: {}",
+                character.example_messages.join(" | ")
+            ));
+        }
+    }
+    if !input.metadata.active_layer_ids.is_empty() {
+        lines.push(format!(
+            "Active lore layers: {}",
+            input.metadata.active_layer_ids.join(", ")
+        ));
+    }
+    lines.push("Use this roleplay context as session-scoped setup. Prefer current chat evidence if it conflicts with older character or lore metadata.".to_string());
+
+    RoleplayPromptContextOutput {
+        prompt_context: Some(lines.join("\n")),
+    }
+}
+
+pub fn speaker_identity_snapshot(
+    input: RoleplaySpeakerIdentityInput,
+) -> RoleplaySpeakerIdentitySnapshot {
+    let role = match input.actor.kind.as_str() {
+        "agent" => "assistant",
+        "system" => "system",
+        _ => "user",
+    }
+    .to_string();
+
+    if role == "system" {
+        return RoleplaySpeakerIdentitySnapshot {
+            speaker_kind: "system".to_string(),
+            role,
+            source_id: input.actor.id.clone(),
+            display_name: input
+                .actor
+                .display_name
+                .as_deref()
+                .or_else(|| non_empty(Some(input.actor.id.as_str())))
+                .unwrap_or("System")
+                .to_string(),
+            avatar_url: None,
+            avatar_asset_ref: None,
+            snapshot_at: input.now,
+        };
+    }
+
+    if role == "user" {
+        if let Some(persona) = active_persona(input.player_persona.as_ref()) {
+            return RoleplaySpeakerIdentitySnapshot {
+                speaker_kind: "player_persona".to_string(),
+                role,
+                source_id: persona.id.clone(),
+                display_name: persona.display_name.clone(),
+                avatar_url: persona.avatar_url.clone(),
+                avatar_asset_ref: persona.avatar_asset_ref.clone(),
+                snapshot_at: input.now,
+            };
+        }
+        return RoleplaySpeakerIdentitySnapshot {
+            speaker_kind: "fallback_player".to_string(),
+            role,
+            source_id: input.actor.id,
+            display_name: input
+                .actor
+                .display_name
+                .unwrap_or_else(|| "Player".to_string()),
+            avatar_url: None,
+            avatar_asset_ref: None,
+            snapshot_at: input.now,
+        };
+    }
+
+    if let Some(character) = active_character(input.character.as_ref()) {
+        return RoleplaySpeakerIdentitySnapshot {
+            speaker_kind: "assistant_character".to_string(),
+            role,
+            source_id: character.id.clone(),
+            display_name: character.name.clone(),
+            avatar_url: character.avatar_url.clone(),
+            avatar_asset_ref: None,
+            snapshot_at: input.now,
+        };
+    }
+    RoleplaySpeakerIdentitySnapshot {
+        speaker_kind: "fallback_assistant".to_string(),
+        role,
+        source_id: input.actor.id,
+        display_name: input
+            .actor
+            .display_name
+            .unwrap_or_else(|| "Assistant".to_string()),
+        avatar_url: None,
+        avatar_asset_ref: None,
+        snapshot_at: input.now,
+    }
 }
 
 pub fn alternative_slot_projection(
@@ -383,6 +651,22 @@ fn validate_unique_slots(slots: &[RoleplayMessageSlot]) -> RoleplayDomainResult<
     Ok(())
 }
 
+fn active_status() -> String {
+    "active".to_string()
+}
+
+fn active_persona(persona: Option<&RoleplayPlayerPersona>) -> Option<&RoleplayPlayerPersona> {
+    persona.filter(|persona| persona.status != "archived")
+}
+
+fn active_character(character: Option<&RoleplayCharacter>) -> Option<&RoleplayCharacter> {
+    character.filter(|character| character.status != "archived")
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,6 +815,88 @@ mod tests {
         assert_eq!(next_alternate_ordinal(&slot), 2);
     }
 
+    #[test]
+    fn builds_prompt_context_for_selected_roleplay_records() {
+        let output = build_prompt_context(RoleplayPromptContextInput {
+            metadata: metadata(vec!["world".to_string(), "scene".to_string()]),
+            player_persona: Some(persona(
+                "Player Prime",
+                "careful cartographer",
+                "keeps notes",
+            )),
+            character: Some(character("Guide", "knows the city")),
+        });
+        let prompt = output.prompt_context.expect("prompt context");
+        assert!(prompt.contains("Session: Evening run"));
+        assert!(prompt.contains("Player persona: Player Prime"));
+        assert!(prompt.contains("Player persona description: careful cartographer"));
+        assert!(prompt.contains("Selected character: Guide"));
+        assert!(prompt.contains("Description: knows the city"));
+        assert!(prompt.contains("Active lore layers: world, scene"));
+    }
+
+    #[test]
+    fn prompt_context_ignores_archived_records_but_keeps_layers() {
+        let mut archived_persona = persona("Old Player", "archived", "");
+        archived_persona.status = "archived".to_string();
+        let mut archived_character = character("Old Guide", "archived");
+        archived_character.status = "archived".to_string();
+
+        let output = build_prompt_context(RoleplayPromptContextInput {
+            metadata: metadata(vec!["scene".to_string()]),
+            player_persona: Some(archived_persona),
+            character: Some(archived_character),
+        });
+        let prompt = output.prompt_context.expect("layers keep context active");
+        assert!(prompt.contains("Player persona: Player (default fallback)"));
+        assert!(!prompt.contains("Old Guide"));
+        assert!(prompt.contains("Active lore layers: scene"));
+    }
+
+    #[test]
+    fn prompt_context_is_absent_without_records_or_layers() {
+        let output = build_prompt_context(RoleplayPromptContextInput {
+            metadata: metadata(vec![]),
+            player_persona: None,
+            character: None,
+        });
+        assert_eq!(output.prompt_context, None);
+    }
+
+    #[test]
+    fn speaker_identity_projects_persona_character_and_fallbacks() {
+        let now = "2026-07-07T00:00:00Z".to_string();
+        let user = speaker_identity_snapshot(RoleplaySpeakerIdentityInput {
+            actor: actor("human-1", "human", Some("Human Name")),
+            now: now.clone(),
+            metadata: Some(metadata(vec![])),
+            player_persona: Some(persona("Player Prime", "", "")),
+            character: None,
+        });
+        assert_eq!(user.speaker_kind, "player_persona");
+        assert_eq!(user.display_name, "Player Prime");
+
+        let assistant = speaker_identity_snapshot(RoleplaySpeakerIdentityInput {
+            actor: actor("agent-1", "agent", None),
+            now: now.clone(),
+            metadata: Some(metadata(vec![])),
+            player_persona: None,
+            character: Some(character("Guide", "")),
+        });
+        assert_eq!(assistant.speaker_kind, "assistant_character");
+        assert_eq!(assistant.display_name, "Guide");
+
+        let fallback = speaker_identity_snapshot(RoleplaySpeakerIdentityInput {
+            actor: actor("agent-1", "agent", None),
+            now,
+            metadata: Some(metadata(vec![])),
+            player_persona: None,
+            character: None,
+        });
+        assert_eq!(fallback.speaker_kind, "fallback_assistant");
+        assert_eq!(fallback.display_name, "Assistant");
+    }
+
     fn branch(branch_id: &str, head_message_id: Option<&str>) -> RoleplayConversationBranch {
         RoleplayConversationBranch {
             branch_id: branch_id.to_string(),
@@ -544,6 +910,62 @@ mod tests {
             created_at: "2026-07-07T00:00:00Z".to_string(),
             updated_at: "2026-07-07T00:00:00Z".to_string(),
             version: 1,
+        }
+    }
+
+    fn metadata(active_layer_ids: Vec<String>) -> RoleplaySessionMetadata {
+        RoleplaySessionMetadata {
+            session_id: "session-rp".to_string(),
+            profile_id: "profile-rp".to_string(),
+            display_name: Some("Evening run".to_string()),
+            player_persona_id: Some("persona-1".to_string()),
+            character_id: Some("character-1".to_string()),
+            active_layer_ids,
+            archived: false,
+            created_at: "2026-07-07T00:00:00Z".to_string(),
+            updated_at: "2026-07-07T00:00:00Z".to_string(),
+        }
+    }
+
+    fn persona(display_name: &str, description: &str, notes: &str) -> RoleplayPlayerPersona {
+        RoleplayPlayerPersona {
+            id: "persona-1".to_string(),
+            profile_id: "profile-rp".to_string(),
+            display_name: display_name.to_string(),
+            avatar_url: Some("https://example.test/avatar.png".to_string()),
+            avatar_asset_ref: Some("asset:avatar".to_string()),
+            description: description.to_string(),
+            notes: notes.to_string(),
+            status: "active".to_string(),
+            created_at: "2026-07-07T00:00:00Z".to_string(),
+            updated_at: None,
+        }
+    }
+
+    fn character(name: &str, description: &str) -> RoleplayCharacter {
+        RoleplayCharacter {
+            id: "character-1".to_string(),
+            profile_id: "profile-rp".to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+            personality: "warm".to_string(),
+            scenario: "market square".to_string(),
+            first_message: "Welcome back.".to_string(),
+            alternate_greetings: vec!["Hello".to_string(), "Well met".to_string()],
+            example_messages: vec!["Guide: stay close".to_string()],
+            tags: vec![],
+            avatar_url: Some("https://example.test/guide.png".to_string()),
+            status: "active".to_string(),
+            created_at: "2026-07-07T00:00:00Z".to_string(),
+            updated_at: None,
+        }
+    }
+
+    fn actor(id: &str, kind: &str, display_name: Option<&str>) -> RoleplayChatActor {
+        RoleplayChatActor {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            display_name: display_name.map(str::to_string),
         }
     }
 

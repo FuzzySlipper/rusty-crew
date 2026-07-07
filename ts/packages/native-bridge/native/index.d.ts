@@ -74,6 +74,8 @@ export declare class NativeBridgeBinding {
   submitOpenaiResponsesToolOutputJson(inputJson: string): string
   cancelOpenaiResponsesBrainJson(inputJson: string): string
   planRoleplayAssistantAlternativeJson(inputJson: string): string
+  buildRoleplayPromptContextJson(inputJson: string): string
+  roleplaySpeakerIdentityJson(inputJson: string): string
   addLoreEntryJson(inputJson: string): string
   replaceLoreEntryJson(inputJson: string): string
   supersedeLoreEntryJson(inputJson: string): string

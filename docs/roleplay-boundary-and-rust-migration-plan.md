@@ -41,7 +41,7 @@ Current roleplay route surface after the first extraction:
 | Assistant alternative terminal-slot and branch-head planning | `crates/roleplay/roleplay-core` via `plan_roleplay_assistant_alternative` | Rust deterministic domain |
 | Character/persona admin API | `service-roleplay-routes.ts` | Rust roleplay domain plus TS route adapter |
 | Session metadata API | `service-roleplay-routes.ts` | Rust roleplay domain plus TS route adapter |
-| Prompt context and speaker identity snapshots | `service-roleplay-routes.ts` | Rust deterministic assembly, with TS brain glue |
+| Prompt context and speaker identity snapshots | `crates/roleplay/roleplay-core` via `build_roleplay_prompt_context` and `roleplay_speaker_identity` | Rust deterministic assembly, with TS record fetching/brain glue |
 | Assistant alternative persistence and selection routes | `service-roleplay-routes.ts` | TS route adapter over Rust domain planning and persistence bridge operations |
 | Narrator config API | `service-roleplay-routes.ts` | Rust config/domain validation, TS route adapter |
 | Narrator brain execution | `narrator-brain.ts` | TS brain module until a Rust brain module is deliberately built |
@@ -94,8 +94,9 @@ Good follow-up slices, in priority order:
    `plan_roleplay_assistant_alternative` helper as needed. TS may still invoke
    the model for generated text, but terminal-slot, branch-head, and
    no-normal-chat-append invariants now have a Rust domain home.
-2. Move prompt context and speaker identity snapshot assembly to Rust so role
-   context can be tested without a service host or Node runtime.
+2. Keep prompt context and speaker identity expansion inside the current
+   `roleplay-core` helpers so role context remains testable without a service
+   host or Node runtime.
 3. Move character/persona/session metadata validation into a Rust roleplay
    domain crate, leaving TS as JSON route mapping.
 4. Move narrator config validation into the same Rust domain crate before more

@@ -995,6 +995,24 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Validate roleplay assistant-alternative terminal slot and branch-head invariants without mutating storage."
 
 [[operation]]
+name = "build_roleplay_prompt_context"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayPromptContextInput"
+output = "roleplay_core::RoleplayPromptContextOutput"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Assemble deterministic roleplay session prompt context from session metadata, persona, character, and active lore layer ids."
+
+[[operation]]
+name = "roleplay_speaker_identity"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplaySpeakerIdentityInput"
+output = "roleplay_core::RoleplaySpeakerIdentitySnapshot"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Project deterministic roleplay speaker identity metadata for chat message persistence."
+
+[[operation]]
 name = "list_simple_kv"
 surface = "stable"
 direction = "ts_to_rust"

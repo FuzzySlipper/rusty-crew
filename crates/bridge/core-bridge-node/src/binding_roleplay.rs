@@ -21,6 +21,24 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn build_roleplay_prompt_context_json(&self, input_json: String) -> napi::Result<String> {
+        let input =
+            parse_json::<RoleplayPromptContextInput>(&input_json, "roleplay prompt context input")?;
+        let output = build_prompt_context(input);
+        serialize_json(&output, "roleplay prompt context output")
+    }
+
+    #[napi]
+    pub fn roleplay_speaker_identity_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<RoleplaySpeakerIdentityInput>(
+            &input_json,
+            "roleplay speaker identity input",
+        )?;
+        let snapshot = speaker_identity_snapshot(input);
+        serialize_json(&snapshot, "roleplay speaker identity snapshot")
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;

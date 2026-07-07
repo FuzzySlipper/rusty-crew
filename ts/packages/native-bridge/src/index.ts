@@ -209,6 +209,8 @@ interface NativeBridgeBinding {
   cancelOpenaiResponsesBrainJson(inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   planRoleplayAssistantAlternativeJson(inputJson: string): string;
+  buildRoleplayPromptContextJson(inputJson: string): string;
+  roleplaySpeakerIdentityJson(inputJson: string): string;
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
   queryMessageSlotsJson(inputJson: string): string;
@@ -1937,6 +1939,8 @@ export interface NativeBridgeModule {
     decision: MemoryGovernanceDecisionInput,
   ): Promise<MemoryGovernanceDecisionRecord>;
   planRoleplayAssistantAlternative(input: unknown): Promise<unknown>;
+  buildRoleplayPromptContext(input: unknown): Promise<unknown>;
+  roleplaySpeakerIdentity(input: unknown): Promise<unknown>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
@@ -2223,6 +2227,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     planRoleplayAssistantAlternative: unavailable(
       "plan_roleplay_assistant_alternative",
     ),
+    buildRoleplayPromptContext: unavailable("build_roleplay_prompt_context"),
+    roleplaySpeakerIdentity: unavailable("roleplay_speaker_identity"),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
     queryMessageSlots: unavailable("query_message_slots"),
@@ -3358,6 +3364,14 @@ function createNativeBridgeModule(
     planRoleplayAssistantAlternative: async (input) =>
       JSON.parse(
         binding.planRoleplayAssistantAlternativeJson(JSON.stringify(input)),
+      ) as unknown,
+    buildRoleplayPromptContext: async (input) =>
+      JSON.parse(
+        binding.buildRoleplayPromptContextJson(JSON.stringify(input)),
+      ) as unknown,
+    roleplaySpeakerIdentity: async (input) =>
+      JSON.parse(
+        binding.roleplaySpeakerIdentityJson(JSON.stringify(input)),
       ) as unknown,
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),

@@ -1093,48 +1093,12 @@ export async function roleplayPromptContextForSession(
           session.profileId,
           metadata.characterId,
         ).catch(() => undefined);
-  if (
-    playerPersona === undefined &&
-    character === undefined &&
-    metadata.activeLayerIds.length === 0
-  ) {
-    return undefined;
-  }
-  const lines = [
-    "# Roleplay Session Context",
-    metadata.displayName ? `Session: ${metadata.displayName}` : undefined,
-    playerPersona
-      ? `Player persona: ${playerPersona.displayName}`
-      : "Player persona: Player (default fallback)",
-    playerPersona?.description
-      ? `Player persona description: ${playerPersona.description}`
-      : undefined,
-    playerPersona?.notes
-      ? `Player persona notes: ${playerPersona.notes}`
-      : undefined,
-    character ? `Selected character: ${character.name}` : undefined,
-    character?.description
-      ? `Description: ${character.description}`
-      : undefined,
-    character?.personality
-      ? `Personality: ${character.personality}`
-      : undefined,
-    character?.scenario ? `Scenario: ${character.scenario}` : undefined,
-    character?.firstMessage
-      ? `First message: ${character.firstMessage}`
-      : undefined,
-    character && character.alternateGreetings.length > 0
-      ? `Alternate greetings: ${character.alternateGreetings.join(" | ")}`
-      : undefined,
-    character && character.exampleMessages.length > 0
-      ? `Example messages: ${character.exampleMessages.join(" | ")}`
-      : undefined,
-    metadata.activeLayerIds.length > 0
-      ? `Active lore layers: ${metadata.activeLayerIds.join(", ")}`
-      : undefined,
-    "Use this roleplay context as session-scoped setup. Prefer current chat evidence if it conflicts with older character or lore metadata.",
-  ];
-  return lines.filter((line): line is string => Boolean(line)).join("\n");
+  const output = (await state.bridge.buildRoleplayPromptContext({
+    metadata,
+    player_persona: playerPersona,
+    character,
+  })) as { prompt_context?: string };
+  return output.prompt_context;
 }
 
 export async function roleplaySpeakerIdentitySnapshotForMessage(
@@ -1153,13 +1117,10 @@ export async function roleplaySpeakerIdentitySnapshotForMessage(
         ? "system"
         : "user";
   if (role === "system") {
-    return {
-      speaker_kind: "system",
-      role,
-      source_id: actor.id,
-      display_name: actor.display_name ?? actor.id ?? "System",
-      snapshot_at: now,
-    };
+    return (await state.bridge.roleplaySpeakerIdentity({
+      actor,
+      now,
+    })) as RoleplaySpeakerIdentitySnapshot;
   }
   const metadata = await roleplaySessionMetadata(state, session).catch(
     () => undefined,
@@ -1173,21 +1134,12 @@ export async function roleplaySpeakerIdentitySnapshotForMessage(
             session.profileId,
             metadata.playerPersonaId,
           ).catch(() => undefined);
-    return {
-      speaker_kind:
-        playerPersona === undefined ? "fallback_player" : "player_persona",
-      role,
-      source_id: playerPersona?.id ?? actor.id,
-      display_name:
-        playerPersona?.displayName ?? actor.display_name ?? "Player",
-      ...(playerPersona?.avatarUrl
-        ? { avatar_url: playerPersona.avatarUrl }
-        : {}),
-      ...(playerPersona?.avatarAssetRef
-        ? { avatar_asset_ref: playerPersona.avatarAssetRef }
-        : {}),
-      snapshot_at: now,
-    };
+    return (await state.bridge.roleplaySpeakerIdentity({
+      actor,
+      now,
+      metadata,
+      player_persona: playerPersona,
+    })) as RoleplaySpeakerIdentitySnapshot;
   }
   const character =
     metadata?.characterId === undefined
@@ -1197,15 +1149,12 @@ export async function roleplaySpeakerIdentitySnapshotForMessage(
           session.profileId,
           metadata.characterId,
         ).catch(() => undefined);
-  return {
-    speaker_kind:
-      character === undefined ? "fallback_assistant" : "assistant_character",
-    role,
-    source_id: character?.id ?? actor.id,
-    display_name: character?.name ?? actor.display_name ?? "Assistant",
-    ...(character?.avatarUrl ? { avatar_url: character.avatarUrl } : {}),
-    snapshot_at: now,
-  };
+  return (await state.bridge.roleplaySpeakerIdentity({
+    actor,
+    now,
+    metadata,
+    character,
+  })) as RoleplaySpeakerIdentitySnapshot;
 }
 
 async function listRoleplaySessions(
