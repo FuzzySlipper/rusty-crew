@@ -465,7 +465,7 @@ try {
       name: "RP Hero",
       description: "A browser-safe roleplay character.",
       personality: "curious and steady",
-      scenario: "Smoke-testing Rusty Crew.",
+      scenario: "{{char}} greets {{user}} while smoke-testing Rusty Crew.",
       firstMessage: "Ready.",
       alternateGreetings: ["Still ready."],
       exampleMessages: ["Let's test this path."],
@@ -557,6 +557,47 @@ try {
   assert.equal(session.body.data.session.player_persona_source, "persona");
   assert.equal(session.body.data.session.character_name, "RP Hero");
   assert.deepEqual(session.body.data.session.active_layer_ids, ["rp-world"]);
+
+  const promptStack = await get(
+    "/v1/admin/roleplay/sessions/rp-browser-session/prompt-stack",
+  );
+  assert.equal(promptStack.status, 200, JSON.stringify(promptStack.body));
+  assert.match(promptStack.body.data.promptContext, /# Core Behavior/);
+  assert.equal(promptStack.body.data.stack.version, 1);
+  assert.deepEqual(
+    promptStack.body.data.stack.sections.map(
+      (section: Record<string, unknown>) => section.id,
+    ),
+    [
+      "core_behavior",
+      "player_persona",
+      "character_identity",
+      "scene_setup",
+      "relevant_lore_context",
+      "response_guidance",
+    ],
+  );
+  assert.equal(promptStack.body.data.stack.trace.length, 6);
+  assert.match(
+    promptStack.body.data.stack.compiled_text,
+    /RP Hero greets Browser Player Revised/,
+  );
+  assert.doesNotMatch(
+    promptStack.body.data.stack.compiled_text,
+    /\{\{(?:char|user)\}\}/,
+  );
+  assert.deepEqual(
+    promptStack.body.data.stack.macro_resolutions.map(
+      (resolution: Record<string, unknown>) => [
+        resolution.macro_name,
+        resolution.occurrences,
+      ],
+    ),
+    [
+      ["{{char}}", 1],
+      ["{{user}}", 1],
+    ],
+  );
 
   const userSlot = await post("/v1/chat/sessions/rp-browser-session/slots", {
     slot_id: "rp-user-slot",

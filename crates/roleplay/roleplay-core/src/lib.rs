@@ -35,12 +35,106 @@ pub struct RoleplayPromptContextInput {
     pub player_persona: Option<RoleplayPlayerPersona>,
     #[serde(default)]
     pub character: Option<RoleplayCharacter>,
+    #[serde(default)]
+    pub scene_setup: Option<String>,
+    #[serde(default)]
+    pub relevant_lore: Vec<RoleplayPromptStackSourceText>,
+    #[serde(default)]
+    pub recent_history: Vec<RoleplayPromptStackSourceText>,
+    #[serde(default)]
+    pub response_guidance: Option<String>,
+    #[serde(default)]
+    pub imported_prompt_blocks: Vec<RoleplayPromptStackRawBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleplayPromptContextOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack: Option<RoleplayPromptStackOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleplayPromptStackSourceText {
+    pub source_kind: String,
+    pub source_id: String,
+    pub title: String,
+    pub body: String,
+    #[serde(default)]
+    pub editable: bool,
+    #[serde(default)]
+    pub derived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleplayPromptStackRawBlock {
+    pub source_kind: String,
+    pub source_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub metadata_json: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleplayPromptStackOutput {
+    pub version: u32,
+    pub compiled_text: String,
+    pub messages: Vec<RoleplayPromptStackMessage>,
+    pub sections: Vec<RoleplayPromptStackSection>,
+    pub trace: Vec<RoleplayPromptStackTraceEntry>,
+    #[serde(default)]
+    pub macro_resolutions: Vec<RoleplayPromptMacroResolution>,
+    #[serde(default)]
+    pub imported_prompt_blocks: Vec<RoleplayPromptStackRawBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleplayPromptStackMessage {
+    pub role: String,
+    pub content: String,
+    #[serde(default)]
+    pub section_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleplayPromptStackSection {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub source_kind: String,
+    pub source_id: String,
+    pub inclusion_reason: String,
+    pub token_estimate: u32,
+    pub editable: bool,
+    pub derived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleplayPromptStackTraceEntry {
+    pub section_id: String,
+    pub source_kind: String,
+    pub source_id: String,
+    pub inclusion_reason: String,
+    pub token_estimate: u32,
+    pub editable: bool,
+    pub derived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleplayPromptMacroResolution {
+    pub macro_name: String,
+    pub replacement: String,
+    pub occurrences: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -499,66 +593,279 @@ pub fn plan_assistant_alternative(
 pub fn build_prompt_context(input: RoleplayPromptContextInput) -> RoleplayPromptContextOutput {
     let player_persona = active_persona(input.player_persona.as_ref());
     let character = active_character(input.character.as_ref());
-    if player_persona.is_none() && character.is_none() && input.metadata.active_layer_ids.is_empty()
+    if player_persona.is_none()
+        && character.is_none()
+        && input.metadata.active_layer_ids.is_empty()
+        && input
+            .scene_setup
+            .as_deref()
+            .and_then(|value| non_empty(Some(value)))
+            .is_none()
+        && input.relevant_lore.is_empty()
+        && input.recent_history.is_empty()
+        && input
+            .response_guidance
+            .as_deref()
+            .and_then(|value| non_empty(Some(value)))
+            .is_none()
     {
         return RoleplayPromptContextOutput {
             prompt_context: None,
+            stack: None,
         };
     }
 
-    let mut lines = vec!["# Roleplay Session Context".to_string()];
+    let character_name = character
+        .map(|record| record.name.as_str())
+        .and_then(|name| non_empty(Some(name)))
+        .unwrap_or("Assistant");
+    let user_name = player_persona
+        .map(|record| record.display_name.as_str())
+        .and_then(|name| non_empty(Some(name)))
+        .unwrap_or("Player");
+    let mut macro_tracker = RoleplayMacroTracker::new(character_name, user_name);
+    let mut sections = Vec::new();
+
+    let mut core_lines = vec![
+        "Use a clean modern roleplay prompt stack. Preserve character voice, user creative assets, current scene evidence, and relevant lore without copying legacy prompt-block ceremony.".to_string(),
+        "Prefer the current branch transcript if it conflicts with older imported metadata.".to_string(),
+    ];
     if let Some(display_name) = non_empty(input.metadata.display_name.as_deref()) {
-        lines.push(format!("Session: {display_name}"));
+        core_lines.push(format!("Session: {display_name}"));
     }
+    add_prompt_section(
+        &mut sections,
+        PromptSectionDraft {
+            id: "core_behavior",
+            title: "Core Behavior",
+            body: core_lines.join("\n"),
+            source_kind: "roleplay_runtime",
+            source_id: &input.metadata.session_id,
+            inclusion_reason: "base roleplay runtime guidance",
+            editable: false,
+            derived: true,
+        },
+        &mut macro_tracker,
+    );
+
     match player_persona {
         Some(persona) => {
-            lines.push(format!("Player persona: {}", persona.display_name));
+            let mut persona_lines = vec![format!("Player persona: {}", persona.display_name)];
             if let Some(description) = non_empty(Some(persona.description.as_str())) {
-                lines.push(format!("Player persona description: {description}"));
+                persona_lines.push(format!("Description: {description}"));
             }
             if let Some(notes) = non_empty(Some(persona.notes.as_str())) {
-                lines.push(format!("Player persona notes: {notes}"));
+                persona_lines.push(format!("Notes: {notes}"));
             }
+            add_prompt_section(
+                &mut sections,
+                PromptSectionDraft {
+                    id: "player_persona",
+                    title: "Player Persona",
+                    body: persona_lines.join("\n"),
+                    source_kind: "player_persona",
+                    source_id: &persona.id,
+                    inclusion_reason: "active session player persona",
+                    editable: true,
+                    derived: false,
+                },
+                &mut macro_tracker,
+            );
         }
-        None => lines.push("Player persona: Player (default fallback)".to_string()),
+        None => add_prompt_section(
+            &mut sections,
+            PromptSectionDraft {
+                id: "player_persona",
+                title: "Player Persona",
+                body: "Player persona: Player (default fallback)".to_string(),
+                source_kind: "fallback",
+                source_id: "player",
+                inclusion_reason: "no active player persona selected",
+                editable: false,
+                derived: true,
+            },
+            &mut macro_tracker,
+        ),
     }
+
     if let Some(character) = character {
-        lines.push(format!("Selected character: {}", character.name));
+        let mut character_lines = vec![format!("Selected character: {}", character.name)];
         if let Some(description) = non_empty(Some(character.description.as_str())) {
-            lines.push(format!("Description: {description}"));
+            character_lines.push(format!("Description: {description}"));
         }
         if let Some(personality) = non_empty(Some(character.personality.as_str())) {
-            lines.push(format!("Personality: {personality}"));
-        }
-        if let Some(scenario) = non_empty(Some(character.scenario.as_str())) {
-            lines.push(format!("Scenario: {scenario}"));
+            character_lines.push(format!("Personality: {personality}"));
         }
         if let Some(first_message) = non_empty(Some(character.first_message.as_str())) {
-            lines.push(format!("First message: {first_message}"));
+            character_lines.push(format!("First message: {first_message}"));
         }
         if !character.alternate_greetings.is_empty() {
-            lines.push(format!(
+            character_lines.push(format!(
                 "Alternate greetings: {}",
                 character.alternate_greetings.join(" | ")
             ));
         }
         if !character.example_messages.is_empty() {
-            lines.push(format!(
+            character_lines.push(format!(
                 "Example messages: {}",
                 character.example_messages.join(" | ")
             ));
         }
+        add_prompt_section(
+            &mut sections,
+            PromptSectionDraft {
+                id: "character_identity",
+                title: "Character Identity And Style",
+                body: character_lines.join("\n"),
+                source_kind: "character",
+                source_id: &character.id,
+                inclusion_reason: "active session assistant character",
+                editable: true,
+                derived: false,
+            },
+            &mut macro_tracker,
+        );
+        if let Some(scenario) = non_empty(Some(character.scenario.as_str())) {
+            add_prompt_section(
+                &mut sections,
+                PromptSectionDraft {
+                    id: "scene_setup",
+                    title: "Scene Setup",
+                    body: scenario.to_string(),
+                    source_kind: "character",
+                    source_id: &character.id,
+                    inclusion_reason: "character scenario selected as current setup",
+                    editable: true,
+                    derived: false,
+                },
+                &mut macro_tracker,
+            );
+        }
     }
-    if !input.metadata.active_layer_ids.is_empty() {
-        lines.push(format!(
-            "Active lore layers: {}",
-            input.metadata.active_layer_ids.join(", ")
-        ));
+
+    if let Some(scene_setup) = non_empty(input.scene_setup.as_deref()) {
+        add_prompt_section(
+            &mut sections,
+            PromptSectionDraft {
+                id: "scene_setup_override",
+                title: "Scene Setup Override",
+                body: scene_setup.to_string(),
+                source_kind: "scene",
+                source_id: &input.metadata.session_id,
+                inclusion_reason: "explicit scene setup supplied by caller",
+                editable: true,
+                derived: false,
+            },
+            &mut macro_tracker,
+        );
     }
-    lines.push("Use this roleplay context as session-scoped setup. Prefer current chat evidence if it conflicts with older character or lore metadata.".to_string());
+
+    if !input.metadata.active_layer_ids.is_empty() || !input.relevant_lore.is_empty() {
+        let mut lore_lines = Vec::new();
+        if !input.metadata.active_layer_ids.is_empty() {
+            lore_lines.push(format!(
+                "Active lore layers: {}",
+                input.metadata.active_layer_ids.join(", ")
+            ));
+        }
+        for lore in &input.relevant_lore {
+            lore_lines.push(format!("{}: {}", lore.title, lore.body));
+        }
+        add_prompt_section(
+            &mut sections,
+            PromptSectionDraft {
+                id: "relevant_lore_context",
+                title: "Relevant Lore Context",
+                body: lore_lines.join("\n"),
+                source_kind: "lore_context",
+                source_id: &input.metadata.session_id,
+                inclusion_reason: "active lore layers and caller-selected relevant lore",
+                editable: false,
+                derived: true,
+            },
+            &mut macro_tracker,
+        );
+    }
+
+    if !input.recent_history.is_empty() {
+        let history = input
+            .recent_history
+            .iter()
+            .map(|entry| format!("{}: {}", entry.title, entry.body))
+            .collect::<Vec<_>>()
+            .join("\n");
+        add_prompt_section(
+            &mut sections,
+            PromptSectionDraft {
+                id: "recent_branch_history",
+                title: "Recent Branch History",
+                body: history,
+                source_kind: "chat_history",
+                source_id: &input.metadata.session_id,
+                inclusion_reason: "caller-selected recent branch history",
+                editable: false,
+                derived: true,
+            },
+            &mut macro_tracker,
+        );
+    }
+
+    let response_guidance = input.response_guidance.as_deref().and_then(|value| non_empty(Some(value))).unwrap_or(
+        "Write the next response in-character. Keep narrative output clean: no JSON, tool-call labels, or system/debug artifacts.",
+    );
+    add_prompt_section(
+        &mut sections,
+        PromptSectionDraft {
+            id: "response_guidance",
+            title: "Response Guidance",
+            body: response_guidance.to_string(),
+            source_kind: "roleplay_runtime",
+            source_id: &input.metadata.session_id,
+            inclusion_reason: "roleplay response quality guardrail",
+            editable: true,
+            derived: false,
+        },
+        &mut macro_tracker,
+    );
+
+    let compiled_text = sections
+        .iter()
+        .map(|section| format!("# {}\n{}", section.title, section.body))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let section_ids = sections
+        .iter()
+        .map(|section| section.id.clone())
+        .collect::<Vec<_>>();
+    let trace = sections
+        .iter()
+        .map(|section| RoleplayPromptStackTraceEntry {
+            section_id: section.id.clone(),
+            source_kind: section.source_kind.clone(),
+            source_id: section.source_id.clone(),
+            inclusion_reason: section.inclusion_reason.clone(),
+            token_estimate: section.token_estimate,
+            editable: section.editable,
+            derived: section.derived,
+        })
+        .collect::<Vec<_>>();
+    let stack = RoleplayPromptStackOutput {
+        version: 1,
+        messages: vec![RoleplayPromptStackMessage {
+            role: "system".to_string(),
+            content: compiled_text.clone(),
+            section_ids,
+        }],
+        compiled_text: compiled_text.clone(),
+        sections,
+        trace,
+        macro_resolutions: macro_tracker.into_resolutions(),
+        imported_prompt_blocks: input.imported_prompt_blocks,
+    };
 
     RoleplayPromptContextOutput {
-        prompt_context: Some(lines.join("\n")),
+        prompt_context: Some(compiled_text),
+        stack: Some(stack),
     }
 }
 
@@ -1800,6 +2107,101 @@ fn validate_layer_refs(selected: &[String], available: &[String]) -> RoleplayDom
     Ok(())
 }
 
+struct PromptSectionDraft<'a> {
+    id: &'static str,
+    title: &'static str,
+    body: String,
+    source_kind: &'static str,
+    source_id: &'a str,
+    inclusion_reason: &'static str,
+    editable: bool,
+    derived: bool,
+}
+
+fn add_prompt_section(
+    sections: &mut Vec<RoleplayPromptStackSection>,
+    draft: PromptSectionDraft<'_>,
+    macro_tracker: &mut RoleplayMacroTracker,
+) {
+    let body = macro_tracker.resolve(&draft.body);
+    if non_empty(Some(body.as_str())).is_none() {
+        return;
+    }
+    sections.push(RoleplayPromptStackSection {
+        id: draft.id.to_string(),
+        title: draft.title.to_string(),
+        token_estimate: estimate_prompt_tokens(&body),
+        body,
+        source_kind: draft.source_kind.to_string(),
+        source_id: draft.source_id.to_string(),
+        inclusion_reason: draft.inclusion_reason.to_string(),
+        editable: draft.editable,
+        derived: draft.derived,
+    });
+}
+
+struct RoleplayMacroTracker {
+    character_name: String,
+    user_name: String,
+    char_occurrences: u32,
+    user_occurrences: u32,
+}
+
+impl RoleplayMacroTracker {
+    fn new(character_name: &str, user_name: &str) -> Self {
+        Self {
+            character_name: character_name.to_string(),
+            user_name: user_name.to_string(),
+            char_occurrences: 0,
+            user_occurrences: 0,
+        }
+    }
+
+    fn resolve(&mut self, text: &str) -> String {
+        let (text, char_count) = replace_macro(text, "{{char}}", &self.character_name);
+        let (text, user_count) = replace_macro(&text, "{{user}}", &self.user_name);
+        self.char_occurrences += char_count;
+        self.user_occurrences += user_count;
+        text
+    }
+
+    fn into_resolutions(self) -> Vec<RoleplayPromptMacroResolution> {
+        let mut resolutions = Vec::new();
+        if self.char_occurrences > 0 {
+            resolutions.push(RoleplayPromptMacroResolution {
+                macro_name: "{{char}}".to_string(),
+                replacement: self.character_name,
+                occurrences: self.char_occurrences,
+            });
+        }
+        if self.user_occurrences > 0 {
+            resolutions.push(RoleplayPromptMacroResolution {
+                macro_name: "{{user}}".to_string(),
+                replacement: self.user_name,
+                occurrences: self.user_occurrences,
+            });
+        }
+        resolutions
+    }
+}
+
+fn replace_macro(text: &str, needle: &str, replacement: &str) -> (String, u32) {
+    let count = text.matches(needle).count() as u32;
+    if count == 0 {
+        return (text.to_string(), 0);
+    }
+    (text.replace(needle, replacement), count)
+}
+
+fn estimate_prompt_tokens(text: &str) -> u32 {
+    let chars = text.chars().count() as u32;
+    if chars == 0 {
+        0
+    } else {
+        chars.div_ceil(4)
+    }
+}
+
 fn active_persona(persona: Option<&RoleplayPlayerPersona>) -> Option<&RoleplayPlayerPersona> {
     persona.filter(|persona| persona.status != "archived")
 }
@@ -1970,14 +2372,35 @@ mod tests {
                 "keeps notes",
             )),
             character: Some(character("Guide", "knows the city")),
+            ..prompt_context_defaults()
         });
         let prompt = output.prompt_context.expect("prompt context");
         assert!(prompt.contains("Session: Evening run"));
         assert!(prompt.contains("Player persona: Player Prime"));
-        assert!(prompt.contains("Player persona description: careful cartographer"));
+        assert!(prompt.contains("Description: careful cartographer"));
         assert!(prompt.contains("Selected character: Guide"));
         assert!(prompt.contains("Description: knows the city"));
         assert!(prompt.contains("Active lore layers: world, scene"));
+        let stack = output.stack.expect("prompt stack");
+        assert_eq!(stack.version, 1);
+        assert_eq!(stack.messages[0].role, "system");
+        assert_eq!(
+            stack
+                .sections
+                .iter()
+                .map(|section| section.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "core_behavior",
+                "player_persona",
+                "character_identity",
+                "scene_setup",
+                "relevant_lore_context",
+                "response_guidance"
+            ]
+        );
+        assert_eq!(stack.trace.len(), stack.sections.len());
+        assert!(stack.trace.iter().all(|entry| entry.token_estimate > 0));
     }
 
     #[test]
@@ -1991,6 +2414,7 @@ mod tests {
             metadata: metadata(vec!["scene".to_string()]),
             player_persona: Some(archived_persona),
             character: Some(archived_character),
+            ..prompt_context_defaults()
         });
         let prompt = output.prompt_context.expect("layers keep context active");
         assert!(prompt.contains("Player persona: Player (default fallback)"));
@@ -2004,8 +2428,45 @@ mod tests {
             metadata: metadata(vec![]),
             player_persona: None,
             character: None,
+            ..prompt_context_defaults()
         });
         assert_eq!(output.prompt_context, None);
+        assert_eq!(output.stack, None);
+    }
+
+    #[test]
+    fn prompt_stack_resolves_common_roleplay_macros_and_preserves_raw_blocks() {
+        let output = build_prompt_context(RoleplayPromptContextInput {
+            metadata: metadata(vec![]),
+            player_persona: Some(persona("Kopis Valliren", "{{user}} stands guard", "")),
+            character: Some(character(
+                "Crown Prince Xavier",
+                "{{char}} watches {{user}}",
+            )),
+            imported_prompt_blocks: vec![RoleplayPromptStackRawBlock {
+                source_kind: "sillytavern_preset".to_string(),
+                source_id: "preset-ava".to_string(),
+                title: "Legacy prompt block".to_string(),
+                body: "{{char}} legacy ceremony".to_string(),
+                metadata_json: serde_json::json!({"injection_position": "chat"}),
+            }],
+            ..prompt_context_defaults()
+        });
+        let stack = output.stack.expect("prompt stack");
+        assert!(stack
+            .compiled_text
+            .contains("Crown Prince Xavier watches Kopis Valliren"));
+        assert!(!stack.compiled_text.contains("{{char}}"));
+        assert!(!stack.compiled_text.contains("{{user}}"));
+        assert_eq!(stack.imported_prompt_blocks.len(), 1);
+        assert_eq!(
+            stack
+                .macro_resolutions
+                .iter()
+                .map(|resolution| (&resolution.macro_name, resolution.occurrences))
+                .collect::<Vec<_>>(),
+            vec![(&"{{char}}".to_string(), 1), (&"{{user}}".to_string(), 2)]
+        );
     }
 
     #[test]
@@ -2487,6 +2948,19 @@ mod tests {
             archived: false,
             created_at: "2026-07-07T00:00:00Z".to_string(),
             updated_at: "2026-07-07T00:00:00Z".to_string(),
+        }
+    }
+
+    fn prompt_context_defaults() -> RoleplayPromptContextInput {
+        RoleplayPromptContextInput {
+            metadata: metadata(vec![]),
+            player_persona: None,
+            character: None,
+            scene_setup: None,
+            relevant_lore: vec![],
+            recent_history: vec![],
+            response_guidance: None,
+            imported_prompt_blocks: vec![],
         }
     }
 

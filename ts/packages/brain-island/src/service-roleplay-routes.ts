@@ -178,6 +178,11 @@ interface BrowserRoleplayNarratorConfig {
   };
 }
 
+interface RoleplayPromptContextOutput {
+  prompt_context?: string;
+  stack?: Record<string, unknown>;
+}
+
 export async function handleAdminRoleplayRequest(
   request: IncomingMessage,
   state: RoleplayRouteContext,
@@ -493,6 +498,38 @@ async function handleRoleplaySessionRequest(
     if (action === "restore" && method === "POST") {
       const restored = await restoreRoleplaySession(state, sessionId);
       return successRoute(requestIdValue, { session: restored });
+    }
+    if (
+      action === "prompt-stack" &&
+      childId === undefined &&
+      childAction === undefined
+    ) {
+      if (method !== "GET") {
+        return roleplayLoreMethodNotAllowed(
+          requestIdValue,
+          "roleplay session prompt stack supports GET",
+        );
+      }
+      const session = (await state.bridge.listSessions()).find(
+        (candidate) => candidate.sessionId === sessionId,
+      );
+      if (session === undefined) {
+        return roleplayNotFound(
+          requestIdValue,
+          "roleplay_session_not_found",
+          `roleplay session ${sessionId} was not found`,
+        );
+      }
+      const output = await roleplayPromptContextOutputForSession(
+        state,
+        session,
+      );
+      return successRoute(requestIdValue, {
+        sessionId,
+        profileId: session.profileId,
+        promptContext: output?.prompt_context,
+        stack: output?.stack,
+      });
     }
     if (action === "fork" && method === "POST") {
       const fork = await forkRoleplaySessionAtMessage(
@@ -937,6 +974,17 @@ export async function roleplayPromptContextForSession(
     "sessionId" | "profileId" | "createdAt" | "lastActiveAt" | "status"
   >,
 ): Promise<string | undefined> {
+  const output = await roleplayPromptContextOutputForSession(state, session);
+  return output?.prompt_context;
+}
+
+async function roleplayPromptContextOutputForSession(
+  state: RoleplayRouteContext,
+  session: Pick<
+    SessionState,
+    "sessionId" | "profileId" | "createdAt" | "lastActiveAt" | "status"
+  >,
+): Promise<RoleplayPromptContextOutput | undefined> {
   const metadata = await roleplaySessionMetadata(state, session).catch(
     () => undefined,
   );
@@ -961,8 +1009,8 @@ export async function roleplayPromptContextForSession(
     metadata,
     player_persona: playerPersona,
     character,
-  })) as { prompt_context?: string };
-  return output.prompt_context;
+  })) as RoleplayPromptContextOutput;
+  return output;
 }
 
 export async function roleplaySpeakerIdentitySnapshotForMessage(

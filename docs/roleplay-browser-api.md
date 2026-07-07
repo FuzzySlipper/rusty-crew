@@ -329,6 +329,7 @@ Create accepts:
 - `PATCH /v1/admin/roleplay/sessions/{sessionId}`
 - `POST /v1/admin/roleplay/sessions/{sessionId}/archive`
 - `POST /v1/admin/roleplay/sessions/{sessionId}/restore`
+- `GET /v1/admin/roleplay/sessions/{sessionId}/prompt-stack`
 
 Create accepts:
 
@@ -348,6 +349,20 @@ Responses include `display_name`, `character_id`, `character_name`,
 
 Normal chat messages still do not create sessions implicitly. `/new` retains
 archive-and-create semantics through the existing command/control path.
+
+`GET /v1/admin/roleplay/sessions/{sessionId}/prompt-stack` returns the
+compiled roleplay prompt preview for the session without waking the agent. The
+response includes:
+
+- `promptContext`: compatibility string used by the current brain role assembly.
+- `stack.compiled_text`: the same compiled prompt text.
+- `stack.sections`: ordered prompt sections with source ids, inclusion reasons,
+  editability markers, derived markers, and token estimates.
+- `stack.trace`: one entry per included section for UI inspection.
+- `stack.macro_resolutions`: counts for resolved macros such as `{{char}}` and
+  `{{user}}`.
+- `stack.messages`: provider-shaped preview messages for future roleplay brain
+  migration work.
 
 ## Narrator Config
 
