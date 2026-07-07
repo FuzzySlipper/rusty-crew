@@ -54,12 +54,24 @@ contract.
 
 `smoke:bridge-fixture-drift` compares the checked-in file with fresh Rust
 serialization output. `smoke:bridge-validation` validates those Rust fixtures
-against the TypeBox bridge schemas and asserts that each object key present in
-a Rust fixture is explicitly declared by the matching TypeBox schema. Together
-they provide the first CI-capable drift guard while the full generator matures:
-adding a field to a covered Rust protocol shape fails until the TS schema is
-updated, even when runtime validation remains permissive for forward
-compatibility.
+against the TypeBox bridge schemas, asserts that each object key present in a
+Rust fixture is explicitly declared by the matching TypeBox schema, and enforces
+the bridge coverage ratchet in
+`ts/packages/native-bridge/src/bridge-validation-coverage.ts`.
+
+The ratchet currently pins:
+
+- manifest operations: 132;
+- exported TypeBox bridge schemas: 24;
+- Rust fixture families: 9;
+- manifest operations with TypeBox runtime validation and/or Rust fixtures: 19;
+- explicit operation exemptions: 113.
+
+Together these provide the CI-capable drift guard while the full generator
+matures: adding a field to a covered Rust protocol shape fails until the TS
+schema is updated, and adding a bridge operation fails until it is covered by
+validation/fixtures or deliberately added to the exact exemption list with a
+rationale.
 
 The native bridge loader also asserts `manifestVersion`, exact operation
 inventory, and the checked-in wire-shape fingerprint when a co-located `.node`
@@ -127,6 +139,24 @@ protocol type before the checker workflow is proven.
 
 ## Current Coverage
 
+The current counts above are intentionally asserted in code, not only in this
+document. To update them after intentional bridge work:
+
+1. Add or adjust TypeBox schemas and/or Rust fixtures when possible.
+2. If a family remains uncovered, add an exact operation exemption in
+   `bridge-validation-coverage.ts` with a short reason and preserve the
+   `MANIFEST_VERSION` bump rule for breaking changes.
+3. Regenerate fixtures/fingerprint when Rust fixture shapes change.
+4. Run the bridge gate:
+
+```bash
+npm run smoke:bridge-contract-parity
+npm run smoke:bridge-native-surface
+npm run smoke:bridge-fixture-drift
+npm run smoke:bridge-fingerprint-drift
+npm run smoke:bridge-validation
+```
+
 Checker-backed Rust fixtures currently cover:
 
 | Family | Operations / Shape | TS Validation Surface |
@@ -161,6 +191,13 @@ Runtime validation currently wraps:
 - profile registry create/update/list/get record reads
 - model provider upsert/list/get record reads
 - OpenAI Responses brain run input/result
+
+Bridge validation defaults are now fail-safe for development, test, and local
+service runs. `RUSTY_CREW_BRIDGE_VALIDATE=1` still forces validation on, and
+`RUSTY_CREW_BRIDGE_VALIDATE=0` forces it off. With no explicit setting,
+validation is enabled unless `NODE_ENV=production`. Production deployments that
+need to skip runtime validation should set either `NODE_ENV=production` or the
+explicit bridge validation opt-out.
 
 ## Adding A Bridge Family
 

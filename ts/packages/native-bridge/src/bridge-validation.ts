@@ -11,6 +11,7 @@ export interface BridgeValidationIssue {
 
 export interface BridgeValidationEnv {
   RUSTY_CREW_BRIDGE_VALIDATE?: string;
+  NODE_ENV?: string;
 }
 
 export class BridgeValidationError extends Error {
@@ -42,7 +43,24 @@ export class BridgeValidationError extends Error {
 export function bridgeValidationEnabled(
   env: BridgeValidationEnv = process.env,
 ): boolean {
-  return env.RUSTY_CREW_BRIDGE_VALIDATE === "1";
+  const explicit = env.RUSTY_CREW_BRIDGE_VALIDATE?.trim().toLowerCase();
+  if (
+    explicit === "1" ||
+    explicit === "true" ||
+    explicit === "yes" ||
+    explicit === "on"
+  ) {
+    return true;
+  }
+  if (
+    explicit === "0" ||
+    explicit === "false" ||
+    explicit === "no" ||
+    explicit === "off"
+  ) {
+    return false;
+  }
+  return env.NODE_ENV !== "production";
 }
 
 export function validateBridgeValue<T>(input: {

@@ -6,8 +6,10 @@ import { Value } from "typebox/value";
 
 import {
   BridgeValidationError,
+  bridgeValidationEnabled,
   validateBridgeValue,
 } from "./bridge-validation.js";
+import { assertBridgeValidationCoverageRatchet } from "./bridge-validation-coverage.js";
 import {
   actionBatchReceiptSchema,
   brainActionBatchSchema,
@@ -42,6 +44,7 @@ interface RustBridgeValidationFixtureFile {
   operation_count: number;
   fixtures: Array<{
     name: string;
+    operation: string;
     value: unknown;
   }>;
 }
@@ -68,6 +71,7 @@ if (rustFixtures.operation_count !== nativeManifestOperationNames.length) {
     `Rust fixture operation count ${rustFixtures.operation_count} does not match TS manifest operation count ${nativeManifestOperationNames.length}`,
   );
 }
+assertBridgeValidationCoverageRatchet(rustFixtures);
 
 const nativeBridge = await loadNativeBridge();
 assertArrayEqual(
@@ -81,12 +85,52 @@ if (nativeBridge.wireShapeFingerprint !== nativeWireShapeFingerprint) {
   );
 }
 
+assertBridgeValidationDefaults();
+
 function rustFixture(name: string): unknown {
   const value = rustFixtureValues.get(name);
   if (value === undefined) {
     throw new Error(`missing Rust bridge validation fixture ${name}`);
   }
   return value;
+}
+
+function assertBridgeValidationDefaults(): void {
+  const cases: Array<{
+    label: string;
+    env: Parameters<typeof bridgeValidationEnabled>[0];
+    expected: boolean;
+  }> = [
+    { label: "default local", env: {}, expected: true },
+    { label: "test", env: { NODE_ENV: "test" }, expected: true },
+    {
+      label: "production default",
+      env: { NODE_ENV: "production" },
+      expected: false,
+    },
+    {
+      label: "explicit production on",
+      env: {
+        NODE_ENV: "production",
+        RUSTY_CREW_BRIDGE_VALIDATE: "1",
+      },
+      expected: true,
+    },
+    {
+      label: "explicit local off",
+      env: { RUSTY_CREW_BRIDGE_VALIDATE: "0" },
+      expected: false,
+    },
+  ];
+
+  for (const item of cases) {
+    const actual = bridgeValidationEnabled(item.env);
+    if (actual !== item.expected) {
+      throw new Error(
+        `bridge validation default ${item.label} expected ${item.expected}, got ${actual}`,
+      );
+    }
+  }
 }
 
 function validateRustFixture(input: {
