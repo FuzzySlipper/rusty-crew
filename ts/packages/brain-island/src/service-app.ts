@@ -7783,7 +7783,7 @@ async function submitRustyViewChatMessage(
   const slotId = stableChatRecordId("slot", messageId);
   const primaryVariantId = stableChatRecordId("variant", slotId);
   const now = state.now();
-  const branch = await ensureDefaultConversationBranch(
+  const branch = await ensureActiveConversationBranch(
     state,
     input.session,
     now,
@@ -8720,7 +8720,7 @@ async function removeRustyViewDataBankScope(
   return { status: "removed", scope: removed, latest_cursor: event.event_id };
 }
 
-async function ensureDefaultConversationBranch(
+async function ensureActiveConversationBranch(
   state: ServiceState,
   session: ChatSendMessageInput["session"],
   now: string,
@@ -8752,7 +8752,32 @@ async function ensureDefaultConversationBranch(
       updated_at: now,
     })
     .catch(() => undefined);
-  return branch;
+  return activeConversationBranchOrDefault(state, session.sessionId, branch);
+}
+
+async function activeConversationBranchOrDefault(
+  state: ServiceState,
+  sessionId: SessionId,
+  fallback: ConversationBranchRecord,
+): Promise<ConversationBranchRecord> {
+  const stateRecord = (await state.bridge
+    .getConversationBranchState({
+      session_id: sessionId,
+      default_updated_at: state.now(),
+    })
+    .catch(() => undefined)) as ConversationBranchStateRecord | undefined;
+  if (stateRecord?.active_branch_id == null) {
+    return fallback;
+  }
+  const branches = (await state.bridge.queryConversationBranches({
+    session_id: sessionId,
+    page: { limit: 500, offset: 0 },
+  })) as ConversationBranchRecord[];
+  return (
+    branches.find(
+      (candidate) => candidate.branch_id === stateRecord.active_branch_id,
+    ) ?? fallback
+  );
 }
 
 async function listRustyViewMessageVariants(
@@ -8851,6 +8876,9 @@ async function createRustyViewMessageVariant(
       ordinal,
       actor: input.request.actor,
       body: input.request.body,
+      branchId: slot.primary.message.branch_id ?? undefined,
+      parentMessageId: slot.primary.message.parent_message_id ?? undefined,
+      previousMessageId: slot.primary.message.previous_message_id ?? undefined,
       metadataJson: input.request.metadata_json ?? {},
       blocks: input.request.blocks,
       now,
@@ -8928,6 +8956,23 @@ async function selectRustyViewActiveMessageVariant(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "selected";
+  if (status === "selected") {
+    const selected =
+      result.slot.active_variant_id === null ||
+      result.slot.active_variant_id === undefined
+        ? result.slot.primary
+        : [result.slot.primary, ...result.slot.alternates].find(
+            (variant) => variant.variant_id === result.slot.active_variant_id,
+          );
+    if (selected?.message.branch_id) {
+      await state.bridge.updateConversationBranchHead({
+        branch_id: selected.message.branch_id,
+        head_message_id: selected.message.message_id,
+        expected: { type: "any" },
+        updated_at: state.now(),
+      });
+    }
+  }
   const event = appendChatEvent(state, input.session.sessionId, {
     kind: "message_active_variant_selected",
     payload: {

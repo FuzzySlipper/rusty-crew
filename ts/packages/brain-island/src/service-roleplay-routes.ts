@@ -17,7 +17,13 @@ import type {
 import type { AdminRouteResult } from "./admin-diagnostics-api.js";
 import { failure, successRoute } from "./service-route-results.js";
 import { loadProfileConfig } from "./profile-loading.js";
-import type { ChatEvent } from "./rusty-view-chat-api.js";
+import type {
+  ChatActor,
+  ChatEvent,
+  ConversationBranchRecord,
+  MessageSlotRecord,
+  MessageVariantRecord,
+} from "./rusty-view-chat-api.js";
 
 export interface RoleplayRouteContext {
   readonly bridge: NativeBridgeModule;
@@ -83,6 +89,16 @@ interface RoleplaySessionMetadata {
   archived: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+interface RoleplaySessionAlternativeSlot {
+  slot_id: string;
+  active_variant_id?: string | null;
+  primary_variant_id: string;
+  alternate_count: number;
+  variant_count: number;
+  active_variant?: MessageVariantRecord;
+  variants: MessageVariantRecord[];
 }
 
 interface RoleplayChatLayersBrowserWrite extends NativeRoleplayChatLayersWrite {
@@ -2306,6 +2322,8 @@ async function handleRoleplaySessionRequest(
   const sessionId =
     parts.length >= 5 ? decodeURIComponent(parts[4]) : undefined;
   const action = parts.length >= 6 ? parts[5] : undefined;
+  const childId = parts.length >= 7 ? decodeURIComponent(parts[6]) : undefined;
+  const childAction = parts.length >= 8 ? parts[7] : undefined;
   try {
     if (sessionId === undefined) {
       if (method === "GET") {
@@ -2335,6 +2353,53 @@ async function handleRoleplaySessionRequest(
     if (action === "restore" && method === "POST") {
       const restored = await restoreRoleplaySession(state, sessionId);
       return successRoute(requestIdValue, { session: restored });
+    }
+    if (action === "fork" && method === "POST") {
+      const fork = await forkRoleplaySessionAtMessage(
+        state,
+        sessionId,
+        recordBody(await readJsonBody(request)),
+      );
+      return roleplaySuccess(requestIdValue, fork, 201);
+    }
+    if (action === "alternatives" && childId === undefined) {
+      if (method === "GET") {
+        return successRoute(
+          requestIdValue,
+          await roleplayTerminalAlternativesResult(state, sessionId, url),
+        );
+      }
+      if (method === "POST") {
+        const alternative = await createRoleplayAssistantAlternative(
+          state,
+          sessionId,
+          recordBody(await readJsonBody(request)),
+          requestIdValue,
+        );
+        return roleplaySuccess(requestIdValue, alternative, 201);
+      }
+      return roleplayLoreMethodNotAllowed(
+        requestIdValue,
+        "roleplay session alternatives supports GET and POST",
+      );
+    }
+    if (
+      action === "alternatives" &&
+      childId !== undefined &&
+      childAction === "select" &&
+      method === "POST"
+    ) {
+      const selected = await selectRoleplayAssistantAlternative(
+        state,
+        sessionId,
+        childId,
+        recordBody(await readJsonBody(request)),
+      );
+      return roleplaySuccess(
+        requestIdValue,
+        selected,
+        selected.status === "conflict" ? 409 : 200,
+      );
     }
     if (action !== undefined) {
       return roleplayNotFound(
@@ -3107,6 +3172,482 @@ async function restoreRoleplaySession(
   return summary;
 }
 
+async function forkRoleplaySessionAtMessage(
+  state: RoleplayRouteContext,
+  sourceSessionId: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const sourceSession = await state.serviceSessionById(sourceSessionId);
+  const targetMessageId = requiredRouteString(
+    optionalString(body.messageId) ?? optionalString(body.message_id),
+    "messageId",
+  );
+  const targetSessionId =
+    optionalString(body.sessionId) ??
+    optionalString(body.session_id) ??
+    optionalString(body.newSessionId) ??
+    optionalString(body.new_session_id) ??
+    `${sourceSession.agentId}-fork-${state
+      .now()
+      .replace(/[^0-9A-Za-z]/g, "")
+      .slice(0, 17)}-${randomBytes(3).toString("hex")}`;
+  const sourceSlots = await canonicalRoleplaySlotsThroughMessage(
+    state,
+    sourceSessionId,
+    targetMessageId,
+  );
+  const targetSession = await state.bridge.createSession({
+    sessionId: targetSessionId,
+    agentId: sourceSession.agentId,
+    profileId: sourceSession.profileId,
+    kind: sourceSession.kind as "full" | "worker" | "delegated",
+    resourceLimits: compactRecord(
+      sourceSession.resourceLimits as unknown as Record<string, unknown>,
+    ),
+    toolProfile: sourceSession.toolProfile,
+    historyWindow: sourceSession.historyWindow,
+  });
+  const sourceMetadata = await roleplaySessionMetadata(state, sourceSession);
+  await upsertRoleplaySessionMetadata(state, targetSession.sessionId, {
+    ...sourceMetadata,
+    sessionId: targetSession.sessionId,
+    profileId: targetSession.profileId,
+    displayName:
+      optionalString(body.displayName) ??
+      optionalString(body.display_name) ??
+      `${sourceMetadata.displayName ?? sourceSession.sessionId} fork`,
+    archived: false,
+    createdAt: state.now(),
+    updatedAt: state.now(),
+  });
+  const sourceLayers = await state.bridge.getChatLayers(sourceSessionId);
+  if (sourceLayers.length > 0) {
+    await state.bridge.setChatLayers({
+      chat_id: targetSession.sessionId,
+      layers: sourceLayers.map((layer) => ({
+        layer_id: String(layer.layer_id),
+        priority: numberValue(layer.priority),
+        enabled: layer.enabled !== false,
+      })),
+      now: state.now(),
+    });
+  }
+  const now = state.now();
+  const branchId = stableRoleplayRecordId(
+    "branch",
+    `${targetSession.sessionId}:fork:${targetMessageId}`,
+  );
+  const branch = (await state.bridge.saveConversationBranch({
+    branch_id: branchId,
+    session_id: targetSession.sessionId,
+    parent_branch_id: null,
+    parent_message_id: null,
+    origin_message_id: null,
+    head_message_id: null,
+    label:
+      optionalString(body.label) ??
+      optionalString(body.branchLabel) ??
+      optionalString(body.branch_label) ??
+      "Fork",
+    metadata_json: {
+      source: "roleplay_session_fork",
+      source_session_id: sourceSessionId,
+      source_message_id: targetMessageId,
+    },
+    created_at: now,
+    updated_at: now,
+  })) as ConversationBranchRecord;
+
+  const copiedMessages = new Map<string, string>();
+  let copiedCount = 0;
+  let targetCopiedMessageId: string | undefined;
+  for (const slot of sourceSlots) {
+    const sourceVariant = slot.canonical;
+    const sourceMessage = sourceVariant.message;
+    const copiedMessageId = stableRoleplayRecordId(
+      "message",
+      `${targetSession.sessionId}:${sourceMessage.message_id}`,
+    );
+    copiedMessages.set(sourceMessage.message_id, copiedMessageId);
+    if (sourceMessage.message_id === targetMessageId) {
+      targetCopiedMessageId = copiedMessageId;
+    }
+    const slotId = stableRoleplayRecordId(
+      "slot",
+      `${targetSession.sessionId}:${slot.slot.slot_id}`,
+    );
+    const variantId = stableRoleplayRecordId("variant", slotId);
+    await state.bridge.saveMessageSlot({
+      slot_id: slotId,
+      session_id: targetSession.sessionId,
+      primary_variant_id: variantId,
+      active_variant_id: null,
+      metadata_json: {
+        source: "roleplay_session_fork",
+        source_slot_id: slot.slot.slot_id,
+        source_variant_id: sourceVariant.variant_id,
+      },
+      created_at: now,
+      updated_at: now,
+    });
+    await state.bridge.saveMessageVariant(
+      roleplayMessageVariantWrite({
+        sessionId: targetSession.sessionId,
+        slotId,
+        variantId,
+        messageId: copiedMessageId,
+        source: "primary",
+        ordinal: 0,
+        actor: actorForVariant(sourceVariant),
+        body: sourceMessage.body,
+        branchId,
+        parentMessageId:
+          sourceMessage.parent_message_id === null ||
+          sourceMessage.parent_message_id === undefined
+            ? undefined
+            : copiedMessages.get(sourceMessage.parent_message_id),
+        previousMessageId:
+          sourceMessage.previous_message_id === null ||
+          sourceMessage.previous_message_id === undefined
+            ? undefined
+            : copiedMessages.get(sourceMessage.previous_message_id),
+        metadataJson: {
+          ...(optionalRecord(sourceMessage.metadata_json) ?? {}),
+          source: "roleplay_session_fork",
+          source_session_id: sourceSessionId,
+          source_message_id: sourceMessage.message_id,
+        },
+        now,
+      }),
+    );
+    copiedCount += 1;
+  }
+  await state.bridge.updateConversationBranchHead({
+    branch_id: branchId,
+    head_message_id:
+      targetCopiedMessageId ?? [...copiedMessages.values()].at(-1),
+    expected: { type: "any" },
+    updated_at: state.now(),
+  });
+  await state.bridge.selectActiveConversationBranch({
+    session_id: targetSession.sessionId,
+    active_branch_id: branchId,
+    expected: { type: "any" },
+    updated_at: state.now(),
+  });
+  const summary = await getRoleplaySessionSummary(
+    state,
+    targetSession.sessionId,
+  );
+  return {
+    status: "forked",
+    source_session_id: sourceSessionId,
+    source_message_id: targetMessageId,
+    session: summary,
+    branch: {
+      ...branch,
+      head_message_id:
+        targetCopiedMessageId ?? [...copiedMessages.values()].at(-1),
+    },
+    copied_message_count: copiedCount,
+  };
+}
+
+async function roleplayTerminalAlternativesResult(
+  state: RoleplayRouteContext,
+  sessionId: string,
+  url: URL,
+): Promise<Record<string, unknown>> {
+  const slot = await roleplayTerminalAssistantSlot(
+    state,
+    sessionId,
+    optionalString(
+      url.searchParams.get("slot_id") ?? url.searchParams.get("slotId"),
+    ),
+  );
+  return {
+    session_id: sessionId,
+    slot: roleplayAlternativeSlot(slot),
+  };
+}
+
+async function createRoleplayAssistantAlternative(
+  state: RoleplayRouteContext,
+  sessionId: string,
+  body: Record<string, unknown>,
+  requestIdValue: string,
+): Promise<Record<string, unknown>> {
+  const slot = await roleplayTerminalAssistantSlot(
+    state,
+    sessionId,
+    optionalString(body.slotId) ?? optionalString(body.slot_id),
+  );
+  const now = state.now();
+  const variantId =
+    optionalString(body.variantId) ??
+    optionalString(body.variant_id) ??
+    stableRoleplayRecordId("variant", `${slot.slot_id}:${requestIdValue}`);
+  const messageId =
+    optionalString(body.messageId) ??
+    optionalString(body.message_id) ??
+    stableRoleplayRecordId("message", variantId);
+  const bodyText = requiredRouteString(
+    optionalString(body.body) ?? optionalString(body.text),
+    "body",
+  );
+  const variant = (await state.bridge.saveMessageVariant(
+    roleplayMessageVariantWrite({
+      sessionId,
+      slotId: slot.slot_id,
+      variantId,
+      messageId,
+      source: "alternate",
+      ordinal: slot.alternates.length + 1,
+      actor: { id: "roleplay-assistant", kind: "agent" },
+      body: bodyText,
+      branchId: slot.primary.message.branch_id ?? undefined,
+      parentMessageId: slot.primary.message.parent_message_id ?? undefined,
+      previousMessageId: slot.primary.message.previous_message_id ?? undefined,
+      metadataJson: {
+        source: "roleplay_assistant_alternative",
+        generated: false,
+        ...(optionalRecord(body.metadata_json) ?? {}),
+      },
+      now,
+    }),
+  )) as MessageVariantRecord;
+  return {
+    status: "created",
+    session_id: sessionId,
+    slot: roleplayAlternativeSlot({
+      ...slot,
+      alternates: [...slot.alternates, variant],
+    }),
+    variant,
+  };
+}
+
+async function selectRoleplayAssistantAlternative(
+  state: RoleplayRouteContext,
+  sessionId: string,
+  slotId: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const slot = await requireRoleplayMessageSlot(state, sessionId, slotId);
+  const activeVariantId =
+    optionalString(body.activeVariantId) ??
+    optionalString(body.active_variant_id) ??
+    optionalString(body.variantId) ??
+    optionalString(body.variant_id);
+  const result = (await state.bridge.selectActiveMessageVariant({
+    slot_id: slot.slot_id,
+    active_variant_id: activeVariantId ?? null,
+    expected: { type: "any" },
+    updated_at: state.now(),
+  })) as {
+    slot: MessageSlotRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  const status = result.conflict ? "conflict" : "selected";
+  if (status === "selected") {
+    const selected = activeVariantForSlot(result.slot);
+    if (selected?.message.branch_id) {
+      await state.bridge.updateConversationBranchHead({
+        branch_id: selected.message.branch_id,
+        head_message_id: selected.message.message_id,
+        expected: { type: "any" },
+        updated_at: state.now(),
+      });
+    }
+  }
+  return {
+    status,
+    session_id: sessionId,
+    slot: roleplayAlternativeSlot(result.slot),
+    ...(result.conflict ? { conflict: result.conflict } : {}),
+  };
+}
+
+async function canonicalRoleplaySlotsThroughMessage(
+  state: RoleplayRouteContext,
+  sessionId: string,
+  targetMessageId: string,
+): Promise<
+  Array<{ slot: MessageSlotRecord; canonical: MessageVariantRecord }>
+> {
+  const slots = await roleplayMessageSlots(state, sessionId);
+  const ordered = [...slots].sort((left, right) =>
+    left.created_at === right.created_at
+      ? left.slot_id.localeCompare(right.slot_id)
+      : left.created_at.localeCompare(right.created_at),
+  );
+  const copied: Array<{
+    slot: MessageSlotRecord;
+    canonical: MessageVariantRecord;
+  }> = [];
+  for (const slot of ordered) {
+    const explicitTarget = [slot.primary, ...slot.alternates].find(
+      (variant) => variant.message.message_id === targetMessageId,
+    );
+    const canonical = explicitTarget ?? activeVariantForSlot(slot);
+    copied.push({ slot, canonical });
+    if (explicitTarget !== undefined) {
+      return copied;
+    }
+  }
+  throw new Error(
+    `message ${targetMessageId} was not found in roleplay session ${sessionId}`,
+  );
+}
+
+async function roleplayTerminalAssistantSlot(
+  state: RoleplayRouteContext,
+  sessionId: string,
+  slotId: string | undefined,
+): Promise<MessageSlotRecord> {
+  if (slotId !== undefined) {
+    return requireRoleplayMessageSlot(state, sessionId, slotId);
+  }
+  const slots = await roleplayMessageSlots(state, sessionId);
+  const assistantSlots = slots
+    .filter(
+      (slot) => activeVariantForSlot(slot).message.author_role === "assistant",
+    )
+    .sort((left, right) =>
+      left.created_at === right.created_at
+        ? left.slot_id.localeCompare(right.slot_id)
+        : left.created_at.localeCompare(right.created_at),
+    );
+  const terminal = assistantSlots.at(-1);
+  if (terminal === undefined) {
+    throw new Error(`roleplay session ${sessionId} has no assistant slot`);
+  }
+  return terminal;
+}
+
+async function requireRoleplayMessageSlot(
+  state: RoleplayRouteContext,
+  sessionId: string,
+  slotId: string,
+): Promise<MessageSlotRecord> {
+  const found = (await roleplayMessageSlots(state, sessionId)).find(
+    (slot) => slot.slot_id === slotId,
+  );
+  if (found === undefined) {
+    throw new Error(`message slot ${slotId} was not found for ${sessionId}`);
+  }
+  return found;
+}
+
+async function roleplayMessageSlots(
+  state: RoleplayRouteContext,
+  sessionId: string,
+): Promise<MessageSlotRecord[]> {
+  return (await state.bridge.queryMessageSlots({
+    session_id: sessionId,
+    include_alternates: true,
+    page: { limit: 1_000, offset: 0 },
+  })) as MessageSlotRecord[];
+}
+
+function roleplayAlternativeSlot(
+  slot: MessageSlotRecord,
+): RoleplaySessionAlternativeSlot {
+  const variants = [slot.primary, ...slot.alternates].filter(
+    (variant) => variant.status !== "deleted",
+  );
+  return {
+    slot_id: slot.slot_id,
+    active_variant_id: slot.active_variant_id,
+    primary_variant_id: slot.primary_variant_id,
+    alternate_count: slot.alternates.filter(
+      (variant) => variant.status !== "deleted",
+    ).length,
+    variant_count: variants.length,
+    active_variant: activeVariantForSlot(slot),
+    variants,
+  };
+}
+
+function activeVariantForSlot(slot: MessageSlotRecord): MessageVariantRecord {
+  if (slot.active_variant_id === null || slot.active_variant_id === undefined) {
+    return slot.primary;
+  }
+  return (
+    [slot.primary, ...slot.alternates].find(
+      (variant) => variant.variant_id === slot.active_variant_id,
+    ) ?? slot.primary
+  );
+}
+
+function actorForVariant(variant: MessageVariantRecord): ChatActor {
+  const role = variant.message.author_role;
+  return {
+    id: variant.message.author_id,
+    kind:
+      role === "assistant" ? "agent" : role === "system" ? "system" : "human",
+  };
+}
+
+function roleplayMessageVariantWrite(input: {
+  sessionId: string;
+  slotId: string;
+  variantId: string;
+  messageId: string;
+  source: "primary" | "alternate";
+  ordinal: number;
+  actor: ChatActor;
+  body: string;
+  branchId?: string | null;
+  parentMessageId?: string | null;
+  previousMessageId?: string | null;
+  metadataJson: unknown;
+  now: string;
+}): Record<string, unknown> {
+  return {
+    variant_id: input.variantId,
+    slot_id: input.slotId,
+    source: input.source,
+    ordinal: input.ordinal,
+    status: "active",
+    message: {
+      message_id: input.messageId,
+      session_id: input.sessionId,
+      branch_id: input.branchId ?? null,
+      parent_message_id: input.parentMessageId ?? null,
+      previous_message_id: input.previousMessageId ?? null,
+      author_id: input.actor.id,
+      author_role:
+        input.actor.kind === "agent"
+          ? "assistant"
+          : input.actor.kind === "system"
+            ? "system"
+            : "user",
+      status: "completed",
+      body: input.body,
+      metadata_json: input.metadataJson ?? {},
+      created_at: input.now,
+      blocks: [
+        {
+          block_id: `${input.messageId}:block:1`,
+          ordinal: 0,
+          kind: "text",
+          content_json: { text: input.body },
+          render_policy_json: undefined,
+          metadata_json: {},
+        },
+      ],
+    },
+    metadata_json: input.metadataJson ?? {},
+    created_at: input.now,
+    updated_at: input.now,
+  };
+}
+
+function stableRoleplayRecordId(prefix: string, raw: string): string {
+  return `${prefix}:${raw.replace(/[^A-Za-z0-9._:-]+/g, "_").slice(0, 160)}`;
+}
+
 function lastEventPreview(event: ChatEvent | undefined): string | undefined {
   if (event === undefined) return undefined;
   const body =
@@ -3242,6 +3783,22 @@ function roleplayNotFound(
     message,
     retryable: false,
   });
+}
+
+function roleplaySuccess<T>(
+  requestIdValue: string,
+  data: T,
+  status: number,
+): AdminRouteResult<T> {
+  return {
+    status,
+    headers: { "content-type": "application/json" },
+    body: {
+      ok: true,
+      data,
+      meta: { request_id: requestIdValue, schema_version: 1 },
+    },
+  };
 }
 
 function roleplayInputError(

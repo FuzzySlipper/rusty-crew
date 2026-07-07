@@ -557,6 +557,116 @@ try {
   assert.equal(session.body.data.session.character_name, "RP Hero");
   assert.deepEqual(session.body.data.session.active_layer_ids, ["rp-world"]);
 
+  const userSlot = await post("/v1/chat/sessions/rp-browser-session/slots", {
+    slot_id: "rp-user-slot",
+    primary_variant_id: "rp-user-primary",
+    message_id: "rp-message-user-1",
+    actor: { id: "rp-player", kind: "human" },
+    body: "I lift the lantern.",
+  });
+  assert.equal(userSlot.status, 201, JSON.stringify(userSlot.body));
+  const assistantSlot = await post(
+    "/v1/chat/sessions/rp-browser-session/slots",
+    {
+      slot_id: "rp-assistant-slot",
+      primary_variant_id: "rp-assistant-primary",
+      message_id: "rp-message-assistant-1",
+      actor: { id: "rp-profile", kind: "agent" },
+      body: "The lantern catches silver dust in the air.",
+    },
+  );
+  assert.equal(assistantSlot.status, 201, JSON.stringify(assistantSlot.body));
+
+  const initialAlternatives = await get(
+    "/v1/admin/roleplay/sessions/rp-browser-session/alternatives",
+  );
+  assert.equal(initialAlternatives.status, 200);
+  assert.equal(initialAlternatives.body.data.slot.slot_id, "rp-assistant-slot");
+  assert.equal(initialAlternatives.body.data.slot.alternate_count, 0);
+
+  const firstAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-browser-session/alternatives",
+    {
+      slotId: "rp-assistant-slot",
+      variantId: "rp-alt-1",
+      messageId: "rp-message-assistant-alt-1",
+      body: "The lantern shows a narrow blue seam under the old door.",
+    },
+  );
+  assert.equal(
+    firstAlternative.status,
+    201,
+    JSON.stringify(firstAlternative.body),
+  );
+  const secondAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-browser-session/alternatives",
+    {
+      slotId: "rp-assistant-slot",
+      variantId: "rp-alt-2",
+      messageId: "rp-message-assistant-alt-2",
+      body: "The lantern reveals a serpent-and-rose crest in the dust.",
+    },
+  );
+  assert.equal(
+    secondAlternative.body.data.slot.alternate_count,
+    2,
+    JSON.stringify(secondAlternative.body),
+  );
+  const selectedAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-browser-session/alternatives/rp-assistant-slot/select",
+    { variantId: "rp-alt-2" },
+  );
+  assert.equal(
+    selectedAlternative.status,
+    200,
+    JSON.stringify(selectedAlternative.body),
+  );
+  assert.equal(
+    selectedAlternative.body.data.slot.active_variant_id,
+    "rp-alt-2",
+  );
+
+  const forkAtOldMessage = await post(
+    "/v1/admin/roleplay/sessions/rp-browser-session/fork",
+    {
+      messageId: "rp-message-user-1",
+      sessionId: "rp-browser-session-fork-old",
+      displayName: "Browser RP Fork Old",
+    },
+  );
+  assert.equal(
+    forkAtOldMessage.status,
+    201,
+    JSON.stringify(forkAtOldMessage.body),
+  );
+  assert.equal(forkAtOldMessage.body.data.copied_message_count, 1);
+  assert.equal(
+    forkAtOldMessage.body.data.session.player_persona_id,
+    "rp-player",
+  );
+  assert.deepEqual(forkAtOldMessage.body.data.session.active_layer_ids, [
+    "rp-world",
+  ]);
+
+  const forkAtSelectedAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-browser-session/fork",
+    {
+      messageId: "rp-message-assistant-alt-2",
+      sessionId: "rp-browser-session-fork-selected",
+      displayName: "Browser RP Fork Selected",
+    },
+  );
+  assert.equal(
+    forkAtSelectedAlternative.status,
+    201,
+    JSON.stringify(forkAtSelectedAlternative.body),
+  );
+  assert.equal(forkAtSelectedAlternative.body.data.copied_message_count, 2);
+  assert.equal(
+    forkAtSelectedAlternative.body.data.source_message_id,
+    "rp-message-assistant-alt-2",
+  );
+
   const reboundSession = await patch(
     "/v1/admin/roleplay/sessions/rp-browser-session",
     {
