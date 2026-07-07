@@ -812,6 +812,74 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
   { additionalProperties: true },
 );
 
+const chatCompletionMessageSchema = Type.Object(
+  {
+    role: Type.Union([
+      Type.Literal("system"),
+      Type.Literal("user"),
+      Type.Literal("assistant"),
+      Type.Literal("tool"),
+    ]),
+    content: Type.Optional(Type.String()),
+    name: Type.Optional(Type.String()),
+    toolCallId: Type.Optional(Type.String()),
+    toolCalls: Type.Optional(Type.Array(Type.Unknown())),
+  },
+  { additionalProperties: true },
+);
+
+const piAgentClientSchema = Type.Union([
+  Type.Object(
+    {
+      mode: Type.Literal("fake"),
+    },
+    { additionalProperties: true },
+  ),
+  Type.Object(
+    {
+      mode: Type.Literal("live"),
+      baseUrl: Type.String(),
+      apiKey: Type.Optional(Type.String()),
+    },
+    { additionalProperties: true },
+  ),
+]);
+
+export const piAgentBrainRunInputSchema = Type.Object(
+  {
+    wakeId: Type.String(),
+    sessionId: Type.String(),
+    messages: Type.Array(chatCompletionMessageSchema),
+    tools: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            name: Type.String(),
+            description: Type.String(),
+            inputSchema: Type.Unknown(),
+          },
+          { additionalProperties: true },
+        ),
+      ),
+    ),
+    config: Type.Object(
+      {
+        model: Type.String(),
+        streamIdleTimeoutMs: Type.Optional(Type.Number()),
+        wakeTimeoutMs: Type.Optional(Type.Number()),
+        temperatureMilli: Type.Optional(Type.Number()),
+        maxOutputTokens: Type.Optional(Type.Number()),
+        maxToolRounds: Type.Optional(Type.Number()),
+        repeatedToolCallLimit: Type.Optional(Type.Number()),
+        finalMessageFallbackText: Type.Optional(Type.String()),
+      },
+      { additionalProperties: true },
+    ),
+    client: Type.Optional(piAgentClientSchema),
+  },
+  { additionalProperties: true },
+);
+
 const nativeProviderStateInputSchema = Type.Object(
   {
     module_id: Type.String(),
@@ -1014,6 +1082,55 @@ export const rawOpenAiResponsesBrainRunResultSchema = Type.Object(
         },
         { additionalProperties: true },
       ),
+    ),
+  },
+  { additionalProperties: true },
+);
+
+const piAgentTransportMetricsSchema = Type.Object(
+  {
+    provider_request_count: Type.Number(),
+    tool_round_count: Type.Number(),
+  },
+  { additionalProperties: true },
+);
+
+export const rawPiAgentBufferedDrainResultSchema = Type.Object(
+  {
+    wake_id: Type.String(),
+    items: Type.Array(rawBrainWakeStreamItemSchema),
+    tool_requests: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            call_id: Type.String(),
+            provider_item_id: Type.Optional(
+              Type.Union([Type.String(), Type.Null()]),
+            ),
+            name: Type.String(),
+            arguments_json: Type.String(),
+          },
+          { additionalProperties: true },
+        ),
+      ),
+    ),
+    terminal: Type.Boolean(),
+    transport_metrics: Type.Optional(
+      Type.Union([Type.Null(), piAgentTransportMetricsSchema]),
+    ),
+    error: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    cancellation: Type.Optional(
+      Type.Union([
+        Type.Null(),
+        Type.Object(
+          {
+            reason_code: Type.String(),
+            summary: Type.String(),
+            cancelled_at: Type.String(),
+          },
+          { additionalProperties: true },
+        ),
+      ]),
     ),
   },
   { additionalProperties: true },

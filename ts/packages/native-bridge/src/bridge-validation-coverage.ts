@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 132;
-const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 24;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 136;
+const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 26;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 19;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 113;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 21;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 115;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "create_profile_registry_record",
@@ -35,7 +35,9 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "model_provider_refresh_impact",
   "provider_state_diagnostics",
   "purge_profile",
+  "drain_pi_agent_brain_stream",
   "run_openai_responses_brain",
+  "start_pi_agent_brain",
   "submit_brain_actions",
   "submit_brain_event",
   "update_profile_registry_record",
@@ -92,6 +94,12 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "cancel_openai_responses_brain",
       "exchange_openai_oauth_code",
     ],
+  },
+  {
+    group: "pi_agent_buffered",
+    reason:
+      "Rust pi-agent start/drain are TypeBox validated; submit/cancel are narrow buffered-run receipts covered by Rust bridge tests until per-operation fixtures are added.",
+    operations: ["submit_pi_agent_tool_output", "cancel_pi_agent_brain"],
   },
   {
     group: "config_and_adapter_ingress",

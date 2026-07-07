@@ -81,6 +81,7 @@ mod binding_delegation;
 mod binding_events;
 mod binding_manifest;
 mod binding_memory;
+mod binding_pi_agent;
 mod binding_responses;
 mod binding_roleplay;
 mod binding_scheduler;
@@ -93,6 +94,7 @@ mod delegation;
 mod engine;
 mod events;
 mod memory;
+mod pi_agent;
 mod registries;
 mod responses;
 mod roleplay;
@@ -106,6 +108,10 @@ pub(crate) use config_profiles::*;
 pub(crate) use engine::*;
 pub(crate) use events::*;
 pub(crate) use memory::*;
+use pi_agent::{
+    cancel_pi_agent_brain_json, drain_pi_agent_brain_stream_json, start_pi_agent_brain_json,
+    submit_pi_agent_tool_output_json,
+};
 use registries::{BrainImplementationRegistry, PlatformAdapterRegistry, SubscriptionRegistry};
 use responses::{
     cancel_openai_responses_brain_json, drain_openai_responses_brain_stream_json,

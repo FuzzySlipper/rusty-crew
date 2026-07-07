@@ -23,6 +23,7 @@ rusty-crew-core-engine = { path = "../../core/core-engine" }
 rusty-crew-core-persistence = { path = "../../core/core-persistence" }
 rusty-crew-core-protocol = { path = "../../core/core-protocol" }
 rusty-crew-openai-responses-brain = { path = "../../brains/openai-responses" }
+rusty-crew-pi-agent-brain = { path = "../../brains/pi-agent" }
 rusty-crew-roleplay-core = { path = "../../roleplay/roleplay-core" }
 serde.workspace = true
 serde_json.workspace = true

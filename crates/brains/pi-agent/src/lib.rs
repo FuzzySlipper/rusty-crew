@@ -713,6 +713,14 @@ where
                 if let ChatCompletionsEvent::ToolCallFinished(call) = event {
                     tool_calls.push(call.clone());
                 }
+                if matches!(
+                    event,
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some(reason)
+                    } if reason == "tool_calls"
+                ) {
+                    return;
+                }
                 stream.extend(mapper.map_provider_event(&input.context, event));
             });
 

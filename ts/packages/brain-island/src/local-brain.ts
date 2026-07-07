@@ -17,6 +17,7 @@ import type {
   BrainWakeExecutor,
   NativeBridgeModule,
   OpenAiResponsesTransportMetrics,
+  PiAgentTransportMetrics,
 } from "@rusty-crew/native-bridge";
 
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
@@ -45,7 +46,7 @@ export interface BrainWakeResult {
   actions: BrainAction[];
   providerState?: BrainWakeProviderStateOutput;
   stream?: BrainWakeStreamItem[];
-  transportMetrics?: OpenAiResponsesTransportMetrics;
+  transportMetrics?: OpenAiResponsesTransportMetrics | PiAgentTransportMetrics;
   brainEventCounts?: Record<string, number>;
   brainStreamItemCounts?: Record<string, number>;
 }

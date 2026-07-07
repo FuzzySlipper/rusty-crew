@@ -67,6 +67,10 @@ export declare class NativeBridgeBinding {
   addProfileMemory(write: JsProfileMemoryWrite): JsProfileMemoryRecord
   replaceProfileMemory(replace: JsProfileMemoryReplace): JsProfileMemoryRecord
   removeProfileMemory(delete: JsProfileMemoryDelete): JsProfileMemoryRecord
+  startPiAgentBrainJson(inputJson: string): string
+  drainPiAgentBrainStreamJson(wakeId: string, maxItems?: number | undefined | null): string
+  submitPiAgentToolOutputJson(inputJson: string): string
+  cancelPiAgentBrainJson(inputJson: string): string
   runOpenaiResponsesBrainJson(inputJson: string): Promise<unknown>
   exchangeOpenaiOauthCodeJson(inputJson: string): Promise<unknown>
   startOpenaiResponsesBrainJson(inputJson: string): string

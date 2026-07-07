@@ -162,6 +162,42 @@ errors = "core_protocol::CoreError"
 summary = "Cancel a buffered OpenAI Responses brain wake cooperatively."
 
 [[operation]]
+name = "start_pi_agent_brain"
+surface = "stable"
+direction = "ts_to_rust"
+input = "pi_agent_brain::PiAgentBrainRunInput"
+output = "{ wake_id: String }"
+errors = "core_protocol::CoreError"
+summary = "Start one buffered Rust pi-agent chat-completions brain wake and return the stream registry id."
+
+[[operation]]
+name = "drain_pi_agent_brain_stream"
+surface = "stable"
+direction = "ts_to_rust"
+input = "(wake_id: String, max_items: Option<u32>)"
+output = "Vec<core_protocol::BrainWakeStreamItem>"
+errors = "core_protocol::CoreError"
+summary = "Drain buffered Rust pi-agent stream items for a running native brain wake."
+
+[[operation]]
+name = "submit_pi_agent_tool_output"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ wake_id, call_id, output }"
+output = "{ accepted: bool }"
+errors = "core_protocol::CoreError"
+summary = "Submit one tool result into a buffered Rust pi-agent brain wake."
+
+[[operation]]
+name = "cancel_pi_agent_brain"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ wake_id, reason_code, summary }"
+output = "{ ok, wake_id, cancelled, terminal, cancellation? }"
+errors = "core_protocol::CoreError"
+summary = "Cancel a buffered Rust pi-agent brain wake cooperatively."
+
+[[operation]]
 name = "exchange_openai_oauth_code"
 surface = "stable"
 direction = "ts_to_rust"
