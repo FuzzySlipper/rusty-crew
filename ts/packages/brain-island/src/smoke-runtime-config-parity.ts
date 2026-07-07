@@ -60,10 +60,19 @@ try {
       "valid/validation-input.camel.json",
       tempRoot,
     );
+  const expectedSnakeInput = await readFixtureJson<unknown>(
+    "valid/validation-input.snake.json",
+    tempRoot,
+  );
   assert.deepEqual(
     actualInput,
     expectedInput,
     "TS runtime/profile loading drifted from the shared config validation fixture",
+  );
+  assert.deepEqual(
+    snakeCaseKeys(actualInput),
+    expectedSnakeInput,
+    "runtime config parity fixture drifted from the Rust serde snake_case shape",
   );
 
   const validation = await bridge.validateRuntimeConfigDraft(expectedInput);
@@ -81,6 +90,15 @@ try {
   const createRequest = await readFixtureJson<NativeCreateProfileRequest>(
     "valid/create-profile-request.camel.json",
     tempRoot,
+  );
+  const expectedCreateRequestSnake = await readFixtureJson<unknown>(
+    "valid/create-profile-request.snake.json",
+    tempRoot,
+  );
+  assert.deepEqual(
+    snakeCaseKeys(jsonRoundTrip(createRequest)),
+    expectedCreateRequestSnake,
+    "create-profile parity fixture drifted from the Rust serde snake_case shape",
   );
   const createPlan = await planCreateProfileWithRust({
     bridge,
@@ -161,4 +179,23 @@ async function readFixtureText(
 
 function jsonRoundTrip<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function snakeCaseKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(snakeCaseKeys);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      camelToSnake(key),
+      snakeCaseKeys(entry),
+    ]),
+  );
+}
+
+function camelToSnake(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
