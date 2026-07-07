@@ -101,6 +101,21 @@ interface RoleplaySessionAlternativeSlot {
   variants: MessageVariantRecord[];
 }
 
+export interface RoleplaySpeakerIdentitySnapshot {
+  speaker_kind:
+    | "player_persona"
+    | "fallback_player"
+    | "assistant_character"
+    | "fallback_assistant"
+    | "system";
+  role: "user" | "assistant" | "system";
+  source_id?: string;
+  display_name: string;
+  avatar_url?: string;
+  avatar_asset_ref?: string;
+  snapshot_at: string;
+}
+
 interface RoleplayChatLayersBrowserWrite extends NativeRoleplayChatLayersWrite {
   chat_id: string;
   layers: Array<{ layer_id: string; priority: number; enabled: boolean }>;
@@ -2990,6 +3005,77 @@ export async function roleplayPromptContextForSession(
   return lines.filter((line): line is string => Boolean(line)).join("\n");
 }
 
+export async function roleplaySpeakerIdentitySnapshotForMessage(
+  state: RoleplayRouteContext,
+  session: Pick<
+    SessionState,
+    "sessionId" | "profileId" | "createdAt" | "lastActiveAt" | "status"
+  >,
+  actor: ChatActor,
+  now: string,
+): Promise<RoleplaySpeakerIdentitySnapshot> {
+  const role =
+    actor.kind === "agent"
+      ? "assistant"
+      : actor.kind === "system"
+        ? "system"
+        : "user";
+  if (role === "system") {
+    return {
+      speaker_kind: "system",
+      role,
+      source_id: actor.id,
+      display_name: actor.display_name ?? actor.id ?? "System",
+      snapshot_at: now,
+    };
+  }
+  const metadata = await roleplaySessionMetadata(state, session).catch(
+    () => undefined,
+  );
+  if (role === "user") {
+    const playerPersona =
+      metadata?.playerPersonaId === undefined
+        ? undefined
+        : await getRoleplayPlayerPersona(
+            state,
+            session.profileId,
+            metadata.playerPersonaId,
+          ).catch(() => undefined);
+    return {
+      speaker_kind:
+        playerPersona === undefined ? "fallback_player" : "player_persona",
+      role,
+      source_id: playerPersona?.id ?? actor.id,
+      display_name:
+        playerPersona?.displayName ?? actor.display_name ?? "Player",
+      ...(playerPersona?.avatarUrl
+        ? { avatar_url: playerPersona.avatarUrl }
+        : {}),
+      ...(playerPersona?.avatarAssetRef
+        ? { avatar_asset_ref: playerPersona.avatarAssetRef }
+        : {}),
+      snapshot_at: now,
+    };
+  }
+  const character =
+    metadata?.characterId === undefined
+      ? undefined
+      : await getRoleplayCharacter(
+          state,
+          session.profileId,
+          metadata.characterId,
+        ).catch(() => undefined);
+  return {
+    speaker_kind:
+      character === undefined ? "fallback_assistant" : "assistant_character",
+    role,
+    source_id: character?.id ?? actor.id,
+    display_name: character?.name ?? actor.display_name ?? "Assistant",
+    ...(character?.avatarUrl ? { avatar_url: character.avatarUrl } : {}),
+    snapshot_at: now,
+  };
+}
+
 async function listRoleplaySessions(
   state: RoleplayRouteContext,
   profileId: string | undefined,
@@ -3383,6 +3469,13 @@ async function createRoleplayAssistantAlternative(
     optionalString(body.slotId) ?? optionalString(body.slot_id),
   );
   const now = state.now();
+  const session = await state.serviceSessionById(sessionId);
+  const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
+    state,
+    session,
+    { id: "roleplay-assistant", kind: "agent" },
+    now,
+  ).catch(() => undefined);
   const variantId =
     optionalString(body.variantId) ??
     optionalString(body.variant_id) ??
@@ -3412,6 +3505,9 @@ async function createRoleplayAssistantAlternative(
         source: "roleplay_assistant_alternative",
         generated: false,
         ...(optionalRecord(body.metadata_json) ?? {}),
+        ...(speakerIdentity === undefined
+          ? {}
+          : { speaker_identity: speakerIdentity }),
       },
       now,
     }),

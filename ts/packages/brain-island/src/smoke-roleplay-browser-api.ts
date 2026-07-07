@@ -470,6 +470,7 @@ try {
       alternateGreetings: ["Still ready."],
       exampleMessages: ["Let's test this path."],
       tags: ["smoke"],
+      avatarUrl: "https://example.invalid/hero.png",
     },
   );
   assert.equal(character.status, 200, JSON.stringify(character.body));
@@ -565,6 +566,21 @@ try {
     body: "I lift the lantern.",
   });
   assert.equal(userSlot.status, 201, JSON.stringify(userSlot.body));
+  assert.equal(
+    userSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .speaker_kind,
+    "player_persona",
+  );
+  assert.equal(
+    userSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .display_name,
+    "Browser Player Revised",
+  );
+  assert.equal(
+    userSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .avatar_asset_ref,
+    "asset://player/browser",
+  );
   const assistantSlot = await post(
     "/v1/chat/sessions/rp-browser-session/slots",
     {
@@ -576,6 +592,58 @@ try {
     },
   );
   assert.equal(assistantSlot.status, 201, JSON.stringify(assistantSlot.body));
+  assert.equal(
+    assistantSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .speaker_kind,
+    "assistant_character",
+  );
+  assert.equal(
+    assistantSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .display_name,
+    "RP Hero",
+  );
+  assert.equal(
+    assistantSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .avatar_url,
+    "https://example.invalid/hero.png",
+  );
+
+  const switchedPersona = await patch(
+    "/v1/admin/roleplay/profiles/rp-profile/personas/rp-player",
+    { displayName: "Browser Player Later" },
+  );
+  assert.equal(switchedPersona.status, 200);
+  const switchedCharacter = await patch(
+    "/v1/admin/roleplay/profiles/rp-profile/characters/rp-hero",
+    { name: "RP Hero Later" },
+  );
+  assert.equal(switchedCharacter.status, 200);
+  const laterUserSlot = await post(
+    "/v1/chat/sessions/rp-browser-session/slots",
+    {
+      slot_id: "rp-user-slot-later",
+      primary_variant_id: "rp-user-primary-later",
+      message_id: "rp-message-user-later",
+      actor: { id: "rp-player", kind: "human" },
+      body: "I lower the lantern.",
+    },
+  );
+  assert.equal(
+    laterUserSlot.body.data.slot.primary.message.metadata_json.speaker_identity
+      .display_name,
+    "Browser Player Later",
+  );
+  const slotReadback = await get(
+    "/v1/chat/sessions/rp-browser-session/slots?include_alternates=true",
+  );
+  const originalUserSlot = slotReadback.body.data.items.find(
+    (slot: Record<string, unknown>) => slot.slot_id === "rp-user-slot",
+  );
+  assert.equal(
+    (originalUserSlot?.primary as any).message.metadata_json.speaker_identity
+      .display_name,
+    "Browser Player Revised",
+  );
 
   const initialAlternatives = await get(
     "/v1/admin/roleplay/sessions/rp-browser-session/alternatives",
@@ -611,6 +679,11 @@ try {
     secondAlternative.body.data.slot.alternate_count,
     2,
     JSON.stringify(secondAlternative.body),
+  );
+  assert.equal(
+    secondAlternative.body.data.variant.message.metadata_json.speaker_identity
+      .display_name,
+    "RP Hero Later",
   );
   const selectedAlternative = await post(
     "/v1/admin/roleplay/sessions/rp-browser-session/alternatives/rp-assistant-slot/select",

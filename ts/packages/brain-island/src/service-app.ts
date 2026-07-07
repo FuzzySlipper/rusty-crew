@@ -127,6 +127,7 @@ import {
   handleAdminRoleplayRequest,
   isRoleplayBrowserRoute,
   roleplayPromptContextForSession,
+  roleplaySpeakerIdentitySnapshotForMessage,
   type RoleplayRouteContext,
 } from "./service-roleplay-routes.js";
 import {
@@ -7788,16 +7789,26 @@ async function submitRustyViewChatMessage(
     input.session,
     now,
   );
+  const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
+    roleplayRouteContext(state),
+    input.session,
+    input.actor,
+    now,
+  ).catch(() => undefined);
+  const messageMetadata = {
+    source: "rusty_view_chat",
+    correlation_id: correlationId,
+    reason: input.reason,
+    ...(speakerIdentity === undefined
+      ? {}
+      : { speaker_identity: speakerIdentity }),
+  };
   await state.bridge.saveMessageSlot({
     slot_id: slotId,
     session_id: input.session.sessionId,
     primary_variant_id: primaryVariantId,
     active_variant_id: null,
-    metadata_json: {
-      source: "rusty_view_chat",
-      correlation_id: correlationId,
-      reason: input.reason,
-    },
+    metadata_json: messageMetadata,
     created_at: now,
     updated_at: now,
   });
@@ -7814,11 +7825,7 @@ async function submitRustyViewChatMessage(
       branchId: branch.branch_id,
       parentMessageId: branch.head_message_id ?? undefined,
       previousMessageId: branch.head_message_id ?? undefined,
-      metadataJson: {
-        source: "rusty_view_chat",
-        correlation_id: correlationId,
-        reason: input.reason,
-      },
+      metadataJson: messageMetadata,
       now,
     }),
   );
@@ -7834,6 +7841,9 @@ async function submitRustyViewChatMessage(
       role: input.actor.kind === "agent" ? "assistant" : "user",
       actor: input.actor,
       body: input.body,
+      ...(speakerIdentity === undefined
+        ? {}
+        : { speaker_identity: speakerIdentity }),
       correlation_id: correlationId,
       reason: input.reason,
     },
@@ -8812,12 +8822,30 @@ async function createRustyViewMessageSlot(
     stableChatRecordId("slot", `${input.session.sessionId}:${input.requestId}`);
   const variantId =
     input.request.primary_variant_id ?? stableChatRecordId("variant", slotId);
+  const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
+    roleplayRouteContext(state),
+    input.session,
+    input.request.actor,
+    now,
+  ).catch(() => undefined);
+  const slotMetadata = {
+    ...(optionalRecord(input.request.metadata_json) ?? {}),
+    ...(speakerIdentity === undefined
+      ? {}
+      : { speaker_identity: speakerIdentity }),
+  };
+  const variantMetadata = {
+    ...(optionalRecord(input.request.variant_metadata_json) ?? {}),
+    ...(speakerIdentity === undefined
+      ? {}
+      : { speaker_identity: speakerIdentity }),
+  };
   await state.bridge.saveMessageSlot({
     slot_id: slotId,
     session_id: input.session.sessionId,
     primary_variant_id: variantId,
     active_variant_id: null,
-    metadata_json: input.request.metadata_json ?? {},
+    metadata_json: slotMetadata,
     created_at: now,
     updated_at: now,
   });
@@ -8832,7 +8860,7 @@ async function createRustyViewMessageSlot(
       ordinal: 0,
       actor: input.request.actor,
       body: input.request.body,
-      metadataJson: input.request.variant_metadata_json ?? {},
+      metadataJson: variantMetadata,
       blocks: input.request.blocks,
       now,
     }),
@@ -8865,6 +8893,12 @@ async function createRustyViewMessageVariant(
     input.request.variant_id ??
     stableChatRecordId("variant", `${input.slotId}:${input.requestId}`);
   const ordinal = slot.alternates.length + 1;
+  const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
+    roleplayRouteContext(state),
+    input.session,
+    input.request.actor,
+    now,
+  ).catch(() => undefined);
   const variant = (await state.bridge.saveMessageVariant(
     messageVariantWrite({
       sessionId: input.session.sessionId,
@@ -8879,7 +8913,12 @@ async function createRustyViewMessageVariant(
       branchId: slot.primary.message.branch_id ?? undefined,
       parentMessageId: slot.primary.message.parent_message_id ?? undefined,
       previousMessageId: slot.primary.message.previous_message_id ?? undefined,
-      metadataJson: input.request.metadata_json ?? {},
+      metadataJson: {
+        ...(optionalRecord(input.request.metadata_json) ?? {}),
+        ...(speakerIdentity === undefined
+          ? {}
+          : { speaker_identity: speakerIdentity }),
+      },
       blocks: input.request.blocks,
       now,
     }),
