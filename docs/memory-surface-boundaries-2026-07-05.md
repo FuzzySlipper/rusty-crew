@@ -133,6 +133,60 @@ scene, canon status, visibility, capture, promotion, and recall.
 6. Plan the later typed-memory facade only after the above is stable; do not
    collapse roleplay lore or runtime search into generic memory prematurely.
 
+## Task 4585 Follow-Up Series
+
+Task 4585 continues the broader TS authority reduction work. The immediate goal
+is not to make one universal memory abstraction; it is to make durable Crew
+memory policy, storage decisions, and governance state Rust-owned while leaving
+TypeScript as provider glue, prompt/tool presentation, and external adapter
+code.
+
+The existing split is already partly healthy:
+
+- `core-persistence` owns profile memory, session memory, memory proposal, and
+  governance decision tables for SQLite and Postgres.
+- `core-protocol` owns the typed memory-space contract.
+- `core-engine` owns selected session-memory prompt context.
+- TypeScript owns large capture, curator, and external-memory wrappers that
+  still normalize too much domain policy before Rust sees it.
+
+The next implementation series should move in these slices:
+
+1. Define a Rust memory governance policy port that validates proposal targets,
+   governance modes, allowed operations, evidence requirements, retention
+   metadata, conflict/revision behavior, and denial reason codes before any
+   Crew memory proposal or decision is accepted.
+2. Move capture proposal normalization from
+   `capture-memory-proposals.ts`/`capture-producer-provider.ts` into a Rust
+   planner. TypeScript may still call the LLM and parse JSON, but the accepted
+   proposal envelope, dedupe key, target-space policy, and diagnostics should
+   come from Rust.
+3. Move curator candidate and mutation state for memory-affecting work behind
+   Rust governance records. TypeScript can keep file/skill discovery and
+   previews where the source state is filesystem-oriented, but candidate
+   lifecycle, approval, stale checks, receipts, and memory mutation requests
+   should use Rust-owned policy.
+4. Move external memory availability selection into the Rust/tool-profile
+   planning path. If the configured external memory client is unavailable or
+   disabled, the model should not receive attractive broken memory tools; admin
+   diagnostics and tool-selection diagnostics should explain the omission.
+5. Classify remaining TypeScript memory tools as one of: local Crew-memory
+   wrapper, external-memory adapter wrapper, roleplay-lore domain wrapper,
+   runtime-search wrapper, or UI/admin route glue. Anything that still owns
+   durable policy after classification needs a follow-up migration task.
+6. Ratchet tests and live certification around the confusing case: a profile
+   with Den document/task MCP tools plus external memory tools must use document
+   tools for Den docs/tasks and memory tools only for memory.
+
+The series should preserve these non-goals:
+
+- Do not use Den memory as fallback Crew storage.
+- Do not collapse roleplay lore into a generic memory blob.
+- Do not rename runtime search into memory.
+- Do not require TypeScript to perfectly emit memory governance JSON; model or
+  provider output should be normalized by a narrow wrapper and validated by
+  Rust before persistence.
+
 ## Acceptance For Future Changes
 
 - Agents must not need to infer backend ownership from a tool name.
