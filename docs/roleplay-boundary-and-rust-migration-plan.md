@@ -43,7 +43,7 @@ Current roleplay route surface after the first extraction:
 | Session metadata API | `crates/roleplay/roleplay-core` via metadata patch validator | Rust deterministic validation/reference checks, with TS route adapter and persistence calls |
 | Prompt context and speaker identity snapshots | `crates/roleplay/roleplay-core` via `build_roleplay_prompt_context` and `roleplay_speaker_identity` | Rust deterministic assembly, with TS record fetching/brain glue |
 | Assistant alternative persistence and selection routes | `service-roleplay-routes.ts` | TS route adapter over Rust domain planning and persistence bridge operations |
-| Narrator config API | `service-roleplay-routes.ts` | Rust config/domain validation, TS route adapter |
+| Narrator config API | `crates/roleplay/roleplay-core` via `normalize_roleplay_narrator_config` | Rust deterministic validation/defaulting, with TS route adapter and profile-file persistence |
 | Narrator brain execution | `narrator-brain.ts` | TS brain module until a Rust brain module is deliberately built |
 
 ## First Extraction
@@ -101,8 +101,9 @@ Good follow-up slices, in priority order:
    `roleplay-core` write/merge/patch helpers so required fields, archived
    references, layer references, and status transitions stay testable without
    Node.
-4. Move narrator config validation into the same Rust domain crate before more
-   roleplay-specific runtime knobs accumulate.
+4. Keep narrator config validation/defaulting expansion inside
+   `normalize_roleplay_narrator_config` before more roleplay-specific runtime
+   knobs accumulate.
 
 ## Non-Goals
 

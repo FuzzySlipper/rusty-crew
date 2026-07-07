@@ -1058,6 +1058,15 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Validate and normalize roleplay session metadata patches, including persona, character, and active-layer references."
 
 [[operation]]
+name = "normalize_roleplay_narrator_config"
+surface = "stable"
+direction = "ts_to_rust"
+input = "serde_json::Value"
+output = "roleplay_core::RoleplayNarratorConfig"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate and normalize browser/admin roleplay narrator config writes and readbacks."
+
+[[operation]]
 name = "list_simple_kv"
 surface = "stable"
 direction = "ts_to_rust"

@@ -69,9 +69,9 @@ use rusty_crew_openai_responses_brain::{
     ResponsesOutputItem, ResponsesReplayBrain, ResponsesTokenUsage, ResponsesTransportMetrics,
 };
 use rusty_crew_roleplay_core::{
-    build_prompt_context, merge_character, merge_player_persona, patch_session_metadata,
-    plan_assistant_alternative, speaker_identity_snapshot, write_character, write_player_persona,
-    RoleplayAssistantAlternativePlanInput, RoleplayCharacterMergeInput,
+    build_prompt_context, merge_character, merge_player_persona, normalize_narrator_config,
+    patch_session_metadata, plan_assistant_alternative, speaker_identity_snapshot, write_character,
+    write_player_persona, RoleplayAssistantAlternativePlanInput, RoleplayCharacterMergeInput,
     RoleplayCharacterWriteInput, RoleplayPlayerPersonaMergeInput, RoleplayPlayerPersonaWriteInput,
     RoleplayPromptContextInput, RoleplaySessionMetadataPatchInput, RoleplaySpeakerIdentityInput,
 };

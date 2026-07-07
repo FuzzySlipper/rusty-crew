@@ -104,6 +104,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "write_roleplay_player_persona",
     "merge_roleplay_player_persona",
     "patch_roleplay_session_metadata",
+    "normalize_roleplay_narrator_config",
     "create_lore_layer",
     "get_lore_layer",
     "list_lore_layers",

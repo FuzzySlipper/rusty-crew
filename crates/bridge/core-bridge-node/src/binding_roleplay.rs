@@ -85,6 +85,16 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn normalize_roleplay_narrator_config_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<serde_json::Value>(&input_json, "roleplay narrator config")?;
+        let config = normalize_narrator_config(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&config, "roleplay narrator config")
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;

@@ -216,6 +216,7 @@ interface NativeBridgeBinding {
   writeRoleplayPlayerPersonaJson(inputJson: string): string;
   mergeRoleplayPlayerPersonaJson(inputJson: string): string;
   patchRoleplaySessionMetadataJson(inputJson: string): string;
+  normalizeRoleplayNarratorConfigJson(inputJson: string): string;
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
   queryMessageSlotsJson(inputJson: string): string;
@@ -1951,6 +1952,7 @@ export interface NativeBridgeModule {
   writeRoleplayPlayerPersona(input: unknown): Promise<unknown>;
   mergeRoleplayPlayerPersona(input: unknown): Promise<unknown>;
   patchRoleplaySessionMetadata(input: unknown): Promise<unknown>;
+  normalizeRoleplayNarratorConfig(input: unknown): Promise<unknown>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
@@ -2245,6 +2247,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     mergeRoleplayPlayerPersona: unavailable("merge_roleplay_player_persona"),
     patchRoleplaySessionMetadata: unavailable(
       "patch_roleplay_session_metadata",
+    ),
+    normalizeRoleplayNarratorConfig: unavailable(
+      "normalize_roleplay_narrator_config",
     ),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
@@ -3409,6 +3414,10 @@ function createNativeBridgeModule(
     patchRoleplaySessionMetadata: async (input) =>
       JSON.parse(
         binding.patchRoleplaySessionMetadataJson(JSON.stringify(input)),
+      ) as unknown,
+    normalizeRoleplayNarratorConfig: async (input) =>
+      JSON.parse(
+        binding.normalizeRoleplayNarratorConfigJson(JSON.stringify(input)),
       ) as unknown,
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),

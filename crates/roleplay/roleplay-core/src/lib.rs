@@ -221,6 +221,27 @@ pub struct RoleplaySessionMetadataPatchOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayNarratorConfig {
+    pub tone: String,
+    pub pacing: String,
+    pub explicitness: String,
+    pub memory_depth: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exemplar: Option<String>,
+    pub review: RoleplayNarratorReviewConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplayNarratorReviewConfig {
+    pub enabled: bool,
+    pub max_review_cycles: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleplayAssistantAlternativePlanInput {
     pub session_id: String,
     #[serde(default)]
@@ -727,6 +748,70 @@ pub fn patch_session_metadata(
     })
 }
 
+pub fn normalize_narrator_config(input: JsonValue) -> RoleplayDomainResult<RoleplayNarratorConfig> {
+    let raw = json_object(&input, "roleplay narrator config")?;
+    let review = optional_json_object(raw, &["review"], "review")?
+        .cloned()
+        .unwrap_or_default();
+    let max_review_cycles = optional_u32(
+        &review,
+        &["maxReviewCycles", "max_review_cycles"],
+        "review.maxReviewCycles",
+    )?
+    .unwrap_or(1);
+    if max_review_cycles > 8 {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_narrator_review_cycles",
+            "review.maxReviewCycles must be an integer between 0 and 8",
+        ));
+    }
+
+    Ok(RoleplayNarratorConfig {
+        tone: enum_string(
+            raw,
+            &["tone"],
+            &["whimsical", "dramatic", "matter_of_fact", "lush", "wry"],
+            "tone",
+            "lush",
+        )?,
+        pacing: enum_string(
+            raw,
+            &["pacing"],
+            &["leisurely", "balanced", "rapid", "breathless"],
+            "pacing",
+            "balanced",
+        )?,
+        explicitness: enum_string(
+            raw,
+            &["explicitness"],
+            &["implied", "suggestive", "romantic", "steamy"],
+            "explicitness",
+            "romantic",
+        )?,
+        memory_depth: enum_string(
+            raw,
+            &["memoryDepth", "memory_depth"],
+            &["shallow", "medium", "deep"],
+            "memoryDepth",
+            "medium",
+        )?,
+        style_prompt: if has_any(raw, &["stylePrompt", "style_prompt"]) {
+            Some(first_string(raw, &["stylePrompt", "style_prompt"]).unwrap_or_default())
+        } else {
+            None
+        },
+        exemplar: if has_any(raw, &["exemplar", "styleExemplar"]) {
+            Some(first_string(raw, &["exemplar", "styleExemplar"]).unwrap_or_default())
+        } else {
+            None
+        },
+        review: RoleplayNarratorReviewConfig {
+            enabled: optional_bool(&review, &["enabled"]).unwrap_or(false),
+            max_review_cycles,
+        },
+    })
+}
+
 pub fn alternative_slot_projection(
     slot: &RoleplayMessageSlot,
 ) -> RoleplayAlternativeSlotProjection {
@@ -998,6 +1083,79 @@ fn optional_string_array(
         parsed.push(value.to_string());
     }
     Ok(Some(parsed))
+}
+
+fn optional_json_object<'a>(
+    body: &'a serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<&'a serde_json::Map<String, JsonValue>>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    value.as_object().map(Some).ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_invalid_json_object",
+            format!("{field_name} must be an object"),
+        )
+    })
+}
+
+fn optional_bool(body: &serde_json::Map<String, JsonValue>, keys: &[&str]) -> Option<bool> {
+    keys.iter()
+        .find_map(|key| body.get(*key))
+        .and_then(JsonValue::as_bool)
+}
+
+fn optional_u32(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<u32>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(None);
+    };
+    let Some(number) = value.as_u64() else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_integer",
+            format!("{field_name} must be an integer"),
+        ));
+    };
+    u32::try_from(number).map(Some).map_err(|_| {
+        RoleplayDomainError::invalid(
+            "roleplay_invalid_integer",
+            format!("{field_name} must fit in an unsigned 32-bit integer"),
+        )
+    })
+}
+
+fn enum_string(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    allowed: &[&str],
+    field_name: &'static str,
+    fallback: &'static str,
+) -> RoleplayDomainResult<String> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(fallback.to_string());
+    };
+    let Some(value) = value.as_str() else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_enum",
+            format!("{field_name} must be one of {}", allowed.join(", ")),
+        ));
+    };
+    if allowed.contains(&value) {
+        Ok(value.to_string())
+    } else {
+        Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_enum",
+            format!("{field_name} must be one of {}", allowed.join(", ")),
+        ))
+    }
 }
 
 fn validate_record_status(status: &str) -> RoleplayDomainResult<String> {
@@ -1438,6 +1596,58 @@ mod tests {
             layer_error.reason_code,
             "roleplay_lore_layer_reference_invalid"
         );
+    }
+
+    #[test]
+    fn normalizes_narrator_config_defaults_and_long_text() {
+        let long_style = "a".repeat(12_000);
+        let config = normalize_narrator_config(serde_json::json!({
+            "memory_depth": "deep",
+            "style_prompt": long_style,
+            "styleExemplar": "Short, sharp exemplar.",
+            "review": {
+                "enabled": true,
+                "max_review_cycles": 3
+            }
+        }))
+        .expect("narrator config");
+
+        assert_eq!(config.tone, "lush");
+        assert_eq!(config.pacing, "balanced");
+        assert_eq!(config.explicitness, "romantic");
+        assert_eq!(config.memory_depth, "deep");
+        assert_eq!(config.style_prompt.as_deref(), Some(long_style.as_str()));
+        assert_eq!(config.exemplar.as_deref(), Some("Short, sharp exemplar."));
+        assert!(config.review.enabled);
+        assert_eq!(config.review.max_review_cycles, 3);
+    }
+
+    #[test]
+    fn rejects_invalid_narrator_enums_and_review_bounds() {
+        let tone_error = normalize_narrator_config(serde_json::json!({
+            "tone": "sepia"
+        }))
+        .expect_err("invalid tone");
+        assert_eq!(tone_error.reason_code, "roleplay_invalid_enum");
+
+        let cycles_error = normalize_narrator_config(serde_json::json!({
+            "review": {
+                "maxReviewCycles": 9
+            }
+        }))
+        .expect_err("review cycles too high");
+        assert_eq!(
+            cycles_error.reason_code,
+            "roleplay_invalid_narrator_review_cycles"
+        );
+
+        let fractional_error = normalize_narrator_config(serde_json::json!({
+            "review": {
+                "maxReviewCycles": 1.5
+            }
+        }))
+        .expect_err("fractional review cycles");
+        assert_eq!(fractional_error.reason_code, "roleplay_invalid_integer");
     }
 
     fn branch(branch_id: &str, head_message_id: Option<&str>) -> RoleplayConversationBranch {

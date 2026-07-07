@@ -1875,7 +1875,7 @@ async function readRoleplayNarratorConfig(
     state.runtimeConfig.profilesDir,
     profileId as ProfileId,
   );
-  return normalizeRoleplayNarratorConfig(profile.roleplayNarrator ?? {});
+  return normalizeRoleplayNarratorConfig(state, profile.roleplayNarrator ?? {});
 }
 
 async function writeRoleplayNarratorConfig(
@@ -1883,7 +1883,10 @@ async function writeRoleplayNarratorConfig(
   profileId: string,
   body: Record<string, unknown>,
 ): Promise<BrowserRoleplayNarratorConfig> {
-  const config = normalizeRoleplayNarratorConfig(body.config ?? body);
+  const config = await normalizeRoleplayNarratorConfig(
+    state,
+    body.config ?? body,
+  );
   const profilePath = safeProfileConfigPath(
     state.runtimeConfig.profilesDir,
     profileId,
@@ -1908,74 +1911,13 @@ async function writeRoleplayNarratorConfig(
   return config;
 }
 
-function normalizeRoleplayNarratorConfig(
+async function normalizeRoleplayNarratorConfig(
+  state: RoleplayRouteContext,
   input: unknown,
-): BrowserRoleplayNarratorConfig {
-  const raw = recordBody(input);
-  const review = optionalRecord(raw.review) ?? {};
-  const maxReviewCycles =
-    optionalNumber(review.maxReviewCycles ?? review.max_review_cycles) ?? 1;
-  if (
-    !Number.isInteger(maxReviewCycles) ||
-    maxReviewCycles < 0 ||
-    maxReviewCycles > 8
-  ) {
-    throw new Error(
-      "review.maxReviewCycles must be an integer between 0 and 8",
-    );
-  }
-  return {
-    tone: enumValue(
-      raw.tone,
-      ["whimsical", "dramatic", "matter_of_fact", "lush", "wry"],
-      "tone",
-      "lush",
-    ),
-    pacing: enumValue(
-      raw.pacing,
-      ["leisurely", "balanced", "rapid", "breathless"],
-      "pacing",
-      "balanced",
-    ),
-    explicitness: enumValue(
-      raw.explicitness,
-      ["implied", "suggestive", "romantic", "steamy"],
-      "explicitness",
-      "romantic",
-    ),
-    memoryDepth: enumValue(
-      raw.memoryDepth ?? raw.memory_depth,
-      ["shallow", "medium", "deep"],
-      "memoryDepth",
-      "medium",
-    ),
-    ...(Object.hasOwn(raw, "stylePrompt") || Object.hasOwn(raw, "style_prompt")
-      ? {
-          stylePrompt:
-            optionalString(raw.stylePrompt ?? raw.style_prompt) ?? "",
-        }
-      : {}),
-    ...(Object.hasOwn(raw, "exemplar") || Object.hasOwn(raw, "styleExemplar")
-      ? { exemplar: optionalString(raw.exemplar ?? raw.styleExemplar) ?? "" }
-      : {}),
-    review: {
-      enabled: optionalBoolean(review.enabled) ?? false,
-      maxReviewCycles,
-    },
-  };
-}
-
-function enumValue<T extends string>(
-  value: unknown,
-  allowed: readonly T[],
-  fieldName: string,
-  fallback: T,
-): T {
-  if (value === undefined) return fallback;
-  if (typeof value === "string" && allowed.includes(value as T)) {
-    return value as T;
-  }
-  throw new Error(`${fieldName} must be one of ${allowed.join(", ")}`);
+): Promise<BrowserRoleplayNarratorConfig> {
+  return (await state.bridge.normalizeRoleplayNarratorConfig(
+    recordBody(input),
+  )) as BrowserRoleplayNarratorConfig;
 }
 
 function numberValue(value: unknown): number {
@@ -2097,16 +2039,6 @@ function requiredString(value: unknown, fieldName: string): string {
     throw new Error(`${fieldName} is required`);
   }
   return value;
-}
-
-function optionalBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
 }
 
 function recordBody(value: unknown): Record<string, unknown> {
