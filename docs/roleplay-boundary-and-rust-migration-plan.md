@@ -39,8 +39,8 @@ Current roleplay route surface after the first extraction:
 | Lore browser API | `ts/packages/brain-island/src/roleplay/lore-routes.ts` | TS route adapter over Rust persistence |
 | Lore storage/query semantics | `crates/core/core-persistence` bridge operations | Rust |
 | Assistant alternative terminal-slot and branch-head planning | `crates/roleplay/roleplay-core` via `plan_roleplay_assistant_alternative` | Rust deterministic domain |
-| Character/persona admin API | `service-roleplay-routes.ts` | Rust roleplay domain plus TS route adapter |
-| Session metadata API | `service-roleplay-routes.ts` | Rust roleplay domain plus TS route adapter |
+| Character/persona admin API | `crates/roleplay/roleplay-core` via write/merge validators | Rust deterministic validation, with TS route adapter and persistence calls |
+| Session metadata API | `crates/roleplay/roleplay-core` via metadata patch validator | Rust deterministic validation/reference checks, with TS route adapter and persistence calls |
 | Prompt context and speaker identity snapshots | `crates/roleplay/roleplay-core` via `build_roleplay_prompt_context` and `roleplay_speaker_identity` | Rust deterministic assembly, with TS record fetching/brain glue |
 | Assistant alternative persistence and selection routes | `service-roleplay-routes.ts` | TS route adapter over Rust domain planning and persistence bridge operations |
 | Narrator config API | `service-roleplay-routes.ts` | Rust config/domain validation, TS route adapter |
@@ -97,8 +97,10 @@ Good follow-up slices, in priority order:
 2. Keep prompt context and speaker identity expansion inside the current
    `roleplay-core` helpers so role context remains testable without a service
    host or Node runtime.
-3. Move character/persona/session metadata validation into a Rust roleplay
-   domain crate, leaving TS as JSON route mapping.
+3. Keep character/persona/session metadata expansion inside the current
+   `roleplay-core` write/merge/patch helpers so required fields, archived
+   references, layer references, and status transitions stay testable without
+   Node.
 4. Move narrator config validation into the same Rust domain crate before more
    roleplay-specific runtime knobs accumulate.
 

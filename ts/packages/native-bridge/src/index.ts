@@ -211,6 +211,11 @@ interface NativeBridgeBinding {
   planRoleplayAssistantAlternativeJson(inputJson: string): string;
   buildRoleplayPromptContextJson(inputJson: string): string;
   roleplaySpeakerIdentityJson(inputJson: string): string;
+  writeRoleplayCharacterJson(inputJson: string): string;
+  mergeRoleplayCharacterJson(inputJson: string): string;
+  writeRoleplayPlayerPersonaJson(inputJson: string): string;
+  mergeRoleplayPlayerPersonaJson(inputJson: string): string;
+  patchRoleplaySessionMetadataJson(inputJson: string): string;
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
   queryMessageSlotsJson(inputJson: string): string;
@@ -1941,6 +1946,11 @@ export interface NativeBridgeModule {
   planRoleplayAssistantAlternative(input: unknown): Promise<unknown>;
   buildRoleplayPromptContext(input: unknown): Promise<unknown>;
   roleplaySpeakerIdentity(input: unknown): Promise<unknown>;
+  writeRoleplayCharacter(input: unknown): Promise<unknown>;
+  mergeRoleplayCharacter(input: unknown): Promise<unknown>;
+  writeRoleplayPlayerPersona(input: unknown): Promise<unknown>;
+  mergeRoleplayPlayerPersona(input: unknown): Promise<unknown>;
+  patchRoleplaySessionMetadata(input: unknown): Promise<unknown>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
@@ -2229,6 +2239,13 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     ),
     buildRoleplayPromptContext: unavailable("build_roleplay_prompt_context"),
     roleplaySpeakerIdentity: unavailable("roleplay_speaker_identity"),
+    writeRoleplayCharacter: unavailable("write_roleplay_character"),
+    mergeRoleplayCharacter: unavailable("merge_roleplay_character"),
+    writeRoleplayPlayerPersona: unavailable("write_roleplay_player_persona"),
+    mergeRoleplayPlayerPersona: unavailable("merge_roleplay_player_persona"),
+    patchRoleplaySessionMetadata: unavailable(
+      "patch_roleplay_session_metadata",
+    ),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
     queryMessageSlots: unavailable("query_message_slots"),
@@ -3372,6 +3389,26 @@ function createNativeBridgeModule(
     roleplaySpeakerIdentity: async (input) =>
       JSON.parse(
         binding.roleplaySpeakerIdentityJson(JSON.stringify(input)),
+      ) as unknown,
+    writeRoleplayCharacter: async (input) =>
+      JSON.parse(
+        binding.writeRoleplayCharacterJson(JSON.stringify(input)),
+      ) as unknown,
+    mergeRoleplayCharacter: async (input) =>
+      JSON.parse(
+        binding.mergeRoleplayCharacterJson(JSON.stringify(input)),
+      ) as unknown,
+    writeRoleplayPlayerPersona: async (input) =>
+      JSON.parse(
+        binding.writeRoleplayPlayerPersonaJson(JSON.stringify(input)),
+      ) as unknown,
+    mergeRoleplayPlayerPersona: async (input) =>
+      JSON.parse(
+        binding.mergeRoleplayPlayerPersonaJson(JSON.stringify(input)),
+      ) as unknown,
+    patchRoleplaySessionMetadata: async (input) =>
+      JSON.parse(
+        binding.patchRoleplaySessionMetadataJson(JSON.stringify(input)),
       ) as unknown,
     saveMessageSlot: async (input) =>
       binding.saveMessageSlotJson(JSON.stringify(input)),

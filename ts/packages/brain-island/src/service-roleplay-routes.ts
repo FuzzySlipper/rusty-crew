@@ -105,6 +105,11 @@ interface RoleplaySessionMetadata {
   updatedAt: string;
 }
 
+interface RoleplaySessionMetadataPatchOutput {
+  metadata: RoleplaySessionMetadata;
+  active_layer_ids_changed: boolean;
+}
+
 interface RoleplaySessionAlternativeSlot {
   slot_id: string;
   active_variant_id?: string | null;
@@ -260,11 +265,12 @@ async function handleRoleplayCharacterRequest(
         });
       }
       if (method === "POST") {
-        const character = roleplayCharacterFromBody(
-          recordBody(await readJsonBody(request)),
-          profileId,
-          state.now(),
-        );
+        const character = (await state.bridge.writeRoleplayCharacter({
+          profile_id: profileId,
+          now: state.now(),
+          fallback_id: `character-${randomBytes(6).toString("hex")}`,
+          body: recordBody(await readJsonBody(request)),
+        })) as RoleplayCharacterRecord;
         await putRoleplayJson(state, roleplayCharacterScope(profileId), {
           key: roleplayCharacterKey(character.id),
           value: character,
@@ -298,11 +304,11 @@ async function handleRoleplayCharacterRequest(
         profileId,
         characterId,
       );
-      const character = mergeRoleplayCharacter(
+      const character = (await state.bridge.mergeRoleplayCharacter({
         current,
-        recordBody(await readJsonBody(request)),
-        state.now(),
-      );
+        body: recordBody(await readJsonBody(request)),
+        now: state.now(),
+      })) as RoleplayCharacterRecord;
       await putRoleplayJson(state, roleplayCharacterScope(profileId), {
         key: roleplayCharacterKey(character.id),
         value: character,
@@ -315,11 +321,11 @@ async function handleRoleplayCharacterRequest(
         profileId,
         characterId,
       );
-      const character = {
-        ...current,
-        status: "archived" as const,
-        updatedAt: state.now(),
-      };
+      const character = (await state.bridge.mergeRoleplayCharacter({
+        current,
+        body: { status: "archived" },
+        now: state.now(),
+      })) as RoleplayCharacterRecord;
       await putRoleplayJson(state, roleplayCharacterScope(profileId), {
         key: roleplayCharacterKey(character.id),
         value: character,
@@ -365,11 +371,12 @@ async function handleRoleplayPlayerPersonaRequest(
         });
       }
       if (method === "POST") {
-        const persona = roleplayPlayerPersonaFromBody(
-          recordBody(await readJsonBody(request)),
-          profileId,
-          state.now(),
-        );
+        const persona = (await state.bridge.writeRoleplayPlayerPersona({
+          profile_id: profileId,
+          now: state.now(),
+          fallback_id: `persona-${randomBytes(6).toString("hex")}`,
+          body: recordBody(await readJsonBody(request)),
+        })) as RoleplayPlayerPersonaRecord;
         await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
           key: roleplayPlayerPersonaKey(persona.id),
           value: persona,
@@ -403,11 +410,11 @@ async function handleRoleplayPlayerPersonaRequest(
         profileId,
         personaId,
       );
-      const persona = mergeRoleplayPlayerPersona(
+      const persona = (await state.bridge.mergeRoleplayPlayerPersona({
         current,
-        recordBody(await readJsonBody(request)),
-        state.now(),
-      );
+        body: recordBody(await readJsonBody(request)),
+        now: state.now(),
+      })) as RoleplayPlayerPersonaRecord;
       await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
         key: roleplayPlayerPersonaKey(persona.id),
         value: persona,
@@ -420,11 +427,11 @@ async function handleRoleplayPlayerPersonaRequest(
         profileId,
         personaId,
       );
-      const persona = {
-        ...current,
-        status: "archived" as const,
-        updatedAt: state.now(),
-      };
+      const persona = (await state.bridge.mergeRoleplayPlayerPersona({
+        current,
+        body: { status: "archived" },
+        now: state.now(),
+      })) as RoleplayPlayerPersonaRecord;
       await putRoleplayJson(state, roleplayPlayerPersonaScope(profileId), {
         key: roleplayPlayerPersonaKey(persona.id),
         value: persona,
@@ -703,194 +710,6 @@ async function getRoleplayJson<T>(
   return exact === undefined ? undefined : (JSON.parse(exact.valueJson) as T);
 }
 
-function roleplayCharacterFromBody(
-  body: Record<string, unknown>,
-  profileId: string,
-  now: string,
-): RoleplayCharacterRecord {
-  const id =
-    optionalString(body.id) ??
-    optionalString(body.character_id) ??
-    optionalString(body.characterId) ??
-    `character-${randomBytes(6).toString("hex")}`;
-  return {
-    id,
-    profileId,
-    name: requiredString(body.name, "name"),
-    description: optionalString(body.description) ?? "",
-    personality: optionalString(body.personality) ?? "",
-    scenario: optionalString(body.scenario) ?? "",
-    firstMessage:
-      optionalString(body.firstMessage) ??
-      optionalString(body.first_message) ??
-      "",
-    alternateGreetings: optionalStringArray(
-      body.alternateGreetings ?? body.alternate_greetings,
-      [],
-      "alternateGreetings",
-    ),
-    exampleMessages: optionalStringArray(
-      body.exampleMessages ?? body.example_messages,
-      [],
-      "exampleMessages",
-    ),
-    tags: optionalStringArray(body.tags, [], "tags"),
-    ...((optionalString(body.avatarUrl) ?? optionalString(body.avatar_url))
-      ? {
-          avatarUrl:
-            optionalString(body.avatarUrl) ?? optionalString(body.avatar_url),
-        }
-      : {}),
-    status: "active",
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function mergeRoleplayCharacter(
-  current: RoleplayCharacterRecord,
-  body: Record<string, unknown>,
-  now: string,
-): RoleplayCharacterRecord {
-  return {
-    ...current,
-    ...(optionalString(body.name) === undefined
-      ? {}
-      : { name: optionalString(body.name) }),
-    ...(Object.hasOwn(body, "description")
-      ? { description: optionalString(body.description) ?? "" }
-      : {}),
-    ...(Object.hasOwn(body, "personality")
-      ? { personality: optionalString(body.personality) ?? "" }
-      : {}),
-    ...(Object.hasOwn(body, "scenario")
-      ? { scenario: optionalString(body.scenario) ?? "" }
-      : {}),
-    ...(Object.hasOwn(body, "firstMessage") ||
-    Object.hasOwn(body, "first_message")
-      ? {
-          firstMessage:
-            optionalString(body.firstMessage) ??
-            optionalString(body.first_message) ??
-            "",
-        }
-      : {}),
-    ...(body.alternateGreetings !== undefined ||
-    body.alternate_greetings !== undefined
-      ? {
-          alternateGreetings: optionalStringArray(
-            body.alternateGreetings ?? body.alternate_greetings,
-            [],
-            "alternateGreetings",
-          ),
-        }
-      : {}),
-    ...(body.exampleMessages !== undefined ||
-    body.example_messages !== undefined
-      ? {
-          exampleMessages: optionalStringArray(
-            body.exampleMessages ?? body.example_messages,
-            [],
-            "exampleMessages",
-          ),
-        }
-      : {}),
-    ...(body.tags === undefined
-      ? {}
-      : { tags: optionalStringArray(body.tags, [], "tags") }),
-    ...(body.avatarUrl !== undefined || body.avatar_url !== undefined
-      ? {
-          avatarUrl:
-            optionalString(body.avatarUrl) ?? optionalString(body.avatar_url),
-        }
-      : {}),
-    status:
-      optionalString(body.status) === "archived" ? "archived" : current.status,
-    updatedAt: now,
-  };
-}
-
-function roleplayPlayerPersonaFromBody(
-  body: Record<string, unknown>,
-  profileId: string,
-  now: string,
-): RoleplayPlayerPersonaRecord {
-  const id =
-    optionalString(body.id) ??
-    optionalString(body.persona_id) ??
-    optionalString(body.personaId) ??
-    `persona-${randomBytes(6).toString("hex")}`;
-  const avatarUrl =
-    optionalString(body.avatarUrl) ?? optionalString(body.avatar_url);
-  const avatarAssetRef =
-    optionalString(body.avatarAssetRef) ??
-    optionalString(body.avatar_asset_ref) ??
-    optionalString(body.assetRef) ??
-    optionalString(body.asset_ref);
-  return {
-    id,
-    profileId,
-    displayName: requiredString(
-      body.displayName ?? body.display_name ?? body.name,
-      "displayName",
-    ),
-    ...(avatarUrl ? { avatarUrl } : {}),
-    ...(avatarAssetRef ? { avatarAssetRef } : {}),
-    description: optionalString(body.description) ?? "",
-    notes: optionalString(body.notes) ?? "",
-    status: "active",
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function mergeRoleplayPlayerPersona(
-  current: RoleplayPlayerPersonaRecord,
-  body: Record<string, unknown>,
-  now: string,
-): RoleplayPlayerPersonaRecord {
-  return {
-    ...current,
-    ...(Object.hasOwn(body, "displayName") ||
-    Object.hasOwn(body, "display_name") ||
-    Object.hasOwn(body, "name")
-      ? {
-          displayName: requiredString(
-            body.displayName ?? body.display_name ?? body.name,
-            "displayName",
-          ),
-        }
-      : {}),
-    ...(Object.hasOwn(body, "avatarUrl") || Object.hasOwn(body, "avatar_url")
-      ? {
-          avatarUrl:
-            optionalString(body.avatarUrl) ?? optionalString(body.avatar_url),
-        }
-      : {}),
-    ...(Object.hasOwn(body, "avatarAssetRef") ||
-    Object.hasOwn(body, "avatar_asset_ref") ||
-    Object.hasOwn(body, "assetRef") ||
-    Object.hasOwn(body, "asset_ref")
-      ? {
-          avatarAssetRef:
-            optionalString(body.avatarAssetRef) ??
-            optionalString(body.avatar_asset_ref) ??
-            optionalString(body.assetRef) ??
-            optionalString(body.asset_ref),
-        }
-      : {}),
-    ...(Object.hasOwn(body, "description")
-      ? { description: optionalString(body.description) ?? "" }
-      : {}),
-    ...(Object.hasOwn(body, "notes")
-      ? { notes: optionalString(body.notes) ?? "" }
-      : {}),
-    status:
-      optionalString(body.status) === "archived" ? "archived" : current.status,
-    updatedAt: now,
-  };
-}
-
 async function listRoleplayCharacters(
   state: RoleplayRouteContext,
   profileId: string,
@@ -1004,6 +823,51 @@ async function upsertRoleplaySessionMetadata(
     value: next,
   });
   return next;
+}
+
+async function roleplaySessionMetadataPatchFromBody(
+  state: RoleplayRouteContext,
+  current: RoleplaySessionMetadata,
+  sessionId: string,
+  profileId: string,
+  body: Record<string, unknown>,
+): Promise<RoleplaySessionMetadataPatchOutput> {
+  const requestedPersonaId =
+    Object.hasOwn(body, "playerPersonaId") ||
+    Object.hasOwn(body, "player_persona_id")
+      ? (optionalString(body.playerPersonaId) ??
+        optionalString(body.player_persona_id))
+      : undefined;
+  const requestedCharacterId =
+    Object.hasOwn(body, "characterId") || Object.hasOwn(body, "character_id")
+      ? (optionalString(body.characterId) ?? optionalString(body.character_id))
+      : undefined;
+  const activeLayerIdsChanged =
+    Object.hasOwn(body, "activeLayerIds") ||
+    Object.hasOwn(body, "active_layer_ids");
+  const [playerPersona, character, availableLayerIds] = await Promise.all([
+    requestedPersonaId === undefined
+      ? Promise.resolve(undefined)
+      : getRoleplayPlayerPersona(state, profileId, requestedPersonaId),
+    requestedCharacterId === undefined
+      ? Promise.resolve(undefined)
+      : getRoleplayCharacter(state, profileId, requestedCharacterId),
+    activeLayerIdsChanged
+      ? state.bridge
+          .listLoreLayers(profileId)
+          .then((layers) => layers.map((layer) => String(layer.layer_id)))
+      : Promise.resolve(undefined),
+  ]);
+  return (await state.bridge.patchRoleplaySessionMetadata({
+    current,
+    session_id: sessionId,
+    profile_id: profileId,
+    now: state.now(),
+    body,
+    player_persona: playerPersona,
+    character,
+    available_layer_ids: availableLayerIds,
+  })) as RoleplaySessionMetadataPatchOutput;
 }
 
 async function roleplaySessionSummary(
@@ -1202,11 +1066,6 @@ async function createRoleplaySession(
       .now()
       .replace(/[^0-9A-Za-z]/g, "")
       .slice(0, 17)}-${randomBytes(3).toString("hex")}`;
-  const activeLayerIds = optionalStringArray(
-    body.activeLayerIds ?? body.active_layer_ids,
-    [],
-    "activeLayerIds",
-  );
   const session = await state.bridge.createSession({
     sessionId,
     agentId,
@@ -1215,24 +1074,33 @@ async function createRoleplaySession(
     resourceLimits: {},
     toolProfile: { tools: [] },
   });
-  const metadata: Partial<RoleplaySessionMetadata> = {
-    profileId,
-    displayName:
-      optionalString(body.displayName) ?? optionalString(body.display_name),
-    playerPersonaId:
-      optionalString(body.playerPersonaId) ??
-      optionalString(body.player_persona_id),
-    characterId:
-      optionalString(body.characterId) ?? optionalString(body.character_id),
-    activeLayerIds,
+  const now = state.now();
+  const baseMetadata: RoleplaySessionMetadata = {
+    sessionId: session.sessionId,
+    profileId: session.profileId,
+    activeLayerIds: [],
     archived: false,
-    createdAt: state.now(),
+    createdAt: now,
+    updatedAt: now,
   };
-  await upsertRoleplaySessionMetadata(state, session.sessionId, metadata);
-  if (activeLayerIds.length > 0) {
+  const patch = await roleplaySessionMetadataPatchFromBody(
+    state,
+    baseMetadata,
+    session.sessionId,
+    session.profileId,
+    body,
+  );
+  await putRoleplayJson(state, roleplaySessionScope(session.sessionId), {
+    key: roleplaySessionMetadataKey(),
+    value: patch.metadata,
+  });
+  if (
+    patch.active_layer_ids_changed &&
+    patch.metadata.activeLayerIds.length > 0
+  ) {
     await state.bridge.setChatLayers({
       chat_id: session.sessionId,
-      layers: activeLayerIds.map((layerId, index) => ({
+      layers: patch.metadata.activeLayerIds.map((layerId, index) => ({
         layer_id: layerId,
         priority: index,
         enabled: true,
@@ -1255,41 +1123,19 @@ async function updateRoleplaySessionMetadata(
   sessionId: string,
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const patch: Partial<RoleplaySessionMetadata> = {};
-  if (
-    Object.hasOwn(body, "displayName") ||
-    Object.hasOwn(body, "display_name")
-  ) {
-    patch.displayName =
-      optionalString(body.displayName) ?? optionalString(body.display_name);
-  }
-  if (
-    Object.hasOwn(body, "playerPersonaId") ||
-    Object.hasOwn(body, "player_persona_id")
-  ) {
-    patch.playerPersonaId =
-      optionalString(body.playerPersonaId) ??
-      optionalString(body.player_persona_id);
-  }
-  if (
-    Object.hasOwn(body, "characterId") ||
-    Object.hasOwn(body, "character_id")
-  ) {
-    patch.characterId =
-      optionalString(body.characterId) ?? optionalString(body.character_id);
-  }
-  if (
-    Object.hasOwn(body, "activeLayerIds") ||
-    Object.hasOwn(body, "active_layer_ids")
-  ) {
-    patch.activeLayerIds = optionalStringArray(
-      body.activeLayerIds ?? body.active_layer_ids,
-      [],
-      "activeLayerIds",
-    );
+  const session = await state.serviceSessionById(sessionId);
+  const current = await roleplaySessionMetadata(state, session);
+  const patch = await roleplaySessionMetadataPatchFromBody(
+    state,
+    current,
+    sessionId,
+    session.profileId,
+    body,
+  );
+  if (patch.active_layer_ids_changed) {
     await state.bridge.setChatLayers({
       chat_id: sessionId,
-      layers: patch.activeLayerIds.map((layerId, index) => ({
+      layers: patch.metadata.activeLayerIds.map((layerId, index) => ({
         layer_id: layerId,
         priority: index,
         enabled: true,
@@ -1297,7 +1143,10 @@ async function updateRoleplaySessionMetadata(
       now: state.now(),
     });
   }
-  await upsertRoleplaySessionMetadata(state, sessionId, patch);
+  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
+    key: roleplaySessionMetadataKey(),
+    value: patch.metadata,
+  });
   const summary = await getRoleplaySessionSummary(state, sessionId);
   if (summary === undefined)
     throw new Error(`roleplay session ${sessionId} missing`);
@@ -2241,22 +2090,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function stringArray(value: unknown, fieldName: string): string[] {
-  if (!Array.isArray(value)) throw new Error(`${fieldName} must be an array`);
-  return value.map((item, index) =>
-    requiredString(item, `${fieldName}[${index}]`),
-  );
-}
-
-function optionalStringArray(
-  value: unknown,
-  fallback: string[],
-  fieldName: string,
-): string[] {
-  if (value === undefined) return fallback;
-  return stringArray(value, fieldName);
 }
 
 function requiredString(value: unknown, fieldName: string): string {

@@ -1013,6 +1013,51 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Project deterministic roleplay speaker identity metadata for chat message persistence."
 
 [[operation]]
+name = "write_roleplay_character"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayCharacterWriteInput"
+output = "roleplay_core::RoleplayCharacter"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate and normalize a roleplay character create request before route-layer persistence."
+
+[[operation]]
+name = "merge_roleplay_character"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayCharacterMergeInput"
+output = "roleplay_core::RoleplayCharacter"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate and normalize a roleplay character patch/archive request before route-layer persistence."
+
+[[operation]]
+name = "write_roleplay_player_persona"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayPlayerPersonaWriteInput"
+output = "roleplay_core::RoleplayPlayerPersona"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate and normalize a roleplay player persona create request before route-layer persistence."
+
+[[operation]]
+name = "merge_roleplay_player_persona"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayPlayerPersonaMergeInput"
+output = "roleplay_core::RoleplayPlayerPersona"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate and normalize a roleplay player persona patch/archive request before route-layer persistence."
+
+[[operation]]
+name = "patch_roleplay_session_metadata"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplaySessionMetadataPatchInput"
+output = "roleplay_core::RoleplaySessionMetadataPatchOutput"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Validate and normalize roleplay session metadata patches, including persona, character, and active-layer references."
+
+[[operation]]
 name = "list_simple_kv"
 surface = "stable"
 direction = "ts_to_rust"

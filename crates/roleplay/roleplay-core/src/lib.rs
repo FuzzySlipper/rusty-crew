@@ -76,37 +76,55 @@ pub struct RoleplayChatActor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RoleplaySessionMetadata {
-    #[serde(alias = "sessionId")]
+    #[serde(alias = "session_id")]
     pub session_id: String,
-    #[serde(alias = "profileId")]
+    #[serde(alias = "profile_id")]
     pub profile_id: String,
-    #[serde(default, alias = "displayName")]
+    #[serde(
+        default,
+        alias = "display_name",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub display_name: Option<String>,
-    #[serde(default, alias = "playerPersonaId")]
+    #[serde(
+        default,
+        alias = "player_persona_id",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub player_persona_id: Option<String>,
-    #[serde(default, alias = "characterId")]
+    #[serde(
+        default,
+        alias = "character_id",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub character_id: Option<String>,
-    #[serde(default, alias = "activeLayerIds")]
+    #[serde(default, alias = "active_layer_ids")]
     pub active_layer_ids: Vec<String>,
     #[serde(default)]
     pub archived: bool,
-    #[serde(alias = "createdAt")]
+    #[serde(alias = "created_at")]
     pub created_at: String,
-    #[serde(alias = "updatedAt")]
+    #[serde(alias = "updated_at")]
     pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RoleplayPlayerPersona {
     pub id: String,
-    #[serde(alias = "profileId")]
+    #[serde(alias = "profile_id")]
     pub profile_id: String,
-    #[serde(alias = "displayName")]
+    #[serde(alias = "display_name")]
     pub display_name: String,
-    #[serde(default, alias = "avatarUrl")]
+    #[serde(default, alias = "avatar_url", skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
-    #[serde(default, alias = "avatarAssetRef")]
+    #[serde(
+        default,
+        alias = "avatar_asset_ref",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub avatar_asset_ref: Option<String>,
     #[serde(default)]
     pub description: String,
@@ -114,16 +132,17 @@ pub struct RoleplayPlayerPersona {
     pub notes: String,
     #[serde(default = "active_status")]
     pub status: String,
-    #[serde(alias = "createdAt")]
+    #[serde(alias = "created_at")]
     pub created_at: String,
-    #[serde(default, alias = "updatedAt")]
+    #[serde(default, alias = "updated_at", skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RoleplayCharacter {
     pub id: String,
-    #[serde(alias = "profileId")]
+    #[serde(alias = "profile_id")]
     pub profile_id: String,
     pub name: String,
     #[serde(default)]
@@ -132,22 +151,73 @@ pub struct RoleplayCharacter {
     pub personality: String,
     #[serde(default)]
     pub scenario: String,
-    #[serde(default, alias = "firstMessage")]
+    #[serde(default, alias = "first_message")]
     pub first_message: String,
-    #[serde(default, alias = "alternateGreetings")]
+    #[serde(default, alias = "alternate_greetings")]
     pub alternate_greetings: Vec<String>,
-    #[serde(default, alias = "exampleMessages")]
+    #[serde(default, alias = "example_messages")]
     pub example_messages: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default, alias = "avatarUrl")]
+    #[serde(default, alias = "avatar_url", skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
     #[serde(default = "active_status")]
     pub status: String,
-    #[serde(alias = "createdAt")]
+    #[serde(alias = "created_at")]
     pub created_at: String,
-    #[serde(default, alias = "updatedAt")]
+    #[serde(default, alias = "updated_at", skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayCharacterWriteInput {
+    pub profile_id: String,
+    pub now: String,
+    pub fallback_id: String,
+    pub body: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayCharacterMergeInput {
+    pub current: RoleplayCharacter,
+    pub now: String,
+    pub body: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayPlayerPersonaWriteInput {
+    pub profile_id: String,
+    pub now: String,
+    pub fallback_id: String,
+    pub body: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayPlayerPersonaMergeInput {
+    pub current: RoleplayPlayerPersona,
+    pub now: String,
+    pub body: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionMetadataPatchInput {
+    pub current: RoleplaySessionMetadata,
+    pub session_id: String,
+    pub profile_id: String,
+    pub now: String,
+    pub body: JsonValue,
+    #[serde(default)]
+    pub player_persona: Option<RoleplayPlayerPersona>,
+    #[serde(default)]
+    pub character: Option<RoleplayCharacter>,
+    #[serde(default)]
+    pub available_layer_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionMetadataPatchOutput {
+    pub metadata: RoleplaySessionMetadata,
+    pub active_layer_ids_changed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -451,6 +521,212 @@ pub fn speaker_identity_snapshot(
     }
 }
 
+pub fn write_character(
+    input: RoleplayCharacterWriteInput,
+) -> RoleplayDomainResult<RoleplayCharacter> {
+    let body = json_object(&input.body, "character body")?;
+    let id =
+        first_string(body, &["id", "character_id", "characterId"]).unwrap_or(input.fallback_id);
+    Ok(RoleplayCharacter {
+        id,
+        profile_id: input.profile_id,
+        name: required_json_string(body, &["name"], "name")?,
+        description: first_string(body, &["description"]).unwrap_or_default(),
+        personality: first_string(body, &["personality"]).unwrap_or_default(),
+        scenario: first_string(body, &["scenario"]).unwrap_or_default(),
+        first_message: first_string(body, &["firstMessage", "first_message"]).unwrap_or_default(),
+        alternate_greetings: optional_string_array(
+            body,
+            &["alternateGreetings", "alternate_greetings"],
+            "alternateGreetings",
+        )?
+        .unwrap_or_default(),
+        example_messages: optional_string_array(
+            body,
+            &["exampleMessages", "example_messages"],
+            "exampleMessages",
+        )?
+        .unwrap_or_default(),
+        tags: optional_string_array(body, &["tags"], "tags")?.unwrap_or_default(),
+        avatar_url: first_string(body, &["avatarUrl", "avatar_url"]),
+        status: "active".to_string(),
+        created_at: input.now.clone(),
+        updated_at: Some(input.now),
+    })
+}
+
+pub fn merge_character(
+    input: RoleplayCharacterMergeInput,
+) -> RoleplayDomainResult<RoleplayCharacter> {
+    let body = json_object(&input.body, "character body")?;
+    let mut next = input.current;
+    if let Some(name) = first_string(body, &["name"]) {
+        next.name = name;
+    }
+    if has_any(body, &["description"]) {
+        next.description = first_string(body, &["description"]).unwrap_or_default();
+    }
+    if has_any(body, &["personality"]) {
+        next.personality = first_string(body, &["personality"]).unwrap_or_default();
+    }
+    if has_any(body, &["scenario"]) {
+        next.scenario = first_string(body, &["scenario"]).unwrap_or_default();
+    }
+    if has_any(body, &["firstMessage", "first_message"]) {
+        next.first_message =
+            first_string(body, &["firstMessage", "first_message"]).unwrap_or_default();
+    }
+    if let Some(values) = optional_string_array(
+        body,
+        &["alternateGreetings", "alternate_greetings"],
+        "alternateGreetings",
+    )? {
+        next.alternate_greetings = values;
+    }
+    if let Some(values) = optional_string_array(
+        body,
+        &["exampleMessages", "example_messages"],
+        "exampleMessages",
+    )? {
+        next.example_messages = values;
+    }
+    if let Some(values) = optional_string_array(body, &["tags"], "tags")? {
+        next.tags = values;
+    }
+    if has_any(body, &["avatarUrl", "avatar_url"]) {
+        next.avatar_url = first_string(body, &["avatarUrl", "avatar_url"]);
+    }
+    if let Some(status) = first_string(body, &["status"]) {
+        next.status = validate_record_status(&status)?;
+    }
+    next.updated_at = Some(input.now);
+    Ok(next)
+}
+
+pub fn write_player_persona(
+    input: RoleplayPlayerPersonaWriteInput,
+) -> RoleplayDomainResult<RoleplayPlayerPersona> {
+    let body = json_object(&input.body, "player persona body")?;
+    let id = first_string(body, &["id", "persona_id", "personaId"]).unwrap_or(input.fallback_id);
+    Ok(RoleplayPlayerPersona {
+        id,
+        profile_id: input.profile_id,
+        display_name: required_json_string(
+            body,
+            &["displayName", "display_name", "name"],
+            "displayName",
+        )?,
+        avatar_url: first_string(body, &["avatarUrl", "avatar_url"]),
+        avatar_asset_ref: first_string(
+            body,
+            &[
+                "avatarAssetRef",
+                "avatar_asset_ref",
+                "assetRef",
+                "asset_ref",
+            ],
+        ),
+        description: first_string(body, &["description"]).unwrap_or_default(),
+        notes: first_string(body, &["notes"]).unwrap_or_default(),
+        status: "active".to_string(),
+        created_at: input.now.clone(),
+        updated_at: Some(input.now),
+    })
+}
+
+pub fn merge_player_persona(
+    input: RoleplayPlayerPersonaMergeInput,
+) -> RoleplayDomainResult<RoleplayPlayerPersona> {
+    let body = json_object(&input.body, "player persona body")?;
+    let mut next = input.current;
+    if has_any(body, &["displayName", "display_name", "name"]) {
+        next.display_name = required_json_string(
+            body,
+            &["displayName", "display_name", "name"],
+            "displayName",
+        )?;
+    }
+    if has_any(body, &["avatarUrl", "avatar_url"]) {
+        next.avatar_url = first_string(body, &["avatarUrl", "avatar_url"]);
+    }
+    if has_any(
+        body,
+        &[
+            "avatarAssetRef",
+            "avatar_asset_ref",
+            "assetRef",
+            "asset_ref",
+        ],
+    ) {
+        next.avatar_asset_ref = first_string(
+            body,
+            &[
+                "avatarAssetRef",
+                "avatar_asset_ref",
+                "assetRef",
+                "asset_ref",
+            ],
+        );
+    }
+    if has_any(body, &["description"]) {
+        next.description = first_string(body, &["description"]).unwrap_or_default();
+    }
+    if has_any(body, &["notes"]) {
+        next.notes = first_string(body, &["notes"]).unwrap_or_default();
+    }
+    if let Some(status) = first_string(body, &["status"]) {
+        next.status = validate_record_status(&status)?;
+    }
+    next.updated_at = Some(input.now);
+    Ok(next)
+}
+
+pub fn patch_session_metadata(
+    input: RoleplaySessionMetadataPatchInput,
+) -> RoleplayDomainResult<RoleplaySessionMetadataPatchOutput> {
+    let body = json_object(&input.body, "session metadata body")?;
+    let mut next = input.current;
+    next.session_id = input.session_id;
+    next.profile_id = input.profile_id.clone();
+    let mut active_layer_ids_changed = false;
+
+    if has_any(body, &["displayName", "display_name"]) {
+        next.display_name = first_string(body, &["displayName", "display_name"]);
+    }
+    if has_any(body, &["playerPersonaId", "player_persona_id"]) {
+        next.player_persona_id = validate_selected_persona(
+            &input.profile_id,
+            first_string(body, &["playerPersonaId", "player_persona_id"]),
+            input.player_persona.as_ref(),
+        )?;
+    }
+    if has_any(body, &["characterId", "character_id"]) {
+        next.character_id = validate_selected_character(
+            &input.profile_id,
+            first_string(body, &["characterId", "character_id"]),
+            input.character.as_ref(),
+        )?;
+    }
+    if has_any(body, &["activeLayerIds", "active_layer_ids"]) {
+        let layer_ids = optional_string_array(
+            body,
+            &["activeLayerIds", "active_layer_ids"],
+            "activeLayerIds",
+        )?
+        .unwrap_or_default();
+        if let Some(available) = input.available_layer_ids.as_ref() {
+            validate_layer_refs(&layer_ids, available)?;
+        }
+        next.active_layer_ids = layer_ids;
+        active_layer_ids_changed = true;
+    }
+    next.updated_at = input.now;
+    Ok(RoleplaySessionMetadataPatchOutput {
+        metadata: next,
+        active_layer_ids_changed,
+    })
+}
+
 pub fn alternative_slot_projection(
     slot: &RoleplayMessageSlot,
 ) -> RoleplayAlternativeSlotProjection {
@@ -653,6 +929,148 @@ fn validate_unique_slots(slots: &[RoleplayMessageSlot]) -> RoleplayDomainResult<
 
 fn active_status() -> String {
     "active".to_string()
+}
+
+fn json_object<'a>(
+    value: &'a JsonValue,
+    label: &'static str,
+) -> RoleplayDomainResult<&'a serde_json::Map<String, JsonValue>> {
+    value.as_object().ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_invalid_json_object",
+            format!("{label} must be an object"),
+        )
+    })
+}
+
+fn required_json_string(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<String> {
+    first_string(body, keys).ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_required_field_missing",
+            format!("{field_name} is required"),
+        )
+    })
+}
+
+fn first_string(body: &serde_json::Map<String, JsonValue>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| body.get(*key))
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn has_any(body: &serde_json::Map<String, JsonValue>, keys: &[&str]) -> bool {
+    keys.iter().any(|key| body.contains_key(*key))
+}
+
+fn optional_string_array(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<Vec<String>>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(None);
+    };
+    let Some(items) = value.as_array() else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_string_array",
+            format!("{field_name} must be an array"),
+        ));
+    };
+    let mut parsed = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let Some(value) = item
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_invalid_string_array",
+                format!("{field_name}[{index}] must be a non-empty string"),
+            ));
+        };
+        parsed.push(value.to_string());
+    }
+    Ok(Some(parsed))
+}
+
+fn validate_record_status(status: &str) -> RoleplayDomainResult<String> {
+    match status {
+        "active" | "archived" => Ok(status.to_string()),
+        _ => Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_record_status",
+            "status must be active or archived",
+        )),
+    }
+}
+
+fn validate_selected_persona(
+    profile_id: &str,
+    selected_id: Option<String>,
+    persona: Option<&RoleplayPlayerPersona>,
+) -> RoleplayDomainResult<Option<String>> {
+    let Some(selected_id) = selected_id else {
+        return Ok(None);
+    };
+    let Some(persona) = persona else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_player_persona_reference_missing",
+            format!("roleplay player persona {selected_id} was not found"),
+        ));
+    };
+    if persona.id != selected_id || persona.profile_id != profile_id || persona.status == "archived"
+    {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_player_persona_reference_invalid",
+            format!("roleplay player persona {selected_id} is not active for profile {profile_id}"),
+        ));
+    }
+    Ok(Some(selected_id))
+}
+
+fn validate_selected_character(
+    profile_id: &str,
+    selected_id: Option<String>,
+    character: Option<&RoleplayCharacter>,
+) -> RoleplayDomainResult<Option<String>> {
+    let Some(selected_id) = selected_id else {
+        return Ok(None);
+    };
+    let Some(character) = character else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_character_reference_missing",
+            format!("roleplay character {selected_id} was not found"),
+        ));
+    };
+    if character.id != selected_id
+        || character.profile_id != profile_id
+        || character.status == "archived"
+    {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_character_reference_invalid",
+            format!("roleplay character {selected_id} is not active for profile {profile_id}"),
+        ));
+    }
+    Ok(Some(selected_id))
+}
+
+fn validate_layer_refs(selected: &[String], available: &[String]) -> RoleplayDomainResult<()> {
+    let available: BTreeSet<&str> = available.iter().map(String::as_str).collect();
+    for layer_id in selected {
+        if !available.contains(layer_id.as_str()) {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_lore_layer_reference_invalid",
+                format!("roleplay lore layer {layer_id} is not available for this profile"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn active_persona(persona: Option<&RoleplayPlayerPersona>) -> Option<&RoleplayPlayerPersona> {
@@ -895,6 +1313,131 @@ mod tests {
         });
         assert_eq!(fallback.speaker_kind, "fallback_assistant");
         assert_eq!(fallback.display_name, "Assistant");
+    }
+
+    #[test]
+    fn validates_character_and_persona_writes() {
+        let character = write_character(RoleplayCharacterWriteInput {
+            profile_id: "profile-rp".to_string(),
+            now: "2026-07-07T00:00:00Z".to_string(),
+            fallback_id: "character-generated".to_string(),
+            body: serde_json::json!({
+                "name": "Guide",
+                "alternateGreetings": ["Hello"],
+                "example_messages": ["Guide: follow me"],
+                "tags": ["npc"]
+            }),
+        })
+        .expect("character write");
+        assert_eq!(character.id, "character-generated");
+        assert_eq!(character.name, "Guide");
+        assert_eq!(character.alternate_greetings, vec!["Hello"]);
+
+        let missing = write_character(RoleplayCharacterWriteInput {
+            profile_id: "profile-rp".to_string(),
+            now: "2026-07-07T00:00:00Z".to_string(),
+            fallback_id: "character-generated".to_string(),
+            body: serde_json::json!({}),
+        })
+        .expect_err("missing name should fail");
+        assert_eq!(missing.reason_code, "roleplay_required_field_missing");
+
+        let persona = write_player_persona(RoleplayPlayerPersonaWriteInput {
+            profile_id: "profile-rp".to_string(),
+            now: "2026-07-07T00:00:00Z".to_string(),
+            fallback_id: "persona-generated".to_string(),
+            body: serde_json::json!({"display_name": "Player"}),
+        })
+        .expect("persona write");
+        assert_eq!(persona.id, "persona-generated");
+        assert_eq!(persona.display_name, "Player");
+    }
+
+    #[test]
+    fn merges_and_archives_roleplay_records() {
+        let current = character("Guide", "old");
+        let merged = merge_character(RoleplayCharacterMergeInput {
+            current,
+            now: "2026-07-07T01:00:00Z".to_string(),
+            body: serde_json::json!({
+                "description": "new",
+                "status": "archived"
+            }),
+        })
+        .expect("merge character");
+        assert_eq!(merged.description, "new");
+        assert_eq!(merged.status, "archived");
+        assert_eq!(merged.updated_at.as_deref(), Some("2026-07-07T01:00:00Z"));
+
+        let invalid = merge_player_persona(RoleplayPlayerPersonaMergeInput {
+            current: persona("Player", "", ""),
+            now: "2026-07-07T01:00:00Z".to_string(),
+            body: serde_json::json!({"status": "deleted"}),
+        })
+        .expect_err("invalid status");
+        assert_eq!(invalid.reason_code, "roleplay_invalid_record_status");
+    }
+
+    #[test]
+    fn patches_session_metadata_with_reference_validation() {
+        let patched = patch_session_metadata(RoleplaySessionMetadataPatchInput {
+            current: metadata(vec![]),
+            session_id: "session-rp".to_string(),
+            profile_id: "profile-rp".to_string(),
+            now: "2026-07-07T02:00:00Z".to_string(),
+            body: serde_json::json!({
+                "playerPersonaId": "persona-1",
+                "character_id": "character-1",
+                "activeLayerIds": ["world", "scene"]
+            }),
+            player_persona: Some(persona("Player", "", "")),
+            character: Some(character("Guide", "")),
+            available_layer_ids: Some(vec!["scene".to_string(), "world".to_string()]),
+        })
+        .expect("metadata patch");
+        assert_eq!(
+            patched.metadata.active_layer_ids,
+            vec!["world".to_string(), "scene".to_string()]
+        );
+        assert!(patched.active_layer_ids_changed);
+        assert_eq!(patched.metadata.updated_at, "2026-07-07T02:00:00Z");
+    }
+
+    #[test]
+    fn rejects_archived_metadata_references_and_unknown_layers() {
+        let mut archived_persona = persona("Player", "", "");
+        archived_persona.status = "archived".to_string();
+        let persona_error = patch_session_metadata(RoleplaySessionMetadataPatchInput {
+            current: metadata(vec![]),
+            session_id: "session-rp".to_string(),
+            profile_id: "profile-rp".to_string(),
+            now: "2026-07-07T02:00:00Z".to_string(),
+            body: serde_json::json!({"playerPersonaId": "persona-1"}),
+            player_persona: Some(archived_persona),
+            character: None,
+            available_layer_ids: None,
+        })
+        .expect_err("archived persona rejected");
+        assert_eq!(
+            persona_error.reason_code,
+            "roleplay_player_persona_reference_invalid"
+        );
+
+        let layer_error = patch_session_metadata(RoleplaySessionMetadataPatchInput {
+            current: metadata(vec![]),
+            session_id: "session-rp".to_string(),
+            profile_id: "profile-rp".to_string(),
+            now: "2026-07-07T02:00:00Z".to_string(),
+            body: serde_json::json!({"active_layer_ids": ["missing"]}),
+            player_persona: None,
+            character: None,
+            available_layer_ids: Some(vec!["world".to_string()]),
+        })
+        .expect_err("missing layer rejected");
+        assert_eq!(
+            layer_error.reason_code,
+            "roleplay_lore_layer_reference_invalid"
+        );
     }
 
     fn branch(branch_id: &str, head_message_id: Option<&str>) -> RoleplayConversationBranch {

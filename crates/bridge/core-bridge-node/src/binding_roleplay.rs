@@ -39,6 +39,52 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn write_roleplay_character_json(&self, input_json: String) -> napi::Result<String> {
+        let input =
+            parse_json::<RoleplayCharacterWriteInput>(&input_json, "roleplay character write")?;
+        let character = write_character(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&character, "roleplay character")
+    }
+
+    #[napi]
+    pub fn merge_roleplay_character_json(&self, input_json: String) -> napi::Result<String> {
+        let input =
+            parse_json::<RoleplayCharacterMergeInput>(&input_json, "roleplay character merge")?;
+        let character = merge_character(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&character, "roleplay character")
+    }
+
+    #[napi]
+    pub fn write_roleplay_player_persona_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<RoleplayPlayerPersonaWriteInput>(
+            &input_json,
+            "roleplay player persona write",
+        )?;
+        let persona = write_player_persona(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&persona, "roleplay player persona")
+    }
+
+    #[napi]
+    pub fn merge_roleplay_player_persona_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<RoleplayPlayerPersonaMergeInput>(
+            &input_json,
+            "roleplay player persona merge",
+        )?;
+        let persona = merge_player_persona(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&persona, "roleplay player persona")
+    }
+
+    #[napi]
+    pub fn patch_roleplay_session_metadata_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<RoleplaySessionMetadataPatchInput>(
+            &input_json,
+            "roleplay session metadata patch",
+        )?;
+        let output = patch_session_metadata(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&output, "roleplay session metadata patch")
+    }
+
+    #[napi]
     pub fn add_lore_entry_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<RoleplayLoreWrite>(&input_json, "roleplay lore write")?;
@@ -294,4 +340,13 @@ impl NativeBridgeBinding {
         let trace = bridge.get_recall_trace(&trace_id).map_err(to_napi_error)?;
         serialize_json(&trace, "roleplay lore recall trace")
     }
+}
+
+fn roleplay_domain_error_to_napi(
+    error: rusty_crew_roleplay_core::RoleplayDomainError,
+) -> napi::Error {
+    napi::Error::new(
+        napi::Status::InvalidArg,
+        format!("{}: {}", error.reason_code, error.message),
+    )
 }
