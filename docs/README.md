@@ -69,6 +69,9 @@ historical audit context only; they are not an implementation recommendation.
    - `service-composition-decomposition-plan.md` — current migration path for
      moving service composition out of the oversized brain-island service app
      without breaking the working service.
+   - `rust-pi-agent-brain-port-contract.md` — parity matrix and cutover
+     boundary for moving the current pi-agent brain from TypeScript to a Rust
+     brain module without porting the unused pi-ai provider matrix.
 
 2. **Two brain surfaces, one contract.** Rust coordination wakes a brain with a
    frozen `BodyState` snapshot; brain implementations emit
