@@ -1320,11 +1320,10 @@ fn narrator_auto_capture_layer_id(details: &JsonValue) -> Option<String> {
         .into_iter()
         .flatten()
         .filter(|layer| {
-            layer
+            !layer
                 .get("is_archived")
                 .and_then(JsonValue::as_bool)
                 .unwrap_or(false)
-                != true
         })
         .filter(|layer| {
             layer

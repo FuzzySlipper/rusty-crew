@@ -15,7 +15,7 @@ const adapterPackages = [
   "@rusty-crew/adapter-telegram",
   "@rusty-crew/adapter-tui",
 ];
-const legacyBrainIslandSrcSmokeCount = 132;
+const legacyBrainIslandSrcSmokeCount = 134;
 const legacySrcSmokeAllowedImports = new Map([
   [
     normalizePath("ts/packages/brain-island/src/smoke-adapter-diagnostics.ts"),
@@ -56,6 +56,22 @@ const legacySrcSmokeAllowedImports = new Map([
       "ts/packages/brain-island/src/smoke-den-successor-service.ts",
     ),
     new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-admin-profile-create-concurrency.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-pi-agent-rust-bridge.ts"),
+    new Set(),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-brain-module-registry.ts",
+    ),
+    new Set(),
   ],
   [
     normalizePath("ts/packages/brain-island/src/smoke-mcp-reload.ts"),
