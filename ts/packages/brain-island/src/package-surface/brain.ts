@@ -43,6 +43,7 @@ export {
   localBrainModule,
   piAgentCoreBrainModule,
   resolveBrainModuleSelection,
+  rustPiAgentBrainModule,
 } from "../brain-module.js";
 export type {
   BrainModule,

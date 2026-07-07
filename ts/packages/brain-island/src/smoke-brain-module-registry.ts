@@ -128,8 +128,16 @@ try {
       "openai-responses",
     );
     assert.equal(
+      applyResult.brainModulesByProfileId["narrator-profile"]?.moduleId,
+      "pi-agent-core",
+    );
+    assert.equal(
+      applyResult.brainModulesByProfileId["narrator-profile"]?.strategy,
+      "roleplay_narrator",
+    );
+    assert.equal(
       applyResult.brainDiagnosticsByProfileId["pi-profile"]?.toolAdapterStatus,
-      "neutral_tools_adapted_to_pi",
+      "native_neutral_tools",
     );
     assert.equal(
       applyResult.brainDiagnosticsByProfileId["pi-profile"]?.selectedToolSource,
@@ -181,7 +189,7 @@ try {
       "input_not_append_only",
       "normal_invalidation",
     ]);
-    assert.equal(denRouterOptions.length, 1);
+    assert.equal(denRouterOptions.length, 0);
 
     const diagnostics = buildRuntimeDiagnosticsProjection({
       now: "2026-06-23T19:00:00Z",
@@ -208,7 +216,7 @@ try {
           "default",
           "unused",
           "default-local-tools",
-          "neutral_tools_adapted_to_pi",
+          "native_neutral_tools",
         ],
         [
           "local-profile",
@@ -240,6 +248,16 @@ try {
           "default-local-tools",
           "native_neutral_tools",
         ],
+        [
+          "narrator-profile",
+          "narrator-brain",
+          "pi-agent-core",
+          "roleplay_narrator",
+          "roleplay_narrator",
+          "unused",
+          "default-local-tools",
+          "native_neutral_tools",
+        ],
       ],
     );
     assert.equal(
@@ -267,6 +285,11 @@ try {
       "responses-session" as SessionId,
       "wake-responses-module",
     );
+    const narratorResult = await wakeSession(
+      applyResult.brainHandlesByProfileId["narrator-profile"],
+      "narrator-session" as SessionId,
+      "wake-narrator-module",
+    );
 
     assert.deepEqual(piResult, { wakeId: "wake-pi-module", accepted: true });
     assert.deepEqual(localResult, {
@@ -277,11 +300,15 @@ try {
       wakeId: "wake-responses-module",
       accepted: true,
     });
-    assert.equal(await native.countRows("completion_packets"), 3);
+    assert.deepEqual(narratorResult, {
+      wakeId: "wake-narrator-module",
+      accepted: true,
+    });
+    assert.equal(await native.countRows("completion_packets"), 4);
 
     const observedEvents = await native.drainSubscriptionEvents(
       brainEvents,
-      10,
+      20,
     );
     await native.unsubscribeEvents(brainEvents);
     const piText = observedEvents
@@ -293,7 +320,15 @@ try {
           : [],
       )
       .join("");
-    assert.match(piText, /pi module pi-session replied/);
+    assert.match(piText, /pi-agent Rust bridge wake completed/);
+    const narratorPhases = observedEvents.flatMap((event) =>
+      event.type === "brain_event_observed" &&
+      event.wakeId === "wake-narrator-module" &&
+      event.event.type === "phase_change"
+        ? [event.event.phase]
+        : [],
+    );
+    assert.deepEqual(narratorPhases, ["exploring", "composing", "idle"]);
 
     console.log(
       JSON.stringify(
@@ -389,6 +424,10 @@ function writeRuntimeConfig(dataDir: string): void {
             profileId: "responses-chain-profile",
             implementationId: "responses-chain-brain",
           },
+          {
+            profileId: "narrator-profile",
+            implementationId: "narrator-brain",
+          },
         ],
         sessions: [
           {
@@ -413,6 +452,12 @@ function writeRuntimeConfig(dataDir: string): void {
             sessionId: "responses-chain-session",
             agentId: "responses-chain-agent",
             profileId: "responses-chain-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "narrator-session",
+            agentId: "narrator-agent",
+            profileId: "narrator-profile",
             kind: "full",
           },
         ],
@@ -492,6 +537,41 @@ function writeRuntimeConfig(dataDir: string): void {
         brain: {
           module: "openai-responses",
           strategy: "previous-response-chain",
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(profilesDir, "narrator-profile.json"),
+    JSON.stringify(
+      {
+        profileId: "narrator-profile",
+        modelConfig: {
+          provider: "den-router",
+          modelName: "fake-model",
+          maxOutputTokens: 256,
+        },
+        brain: {
+          module: "pi-agent-core",
+          strategy: "roleplay_narrator",
+        },
+        toolPolicy: {
+          requestedTools: [],
+        },
+        roleplayNarrator: {
+          tone: "wry",
+          pacing: "balanced",
+          explicitness: "romantic",
+          memoryDepth: "medium",
+          review: {
+            enabled: false,
+            maxReviewCycles: 1,
+            checkGravityDrift: true,
+            checkCharacterVoice: true,
+            checkContinuity: true,
+          },
         },
       },
       null,

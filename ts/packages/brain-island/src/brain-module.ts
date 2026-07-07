@@ -9,6 +9,7 @@ import type {
   BrainStrategyMetadata,
   ProviderStateMode,
   SessionId,
+  ToolProfile,
 } from "@rusty-crew/contracts";
 import type {
   NativeBridgeModule,
@@ -22,8 +23,11 @@ import type {
 } from "@rusty-crew/native-bridge";
 import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
-import { createRoleplayNarratorBrain } from "./narrator-brain.js";
-import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
+import {
+  createRoleplayNarratorBrain,
+  type RoleplayNarratorPhaseBrainOptions,
+} from "./narrator-brain.js";
+import type { PiAgentFactory } from "./pi-agent-brain.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import {
   effectiveWakeTimeoutMs,
@@ -35,6 +39,7 @@ import type {
   BrainImplementation,
   BrainWakeInput,
   BrainWakeOptions,
+  BrainWakeResult,
 } from "./index.js";
 import {
   localToolCallMetadata,
@@ -261,7 +266,8 @@ export const piAgentCoreBrainModule: BrainModule = {
         mode: "unused",
         rebuild: {
           action: "discard",
-          reason: "pi-agent-core does not use persisted provider wire state",
+          reason:
+            "pi-agent-core compatibility path uses Rust pi-agent without persisted provider wire state",
         },
       },
     },
@@ -272,32 +278,27 @@ export const piAgentCoreBrainModule: BrainModule = {
         rebuild: {
           action: "discard",
           reason:
-            "roleplay narrator uses pi-agent-core turns without persisted provider wire state",
+            "roleplay narrator uses Rust pi-agent phase turns without persisted provider wire state",
         },
       },
     },
   ],
   diagnostics: {
-    toolAdapterStatus: "neutral_tools_adapted_to_pi",
+    toolAdapterStatus: "native_neutral_tools",
   },
   async createBrain(context) {
-    const profile = context.profile.profile;
-    const createAgent = await (
-      context.createDenRouterAgentFactory ?? createDenRouterPiAgentFactory
-    )({
-      modelId: profile.modelConfig.modelName,
-      maxTokens: context.maxTokens,
-      baseUrl: profile.modelConfig.baseUrl,
-      api: profile.modelConfig.api,
-      apiKeyEnv: profile.modelConfig.apiKeyEnv,
-      temperature:
-        profile.modelConfig.temperatureMilli === undefined
-          ? undefined
-          : profile.modelConfig.temperatureMilli / 1_000,
-    });
     if (context.profile.profile.brain?.strategy === "roleplay_narrator") {
       return createRoleplayNarratorBrain({
-        createAgent,
+        createPhaseBrain: (phase: RoleplayNarratorPhaseBrainOptions) =>
+          createRustPiAgentBrainImplementation(context, {
+            moduleLabel: "pi-agent-core",
+            toolResolver: phase.resolveTools,
+            toolProfile: phase.toolProfile,
+            submitEvent: phase.submitEvent,
+            liveEvents: phase.submitEvent !== undefined,
+            planActions:
+              phase.phase === "compose" ? context.planActions : undefined,
+          }),
         planActions: context.planActions,
         resolveTools: context.toolResolver,
         toolProfile: context.profile.toolSelection.toolProfile,
@@ -314,18 +315,9 @@ export const piAgentCoreBrainModule: BrainModule = {
           : undefined,
       });
     }
-    return createPiAgentBrain({
-      createAgent,
+    return createRustPiAgentBrainImplementation(context, {
+      moduleLabel: "pi-agent-core",
       planActions: context.planActions,
-      resolveTools: context.toolResolver,
-      toolProfile: context.profile.toolSelection.toolProfile,
-      toolCallDebugStore: context.toolCallDebugStore,
-      providerRequestDebugStore: context.providerRequestDebugStore,
-      submitEvent: context.bridge
-        ? async (event) => {
-            await context.bridge?.submitBrainEvent(event);
-          }
-        : undefined,
     });
   },
 };
@@ -382,68 +374,100 @@ export const rustPiAgentBrainModule: BrainModule = {
     toolAdapterStatus: "native_neutral_tools",
   },
   async createBrain(context) {
-    const client = rustPiAgentClientConfig(context);
-    return {
-      async wake(
-        wake,
-        options,
-      ): Promise<{
-        events: BrainEventEnvelope[];
-        actions: BrainAction[];
-        stream?: import("@rusty-crew/contracts").BrainWakeStreamItem[];
-        transportMetrics?: PiAgentTransportMetrics;
-      }> {
-        if (context.bridge === undefined) {
-          throw new Error("rust-pi-agent brain requires native bridge");
-        }
-        const input: PiAgentBrainRunInput = {
-          wakeId: wake.wakeId,
-          sessionId: wake.sessionId,
-          messages: rustPiAgentMessages(wake),
-          config: {
-            model: context.profile.profile.modelConfig.modelName,
-            streamIdleTimeoutMs: rustPiAgentStreamIdleTimeoutMs(),
-            wakeTimeoutMs: openAiResponsesWakeTimeoutMs(context, wake),
-            temperatureMilli:
-              context.profile.profile.modelConfig.temperatureMilli,
-            maxOutputTokens:
-              context.profile.profile.modelConfig.maxOutputTokens ??
-              context.maxTokens,
-          },
-          client,
-        };
-        const providerDebug = context.providerRequestDebugStore?.record({
-          sessionId: wake.sessionId,
-          wakeId: wake.wakeId,
-          brainModule: "rust-pi-agent",
-          providerAlias: context.profile.profile.providerAlias,
-          model: input.config.model,
-          protocol: "chat_completions",
-          providerKind: context.profile.profile.modelConfig.provider,
-          request: {
-            boundary: "ts_to_native_rust_pi_agent",
-            wakeId: input.wakeId,
-            sessionId: input.sessionId,
-            messages: input.messages,
-            config: input.config,
-            client: input.client,
-          },
-        });
-        if (providerDebug) {
-          await context.bridge.submitBrainEvent(
-            providerRequestDebugEvent(wake, providerDebug),
-          );
-        }
-        return runRustPiAgentBrainWithIncrementalDrain(
-          context,
-          wake,
-          input,
-          options,
-        );
-      },
-    };
+    return createRustPiAgentBrainImplementation(context, {
+      moduleLabel: "rust-pi-agent",
+    });
   },
 };
+
+interface RustPiAgentBrainImplementationOptions {
+  moduleLabel: string;
+  toolResolver?: BrainToolResolver;
+  toolProfile?: ToolProfile;
+  submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
+  liveEvents?: boolean;
+  planActions?: BrainActionPlanner;
+}
+
+function createRustPiAgentBrainImplementation(
+  context: BrainModuleContext,
+  implementation: RustPiAgentBrainImplementationOptions,
+): BrainImplementation {
+  const client = rustPiAgentClientConfig(context);
+  return {
+    async wake(wake, options): Promise<BrainWakeResult> {
+      const bridge = context.bridge;
+      if (bridge === undefined) {
+        throw new Error(
+          `${implementation.moduleLabel} brain requires native bridge`,
+        );
+      }
+      const submitEvent =
+        implementation.liveEvents === false
+          ? undefined
+          : (implementation.submitEvent ??
+            (async (event: BrainEventEnvelope) => {
+              await bridge.submitBrainEvent(event);
+            }));
+      const input: PiAgentBrainRunInput = {
+        wakeId: wake.wakeId,
+        sessionId: wake.sessionId,
+        messages: rustPiAgentMessages(wake),
+        config: {
+          model: context.profile.profile.modelConfig.modelName,
+          streamIdleTimeoutMs: rustPiAgentStreamIdleTimeoutMs(),
+          wakeTimeoutMs: openAiResponsesWakeTimeoutMs(context, wake),
+          temperatureMilli:
+            context.profile.profile.modelConfig.temperatureMilli,
+          maxOutputTokens:
+            context.profile.profile.modelConfig.maxOutputTokens ??
+            context.maxTokens,
+        },
+        client,
+      };
+      const providerDebug = context.providerRequestDebugStore?.record({
+        sessionId: wake.sessionId,
+        wakeId: wake.wakeId,
+        brainModule: implementation.moduleLabel,
+        providerAlias: context.profile.profile.providerAlias,
+        model: input.config.model,
+        protocol: "chat_completions",
+        providerKind: context.profile.profile.modelConfig.provider,
+        request: {
+          boundary: "ts_to_native_rust_pi_agent",
+          wakeId: input.wakeId,
+          sessionId: input.sessionId,
+          messages: input.messages,
+          config: input.config,
+          client: input.client,
+        },
+      });
+      const events: BrainEventEnvelope[] = [];
+      if (providerDebug) {
+        const event = providerRequestDebugEvent(wake, providerDebug);
+        if (submitEvent) {
+          await submitEvent(event);
+        } else {
+          events.push(event);
+        }
+      }
+      return runRustPiAgentBrainWithIncrementalDrain(
+        context,
+        wake,
+        input,
+        options,
+        {
+          moduleLabel: implementation.moduleLabel,
+          events,
+          submitEvent,
+          toolResolver: implementation.toolResolver,
+          toolProfile: implementation.toolProfile,
+          planActions: implementation.planActions,
+        },
+      );
+    },
+  };
+}
 
 function rustPiAgentStreamIdleTimeoutMs(
   env: Partial<
@@ -853,6 +877,17 @@ async function runRustPiAgentBrainWithIncrementalDrain(
   wake: BrainWakeInput,
   input: PiAgentBrainRunInput,
   options?: BrainWakeOptions,
+  runOptions: {
+    moduleLabel: string;
+    events: BrainEventEnvelope[];
+    submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
+    toolResolver?: BrainToolResolver;
+    toolProfile?: ToolProfile;
+    planActions?: BrainActionPlanner;
+  } = {
+    moduleLabel: "rust-pi-agent",
+    events: [],
+  },
 ): Promise<{
   events: BrainEventEnvelope[];
   actions: BrainAction[];
@@ -868,8 +903,9 @@ async function runRustPiAgentBrainWithIncrementalDrain(
   const selectionActions = createResponsesBrainActionCollector();
   const toolSelection = resolveToolSession({
     wake,
-    resolveTools: context.toolResolver,
-    toolProfile: context.profile.toolSelection.toolProfile,
+    resolveTools: runOptions.toolResolver ?? context.toolResolver,
+    toolProfile:
+      runOptions.toolProfile ?? context.profile.toolSelection.toolProfile,
     actions: selectionActions,
   });
   const toolsByName = new Map(
@@ -931,11 +967,23 @@ async function runRustPiAgentBrainWithIncrementalDrain(
         if (item.type === "event") {
           incrementCount(brainEventCounts, item.event.event.type);
         }
+        const debugItem = withOpenAiResponsesToolDebugReference(
+          item,
+          toolDebugReferences,
+        );
+        if (
+          runOptions.submitEvent === undefined &&
+          debugItem.type === "event"
+        ) {
+          runOptions.events.push(debugItem.event);
+          continue;
+        }
         await handleDrainedOpenAiResponsesStreamItem(
           bridge,
-          withOpenAiResponsesToolDebugReference(item, toolDebugReferences),
+          debugItem,
           streamActions,
-          "rust-pi-agent",
+          runOptions.moduleLabel,
+          runOptions.submitEvent,
         );
       }
       for (const request of preparedToolRequests) {
@@ -955,23 +1003,38 @@ async function runRustPiAgentBrainWithIncrementalDrain(
           output.failure,
         );
         if (stopReport !== undefined) {
-          await submitOpenAiResponsesBrainEvent(bridge, wake, {
-            type: "provider_status",
-            level: "error",
-            message: stopReport,
-          });
+          await submitRustPiAgentBrainEvent(
+            wake,
+            {
+              type: "provider_status",
+              level: "error",
+              message: stopReport,
+            },
+            runOptions,
+          );
           throw new Error(stopReport);
         }
       }
       if (drained.error !== undefined) {
         throw new Error(
-          `rust-pi-agent buffered wake ${started.wakeId} failed: ${drained.error}`,
+          `${runOptions.moduleLabel} buffered wake ${started.wakeId} failed: ${drained.error}`,
         );
       }
       if (drained.terminal) {
+        const plannedActions = runOptions.planActions
+          ? await runOptions.planActions({
+              wake,
+              events: runOptions.events,
+              toolActions: [...selectionActions.actions, ...streamActions],
+            })
+          : [];
         return {
-          events: [],
-          actions: [...selectionActions.actions, ...streamActions],
+          events: runOptions.submitEvent ? [] : runOptions.events,
+          actions: [
+            ...selectionActions.actions,
+            ...streamActions,
+            ...plannedActions,
+          ],
           transportMetrics: drained.transportMetrics,
           brainEventCounts,
           brainStreamItemCounts,
@@ -1414,10 +1477,13 @@ async function handleDrainedOpenAiResponsesStreamItem(
   item: BrainWakeStreamItem,
   actions: BrainAction[],
   moduleLabel = "OpenAI Responses",
+  submitEvent: (event: BrainEventEnvelope) => Promise<void> = async (event) => {
+    await bridge.submitBrainEvent(event);
+  },
 ): Promise<void> {
   switch (item.type) {
     case "event":
-      await bridge.submitBrainEvent(item.event);
+      await submitEvent(item.event);
       return;
     case "actions":
       actions.push(...item.batch.actions);
@@ -1427,6 +1493,26 @@ async function handleDrainedOpenAiResponsesStreamItem(
         `${moduleLabel} wake ${item.failure.wakeId} failed: ${item.failure.message}`,
       );
   }
+}
+
+async function submitRustPiAgentBrainEvent(
+  wake: BrainWakeInput,
+  event: BrainEvent,
+  runOptions: {
+    events: BrainEventEnvelope[];
+    submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
+  },
+): Promise<void> {
+  const envelope = {
+    wakeId: wake.wakeId,
+    sessionId: wake.sessionId,
+    event,
+  };
+  if (runOptions.submitEvent) {
+    await runOptions.submitEvent(envelope);
+    return;
+  }
+  runOptions.events.push(envelope);
 }
 
 async function submitOpenAiResponsesBrainEvent(

@@ -26,7 +26,8 @@ import {
 } from "./tool-session-selection.js";
 
 export interface RoleplayNarratorBrainOptions {
-  createAgent: PiAgentFactory;
+  createAgent?: PiAgentFactory;
+  createPhaseBrain?: RoleplayNarratorPhaseBrainFactory;
   resolveTools?: BrainToolResolver;
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
   planActions?: BrainActionPlanner;
@@ -37,6 +38,23 @@ export interface RoleplayNarratorBrainOptions {
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
 }
+
+export type RoleplayNarratorPhase =
+  | "explore"
+  | "compose"
+  | "compose_draft"
+  | "review";
+
+export interface RoleplayNarratorPhaseBrainOptions {
+  phase: RoleplayNarratorPhase;
+  resolveTools?: BrainToolResolver;
+  toolProfile?: ToolProfile;
+  submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
+}
+
+export type RoleplayNarratorPhaseBrainFactory = (
+  options: RoleplayNarratorPhaseBrainOptions,
+) => BrainImplementation;
 
 const EXPLORE_TOOLS = new Set([
   "recall_lore",
@@ -54,50 +72,33 @@ const COMPOSE_TOOLS = new Set(["get_scene_state", "update_scene_state"]);
 export function createRoleplayNarratorBrain(
   options: RoleplayNarratorBrainOptions,
 ): BrainImplementation {
-  const exploreBrain = createPiAgentBrain({
-    createAgent: wrapCreateAgentSystemPrompt(
-      options.createAgent,
-      exploreInstructions,
-    ),
-    resolveTools: filteringResolver(options.resolveTools, EXPLORE_TOOLS),
-    toolProfile: filterToolProfile(options.toolProfile, EXPLORE_TOOLS),
-    toolCallDebugStore: options.toolCallDebugStore,
-    providerRequestDebugStore: options.providerRequestDebugStore,
+  const exploreBrain = createNarratorPhaseBrain(options, {
+    phase: "explore",
+    allowedTools: EXPLORE_TOOLS,
+    compatibilityInstructions: exploreInstructions,
   });
 
-  const composeBrain = createPiAgentBrain({
-    createAgent: wrapCreateAgentSystemPrompt(options.createAgent, () =>
-      composeSystemInstructions(options.narratorConfig),
-    ),
-    resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
-    toolProfile: filterToolProfile(options.toolProfile, COMPOSE_TOOLS),
+  const composeBrain = createNarratorPhaseBrain(options, {
+    phase: "compose",
+    allowedTools: COMPOSE_TOOLS,
     submitEvent: options.submitEvent,
-    planActions: options.planActions,
-    toolCallDebugStore: options.toolCallDebugStore,
-    providerRequestDebugStore: options.providerRequestDebugStore,
+    compatibilityInstructions: () =>
+      composeSystemInstructions(options.narratorConfig),
   });
 
-  const composeDraftBrain = createPiAgentBrain({
-    createAgent: wrapCreateAgentSystemPrompt(options.createAgent, () =>
+  const composeDraftBrain = createNarratorPhaseBrain(options, {
+    phase: "compose_draft",
+    allowedTools: COMPOSE_TOOLS,
+    compatibilityInstructions: () =>
       composeSystemInstructions(options.narratorConfig),
-    ),
-    resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
-    toolProfile: filterToolProfile(options.toolProfile, COMPOSE_TOOLS),
-    toolCallDebugStore: options.toolCallDebugStore,
-    providerRequestDebugStore: options.providerRequestDebugStore,
   });
 
   const reviewBrain =
     options.reviewEnabled === true
-      ? createPiAgentBrain({
-          createAgent: wrapCreateAgentSystemPrompt(
-            options.createAgent,
-            reviewSystemInstructions,
-          ),
-          resolveTools: filteringResolver(options.resolveTools, COMPOSE_TOOLS),
-          toolProfile: filterToolProfile(options.toolProfile, COMPOSE_TOOLS),
-          toolCallDebugStore: options.toolCallDebugStore,
-          providerRequestDebugStore: options.providerRequestDebugStore,
+      ? createNarratorPhaseBrain(options, {
+          phase: "review",
+          allowedTools: COMPOSE_TOOLS,
+          compatibilityInstructions: reviewSystemInstructions,
         })
       : undefined;
 
@@ -212,6 +213,50 @@ export function createRoleplayNarratorBrain(
       };
     },
   };
+}
+
+function createNarratorPhaseBrain(
+  options: RoleplayNarratorBrainOptions,
+  phase: {
+    phase: RoleplayNarratorPhase;
+    allowedTools: ReadonlySet<string>;
+    submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
+    compatibilityInstructions: () => string;
+  },
+): BrainImplementation {
+  const resolveTools = filteringResolver(
+    options.resolveTools,
+    phase.allowedTools,
+  );
+  const toolProfile = filterToolProfile(
+    options.toolProfile,
+    phase.allowedTools,
+  );
+  if (options.createPhaseBrain) {
+    return options.createPhaseBrain({
+      phase: phase.phase,
+      resolveTools,
+      toolProfile,
+      submitEvent: phase.submitEvent,
+    });
+  }
+  if (!options.createAgent) {
+    throw new Error(
+      "roleplay narrator requires createPhaseBrain or createAgent",
+    );
+  }
+  return createPiAgentBrain({
+    createAgent: wrapCreateAgentSystemPrompt(
+      options.createAgent,
+      phase.compatibilityInstructions,
+    ),
+    resolveTools,
+    toolProfile,
+    submitEvent: phase.submitEvent,
+    planActions: phase.phase === "compose" ? options.planActions : undefined,
+    toolCallDebugStore: options.toolCallDebugStore,
+    providerRequestDebugStore: options.providerRequestDebugStore,
+  });
 }
 
 function reviewRequestsRevision(feedback: string | undefined): boolean {
