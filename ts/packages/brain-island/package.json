@@ -91,6 +91,7 @@
     "smoke:direct-debug-service": "tsx src/smoke-direct-debug-service.ts",
     "smoke:debug-api-client": "tsx src/smoke-debug-api-client.ts",
     "smoke:admin-control-api": "tsx src/smoke-admin-control-api.ts",
+    "smoke:admin-profile-create-concurrency": "tsx src/smoke-admin-profile-create-concurrency.ts",
     "smoke:scheduler-cleanup-e2e": "tsx src/smoke-scheduler-cleanup-e2e.ts",
     "smoke:slash-command-router": "tsx src/smoke-slash-command-router.ts",
     "smoke:slash-command-e2e": "tsx src/smoke-slash-command-e2e.ts",

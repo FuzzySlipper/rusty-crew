@@ -377,6 +377,7 @@ interface ServiceState {
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
   readonly lock: RustyCrewServiceLock;
+  readonly runtimeConfigMutationQueue: AsyncMutationQueue;
   readonly auditSink: ReturnType<typeof createMemoryAdminControlAuditSink>;
   readonly adapterFactories: ServiceAdapterFactories;
   runtimeConfig: RustyCrewRuntimeConfig;
@@ -426,6 +427,31 @@ interface ServiceState {
   readonly now: () => string;
   nextWakeSequence: number;
   stopping: boolean;
+}
+
+interface AsyncMutationQueue {
+  tail: Promise<void>;
+}
+
+function createAsyncMutationQueue(): AsyncMutationQueue {
+  return { tail: Promise.resolve() };
+}
+
+async function withAsyncMutationQueue<T>(
+  queue: AsyncMutationQueue,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = queue.tail;
+  let release!: () => void;
+  queue.tail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
 }
 
 function roleplayRouteContext(state: ServiceState): RoleplayRouteContext {
@@ -575,6 +601,7 @@ export async function createRustyCrewServiceApp(
       bridge,
       engine,
       lock,
+      runtimeConfigMutationQueue: createAsyncMutationQueue(),
       auditSink: createMemoryAdminControlAuditSink(),
       adapterFactories: options.adapterFactories,
       runtimeConfig,
@@ -1028,12 +1055,16 @@ async function handleHttpRequest(
         updateProfileRegistryRecord: (input) =>
           state.bridge.updateProfileRegistryRecord(input),
         applyLifecycleEffects: (record) =>
-          applyProfileRegistryLifecycleEffects(state, record),
+          withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+            applyProfileRegistryLifecycleEffects(state, record),
+          ),
         applyRuntimeConfigEffects: (record, plan) =>
-          applyProfileRegistryRuntimeConfigEffects(
-            state,
-            record,
-            plan as ProfileRegistryRuntimeConfigPlan,
+          withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+            applyProfileRegistryRuntimeConfigEffects(
+              state,
+              record,
+              plan as ProfileRegistryRuntimeConfigPlan,
+            ),
           ),
       },
     );
@@ -1144,6 +1175,17 @@ async function upsertAdminMcpServer(
   body: Record<string, unknown>,
   pathServerId: string | undefined,
 ): Promise<AdminRouteResult> {
+  return withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+    upsertAdminMcpServerLocked(state, requestIdValue, body, pathServerId),
+  );
+}
+
+async function upsertAdminMcpServerLocked(
+  state: ServiceState,
+  requestIdValue: string,
+  body: Record<string, unknown>,
+  pathServerId: string | undefined,
+): Promise<AdminRouteResult> {
   const server = mcpServerWriteFromBody(body, pathServerId);
   const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
   const servers = runtimeConfigFile.array("mcpServers");
@@ -1174,6 +1216,16 @@ async function upsertAdminMcpServer(
 }
 
 async function deleteAdminMcpServer(
+  state: ServiceState,
+  requestIdValue: string,
+  serverId: string,
+): Promise<AdminRouteResult> {
+  return withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+    deleteAdminMcpServerLocked(state, requestIdValue, serverId),
+  );
+}
+
+async function deleteAdminMcpServerLocked(
   state: ServiceState,
   requestIdValue: string,
   serverId: string,
@@ -5284,7 +5336,7 @@ async function writeJsonFileAtomic(
   value: unknown,
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tmpPath = `${path}.${process.pid}.${Date.now()}.${randomBytes(8).toString("hex")}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`);
   await rename(tmpPath, path);
 }
@@ -5669,6 +5721,8 @@ function directDebugResult<T>(
 function createServiceControlExecutor(
   state: ServiceState,
 ): AdminControlExecutor {
+  const withRuntimeConfigMutation = <T>(operation: () => Promise<T>) =>
+    withAsyncMutationQueue(state.runtimeConfigMutationQueue, operation);
   return {
     ...createCuratorAdminControlExecutor({
       curatorExecutor: state.curator.executor,
@@ -5678,7 +5732,9 @@ function createServiceControlExecutor(
       skillsDir: curatorSkillsDir(state.curator.runtimeConfig),
     }),
     createProfile: async (command) => {
-      const result = await createServiceProfile(state, command);
+      const result = await withRuntimeConfigMutation(() =>
+        createServiceProfile(state, command),
+      );
       return {
         status: "completed",
         summary: `profile ${result.profileId} created with session ${result.sessionId}`,
@@ -5713,7 +5769,9 @@ function createServiceControlExecutor(
       };
     },
     applyProfileUpdate: async (command) => {
-      const result = await applyServiceProfileUpdate(state, command);
+      const result = await withRuntimeConfigMutation(() =>
+        applyServiceProfileUpdate(state, command),
+      );
       return {
         status: result.ok ? "completed" : "failed",
         summary: result.ok
@@ -5725,7 +5783,9 @@ function createServiceControlExecutor(
       };
     },
     decommissionProfile: async (command) => {
-      const result = await decommissionServiceProfile(state, command);
+      const result = await withRuntimeConfigMutation(() =>
+        decommissionServiceProfile(state, command),
+      );
       return {
         status: "completed",
         summary: `profile ${result.profileId} decommissioned`,
@@ -5743,7 +5803,9 @@ function createServiceControlExecutor(
       };
     },
     deleteProfile: async (command) => {
-      const result = await deleteServiceProfile(state, command);
+      const result = await withRuntimeConfigMutation(() =>
+        deleteServiceProfile(state, command),
+      );
       return {
         status: "completed",
         summary: `profile ${result.profileId} deleted`,
@@ -5788,7 +5850,7 @@ function createServiceControlExecutor(
         string,
         { oldSession: SessionState; plan: ServiceRuntimeReplacementConfigPlan }
       >();
-      return createNewSessionLifecycleExecutor({
+      const executor = createNewSessionLifecycleExecutor({
         loadTemplate: async (currentSessionId) => {
           const session = await serviceSessionById(state, currentSessionId);
           const channelBinding = channelBindingForSession(
@@ -5937,6 +5999,8 @@ function createServiceControlExecutor(
         },
         now: state.now,
       });
+      return (command) =>
+        withRuntimeConfigMutation(async () => executor(command));
     })(),
     pauseRuntime: async (command) => pauseRuntimeTarget(state, command),
     resumeRuntime: async (command) => resumeRuntimeTarget(state, command),
@@ -5966,7 +6030,9 @@ function createServiceControlExecutor(
       };
     },
     reloadConfig: async () => {
-      const result = await reloadServiceRuntimeConfig(state);
+      const result = await withRuntimeConfigMutation(() =>
+        reloadServiceRuntimeConfig(state),
+      );
       return {
         status: "completed",
         summary: runtimeConfigApplySummary("runtime config reloaded", result),
@@ -5991,7 +6057,9 @@ function createServiceControlExecutor(
       };
     },
     applyRuntimeConfigUpdate: async (command) => {
-      const result = await applyServiceRuntimeConfigDraft(state, command);
+      const result = await withRuntimeConfigMutation(() =>
+        applyServiceRuntimeConfigDraft(state, command),
+      );
       return {
         status: result.ok ? "completed" : "failed",
         summary: result.ok
@@ -6002,7 +6070,9 @@ function createServiceControlExecutor(
       };
     },
     patchWakeTimeout: async (command) => {
-      const result = await patchServiceWakeTimeout(state, command);
+      const result = await withRuntimeConfigMutation(() =>
+        patchServiceWakeTimeout(state, command),
+      );
       return {
         status: "completed",
         summary:
@@ -6022,7 +6092,9 @@ function createServiceControlExecutor(
       };
     },
     applyRuntimeRebuild: async (command) => {
-      const result = await applyServiceRuntimeRebuild(state, command);
+      const result = await withRuntimeConfigMutation(() =>
+        applyServiceRuntimeRebuild(state, command),
+      );
       return {
         status: result.apply.status === "completed" ? "completed" : "failed",
         summary:
