@@ -8,7 +8,6 @@ use rusty_crew_core_protocol::{
     CoreError, CoreErrorKind, CoreEvent, CoreResult, IsoTimestamp, RunId, SessionId, SessionStatus,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_SCHEDULED_RUN: AtomicU64 = AtomicU64::new(1);
 
@@ -290,7 +289,7 @@ impl CoreEngine {
         let now = self.now();
         let claim_deadline_at = add_millis_to_iso(&now, SCHEDULER_CLAIM_TTL_MS)?;
         let run = ScheduledRunRecord {
-            run_id: next_scheduled_run_id(&job.job_id),
+            run_id: next_scheduled_run_id(&job.job_id, &now),
             job_id: job.job_id.clone(),
             job_kind: job.job_kind.clone(),
             target_session_id: job.target_session_id.clone(),
@@ -407,12 +406,12 @@ impl CoreEngine {
     }
 }
 
-fn next_scheduled_run_id(job_id: &str) -> RunId {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
+fn next_scheduled_run_id(job_id: &str, now: &IsoTimestamp) -> RunId {
     let sequence = NEXT_SCHEDULED_RUN.fetch_add(1, Ordering::Relaxed);
-    RunId::new(format!("scheduled:{job_id}:{nanos}:{sequence}"))
+    RunId::new(format!(
+        "scheduled:{job_id}:{}:{sequence}",
+        crate::sanitized_clock_key(now)
+    ))
 }
 
 fn normalized_supported_host_job_kinds(job_kinds: Vec<String>) -> CoreResult<Vec<String>> {

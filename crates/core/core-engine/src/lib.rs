@@ -62,7 +62,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 use time::format_description::well_known::Rfc3339;
 use time::Duration;
 use time::OffsetDateTime;
@@ -444,7 +443,7 @@ impl CoreEngine {
         let now = self.now();
         let expires_at = add_millis_to_iso(&now, ttl_ms as u64)?;
         let record = QueuedMessageRecord {
-            message_id: next_queued_message_id(session_id),
+            message_id: next_queued_message_id(session_id, &now),
             owner_session_id: Some(session_id.clone()),
             owner_agent_id: session.agent_id.clone(),
             message: AgentMessage {
@@ -2313,12 +2312,24 @@ fn add_millis_to_iso(at: &IsoTimestamp, millis: u64) -> CoreResult<IsoTimestamp>
         })
 }
 
-fn next_queued_message_id(session_id: &SessionId) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
+fn next_queued_message_id(session_id: &SessionId, now: &IsoTimestamp) -> String {
     let sequence = NEXT_QUEUED_MESSAGE.fetch_add(1, Ordering::Relaxed);
-    format!("follow-up:{session_id}:{nanos}:{sequence}")
+    format!(
+        "follow-up:{session_id}:{}:{sequence}",
+        sanitized_clock_key(now)
+    )
+}
+
+fn sanitized_clock_key(now: &IsoTimestamp) -> String {
+    now.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn profile_registry_provider_alias(record: &ProfileRegistryRecord) -> Option<String> {
@@ -2817,6 +2828,14 @@ mod tests {
             })
             .unwrap();
         assert_eq!(runs.len(), 1);
+        assert!(
+            runs[0]
+                .run_id
+                .0
+                .starts_with("scheduled:wake-prime:2026_06_19T00_00_00Z:"),
+            "scheduled run id should be derived from the engine clock, got {}",
+            runs[0].run_id
+        );
         assert_eq!(
             store
                 .load_scheduled_job("wake-prime")
@@ -2892,17 +2911,21 @@ mod tests {
                 .len(),
             0
         );
-        assert_eq!(
-            store
-                .load_queued_messages(&QueuedMessageFilter {
-                    state: Some(QueuedMessageState::Delivered),
-                    owner_session_id: Some(prime.session_id),
-                    owner_agent_id: None,
-                    limit: None,
-                })
-                .unwrap()
-                .len(),
-            1
+        let delivered = store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Delivered),
+                owner_session_id: Some(prime.session_id),
+                owner_agent_id: None,
+                limit: None,
+            })
+            .unwrap();
+        assert_eq!(delivered.len(), 1);
+        assert!(
+            delivered[0]
+                .message_id
+                .starts_with("follow-up:prime-session:2026_06_19T00_00_00Z:"),
+            "queued follow-up id should be derived from the engine clock, got {}",
+            delivered[0].message_id
         );
     }
 
