@@ -153,6 +153,15 @@ errors = "core_protocol::CoreError"
 summary = "Submit one tool result into a buffered OpenAI Responses brain wake."
 
 [[operation]]
+name = "cancel_openai_responses_brain"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ wake_id, reason_code, summary }"
+output = "{ ok, wake_id, cancelled, terminal, cancellation? }"
+errors = "core_protocol::CoreError"
+summary = "Cancel a buffered OpenAI Responses brain wake cooperatively."
+
+[[operation]]
 name = "exchange_openai_oauth_code"
 surface = "stable"
 direction = "ts_to_rust"

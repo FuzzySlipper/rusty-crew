@@ -32,6 +32,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "start_openai_responses_brain",
     "drain_openai_responses_brain_stream",
     "submit_openai_responses_tool_output",
+    "cancel_openai_responses_brain",
     "exchange_openai_oauth_code",
     "register_platform_adapter",
     "validate_runtime_config_draft",

@@ -1560,6 +1560,7 @@ export const manifestOperationNames = [
   "start_openai_responses_brain",
   "drain_openai_responses_brain_stream",
   "submit_openai_responses_tool_output",
+  "cancel_openai_responses_brain",
   "exchange_openai_oauth_code",
   "register_platform_adapter",
   "validate_runtime_config_draft",
@@ -1672,6 +1673,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "0694aa0c9129fd7a6d1ce6760dceb49d590ab6f1741b3945cc900b443752b05a";
+  "239d85e48e4ef3a5f9321fe6feebe39a2d3df06131e6a5088430a4c8eea96689";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];
