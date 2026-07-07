@@ -40,6 +40,23 @@ export interface RoleplayRouteContext {
     afterCursor: string | undefined,
     limit: number,
   ): readonly ChatEvent[];
+  generateRoleplayAssistantAlternative?(
+    input: RoleplayAssistantAlternativeGenerationInput,
+  ): Promise<RoleplayAssistantAlternativeGenerationResult>;
+}
+
+export interface RoleplayAssistantAlternativeGenerationInput {
+  session: SessionState;
+  slot: MessageSlotRecord;
+  prompt: string;
+  requestId: string;
+}
+
+export interface RoleplayAssistantAlternativeGenerationResult {
+  body: string;
+  wakeId?: string;
+  summary?: string;
+  metadataJson?: Record<string, unknown>;
 }
 
 export function isRoleplayBrowserRoute(pathname: string): boolean {
@@ -2400,6 +2417,20 @@ async function handleRoleplaySessionRequest(
     }
     if (
       action === "alternatives" &&
+      childId === "generate" &&
+      childAction === undefined &&
+      method === "POST"
+    ) {
+      const alternative = await generateRoleplayAssistantAlternative(
+        state,
+        sessionId,
+        recordBody(await readJsonBody(request)),
+        requestIdValue,
+      );
+      return roleplaySuccess(requestIdValue, alternative, 201);
+    }
+    if (
+      action === "alternatives" &&
       childId !== undefined &&
       childAction === "select" &&
       method === "POST"
@@ -3523,6 +3554,108 @@ async function createRoleplayAssistantAlternative(
   };
 }
 
+async function generateRoleplayAssistantAlternative(
+  state: RoleplayRouteContext,
+  sessionId: string,
+  body: Record<string, unknown>,
+  requestIdValue: string,
+): Promise<Record<string, unknown>> {
+  if (state.generateRoleplayAssistantAlternative === undefined) {
+    throw new Error(
+      "roleplay assistant alternative generation is not configured",
+    );
+  }
+  const slot = await roleplayTerminalAssistantSlot(
+    state,
+    sessionId,
+    optionalString(body.slotId) ?? optionalString(body.slot_id),
+  );
+  const session = await state.serviceSessionById(sessionId);
+  const now = state.now();
+  const prompt = roleplayAssistantAlternativeGenerationPrompt(
+    await roleplayMessageSlots(state, sessionId),
+    slot,
+    optionalString(body.instructions),
+  );
+  const generated = await state.generateRoleplayAssistantAlternative({
+    session,
+    slot,
+    prompt,
+    requestId: requestIdValue,
+  });
+  const bodyText = requiredRouteString(generated.body.trim(), "generated body");
+  const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
+    state,
+    session,
+    { id: "roleplay-assistant", kind: "agent" },
+    now,
+  ).catch(() => undefined);
+  const variantId =
+    optionalString(body.variantId) ??
+    optionalString(body.variant_id) ??
+    stableRoleplayRecordId("variant", `${slot.slot_id}:${requestIdValue}`);
+  const messageId =
+    optionalString(body.messageId) ??
+    optionalString(body.message_id) ??
+    stableRoleplayRecordId("message", variantId);
+  const metadataJson = {
+    source: "roleplay_assistant_alternative",
+    generated: true,
+    generation_source: "model",
+    ...(generated.wakeId === undefined ? {} : { wake_id: generated.wakeId }),
+    ...(generated.summary === undefined
+      ? {}
+      : { generation_summary: generated.summary }),
+    ...(generated.metadataJson ?? {}),
+    ...(optionalRecord(body.metadata_json) ?? {}),
+    ...(speakerIdentity === undefined
+      ? {}
+      : { speaker_identity: speakerIdentity }),
+  };
+  const variant = (await state.bridge.saveMessageVariant(
+    roleplayMessageVariantWrite({
+      sessionId,
+      slotId: slot.slot_id,
+      variantId,
+      messageId,
+      source: "alternate",
+      ordinal: slot.alternates.length + 1,
+      actor: { id: "roleplay-assistant", kind: "agent" },
+      body: bodyText,
+      branchId: slot.primary.message.branch_id ?? undefined,
+      parentMessageId: slot.primary.message.parent_message_id ?? undefined,
+      previousMessageId: slot.primary.message.previous_message_id ?? undefined,
+      metadataJson,
+      now,
+    }),
+  )) as MessageVariantRecord;
+  const selected = (await state.bridge.selectActiveMessageVariant({
+    slot_id: slot.slot_id,
+    active_variant_id: variant.variant_id,
+    expected: { type: "any" },
+    updated_at: state.now(),
+  })) as {
+    slot: MessageSlotRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  const selectedVariant = activeVariantForSlot(selected.slot);
+  if (selectedVariant.message.branch_id) {
+    await state.bridge.updateConversationBranchHead({
+      branch_id: selectedVariant.message.branch_id,
+      head_message_id: selectedVariant.message.message_id,
+      expected: { type: "any" },
+      updated_at: state.now(),
+    });
+  }
+  return {
+    status: selected.conflict ? "conflict" : "generated",
+    session_id: sessionId,
+    slot: roleplayAlternativeSlot(selected.slot),
+    variant,
+    ...(selected.conflict ? { conflict: selected.conflict } : {}),
+  };
+}
+
 async function selectRoleplayAssistantAlternative(
   state: RoleplayRouteContext,
   sessionId: string,
@@ -3747,6 +3880,52 @@ function activeVariantForSlot(slot: MessageSlotRecord): MessageVariantRecord {
       (variant) => variant.variant_id === slot.active_variant_id,
     ) ?? slot.primary
   );
+}
+
+function roleplayAssistantAlternativeGenerationPrompt(
+  slots: MessageSlotRecord[],
+  terminalSlot: MessageSlotRecord,
+  instructions: string | undefined,
+): string {
+  const ordered = orderedRoleplaySlots(slots);
+  const terminalIndex = ordered.findIndex(
+    (slot) => slot.slot_id === terminalSlot.slot_id,
+  );
+  const priorSlots =
+    terminalIndex < 0 ? ordered : ordered.slice(0, terminalIndex);
+  const current = activeVariantForSlot(terminalSlot);
+  const transcript = priorSlots
+    .map((slot) => roleplayTranscriptLine(activeVariantForSlot(slot)))
+    .filter((line): line is string => line !== undefined);
+  return [
+    "Generate one new alternate assistant reply for the current terminal assistant message.",
+    "Return only the assistant message body. Do not include labels, analysis, JSON, markdown fences, or commentary about being an alternative.",
+    instructions === undefined
+      ? undefined
+      : `Additional instructions: ${instructions}`,
+    "",
+    "# Conversation Before The Assistant Reply",
+    transcript.length === 0 ? "(no earlier turns)" : transcript.join("\n\n"),
+    "",
+    "# Current Assistant Reply To Vary",
+    current.message.body,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
+function roleplayTranscriptLine(
+  variant: MessageVariantRecord,
+): string | undefined {
+  const body = variant.message.body.trim();
+  if (!body) return undefined;
+  const role =
+    variant.message.author_role === "assistant"
+      ? "Assistant"
+      : variant.message.author_role === "system"
+        ? "System"
+        : "User";
+  return `${role}: ${body}`;
 }
 
 function actorForVariant(variant: MessageVariantRecord): ChatActor {

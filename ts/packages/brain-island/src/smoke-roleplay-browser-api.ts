@@ -684,6 +684,115 @@ try {
     "rp-alt-2",
   );
 
+  const generatedSession = await post("/v1/admin/roleplay/sessions", {
+    sessionId: "rp-generated-session",
+    profileId: "rp-profile",
+    displayName: "Generated Alternative Session",
+    playerPersonaId: "rp-player",
+    characterId: "rp-hero",
+    activeLayerIds: ["rp-world"],
+  });
+  assert.equal(
+    generatedSession.status,
+    200,
+    JSON.stringify(generatedSession.body),
+  );
+  const generatedUserSlot = await post(
+    "/v1/chat/sessions/rp-generated-session/slots",
+    {
+      slot_id: "rp-generated-user-slot",
+      primary_variant_id: "rp-generated-user-primary",
+      message_id: "rp-message-generated-user-1",
+      actor: { id: "rp-player", kind: "human" },
+      body: "I press my palm to the sealed door.",
+    },
+  );
+  assert.equal(
+    generatedUserSlot.status,
+    201,
+    JSON.stringify(generatedUserSlot.body),
+  );
+  const generatedAssistantSlot = await post(
+    "/v1/chat/sessions/rp-generated-session/slots",
+    {
+      slot_id: "rp-generated-assistant-slot",
+      primary_variant_id: "rp-generated-assistant-primary",
+      message_id: "rp-message-generated-assistant-1",
+      actor: { id: "rp-profile", kind: "agent" },
+      body: "The old seal warms beneath your hand.",
+    },
+  );
+  assert.equal(
+    generatedAssistantSlot.status,
+    201,
+    JSON.stringify(generatedAssistantSlot.body),
+  );
+  const generatedAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-generated-session/alternatives/generate",
+    {
+      slotId: "rp-generated-assistant-slot",
+      variantId: "rp-generated-alt-1",
+      messageId: "rp-message-generated-alt-1",
+      instructions: "Keep it concise for the smoke test.",
+    },
+  );
+  assert.equal(
+    generatedAlternative.status,
+    201,
+    JSON.stringify(generatedAlternative.body),
+  );
+  assert.equal(generatedAlternative.body.data.status, "generated");
+  assert.equal(
+    generatedAlternative.body.data.slot.active_variant_id,
+    "rp-generated-alt-1",
+  );
+  assert.equal(
+    generatedAlternative.body.data.variant.message.metadata_json.generated,
+    true,
+  );
+  assert.ok(
+    generatedAlternative.body.data.variant.message.body.length > 0,
+    "generated alternative should persist a non-empty assistant body",
+  );
+  const selectedGeneratedAlternative = await post(
+    "/v1/admin/roleplay/sessions/rp-generated-session/alternatives/rp-generated-assistant-slot/select",
+    { variantId: "rp-generated-alt-1" },
+  );
+  assert.equal(
+    selectedGeneratedAlternative.status,
+    200,
+    JSON.stringify(selectedGeneratedAlternative.body),
+  );
+  const generatedFollowupUserSlot = await post(
+    "/v1/chat/sessions/rp-generated-session/slots",
+    {
+      slot_id: "rp-generated-user-slot-later",
+      primary_variant_id: "rp-generated-user-primary-later",
+      message_id: "rp-message-generated-user-later",
+      actor: { id: "rp-player", kind: "human" },
+      body: "I ask what the seal wants.",
+    },
+  );
+  assert.equal(
+    generatedFollowupUserSlot.status,
+    201,
+    JSON.stringify(generatedFollowupUserSlot.body),
+  );
+  assert.equal(
+    generatedFollowupUserSlot.body.data.slot.primary.message
+      .previous_message_id,
+    "rp-message-generated-alt-1",
+  );
+  const generatedTerminalUserRejection = await post(
+    "/v1/admin/roleplay/sessions/rp-generated-session/alternatives/generate",
+    {},
+  );
+  assert.equal(generatedTerminalUserRejection.status, 400);
+  assert.match(
+    generatedTerminalUserRejection.body.error.message,
+    /terminal message is user/,
+  );
+
   const laterUserSlot = await post(
     "/v1/chat/sessions/rp-browser-session/slots",
     {

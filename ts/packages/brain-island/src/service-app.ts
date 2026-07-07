@@ -128,6 +128,8 @@ import {
   isRoleplayBrowserRoute,
   roleplayPromptContextForSession,
   roleplaySpeakerIdentitySnapshotForMessage,
+  type RoleplayAssistantAlternativeGenerationInput,
+  type RoleplayAssistantAlternativeGenerationResult,
   type RoleplayRouteContext,
 } from "./service-roleplay-routes.js";
 import {
@@ -443,6 +445,8 @@ function roleplayRouteContext(state: ServiceState): RoleplayRouteContext {
     serviceSessionById: (sessionId) => serviceSessionById(state, sessionId),
     listChatEventsAfterCursor: (session, afterCursor, limit) =>
       listChatEventsAfterCursor(state, session, afterCursor, limit),
+    generateRoleplayAssistantAlternative: (input) =>
+      generateRoleplayAssistantAlternativeViaWake(state, input),
   };
 }
 
@@ -7894,6 +7898,67 @@ async function submitRustyViewChatMessage(
   };
   rememberChatMessageReceipt(state, receiptKey, result);
   return result;
+}
+
+async function generateRoleplayAssistantAlternativeViaWake(
+  state: ServiceState,
+  input: RoleplayAssistantAlternativeGenerationInput,
+): Promise<RoleplayAssistantAlternativeGenerationResult> {
+  const beforeCursor = latestChatCursor(state, input.session.sessionId);
+  const correlationId = `roleplay-alternative:${input.requestId}`;
+  const wakeReport = await submitServiceTurn(state, {
+    sessionId: input.session.sessionId,
+    from: "roleplay-alternative-generator",
+    body: input.prompt,
+    correlationId,
+    source: "chat",
+  });
+  if (wakeReport.status !== "completed") {
+    throw new Error(
+      `roleplay assistant alternative generation failed: ${wakeReport.summary}`,
+    );
+  }
+  const wakeEvents = listChatEventsAfterCursor(
+    state,
+    input.session,
+    beforeCursor,
+    500,
+  ).filter((event) => {
+    const payload = event.payload;
+    return (
+      isRecord(payload) &&
+      wakeReport.wakeId !== undefined &&
+      payload.wake_id === wakeReport.wakeId
+    );
+  });
+  const generatedBody =
+    assistantTextFromWakeEvents(wakeEvents) ??
+    wakeReport.completionPacket?.summary ??
+    wakeReport.summary;
+  return {
+    body: generatedBody,
+    wakeId: wakeReport.wakeId,
+    summary: wakeReport.summary,
+    metadataJson: {
+      correlation_id: correlationId,
+      generator: "service_wake",
+    },
+  };
+}
+
+function assistantTextFromWakeEvents(
+  events: readonly ChatEvent[],
+): string | undefined {
+  const text = events
+    .filter((event) => event.kind === "assistant_text_delta")
+    .map((event) =>
+      isRecord(event.payload) && typeof event.payload.text === "string"
+        ? event.payload.text
+        : "",
+    )
+    .join("")
+    .trim();
+  return text.length > 0 ? text : undefined;
 }
 
 async function rustyViewSessionContextUsage(
