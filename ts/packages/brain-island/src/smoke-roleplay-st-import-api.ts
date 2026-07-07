@@ -1,18 +1,12 @@
 import assert from "node:assert/strict";
-import {
-  readFileSync,
-  mkdtempSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
+import { buildStExampleImportPlan } from "./roleplay-st-example-fixture.js";
 
-const exampleDir = "/home/stash/st-example";
 const profileId = "st-import-profile";
 const importId = "dark-xavier-st-example";
 const sessionId = "dark-xavier-st-session";
@@ -36,7 +30,7 @@ const host = await startRustyCrewServiceHost({
 });
 
 try {
-  const plan = buildPlan();
+  const plan = buildStExampleImportPlan({ profileId, importId, sessionId });
   const imported = await post("/v1/admin/roleplay/imports/st-packet", plan);
   assert.equal(imported.status, 200, JSON.stringify(imported.body));
   assert.equal(imported.body.data.counts.characters, 1);
@@ -97,111 +91,6 @@ try {
 } finally {
   await host.stop();
   rmSync(root, { recursive: true, force: true });
-}
-
-function buildPlan(): Record<string, unknown> {
-  const manifest = readJson("manifest.json");
-  const card = readJson("Character Card - Crown Prince Xavier.json");
-  const cardData = (card.data ?? card) as Record<string, any>;
-  const persona = readJson("Persona - Kopis Valliren.json");
-  const lorebook = readJson("Lorebook - LaDS_Philos.json");
-  const rows = readFileSync(
-    join(exampleDir, "Transcript - Crown Prince Xavier.jsonl"),
-    "utf8",
-  )
-    .trim()
-    .split(/\n/)
-    .slice(1)
-    .map((line) => JSON.parse(line));
-  return {
-    profileId,
-    importId,
-    provenance: {
-      source: "st-example",
-      package: manifest.package,
-      generated: manifest.generated,
-      manifestSha256: manifest.files,
-    },
-    rawSource: {
-      manifest,
-      presetFile: "Preset - Ava's Special.json",
-      renderedPromptFile: "Rendered Prompt Export.txt",
-    },
-    character: {
-      id: "st-crown-prince-xavier",
-      name: cardData.name,
-      description: cardData.description,
-      personality: cardData.personality,
-      scenario: cardData.scenario,
-      firstMessage: cardData.first_mes,
-      alternateGreetings: cardData.alternate_greetings ?? [],
-      exampleMessages: [cardData.mes_example].filter(Boolean),
-      tags: cardData.tags ?? [],
-      rawMetadata: {
-        spec: card.spec,
-        spec_version: card.spec_version,
-        creator: cardData.creator,
-        extensions: cardData.extensions,
-      },
-    },
-    persona: {
-      id: "st-kopis-valliren",
-      displayName: persona.name,
-      description: persona.description,
-      notes: persona.comment,
-      rawMetadata: {
-        spec: persona.spec,
-        spec_version: persona.spec_version,
-      },
-    },
-    loreLayer: {
-      layerId: "st-lads-philos",
-      name: "LaDS_Philos",
-      description: "Imported SillyTavern lorebook from the ST example corpus.",
-      purpose: "mixed",
-      writePolicy: "manual",
-    },
-    loreEntries: Object.values(lorebook.entries).map((entry: any) => ({
-      recordId: `st-lore-${entry.uid ?? entry.id}`,
-      title: entry.comment || entry.name || `Lore ${entry.uid ?? entry.id}`,
-      body: entry.content,
-      worldId: profileId,
-      entityId: entry.comment || entry.name,
-      canonStatus: "draft",
-      visibility: "public",
-      primaryKeys: entry.key ?? entry.keys ?? [],
-      secondaryKeys: entry.keysecondary ?? entry.secondary_keys ?? [],
-      constant: entry.constant,
-      enabled: entry.disable === true ? false : entry.enabled !== false,
-      insertionOrder: entry.insertion_order ?? entry.order,
-      probability:
-        typeof entry.probability === "number" ? entry.probability / 100 : 1,
-      rawMetadata: entry,
-    })),
-    session: {
-      sessionId,
-      displayName: "Dark Xavier ST Example",
-    },
-    transcriptRows: rows.map((row: any, index: number) => ({
-      role: row.is_system ? "system" : row.is_user ? "user" : "assistant",
-      name: row.name,
-      send_date: row.send_date,
-      body: row.mes,
-      swipe_id: row.swipe_id,
-      swipes: Array.isArray(row.swipes) ? row.swipes : undefined,
-      swipe_info: row.swipe_info,
-      extra: row.extra,
-      metadata: {
-        source_index: index,
-        is_user: row.is_user,
-        is_system: row.is_system,
-      },
-    })),
-  };
-}
-
-function readJson(fileName: string): any {
-  return JSON.parse(readFileSync(join(exampleDir, fileName), "utf8"));
 }
 
 async function get(path: string) {

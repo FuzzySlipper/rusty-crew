@@ -46,6 +46,7 @@
     "smoke:roleplay-narrator-fsm-bridge": "tsx src/smoke-roleplay-narrator-fsm-bridge.ts",
     "smoke:roleplay-browser-api": "tsx src/smoke-roleplay-browser-api.ts",
     "smoke:roleplay-st-import-api": "tsx src/smoke-roleplay-st-import-api.ts",
+    "smoke:roleplay-behavior-eval": "tsx src/smoke-roleplay-behavior-eval.ts",
     "smoke:roleplay-quality-spike-live": "tsx src/smoke-roleplay-quality-spike-live.ts",
     "smoke:memory-space-api": "tsx src/smoke-memory-space-api.ts",
     "smoke:session-memory-prompt-context": "tsx src/smoke-session-memory-prompt-context.ts",
