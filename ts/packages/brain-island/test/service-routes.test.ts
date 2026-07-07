@@ -62,6 +62,8 @@ import {
   type ProfileRegistryRoutePlan,
   type ProfileRegistryWriteRouteContext,
 } from "../src/service-profile-registry-routes.js";
+import { handleBrowserProfileLoreLayersRequest } from "../src/roleplay/lore-routes.js";
+import { type RoleplayRouteContext } from "../src/service-roleplay-routes.js";
 import type { ChatEvent } from "../src/rusty-view-chat-api.js";
 import type {
   LocalToolProfile,
@@ -147,6 +149,77 @@ test("static site route helpers keep serving rules bounded", async () => {
   const adminFailure = methodFailure as AdminRouteResult;
   assert.equal(adminFailure.status, 405);
   assert.equal(errorReason(adminFailure), "static_method_not_allowed");
+});
+
+test("roleplay lore layer route delegates browser reads through the bridge boundary", async () => {
+  const calls: string[] = [];
+  const context = {
+    bridge: {
+      async listLoreLayers(profileId: string) {
+        calls.push(`layers:${profileId}`);
+        return [
+          {
+            layer_id: "world-details",
+            profile_id: profileId,
+            name: "World Details",
+          },
+          {
+            layer_id: "story-events",
+            profile_id: profileId,
+            name: "Story Events",
+          },
+        ];
+      },
+      async listEntriesByLayer(layerId: string) {
+        calls.push(`entries:${layerId}`);
+        if (layerId === "world-details") {
+          return [{ record_id: "fact-1" }, { record_id: "fact-2" }];
+        }
+        return [{ record_id: "event-1" }];
+      },
+    },
+    runtimeConfig: { profilesDir: "/tmp/profiles" },
+    now: () => "2026-07-07T00:00:00.000Z",
+    async applyServiceRuntimeConfigFromDisk() {
+      return {};
+    },
+    async serviceSessionById() {
+      throw new Error("serviceSessionById should not be used by lore layers");
+    },
+    listChatEventsAfterCursor() {
+      return [];
+    },
+  } as unknown as RoleplayRouteContext;
+
+  const result = await handleBrowserProfileLoreLayersRequest(
+    {
+      method: "GET",
+      headers: { "x-request-id": "req-roleplay-lore-layers" },
+    } as unknown as IncomingMessage,
+    context,
+    new URL("http://local/v1/profile/rp-runner/layers"),
+    "rp-runner",
+  );
+
+  assert.deepEqual(calls, [
+    "layers:rp-runner",
+    "entries:world-details",
+    "entries:story-events",
+  ]);
+  const data = okData<{
+    profileId: string;
+    total: number;
+    entryCounts: Record<string, number>;
+    layers: Array<Record<string, unknown>>;
+  }>(result);
+  assert.equal(data.profileId, "rp-runner");
+  assert.equal(data.total, 2);
+  assert.deepEqual(data.entryCounts, {
+    "story-events": 1,
+    "world-details": 2,
+  });
+  assert.equal(data.layers[0]?.entry_count, 2);
+  assert.equal(data.layers[0]?.entryCount, 2);
 });
 
 test("model provider admin routes list, project records, and report revision conflicts", async () => {

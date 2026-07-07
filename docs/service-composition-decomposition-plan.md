@@ -181,6 +181,15 @@ The 4335 authority split is:
   schemas, command output envelopes, debug-detail payloads, message
   slot/variant/branch schemas, and stream cursor/replay semantics.
 
+Task 4507 moved the roleplay lore browser/admin API into
+`roleplay/lore-routes.ts` and added
+`docs/roleplay-boundary-and-rust-migration-plan.md` as the roleplay-specific
+authority guide. This is a route-adapter extraction over Rust-owned persistence,
+not a decision to let roleplay domain behavior accrete in TypeScript. Future
+roleplay work should consult that boundary note and prefer Rust crates under
+`crates/roleplay/` for deterministic domain validation, prompt/context
+assembly, branch/variant invariants, and roleplay-specific storage semantics.
+
 ## Validation Pattern
 
 Every route-family extraction should add or extend a unit test in
