@@ -7,13 +7,13 @@
 
 use reqwest::blocking::Client as HttpClient;
 use rusty_crew_core_protocol::{
-    BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeStreamItem,
-    ModelProviderRecord, SessionId,
+    BrainActionBatch, BrainEvent, BrainEventEnvelope, BrainProviderStatusLevel, BrainWakeFailure,
+    BrainWakeStreamItem, CoreErrorKind, ModelProviderRecord, SessionId,
 };
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Read;
 use std::time::Duration;
 
@@ -571,6 +571,297 @@ pub enum ChatCompletionsEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiAgentToolOutput {
+    pub output: String,
+    pub is_error: bool,
+    pub cancelled: bool,
+    pub timed_out: bool,
+}
+
+impl PiAgentToolOutput {
+    pub fn ok(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            is_error: false,
+            cancelled: false,
+            timed_out: false,
+        }
+    }
+
+    pub fn error(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            is_error: true,
+            cancelled: false,
+            timed_out: false,
+        }
+    }
+
+    pub fn cancelled(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            is_error: true,
+            cancelled: true,
+            timed_out: false,
+        }
+    }
+
+    pub fn timed_out(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            is_error: true,
+            cancelled: false,
+            timed_out: true,
+        }
+    }
+}
+
+pub trait PiAgentNeutralToolExecutor {
+    fn execute(&self, call: &PendingChatFunctionCall) -> PiAgentToolOutput;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiAgentBrainLoopConfig {
+    pub max_tool_rounds: usize,
+    pub repeated_tool_call_limit: usize,
+}
+
+impl Default for PiAgentBrainLoopConfig {
+    fn default() -> Self {
+        Self {
+            max_tool_rounds: 8,
+            repeated_tool_call_limit: 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiAgentBrainLoopInput {
+    pub context: BrainEventContext,
+    pub messages: Vec<ChatCompletionMessage>,
+    pub final_message_fallback: Option<PiAgentFinalMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiAgentBrainLoopOutput {
+    pub stream: Vec<BrainWakeStreamItem>,
+    pub completed: bool,
+    pub provider_request_count: usize,
+    pub tool_round_count: usize,
+}
+
+pub struct PiAgentBrainLoop<C, T> {
+    client: C,
+    tools: T,
+    request_builder: ChatCompletionsRequestBuilder,
+    config: PiAgentBrainLoopConfig,
+}
+
+impl<C, T> PiAgentBrainLoop<C, T>
+where
+    C: ChatCompletionsClient,
+    T: PiAgentNeutralToolExecutor,
+{
+    pub fn new(
+        client: C,
+        tools: T,
+        chat_config: PiAgentChatConfig,
+        descriptors: Vec<NeutralBrainTool>,
+    ) -> Self {
+        Self {
+            client,
+            tools,
+            request_builder: ChatCompletionsRequestBuilder::new(chat_config).tools(descriptors),
+            config: PiAgentBrainLoopConfig::default(),
+        }
+    }
+
+    pub fn with_loop_config(mut self, config: PiAgentBrainLoopConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    pub fn wake_with_messages(
+        &mut self,
+        context: BrainEventContext,
+        messages: Vec<ChatCompletionMessage>,
+    ) -> PiAgentBrainLoopOutput {
+        self.wake(PiAgentBrainLoopInput {
+            context,
+            messages,
+            final_message_fallback: None,
+        })
+    }
+
+    pub fn wake(&mut self, input: PiAgentBrainLoopInput) -> PiAgentBrainLoopOutput {
+        let mut mapper = PiAgentEventMapper::new();
+        let mut stream = mapper.map_started(&input.context);
+        let mut messages = input.messages;
+        let mut repeated_calls: HashMap<(String, String), usize> = HashMap::new();
+        let mut provider_request_count = 0;
+        let mut tool_round_count = 0;
+
+        loop {
+            provider_request_count += 1;
+            let request = self.request_builder.build(messages.clone());
+            let mut assistant_text = String::new();
+            let mut tool_calls = Vec::new();
+            let result = self.client.stream_observed(request, &mut |event| {
+                if let ChatCompletionsEvent::ContentDelta(text) = event {
+                    assistant_text.push_str(text);
+                }
+                if let ChatCompletionsEvent::ToolCallFinished(call) = event {
+                    tool_calls.push(call.clone());
+                }
+                stream.extend(mapper.map_provider_event(&input.context, event));
+            });
+
+            if let Err(error) = result {
+                stream.push(wake_failed_item(
+                    &input.context,
+                    CoreErrorKind::BrainUnavailable,
+                    format!("pi-agent provider stream failed: {error}"),
+                ));
+                return PiAgentBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    provider_request_count,
+                    tool_round_count,
+                };
+            }
+
+            if tool_calls.is_empty() {
+                if assistant_text.trim().is_empty() {
+                    if let Some(fallback) = input.final_message_fallback {
+                        stream.extend(mapper.map_final_message(&input.context, fallback));
+                    }
+                }
+                stream.push(success_actions_item(&input.context));
+                return PiAgentBrainLoopOutput {
+                    stream,
+                    completed: true,
+                    provider_request_count,
+                    tool_round_count,
+                };
+            }
+
+            if tool_round_count >= self.config.max_tool_rounds {
+                stream.push(wake_failed_item(
+                    &input.context,
+                    CoreErrorKind::BrainUnavailable,
+                    format!(
+                        "pi-agent exceeded {} tool continuation rounds",
+                        self.config.max_tool_rounds
+                    ),
+                ));
+                return PiAgentBrainLoopOutput {
+                    stream,
+                    completed: false,
+                    provider_request_count,
+                    tool_round_count,
+                };
+            }
+            tool_round_count += 1;
+
+            messages.push(assistant_tool_call_message(&assistant_text, &tool_calls));
+            for call in tool_calls {
+                let repeated_key = (call.name.clone(), call.arguments_json.clone());
+                let count = repeated_calls.entry(repeated_key).or_insert(0);
+                *count += 1;
+                if *count > self.config.repeated_tool_call_limit {
+                    stream.push(wake_failed_item(
+                        &input.context,
+                        CoreErrorKind::BrainUnavailable,
+                        format!(
+                            "pi-agent repeated tool call {} with unchanged arguments more than {} times",
+                            call.name, self.config.repeated_tool_call_limit
+                        ),
+                    ));
+                    return PiAgentBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        provider_request_count,
+                        tool_round_count,
+                    };
+                }
+
+                stream.push(brain_event_item(
+                    &input.context,
+                    BrainEvent::ToolCallStarted {
+                        tool_name: call.name.clone(),
+                        metadata: None,
+                    },
+                ));
+                let output = self.tools.execute(&call);
+                stream.push(brain_event_item(
+                    &input.context,
+                    BrainEvent::ToolCallFinished {
+                        tool_name: call.name.clone(),
+                        is_error: output.is_error,
+                        metadata: None,
+                    },
+                ));
+                if output.cancelled || output.timed_out {
+                    let kind = if output.timed_out {
+                        CoreErrorKind::TimeoutExpired
+                    } else {
+                        CoreErrorKind::BrainUnavailable
+                    };
+                    stream.push(wake_failed_item(&input.context, kind, output.output));
+                    return PiAgentBrainLoopOutput {
+                        stream,
+                        completed: false,
+                        provider_request_count,
+                        tool_round_count,
+                    };
+                }
+                messages.push(ChatCompletionMessage::tool(
+                    call.id
+                        .clone()
+                        .unwrap_or_else(|| format!("call_{}", call.index)),
+                    output.output,
+                ));
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct FakeChatCompletionsClient {
+    scripts: VecDeque<Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError>>,
+    requests: Vec<ChatCompletionsRequest>,
+}
+
+impl FakeChatCompletionsClient {
+    pub fn new(
+        scripts: impl IntoIterator<Item = Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError>>,
+    ) -> Self {
+        Self {
+            scripts: scripts.into_iter().collect(),
+            requests: Vec::new(),
+        }
+    }
+
+    pub fn requests(&self) -> &[ChatCompletionsRequest] {
+        &self.requests
+    }
+}
+
+impl ChatCompletionsClient for FakeChatCompletionsClient {
+    fn stream(
+        &mut self,
+        request: ChatCompletionsRequest,
+    ) -> Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError> {
+        self.requests.push(request);
+        self.scripts.pop_front().unwrap_or_else(|| {
+            Err(ChatCompletionsStreamError::Transport(
+                "no fake script".into(),
+            ))
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrainEventContext {
     pub wake_id: String,
     pub session_id: SessionId,
@@ -850,6 +1141,53 @@ fn brain_event_item(context: &BrainEventContext, event: BrainEvent) -> BrainWake
         session_id: context.session_id.clone(),
         event,
     })
+}
+
+fn success_actions_item(context: &BrainEventContext) -> BrainWakeStreamItem {
+    BrainWakeStreamItem::actions(BrainActionBatch {
+        wake_id: context.wake_id.clone(),
+        session_id: context.session_id.clone(),
+        actions: Vec::new(),
+    })
+}
+
+fn wake_failed_item(
+    context: &BrainEventContext,
+    kind: CoreErrorKind,
+    message: impl Into<String>,
+) -> BrainWakeStreamItem {
+    BrainWakeStreamItem::wake_failed(BrainWakeFailure {
+        wake_id: context.wake_id.clone(),
+        session_id: context.session_id.clone(),
+        kind,
+        message: message.into(),
+    })
+}
+
+fn assistant_tool_call_message(
+    content: &str,
+    calls: &[PendingChatFunctionCall],
+) -> ChatCompletionMessage {
+    ChatCompletionMessage {
+        role: ChatMessageRole::Assistant,
+        content: (!content.is_empty()).then(|| content.to_string()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: calls
+            .iter()
+            .map(|call| ChatAssistantToolCall {
+                id: call
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| format!("call_{}", call.index)),
+                kind: "function".to_string(),
+                function: ChatFunctionCall {
+                    name: call.name.clone(),
+                    arguments: call.arguments_json.clone(),
+                },
+            })
+            .collect(),
+    }
 }
 
 fn non_empty_event(
@@ -1653,6 +1991,276 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn terminal_kind(items: &[BrainWakeStreamItem]) -> &'static str {
+        match items.last() {
+            Some(BrainWakeStreamItem::Actions { .. }) => "actions",
+            Some(BrainWakeStreamItem::WakeFailed { .. }) => "wake_failed",
+            _ => "none",
+        }
+    }
+
+    fn tool_call(name: &str, args: &str) -> PendingChatFunctionCall {
+        PendingChatFunctionCall {
+            index: 0,
+            id: Some("call_1".to_string()),
+            name: name.to_string(),
+            arguments_json: args.to_string(),
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct ScriptedToolExecutor {
+        outputs: std::sync::Mutex<VecDeque<PiAgentToolOutput>>,
+    }
+
+    impl ScriptedToolExecutor {
+        fn new(outputs: impl IntoIterator<Item = PiAgentToolOutput>) -> Self {
+            Self {
+                outputs: std::sync::Mutex::new(outputs.into_iter().collect()),
+            }
+        }
+    }
+
+    impl PiAgentNeutralToolExecutor for ScriptedToolExecutor {
+        fn execute(&self, _call: &PendingChatFunctionCall) -> PiAgentToolOutput {
+            self.outputs
+                .lock()
+                .expect("tool script mutex")
+                .pop_front()
+                .unwrap_or_else(|| PiAgentToolOutput::ok("default tool output"))
+        }
+    }
+
+    fn loop_with(
+        scripts: Vec<Result<Vec<ChatCompletionsEvent>, ChatCompletionsStreamError>>,
+        outputs: Vec<PiAgentToolOutput>,
+    ) -> PiAgentBrainLoop<FakeChatCompletionsClient, ScriptedToolExecutor> {
+        PiAgentBrainLoop::new(
+            FakeChatCompletionsClient::new(scripts),
+            ScriptedToolExecutor::new(outputs),
+            PiAgentChatConfig::new("deepseek-flash"),
+            vec![NeutralBrainTool {
+                name: "lookup".to_string(),
+                description: "Look up".to_string(),
+                input_schema: json!({"type": "object"}),
+            }],
+        )
+    }
+
+    #[test]
+    fn minimal_loop_completes_no_tool_turn_with_actions_terminal() {
+        let context = context();
+        let mut brain = loop_with(
+            vec![Ok(vec![
+                ChatCompletionsEvent::ContentDelta("hello".to_string()),
+                ChatCompletionsEvent::Finished {
+                    finish_reason: Some("stop".to_string()),
+                },
+            ])],
+            Vec::new(),
+        );
+
+        let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("hi")]);
+
+        assert!(output.completed);
+        assert_eq!(output.provider_request_count, 1);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+            text: "hello".to_string()
+        }));
+        assert!(events(&output.stream).contains(&BrainEvent::Finished));
+    }
+
+    #[test]
+    fn minimal_loop_executes_one_tool_round_and_continues_with_tool_output() {
+        let context = context();
+        let mut brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{\"q\":\"den\"}")),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("found it".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![PiAgentToolOutput::ok("tool says yes")],
+        );
+
+        let output =
+            brain.wake_with_messages(context, vec![ChatCompletionMessage::user("lookup den")]);
+
+        assert!(output.completed);
+        assert_eq!(output.provider_request_count, 2);
+        assert_eq!(output.tool_round_count, 1);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ToolCallStarted { tool_name, .. } if tool_name == "lookup"
+        )));
+        assert!(events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ToolCallFinished {
+                tool_name,
+                is_error: false,
+                ..
+            } if tool_name == "lookup"
+        )));
+    }
+
+    #[test]
+    fn minimal_loop_allows_tool_error_recovery() {
+        let context = context();
+        let mut brain = loop_with(
+            vec![
+                Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ]),
+                Ok(vec![
+                    ChatCompletionsEvent::ContentDelta("I recovered".to_string()),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("stop".to_string()),
+                    },
+                ]),
+            ],
+            vec![PiAgentToolOutput::error("not available")],
+        );
+
+        let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("go")]);
+
+        assert!(output.completed);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).iter().any(|event| matches!(
+            event,
+            BrainEvent::ToolCallFinished {
+                tool_name,
+                is_error: true,
+                ..
+            } if tool_name == "lookup"
+        )));
+        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+            text: "I recovered".to_string()
+        }));
+    }
+
+    #[test]
+    fn minimal_loop_rejects_repeated_identical_tool_calls() {
+        let context = context();
+        let repeated = Ok(vec![
+            ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
+            ChatCompletionsEvent::Finished {
+                finish_reason: Some("tool_calls".to_string()),
+            },
+        ]);
+        let mut brain = loop_with(
+            vec![
+                repeated.clone(),
+                repeated.clone(),
+                repeated.clone(),
+                repeated,
+            ],
+            vec![
+                PiAgentToolOutput::ok("one"),
+                PiAgentToolOutput::ok("two"),
+                PiAgentToolOutput::ok("three"),
+                PiAgentToolOutput::ok("four"),
+            ],
+        );
+
+        let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("loop")]);
+
+        assert!(!output.completed);
+        assert_eq!(terminal_kind(&output.stream), "wake_failed");
+        assert!(matches!(
+            output.stream.last(),
+            Some(BrainWakeStreamItem::WakeFailed { failure })
+                if failure.message.contains("repeated tool call lookup")
+        ));
+    }
+
+    #[test]
+    fn minimal_loop_fails_visibly_on_tool_cancellation_or_timeout() {
+        for tool_output in [
+            PiAgentToolOutput::cancelled("cancelled by operator"),
+            PiAgentToolOutput::timed_out("tool timed out"),
+        ] {
+            let context = context();
+            let mut brain = loop_with(
+                vec![Ok(vec![
+                    ChatCompletionsEvent::ToolCallFinished(tool_call("lookup", "{}")),
+                    ChatCompletionsEvent::Finished {
+                        finish_reason: Some("tool_calls".to_string()),
+                    },
+                ])],
+                vec![tool_output.clone()],
+            );
+
+            let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("go")]);
+            assert!(!output.completed);
+            assert_eq!(terminal_kind(&output.stream), "wake_failed");
+            assert!(matches!(
+                output.stream.last(),
+                Some(BrainWakeStreamItem::WakeFailed { failure })
+                    if failure.message == tool_output.output
+            ));
+        }
+    }
+
+    #[test]
+    fn minimal_loop_fails_visibly_on_provider_error() {
+        let context = context();
+        let mut brain = loop_with(
+            vec![Err(ChatCompletionsStreamError::Transport(
+                "upstream closed".to_string(),
+            ))],
+            Vec::new(),
+        );
+
+        let output = brain.wake_with_messages(context, vec![ChatCompletionMessage::user("hi")]);
+
+        assert!(!output.completed);
+        assert_eq!(terminal_kind(&output.stream), "wake_failed");
+        assert!(matches!(
+            output.stream.last(),
+            Some(BrainWakeStreamItem::WakeFailed { failure })
+                if failure.message.contains("upstream closed")
+        ));
+    }
+
+    #[test]
+    fn minimal_loop_uses_final_message_fallback_when_stream_has_no_visible_text() {
+        let context = context();
+        let mut brain = loop_with(
+            vec![Ok(vec![ChatCompletionsEvent::Finished {
+                finish_reason: Some("stop".to_string()),
+            }])],
+            Vec::new(),
+        );
+
+        let output = brain.wake(PiAgentBrainLoopInput {
+            context,
+            messages: vec![ChatCompletionMessage::user("hi")],
+            final_message_fallback: Some(PiAgentFinalMessage {
+                text: Some("final-only".to_string()),
+                ..PiAgentFinalMessage::default()
+            }),
+        });
+
+        assert!(output.completed);
+        assert_eq!(terminal_kind(&output.stream), "actions");
+        assert!(events(&output.stream).contains(&BrainEvent::TextDelta {
+            text: "final-only".to_string()
+        }));
     }
 
     #[test]
