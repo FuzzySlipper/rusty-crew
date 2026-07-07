@@ -1,0 +1,558 @@
+{
+  "schemaVersion": 1,
+  "source": "rusty-view-chat-api",
+  "scenario": "roleplay-turn-readback",
+  "capturedAt": "2026-07-07T13:05:00Z",
+  "redaction": "Captured from the debug Rusty Crew service after a Rusty View roleplay narrator turn. Headers, auth material, full prompts, provider request bodies, raw reasoning text, and long assistant prose are excluded or shortened. Stable ids and timestamps are representative shape values.",
+  "interactions": [
+    {
+      "name": "sessions-page",
+      "request": {
+        "method": "GET",
+        "path": "/v1/chat/sessions"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "data": {
+            "items": [
+              {
+                "session_id": "narrator-fsm-cert-rp-session",
+                "agent_id": "narrator-fsm-cert-rp",
+                "profile_id": "narrator-fsm-cert-rp",
+                "kind": "full",
+                "status": "idle",
+                "latest_cursor": "narrator-fsm-cert-rp-session:389",
+                "created_at": "2026-07-07T12:55:10.391683661Z",
+                "updated_at": "2026-07-07T12:55:10.391683661Z",
+                "message_count": 2,
+                "tool_event_count": 9,
+                "effective_defaults": {
+                  "resourceLimits": {
+                    "workdir": "/home",
+                    "maxDurationMs": null,
+                    "maxDelegationDepth": null
+                  }
+                }
+              }
+            ],
+            "total": 1,
+            "limit": 100,
+            "offset": 0
+          },
+          "meta": {
+            "request_id": "req_redacted",
+            "schema_version": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "session-open",
+      "request": {
+        "method": "GET",
+        "path": "/v1/chat/sessions/narrator-fsm-cert-rp-session"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "data": {
+            "session": {
+              "session_id": "narrator-fsm-cert-rp-session",
+              "agent_id": "narrator-fsm-cert-rp",
+              "profile_id": "narrator-fsm-cert-rp",
+              "kind": "full",
+              "status": "idle",
+              "latest_cursor": "narrator-fsm-cert-rp-session:389",
+              "created_at": "2026-07-07T12:55:10.391683661Z",
+              "updated_at": "2026-07-07T12:55:10.391683661Z",
+              "message_count": 2,
+              "tool_event_count": 9
+            },
+            "events": [
+              {
+                "event_id": "narrator-fsm-cert-rp-session:0",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 0,
+                "created_at": "2026-07-07T12:57:06.500Z",
+                "kind": "session_snapshot",
+                "payload": {
+                  "session": {
+                    "session_id": "narrator-fsm-cert-rp-session",
+                    "status": "idle",
+                    "latest_cursor": "narrator-fsm-cert-rp-session:389"
+                  }
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:386",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 386,
+                "created_at": "2026-07-07T12:57:36.100Z",
+                "kind": "assistant_turn_finished",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted"
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:387",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 387,
+                "created_at": "2026-07-07T12:57:36.120Z",
+                "kind": "phase_change",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "phase": "idle",
+                  "message": "Narrator turn complete."
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:388",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 388,
+                "created_at": "2026-07-07T12:57:36.120Z",
+                "kind": "assistant_message_completed",
+                "payload": {
+                  "status": "completed",
+                  "summary": "LLM wake completed.",
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted"
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:389",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 389,
+                "created_at": "2026-07-07T12:57:36.121Z",
+                "kind": "unknown",
+                "payload": {
+                  "source_event_type": "brain_actions_accepted",
+                  "accepted_action_count": 1
+                }
+              }
+            ],
+            "message_slots": [
+              {
+                "slot_id": "slot:chat:narrator-fsm-cert-rp-session:req_redacted",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "primary_variant_id": "variant:slot:chat:narrator-fsm-cert-rp-session:req_redacted",
+                "active_variant_id": null,
+                "metadata_json": {
+                  "source": "rusty_view_chat",
+                  "correlation_id": "chat:narrator-fsm-cert-rp-session:req_redacted",
+                  "speaker_identity": {
+                    "speaker_kind": "fallback_player",
+                    "role": "user",
+                    "source_id": "debug-user",
+                    "display_name": "Player",
+                    "snapshot_at": "2026-07-07T12:57:06.508Z"
+                  }
+                },
+                "created_at": "2026-07-07T12:57:06.508Z",
+                "updated_at": "2026-07-07T12:57:06.508Z",
+                "version": 0,
+                "primary": {
+                  "variant_id": "variant:slot:chat:narrator-fsm-cert-rp-session:req_redacted",
+                  "slot_id": "slot:chat:narrator-fsm-cert-rp-session:req_redacted",
+                  "source": "primary",
+                  "ordinal": 0,
+                  "status": "active",
+                  "message": {
+                    "message_id": "chat:narrator-fsm-cert-rp-session:req_redacted",
+                    "session_id": "narrator-fsm-cert-rp-session",
+                    "branch_id": "branch:narrator-fsm-cert-rp-session:default",
+                    "parent_message_id": null,
+                    "previous_message_id": null,
+                    "author_id": "debug-user",
+                    "author_role": "user",
+                    "status": "completed",
+                    "body": "Redacted user roleplay prompt.",
+                    "metadata_json": {
+                      "source": "rusty_view_chat",
+                      "correlation_id": "chat:narrator-fsm-cert-rp-session:req_redacted"
+                    },
+                    "created_at": "2026-07-07T12:57:06.508Z",
+                    "blocks": [
+                      {
+                        "block_id": "chat:narrator-fsm-cert-rp-session:req_redacted:block:1",
+                        "message_id": "chat:narrator-fsm-cert-rp-session:req_redacted",
+                        "ordinal": 0,
+                        "kind": "text",
+                        "content_json": {
+                          "text": "Redacted user roleplay prompt."
+                        },
+                        "render_policy_json": null,
+                        "metadata_json": {}
+                      }
+                    ]
+                  },
+                  "metadata_json": {
+                    "source": "rusty_view_chat",
+                    "correlation_id": "chat:narrator-fsm-cert-rp-session:req_redacted"
+                  },
+                  "created_at": "2026-07-07T12:57:06.508Z",
+                  "updated_at": "2026-07-07T12:57:06.508Z"
+                },
+                "alternates": []
+              }
+            ],
+            "latest_cursor": "narrator-fsm-cert-rp-session:389",
+            "has_more_before": true
+          },
+          "meta": {
+            "request_id": "req_redacted",
+            "schema_version": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "events-page",
+      "request": {
+        "method": "GET",
+        "path": "/v1/chat/sessions/narrator-fsm-cert-rp-session/events?cursor=narrator-fsm-cert-rp-session:0&limit=20"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "data": {
+            "items": [
+              {
+                "event_id": "narrator-fsm-cert-rp-session:1",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 1,
+                "created_at": "2026-07-07T12:57:06.510Z",
+                "kind": "message_created",
+                "payload": {
+                  "message_id": "chat:narrator-fsm-cert-rp-session:req_redacted",
+                  "slot_id": "slot:chat:narrator-fsm-cert-rp-session:req_redacted",
+                  "primary_variant_id": "variant:slot:chat:narrator-fsm-cert-rp-session:req_redacted",
+                  "branch_id": "branch:narrator-fsm-cert-rp-session:default",
+                  "parent_message_id": null,
+                  "previous_message_id": null,
+                  "role": "user",
+                  "actor": {
+                    "id": "debug-user",
+                    "kind": "human"
+                  },
+                  "body": "Redacted user roleplay prompt.",
+                  "speaker_identity": {
+                    "speaker_kind": "fallback_player",
+                    "role": "user",
+                    "source_id": "debug-user",
+                    "display_name": "Player",
+                    "snapshot_at": "2026-07-07T12:57:06.508Z"
+                  },
+                  "correlation_id": "chat:narrator-fsm-cert-rp-session:req_redacted"
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:2",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 2,
+                "created_at": "2026-07-07T12:57:06.548Z",
+                "kind": "phase_change",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "phase": "exploring",
+                  "message": "Gathering lore and scene context."
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:3",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 3,
+                "created_at": "2026-07-07T12:57:06.548Z",
+                "kind": "tool_call_started",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "tool_call_id": "service-narrator-fsm-cert-rp-session-redacted:local:get_scene_state",
+                  "tool_name": "get_scene_state",
+                  "metadata": {
+                    "source": "local",
+                    "serverNames": ["roleplay_narrator"],
+                    "sourceToolName": "get_scene_state"
+                  }
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:4",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 4,
+                "created_at": "2026-07-07T12:57:06.548Z",
+                "kind": "tool_call_completed",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "tool_call_id": "service-narrator-fsm-cert-rp-session-redacted:local:get_scene_state",
+                  "tool_name": "get_scene_state",
+                  "is_error": false,
+                  "metadata": {
+                    "source": "local",
+                    "serverNames": ["roleplay_narrator"],
+                    "sourceToolName": "get_scene_state"
+                  }
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:5",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 5,
+                "created_at": "2026-07-07T12:57:06.548Z",
+                "kind": "tool_call_started",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "tool_call_id": "service-narrator-fsm-cert-rp-session-redacted:local:recall_lore",
+                  "tool_name": "recall_lore",
+                  "metadata": {
+                    "source": "local",
+                    "serverNames": ["roleplay_narrator"],
+                    "sourceToolName": "recall_lore"
+                  }
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:6",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 6,
+                "created_at": "2026-07-07T12:57:06.548Z",
+                "kind": "tool_call_completed",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "tool_call_id": "service-narrator-fsm-cert-rp-session-redacted:local:recall_lore",
+                  "tool_name": "recall_lore",
+                  "is_error": false,
+                  "metadata": {
+                    "source": "local",
+                    "serverNames": ["roleplay_narrator"],
+                    "sourceToolName": "recall_lore"
+                  }
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:9",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 9,
+                "created_at": "2026-07-07T12:57:14.016Z",
+                "kind": "phase_change",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "phase": "composing",
+                  "message": "Writing final narrative response."
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:10",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 10,
+                "created_at": "2026-07-07T12:57:14.016Z",
+                "kind": "provider_status",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "level": "info",
+                  "message": "Provider request debug snapshot captured.",
+                  "metadata_json": "{\"provider_request_debug_detail_id\":\"providerdbg_redacted\",\"provider_request_debug_url\":\"/v1/chat/sessions/narrator-fsm-cert-rp-session/provider-requests/providerdbg_redacted\",\"request_sha256\":\"sha256_redacted\",\"request_json_chars\":3306,\"expires_at\":\"2026-07-07T13:57:14.015Z\"}"
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:11",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 11,
+                "created_at": "2026-07-07T12:57:24.690Z",
+                "kind": "assistant_turn_started",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted"
+                }
+              },
+              {
+                "event_id": "narrator-fsm-cert-rp-session:12",
+                "session_id": "narrator-fsm-cert-rp-session",
+                "sequence_id": 12,
+                "created_at": "2026-07-07T12:57:24.690Z",
+                "kind": "assistant_reasoning_delta",
+                "payload": {
+                  "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+                  "text": "Redacted reasoning delta.",
+                  "visibility": "reasoning",
+                  "format": "chat-completions:reasoning_content"
+                }
+              }
+            ],
+            "latest_cursor": "narrator-fsm-cert-rp-session:20",
+            "has_more": true
+          },
+          "meta": {
+            "request_id": "req_redacted",
+            "schema_version": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "session-context",
+      "request": {
+        "method": "GET",
+        "path": "/v1/chat/sessions/narrator-fsm-cert-rp-session/context"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "data": {
+            "session_id": "narrator-fsm-cert-rp-session",
+            "agent_id": "narrator-fsm-cert-rp",
+            "profile_id": "narrator-fsm-cert-rp",
+            "provider": {
+              "alias": "deepseek-flash",
+              "status": "active",
+              "protocol": "chat_completions",
+              "provider_kind": "custom",
+              "display_name": "deepseek-flash",
+              "base_url_host": "127.0.0.1:18082",
+              "base_url_redacted": "http://127.0.0.1:18082",
+              "model_id": "deepseek-flash",
+              "context_window_tokens": 1000000,
+              "max_output_tokens": 8096,
+              "temperature": 0.5,
+              "reasoning_effort": "high",
+              "reasoning_format": "deepseek",
+              "revision": 1
+            },
+            "brain": {
+              "module": "pi-agent-core",
+              "strategy": "roleplay_narrator",
+              "backend": "pi-agent-core"
+            },
+            "context_strategy": {
+              "strategy_id": "recent_window",
+              "enabled": true,
+              "auto_compaction_enabled": false,
+              "compact_at_percent": 80,
+              "target_percent_after_compaction": 55,
+              "max_context_percent_for_wake": 95,
+              "debug_visibility": "status",
+              "include_debug_events_in_model_context": false
+            },
+            "tools": {
+              "local_tool_profile_id": "roleplay_lore",
+              "tool_count": 9,
+              "requested_toolsets": [
+                "roleplay_lore_manage",
+                "roleplay_lore_read",
+                "roleplay_lore_write",
+                "roleplay_scene_state"
+              ],
+              "requested_tools": [],
+              "mcp_binding_count": 0,
+              "mcp_active_count": 0
+            },
+            "context": {
+              "estimate_quality": "approximate",
+              "estimate_method": "approximate_chars_div4_and_words_4over3_from_chat_events",
+              "estimator_id": "fallback_chars_words_v1",
+              "context_window_tokens": 1000000,
+              "estimated_prompt_tokens": 1169,
+              "estimated_remaining_tokens": 998831,
+              "system_tokens": 247,
+              "lore_tokens": 61,
+              "history_tokens": 861,
+              "max_output_tokens": 8096,
+              "reserved_response_tokens": 8096,
+              "safety_margin_tokens": 20000,
+              "usable_input_tokens": 971904,
+              "sampled_event_count": 389,
+              "sampled_message_count": 2
+            },
+            "degraded": false,
+            "diagnostics": []
+          },
+          "meta": {
+            "request_id": "req_redacted",
+            "schema_version": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "tool-call-debug-detail",
+      "request": {
+        "method": "GET",
+        "path": "/v1/chat/sessions/narrator-fsm-cert-rp-session/tool-calls/tooldbg_redacted"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "data": {
+            "debug_detail_id": "tooldbg_redacted",
+            "tool_call_id": "call_redacted",
+            "session_id": "narrator-fsm-cert-rp-session",
+            "wake_id": "service-narrator-fsm-cert-rp-session-redacted",
+            "tool_name": "get_scene_state",
+            "status": "completed",
+            "arguments": {
+              "value": {
+                "rawArguments": {
+                  "sessionId": "default"
+                },
+                "preparedArguments": {
+                  "sessionId": "default"
+                }
+              },
+              "truncated": false,
+              "redacted": false,
+              "originalJsonChars": 84
+            },
+            "partial_updates": [],
+            "final_result": {
+              "value": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "{ \"ok\": true, \"operation\": \"get_scene_state\", \"action\": \"read\" }"
+                  }
+                ],
+                "details": {
+                  "ok": true,
+                  "operation": "get_scene_state",
+                  "action": "read",
+                  "state": {
+                    "sessionId": "default",
+                    "charactersPresent": [],
+                    "activeThreads": []
+                  }
+                }
+              },
+              "truncated": false,
+              "redacted": false,
+              "originalJsonChars": 379
+            },
+            "source_metadata": {
+              "source": "local",
+              "serverNames": [],
+              "sourceToolName": "get_scene_state",
+              "catalogRevision": "brain-tool-adapter",
+              "policy": {
+                "allowed": true
+              }
+            },
+            "started_at": "2026-07-07T12:57:15.881Z",
+            "updated_at": "2026-07-07T12:57:15.882Z",
+            "expires_at": "2026-07-07T13:57:15.881Z",
+            "limits": {
+              "maxJsonChars": 24000,
+              "maxPartialUpdates": 8,
+              "retentionMs": 3600000,
+              "maxRecords": 1000
+            }
+          },
+          "meta": {
+            "request_id": "req_redacted",
+            "schema_version": 1
+          }
+        }
+      }
+    }
+  ]
+}

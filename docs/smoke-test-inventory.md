@@ -145,6 +145,14 @@ Good cassette candidates:
 - Rusty View API readback shapes that do not require rendered browser proof;
 - adapter webhook payloads with identifying text normalized.
 
+Current external cassette families:
+
+- `den-successor-gateway/conversation-readback` validates Den successor Gateway
+  health/runtime/delivery/conversation readback shapes.
+- `rusty-view-chat-api/roleplay-turn-readback` validates Rusty View chat API
+  session/context/event/tool-debug readback shapes captured from the debug
+  service after a real roleplay narrator turn.
+
 Do not use cassettes as a replacement for live certification when behavior is
 rendered, streamed, stateful, or model-visible. A substantial chat/runtime
 change still needs the live evidence packet from

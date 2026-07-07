@@ -67,6 +67,7 @@
     "smoke:rusty-view-chat-authority-boundary": "tsx src/smoke-rusty-view-chat-authority-boundary.ts",
     "smoke:model-provider-admin-contract": "tsx src/smoke-model-provider-admin-contract.ts",
     "smoke:rusty-view-chat-context": "tsx src/smoke-rusty-view-chat-context.ts",
+    "smoke:chat-api-cassettes": "tsx smokes/chat-api-cassettes.ts",
     "smoke:provider-request-debug-cache": "tsx src/smoke-provider-request-debug-cache.ts",
     "smoke:todo-tool": "tsx src/smoke-todo-tool.ts",
     "smoke:counter-reset-tool": "tsx src/smoke-counter-reset-tool.ts",

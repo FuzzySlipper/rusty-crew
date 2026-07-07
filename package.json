@@ -135,7 +135,7 @@
     "smoke:den-product-ingress": "npm run smoke:product-ingress -w @rusty-crew/adapter-den",
     "smoke:den-memory-client": "npm run smoke:memory-client -w @rusty-crew/adapter-den",
     "smoke:den-successor-gateway": "npm run smoke:successor-gateway -w @rusty-crew/adapter-den",
-    "smoke:external-cassettes": "npm run smoke:successor-gateway-cassettes -w @rusty-crew/adapter-den",
+    "smoke:external-cassettes": "npm run smoke:successor-gateway-cassettes -w @rusty-crew/adapter-den && npm run smoke:chat-api-cassettes -w @rusty-crew/brain-island",
     "smoke:channel-readback-tool": "npm run smoke:channel-readback-tool -w @rusty-crew/brain-island",
     "smoke:channel-wake-policy": "npm run smoke:channel-wake-policy -w @rusty-crew/brain-island",
     "smoke:wake-timeout": "npm run smoke:wake-timeout -w @rusty-crew/brain-island",

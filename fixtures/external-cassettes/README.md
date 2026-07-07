@@ -16,6 +16,8 @@ Use one directory per external system:
 fixtures/external-cassettes/
   den-successor-gateway/
     <scenario>.redacted.json
+  rusty-view-chat-api/
+    <scenario>.redacted.json
 ```
 
 Each cassette should include:
@@ -41,6 +43,29 @@ representative value and mention that in `redaction`.
 4. Run the cassette smoke for the owning package.
 5. If the behavior is user-visible, still attach live Rusty View certification
    evidence to the Den task.
+
+## Current Cassette Families
+
+- `den-successor-gateway/conversation-readback`: Den Gateway health, runtime,
+  delivery, and conversation readback shapes. This protects the successor
+  adapter anti-corruption layer without requiring Den to be reachable in CI.
+- `rusty-view-chat-api/roleplay-turn-readback`: browser-facing chat/session
+  readback shapes captured from the debug service after a real roleplay narrator
+  turn. This protects Rusty View API envelopes, event pagination, phase/tool
+  event shapes, context diagnostics, and tool debug detail readback. It does not
+  prove rendered browser behavior.
+
+## Validation
+
+Run all committed external cassette checks with:
+
+```sh
+npm run smoke:external-cassettes
+```
+
+`verify:offline` runs the same alias. The root alias intentionally fans out to
+package-local `*cassette*` smokes rather than growing bespoke root commands for
+each fixture family.
 
 Offline cassettes may run in `verify:offline` when they do not need a native
 build, service startup, Den, local Postgres, Rusty View, Telegram, or a real
