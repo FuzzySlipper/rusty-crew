@@ -47,8 +47,18 @@ export interface RoleplayNarratorTurnState {
   reviewEnabled: boolean;
   maxReviewCycles: number;
   reviewCycle: number;
+  relevantLore: RoleplayNarratorPromptSourceText[];
   sceneBrief?: string;
   reviewFeedback?: string;
+}
+
+export interface RoleplayNarratorPromptSourceText {
+  source_kind: string;
+  source_id: string;
+  title: string;
+  body: string;
+  editable: boolean;
+  derived: boolean;
 }
 
 export interface RoleplayNarratorPhasePlan {

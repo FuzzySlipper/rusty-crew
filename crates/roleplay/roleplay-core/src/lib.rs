@@ -407,6 +407,8 @@ pub struct RoleplayNarratorTurnState {
     pub review_enabled: bool,
     pub max_review_cycles: u32,
     pub review_cycle: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relevant_lore: Vec<RoleplayPromptStackSourceText>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene_brief: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1325,6 +1327,7 @@ pub fn start_narrator_turn(input: RoleplayNarratorStartInput) -> RoleplayNarrato
         review_enabled,
         max_review_cycles,
         review_cycle: 0,
+        relevant_lore: narrator_relevant_lore_from_observations(&input.prelude_observations),
         scene_brief: None,
         review_feedback: None,
     };
@@ -1352,6 +1355,7 @@ pub fn next_narrator_phase(
             instructions: narrator_review_instructions(
                 state.scene_brief.as_deref().unwrap_or("{}"),
                 &input.output_text,
+                &state.relevant_lore,
             ),
             allowed_tools: narrator_compose_tools(),
             mandatory_tool_requests: Vec::new(),
@@ -1413,6 +1417,7 @@ fn narrator_compose_draft_plan(state: RoleplayNarratorTurnState) -> RoleplayNarr
             state.scene_brief.as_deref().unwrap_or("{}"),
             state.review_feedback.as_deref(),
             state.narrator_config.as_ref(),
+            &state.relevant_lore,
         ),
         allowed_tools: narrator_compose_tools(),
         mandatory_tool_requests: Vec::new(),
@@ -1428,6 +1433,7 @@ fn narrator_compose_plan(state: RoleplayNarratorTurnState) -> RoleplayNarratorPh
             state.scene_brief.as_deref().unwrap_or("{}"),
             state.review_feedback.as_deref(),
             state.narrator_config.as_ref(),
+            &state.relevant_lore,
         ),
         allowed_tools: narrator_compose_tools(),
         mandatory_tool_requests: Vec::new(),
@@ -1482,8 +1488,15 @@ fn narrator_compose_instructions(
     scene_brief: &str,
     review_feedback: Option<&str>,
     narrator_config: Option<&RoleplayNarratorConfig>,
+    relevant_lore: &[RoleplayPromptStackSourceText],
 ) -> String {
     let mut lines = vec![narrator_compose_system_instructions(narrator_config)];
+    let lore_context = narrator_compact_lore_context(relevant_lore);
+    if !lore_context.is_empty() {
+        lines.push(String::new());
+        lines.push("Relevant lore gathered during explore:".to_string());
+        lines.push(lore_context);
+    }
     if let Some(feedback) = review_feedback.filter(|feedback| !feedback.trim().is_empty()) {
         lines.push(
             "Apply the internal review feedback below while keeping the output clean.".to_string(),
@@ -1552,17 +1565,25 @@ fn narrator_style_instructions(narrator_config: Option<&RoleplayNarratorConfig>)
     lines
 }
 
-fn narrator_review_instructions(scene_brief: &str, draft: &str) -> String {
-    [
+fn narrator_review_instructions(
+    scene_brief: &str,
+    draft: &str,
+    relevant_lore: &[RoleplayPromptStackSourceText],
+) -> String {
+    let mut lines = vec![
         narrator_review_system_instructions(),
         String::new(),
         "Scene brief:".to_string(),
         scene_brief.to_string(),
-        String::new(),
-        "Draft:".to_string(),
-        draft.to_string(),
-    ]
-    .join("\n")
+    ];
+    let lore_context = narrator_compact_lore_context(relevant_lore);
+    if !lore_context.is_empty() {
+        lines.push(String::new());
+        lines.push("Relevant lore gathered during explore:".to_string());
+        lines.push(lore_context);
+    }
+    lines.extend([String::new(), "Draft:".to_string(), draft.to_string()]);
+    lines.join("\n")
 }
 
 fn narrator_review_system_instructions() -> String {
@@ -1574,6 +1595,124 @@ fn narrator_review_system_instructions() -> String {
         "If the draft is acceptable, respond with all clear.",
     ]
     .join("\n")
+}
+
+fn narrator_relevant_lore_from_observations(
+    observations: &[RoleplayNarratorToolObservation],
+) -> Vec<RoleplayPromptStackSourceText> {
+    let mut seen_record_ids = BTreeSet::new();
+    let mut lore = Vec::new();
+    for observation in observations
+        .iter()
+        .filter(|observation| observation.ok && observation.details_json.is_some())
+    {
+        let Some(details) = observation
+            .details_json
+            .as_ref()
+            .and_then(JsonValue::as_object)
+        else {
+            continue;
+        };
+        let Some(result) = details.get("result").and_then(JsonValue::as_object) else {
+            continue;
+        };
+        match observation.tool_name.as_str() {
+            "recall_lore" => {
+                if let Some(entries) = result.get("entries").and_then(JsonValue::as_array) {
+                    for entry in entries {
+                        let Some(entry_object) = entry.as_object() else {
+                            continue;
+                        };
+                        if let Some(record) =
+                            entry_object.get("record").and_then(JsonValue::as_object)
+                        {
+                            narrator_push_lore_context(
+                                &mut lore,
+                                &mut seen_record_ids,
+                                "roleplay_lore_recall",
+                                record,
+                            );
+                        }
+                    }
+                }
+            }
+            "search_lore" => {
+                if let Some(records) = result.get("records").and_then(JsonValue::as_array) {
+                    for record in records.iter().filter_map(JsonValue::as_object) {
+                        narrator_push_lore_context(
+                            &mut lore,
+                            &mut seen_record_ids,
+                            "roleplay_lore_search",
+                            record,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+        if lore.len() >= 8 {
+            break;
+        }
+    }
+    lore.truncate(8);
+    lore
+}
+
+fn narrator_push_lore_context(
+    lore: &mut Vec<RoleplayPromptStackSourceText>,
+    seen_record_ids: &mut BTreeSet<String>,
+    source_kind: &str,
+    record: &serde_json::Map<String, JsonValue>,
+) {
+    let Some(record_id) = first_string(record, &["record_id", "recordId", "id"]) else {
+        return;
+    };
+    if !seen_record_ids.insert(record_id.clone()) {
+        return;
+    }
+    let title = first_string(record, &["title"]).unwrap_or_else(|| record_id.clone());
+    let body = first_string(record, &["body"])
+        .or_else(|| {
+            record
+                .get("content")
+                .and_then(JsonValue::as_object)
+                .and_then(|content| first_string(content, &["body", "text", "summary"]))
+        })
+        .unwrap_or_default();
+    if body.trim().is_empty() && title == record_id {
+        return;
+    }
+    lore.push(RoleplayPromptStackSourceText {
+        source_kind: source_kind.to_string(),
+        source_id: record_id,
+        title: narrator_compact_text(&title, 160),
+        body: narrator_compact_text(&body, 900),
+        editable: true,
+        derived: false,
+    });
+}
+
+fn narrator_compact_lore_context(lore: &[RoleplayPromptStackSourceText]) -> String {
+    lore.iter()
+        .map(|entry| {
+            [
+                format!("- {} ({})", entry.title, entry.source_id),
+                format!("  source: {}", entry.source_kind),
+                format!("  {}", entry.body),
+            ]
+            .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn narrator_compact_text(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    let mut compact = trimmed.chars().take(max_chars).collect::<String>();
+    if trimmed.chars().count() > max_chars {
+        compact.push_str("...");
+    }
+    compact
 }
 
 fn narrator_format_mandatory_explore_prelude(
@@ -2754,17 +2893,64 @@ mod tests {
             narrator_config: None,
             review_enabled: false,
             max_review_cycles: None,
-            prelude_observations: vec![RoleplayNarratorToolObservation {
-                tool_name: "recall_lore".to_string(),
-                ok: true,
-                summary: "Relevant lore found.".to_string(),
-                details_json: None,
-            }],
+            prelude_observations: vec![
+                RoleplayNarratorToolObservation {
+                    tool_name: "recall_lore".to_string(),
+                    ok: true,
+                    summary: "Relevant lore found.".to_string(),
+                    details_json: Some(serde_json::json!({
+                        "ok": true,
+                        "operation": "recall_lore",
+                        "action": "read",
+                        "result": {
+                            "entries": [{
+                                "record": {
+                                    "record_id": "moonlit-garden",
+                                    "title": "Moonlit Garden",
+                                    "body": "Night-blooming orchids glow beside the missing locket's path."
+                                },
+                                "score": 0.92,
+                                "token_estimate": 18
+                            }],
+                            "entries_considered": 1,
+                            "tokens_consumed": 18
+                        }
+                    })),
+                },
+                RoleplayNarratorToolObservation {
+                    tool_name: "search_lore".to_string(),
+                    ok: true,
+                    summary: "Agentic search found a scene-specific entry.".to_string(),
+                    details_json: Some(serde_json::json!({
+                        "ok": true,
+                        "operation": "search_lore",
+                        "action": "read",
+                        "result": {
+                            "records": [{
+                                "record_id": "silver-locket",
+                                "title": "Silver Locket",
+                                "body": "The serpent-and-rose crest belongs to the old city wardens."
+                            }]
+                        }
+                    })),
+                },
+            ],
         });
 
         assert_eq!(plan.phase, RoleplayNarratorPhaseKind::Explore);
         assert!(plan.instructions.contains("Mandatory explore tool results"));
         assert!(plan.allowed_tools.contains(&"recall_lore".to_string()));
+        assert_eq!(plan.state.relevant_lore.len(), 2);
+        assert_eq!(plan.state.relevant_lore[0].source_id, "moonlit-garden");
+        assert_eq!(
+            plan.state.relevant_lore[0].source_kind,
+            "roleplay_lore_recall"
+        );
+        assert_eq!(plan.state.relevant_lore[1].source_id, "silver-locket");
+        assert_eq!(
+            plan.state.relevant_lore[1].source_kind,
+            "roleplay_lore_search"
+        );
 
         let compose = next_narrator_phase(RoleplayNarratorNextInput {
             state: plan.state,
@@ -2775,6 +2961,13 @@ mod tests {
         assert_eq!(compose.phase, RoleplayNarratorPhaseKind::Compose);
         assert!(compose.instructions.contains("Scene brief:"));
         assert!(compose.instructions.contains("moonlit library"));
+        assert!(compose
+            .instructions
+            .contains("Relevant lore gathered during explore:"));
+        assert!(compose.instructions.contains("Moonlit Garden"));
+        assert!(compose.instructions.contains("Night-blooming orchids glow"));
+        assert!(compose.instructions.contains("Silver Locket"));
+        assert!(compose.instructions.contains("old city wardens"));
         assert_eq!(
             compose.allowed_tools,
             vec![
@@ -2910,6 +3103,7 @@ mod tests {
                 review_enabled: false,
                 max_review_cycles: 1,
                 review_cycle: 0,
+                relevant_lore: Vec::new(),
                 scene_brief: None,
                 review_feedback: None,
             },

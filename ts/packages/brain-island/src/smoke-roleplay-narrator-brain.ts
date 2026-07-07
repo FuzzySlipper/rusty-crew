@@ -141,6 +141,15 @@ async function runSmoke(): Promise<void> {
     phaseFactory.calls[1]?.instructions ?? "",
     /Treat the direct style prompt above as style guidance\/instructions, not as prose to copy/,
   );
+  assert.match(
+    phaseFactory.calls[1]?.instructions ?? "",
+    /Relevant lore gathered during explore:/,
+  );
+  assert.match(phaseFactory.calls[1]?.instructions ?? "", /Moonlit Garden/);
+  assert.match(
+    phaseFactory.calls[1]?.instructions ?? "",
+    /Night-blooming orchids/,
+  );
   assert.equal(
     result.actions.find((action) => action.type === "deliver_completion")
       ?.packet.summary,
@@ -306,6 +315,32 @@ const ALL_TOOLS: BrainTool[] = ALL_TOOL_NAMES.map((name) => ({
   description: `${name} implementation`,
   parameters: Type.Object({}),
   async execute() {
+    if (name === "recall_lore") {
+      const result = {
+        ok: true,
+        operation: "recall_lore",
+        action: "read",
+        result: {
+          entries: [
+            {
+              record: {
+                record_id: "moonlit-garden",
+                title: "Moonlit Garden",
+                body: "Night-blooming orchids mark the path to the missing locket.",
+              },
+              score: 0.91,
+              token_estimate: 18,
+            },
+          ],
+          entries_considered: 1,
+          tokens_consumed: 18,
+        },
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    }
     return {
       content: [{ type: "text", text: "{}" }],
       details: {},
