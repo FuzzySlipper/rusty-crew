@@ -4,10 +4,12 @@ import type {
 } from "@rusty-crew/contracts";
 
 const DEFAULT_GATEWAY_URL = "http://192.168.1.10:8079";
+export const DEFAULT_SUCCESSOR_GATEWAY_API_PREFIX = "/v1";
 const MIGRATED_FUNCTIONS_HEADER = "X-Den-Migrated-Functions";
 
 export interface DenSuccessorGatewayEnv {
   DEN_SUCCESSOR_GATEWAY_URL?: string;
+  DEN_SUCCESSOR_GATEWAY_API_PREFIX?: string;
   DEN_SUCCESSOR_DELIVERY_TOKEN?: string;
   DEN_SUCCESSOR_RUNTIME_TOKEN?: string;
   DEN_SUCCESSOR_OBSERVATION_WRITE_TOKEN?: string;
@@ -17,6 +19,7 @@ export interface DenSuccessorGatewayEnv {
   DEN_SUCCESSOR_TIMELINE_READ_TOKEN?: string;
   DEN_GATEWAY_SERVICE_TOKEN?: string;
   DEN_GATEWAY_RUNTIME_CALLER_TOKEN?: string;
+  DEN_GATEWAY_API_PREFIX?: string;
   DEN_GATEWAY_OBSERVATION_WRITE_TOKEN?: string;
   DEN_GATEWAY_OBSERVATION_READ_TOKEN?: string;
   DEN_GATEWAY_CONVERSATION_WRITE_TOKEN?: string;
@@ -36,6 +39,7 @@ export interface DenSuccessorGatewayTokens {
 
 export interface DenSuccessorGatewayConfig {
   gatewayUrl: string;
+  apiPrefix?: string;
   tokens: DenSuccessorGatewayTokens;
   timeoutMs?: number;
 }
@@ -277,13 +281,21 @@ export function loadDenSuccessorGatewayConfig(
   if (!Object.values(tokens).some((token) => token !== undefined)) {
     return undefined;
   }
-  return { gatewayUrl, tokens };
+  return {
+    gatewayUrl,
+    apiPrefix:
+      optionalEnv(env.DEN_SUCCESSOR_GATEWAY_API_PREFIX) ??
+      optionalEnv(env.DEN_GATEWAY_API_PREFIX) ??
+      DEFAULT_SUCCESSOR_GATEWAY_API_PREFIX,
+    tokens,
+  };
 }
 
 export function createDenSuccessorGatewayClient(
   config: DenSuccessorGatewayConfig,
 ): DenSuccessorGatewayClient {
   const baseUrl = config.gatewayUrl.replace(/\/+$/, "");
+  const apiPrefix = normalizeSuccessorGatewayApiPrefix(config.apiPrefix);
   const timeoutMs = config.timeoutMs ?? 10_000;
 
   return {
@@ -298,7 +310,7 @@ export function createDenSuccessorGatewayClient(
     createObservationActivityEvent(request) {
       return requestJSON({
         baseUrl,
-        path: "/v1/observation/activity-events",
+        path: successorGatewayPath(apiPrefix, "/observation/activity-events"),
         method: "POST",
         token: requireToken(
           config.tokens.observationWrite,
@@ -311,7 +323,7 @@ export function createDenSuccessorGatewayClient(
     registerRuntimeInstance(request) {
       return requestJSON<DenSuccessorRuntimeInstance>({
         baseUrl,
-        path: "/v1/runtime/instances",
+        path: successorGatewayPath(apiPrefix, "/runtime/instances"),
         method: "POST",
         token: requireToken(config.tokens.runtime, "runtime"),
         body: request,
@@ -321,7 +333,10 @@ export function createDenSuccessorGatewayClient(
     heartbeatRuntimeInstance(instanceId) {
       return requestJSON<DenSuccessorRuntimeInstance>({
         baseUrl,
-        path: `/v1/runtime/instances/${encodeURIComponent(instanceId)}/heartbeat`,
+        path: successorGatewayPath(
+          apiPrefix,
+          `/runtime/instances/${encodeURIComponent(instanceId)}/heartbeat`,
+        ),
         method: "POST",
         token: requireToken(config.tokens.runtime, "runtime"),
         body: {},
@@ -331,7 +346,10 @@ export function createDenSuccessorGatewayClient(
     getRuntimeInstance(instanceId) {
       return requestJSON<DenSuccessorRuntimeInstance>({
         baseUrl,
-        path: `/v1/runtime/instances/${encodeURIComponent(instanceId)}`,
+        path: successorGatewayPath(
+          apiPrefix,
+          `/runtime/instances/${encodeURIComponent(instanceId)}`,
+        ),
         method: "GET",
         token: requireToken(config.tokens.runtime, "runtime"),
         timeoutMs,
@@ -340,7 +358,7 @@ export function createDenSuccessorGatewayClient(
     createDeliveryIntent(request) {
       return requestJSON<DenSuccessorDeliveryIntent>({
         baseUrl,
-        path: "/v1/delivery/intents",
+        path: successorGatewayPath(apiPrefix, "/delivery/intents"),
         method: "POST",
         token: requireToken(config.tokens.delivery, "delivery"),
         body: request,
@@ -351,7 +369,7 @@ export function createDenSuccessorGatewayClient(
       const query = state ? `?state=${encodeURIComponent(state)}` : "";
       return requestJSON<DenSuccessorDeliveryIntent[]>({
         baseUrl,
-        path: `/v1/delivery/intents${query}`,
+        path: successorGatewayPath(apiPrefix, `/delivery/intents${query}`),
         method: "GET",
         token: requireToken(config.tokens.delivery, "delivery"),
         timeoutMs,
@@ -360,7 +378,10 @@ export function createDenSuccessorGatewayClient(
     claimDeliveryIntent(input) {
       return requestJSON<DenSuccessorDeliveryIntent>({
         baseUrl,
-        path: `/v1/delivery/intents/${encodeURIComponent(String(input.id))}/claim`,
+        path: successorGatewayPath(
+          apiPrefix,
+          `/delivery/intents/${encodeURIComponent(String(input.id))}/claim`,
+        ),
         method: "POST",
         token: requireToken(config.tokens.delivery, "delivery"),
         body: {
@@ -373,7 +394,10 @@ export function createDenSuccessorGatewayClient(
     reportDeliveryIntentEvent(input) {
       return requestJSON<DenSuccessorDeliveryIntent>({
         baseUrl,
-        path: `/v1/delivery/intents/${encodeURIComponent(String(input.id))}/events`,
+        path: successorGatewayPath(
+          apiPrefix,
+          `/delivery/intents/${encodeURIComponent(String(input.id))}/events`,
+        ),
         method: "POST",
         token: requireToken(config.tokens.delivery, "delivery"),
         body: {
@@ -387,7 +411,10 @@ export function createDenSuccessorGatewayClient(
     appendConversationMessage(input) {
       return requestJSON({
         baseUrl,
-        path: `/v1/conversation/channels/${encodeURIComponent(String(input.channelId))}/messages`,
+        path: successorGatewayPath(
+          apiPrefix,
+          `/conversation/channels/${encodeURIComponent(String(input.channelId))}/messages`,
+        ),
         method: "POST",
         token: requireToken(
           config.tokens.conversationWrite,
@@ -407,7 +434,7 @@ export function createDenSuccessorGatewayClient(
       const query = params.size > 0 ? `?${params.toString()}` : "";
       return requestJSON<DenSuccessorConversationChannel[]>({
         baseUrl,
-        path: `/v1/conversation/channels${query}`,
+        path: successorGatewayPath(apiPrefix, `/conversation/channels${query}`),
         method: "GET",
         token: requireToken(
           config.tokens.conversationRead,
@@ -419,7 +446,7 @@ export function createDenSuccessorGatewayClient(
     createConversationChannel(input) {
       return requestJSON<DenSuccessorConversationChannel>({
         baseUrl,
-        path: "/v1/conversation/channels",
+        path: successorGatewayPath(apiPrefix, "/conversation/channels"),
         method: "POST",
         token: requireToken(
           config.tokens.conversationWrite,
@@ -445,7 +472,10 @@ export function createDenSuccessorGatewayClient(
       const query = params.size > 0 ? `?${params.toString()}` : "";
       return requestJSON<DenSuccessorConversationMembership[]>({
         baseUrl,
-        path: `/v1/conversation/memberships${query}`,
+        path: successorGatewayPath(
+          apiPrefix,
+          `/conversation/memberships${query}`,
+        ),
         method: "GET",
         token: requireToken(
           config.tokens.conversationRead,
@@ -462,7 +492,10 @@ export function createDenSuccessorGatewayClient(
       const query = params.size > 0 ? `?${params.toString()}` : "";
       return requestJSON<DenSuccessorConversationMessage[]>({
         baseUrl,
-        path: `/v1/conversation/channels/${encodeURIComponent(String(input.channelId))}/messages${query}`,
+        path: successorGatewayPath(
+          apiPrefix,
+          `/conversation/channels/${encodeURIComponent(String(input.channelId))}/messages${query}`,
+        ),
         method: "GET",
         token: requireToken(
           config.tokens.conversationRead,
@@ -472,6 +505,27 @@ export function createDenSuccessorGatewayClient(
       });
     },
   };
+}
+
+export function normalizeSuccessorGatewayApiPrefix(
+  value: string | undefined,
+): string {
+  const trimmed = value?.trim();
+  if (!trimmed) return DEFAULT_SUCCESSOR_GATEWAY_API_PREFIX;
+  if (trimmed === "/") return "";
+  return `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
+}
+
+export function successorGatewayPath(
+  apiPrefix: string,
+  routePath: string,
+): string {
+  const normalizedPrefix = normalizeSuccessorGatewayApiPrefix(apiPrefix);
+  const normalizedRoute =
+    routePath.startsWith("/") || routePath.startsWith("?")
+      ? routePath
+      : `/${routePath}`;
+  return `${normalizedPrefix}${normalizedRoute}`;
 }
 
 export function successorMessageFromProjection(

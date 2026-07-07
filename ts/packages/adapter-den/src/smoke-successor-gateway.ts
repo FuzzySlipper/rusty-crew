@@ -14,6 +14,8 @@ const requests: {
   idempotencyKey?: string;
   body?: unknown;
 }[] = [];
+const gatewayApiPrefix = "/edge/v1";
+const gatewayRoute = (path: string) => `${gatewayApiPrefix}${path}`;
 
 const server = createServer((request, response) => {
   let body = "";
@@ -36,7 +38,7 @@ const server = createServer((request, response) => {
       response.end(JSON.stringify({ status: "ok", service_name: "gateway" }));
       return;
     }
-    if (request.url === "/v1/delivery/intents?state=pending") {
+    if (request.url === gatewayRoute("/delivery/intents?state=pending")) {
       response.end(
         JSON.stringify([
           {
@@ -55,7 +57,7 @@ const server = createServer((request, response) => {
       );
       return;
     }
-    if (request.url === "/v1/runtime/instances") {
+    if (request.url === gatewayRoute("/runtime/instances")) {
       response.statusCode = 201;
       response.end(
         JSON.stringify({
@@ -68,7 +70,10 @@ const server = createServer((request, response) => {
       );
       return;
     }
-    if (request.url === "/v1/runtime/instances/field-prime%40rusty-crew") {
+    if (
+      request.url ===
+      gatewayRoute("/runtime/instances/field-prime%40rusty-crew")
+    ) {
       response.end(
         JSON.stringify({
           instance_id: "field-prime@rusty-crew",
@@ -81,7 +86,8 @@ const server = createServer((request, response) => {
       return;
     }
     if (
-      request.url === "/v1/runtime/instances/field-prime%40rusty-crew/heartbeat"
+      request.url ===
+      gatewayRoute("/runtime/instances/field-prime%40rusty-crew/heartbeat")
     ) {
       response.end(
         JSON.stringify({
@@ -95,7 +101,7 @@ const server = createServer((request, response) => {
       );
       return;
     }
-    if (request.url === "/v1/delivery/intents/7/claim") {
+    if (request.url === gatewayRoute("/delivery/intents/7/claim")) {
       response.end(
         JSON.stringify({
           id: 7,
@@ -114,7 +120,9 @@ const server = createServer((request, response) => {
     }
     if (
       request.url ===
-      "/v1/conversation/channels?project_id=rusty-crew&kind=agent_channel&limit=25"
+      gatewayRoute(
+        "/conversation/channels?project_id=rusty-crew&kind=agent_channel&limit=25",
+      )
     ) {
       response.end(
         JSON.stringify([
@@ -134,7 +142,7 @@ const server = createServer((request, response) => {
       );
       return;
     }
-    if (request.url === "/v1/conversation/channels") {
+    if (request.url === gatewayRoute("/conversation/channels")) {
       response.statusCode = 201;
       response.end(
         JSON.stringify({
@@ -154,7 +162,9 @@ const server = createServer((request, response) => {
     }
     if (
       request.url ===
-      "/v1/conversation/memberships?channel_id=42&member_identity=field-prime&membership_purpose=ordinary&include_left=true&limit=10"
+      gatewayRoute(
+        "/conversation/memberships?channel_id=42&member_identity=field-prime&membership_purpose=ordinary&include_left=true&limit=10",
+      )
     ) {
       response.end(
         JSON.stringify([
@@ -178,7 +188,9 @@ const server = createServer((request, response) => {
       );
       return;
     }
-    if (request.url === "/v1/conversation/channels/42/messages?limit=5") {
+    if (
+      request.url === gatewayRoute("/conversation/channels/42/messages?limit=5")
+    ) {
       response.end(
         JSON.stringify([
           {
@@ -210,6 +222,7 @@ if (typeof address !== "object" || address === null) {
 try {
   const config = loadDenSuccessorGatewayConfig({
     DEN_SUCCESSOR_GATEWAY_URL: `http://127.0.0.1:${address.port}`,
+    DEN_SUCCESSOR_GATEWAY_API_PREFIX: `${gatewayApiPrefix}/`,
     DEN_SUCCESSOR_DELIVERY_TOKEN: "delivery-token",
     DEN_SUCCESSOR_RUNTIME_TOKEN: "runtime-token",
     DEN_SUCCESSOR_OBSERVATION_WRITE_TOKEN: "observation-write-token",
@@ -316,17 +329,17 @@ try {
     requests.map((request) => `${request.method} ${request.path}`),
     [
       "GET /health",
-      "POST /v1/observation/activity-events",
-      "POST /v1/runtime/instances",
-      "POST /v1/runtime/instances/field-prime%40rusty-crew/heartbeat",
-      "GET /v1/runtime/instances/field-prime%40rusty-crew",
-      "GET /v1/delivery/intents?state=pending",
-      "POST /v1/delivery/intents/7/claim",
-      "POST /v1/conversation/channels/42/messages",
-      "GET /v1/conversation/channels?project_id=rusty-crew&kind=agent_channel&limit=25",
-      "POST /v1/conversation/channels",
-      "GET /v1/conversation/memberships?channel_id=42&member_identity=field-prime&membership_purpose=ordinary&include_left=true&limit=10",
-      "GET /v1/conversation/channels/42/messages?limit=5",
+      `POST ${gatewayRoute("/observation/activity-events")}`,
+      `POST ${gatewayRoute("/runtime/instances")}`,
+      `POST ${gatewayRoute("/runtime/instances/field-prime%40rusty-crew/heartbeat")}`,
+      `GET ${gatewayRoute("/runtime/instances/field-prime%40rusty-crew")}`,
+      `GET ${gatewayRoute("/delivery/intents?state=pending")}`,
+      `POST ${gatewayRoute("/delivery/intents/7/claim")}`,
+      `POST ${gatewayRoute("/conversation/channels/42/messages")}`,
+      `GET ${gatewayRoute("/conversation/channels?project_id=rusty-crew&kind=agent_channel&limit=25")}`,
+      `POST ${gatewayRoute("/conversation/channels")}`,
+      `GET ${gatewayRoute("/conversation/memberships?channel_id=42&member_identity=field-prime&membership_purpose=ordinary&include_left=true&limit=10")}`,
+      `GET ${gatewayRoute("/conversation/channels/42/messages?limit=5")}`,
     ],
   );
   assert.equal(

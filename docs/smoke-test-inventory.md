@@ -149,6 +149,9 @@ Current external cassette families:
 
 - `den-successor-gateway/conversation-readback` validates Den successor Gateway
   health/runtime/delivery/conversation readback shapes.
+  The package-local successor Gateway smoke separately uses a non-default
+  `/edge/v1` prefix to prove Gateway route composition stays centralized in
+  `adapter-den`.
 - `rusty-view-chat-api/roleplay-turn-readback` validates Rusty View chat API
   session/context/event/tool-debug readback shapes captured from the debug
   service after a real roleplay narrator turn.

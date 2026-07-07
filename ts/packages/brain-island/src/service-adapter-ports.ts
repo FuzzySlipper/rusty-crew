@@ -17,6 +17,7 @@ import type {
 
 export interface DenSuccessorGatewayEnv {
   DEN_SUCCESSOR_GATEWAY_URL?: string;
+  DEN_SUCCESSOR_GATEWAY_API_PREFIX?: string;
   DEN_SUCCESSOR_DELIVERY_TOKEN?: string;
   DEN_SUCCESSOR_RUNTIME_TOKEN?: string;
   DEN_SUCCESSOR_OBSERVATION_WRITE_TOKEN?: string;
@@ -26,6 +27,7 @@ export interface DenSuccessorGatewayEnv {
   DEN_SUCCESSOR_TIMELINE_READ_TOKEN?: string;
   DEN_GATEWAY_SERVICE_TOKEN?: string;
   DEN_GATEWAY_RUNTIME_CALLER_TOKEN?: string;
+  DEN_GATEWAY_API_PREFIX?: string;
   DEN_GATEWAY_OBSERVATION_WRITE_TOKEN?: string;
   DEN_GATEWAY_OBSERVATION_READ_TOKEN?: string;
   DEN_GATEWAY_CONVERSATION_WRITE_TOKEN?: string;
@@ -45,6 +47,7 @@ export interface DenSuccessorGatewayTokens {
 
 export interface DenSuccessorGatewayConfig {
   gatewayUrl: string;
+  apiPrefix?: string;
   tokens: DenSuccessorGatewayTokens;
   timeoutMs?: number;
 }

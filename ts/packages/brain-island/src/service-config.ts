@@ -193,6 +193,7 @@ export const RUSTY_CREW_DEFAULT_ADMIN_HOST = "0.0.0.0";
 export const RUSTY_CREW_DEFAULT_ADMIN_PORT = 9347;
 export const RUSTY_CREW_DEFAULT_DEN_SUCCESSOR_GATEWAY_URL =
   "http://192.168.1.10:8079";
+export const RUSTY_CREW_DEFAULT_DEN_SUCCESSOR_GATEWAY_API_PREFIX = "/v1";
 export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_ISSUER = "https://auth.openai.com";
 export const RUSTY_CREW_DEFAULT_OPENAI_OAUTH_CLIENT_ID =
   "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -359,6 +360,10 @@ export function loadDenSuccessorGatewayConfig(
     gatewayUrl:
       normalizeOptional(env.DEN_SUCCESSOR_GATEWAY_URL) ??
       RUSTY_CREW_DEFAULT_DEN_SUCCESSOR_GATEWAY_URL,
+    apiPrefix:
+      normalizeOptional(env.DEN_SUCCESSOR_GATEWAY_API_PREFIX) ??
+      normalizeOptional(env.DEN_GATEWAY_API_PREFIX) ??
+      RUSTY_CREW_DEFAULT_DEN_SUCCESSOR_GATEWAY_API_PREFIX,
     tokens,
   };
 }
