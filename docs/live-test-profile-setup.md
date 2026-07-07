@@ -39,6 +39,19 @@ The service should be ready enough for admin/profile work. During the
 architecture remediation window, it is acceptable to restart the service or
 reset local service data before this setup.
 
+For Rust pi-agent live certification, the debug service must run the live Rust
+brain path rather than the deterministic fake bridge path:
+
+```bash
+RUSTY_CREW_PI_AGENT_LIVE=1
+RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=300000
+```
+
+These values belong in the local debug service environment file, normally
+`/home/system/rusty-crew-debug/config/service.env`, and require a debug service
+restart. The idle timeout is intentionally long for live certification because
+real providers can spend meaningful time in reasoning or tool loops.
+
 ## 2. Create The Default Live Chat Provider
 
 The default no-secret provider points at local den-router. The router owns
@@ -158,6 +171,16 @@ export RV_LIVE_MIN_STREAMING_MS=15000
 Run live certification through the broker as described in
 `docs/live-deliverable-certification.md` and
 `../rusty-view/docs/live-testing.md`.
+
+If a manual Rusty View browser run is needed, make sure the app is opened with
+the debug backend override:
+
+```text
+http://127.0.0.1:<rusty-view-port>/?api=http%3A%2F%2F127.0.0.1%3A9348
+```
+
+Without the `api` query parameter, the Rusty View dev app may derive a backend
+from its served origin and accidentally talk to the live service on port `9347`.
 
 ## Long-Streaming Prompt Pattern
 

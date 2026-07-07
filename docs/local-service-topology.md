@@ -55,6 +55,18 @@ modelId: deepseek-flash
 baseUrl: http://127.0.0.1:18082/v1
 ```
 
+For Rust pi-agent live certification, the debug service environment should also
+enable the live Rust brain path:
+
+```text
+RUSTY_CREW_PI_AGENT_LIVE=1
+RUSTY_CREW_PI_AGENT_STREAM_IDLE_TIMEOUT_MS=300000
+```
+
+If these are absent, `pi-agent-core` profiles can exercise the fake deterministic
+bridge path and return diagnostic text such as `pi-agent Rust bridge wake
+completed` instead of calling a provider.
+
 ## Health Checks
 
 ```bash
