@@ -212,6 +212,92 @@ The 4509 authority split is:
   host/API paths and the shared admin error envelope used by host-owned static
   failures.
 
+## Task 4579 Continuation
+
+The TypeScript authority refactor reopened service composition after the host
+shell/static-site extraction. Do not redo the browser shell work. The remaining
+work should reduce the authority still concentrated in
+`brain-island/src/service-app.ts` and `service-runtime-config.ts`.
+
+### 1. Runtime Apply And Refresh Control Plane
+
+Provider/profile/runtime-config refresh apply ordering is still too semantic for
+route glue. Move the next lifecycle/apply decision behind Rust-owned planning or
+control-plane operations.
+
+Target decisions:
+
+- model-provider refresh impact planning and apply summaries;
+- profile registry runtime-config write apply ordering;
+- profile/session rebuild or brain replacement planning;
+- runtime config draft apply and refresh side effects;
+- new-session/archive-session transitions triggered by profile changes.
+
+TS should gather current records, call Rust operations, apply returned plans
+through explicit ports, and shape admin envelopes. It should not decide hidden
+ordering rules.
+
+### 2. Storage Boot Gating And Host Preflight
+
+Storage boot gating currently lives near service app construction even though it
+is process startup policy. Move boot-mode validation and host preflight
+projection toward `service-host`, while Rust/config crates own backend shape
+validation.
+
+The host should fail closed before the service app half-starts when storage
+configuration is invalid.
+
+### 3. Background Loop Lifecycle
+
+`service-app.ts` still composes scheduler ticks, wake dispatch timers, Den
+runtime heartbeat, Den delivery polling, Telegram outbound draining, and
+background review callbacks. Move loop ownership toward `service-host` once
+each loop has a narrow port.
+
+Rust should own durable scheduler/run state transitions. `service-host` should
+own timers, process drain, and lifecycle wiring. `brain-island` should expose
+loop executors only where they are close to brain/tool/provider capability.
+
+### 4. Adapter Projection And Dynamic Channel Binding State
+
+Den successor gateway startup, dynamic Den channel bindings, membership
+refresh, and delivery-intent polling currently sit inside `service-app.ts`.
+Move the process/adaptor wiring toward `service-host` and keep Den as an
+adapter. Any durable routing/channel state should go through Rust-owned
+configuration or persistence operations.
+
+### 5. API Route Table Composition
+
+`service-app.ts` still owns the central API/admin route if-chain. Extracting
+more route modules is useful only when authority moves with it:
+
+- host-owned route table composition can move to `service-host`;
+- brain/tool/provider-adjacent handlers can remain in `brain-island`;
+- lifecycle/session/storage mutation effects should call Rust control-plane
+  operations;
+- route capability/catalog metadata should be generated or checked.
+
+### 6. Drain And Stop Semantics
+
+`service-host` closes the HTTP server, but the service app still owns much of
+the shutdown/drain detail. Move process-level drain-loop hosting and stop
+ordering into `service-host` while keeping Rust engine shutdown authoritative
+through the bridge.
+
+## Task 4579 Implementation Series
+
+The next tasks should be split so each one changes either a Rust authority
+boundary or a service-host composition boundary, not both at once:
+
+1. Move one runtime apply/refresh decision behind a Rust control-plane plan.
+2. Move storage boot gating and service preflight into service-host.
+3. Move background loop timer ownership to service-host through narrow ports.
+4. Move Den gateway/channel process wiring out of service-app.
+5. Extract API route table composition/capability metadata without moving
+   mutation authority into a new TS module.
+6. Ratchet service-host boundaries so brain-island cannot import service-host
+   or add new whole-service orchestration without a task note.
+
 ## Validation Pattern
 
 Every route-family extraction should add or extend a unit test in the owning
