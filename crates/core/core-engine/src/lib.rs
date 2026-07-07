@@ -1,13 +1,16 @@
 //! Coordination engine composition.
 
+mod body_queue;
 mod memory_spaces;
 mod scheduler;
 
 pub use scheduler::SchedulerTickReport;
 
+use body_queue::{
+    drain_follow_up_queue_for_wake, enforce_follow_up_queue_cap, save_body_follow_up_message,
+};
 use rusty_crew_core_body::{
-    apply_history_window, session_kind_can_wake, BodyProjector, BrainActionExecutor,
-    DefaultWakeThreshold, WakeThreshold,
+    session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
@@ -21,8 +24,8 @@ use rusty_crew_core_persistence::{
     MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
     ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
     ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageFilter,
-    QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord,
+    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
     RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
     RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
     RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
@@ -182,7 +185,7 @@ impl CoreEngine {
                 }
                 if existing.status == SessionStatus::Archived {
                     let now = self.now();
-                    self.store.expire_queued_messages_at(&now)?;
+                    self.expire_body_follow_up_messages(&now)?;
                     self.sessions.apply_config(&config)?;
                     let state = self.sessions.reactivate_session(&config.session_id, now)?;
                     self.store.save_session(&state)?;
@@ -462,7 +465,7 @@ impl CoreEngine {
             terminal_at: None,
             state_reason: None,
         };
-        self.store.save_queued_message(&record)?;
+        save_body_follow_up_message(&self.store, &record)?;
         self.enforce_body_follow_up_cap(session_id, state.delta_policy.max_queued_messages)?;
         self.bus.publish(CoreEvent::BrainWakeRequested {
             session_id: session_id.clone(),
@@ -1522,49 +1525,20 @@ impl CoreEngine {
         }
     }
 
+    fn expire_body_follow_up_messages(
+        &self,
+        now: &IsoTimestamp,
+    ) -> CoreResult<Vec<QueuedMessageRecord>> {
+        body_queue::BodyQueueStore::expire_body_follow_up_messages_at(&self.store, now)
+    }
+
     fn drain_body_follow_up_messages_for_wake(
         &self,
         session_id: &SessionId,
         max_delivered_messages: Option<u32>,
     ) -> CoreResult<Vec<QueuedMessageRecord>> {
         let now = self.now();
-        self.store.expire_queued_messages_at(&now)?;
-        let pending = self.store.load_queued_messages(&QueuedMessageFilter {
-            state: Some(QueuedMessageState::Pending),
-            owner_session_id: Some(session_id.clone()),
-            owner_agent_id: None,
-            limit: None,
-        })?;
-        let delivered_ids = apply_history_window(
-            pending
-                .iter()
-                .map(|record| record.message_id.clone())
-                .collect::<Vec<_>>(),
-            max_delivered_messages,
-        )
-        .into_iter()
-        .collect::<std::collections::HashSet<_>>();
-        let mut delivered = Vec::new();
-        for mut record in pending {
-            let include_in_wake = delivered_ids.contains(&record.message_id);
-            record.state = if include_in_wake {
-                QueuedMessageState::Delivered
-            } else {
-                QueuedMessageState::Discarded
-            };
-            record.delivery_attempts += 1;
-            record.terminal_at = Some(now.clone());
-            record.state_reason = Some(if include_in_wake {
-                "delivered_for_wake".to_string()
-            } else {
-                "history_window_exceeded".to_string()
-            });
-            self.store.save_queued_message(&record)?;
-            if include_in_wake {
-                delivered.push(record);
-            }
-        }
-        Ok(delivered)
+        drain_follow_up_queue_for_wake(&self.store, &now, session_id, max_delivered_messages)
     }
 
     fn enforce_body_follow_up_cap(
@@ -1572,24 +1546,8 @@ impl CoreEngine {
         session_id: &SessionId,
         max_queued_messages: u32,
     ) -> CoreResult<()> {
-        let pending = self.store.load_queued_messages(&QueuedMessageFilter {
-            state: Some(QueuedMessageState::Pending),
-            owner_session_id: Some(session_id.clone()),
-            owner_agent_id: None,
-            limit: None,
-        })?;
-        let overflow = pending.len().saturating_sub(max_queued_messages as usize);
-        if overflow == 0 {
-            return Ok(());
-        }
         let now = self.now();
-        for mut record in pending.into_iter().take(overflow) {
-            record.state = QueuedMessageState::Discarded;
-            record.terminal_at = Some(now.clone());
-            record.state_reason = Some("queue_cap_exceeded".to_string());
-            self.store.save_queued_message(&record)?;
-        }
-        Ok(())
+        enforce_follow_up_queue_cap(&self.store, &now, session_id, max_queued_messages)
     }
 
     fn spawn_delegated_workers(
