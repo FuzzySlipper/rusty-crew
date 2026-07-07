@@ -6,7 +6,7 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   ProfileId,
@@ -15,14 +15,16 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   buildProfileRoleAssembly,
-  createPiAgentBrain,
   loadProfileContext,
   renderDenMemoryContext,
   renderDenseProfileMemoryContext,
   renderPlanningContext,
   renderSessionTodoContext,
 } from "./index.js";
-import type { PiAgentLike } from "./index.js";
+import {
+  createPiAgentBrain,
+  type PiAgentLike,
+} from "./legacy-pi-agent-test-harness.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-profile-role-assembly-"));
 const profilesDir = join(root, "profiles");

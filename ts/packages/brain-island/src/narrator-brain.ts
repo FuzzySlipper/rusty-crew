@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { AgentOptions as PiAgentOptions } from "@earendil-works/pi-agent-core";
 import type {
   BrainAction,
   BrainEvent,
@@ -16,7 +15,6 @@ import type {
   BrainWakeInput,
   BrainWakeResult,
 } from "./index.js";
-import { createPiAgentBrain, type PiAgentFactory } from "./pi-agent-brain.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import type { RoleplayNarratorConfig } from "./profile-loading.js";
@@ -26,8 +24,7 @@ import {
 } from "./tool-session-selection.js";
 
 export interface RoleplayNarratorBrainOptions {
-  createAgent?: PiAgentFactory;
-  createPhaseBrain?: RoleplayNarratorPhaseBrainFactory;
+  createPhaseBrain: RoleplayNarratorPhaseBrainFactory;
   resolveTools?: BrainToolResolver;
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
   planActions?: BrainActionPlanner;
@@ -50,6 +47,7 @@ export interface RoleplayNarratorPhaseBrainOptions {
   resolveTools?: BrainToolResolver;
   toolProfile?: ToolProfile;
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
+  planActions?: BrainActionPlanner;
 }
 
 export type RoleplayNarratorPhaseBrainFactory = (
@@ -75,22 +73,18 @@ export function createRoleplayNarratorBrain(
   const exploreBrain = createNarratorPhaseBrain(options, {
     phase: "explore",
     allowedTools: EXPLORE_TOOLS,
-    compatibilityInstructions: exploreInstructions,
   });
 
   const composeBrain = createNarratorPhaseBrain(options, {
     phase: "compose",
     allowedTools: COMPOSE_TOOLS,
     submitEvent: options.submitEvent,
-    compatibilityInstructions: () =>
-      composeSystemInstructions(options.narratorConfig),
+    planActions: options.planActions,
   });
 
   const composeDraftBrain = createNarratorPhaseBrain(options, {
     phase: "compose_draft",
     allowedTools: COMPOSE_TOOLS,
-    compatibilityInstructions: () =>
-      composeSystemInstructions(options.narratorConfig),
   });
 
   const reviewBrain =
@@ -98,7 +92,6 @@ export function createRoleplayNarratorBrain(
       ? createNarratorPhaseBrain(options, {
           phase: "review",
           allowedTools: COMPOSE_TOOLS,
-          compatibilityInstructions: reviewSystemInstructions,
         })
       : undefined;
 
@@ -221,7 +214,7 @@ function createNarratorPhaseBrain(
     phase: RoleplayNarratorPhase;
     allowedTools: ReadonlySet<string>;
     submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
-    compatibilityInstructions: () => string;
+    planActions?: BrainActionPlanner;
   },
 ): BrainImplementation {
   const resolveTools = filteringResolver(
@@ -232,30 +225,12 @@ function createNarratorPhaseBrain(
     options.toolProfile,
     phase.allowedTools,
   );
-  if (options.createPhaseBrain) {
-    return options.createPhaseBrain({
-      phase: phase.phase,
-      resolveTools,
-      toolProfile,
-      submitEvent: phase.submitEvent,
-    });
-  }
-  if (!options.createAgent) {
-    throw new Error(
-      "roleplay narrator requires createPhaseBrain or createAgent",
-    );
-  }
-  return createPiAgentBrain({
-    createAgent: wrapCreateAgentSystemPrompt(
-      options.createAgent,
-      phase.compatibilityInstructions,
-    ),
+  return options.createPhaseBrain({
+    phase: phase.phase,
     resolveTools,
     toolProfile,
     submitEvent: phase.submitEvent,
-    planActions: phase.phase === "compose" ? options.planActions : undefined,
-    toolCallDebugStore: options.toolCallDebugStore,
-    providerRequestDebugStore: options.providerRequestDebugStore,
+    planActions: phase.planActions,
   });
 }
 
@@ -612,22 +587,6 @@ function filteringResolver(
   if (!resolver) return undefined;
   return (input) =>
     resolver(input).filter((tool) => allowedNames.has(tool.name));
-}
-
-function wrapCreateAgentSystemPrompt(
-  createAgent: PiAgentFactory,
-  instructions: (context?: string) => string,
-): PiAgentFactory {
-  return (options: PiAgentOptions) =>
-    createAgent({
-      ...options,
-      initialState: {
-        ...options.initialState,
-        systemPrompt: [options.initialState?.systemPrompt, instructions()]
-          .filter(Boolean)
-          .join("\n\n"),
-      },
-    });
 }
 
 function withNarratorInstructions(

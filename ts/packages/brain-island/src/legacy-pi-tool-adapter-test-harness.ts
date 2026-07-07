@@ -2,7 +2,7 @@ import type {
   AgentTool as PiAgentTool,
   AgentToolResult as PiAgentToolResult,
   AgentToolUpdateCallback as PiAgentToolUpdateCallback,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import type { Static, TSchema } from "typebox";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { BrainWakeInput } from "./index.js";

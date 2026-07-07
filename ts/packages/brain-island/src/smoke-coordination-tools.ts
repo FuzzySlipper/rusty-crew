@@ -15,7 +15,7 @@ import {
   type CoordinationToolRuntime,
 } from "./coordination-tools.js";
 import { defaultBodyDeltaPolicy } from "./mid-turn-delta.js";
-import { toPiAgentTool } from "./pi-tool-adapter.js";
+import { toPiAgentTool } from "./legacy-pi-tool-adapter-test-harness.js";
 import {
   buildBuiltInToolCatalog,
   defaultToolRegistry,

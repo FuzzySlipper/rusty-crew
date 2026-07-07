@@ -1,23 +1,29 @@
 # Rust Pi-Agent Brain Port Contract
 
-Status: design/parity contract for task 4556
+Status: implemented cutover record for tasks 4556-4564
 
-This note pins the boundary and parity target for porting the current
-TypeScript pi-agent brain to Rust. It is intentionally narrower than older
-pi-crew audit prose: Rusty Crew is not porting the full `pi-ai` provider matrix
-or the whole upstream `Agent` runtime. It is porting the behavior Rusty Crew
-actually uses today: a fresh per-wake agent loop over OpenAI-compatible
-den-router model surfaces, neutral tool execution, and the existing
-`BrainWakeStreamItem` vocabulary.
+This note pins the boundary and parity target used to port the TypeScript
+pi-agent brain behavior to Rust. It is intentionally narrower than older
+pi-crew audit prose: Rusty Crew did not port the full `pi-ai` provider matrix
+or the whole upstream `Agent` runtime. It ported the behavior Rusty Crew uses:
+a fresh per-wake agent loop over OpenAI-compatible model surfaces, neutral tool
+execution, and the existing `BrainWakeStreamItem` vocabulary.
 
 ## Source Grounding
 
-Current TypeScript behavior is in:
+The former TypeScript behavior was in:
 
-- `ts/packages/brain-island/src/pi-agent-brain.ts`
-- `ts/packages/brain-island/src/den-router-agent.ts`
-- `ts/packages/brain-island/src/pi-tool-adapter.ts`
+- `ts/packages/brain-island/src/legacy-pi-agent-test-harness.ts` (private
+  smoke harness, not a production module export)
+- `ts/packages/brain-island/src/legacy-pi-tool-adapter-test-harness.ts`
+  (legacy harness adapter)
 - `ts/packages/brain-island/src/brain-module.ts`
+
+The production implementation is in:
+
+- `crates/brains/pi-agent`
+- `ts/packages/brain-island/src/brain-module.ts`
+- the native bridge pi-agent wake surface
 
 Boundary references:
 
@@ -54,8 +60,8 @@ Rust owns for this brain:
   calls or terminal failure/guard.
 - Event mapping into `BrainWakeStreamItem`.
 - Stateful literal `<think>...</think>` scanning.
-- Den-router model/API selection logic currently in `den-router-agent.ts`, or a
-  Rust helper with the same reviewed behavior.
+- Model/API selection logic in a Rust helper with the same reviewed behavior as
+  the retired TypeScript den-router helper.
 - Typed failure summaries that surface as `wake_failed` or visible
   `provider_status` events according to the stream protocol.
 
@@ -95,7 +101,9 @@ TypeScript remains the transition owner for:
 8. Keep `roleplay_narrator` as transitional TypeScript sequencing that invokes
    Rust pi-agent sub-wakes.
 9. Delete the TypeScript pi-agent internals and drop `@earendil-works/pi-*`
-   runtime dependencies after deterministic and live certification.
+   runtime dependencies after deterministic and live certification. Completed
+   by task 4564, except for private smoke harness helpers retained to test
+   neutral event/tool mapping without upstream packages.
 
 ## Parity Matrix
 
@@ -116,7 +124,7 @@ TypeScript remains the transition owner for:
 | Agent loop | Upstream Agent owns prompt, stream, tool execution, idle wait, and queue clearing. Rusty Crew creates a fresh Agent each wake, then `clearAllQueues`. | Replace with Rust loop: stream provider events, gather tool calls, execute neutral tools, submit tool outputs, repeat. No queue-clearing concept should be needed beyond dropping per-wake state. |
 | Repeated tool calls | Currently mostly upstream Agent behavior; responses brain has explicit repeated-call ceiling. | Use an explicit Rust guard comparable to responses brain. Fail visibly before an infinite tool loop. |
 | Provider errors | Final assistant message with `stopReason: "error"` and `errorMessage` maps to visible `text_delta` prefixed with `LLM error:`. | Preserve user-visible failure summaries, but prefer terminal `wake_failed` for provider failures that abort before meaningful model output. Include typed provider status where useful. |
-| Usage | pi final message may carry usage, but current `pi-agent-brain.ts` does not project usage into neutral stream events. | No required parity projection. If chat-completions usage is available, expose it through transport metrics/debug samples or a future neutral usage event only after contract work. |
+| Usage | The retired TypeScript pi-agent harness did not project usage into neutral stream events. | No required parity projection. If chat-completions usage is available, expose it through transport metrics/debug samples or a future neutral usage event only after contract work. |
 | Den-router model selection | Default base URL `http://127.0.0.1:18082`; probe `/v1/models` and `/routes`; choose requested model, else `deepseek-flash`, `grok`, `glm`, `local-coder`, else first model; codex-oauth backend implies responses API unless explicitly configured. Only `openai-responses` and `openai-completions` are accepted. | Preserve exact candidate/default behavior unless a later task deliberately changes it. Unsupported API/provider cases fail clearly; no silent fallback to another brain or provider matrix. |
 | Responses protocol | Current den-router factory may select `openai-responses` for codex-backed models even though this port is primarily chat-completions. | Do not build a fake responses shim inside the pi-agent brain. Prefer routing responses providers to the existing Rust `openai-responses` brain, or explicitly document a small compatibility bridge if profile semantics require it. |
 | Debug store | TS records a provider request debug snapshot with boundary `pi_agent_options`; tool debug records start/update/finish/fail around TS tool execution. | Preserve operator-visible debug snapshots. For Rust client internals, record request samples at the TS/native boundary as done by `openai-responses`, without leaking secrets. |

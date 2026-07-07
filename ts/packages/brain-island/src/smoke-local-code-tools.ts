@@ -20,13 +20,13 @@ import type {
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
   AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import {
-  createPiAgentBrain,
   defaultBodyDeltaPolicy,
   resolveLocalCodeTools,
   selectToolProfile,
 } from "./index.js";
+import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
 
 const workdir = mkdtempSync(join(tmpdir(), "rusty-crew-local-tools-"));
 const outsideDir = mkdtempSync(

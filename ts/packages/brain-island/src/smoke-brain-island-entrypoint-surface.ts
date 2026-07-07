@@ -36,7 +36,6 @@ const runtimeExportGroups: Record<string, string[]> = {
     "createLocalBrain",
     "createPlaceholderBrain",
     "envelope",
-    "createPiAgentBrain",
     "wakeBrainFromBridgeRequest",
   ],
   serviceConfig: [

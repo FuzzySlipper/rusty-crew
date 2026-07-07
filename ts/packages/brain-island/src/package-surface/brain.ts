@@ -1,10 +1,4 @@
 export type {
-  PiAgentBrainOptions,
-  PiAgentFactory,
-  PiAgentLike,
-} from "../pi-agent-brain.js";
-export { createPiAgentBrain } from "../pi-agent-brain.js";
-export type {
   ToolCallDebugRecord,
   ToolCallDebugStore,
 } from "../tool-call-debug-store.js";
@@ -61,14 +55,6 @@ export {
   defaultBodyDeltaPolicy,
 } from "../mid-turn-delta.js";
 export type { DrainResult, QueuedMidTurnMessage } from "../mid-turn-delta.js";
-export {
-  createDenRouterPiAgentFactory,
-  resolveDenRouterModel,
-} from "../den-router-agent.js";
-export type {
-  DenRouterAgentOptions,
-  DenRouterModelSelection,
-} from "../den-router-agent.js";
 export {
   buildDelegatedRoleAssembly,
   normalizeDelegatedRole,

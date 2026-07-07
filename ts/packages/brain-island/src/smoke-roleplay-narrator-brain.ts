@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
 import type {
-  Agent as PiAgent,
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
-} from "@earendil-works/pi-agent-core";
-import type {
   AgentId,
   BrainAction,
+  BrainEvent,
   BrainEventEnvelope,
   ProfileId,
   SessionHandle,
@@ -16,20 +11,23 @@ import type {
 } from "@rusty-crew/contracts";
 import { Type } from "typebox";
 import type { BrainTool } from "./brain-tool.js";
-import type { BrainWakeInput } from "./index.js";
-import { createRoleplayNarratorBrain } from "./narrator-brain.js";
+import type { BrainImplementation, BrainWakeInput } from "./index.js";
+import {
+  createRoleplayNarratorBrain,
+  type RoleplayNarratorPhaseBrainOptions,
+} from "./narrator-brain.js";
 
 const sessionId = "roleplay-narrator-session" as SessionId;
 
 async function runSmoke(): Promise<void> {
-  const agentFactory = new RecordingAgentFactory([
+  const phaseFactory = new RecordingPhaseBrainFactory([
     '{"sceneBrief":{"location":"Moonlit Garden","capturedFacts":["silver locket missing"]}}',
     "Moonlight gathered around Katheryn as her hand closed on empty ribbon.",
   ]);
   const submittedEvents: BrainEventEnvelope[] = [];
 
   const brain = createRoleplayNarratorBrain({
-    createAgent: (options) => agentFactory.create(options),
+    createPhaseBrain: (options) => phaseFactory.create(options),
     resolveTools: () => ALL_TOOLS,
     submitEvent: async (event) => {
       submittedEvents.push(event);
@@ -108,8 +106,8 @@ async function runSmoke(): Promise<void> {
       ["tool_call_finished", "recall_lore"],
     ],
   );
-  assert.equal(agentFactory.calls.length, 2);
-  assert.deepEqual(agentFactory.calls[0]?.toolNames.sort(), [
+  assert.equal(phaseFactory.calls.length, 2);
+  assert.deepEqual(phaseFactory.calls[0]?.toolNames.sort(), [
     "capture_lore_fact",
     "get_lore_layer_config",
     "get_scene_state",
@@ -119,20 +117,27 @@ async function runSmoke(): Promise<void> {
     "search_lore",
     "update_scene_state",
   ]);
-  assert.deepEqual(agentFactory.calls[1]?.toolNames.sort(), [
+  assert.deepEqual(phaseFactory.calls[1]?.toolNames.sort(), [
     "get_scene_state",
     "update_scene_state",
   ]);
+  assert.deepEqual(
+    phaseFactory.calls.map((call) => [call.phase, call.plannedActions]),
+    [
+      ["explore", false],
+      ["compose", true],
+    ],
+  );
   assert.match(
-    agentFactory.calls[1]?.systemPrompt ?? "",
+    phaseFactory.calls[1]?.instructions ?? "",
     /Direct narrator style prompt:\nFavor crisp emotional interiority/,
   );
   assert.match(
-    agentFactory.calls[1]?.systemPrompt ?? "",
+    phaseFactory.calls[1]?.instructions ?? "",
     /Style exemplar\/reference prose:\nRain softened the window-glow/,
   );
   assert.match(
-    agentFactory.calls[1]?.systemPrompt ?? "",
+    phaseFactory.calls[1]?.instructions ?? "",
     /Treat the direct style prompt above as style guidance\/instructions, not as prose to copy/,
   );
   assert.equal(
@@ -157,8 +162,8 @@ async function runSmoke(): Promise<void> {
           .map((event) =>
             event.event.type === "phase_change" ? event.event.phase : "unknown",
           ),
-        exploreTools: agentFactory.calls[0]?.toolNames.sort(),
-        composeTools: agentFactory.calls[1]?.toolNames.sort(),
+        exploreTools: phaseFactory.calls[0]?.toolNames.sort(),
+        composeTools: phaseFactory.calls[1]?.toolNames.sort(),
         completion: result.actions.find(
           (action) => action.type === "deliver_completion",
         )?.packet.summary,
@@ -168,7 +173,7 @@ async function runSmoke(): Promise<void> {
     ),
   );
 
-  const reviewFactory = new RecordingAgentFactory([
+  const reviewFactory = new RecordingPhaseBrainFactory([
     '{"sceneBrief":{"location":"Moonlit Garden"}}',
     "Internal draft that should not stream.",
     "all clear",
@@ -176,7 +181,7 @@ async function runSmoke(): Promise<void> {
   ]);
   const reviewSubmittedEvents: BrainEventEnvelope[] = [];
   const reviewBrain = createRoleplayNarratorBrain({
-    createAgent: (options) => reviewFactory.create(options),
+    createPhaseBrain: (options) => reviewFactory.create(options),
     resolveTools: () => ALL_TOOLS,
     submitEvent: async (event) => {
       reviewSubmittedEvents.push(event);
@@ -221,61 +226,58 @@ async function runSmoke(): Promise<void> {
   );
 }
 
-class RecordingAgentFactory {
-  readonly calls: Array<{ toolNames: string[]; systemPrompt: string }> = [];
+class RecordingPhaseBrainFactory {
+  readonly calls: Array<{
+    phase: RoleplayNarratorPhaseBrainOptions["phase"];
+    toolNames: string[];
+    instructions: string;
+    plannedActions: boolean;
+  }> = [];
 
   constructor(private readonly responses: readonly string[]) {}
 
-  create(
-    options: PiAgentOptions,
-  ): Pick<PiAgent, "prompt" | "subscribe" | "waitForIdle"> &
-    Partial<Pick<PiAgent, "clearAllQueues">> {
-    const index = this.calls.length;
-    this.calls.push({
-      toolNames: (
-        (options.initialState?.tools ?? []) as Array<{ name: string }>
-      ).map((tool) => tool.name),
-      systemPrompt: options.initialState?.systemPrompt ?? "",
-    });
-    return new FinalMessageAgent(this.responses[index] ?? "");
-  }
-}
-
-class FinalMessageAgent {
-  private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;
-
-  constructor(private readonly text: string) {}
-
-  subscribe(
-    listener: (event: PiAgentEvent, signal: AbortSignal) => void,
-  ): () => void {
-    this.listener = listener;
-    return () => {
-      this.listener = undefined;
+  create(options: RoleplayNarratorPhaseBrainOptions): BrainImplementation {
+    return {
+      wake: async (input) => {
+        const index = this.calls.length;
+        const resolvedTools =
+          options.resolveTools?.({
+            wake: input,
+            tools: input.state.session.toolProfile?.tools ?? [],
+          }) ?? [];
+        this.calls.push({
+          phase: options.phase,
+          toolNames: resolvedTools.map((tool) => tool.name),
+          instructions: input.roleAssembly.instructions ?? "",
+          plannedActions: options.planActions !== undefined,
+        });
+        const call = this.calls[index];
+        assert.ok(call);
+        const events = [
+          eventEnvelope(input, { type: "started" }),
+          eventEnvelope(input, {
+            type: "text_delta",
+            text: this.responses[index] ?? "",
+          }),
+          eventEnvelope(input, { type: "finished" }),
+        ] satisfies BrainEventEnvelope[];
+        for (const event of events) {
+          await options.submitEvent?.(event);
+        }
+        const plannedActions = options.planActions
+          ? await options.planActions({
+              wake: input,
+              events,
+              toolActions: [],
+            })
+          : [];
+        return {
+          events: options.submitEvent ? [] : events,
+          actions: plannedActions,
+        };
+      },
     };
   }
-
-  async prompt(
-    _input: PiAgentMessage[] | PiAgentMessage | string,
-  ): Promise<void> {
-    const signal = new AbortController().signal;
-    this.listener?.({ type: "agent_start" } as PiAgentEvent, signal);
-    this.listener?.(
-      {
-        type: "message_update",
-        assistantMessageEvent: { type: "text_delta", delta: this.text },
-      } as PiAgentEvent,
-      signal,
-    );
-    this.listener?.(
-      { type: "agent_end", messages: [] } as PiAgentEvent,
-      signal,
-    );
-  }
-
-  async waitForIdle(): Promise<void> {}
-
-  clearAllQueues(): void {}
 }
 
 const ALL_TOOL_NAMES = [
@@ -315,6 +317,17 @@ function textFromEvents(events: readonly BrainEventEnvelope[]): string {
       event.event.type === "text_delta" ? [event.event.text] : [],
     )
     .join("");
+}
+
+function eventEnvelope(
+  input: BrainWakeInput,
+  event: BrainEvent,
+): BrainEventEnvelope {
+  return {
+    wakeId: input.wakeId,
+    sessionId: input.sessionId,
+    event,
+  };
 }
 
 function wakeInput(wakeId: string): BrainWakeInput {

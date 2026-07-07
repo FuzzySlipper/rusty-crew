@@ -59,7 +59,6 @@ import {
 } from "./brain-module.js";
 import { wakeBrainFromBridgeRequest } from "./bridge-wake.js";
 import { nextCronDueAt } from "./cron-expression.js";
-import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import {
   denseProfileMemoryTool,
   type DenseProfileMemoryMode,
@@ -71,7 +70,6 @@ import { resolveSceneStateTools } from "./scene-state-tool.js";
 import type { BrainImplementation, BrainWakeResult } from "./index.js";
 import { resolveLocalCodeTools } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
-import type { PiAgentFactory } from "./pi-agent-brain.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import { providerStateScopeForProfile } from "./provider-state-fingerprints.js";
@@ -713,9 +711,6 @@ export async function applyRustyCrewRuntimeConfig(input: {
   bridge: NativeBridgeModule;
   existingBrainHandlesByProfileId?: Record<string, BrainImplementationHandle>;
   createMissingSessions?: boolean;
-  createDenRouterAgentFactory?: (
-    options: Parameters<typeof createDenRouterPiAgentFactory>[0],
-  ) => Promise<PiAgentFactory>;
   curatorExecutor?: CuratorExecuteContext["executor"];
   mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
@@ -809,7 +804,6 @@ export async function applyRustyCrewRuntimeConfig(input: {
         },
         toBridgeWakeExecutor(
           await createConfiguredBrain(module, profile, {
-            createDenRouterAgentFactory: input.createDenRouterAgentFactory,
             bridge: input.bridge,
             providerStateScope,
             runtimeConfig,
@@ -976,9 +970,6 @@ export async function rebuildConfiguredBrainRuntime(input: {
   runtimeConfig: RustyCrewRuntimeConfig;
   profileId: ProfileId;
   bridge: NativeBridgeModule;
-  createDenRouterAgentFactory?: (
-    options: Parameters<typeof createDenRouterPiAgentFactory>[0],
-  ) => Promise<PiAgentFactory>;
   curatorExecutor?: CuratorExecuteContext["executor"];
   mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
@@ -1041,7 +1032,6 @@ export async function rebuildConfiguredBrainRuntime(input: {
     },
     toBridgeWakeExecutor(
       await createConfiguredBrain(module, profile, {
-        createDenRouterAgentFactory: input.createDenRouterAgentFactory,
         bridge: input.bridge,
         providerStateScope,
         runtimeConfig,
@@ -1345,9 +1335,6 @@ async function createConfiguredBrain(
   module: BrainModule,
   profile: Awaited<ReturnType<typeof loadProfileContext>>,
   options: {
-    createDenRouterAgentFactory?: (
-      options: Parameters<typeof createDenRouterPiAgentFactory>[0],
-    ) => Promise<PiAgentFactory>;
     bridge?: NativeBridgeModule;
     runtimeConfig?: RustyCrewRuntimeConfig;
     serviceConfig?: RustyCrewServiceConfig;
@@ -1370,7 +1357,6 @@ async function createConfiguredBrain(
     toolResolver: createServiceToolResolver(profile, options),
     planActions: completionActionFromEvents,
     maxTokens: effectiveModelMaxTokens(profile),
-    createDenRouterAgentFactory: options.createDenRouterAgentFactory,
     toolCallDebugStore: options.toolCallDebugStore,
     providerRequestDebugStore: options.providerRequestDebugStore,
   });

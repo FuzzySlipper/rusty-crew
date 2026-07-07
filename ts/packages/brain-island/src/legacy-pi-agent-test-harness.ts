@@ -1,18 +1,14 @@
-import type {
-  Agent as PiAgent,
-  AgentEvent as PiAgentEvent,
-  AgentMessage as PiAgentMessage,
-  AgentOptions as PiAgentOptions,
-  AgentTool as PiAgentTool,
-} from "@earendil-works/pi-agent-core";
+import type { Static, TSchema } from "typebox";
 import type {
   BrainAction,
   AgentMessage as RustyAgentMessage,
   BrainEvent,
   BrainEventEnvelope,
+  SessionId,
   ToolDescriptor,
   ToolProfile,
 } from "@rusty-crew/contracts";
+import type { BrainToolExecutionMode } from "./brain-tool.js";
 import type {
   BrainActionPlanner,
   BrainImplementation,
@@ -25,13 +21,121 @@ import {
   resolveToolSession,
   type BrainToolResolver,
 } from "./tool-session-selection.js";
-import { toPiAgentTools } from "./pi-tool-adapter.js";
+import { toPiAgentTools } from "./legacy-pi-tool-adapter-test-harness.js";
 import {
   localToolCallMetadata,
   type ToolCallDebugStore,
   withToolCallDebugReference,
 } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
+
+// Legacy TS pi-agent test harness only. Production pi-agent module wiring now
+// uses the Rust pi-agent brain through the native bridge.
+export interface AgentToolResult<TDetails = unknown> {
+  content: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  >;
+  details: TDetails;
+  terminate?: boolean;
+}
+
+export type AgentToolUpdateCallback<TDetails = unknown> = (
+  partial: AgentToolResult<TDetails>,
+) => void | Promise<void>;
+
+export interface AgentTool<
+  TParameters extends TSchema = TSchema,
+  TDetails = unknown,
+> {
+  name: string;
+  description: string;
+  label: string;
+  parameters: TParameters;
+  prepareArguments?: (raw: unknown) => Static<TParameters>;
+  execute(
+    toolCallId: string,
+    params: Static<TParameters>,
+    signal?: AbortSignal,
+    onUpdate?: AgentToolUpdateCallback<TDetails>,
+  ): Promise<AgentToolResult<TDetails>>;
+  executionMode?: BrainToolExecutionMode;
+}
+
+export interface AgentOptions {
+  initialState?: {
+    systemPrompt?: string;
+    messages?: AgentMessage[];
+    tools?: AgentTool[];
+  };
+  sessionId: SessionId;
+  steeringMode?: string;
+  followUpMode?: string;
+}
+
+export interface AgentMessage {
+  role: "user" | "assistant" | "system" | string;
+  content: Array<
+    | { type: "text"; text: string }
+    | { type: "thinking"; thinking: string }
+    | { type: "image"; data: string; mimeType: string }
+  >;
+  api?: string;
+  provider?: string;
+  model?: string;
+  usage?: unknown;
+  stopReason?: string;
+  errorMessage?: string;
+  timestamp?: number;
+}
+
+export type AgentEvent =
+  | { type: "agent_start" }
+  | {
+      type: "message_update";
+      assistantMessageEvent:
+        | { type: "text_delta"; delta?: string }
+        | { type: "thinking_delta"; delta?: string }
+        | { type: string; delta?: string };
+    }
+  | { type: "message_end"; message: AgentMessage }
+  | {
+      type: "tool_execution_start";
+      toolCallId: string;
+      toolName: string;
+      args?: unknown;
+      partialResult?: unknown;
+    }
+  | {
+      type: "tool_execution_update";
+      toolCallId: string;
+      toolName: string;
+      args?: unknown;
+      partialResult?: unknown;
+    }
+  | {
+      type: "tool_execution_end";
+      toolCallId: string;
+      toolName: string;
+      isError: boolean;
+      result?: unknown;
+    }
+  | { type: "agent_end"; messages: AgentMessage[] };
+
+export interface Agent {
+  prompt(input: AgentMessage | AgentMessage[] | string): Promise<void>;
+  subscribe(
+    listener: (event: AgentEvent, signal: AbortSignal) => void,
+  ): () => void;
+  waitForIdle(): Promise<void>;
+  clearAllQueues?(): void;
+}
+
+type PiAgent = Agent;
+type PiAgentEvent = AgentEvent;
+type PiAgentMessage = AgentMessage;
+type PiAgentOptions = AgentOptions;
+type PiAgentTool = AgentTool;
 
 export type PiAgentLike = Pick<
   PiAgent,

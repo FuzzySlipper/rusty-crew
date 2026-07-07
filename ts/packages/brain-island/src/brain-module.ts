@@ -21,13 +21,11 @@ import type {
   PiAgentBrainRunInput,
   PiAgentTransportMetrics,
 } from "@rusty-crew/native-bridge";
-import { createDenRouterPiAgentFactory } from "./den-router-agent.js";
 import type { LoadedProfileContext } from "./profile-loading.js";
 import {
   createRoleplayNarratorBrain,
   type RoleplayNarratorPhaseBrainOptions,
 } from "./narrator-brain.js";
-import type { PiAgentFactory } from "./pi-agent-brain.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import {
   effectiveWakeTimeoutMs,
@@ -134,9 +132,6 @@ export interface BrainModuleContext {
   maxTokens?: number;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
-  createDenRouterAgentFactory?: (
-    options: Parameters<typeof createDenRouterPiAgentFactory>[0],
-  ) => Promise<PiAgentFactory>;
 }
 
 export interface BrainModule {
@@ -296,8 +291,7 @@ export const piAgentCoreBrainModule: BrainModule = {
             toolProfile: phase.toolProfile,
             submitEvent: phase.submitEvent,
             liveEvents: phase.submitEvent !== undefined,
-            planActions:
-              phase.phase === "compose" ? context.planActions : undefined,
+            planActions: phase.planActions,
           }),
         planActions: context.planActions,
         resolveTools: context.toolResolver,

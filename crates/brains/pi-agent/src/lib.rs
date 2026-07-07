@@ -1019,18 +1019,18 @@ impl PiAgentEventMapper {
     ) -> Vec<BrainWakeStreamItem> {
         events
             .into_iter()
-            .filter_map(|event| match event {
+            .map(|event| match event {
                 LiteralThinkEvent::Text(text) => {
                     self.saw_text_delta = true;
-                    Some(brain_event_item(context, BrainEvent::TextDelta { text }))
+                    brain_event_item(context, BrainEvent::TextDelta { text })
                 }
-                LiteralThinkEvent::Reasoning(text) => Some(brain_event_item(
+                LiteralThinkEvent::Reasoning(text) => brain_event_item(
                     context,
                     BrainEvent::ReasoningDelta {
                         text,
                         format: Some("literal-think-tag".to_string()),
                     },
-                )),
+                ),
             })
             .collect()
     }

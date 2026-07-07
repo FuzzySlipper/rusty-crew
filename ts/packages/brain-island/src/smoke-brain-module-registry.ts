@@ -6,7 +6,7 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import type {
   BrainImplementationHandle,
   SessionId,
@@ -104,15 +104,10 @@ try {
     defaultIdleTimeoutMs: 1_000,
   });
   try {
-    const denRouterOptions: unknown[] = [];
     const applyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig,
       runtimeConfig,
       bridge: native,
-      createDenRouterAgentFactory: async (options) => {
-        denRouterOptions.push(options);
-        return (agentOptions) => new FinalTextFakePiAgent(agentOptions);
-      },
     });
 
     assert.equal(
@@ -189,8 +184,6 @@ try {
       "input_not_append_only",
       "normal_invalidation",
     ]);
-    assert.equal(denRouterOptions.length, 0);
-
     const diagnostics = buildRuntimeDiagnosticsProjection({
       now: "2026-06-23T19:00:00Z",
       sessions: await native.listSessions(),

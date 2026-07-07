@@ -10,12 +10,9 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentTool as PiAgentTool,
-} from "@earendil-works/pi-agent-core";
-import {
-  BodyControlledDeltaQueue,
-  createPiAgentBrain,
-  defaultBodyDeltaPolicy,
-} from "./index.js";
+} from "./legacy-pi-agent-test-harness.js";
+import { BodyControlledDeltaQueue, defaultBodyDeltaPolicy } from "./index.js";
+import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
 
 class FakeAgent {
   private listener?: (event: PiAgentEvent, signal: AbortSignal) => void;

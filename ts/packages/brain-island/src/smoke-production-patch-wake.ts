@@ -7,7 +7,7 @@ import type {
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
   AgentTool,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   BodyState,
@@ -20,12 +20,12 @@ import type {
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
-  createPiAgentBrain,
   defaultBodyDeltaPolicy,
   registerBrainImplementationRuntime,
   resolveLocalCodeTools,
   selectToolProfile,
 } from "./index.js";
+import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;

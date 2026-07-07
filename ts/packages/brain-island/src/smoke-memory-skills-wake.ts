@@ -7,7 +7,7 @@ import type {
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
   AgentTool,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import type {
   DenMemoryClient,
   DenMemoryRecallRequest,
@@ -27,7 +27,6 @@ import {
   buildProfileRoleAssembly,
   buildToolContextDiagnosticsReport,
   buildToolRegistryDiagnostics,
-  createPiAgentBrain,
   defaultBodyDeltaPolicy,
   denseProfileMemoryTool,
   loadProfileContext,
@@ -37,6 +36,7 @@ import {
   resolveDenMemoryTools,
   resolveSkillsTools,
 } from "./index.js";
+import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;

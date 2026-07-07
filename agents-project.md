@@ -24,17 +24,19 @@ not the current planning queue.
 
 ## Architecture Soul
 
-> Rust owns deterministic coordination. Brain modules run behind the neutral
-> wake contract. TypeScript owns the pi-agent brain integration and external
-> adapters. The bridge manifest defines the border.
+> Rust owns deterministic coordination and production brain loops. Brain
+> modules run behind the neutral wake contract. TypeScript owns service
+> composition, tools, profiles, and external adapters. The bridge manifest
+> defines the border.
 
 - Rust is authoritative for coordination: internal bus routing, sessions,
   body-state projection, wake thresholds, brain action validation, delegated
   worker lifecycle, completion packet persistence, and restart hydration.
-- TypeScript owns the current `@earendil-works/pi-agent-core` /
-  `@earendil-works/pi-ai` integration, many model-callable tool
-  implementations, role/profile composition, MCP clients, and platform
-  adapters.
+- Rust owns the current pi-agent brain loop and OpenAI Responses brain loop
+  behind the neutral wake/stream/action/provider-state contract.
+- TypeScript owns many model-callable tool implementations, neutral tool
+  execution, role/profile composition, MCP clients, roleplay narrator
+  sequencing during the transition, and platform adapters.
 - Rust brain modules are first-class only behind the same neutral
   wake/stream/action/provider-state contract. They must not depend on
   coordination internals, persistence, adapters, service-host code, or local

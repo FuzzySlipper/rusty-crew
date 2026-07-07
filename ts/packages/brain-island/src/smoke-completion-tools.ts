@@ -3,7 +3,7 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   BrainAction,
@@ -12,11 +12,11 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import {
-  createPiAgentBrain,
   defaultBodyDeltaPolicy,
   resolveCompletionTools,
   selectToolProfile,
 } from "./index.js";
+import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
 
 const sessionId = "completion-tools-session" as SessionId;
 const agentId = "completion-tools-agent" as AgentId;

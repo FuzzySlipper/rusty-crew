@@ -21,11 +21,13 @@ import type {
 import { createDenAdapter } from "@rusty-crew/adapter-den";
 import { createMemoryDenProjectionSink } from "@rusty-crew/adapter-den/test-support";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import { defaultBodyDeltaPolicy } from "./index.js";
 import {
-  createDenRouterPiAgentFactory,
   createPiAgentBrain,
-  defaultBodyDeltaPolicy,
-} from "./index.js";
+  type AgentEvent,
+  type AgentMessage as PiAgentMessage,
+  type PiAgentFactory,
+} from "./legacy-pi-agent-test-harness.js";
 
 const decoder = new TextDecoder();
 const engineDataDir = mkdtempSync(
@@ -39,14 +41,33 @@ const engine = await native.initializeEngine({
   defaultIdleTimeoutMs: 1_000,
 });
 
+class SilentFakeAgent {
+  private listener?: (event: AgentEvent, signal: AbortSignal) => void;
+
+  subscribe(
+    listener: (event: AgentEvent, signal: AbortSignal) => void,
+  ): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async prompt(
+    _input: PiAgentMessage | PiAgentMessage[] | string,
+  ): Promise<void> {
+    const signal = new AbortController().signal;
+    this.listener?.({ type: "agent_start" }, signal);
+    this.listener?.({ type: "agent_end", messages: [] }, signal);
+  }
+
+  async waitForIdle(): Promise<void> {}
+
+  clearAllQueues(): void {}
+}
+
 try {
-  const createAgent = await createDenRouterPiAgentFactory({
-    modelId: process.env.RUSTY_CREW_DEN_ROUTER_MODEL,
-    maxTokens: Number.parseInt(
-      process.env.RUSTY_CREW_DEN_ROUTER_MAX_TOKENS ?? "64",
-      10,
-    ),
-  });
+  const createAgent: PiAgentFactory = () => new SilentFakeAgent();
   const plannerSessionId = "planner-session" as SessionId;
   const plannerAgentId = "planner" as AgentId;
   const plannerWakeId = "planner-wake-1";

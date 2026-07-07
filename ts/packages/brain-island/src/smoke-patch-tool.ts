@@ -7,7 +7,7 @@ import type {
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
   AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+} from "./legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   ProfileId,
@@ -15,12 +15,12 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import {
-  createPiAgentBrain,
   defaultBodyDeltaPolicy,
   patchTool,
   resolveLocalCodeTools,
   selectToolProfile,
 } from "./index.js";
+import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
 
 const workdir = mkdtempSync(join(tmpdir(), "rusty-crew-patch-tool-"));
 const outsideDir = mkdtempSync(

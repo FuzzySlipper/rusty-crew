@@ -130,7 +130,6 @@
     "smoke:local-code-tools": "tsx src/smoke-local-code-tools.ts",
     "smoke:patch-tool": "tsx src/smoke-patch-tool.ts",
     "smoke:service-config": "tsx src/smoke-service-config.ts",
-    "smoke:service-den-router-tools": "tsx src/smoke-service-den-router-tools.ts",
     "smoke:pi-agent-brain-events": "tsx src/smoke-pi-agent-brain-events.ts",
     "smoke:brain-island-entrypoint-surface": "tsx src/smoke-brain-island-entrypoint-surface.ts",
     "test:unit": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test test/**/*.test.ts",
@@ -138,22 +137,8 @@
     "cron": "tsx src/cron-cli.ts",
     "generate:tool-registry-artifact": "tsx src/generate-tool-registry-artifact.ts"
   },
-  "piPackageSource": {
-    "repository": "https://github.com/earendil-works/pi",
-    "commit": "6e6ce70caf3328683517b0e308fdbbc6d1c1abc9",
-    "packages": {
-      "@earendil-works/pi-agent-core": "0.79.8",
-      "@earendil-works/pi-ai": "0.79.8"
-    }
-  },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.79.8",
-    "@earendil-works/pi-ai": "0.79.8",
     "@rusty-crew/native-bridge": "0.1.0",
     "@rusty-crew/contracts": "0.1.0"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-agent-core": "0.79.8",
-    "@earendil-works/pi-ai": "0.79.8"
   }
 }

@@ -4,12 +4,11 @@ This directory holds implementation notes, ADRs, runbooks, audits, proof
 slices, and historical records for Rusty Crew.
 
 Rusty Crew is a Rust-owned coordination runtime with a TypeScript service host,
-a TypeScript brain island built on `@earendil-works/pi-agent-core`, and
-first-class Rust brain modules behind the same neutral
-wake/stream/action/provider-state contract. Use this README as a local document
-map; use Den project `rusty-crew`, especially the `rusty-crew-unified-architecture`
-and `brain-body-architecture` documents, as the live architecture source of
-truth.
+TypeScript tool/profile/adapter composition, and first-class Rust brain modules
+behind the neutral wake/stream/action/provider-state contract. Use this README
+as a local document map; use Den project `rusty-crew`, especially the
+`rusty-crew-unified-architecture` and `brain-body-architecture` documents, as
+the live architecture source of truth.
 
 When local companion docs conflict with the unified architecture, ADRs, current
 code, or the repository root `README.md` / `AGENTS.md`, the unified architecture
@@ -26,14 +25,13 @@ by landed work; see `docs/historical/README.md`.
   old planning prose.
 - **The unified architecture doc wins** when companion docs contradict it.
 
-## Current source assumption
+## Current brain posture
 
-The TypeScript brain island uses the current `earendil-works/pi` source
-(`https://github.com/earendil-works/pi`) and its published
-`@earendil-works/pi-*` package names. The pin lives in
-`pi-package-source-lock.md` and ADR `0001-current-pi-package-source.md` (in the
-repo-root `adr/` directory). References in these docs to older local research
-checkouts, older package locations, or version-skewed comparisons are
+Production brain loops are Rust brain modules behind the neutral
+wake/stream/action/provider-state contract. The `pi-agent-core` module id is a
+compatibility name for the Rust pi-agent brain, not a dependency on the old
+`@earendil-works/pi-*` packages. References in these docs to older local
+research checkouts, older package locations, or version-skewed comparisons are
 historical audit context only; they are not an implementation recommendation.
 
 ## Start here
@@ -70,8 +68,8 @@ historical audit context only; they are not an implementation recommendation.
      moving service composition out of the oversized brain-island service app
      without breaking the working service.
    - `rust-pi-agent-brain-port-contract.md` — parity matrix and cutover
-     boundary for moving the current pi-agent brain from TypeScript to a Rust
-     brain module without porting the unused pi-ai provider matrix.
+     boundary for the Rust pi-agent brain module without porting the unused
+     pi-ai provider matrix.
 
 2. **Two brain surfaces, one contract.** Rust coordination wakes a brain with a
    frozen `BodyState` snapshot; brain implementations emit
@@ -80,10 +78,13 @@ historical audit context only; they are not an implementation recommendation.
    lifecycle effects, and persists coordination state. Implementations today:
    - `crates/brains/openai-responses` — Rust brain for the OpenAI Responses
      API. Wired into production wake handling through the native bridge.
-   - `ts/packages/brain-island` — TypeScript brain island built on
-     `@earendil-works/pi-agent-core` / `pi-ai`. Owns the pi package
-     integration, model-callable tool adaptation, profile/role assembly, and
-     the roleplay narrator brain.
+   - `crates/brains/pi-agent` — Rust brain for OpenAI-compatible
+     chat-completions style agent loops. Wired into the compatibility
+     `pi-agent-core` module id through the native bridge.
+   - `ts/packages/brain-island` — TypeScript service/brain island. Owns
+     model-callable tool implementations and adaptation, profile/role assembly,
+     MCP clients, platform adapters, and transitional roleplay narrator
+     sequencing that invokes Rust brain sub-wakes.
 
 3. **Historical audit context (read-only, not binding).** The `pi-crew-*` and
    `pi-agent-rust-port-inspiration.md` / `rust-llm-ecosystem-research.md` docs

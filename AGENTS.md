@@ -54,9 +54,11 @@ not the current planning queue.
 - Rust is authoritative for coordination: internal bus routing, sessions,
   body-state projection, wake thresholds, brain action validation, delegated
   worker lifecycle, completion packet persistence, and restart hydration.
-- TypeScript owns the brain island, the current
-  `@earendil-works/pi-agent-core` / `@earendil-works/pi-ai` integration, tool
-  execution, role/profile composition, and platform adapters.
+- Rust owns production brain loops behind the neutral wake contract, including
+  the pi-agent and OpenAI Responses brains.
+- TypeScript owns the brain island service composition, neutral tool
+  execution, role/profile composition, roleplay narrator sequencing during the
+  transition, MCP clients, and platform adapters.
 - Den owns product data and observability. Den is not the internal
   agent-to-agent coordination bus.
 - The brain receives frozen state snapshots and emits structured actions. It
