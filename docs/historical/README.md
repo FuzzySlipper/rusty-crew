@@ -21,6 +21,15 @@ document `rusty-crew-unified-architecture`.
   service-host` extracted as composition root). Do not treat early-phase
   wording as current policy.
 
+- `architecture-review-2026-07-05.md` — five-track durability review of the
+  repo at commit `4dd0199`, taken immediately before the remediation wave. Of
+  its seven ranked risks, CI, ops hardening, toolchain pinning, commit
+  history, the persistence/bridge god-file splits, and Postgres
+  migrations/pooling/CI-tested conformance have since landed; the open
+  remainder (composition-layer ownership, smoke relocation, bridge coverage,
+  test pyramid) is re-ranked in `docs/architecture-review-2026-07-06.md`,
+  which supersedes it as the current snapshot.
+
 - `postgres-full-service-gap-audit.md` — audit of pre-cutover PostgreSQL state
   for task 3502. Its own status line declares it historical and instructs
   readers not to use its "Current Live Deployment" section as current

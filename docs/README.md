@@ -253,7 +253,7 @@ policy lives in `stubs-fakes-placeholders-policy.md`, `adr/0015-test-seams-and-p
 and `adr/0016-runtime-clock-policy.md`. The parity-audit grounding snapshot is
 `parity-open-questions-grounding.md` (a dated snapshot; re-check against code
 before relying on its findings). The current maintenance/durability review
-snapshot is `architecture-review-2026-07-05.md` (dated; code wins on conflict).
+snapshot is `architecture-review-2026-07-06.md` (dated; code wins on conflict).
 
 ## What this service is *not*
 
