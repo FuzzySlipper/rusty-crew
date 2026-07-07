@@ -173,8 +173,8 @@ The broad buckets at the start of this transition are:
   compatibility proofs.
 - `ts/smokes/*.ts` is the current home for cross-package/operator smokes.
 
-As of task 4330, the discoverable catalogue contains 260 smoke entries: 126
-root aliases and 134 package entries. The default validation gate does not run
+As of task 4510, the discoverable catalogue contains 273 smoke entries: 130
+root aliases and 143 package entries. The default validation gate does not run
 that full catalogue. It runs only the curated deterministic subset in
 `verify:ts`, and the validation audit blocks accidental promotion of
 live/service/infrastructure smokes into that subset.
@@ -195,10 +195,15 @@ Choose the narrowest layer that proves the behavior:
 
 Do not add new smoke files under package `src/`. Existing `src/smoke-*.ts`
 files remain supported until they are moved in focused follow-up patches.
+`npm run smoke:architecture-boundaries` enforces the current brain-island
+legacy `src/smoke-*.ts` ceiling so new files do not quietly land in production
+source directories. It also checks package-local `smokes/` imports, with only
+explicit legacy exemptions for old smoke files that still need migration.
 
 Prefer adding a package-local `smoke:<name>` script plus runner metadata instead
 of adding another root alias. Root aliases are reserved for high-muscle-memory
-commands or CI entry points.
+commands or CI entry points, and the validation audit freezes the current root
+alias count until old aliases are deliberately retired.
 
 ## Moving Existing Smokes
 

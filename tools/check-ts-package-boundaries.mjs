@@ -15,6 +15,139 @@ const adapterPackages = [
   "@rusty-crew/adapter-telegram",
   "@rusty-crew/adapter-tui",
 ];
+const legacyBrainIslandSrcSmokeCount = 132;
+const legacySrcSmokeAllowedImports = new Map([
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-adapter-diagnostics.ts"),
+    new Set(["@rusty-crew/adapter-den", "@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-channel-readback-tool.ts",
+    ),
+    new Set(["@rusty-crew/adapter-den"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-coordination-tools-live.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-delegated-slice.ts"),
+    new Set(["@rusty-crew/adapter-den"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-den-assignment-evidence-e2e.ts",
+    ),
+    new Set(["@rusty-crew/adapter-den"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-den-channels-e2e.ts"),
+    new Set(["@rusty-crew/adapter-den"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-den-memory-tools.ts"),
+    new Set(["@rusty-crew/adapter-den"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-den-successor-service.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-mcp-reload.ts"),
+    new Set(["@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-mcp-surfaces-e2e.ts"),
+    new Set(["@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-mcp-tool-registry.ts"),
+    new Set(["@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-mcp-tool-telemetry.ts"),
+    new Set(["@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-memory-skills-wake.ts"),
+    new Set(["@rusty-crew/adapter-den"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-new-session-config-transaction.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-reload-mcp-control.ts"),
+    new Set(["@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-responses-concurrency-capacity.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-responses-event-loop.ts"),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-responses-service-field-test.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-roleplay-browser-api.ts"),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-runtime-rebuild-replacement.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-rusty-view-chat-context.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-rusty-view-chat-read-api.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-service-postgres-startup.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
+    normalizePath("ts/packages/brain-island/src/smoke-slash-command-e2e.ts"),
+    new Set(["@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-telegram-service-connector.ts",
+    ),
+    new Set(["@rusty-crew/adapter-den", "@rusty-crew/adapter-telegram"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-wake-timeout-config-patch.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+]);
 
 expectNoDependencies("@rusty-crew/brain-island", [
   "@rusty-crew/service-host",
@@ -41,6 +174,10 @@ expectNoSourceImports("@rusty-crew/brain-island", [
   "@rusty-crew/service-host",
   ...adapterPackages,
 ]);
+expectNoNewSrcSmokes(
+  "@rusty-crew/brain-island",
+  legacyBrainIslandSrcSmokeCount,
+);
 for (const adapterName of adapterPackages) {
   expectNoSourceImports(adapterName, [
     "@rusty-crew/brain-island",
@@ -126,21 +263,48 @@ function dependenciesFor(packageName) {
 function expectNoSourceImports(packageName, forbidden) {
   const pkg = packagesByName.get(packageName);
   if (!pkg) return;
-  const sourceDir = join(pkg.dir, "src");
-  if (!existsSync(sourceDir)) return;
-  for (const sourceFile of findTsFiles(sourceDir)) {
+  for (const sourceFile of sourceAndSmokeFiles(pkg)) {
     const relativePath = normalizePath(relative(root, sourceFile));
-    if (relativePath.includes("/smoke-")) continue;
     if (relativePath.endsWith("/test-support.ts")) continue;
     const source = readFileSync(sourceFile, "utf8");
     for (const dependency of forbidden) {
+      if (isAllowedLegacySmokeImport(relativePath, dependency)) {
+        continue;
+      }
       if (importsPackage(source, dependency)) {
+        const label = relativePath.includes("/smokes/") ? "smoke" : "source";
         violations.push(
-          `${packageName} source ${relativePath} must not import ${dependency}`,
+          `${packageName} ${label} ${relativePath} must not import ${dependency}`,
         );
       }
     }
   }
+}
+
+function sourceAndSmokeFiles(pkg) {
+  const roots = [join(pkg.dir, "src"), join(pkg.dir, "smokes")];
+  return roots.flatMap((dir) => (existsSync(dir) ? findTsFiles(dir) : []));
+}
+
+function expectNoNewSrcSmokes(packageName, expectedCount) {
+  const pkg = packagesByName.get(packageName);
+  if (!pkg) return;
+  const sourceDir = join(pkg.dir, "src");
+  if (!existsSync(sourceDir)) return;
+  const srcSmokeFiles = findTsFiles(sourceDir)
+    .map((sourceFile) => normalizePath(relative(root, sourceFile)))
+    .filter((relativePath) => relativePath.includes("/smoke-"));
+  if (srcSmokeFiles.length > expectedCount) {
+    violations.push(
+      `${packageName} has ${srcSmokeFiles.length} src smoke files; move new smokes to ts/packages/<package>/smokes/ and keep the legacy ceiling at ${expectedCount}`,
+    );
+  }
+}
+
+function isAllowedLegacySmokeImport(relativePath, dependency) {
+  return (
+    legacySrcSmokeAllowedImports.get(relativePath)?.has(dependency) === true
+  );
 }
 
 function findTsFiles(dir) {

@@ -28,7 +28,7 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
-import { createDebugApiClient } from "./debug-api-client.js";
+import { createDebugApiClient } from "@rusty-crew/brain-island";
 import {
   createSystemdNotifier,
   localHealthBaseUrl,
@@ -39,6 +39,7 @@ import {
 const blockedPostgresRoot = mkdtempSync(
   join(tmpdir(), "rusty-crew-service-host-postgres-blocked-"),
 );
+checkpoint("postgres preflight");
 try {
   let initializeCalled = false;
   const blockedPostgresPort = await openPort();
@@ -110,6 +111,7 @@ await assertSystemdNotifierSmoke();
 writeRuntimeConfig(root);
 writeStaticSite(root);
 let host = await startHost(root, port, token);
+checkpoint("host started");
 
 try {
   assert.equal(existsSync(join(root, "data", "engine")), true);
@@ -163,9 +165,10 @@ try {
   assert.equal(ready.body.ok, true);
 
   const chatSessions = await get("/v1/chat/sessions", token);
-  assert.equal(chatSessions.status, 200);
+  assert.equal(chatSessions.status, 200, JSON.stringify(chatSessions.body));
   assert.equal(chatSessions.body.ok, true);
   assert.equal(chatSessions.body.data.items.length, 1);
+  checkpoint("static/admin/chat routes");
 
   const diagnostics = await get("/v1/admin/diagnostics", token);
   assert.equal(diagnostics.status, 200);
@@ -307,6 +310,7 @@ try {
     recentEvents.body.data.items[0]?.summary,
     /1 brains registered.*1 sessions created/,
   );
+  checkpoint("diagnostics catalog");
 
   const maintenance = await post("/v1/admin/control/maintenance", token, {
     reason: "smoke",
@@ -367,6 +371,7 @@ try {
     curatorRun.body.data.outcome.result.summary,
     /scan produced [1-9]/,
   );
+  checkpoint("admin controls");
 
   const client = createDebugApiClient({
     baseUrl: `http://127.0.0.1:${port}`,
@@ -407,6 +412,7 @@ try {
       .completion_packets,
     completionPacketsBeforeDirectTurn + 1,
   );
+  checkpoint("direct debug turn");
 
   await host.bridge.registerScheduledWakeJob({
     jobId: "field-session-smoke-heartbeat",
@@ -518,6 +524,7 @@ try {
     typeof backgroundDiagnostics.body.data.backgroundReview.lastRunAt,
     "string",
   );
+  checkpoint("scheduler/background jobs");
 
   await host.bridge.createSession({
     sessionId: "field-session-expiry" as SessionId,
@@ -549,6 +556,7 @@ try {
     },
     7_000,
   );
+  checkpoint("queue expiry");
 
   await host.stop();
   host = await startHost(root, port, token);
@@ -621,6 +629,7 @@ try {
       .sort(),
     ["field-mcp", "field-mcp-extra"],
   );
+  checkpoint("restart and config reload");
 
   await host.stop();
 
@@ -655,6 +664,7 @@ try {
     assert.equal(existsSync(join(staleLockRoot, "run", "service.lock")), false);
     rmSync(staleLockRoot, { recursive: true, force: true });
   }
+  checkpoint("stale lock recovery");
 
   const noAuthRoot = mkdtempSync(join(tmpdir(), "rusty-crew-service-noauth-"));
   const noAuthPort = await openPort();
@@ -672,6 +682,7 @@ try {
     const noAuthReady = await get("/v1/admin/readyz", undefined, noAuthPort);
     assert.equal(noAuthReady.status, 200);
     assert.equal(noAuthReady.body.ok, true);
+    checkpoint("no-auth host started");
 
     const defaultProvider = await post(
       "/v1/admin/model-providers",
@@ -862,6 +873,7 @@ try {
     );
     assert.equal(oauthClear.status, 200);
     assert.equal(oauthClear.body.data.credential.hasSecret, false);
+    checkpoint("model provider oauth test-mode");
 
     const fakeOauth = await startFakeOpenAiOauthServer();
     try {
@@ -931,6 +943,7 @@ try {
     } finally {
       await fakeOauth.stop();
     }
+    checkpoint("model provider oauth real-shape");
 
     const alternateRevision = alternateProvider.body.data.provider.revision;
     const updatedAlternateProvider = await patch(
@@ -1064,6 +1077,7 @@ try {
       invalidToolProfile.body.error.reason_code,
       "local_tool_profile_rejects_mcp_toolset",
     );
+    checkpoint("local tool profiles");
 
     const updatedToolProfile = await patch(
       "/v1/admin/local-tool-profiles/field_custom",
@@ -1193,6 +1207,7 @@ try {
       "local_code_read",
     ]);
     assert.deepEqual(createdProfileConfig.toolPolicy?.requestedTools, []);
+    checkpoint("profile create");
 
     const customChatProfile = await post(
       "/v1/admin/control/profiles",
@@ -1468,6 +1483,7 @@ try {
       )?.contentText,
       "Registry DB memory edited through Rusty View.",
     );
+    checkpoint("profile registry prompt editing");
     const registryRuntimeRevision = registryPromptApply.body.data.record
       .revision as number;
     const registryRuntimePlan = await post(
@@ -1686,6 +1702,7 @@ try {
         .map((diagnostic: { code: string }) => diagnostic.code),
       ["model_provider_not_found", "inline_tool_policy_unknown_toolset"],
     );
+    checkpoint("profile runtime config editing");
     const registryMismatch = await post(
       "/v1/admin/profiles/registry/field-created-profile/update/apply",
       undefined,
@@ -1775,6 +1792,7 @@ try {
       profileAfterUpdate.prompt?.soulMarkdown,
       "A profile soul edited through Rusty View.",
     );
+    checkpoint("profile file update");
 
     const runtimeDraft = JSON.parse(
       readFileSync(join(noAuthRoot, "config", "service.json"), "utf8"),
@@ -1844,6 +1862,7 @@ try {
       noAuthAfterProfile.body.data.overview.adapters.mcp.totalSurfaces,
       2,
     );
+    checkpoint("runtime config draft");
 
     const refreshPlan = await patch(
       "/v1/admin/model-providers/alternate?refresh=plan",
@@ -1896,6 +1915,7 @@ try {
     );
     assert.equal(reenabledAlternate.status, 200);
     assert.equal(reenabledAlternate.body.data.provider.status, "active");
+    checkpoint("model provider refresh");
 
     const lifecycleProfile = await post(
       "/v1/admin/control/profiles",
@@ -1966,6 +1986,7 @@ try {
       { reason: "service host smoke lifecycle cleanup" },
       noAuthPort,
     );
+    checkpoint("profile lifecycle");
 
     const duplicateProfile = await post(
       "/v1/admin/control/profiles",
@@ -2060,6 +2081,7 @@ try {
     );
     assert.equal(noAuthControl.status, 200);
     assert.equal(noAuthControl.body.ok, true);
+    checkpoint("no-auth cleanup");
   } finally {
     await noAuthHost.stop();
     rmSync(noAuthRoot, { recursive: true, force: true });
@@ -2071,6 +2093,10 @@ try {
 }
 
 console.log("service host smoke passed");
+
+function checkpoint(label: string): void {
+  console.log(`[service-host smoke] ${label}`);
+}
 
 async function get(path: string, bearer?: string, requestPort = port) {
   const response = await fetch(`http://127.0.0.1:${requestPort}${path}`, {

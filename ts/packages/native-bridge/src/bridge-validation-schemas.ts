@@ -130,12 +130,15 @@ export const rawSessionStateSchema = Type.Object(
     resource_limits: Type.Optional(rawResourceLimitsSchema),
     tool_profile: Type.Optional(rawToolProfileSchema),
     history_window: Type.Optional(
-      Type.Object(
-        {
-          max_messages: Type.Optional(nullableNumber),
-        },
-        { additionalProperties: true },
-      ),
+      Type.Union([
+        Type.Object(
+          {
+            max_messages: Type.Optional(nullableNumber),
+          },
+          { additionalProperties: true },
+        ),
+        Type.Null(),
+      ]),
     ),
     status: Type.Union([
       Type.Literal("active"),

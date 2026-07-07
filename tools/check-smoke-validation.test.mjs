@@ -76,3 +76,25 @@ test("rejects live or infrastructure smokes in verify:ts", () => {
   assert.match(audit.violations[2]?.reason ?? "", /lane local-infrastructure/);
   assert.match(audit.violations[3]?.reason ?? "", /den/);
 });
+
+test("rejects new root smoke aliases above the frozen ceiling", () => {
+  const catalog = Array.from({ length: 131 }, (_, index) => ({
+    name: `root-${index}`,
+    scope: "root-alias",
+    lane: "offline",
+    category: "package-integration",
+    requirements: ["none"],
+  }));
+
+  const audit = auditSmokeValidation({
+    packageJson: {
+      scripts: {
+        "verify:ts": "",
+      },
+    },
+    catalog,
+  });
+
+  assert.equal(audit.violations.length, 1);
+  assert.match(audit.violations[0]?.reason ?? "", /root package exposes 131/);
+});

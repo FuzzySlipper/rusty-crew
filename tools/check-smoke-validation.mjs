@@ -8,6 +8,7 @@ import { buildCatalog } from "./smoke-runner.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const allowedVerifyLanes = new Set(["offline", "native-offline"]);
+const rootSmokeAliasCeiling = 130;
 const forbiddenVerifyRequirements = new Set([
   "den",
   "local-router",
@@ -66,6 +67,14 @@ export function auditSmokeValidation({
   const verifySmokeNames = extractSmokeScriptNames(verifyTs);
   const violations = [];
   const checked = [];
+  const rootAliases = catalog.filter((entry) => entry.scope === "root-alias");
+
+  if (rootAliases.length > rootSmokeAliasCeiling) {
+    violations.push({
+      name: "root-smoke-alias-ceiling",
+      reason: `root package exposes ${rootAliases.length} smoke aliases; add package-local scripts discoverable by npm run smoke -- --list instead of exceeding the ceiling ${rootSmokeAliasCeiling}`,
+    });
+  }
 
   for (const name of verifySmokeNames) {
     const matches = catalog.filter(
