@@ -61,11 +61,11 @@ the bridge coverage ratchet in
 
 The ratchet currently pins:
 
-- manifest operations: 132;
-- exported TypeBox bridge schemas: 24;
+- manifest operations: 141;
+- exported TypeBox bridge schemas: 26;
 - Rust fixture families: 9;
-- manifest operations with TypeBox runtime validation and/or Rust fixtures: 19;
-- explicit operation exemptions: 113.
+- manifest operations with TypeBox runtime validation and/or Rust fixtures: 21;
+- explicit operation exemptions: 120.
 
 Together these provide the CI-capable drift guard while the full generator
 matures: adding a field to a covered Rust protocol shape fails until the TS
