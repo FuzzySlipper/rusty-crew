@@ -20,28 +20,28 @@ use rusty_crew_core_persistence::{
     ChatReadModelQuery, ConversationBranchQuery, ConversationBranchRecord,
     ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
-    ConversationSnapshotWrite, CoreCoordinationStore, CreateChatConversationBranchRequest,
-    CreateChatMessageSlotRequest, CreateChatMessageSlotResult, CreateChatMessageVariantRequest,
-    CreateChatMessageVariantResult, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
-    DeleteChatMessageVariantRequest, DurableMessageRecord,
-    EnsureActiveChatConversationBranchRequest, EnsureActiveChatConversationBranchResult,
-    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord,
-    QueuedMessageState, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
-    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
-    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
-    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
-    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
-    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
-    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
+    ConversationSnapshotWrite, CoreCoordinationStore, CreateChatAttachmentRequest,
+    CreateChatAttachmentResult, CreateChatConversationBranchRequest, CreateChatMessageSlotRequest,
+    CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DeleteChatMessageVariantRequest,
+    DurableMessageRecord, EnsureActiveChatConversationBranchRequest,
+    EnsureActiveChatConversationBranchResult, LoreRecallQuery, LoreRecallResult,
+    LoreRecallTraceQuery, LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord,
+    MessageSlotWrite, MessageVariantQuery, MessageVariantRecord, MessageVariantWrite,
+    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
+    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
+    ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
+    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
+    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
+    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
+    RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
+    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite,
+    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
+    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics,
+    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
     SelectActiveChatMessageVariantResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
     SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
@@ -1225,6 +1225,13 @@ impl CoreEngine {
         self.store.conversation().save_attachment(attachment)
     }
 
+    pub fn create_chat_attachment(
+        &self,
+        request: &CreateChatAttachmentRequest,
+    ) -> CoreResult<CreateChatAttachmentResult> {
+        self.store.conversation().create_chat_attachment(request)
+    }
+
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         self.store.conversation().query_attachments(query)
     }
@@ -1237,6 +1244,13 @@ impl CoreEngine {
         self.store
             .conversation()
             .remove_attachment(attachment_id, updated_at)
+    }
+
+    pub fn remove_chat_attachment(
+        &self,
+        request: &RemoveChatAttachmentRequest,
+    ) -> CoreResult<AttachmentRecord> {
+        self.store.conversation().remove_chat_attachment(request)
     }
 
     pub fn save_data_bank_scope(
@@ -2760,22 +2774,22 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 mod tests {
     use super::*;
     use rusty_crew_core_persistence::{
-        ActiveVariantConflict, AgentMessageQuery, BranchHeadConflict, CompletionPacketQuery,
-        CoordinationStore, DurableMessageStatus, DurableMessageWrite, MessageVariantSource,
-        MessageVariantStatus, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-        QueuedMessageState, RuntimeCounterScope, RuntimeMaintenancePolicy, RuntimeSearchFilter,
-        RuntimeSearchRowType, ScheduledRunQuery, ScheduledRunStatus, SessionQuery, ToolCallPhase,
-        WorkerRunQuery,
+        ActiveVariantConflict, AgentMessageQuery, AttachmentLinkWrite, AttachmentStatus,
+        BranchHeadConflict, ChatAttachmentMutationStatus, CompletionPacketQuery, CoordinationStore,
+        DurableMessageStatus, DurableMessageWrite, MessageVariantSource, MessageVariantStatus,
+        QueryPage, QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState,
+        RuntimeCounterScope, RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType,
+        ScheduledRunQuery, ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
     };
     #[cfg(feature = "postgres")]
     use rusty_crew_core_protocol::EngineStorageConfig;
     use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_protocol::{
-        AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
-        CompletionStatus, ConversationBranchId, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
-        DelegationLifecyclePhase, ExternalEventPayload, MessageId, ProfileId, ProjectId,
-        ResourceLimits, SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
-        ToolDescriptor, ToolProfile,
+        AdapterId, AgentId, AgentMessage, AttachmentLinkId, BrainAction, BrainEvent, ClockConfig,
+        CompletionPacket, CompletionStatus, ConversationBranchId, CoreErrorKind, CoreEventKind,
+        DelegatedRunStatus, DelegationLifecyclePhase, ExternalEventPayload, MessageId, ProfileId,
+        ProjectId, ResourceLimits, SessionKind, ToolCallMetadata, ToolCallPolicyMetadata,
+        ToolCallSource, ToolDescriptor, ToolProfile,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -6653,6 +6667,139 @@ mod tests {
     }
 
     #[test]
+    fn create_chat_attachment_rejects_cross_session_attachment_collision() {
+        let engine = test_engine();
+        let first = engine
+            .create_chat_attachment(&CreateChatAttachmentRequest {
+                attachment: test_attachment_write(
+                    "attachment-session-a",
+                    "shared-attachment",
+                    None,
+                ),
+            })
+            .unwrap();
+        assert_eq!(first.status, ChatAttachmentMutationStatus::Created);
+
+        let error = engine
+            .create_chat_attachment(&CreateChatAttachmentRequest {
+                attachment: test_attachment_write(
+                    "attachment-session-b",
+                    "shared-attachment",
+                    None,
+                ),
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+        let records = engine
+            .query_attachments(&AttachmentQuery {
+                session_id: Some(SessionId::new("attachment-session-a")),
+                include_removed: true,
+                include_expired: true,
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(
+            records[0].session_id,
+            SessionId::new("attachment-session-a")
+        );
+    }
+
+    #[test]
+    fn create_chat_attachment_validates_link_targets() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "attachment-link-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        save_test_message_slot(
+            &engine,
+            "attachment-other-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+
+        let linked = engine
+            .create_chat_attachment(&CreateChatAttachmentRequest {
+                attachment: test_attachment_write(
+                    "attachment-link-session",
+                    "linked-attachment",
+                    Some(AttachmentLinkWrite {
+                        link_id: AttachmentLinkId::new("linked-attachment-link"),
+                        attachment_id: AttachmentId::new("linked-attachment"),
+                        session_id: SessionId::new("attachment-link-session"),
+                        message_id: Some(MessageId::new("attachment-link-session-message-1")),
+                        block_id: None,
+                        scope_id: None,
+                        metadata_json: json!({}),
+                        created_at: "2026-06-19T00:01:00Z".to_string(),
+                    }),
+                ),
+            })
+            .unwrap();
+        assert_eq!(linked.status, ChatAttachmentMutationStatus::Linked);
+        assert_eq!(linked.attachment.links.len(), 1);
+
+        let error = engine
+            .create_chat_attachment(&CreateChatAttachmentRequest {
+                attachment: test_attachment_write(
+                    "attachment-link-session",
+                    "wrong-link-attachment",
+                    Some(AttachmentLinkWrite {
+                        link_id: AttachmentLinkId::new("wrong-link-attachment-link"),
+                        attachment_id: AttachmentId::new("wrong-link-attachment"),
+                        session_id: SessionId::new("attachment-link-session"),
+                        message_id: Some(MessageId::new("attachment-other-session-message-1")),
+                        block_id: None,
+                        scope_id: None,
+                        metadata_json: json!({}),
+                        created_at: "2026-06-19T00:01:00Z".to_string(),
+                    }),
+                ),
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+    }
+
+    #[test]
+    fn remove_chat_attachment_is_session_scoped() {
+        let engine = test_engine();
+        engine
+            .create_chat_attachment(&CreateChatAttachmentRequest {
+                attachment: test_attachment_write(
+                    "remove-attachment-session",
+                    "remove-attachment",
+                    None,
+                ),
+            })
+            .unwrap();
+
+        let error = engine
+            .remove_chat_attachment(&RemoveChatAttachmentRequest {
+                session_id: SessionId::new("remove-other-session"),
+                attachment_id: AttachmentId::new("remove-attachment"),
+                updated_at: "2026-06-19T00:02:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+
+        let record = engine
+            .remove_chat_attachment(&RemoveChatAttachmentRequest {
+                session_id: SessionId::new("remove-attachment-session"),
+                attachment_id: AttachmentId::new("remove-attachment"),
+                updated_at: "2026-06-19T00:03:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(record.status, AttachmentStatus::Removed);
+    }
+
+    #[test]
     fn delete_chat_message_variant_validates_slot_session_ownership() {
         let engine = test_engine();
         save_test_message_slot(
@@ -6920,6 +7067,31 @@ mod tests {
             metadata_json: json!({}),
             created_at: "2026-06-19T00:00:00Z".to_string(),
             updated_at: "2026-06-19T00:00:00Z".to_string(),
+        }
+    }
+
+    fn test_attachment_write(
+        session_id: &str,
+        attachment_id: &str,
+        link: Option<AttachmentLinkWrite>,
+    ) -> AttachmentWrite {
+        AttachmentWrite {
+            attachment_id: AttachmentId::new(attachment_id),
+            session_id: SessionId::new(session_id),
+            status: AttachmentStatus::Active,
+            filename: format!("{attachment_id}.txt"),
+            mime_type: "text/plain".to_string(),
+            byte_size: 32,
+            storage_url: None,
+            download_url: None,
+            thumbnail_url: None,
+            extracted_text: Some("attachment body".to_string()),
+            extracted_text_truncated: false,
+            metadata_json: json!({}),
+            created_at: "2026-06-19T00:01:00Z".to_string(),
+            updated_at: "2026-06-19T00:01:00Z".to_string(),
+            expires_at: None,
+            link,
         }
     }
 

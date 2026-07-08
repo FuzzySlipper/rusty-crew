@@ -44,14 +44,15 @@ use crate::{
     AgentInstanceId, AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite,
     AttachmentQuery, AttachmentRecord, AttachmentStatus, AttachmentWrite,
     BranchAwareSessionMemoryQuery, BranchHeadConflict, BranchHeadExpectation, ChannelBindingQuery,
-    ChannelBindingRecord, ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage,
-    ChatEventLogQuery, CompletionPacketQuery, CompletionPacketRecord, ContextCompactionArtifact,
-    ContextCompactionArtifactQuery, ConversationBranchId, ConversationBranchQuery,
-    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
-    ConversationJumpRequest, ConversationJumpResult, ConversationJumpTarget,
-    ConversationSnapshotId, ConversationSnapshotQuery, ConversationSnapshotRecord,
-    ConversationSnapshotSource, ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreEvent,
-    CoreEventKind, CoreResult, CreateChatConversationBranchRequest, CreateChatMessageSlotRequest,
+    ChannelBindingRecord, ChatAttachmentMutationStatus, ChatEventLogAppend, ChatEventLogEvent,
+    ChatEventLogPage, ChatEventLogQuery, CompletionPacketQuery, CompletionPacketRecord,
+    ContextCompactionArtifact, ContextCompactionArtifactQuery, ConversationBranchId,
+    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
+    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
+    ConversationJumpTarget, ConversationSnapshotId, ConversationSnapshotQuery,
+    ConversationSnapshotRecord, ConversationSnapshotSource, ConversationSnapshotWrite, CoreError,
+    CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, CreateChatAttachmentRequest,
+    CreateChatAttachmentResult, CreateChatConversationBranchRequest, CreateChatMessageSlotRequest,
     CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
     DataBankScopeId, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus,
     DataBankScopeWrite, DelegatedCompletion, DeleteChatMessageVariantRequest, DenRuntimeReference,
@@ -59,27 +60,28 @@ use crate::{
     DurableMessageStatus, DurableMessageWrite, EnsureActiveChatConversationBranchRequest,
     EnsureActiveChatConversationBranchResult, ExternalBindingStatus, IsoTimestamp, LoreRecallEntry,
     LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
-    McpBindingQuery, McpBindingRecord, MessageBlockRecord, MessageId, MessageSlotId,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
-    ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
-    ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
-    ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
-    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
-    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
-    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
-    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
-    QueuedMessageState, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
-    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
-    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
-    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
-    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy,
-    RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus,
-    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
-    RuntimeEventFilter, RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord, MessageId,
+    MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantSource, MessageVariantStatus,
+    MessageVariantWrite, ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery,
+    ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite,
+    PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
+    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
+    ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
+    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
+    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
+    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
+    QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
+    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
+    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
+    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
+    RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
+    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
+    RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
     RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
     RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
     RuntimeStorageConnectionHealth, RuntimeStorageTableCount, ScheduledJobQuery,
@@ -4349,6 +4351,173 @@ fn save_attachment_link_in_tx(
     )
     .map_err(|error| postgres_error("save PostgreSQL attachment link", error))?;
     Ok(())
+}
+
+fn validate_chat_attachment_write(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    attachment: &AttachmentWrite,
+) -> CoreResult<()> {
+    if let Some(link) = &attachment.link {
+        if link.attachment_id != attachment.attachment_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "attachment link {} targets {} but request writes {}",
+                    link.link_id, link.attachment_id, attachment.attachment_id
+                ),
+            ));
+        }
+        if link.session_id != attachment.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "attachment link {} session {} does not match attachment session {}",
+                    link.link_id, link.session_id, attachment.session_id
+                ),
+            ));
+        }
+        if let Some(message_id) = &link.message_id {
+            ensure_attachment_message_belongs_to_session_in_tx(
+                tx,
+                schema,
+                &attachment.session_id,
+                message_id,
+            )?;
+        }
+        if let Some(block_id) = &link.block_id {
+            ensure_attachment_block_belongs_to_session_in_tx(
+                tx,
+                schema,
+                &attachment.session_id,
+                link.message_id.as_ref(),
+                block_id,
+            )?;
+        }
+        if let Some(scope_id) = &link.scope_id {
+            ensure_attachment_scope_belongs_to_session_in_tx(
+                tx,
+                schema,
+                &attachment.session_id,
+                scope_id,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn attachment_session_created_at_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    attachment_id: &AttachmentId,
+) -> CoreResult<Option<(SessionId, IsoTimestamp)>> {
+    tx.query_opt(
+        &format!(
+            "SELECT session_id, created_at
+             FROM {schema}.attachments
+             WHERE attachment_id = $1"
+        ),
+        &[&attachment_id.0],
+    )
+    .map_err(|error| postgres_error("load PostgreSQL attachment session ownership", error))
+    .map(|row| {
+        row.map(|row| {
+            (
+                SessionId::new(row.get::<_, String>(0)),
+                row.get::<_, String>(1),
+            )
+        })
+    })
+}
+
+fn ensure_attachment_message_belongs_to_session_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    session_id: &SessionId,
+    message_id: &MessageId,
+) -> CoreResult<()> {
+    let exists = tx
+        .query_one(
+            &format!(
+                "SELECT EXISTS(
+                    SELECT 1 FROM {schema}.messages
+                    WHERE session_id = $1 AND message_id = $2
+                 )"
+            ),
+            &[&session_id.0, &message_id.0],
+        )
+        .map_err(|error| postgres_error("check PostgreSQL attachment message ownership", error))?
+        .get::<_, bool>(0);
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message {message_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn ensure_attachment_block_belongs_to_session_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    session_id: &SessionId,
+    message_id: Option<&MessageId>,
+    block_id: &MessageBlockId,
+) -> CoreResult<()> {
+    let message_id = message_id.map(|value| value.0.as_str());
+    let exists = tx
+        .query_one(
+            &format!(
+                "SELECT EXISTS(
+                    SELECT 1
+                    FROM {schema}.message_blocks b
+                    JOIN {schema}.messages m ON m.message_id = b.message_id
+                    WHERE m.session_id = $1
+                      AND b.block_id = $2
+                      AND ($3::text IS NULL OR b.message_id = $3)
+                 )"
+            ),
+            &[&session_id.0, &block_id.0, &message_id],
+        )
+        .map_err(|error| postgres_error("check PostgreSQL attachment block ownership", error))?
+        .get::<_, bool>(0);
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message block {block_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn ensure_attachment_scope_belongs_to_session_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    session_id: &SessionId,
+    scope_id: &DataBankScopeId,
+) -> CoreResult<()> {
+    let exists = tx
+        .query_one(
+            &format!(
+                "SELECT EXISTS(
+                    SELECT 1 FROM {schema}.data_bank_scopes
+                    WHERE session_id = $1 AND scope_id = $2
+                 )"
+            ),
+            &[&session_id.0, &scope_id.0],
+        )
+        .map_err(|error| postgres_error("check PostgreSQL attachment scope ownership", error))?
+        .get::<_, bool>(0);
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("data-bank scope {scope_id} not found for session {session_id}"),
+        ))
+    }
 }
 
 fn query_attachments<C: GenericClient>(

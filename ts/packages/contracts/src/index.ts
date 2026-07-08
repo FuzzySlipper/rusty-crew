@@ -1623,8 +1623,10 @@ export const manifestOperationNames = [
   "query_conversation_snapshots",
   "resolve_conversation_jump",
   "save_attachment",
+  "create_chat_attachment",
   "query_attachments",
   "remove_attachment",
+  "remove_chat_attachment",
   "save_data_bank_scope",
   "query_data_bank_scopes",
   "remove_data_bank_scope",
@@ -1704,6 +1706,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "8e6c463c8b33393a40b6c3bf63724c52a7a5c76c2371e4a1e490d6138626fb7d";
+  "340f0ab68270b6f251d376bce02ba8ff54f09b8f6a627a883d1524de61e21c06";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

@@ -16,6 +16,49 @@ impl PostgresBackendStore {
         Ok(record)
     }
 
+    pub fn create_chat_attachment(
+        &self,
+        request: &CreateChatAttachmentRequest,
+    ) -> CoreResult<CreateChatAttachmentResult> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start create PostgreSQL chat attachment", error))?;
+        validate_chat_attachment_write(&mut tx, &schema, &request.attachment)?;
+        let existing = attachment_session_created_at_in_tx(
+            &mut tx,
+            &schema,
+            &request.attachment.attachment_id,
+        )?;
+        let mut attachment = request.attachment.clone();
+        let status = match existing {
+            Some((session_id, created_at)) if session_id == attachment.session_id => {
+                attachment.created_at = created_at;
+                ChatAttachmentMutationStatus::Updated
+            }
+            Some((session_id, _)) => {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "attachment {} already belongs to session {} and cannot be written by {}",
+                        attachment.attachment_id, session_id, attachment.session_id
+                    ),
+                ));
+            }
+            None if attachment.link.is_some() => ChatAttachmentMutationStatus::Linked,
+            None => ChatAttachmentMutationStatus::Created,
+        };
+        save_attachment_in_tx(&mut tx, &schema, &attachment)?;
+        let record = load_attachment(&mut tx, &schema, &attachment.attachment_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit create PostgreSQL chat attachment", error))?;
+        Ok(CreateChatAttachmentResult {
+            status,
+            attachment: record,
+        })
+    }
+
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
@@ -45,6 +88,45 @@ impl PostgresBackendStore {
         let record = load_attachment(&mut tx, &schema, attachment_id)?;
         tx.commit()
             .map_err(|error| postgres_error("commit remove PostgreSQL attachment", error))?;
+        Ok(record)
+    }
+
+    pub fn remove_chat_attachment(
+        &self,
+        request: &RemoveChatAttachmentRequest,
+    ) -> CoreResult<AttachmentRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start remove PostgreSQL chat attachment", error))?;
+        let changed = tx
+            .execute(
+                &format!(
+                    "UPDATE {schema}.attachments
+                     SET status = 'removed',
+                         updated_at = $3
+                     WHERE attachment_id = $1 AND session_id = $2"
+                ),
+                &[
+                    &request.attachment_id.0,
+                    &request.session_id.0,
+                    &request.updated_at,
+                ],
+            )
+            .map_err(|error| postgres_error("remove PostgreSQL chat attachment", error))?;
+        if changed == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "attachment {} not found for session {}",
+                    request.attachment_id, request.session_id
+                ),
+            ));
+        }
+        let record = load_attachment(&mut tx, &schema, &request.attachment_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit remove PostgreSQL chat attachment", error))?;
         Ok(record)
     }
 

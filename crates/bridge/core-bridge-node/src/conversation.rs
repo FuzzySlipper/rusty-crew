@@ -132,6 +132,13 @@ impl NativeBridge {
         self.engine()?.save_attachment(attachment)
     }
 
+    pub fn create_chat_attachment(
+        &self,
+        request: &CreateChatAttachmentRequest,
+    ) -> CoreResult<CreateChatAttachmentResult> {
+        self.engine()?.create_chat_attachment(request)
+    }
+
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         self.engine()?.query_attachments(query)
     }
@@ -142,6 +149,13 @@ impl NativeBridge {
         updated_at: &rusty_crew_core_bridge_api::IsoTimestamp,
     ) -> CoreResult<AttachmentRecord> {
         self.engine()?.remove_attachment(attachment_id, updated_at)
+    }
+
+    pub fn remove_chat_attachment(
+        &self,
+        request: &RemoveChatAttachmentRequest,
+    ) -> CoreResult<AttachmentRecord> {
+        self.engine()?.remove_chat_attachment(request)
     }
 
     pub fn save_data_bank_scope(

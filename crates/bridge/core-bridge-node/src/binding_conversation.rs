@@ -222,6 +222,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_chat_attachment_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<CreateChatAttachmentRequest>(
+            &input_json,
+            "create chat attachment request",
+        )?;
+        let result = bridge
+            .create_chat_attachment(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "create chat attachment result")
+    }
+
+    #[napi]
     pub fn query_attachments_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<AttachmentQuery>(&input_json, "attachment query")?;
@@ -236,6 +249,19 @@ impl NativeBridgeBinding {
             parse_json::<WireRemoveAttachmentRequest>(&input_json, "remove attachment request")?;
         let record = bridge
             .remove_attachment(&request.attachment_id, &request.updated_at)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "attachment record")
+    }
+
+    #[napi]
+    pub fn remove_chat_attachment_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<RemoveChatAttachmentRequest>(
+            &input_json,
+            "remove chat attachment request",
+        )?;
+        let record = bridge
+            .remove_chat_attachment(&request)
             .map_err(to_napi_error)?;
         serialize_json(&record, "attachment record")
     }

@@ -732,6 +732,15 @@ errors = "core_protocol::CoreError"
 summary = "Persist generic chat attachment metadata and optional links."
 
 [[operation]]
+name = "create_chat_attachment"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::CreateChatAttachmentRequest"
+output = "core_persistence::CreateChatAttachmentResult"
+errors = "core_protocol::CoreError"
+summary = "Create, update, or link a chat attachment with session-aware ownership validation."
+
+[[operation]]
 name = "query_attachments"
 surface = "stable"
 direction = "ts_to_rust"
@@ -748,6 +757,15 @@ input = "{ attachment_id, updated_at }"
 output = "core_persistence::AttachmentRecord"
 errors = "core_protocol::CoreError"
 summary = "Mark a generic chat attachment removed."
+
+[[operation]]
+name = "remove_chat_attachment"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::RemoveChatAttachmentRequest"
+output = "core_persistence::AttachmentRecord"
+errors = "core_protocol::CoreError"
+summary = "Mark a chat attachment removed with session-aware ownership validation."
 
 [[operation]]
 name = "save_data_bank_scope"

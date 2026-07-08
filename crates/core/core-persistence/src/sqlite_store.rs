@@ -1037,6 +1037,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_chat_attachment(
+        &self,
+        request: &CreateChatAttachmentRequest,
+    ) -> CoreResult<CreateChatAttachmentResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.create_chat_attachment(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.create_chat_attachment(request),
+        }
+    }
+
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         match self {
             Self::Sqlite(sqlite) => sqlite.query_attachments(query),
@@ -1054,6 +1065,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.remove_attachment(attachment_id, updated_at),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.remove_attachment(attachment_id, updated_at),
+        }
+    }
+
+    pub fn remove_chat_attachment(
+        &self,
+        request: &RemoveChatAttachmentRequest,
+    ) -> CoreResult<AttachmentRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.remove_chat_attachment(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.remove_chat_attachment(request),
         }
     }
 
@@ -1878,6 +1900,13 @@ impl ConversationRepositorySet<'_> {
         self.store.save_attachment(attachment)
     }
 
+    pub fn create_chat_attachment(
+        &self,
+        request: &CreateChatAttachmentRequest,
+    ) -> CoreResult<CreateChatAttachmentResult> {
+        self.store.create_chat_attachment(request)
+    }
+
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         self.store.query_attachments(query)
     }
@@ -1888,6 +1917,13 @@ impl ConversationRepositorySet<'_> {
         updated_at: &IsoTimestamp,
     ) -> CoreResult<AttachmentRecord> {
         self.store.remove_attachment(attachment_id, updated_at)
+    }
+
+    pub fn remove_chat_attachment(
+        &self,
+        request: &RemoveChatAttachmentRequest,
+    ) -> CoreResult<AttachmentRecord> {
+        self.store.remove_chat_attachment(request)
     }
 
     pub fn save_data_bank_scope(

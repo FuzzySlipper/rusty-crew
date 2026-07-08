@@ -13,6 +13,44 @@ impl CoordinationStore {
         Ok(record)
     }
 
+    pub fn create_chat_attachment(
+        &self,
+        request: &CreateChatAttachmentRequest,
+    ) -> CoreResult<CreateChatAttachmentResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin create chat attachment", error))?;
+        validate_chat_attachment_write(&tx, &request.attachment)?;
+        let existing = attachment_session_created_at_in_tx(&tx, &request.attachment.attachment_id)?;
+        let mut attachment = request.attachment.clone();
+        let status = match existing {
+            Some((session_id, created_at)) if session_id == attachment.session_id => {
+                attachment.created_at = created_at;
+                ChatAttachmentMutationStatus::Updated
+            }
+            Some((session_id, _)) => {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "attachment {} already belongs to session {} and cannot be written by {}",
+                        attachment.attachment_id, session_id, attachment.session_id
+                    ),
+                ));
+            }
+            None if attachment.link.is_some() => ChatAttachmentMutationStatus::Linked,
+            None => ChatAttachmentMutationStatus::Created,
+        };
+        save_attachment_in_tx(&tx, &attachment)?;
+        let record = load_attachment_in_tx(&tx, &attachment.attachment_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit create chat attachment", error))?;
+        Ok(CreateChatAttachmentResult {
+            status,
+            attachment: record,
+        })
+    }
+
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         let conn = self.conn()?;
         query_attachments(&conn, query)
@@ -37,6 +75,41 @@ impl CoordinationStore {
         let record = load_attachment_in_tx(&tx, attachment_id)?;
         tx.commit()
             .map_err(|error| persistence_error("commit remove attachment", error))?;
+        Ok(record)
+    }
+
+    pub fn remove_chat_attachment(
+        &self,
+        request: &RemoveChatAttachmentRequest,
+    ) -> CoreResult<AttachmentRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin remove chat attachment", error))?;
+        let changed = tx
+            .execute(
+                "UPDATE attachments
+                 SET status = 'removed', updated_at = ?3
+                 WHERE attachment_id = ?1 AND session_id = ?2",
+                params![
+                    request.attachment_id.0.as_str(),
+                    request.session_id.0.as_str(),
+                    request.updated_at,
+                ],
+            )
+            .map_err(|error| persistence_error("remove chat attachment", error))?;
+        if changed == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "attachment {} not found for session {}",
+                    request.attachment_id, request.session_id
+                ),
+            ));
+        }
+        let record = load_attachment_in_tx(&tx, &request.attachment_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit remove chat attachment", error))?;
         Ok(record)
     }
 
@@ -199,6 +272,155 @@ fn save_attachment_link_in_tx(
     )
     .map_err(|error| persistence_error("save attachment link", error))?;
     Ok(())
+}
+
+fn validate_chat_attachment_write(
+    tx: &rusqlite::Transaction<'_>,
+    attachment: &AttachmentWrite,
+) -> CoreResult<()> {
+    if let Some(link) = &attachment.link {
+        if link.attachment_id != attachment.attachment_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "attachment link {} targets {} but request writes {}",
+                    link.link_id, link.attachment_id, attachment.attachment_id
+                ),
+            ));
+        }
+        if link.session_id != attachment.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "attachment link {} session {} does not match attachment session {}",
+                    link.link_id, link.session_id, attachment.session_id
+                ),
+            ));
+        }
+        if let Some(message_id) = &link.message_id {
+            ensure_attachment_message_belongs_to_session_in_tx(
+                tx,
+                &attachment.session_id,
+                message_id,
+            )?;
+        }
+        if let Some(block_id) = &link.block_id {
+            ensure_attachment_block_belongs_to_session_in_tx(
+                tx,
+                &attachment.session_id,
+                link.message_id.as_ref(),
+                block_id,
+            )?;
+        }
+        if let Some(scope_id) = &link.scope_id {
+            ensure_attachment_scope_belongs_to_session_in_tx(tx, &attachment.session_id, scope_id)?;
+        }
+    }
+    Ok(())
+}
+
+fn attachment_session_created_at_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    attachment_id: &AttachmentId,
+) -> CoreResult<Option<(SessionId, IsoTimestamp)>> {
+    tx.query_row(
+        "SELECT session_id, created_at
+         FROM attachments
+         WHERE attachment_id = ?1",
+        params![attachment_id.0.as_str()],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load attachment session ownership", error))
+}
+
+fn ensure_attachment_message_belongs_to_session_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    message_id: &MessageId,
+) -> CoreResult<()> {
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM messages
+                WHERE session_id = ?1 AND message_id = ?2
+            )",
+            params![session_id.0.as_str(), message_id.0.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(|error| persistence_error("check attachment message ownership", error))?;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message {message_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn ensure_attachment_block_belongs_to_session_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    message_id: Option<&MessageId>,
+    block_id: &MessageBlockId,
+) -> CoreResult<()> {
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM message_blocks b
+                JOIN messages m ON m.message_id = b.message_id
+                WHERE m.session_id = ?1
+                  AND b.block_id = ?2
+                  AND (?3 IS NULL OR b.message_id = ?3)
+            )",
+            params![
+                session_id.0.as_str(),
+                block_id.0.as_str(),
+                message_id.map(|value| value.0.as_str()),
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|error| persistence_error("check attachment block ownership", error))?;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message block {block_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn ensure_attachment_scope_belongs_to_session_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    scope_id: &DataBankScopeId,
+) -> CoreResult<()> {
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM data_bank_scopes
+                WHERE session_id = ?1 AND scope_id = ?2
+            )",
+            params![session_id.0.as_str(), scope_id.0.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(|error| persistence_error("check attachment scope ownership", error))?;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("data-bank scope {scope_id} not found for session {session_id}"),
+        ))
+    }
 }
 
 fn query_attachments(

@@ -264,8 +264,10 @@ interface NativeBridgeBinding {
   queryConversationSnapshotsJson(inputJson: string): string;
   resolveConversationJumpJson(inputJson: string): string;
   saveAttachmentJson(inputJson: string): string;
+  createChatAttachmentJson(inputJson: string): string;
   queryAttachmentsJson(inputJson: string): string;
   removeAttachmentJson(inputJson: string): string;
+  removeChatAttachmentJson(inputJson: string): string;
   saveDataBankScopeJson(inputJson: string): string;
   queryDataBankScopesJson(inputJson: string): string;
   removeDataBankScopeJson(inputJson: string): string;
@@ -2196,8 +2198,10 @@ export interface NativeBridgeModule {
   queryConversationSnapshots(query: unknown): Promise<unknown[]>;
   resolveConversationJump(input: unknown): Promise<unknown>;
   saveAttachment(input: unknown): Promise<unknown>;
+  createChatAttachment(input: unknown): Promise<unknown>;
   queryAttachments(query: unknown): Promise<unknown[]>;
   removeAttachment(input: unknown): Promise<unknown>;
+  removeChatAttachment(input: unknown): Promise<unknown>;
   saveDataBankScope(input: unknown): Promise<unknown>;
   queryDataBankScopes(query: unknown): Promise<unknown[]>;
   removeDataBankScope(input: unknown): Promise<unknown>;
@@ -2564,8 +2568,10 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     queryConversationSnapshots: unavailable("query_conversation_snapshots"),
     resolveConversationJump: unavailable("resolve_conversation_jump"),
     saveAttachment: unavailable("save_attachment"),
+    createChatAttachment: unavailable("create_chat_attachment"),
     queryAttachments: unavailable("query_attachments"),
     removeAttachment: unavailable("remove_attachment"),
+    removeChatAttachment: unavailable("remove_chat_attachment"),
     saveDataBankScope: unavailable("save_data_bank_scope"),
     queryDataBankScopes: unavailable("query_data_bank_scopes"),
     removeDataBankScope: unavailable("remove_data_bank_scope"),
@@ -3875,6 +3881,10 @@ function createNativeBridgeModule(
       ) as unknown,
     saveAttachment: async (input) =>
       JSON.parse(binding.saveAttachmentJson(JSON.stringify(input))) as unknown,
+    createChatAttachment: async (input) =>
+      JSON.parse(
+        binding.createChatAttachmentJson(JSON.stringify(input)),
+      ) as unknown,
     queryAttachments: async (query) =>
       JSON.parse(
         binding.queryAttachmentsJson(JSON.stringify(query)),
@@ -3882,6 +3892,10 @@ function createNativeBridgeModule(
     removeAttachment: async (input) =>
       JSON.parse(
         binding.removeAttachmentJson(JSON.stringify(input)),
+      ) as unknown,
+    removeChatAttachment: async (input) =>
+      JSON.parse(
+        binding.removeChatAttachmentJson(JSON.stringify(input)),
       ) as unknown,
     saveDataBankScope: async (input) =>
       JSON.parse(

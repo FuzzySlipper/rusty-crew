@@ -8766,11 +8766,6 @@ async function createRustyViewAttachment(
       "attachment",
       `${input.session.sessionId}:${input.requestId}`,
     );
-  const existing = await findRustyViewAttachment(
-    state,
-    input.session.sessionId,
-    attachmentId,
-  );
   const link = attachmentLinkRecord({
     attachmentId,
     sessionId: input.session.sessionId,
@@ -8780,26 +8775,35 @@ async function createRustyViewAttachment(
     metadataJson: input.request.link_metadata_json ?? {},
     createdAt: now,
   });
-  const attachment = (await state.bridge.saveAttachment({
-    attachment_id: attachmentId,
-    session_id: input.session.sessionId,
-    status: "active",
-    filename: input.request.filename,
-    mime_type: input.request.mime_type,
-    byte_size: input.request.byte_size,
-    storage_url: input.request.storage_url ?? null,
-    download_url: input.request.download_url ?? null,
-    thumbnail_url: input.request.thumbnail_url ?? null,
-    extracted_text: input.request.extracted_text ?? null,
-    extracted_text_truncated: input.request.extracted_text_truncated ?? false,
-    metadata_json: input.request.metadata_json ?? {},
-    created_at: existing?.created_at ?? now,
-    updated_at: now,
-    expires_at: input.request.expires_at ?? null,
-    link: link.message_id || link.block_id || link.scope_id ? link : undefined,
-  })) as AttachmentRecord;
+  const result = (await state.bridge.createChatAttachment({
+    attachment: {
+      attachment_id: attachmentId,
+      session_id: input.session.sessionId,
+      status: "active",
+      filename: input.request.filename,
+      mime_type: input.request.mime_type,
+      byte_size: input.request.byte_size,
+      storage_url: input.request.storage_url ?? null,
+      download_url: input.request.download_url ?? null,
+      thumbnail_url: input.request.thumbnail_url ?? null,
+      extracted_text: input.request.extracted_text ?? null,
+      extracted_text_truncated: input.request.extracted_text_truncated ?? false,
+      metadata_json: input.request.metadata_json ?? {},
+      created_at: now,
+      updated_at: now,
+      expires_at: input.request.expires_at ?? null,
+      link: link.message_id || link.block_id || link.scope_id ? link : null,
+    },
+  })) as {
+    status: "created" | "updated" | "linked";
+    attachment: AttachmentRecord;
+  };
+  const attachment = result.attachment;
   const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: existing ? "attachment_updated" : "attachment_uploaded",
+    kind:
+      result.status === "updated"
+        ? "attachment_updated"
+        : "attachment_uploaded",
     payload: { attachment },
   });
   if (link.message_id || link.block_id || link.scope_id) {
@@ -8809,11 +8813,7 @@ async function createRustyViewAttachment(
     });
   }
   return {
-    status: existing
-      ? "updated"
-      : link.scope_id || link.message_id || link.block_id
-        ? "linked"
-        : "created",
+    status: result.status,
     attachment,
     latest_cursor: event.event_id,
   };
@@ -8847,15 +8847,11 @@ async function removeRustyViewAttachment(
   state: ServiceState,
   input: RemoveAttachmentInput,
 ): Promise<AttachmentMutationResult> {
-  const removed = (await state.bridge.removeAttachment({
+  const removed = (await state.bridge.removeChatAttachment({
+    session_id: input.session.sessionId,
     attachment_id: input.attachmentId,
     updated_at: state.now(),
   })) as AttachmentRecord;
-  if (removed.session_id !== input.session.sessionId) {
-    throw new Error(
-      `attachment ${input.attachmentId} was not found for ${input.session.sessionId}`,
-    );
-  }
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "attachment_removed",
     payload: { attachment_id: input.attachmentId, attachment: removed },

@@ -38,8 +38,10 @@ export declare class NativeBridgeBinding {
   queryConversationSnapshotsJson(inputJson: string): string
   resolveConversationJumpJson(inputJson: string): string
   saveAttachmentJson(inputJson: string): string
+  createChatAttachmentJson(inputJson: string): string
   queryAttachmentsJson(inputJson: string): string
   removeAttachmentJson(inputJson: string): string
+  removeChatAttachmentJson(inputJson: string): string
   saveDataBankScopeJson(inputJson: string): string
   queryDataBankScopesJson(inputJson: string): string
   removeDataBankScopeJson(inputJson: string): string

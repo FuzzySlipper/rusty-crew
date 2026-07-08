@@ -771,6 +771,32 @@ pub struct AttachmentWrite {
     pub link: Option<AttachmentLinkWrite>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatAttachmentMutationStatus {
+    Created,
+    Updated,
+    Linked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatAttachmentRequest {
+    pub attachment: AttachmentWrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatAttachmentResult {
+    pub status: ChatAttachmentMutationStatus,
+    pub attachment: AttachmentRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoveChatAttachmentRequest {
+    pub session_id: SessionId,
+    pub attachment_id: AttachmentId,
+    pub updated_at: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentLinkWrite {
     pub link_id: AttachmentLinkId,
