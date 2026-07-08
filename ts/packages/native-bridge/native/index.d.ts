@@ -99,6 +99,8 @@ export declare class NativeBridgeBinding {
   planRoleplaySessionLifecycleJson(inputJson: string): string
   planRoleplayChatLayerBindingJson(inputJson: string): string
   normalizeRoleplayLoreSearchControlsJson(inputJson: string): string
+  readRoleplaySceneStateJson(inputJson: string): string
+  planRoleplaySceneStateUpdateJson(inputJson: string): string
   buildRoleplayPromptContextJson(inputJson: string): string
   roleplaySpeakerIdentityJson(inputJson: string): string
   writeRoleplayCharacterJson(inputJson: string): string

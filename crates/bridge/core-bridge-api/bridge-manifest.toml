@@ -1238,6 +1238,24 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Normalize browser lore search layer filters and pagination controls before route-layer query execution."
 
 [[operation]]
+name = "read_roleplay_scene_state"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplaySceneStateReadInput"
+output = "roleplay_core::RoleplaySceneStateReadOutput"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Normalize roleplay scene state records and defaults before tool-facing read results."
+
+[[operation]]
+name = "plan_roleplay_scene_state_update"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplaySceneStateUpdateInput"
+output = "roleplay_core::RoleplaySceneStateUpdatePlan"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Plan deterministic roleplay scene state update merges and persisted JSON values for tool adapters."
+
+[[operation]]
 name = "build_roleplay_prompt_context"
 surface = "stable"
 direction = "ts_to_rust"

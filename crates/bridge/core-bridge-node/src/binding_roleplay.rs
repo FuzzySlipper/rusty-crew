@@ -58,6 +58,27 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn read_roleplay_scene_state_json(&self, input_json: String) -> napi::Result<String> {
+        let input =
+            parse_json::<RoleplaySceneStateReadInput>(&input_json, "roleplay scene state read")?;
+        let output = read_scene_state(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&output, "roleplay scene state read")
+    }
+
+    #[napi]
+    pub fn plan_roleplay_scene_state_update_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<RoleplaySceneStateUpdateInput>(
+            &input_json,
+            "roleplay scene state update",
+        )?;
+        let output = plan_scene_state_update(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&output, "roleplay scene state update")
+    }
+
+    #[napi]
     pub fn build_roleplay_prompt_context_json(&self, input_json: String) -> napi::Result<String> {
         let input =
             parse_json::<RoleplayPromptContextInput>(&input_json, "roleplay prompt context input")?;

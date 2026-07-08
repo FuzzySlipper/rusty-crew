@@ -1652,6 +1652,8 @@ export const manifestOperationNames = [
   "plan_roleplay_session_lifecycle",
   "plan_roleplay_chat_layer_binding",
   "normalize_roleplay_lore_search_controls",
+  "read_roleplay_scene_state",
+  "plan_roleplay_scene_state_update",
   "build_roleplay_prompt_context",
   "roleplay_speaker_identity",
   "write_roleplay_character",

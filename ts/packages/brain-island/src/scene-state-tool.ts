@@ -1,13 +1,16 @@
-import type {
-  NativeBridgeModule,
-  NativeSimpleKvRecord,
-} from "@rusty-crew/native-bridge";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { Type, type Static } from "typebox";
 import type { BrainTool, BrainToolResult } from "./brain-tool.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 
 export interface SceneStateToolContext {
-  client?: Pick<NativeBridgeModule, "listSimpleKv" | "putSimpleKv">;
+  client?: Pick<
+    NativeBridgeModule,
+    | "listSimpleKv"
+    | "putSimpleKv"
+    | "readRoleplaySceneState"
+    | "planRoleplaySceneStateUpdate"
+  >;
   session?: {
     sessionId?: string;
   };
@@ -31,6 +34,17 @@ export interface SceneStateToolDetails {
   state?: RoleplaySceneState;
   revision?: number;
   result?: unknown;
+}
+
+interface RoleplaySceneStateReadOutput {
+  state: RoleplaySceneState;
+  revision?: number;
+}
+
+interface RoleplaySceneStateUpdatePlan {
+  state: RoleplaySceneState;
+  value_json: string;
+  now: string;
 }
 
 const getSceneStateParameters = Type.Object({
@@ -81,8 +95,11 @@ export function getSceneStateTool(
       runSceneStateTool("get_scene_state", context, "read", async (client) => {
         const sessionId = resolveSessionId(params.sessionId, context);
         const record = await readSceneStateRecord(client, sessionId, context);
+        const fallback = (await client.readRoleplaySceneState({
+          session_id: sessionId,
+        })) as RoleplaySceneStateReadOutput;
         return {
-          state: record?.state ?? emptySceneState(sessionId),
+          state: record?.state ?? fallback.state,
           revision: record?.revision,
         };
       }),
@@ -108,32 +125,26 @@ export function updateSceneStateTool(
           const sessionId = resolveSessionId(params.sessionId, context);
           const existing =
             (await readSceneStateRecord(client, sessionId, context))?.state ??
-            emptySceneState(sessionId);
-          const updated: RoleplaySceneState = {
-            ...existing,
-            ...(params.location === undefined
-              ? {}
-              : { location: params.location ?? undefined }),
-            ...(params.charactersPresent === undefined
-              ? {}
-              : { charactersPresent: params.charactersPresent }),
-            ...(params.activeThreads === undefined
-              ? {}
-              : { activeThreads: params.activeThreads }),
-            ...(params.notes === undefined
-              ? {}
-              : { notes: params.notes ?? undefined }),
-            updatedAt: now(context),
-          };
+            (
+              (await client.readRoleplaySceneState({
+                session_id: sessionId,
+              })) as RoleplaySceneStateReadOutput
+            ).state;
+          const plan = (await client.planRoleplaySceneStateUpdate({
+            session_id: sessionId,
+            current: existing,
+            now: now(context),
+            body: params,
+          })) as RoleplaySceneStateUpdatePlan;
           const record = await client.putSimpleKv({
             scopeType: SCENE_STATE_SCOPE_TYPE,
             scopeId: sessionId,
             key: SCENE_STATE_KEY,
-            valueJson: JSON.stringify(updated),
-            now: updated.updatedAt ?? now(context),
+            valueJson: plan.value_json,
+            now: plan.now,
           });
           return {
-            state: stateFromRecord(record, sessionId),
+            state: plan.state,
             revision: record.revision,
           };
         },
@@ -145,7 +156,7 @@ async function readSceneStateRecord(
   client: NonNullable<SceneStateToolContext["client"]>,
   sessionId: string,
   context: SceneStateToolContext,
-): Promise<{ state: RoleplaySceneState; revision: number } | undefined> {
+): Promise<{ state: RoleplaySceneState; revision?: number } | undefined> {
   const [record] = await client.listSimpleKv({
     scopeType: SCENE_STATE_SCOPE_TYPE,
     scopeId: sessionId,
@@ -154,37 +165,12 @@ async function readSceneStateRecord(
     limit: 1,
   });
   if (!record) return undefined;
-  return {
-    state: stateFromRecord(record, sessionId),
+  return (await client.readRoleplaySceneState({
+    session_id: sessionId,
+    record_value_json: record.valueJson,
+    record_updated_at: record.updatedAt,
     revision: record.revision,
-  };
-}
-
-function stateFromRecord(
-  record: NativeSimpleKvRecord,
-  sessionId: string,
-): RoleplaySceneState {
-  try {
-    const parsed = JSON.parse(record.valueJson) as Partial<RoleplaySceneState>;
-    return {
-      sessionId,
-      location: stringOrUndefined(parsed.location),
-      charactersPresent: stringArray(parsed.charactersPresent),
-      activeThreads: stringArray(parsed.activeThreads),
-      notes: stringOrUndefined(parsed.notes),
-      updatedAt: stringOrUndefined(parsed.updatedAt) ?? record.updatedAt,
-    };
-  } catch {
-    return emptySceneState(sessionId);
-  }
-}
-
-function emptySceneState(sessionId: string): RoleplaySceneState {
-  return {
-    sessionId,
-    charactersPresent: [],
-    activeThreads: [],
-  };
+  })) as RoleplaySceneStateReadOutput;
 }
 
 async function runSceneStateTool(
@@ -213,6 +199,14 @@ async function runSceneStateTool(
       return sceneStateResult(operation, "denied", {
         ok: false,
         reasonCode: error.reasonCode,
+      });
+    }
+    const reasonCode = sceneStateDomainReasonCode(error);
+    if (reasonCode !== undefined) {
+      return sceneStateResult(operation, "denied", {
+        ok: false,
+        reasonCode,
+        result: error instanceof Error ? error.message : String(error),
       });
     }
     return sceneStateResult(operation, "failed", {
@@ -264,14 +258,10 @@ function now(context: SceneStateToolContext): string {
   return context.now?.() ?? new Date().toISOString();
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
+function sceneStateDomainReasonCode(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  const reasonCode = message.split(":", 1)[0]?.trim();
+  return reasonCode?.startsWith("roleplay_") ? reasonCode : undefined;
 }
 
 class SceneStateInputError extends Error {

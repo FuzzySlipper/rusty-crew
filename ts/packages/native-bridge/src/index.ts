@@ -228,6 +228,8 @@ interface NativeBridgeBinding {
   planRoleplaySessionLifecycleJson(inputJson: string): string;
   planRoleplayChatLayerBindingJson(inputJson: string): string;
   normalizeRoleplayLoreSearchControlsJson(inputJson: string): string;
+  readRoleplaySceneStateJson(inputJson: string): string;
+  planRoleplaySceneStateUpdateJson(inputJson: string): string;
   buildRoleplayPromptContextJson(inputJson: string): string;
   roleplaySpeakerIdentityJson(inputJson: string): string;
   writeRoleplayCharacterJson(inputJson: string): string;
@@ -2215,6 +2217,8 @@ export interface NativeBridgeModule {
   planRoleplaySessionLifecycle(input: unknown): Promise<unknown>;
   planRoleplayChatLayerBinding(input: unknown): Promise<unknown>;
   normalizeRoleplayLoreSearchControls(input: unknown): Promise<unknown>;
+  readRoleplaySceneState(input: unknown): Promise<unknown>;
+  planRoleplaySceneStateUpdate(input: unknown): Promise<unknown>;
   buildRoleplayPromptContext(input: unknown): Promise<unknown>;
   roleplaySpeakerIdentity(input: unknown): Promise<unknown>;
   writeRoleplayCharacter(input: unknown): Promise<unknown>;
@@ -2578,6 +2582,10 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     ),
     normalizeRoleplayLoreSearchControls: unavailable(
       "normalize_roleplay_lore_search_controls",
+    ),
+    readRoleplaySceneState: unavailable("read_roleplay_scene_state"),
+    planRoleplaySceneStateUpdate: unavailable(
+      "plan_roleplay_scene_state_update",
     ),
     buildRoleplayPromptContext: unavailable("build_roleplay_prompt_context"),
     roleplaySpeakerIdentity: unavailable("roleplay_speaker_identity"),
@@ -3810,6 +3818,14 @@ function createNativeBridgeModule(
     normalizeRoleplayLoreSearchControls: async (input) =>
       JSON.parse(
         binding.normalizeRoleplayLoreSearchControlsJson(JSON.stringify(input)),
+      ) as unknown,
+    readRoleplaySceneState: async (input) =>
+      JSON.parse(
+        binding.readRoleplaySceneStateJson(JSON.stringify(input)),
+      ) as unknown,
+    planRoleplaySceneStateUpdate: async (input) =>
+      JSON.parse(
+        binding.planRoleplaySceneStateUpdateJson(JSON.stringify(input)),
       ) as unknown,
     buildRoleplayPromptContext: async (input) =>
       JSON.parse(

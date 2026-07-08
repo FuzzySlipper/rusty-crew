@@ -452,6 +452,58 @@ pub struct RoleplayLoreSearchControls {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RoleplaySceneState {
+    #[serde(alias = "session_id")]
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(default, alias = "characters_present")]
+    pub characters_present: Vec<String>,
+    #[serde(default, alias = "active_threads")]
+    pub active_threads: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, alias = "updated_at", skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySceneStateReadInput {
+    pub session_id: String,
+    #[serde(default)]
+    pub record_value_json: Option<String>,
+    #[serde(default)]
+    pub record_updated_at: Option<String>,
+    #[serde(default)]
+    pub revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySceneStateReadOutput {
+    pub state: RoleplaySceneState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySceneStateUpdateInput {
+    pub session_id: String,
+    #[serde(default)]
+    pub current: Option<RoleplaySceneState>,
+    pub now: String,
+    #[serde(default)]
+    pub body: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySceneStateUpdatePlan {
+    pub state: RoleplaySceneState,
+    pub value_json: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorConfig {
     pub tone: String,
     pub pacing: String,
@@ -1410,6 +1462,67 @@ pub fn normalize_lore_search_controls(
     Ok(RoleplayLoreSearchControls {
         explicit_layer_ids,
         page: RoleplayLoreSearchPagePlan { limit, offset },
+    })
+}
+
+pub fn read_scene_state(
+    input: RoleplaySceneStateReadInput,
+) -> RoleplayDomainResult<RoleplaySceneStateReadOutput> {
+    validate_roleplay_identifier("roleplay scene state session_id", &input.session_id)?;
+    let state = match input.record_value_json.as_deref() {
+        Some(value_json) => parse_scene_state_record(
+            &input.session_id,
+            value_json,
+            input.record_updated_at.as_deref(),
+        ),
+        None => empty_scene_state(&input.session_id),
+    };
+    Ok(RoleplaySceneStateReadOutput {
+        state,
+        revision: input.revision,
+    })
+}
+
+pub fn plan_scene_state_update(
+    input: RoleplaySceneStateUpdateInput,
+) -> RoleplayDomainResult<RoleplaySceneStateUpdatePlan> {
+    validate_roleplay_identifier("roleplay scene state session_id", &input.session_id)?;
+    let body = json_object(&input.body, "roleplay scene state update body")?;
+    let mut state = input
+        .current
+        .unwrap_or_else(|| empty_scene_state(&input.session_id));
+    state.session_id = input.session_id.clone();
+    if has_any(body, &["location"]) {
+        state.location = optional_nullable_string(body, &["location"], "location")?;
+    }
+    if has_any(body, &["charactersPresent", "characters_present"]) {
+        state.characters_present = required_normalized_string_list(
+            body,
+            &["charactersPresent", "characters_present"],
+            "charactersPresent",
+        )?;
+    }
+    if has_any(body, &["activeThreads", "active_threads"]) {
+        state.active_threads = required_normalized_string_list(
+            body,
+            &["activeThreads", "active_threads"],
+            "activeThreads",
+        )?;
+    }
+    if has_any(body, &["notes"]) {
+        state.notes = optional_nullable_string(body, &["notes"], "notes")?;
+    }
+    state.updated_at = Some(input.now.clone());
+    let value_json = serde_json::to_string(&state).map_err(|error| {
+        RoleplayDomainError::invalid(
+            "roleplay_scene_state_serialize_failed",
+            format!("failed to serialize roleplay scene state: {error}"),
+        )
+    })?;
+    Ok(RoleplaySceneStateUpdatePlan {
+        state,
+        value_json,
+        now: input.now,
     })
 }
 
@@ -3064,6 +3177,100 @@ fn query_param_integer_value(
     ))
 }
 
+fn empty_scene_state(session_id: &str) -> RoleplaySceneState {
+    RoleplaySceneState {
+        session_id: session_id.to_string(),
+        location: None,
+        characters_present: Vec::new(),
+        active_threads: Vec::new(),
+        notes: None,
+        updated_at: None,
+    }
+}
+
+fn parse_scene_state_record(
+    session_id: &str,
+    value_json: &str,
+    record_updated_at: Option<&str>,
+) -> RoleplaySceneState {
+    let Ok(mut state) = serde_json::from_str::<RoleplaySceneState>(value_json) else {
+        return empty_scene_state(session_id);
+    };
+    state.session_id = session_id.to_string();
+    state.location = normalize_optional_text(state.location);
+    state.characters_present = normalize_string_tags(state.characters_present);
+    state.active_threads = normalize_string_tags(state.active_threads);
+    state.notes = normalize_optional_text(state.notes);
+    state.updated_at = normalize_optional_text(state.updated_at).or_else(|| {
+        record_updated_at.and_then(|value| normalize_optional_text(Some(value.to_string())))
+    });
+    state
+}
+
+fn optional_nullable_string(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<String>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let Some(text) = value.as_str() else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_string",
+            format!("{field_name} must be a string or null"),
+        ));
+    };
+    Ok(normalize_optional_text(Some(text.to_string())))
+}
+
+fn required_normalized_string_list(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Vec<String>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = value.as_array() else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_string_array",
+            format!("{field_name} must be an array"),
+        ));
+    };
+    let mut tags = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let Some(text) = item.as_str() else {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_invalid_string_array",
+                format!("{field_name}[{index}] must be a string"),
+            ));
+        };
+        if let Some(normalized) = normalize_optional_text(Some(text.to_string())) {
+            tags.push(normalized);
+        }
+    }
+    Ok(normalize_string_tags(tags))
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_string_tags(values: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    values
+        .into_iter()
+        .filter_map(|value| normalize_optional_text(Some(value)))
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
+}
+
 fn required_lifecycle_source(
     source: Option<RoleplaySessionLifecycleSession>,
 ) -> RoleplayDomainResult<RoleplaySessionLifecycleSession> {
@@ -4096,6 +4303,115 @@ mod tests {
         })
         .expect_err("bad layer rejected");
         assert_eq!(bad_layer.reason_code, "roleplay_identifier_invalid");
+    }
+
+    #[test]
+    fn reads_scene_state_defaults_and_normalizes_records() {
+        let empty = read_scene_state(RoleplaySceneStateReadInput {
+            session_id: "session-rp".to_string(),
+            record_value_json: None,
+            record_updated_at: None,
+            revision: None,
+        })
+        .expect("empty scene state");
+        assert_eq!(empty.state.session_id, "session-rp");
+        assert!(empty.state.characters_present.is_empty());
+        assert!(empty.state.active_threads.is_empty());
+
+        let parsed = read_scene_state(RoleplaySceneStateReadInput {
+            session_id: "session-rp".to_string(),
+            record_value_json: Some(
+                serde_json::json!({
+                    "sessionId": "other",
+                    "location": " Garden ",
+                    "charactersPresent": [" elara ", "", "elara"],
+                    "activeThreads": ["locket"],
+                    "notes": "  rain  "
+                })
+                .to_string(),
+            ),
+            record_updated_at: Some("2026-07-07T07:00:00Z".to_string()),
+            revision: Some(7),
+        })
+        .expect("parsed scene state");
+        assert_eq!(parsed.state.session_id, "session-rp");
+        assert_eq!(parsed.state.location.as_deref(), Some("Garden"));
+        assert_eq!(parsed.state.characters_present, vec!["elara".to_string()]);
+        assert_eq!(
+            parsed.state.updated_at.as_deref(),
+            Some("2026-07-07T07:00:00Z")
+        );
+        assert_eq!(parsed.revision, Some(7));
+
+        let corrupt = read_scene_state(RoleplaySceneStateReadInput {
+            session_id: "session-rp".to_string(),
+            record_value_json: Some("not json".to_string()),
+            record_updated_at: Some("2026-07-07T07:00:00Z".to_string()),
+            revision: Some(8),
+        })
+        .expect("corrupt scene state falls back");
+        assert!(corrupt.state.location.is_none());
+        assert_eq!(corrupt.revision, Some(8));
+    }
+
+    #[test]
+    fn plans_scene_state_update_merge_and_normalization() {
+        let plan = plan_scene_state_update(RoleplaySceneStateUpdateInput {
+            session_id: "session-rp".to_string(),
+            current: Some(RoleplaySceneState {
+                session_id: "session-rp".to_string(),
+                location: Some("Garden".to_string()),
+                characters_present: vec!["elara".to_string()],
+                active_threads: vec!["locket".to_string()],
+                notes: Some("rain".to_string()),
+                updated_at: Some("old".to_string()),
+            }),
+            now: "2026-07-07T08:00:00Z".to_string(),
+            body: serde_json::json!({
+                "location": null,
+                "charactersPresent": [" elara ", " katheryn ", "elara"],
+                "activeThreads": ["locket", "", "garden promise"],
+                "notes": "  warmer after rain  "
+            }),
+        })
+        .expect("scene state update plan");
+
+        assert!(plan.state.location.is_none());
+        assert_eq!(
+            plan.state.characters_present,
+            vec!["elara".to_string(), "katheryn".to_string()]
+        );
+        assert_eq!(
+            plan.state.active_threads,
+            vec!["locket".to_string(), "garden promise".to_string()]
+        );
+        assert_eq!(plan.state.notes.as_deref(), Some("warmer after rain"));
+        assert_eq!(
+            plan.state.updated_at.as_deref(),
+            Some("2026-07-07T08:00:00Z")
+        );
+        assert!(plan.value_json.contains("charactersPresent"));
+    }
+
+    #[test]
+    fn rejects_invalid_scene_state_updates() {
+        let bad_array = plan_scene_state_update(RoleplaySceneStateUpdateInput {
+            session_id: "session-rp".to_string(),
+            current: None,
+            now: "2026-07-07T08:00:00Z".to_string(),
+            body: serde_json::json!({"charactersPresent": "elara"}),
+        })
+        .expect_err("charactersPresent string rejected");
+        assert_eq!(bad_array.reason_code, "roleplay_invalid_string_array");
+
+        let bad_note = plan_scene_state_update(RoleplaySceneStateUpdateInput {
+            session_id: "session-rp".to_string(),
+            current: None,
+            now: "2026-07-07T08:00:00Z".to_string(),
+            body: serde_json::json!({"notes": ["nope"]}),
+        })
+        .expect_err("notes array rejected");
+        assert_eq!(bad_note.reason_code, "roleplay_invalid_string");
     }
 
     #[test]

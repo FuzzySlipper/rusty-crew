@@ -72,6 +72,99 @@ async function runSmoke(): Promise<void> {
 class FakeSimpleKvBridge {
   readonly records = new Map<string, NativeSimpleKvRecord>();
 
+  async readRoleplaySceneState(input: {
+    session_id: string;
+    record_value_json?: string;
+    record_updated_at?: string;
+    revision?: number;
+  }): Promise<{
+    state: {
+      sessionId: string;
+      location?: string;
+      charactersPresent: string[];
+      activeThreads: string[];
+      notes?: string;
+      updatedAt?: string;
+    };
+    revision?: number;
+  }> {
+    const parsed =
+      input.record_value_json === undefined
+        ? undefined
+        : safeJson(input.record_value_json);
+    return {
+      state: compactState({
+        sessionId: input.session_id,
+        location: normalizedString(parsed?.location),
+        charactersPresent: normalizedStringArray(parsed?.charactersPresent),
+        activeThreads: normalizedStringArray(parsed?.activeThreads),
+        notes: normalizedString(parsed?.notes),
+        updatedAt:
+          normalizedString(parsed?.updatedAt) ??
+          normalizedString(input.record_updated_at),
+      }),
+      revision: input.revision,
+    };
+  }
+
+  async planRoleplaySceneStateUpdate(input: {
+    session_id: string;
+    current?: {
+      sessionId: string;
+      location?: string;
+      charactersPresent: string[];
+      activeThreads: string[];
+      notes?: string;
+      updatedAt?: string;
+    };
+    now: string;
+    body: {
+      location?: string | null;
+      charactersPresent?: string[];
+      activeThreads?: string[];
+      notes?: string | null;
+    };
+  }): Promise<{
+    state: {
+      sessionId: string;
+      location?: string;
+      charactersPresent: string[];
+      activeThreads: string[];
+      notes?: string;
+      updatedAt?: string;
+    };
+    value_json: string;
+    now: string;
+  }> {
+    const state = compactState({
+      sessionId: input.session_id,
+      location: input.current?.location,
+      charactersPresent: input.current?.charactersPresent ?? [],
+      activeThreads: input.current?.activeThreads ?? [],
+      notes: input.current?.notes,
+      updatedAt: input.now,
+    });
+    if ("location" in input.body) {
+      state.location = normalizedString(input.body.location);
+    }
+    if (input.body.charactersPresent !== undefined) {
+      state.charactersPresent = normalizedStringArray(
+        input.body.charactersPresent,
+      );
+    }
+    if (input.body.activeThreads !== undefined) {
+      state.activeThreads = normalizedStringArray(input.body.activeThreads);
+    }
+    if ("notes" in input.body) {
+      state.notes = normalizedString(input.body.notes);
+    }
+    return {
+      state,
+      value_json: JSON.stringify(state),
+      now: input.now,
+    };
+  }
+
   async listSimpleKv(query: {
     scopeType: string;
     scopeId: string;
@@ -108,6 +201,64 @@ class FakeSimpleKvBridge {
     this.records.set(recordKey, record);
     return record;
   }
+}
+
+function safeJson(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizedString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+function normalizedStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .filter((item) => {
+      if (seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
+function compactState(state: {
+  sessionId: string;
+  location?: string;
+  charactersPresent: string[];
+  activeThreads: string[];
+  notes?: string;
+  updatedAt?: string;
+}): {
+  sessionId: string;
+  location?: string;
+  charactersPresent: string[];
+  activeThreads: string[];
+  notes?: string;
+  updatedAt?: string;
+} {
+  return {
+    sessionId: state.sessionId,
+    ...(state.location === undefined ? {} : { location: state.location }),
+    charactersPresent: state.charactersPresent,
+    activeThreads: state.activeThreads,
+    ...(state.notes === undefined ? {} : { notes: state.notes }),
+    ...(state.updatedAt === undefined ? {} : { updatedAt: state.updatedAt }),
+  };
 }
 
 function key(sessionId: string): string {
