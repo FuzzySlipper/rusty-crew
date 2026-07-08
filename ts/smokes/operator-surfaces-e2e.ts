@@ -9,14 +9,17 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   AgentActivityObservationProducer,
+  apiCapabilityRegistry,
   buildRuntimeDiagnosticsProjection,
   buildRuntimeHealthProjection,
   buildToolRegistryDiagnostics,
+  chatCommandRegistry,
   createDebugApiClient,
   createMemoryAdminControlAuditSink,
   createMemoryAgentActivityObservationSink,
   handleAdminControlRequest,
   handleAdminDiagnosticsRequest,
+  handleStorageQueryRequest,
   inspectDirectDebugSession,
 } from "@rusty-crew/brain-island";
 import type {
@@ -26,6 +29,8 @@ import type {
   AdminRecentEvent,
   AdminRouteResult,
   DebugApiFetch,
+  StorageQueryCatalog,
+  StorageQueryContext,
 } from "@rusty-crew/brain-island";
 import {
   loadDebugTuiState,
@@ -124,6 +129,43 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
   },
 });
 const health = buildRuntimeHealthProjection(diagnostics);
+const storageQueryContext = {
+  bridge: {
+    async storageSchema() {
+      return moduleRegistryFixture();
+    },
+    async storageDiagnostics() {
+      throw new Error(
+        "operator surface smoke only queries the storage catalog",
+      );
+    },
+    async listProfileMemory() {
+      throw new Error(
+        "operator surface smoke only queries the storage catalog",
+      );
+    },
+    async queryConversationBranches() {
+      throw new Error(
+        "operator surface smoke only queries the storage catalog",
+      );
+    },
+    async queryRuntimeCounters() {
+      throw new Error(
+        "operator surface smoke only queries the storage catalog",
+      );
+    },
+    async searchRuntime() {
+      throw new Error(
+        "operator surface smoke only queries the storage catalog",
+      );
+    },
+    async listSimpleKv() {
+      throw new Error(
+        "operator surface smoke only queries the storage catalog",
+      );
+    },
+  },
+} satisfies StorageQueryContext;
 const recentEvents: AdminRecentEvent[] = [
   {
     id: "event-alpha",
@@ -148,6 +190,17 @@ const calls: string[] = [];
 const fakeFetch: DebugApiFetch = async (input, init) => {
   const url = new URL(String(input));
   calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
+  if (url.pathname.startsWith("/v1/admin/storage/")) {
+    const result = await handleStorageQueryRequest(
+      {
+        method: init?.method ?? "GET",
+        url: `${url.pathname}${url.search}`,
+        requestId: "operator-storage-e2e",
+      },
+      storageQueryContext,
+    );
+    return jsonResponse(result.body, result.status);
+  }
   if (url.pathname.startsWith("/v1/admin/")) {
     const result = handleAdminDiagnosticsRequest(
       {
@@ -232,6 +285,47 @@ assert.equal(okData<{ degraded: boolean }>(overview).degraded, true);
 assert.equal(health.liveness.ok, true);
 assert.equal(health.readiness.ready, true);
 
+const capabilities = okEnvelope<ReturnType<typeof apiCapabilityRegistry>>(
+  await fetchJson("/v1/admin/capabilities"),
+);
+assert.deepEqual(
+  capabilities.slash_commands.map((command) => command.name),
+  chatCommandRegistry().commands.map((command) => command.name),
+);
+assert.equal(
+  capabilities.slash_commands.find((command) => command.name === "reload-mcp")
+    ?.rust_plan_operation,
+  "plan_reload_mcp_control",
+);
+assert.equal(
+  capabilities.capabilities.find(
+    (capability) => capability.id === "admin.control.mcp.reload",
+  )?.rust_plan_operation,
+  "plan_reload_mcp_control",
+);
+assert.ok(
+  capabilities.capabilities.some(
+    (capability) =>
+      capability.path_template === "/v1/admin/storage/query-catalog",
+  ),
+  "capability registry should expose storage query catalog",
+);
+
+const storageCatalog = okEnvelope<StorageQueryCatalog>(
+  await fetchJson("/v1/admin/storage/query-catalog"),
+);
+const simpleKvQuery = storageCatalog.items.find(
+  (query) => query.id === "simple_kv.entries",
+);
+assert.ok(
+  simpleKvQuery,
+  "storage query catalog should expose simple_kv.entries",
+);
+assert.equal(simpleKvQuery.owner, "rust_coordination");
+assert.equal(simpleKvQuery.module?.ownerCrate, "core_persistence");
+assert.equal(simpleKvQuery.module?.rustQueryId, "list_entries_by_scope");
+assert.equal(simpleKvQuery.readOnly, true);
+
 const sessions = await client.sessions({ limit: 10 });
 assert.equal(sessions.total, 2);
 const degradedMcp = await client.mcpSurfaces({ status: "degraded" });
@@ -308,6 +402,8 @@ console.log(
       controlAuditEvents: auditSink.events.length,
       controlObservationEvents: observationSink.events.length,
       fakeFetchCalls: calls.length,
+      capabilityCommands: capabilities.slash_commands.length,
+      storageQueries: storageCatalog.items.length,
     },
     null,
     2,
@@ -404,10 +500,91 @@ function controlContext(
   };
 }
 
+function fetchJson(pathname: string): Promise<AdminApiEnvelope<unknown>> {
+  return fakeFetch(`http://rusty-crew.local${pathname}`, {
+    method: "GET",
+    headers: { authorization: "Bearer operator-token" },
+  }).then((response) => response.json() as Promise<AdminApiEnvelope<unknown>>);
+}
+
+function okEnvelope<T>(body: AdminApiEnvelope<unknown>): T {
+  if (!body.ok) {
+    assert.fail(
+      `expected ok envelope, got ${body.error.reason_code}: ${body.error.message}`,
+    );
+  }
+  return body.data as T;
+}
+
 function okData<T>(result: AdminRouteResult): T {
   assert.equal(result.body.ok, true);
   if (!result.body.ok) throw new Error("expected admin route success");
   return result.body.data as T;
+}
+
+function moduleRegistryFixture(): Awaited<
+  ReturnType<StorageQueryContext["bridge"]["storageSchema"]>
+> {
+  return {
+    source: "compiled_module_schema_registry",
+    backendCapabilities: ["transactions", "json_documents"],
+    modules: [
+      {
+        moduleId: "simple_kv",
+        ownerCrate: "core_persistence",
+        ownerModule: "simple_kv",
+        descriptorVersion: 1,
+        installedVersion: 1,
+        migrationStatus: "installed",
+        descriptorFingerprint: "fnv1a64:operator",
+        installedDescriptorFingerprint: "fnv1a64:operator",
+        installedAt: "2026-06-20T15:00:00.000Z",
+        updatedAt: "2026-06-20T15:00:00.000Z",
+        capabilityStatus: [
+          {
+            capability: "transactions",
+            required: true,
+            supported: true,
+            backendVariant: "sqlite",
+          },
+          {
+            capability: "json_documents",
+            required: false,
+            supported: true,
+            backendVariant: "sqlite",
+          },
+        ],
+        logicalStores: [
+          { storeName: "entries", description: "Simple entries" },
+        ],
+        physicalTables: [
+          {
+            tableName: "entries",
+            logicalStore: "entries",
+            physicalTable: "module_simple_kv_entries",
+            declaration: "owned",
+          },
+        ],
+        physicalIndexes: [],
+        retention: [],
+        repositoryContracts: [],
+        queryCatalogEntries: [
+          {
+            queryId: "list_entries_by_scope",
+            storeName: "entries",
+            description: "List simple key/value entries for a scope",
+            parameterSchemaId: "simple_kv_scope_query",
+          },
+        ],
+        exportHooks: [],
+        importHooks: [],
+        migrationNotes: [],
+        degradedReasons: [],
+        blockedReasons: [],
+      },
+    ],
+    orphanInstalledModules: [],
+  };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
