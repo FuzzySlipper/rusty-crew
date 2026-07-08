@@ -570,6 +570,15 @@ errors = "core_protocol::CoreError"
 summary = "Select the active variant for a message slot with compare-and-swap conflict reporting."
 
 [[operation]]
+name = "select_active_chat_message_variant"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::SelectActiveChatMessageVariantRequest"
+output = "core_persistence::SelectActiveChatMessageVariantResult"
+errors = "core_protocol::CoreError"
+summary = "Select the active variant for a chat message slot and synchronize branch head state."
+
+[[operation]]
 name = "delete_message_variant"
 surface = "stable"
 direction = "ts_to_rust"

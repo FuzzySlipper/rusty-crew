@@ -230,6 +230,22 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn select_active_chat_message_variant_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<SelectActiveChatMessageVariantRequest>(
+            &input_json,
+            "select active chat message variant request",
+        )?;
+        let result = bridge
+            .select_active_chat_message_variant(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "select active chat message variant result")
+    }
+
+    #[napi]
     pub fn delete_message_variant_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let request = parse_json::<WireDeleteMessageVariantRequest>(

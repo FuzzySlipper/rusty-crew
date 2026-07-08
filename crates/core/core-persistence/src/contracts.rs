@@ -413,6 +413,21 @@ pub struct SelectActiveVariantResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectActiveChatMessageVariantRequest {
+    pub session_id: SessionId,
+    pub slot_id: MessageSlotId,
+    pub active_variant_id: Option<MessageVariantId>,
+    pub expected: ActiveVariantExpectation,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectActiveChatMessageVariantResult {
+    pub slot: MessageSlotRecord,
+    pub conflict: Option<ActiveVariantConflict>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveVariantConflict {
     pub expected: Option<MessageVariantId>,
     pub actual: Option<MessageVariantId>,

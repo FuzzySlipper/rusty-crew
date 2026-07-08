@@ -40,6 +40,7 @@ export declare class NativeBridgeBinding {
   queryDataBankScopesJson(inputJson: string): string
   removeDataBankScopeJson(inputJson: string): string
   selectActiveMessageVariantJson(inputJson: string): string
+  selectActiveChatMessageVariantJson(inputJson: string): string
   deleteMessageVariantJson(inputJson: string): string
   reorderMessageVariantsJson(inputJson: string): string
   cancelDelegatedSession(delegatedSessionId: string): JsSessionState

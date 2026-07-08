@@ -246,6 +246,7 @@ interface NativeBridgeBinding {
   appendChatEventJson(inputJson: string): string;
   queryChatEventsJson(inputJson: string): string;
   selectActiveMessageVariantJson(inputJson: string): string;
+  selectActiveChatMessageVariantJson(inputJson: string): string;
   deleteMessageVariantJson(inputJson: string): string;
   reorderMessageVariantsJson(inputJson: string): string;
   saveConversationBranchJson(inputJson: string): string;
@@ -2171,6 +2172,7 @@ export interface NativeBridgeModule {
   queryMessageSlots(query: unknown): Promise<unknown[]>;
   queryMessageVariants(query: unknown): Promise<unknown[]>;
   selectActiveMessageVariant(input: unknown): Promise<unknown>;
+  selectActiveChatMessageVariant(input: unknown): Promise<unknown>;
   deleteMessageVariant(input: unknown): Promise<unknown>;
   reorderMessageVariants(input: unknown): Promise<unknown[]>;
   saveConversationBranch(input: unknown): Promise<unknown>;
@@ -2522,6 +2524,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     queryMessageSlots: unavailable("query_message_slots"),
     queryMessageVariants: unavailable("query_message_variants"),
     selectActiveMessageVariant: unavailable("select_active_message_variant"),
+    selectActiveChatMessageVariant: unavailable(
+      "select_active_chat_message_variant",
+    ),
     deleteMessageVariant: unavailable("delete_message_variant"),
     reorderMessageVariants: unavailable("reorder_message_variants"),
     saveConversationBranch: unavailable("save_conversation_branch"),
@@ -3777,6 +3782,10 @@ function createNativeBridgeModule(
     selectActiveMessageVariant: async (input) =>
       JSON.parse(
         binding.selectActiveMessageVariantJson(JSON.stringify(input)),
+      ) as unknown,
+    selectActiveChatMessageVariant: async (input) =>
+      JSON.parse(
+        binding.selectActiveChatMessageVariantJson(JSON.stringify(input)),
       ) as unknown,
     deleteMessageVariant: async (input) =>
       JSON.parse(

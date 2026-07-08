@@ -9212,7 +9212,8 @@ async function selectRustyViewActiveMessageVariant(
     input.session.sessionId,
     input.slotId,
   );
-  const result = (await state.bridge.selectActiveMessageVariant({
+  const result = (await state.bridge.selectActiveChatMessageVariant({
+    session_id: input.session.sessionId,
     slot_id: input.slotId,
     active_variant_id: input.request.active_variant_id ?? null,
     expected: input.request.expected,
@@ -9222,23 +9223,6 @@ async function selectRustyViewActiveMessageVariant(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "selected";
-  if (status === "selected") {
-    const selected =
-      result.slot.active_variant_id === null ||
-      result.slot.active_variant_id === undefined
-        ? result.slot.primary
-        : [result.slot.primary, ...result.slot.alternates].find(
-            (variant) => variant.variant_id === result.slot.active_variant_id,
-          );
-    if (selected?.message.branch_id) {
-      await state.bridge.updateConversationBranchHead({
-        branch_id: selected.message.branch_id,
-        head_message_id: selected.message.message_id,
-        expected: { type: "any" },
-        updated_at: state.now(),
-      });
-    }
-  }
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_active_variant_selected",
     payload: {

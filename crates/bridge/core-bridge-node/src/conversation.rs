@@ -144,6 +144,13 @@ impl NativeBridge {
         self.engine()?.select_active_message_variant(request)
     }
 
+    pub fn select_active_chat_message_variant(
+        &self,
+        request: &SelectActiveChatMessageVariantRequest,
+    ) -> CoreResult<SelectActiveChatMessageVariantResult> {
+        self.engine()?.select_active_chat_message_variant(request)
+    }
+
     pub fn delete_message_variant(
         &self,
         slot_id: &MessageSlotId,
