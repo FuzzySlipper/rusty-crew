@@ -173,7 +173,9 @@ The next implementation series should move in these slices:
 5. Classify remaining TypeScript memory tools as one of: local Crew-memory
    wrapper, external-memory adapter wrapper, roleplay-lore domain wrapper,
    runtime-search wrapper, or UI/admin route glue. Anything that still owns
-   durable policy after classification needs a follow-up migration task.
+   durable policy after classification needs a follow-up migration task. The
+   current classification is recorded in
+   `docs/typescript-memory-surface-inventory-2026-07-08.md`.
 6. Ratchet tests and live certification around the confusing case: a profile
    with Den document/task MCP tools plus external memory tools must use document
    tools for Den docs/tasks and memory tools only for memory.

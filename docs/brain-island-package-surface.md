@@ -35,6 +35,9 @@ Current root entrypoint shape:
   exports.
 - `src/package-surface/memory.ts` owns Den/dense memory tools, memory spaces,
   curator, capture proposal, session digest, and memory review exports.
+  Exporting these wrappers does not make TypeScript the durable memory policy
+  owner; see `docs/typescript-memory-surface-inventory-2026-07-08.md` for the
+  current Rust policy/storage boundary.
 - `src/package-surface/roleplay.ts` owns lore memory, scene state, and roleplay
   narrator exports.
 - `src/package-surface/mcp-browser.ts` owns MCP integration/telemetry and browser
