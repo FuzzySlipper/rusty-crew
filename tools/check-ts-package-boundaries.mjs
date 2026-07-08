@@ -15,6 +15,47 @@ const adapterPackages = [
   "@rusty-crew/adapter-telegram",
   "@rusty-crew/adapter-tui",
 ];
+const adapterAuthorityAllowedCalls = new Map([
+  [
+    normalizePath("ts/packages/adapter-den/src/index.ts"),
+    new Set(["injectDenDataUpdate", "injectExternalEvent"]),
+  ],
+  [
+    normalizePath("ts/packages/adapter-den/src/channel-ingress.ts"),
+    new Set([
+      "ensureSessionForRoute",
+      "injectExternalEvent",
+      "routeAgentMessage",
+    ]),
+  ],
+  [
+    normalizePath("ts/packages/adapter-den/src/den-product-ingress.ts"),
+    new Set(["injectDenDataUpdate", "planDenProductIngressPolicy"]),
+  ],
+]);
+const adapterAuthorityForbiddenCalls = [
+  "archiveSession",
+  "cancelDelegatedSession",
+  "cleanupDelegatedResources",
+  "createSession",
+  "destroyProfile",
+  "drainDelegatedSessions",
+  "injectDenDataUpdate",
+  "injectExternalEvent",
+  "planNewSessionControl",
+  "planProfileRegistryMutation",
+  "planReloadMcpControl",
+  "planRuntimeConfig",
+  "registerBrainImplementation",
+  "requestBrainWake",
+  "requestDelegatedCheckpoint",
+  "routeAgentMessage",
+  "saveRuntimeConfig",
+  "shutdownEngine",
+  "submitBrainEvent",
+  "submitBrainTextDelta",
+  "wakeBrainFromBridgeRequest",
+];
 const legacyBrainIslandSrcSmokeCount = 137;
 const legacySrcSmokeAllowedImports = new Map([
   [
@@ -87,6 +128,12 @@ const legacySrcSmokeAllowedImports = new Map([
   ],
   [
     normalizePath("ts/packages/brain-island/src/smoke-mcp-tool-telemetry.ts"),
+    new Set(["@rusty-crew/adapter-mcp"]),
+  ],
+  [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-memory-document-boundary.ts",
+    ),
     new Set(["@rusty-crew/adapter-mcp"]),
   ],
   [
@@ -209,6 +256,7 @@ for (const adapterName of adapterPackages) {
     ...adapterPackages.filter((candidate) => candidate !== adapterName),
   ]);
 }
+expectAdapterAuthorityRatchets();
 
 if (violations.length > 0) {
   console.error("TypeScript package boundary check failed:");
@@ -229,6 +277,16 @@ console.log(
       serviceHostCompositionDependencies: dependenciesFor(
         "@rusty-crew/service-host",
       ),
+      adapterAuthorityRatchet: {
+        packages: adapterPackages,
+        forbiddenCalls: adapterAuthorityForbiddenCalls.length,
+        exactExemptions: [...adapterAuthorityAllowedCalls].map(
+          ([path, calls]) => ({
+            path,
+            calls: [...calls].sort(),
+          }),
+        ),
+      },
     },
     null,
     2,
@@ -351,6 +409,26 @@ function expectBrainIslandCompositionRatchets() {
   }
 }
 
+function expectAdapterAuthorityRatchets() {
+  for (const adapterName of adapterPackages) {
+    const pkg = packagesByName.get(adapterName);
+    if (!pkg) continue;
+    for (const sourceFile of productionSourceFiles(pkg)) {
+      const relativePath = normalizePath(relative(root, sourceFile));
+      const source = readFileSync(sourceFile, "utf8");
+      for (const callName of adapterAuthorityForbiddenCalls) {
+        if (!usesIdentifier(source, callName)) continue;
+        if (adapterAuthorityAllowedCalls.get(relativePath)?.has(callName)) {
+          continue;
+        }
+        violations.push(
+          `${adapterName} production file ${relativePath} must not call or expose ${callName}; adapters may normalize, project, diagnose, or use exact approved planner/ingress ports only`,
+        );
+      }
+    }
+  }
+}
+
 function productionSourceFiles(pkg) {
   const sourceDir = join(pkg.dir, "src");
   if (!existsSync(sourceDir)) return [];
@@ -408,6 +486,11 @@ function importsPackage(source, packageName) {
   return new RegExp(
     String.raw`\b(?:from|import)\s*(?:\([^)]*)?["']${escaped}(?:/[^"']*)?["']`,
   ).test(source);
+}
+
+function usesIdentifier(source, identifier) {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(String.raw`\b${escaped}\b`).test(source);
 }
 
 function normalizePath(path) {
