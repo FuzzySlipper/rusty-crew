@@ -417,6 +417,14 @@ struct LocalCodeToolPolicy {
     workdir_scoped: bool,
 }
 
+struct WebBrowserToolPolicy {
+    category: ToolCategory,
+    output_shape: &'static str,
+    required_toolsets: &'static [&'static str],
+    required_safety: &'static [ToolSafetyFlag],
+    forbidden_safety: &'static [ToolSafetyFlag],
+}
+
 fn local_code_tool_policy(tool_name: &str) -> Option<LocalCodeToolPolicy> {
     match tool_name {
         "read_file" => Some(LocalCodeToolPolicy {
@@ -483,6 +491,93 @@ fn local_code_tool_policy(tool_name: &str) -> Option<LocalCodeToolPolicy> {
             workdir_scoped: true,
         }),
         _ => None,
+    }
+}
+
+fn web_browser_tool_policy(tool_name: &str) -> Option<WebBrowserToolPolicy> {
+    match tool_name {
+        "web_search" => Some(web_policy("web.search_result.v1")),
+        "web_extract" => Some(web_policy("web.extract_result.v1")),
+        "browser_navigate" => Some(browser_policy(
+            "browser.navigation_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::NetworkAccess],
+            &[ToolSafetyFlag::ReadOnly, ToolSafetyFlag::ExternalWrite],
+        )),
+        "browser_snapshot" => Some(browser_policy(
+            "browser.snapshot_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::ReadOnly],
+            &[ToolSafetyFlag::NetworkAccess, ToolSafetyFlag::ExternalWrite],
+        )),
+        "browser_click" => Some(browser_policy(
+            "browser.click_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::ExternalWrite],
+            &[ToolSafetyFlag::ReadOnly],
+        )),
+        "browser_type" => Some(browser_policy(
+            "browser.type_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::ExternalWrite],
+            &[ToolSafetyFlag::ReadOnly],
+        )),
+        "browser_scroll" => Some(browser_policy(
+            "browser.scroll_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::ReadOnly],
+            &[ToolSafetyFlag::NetworkAccess, ToolSafetyFlag::ExternalWrite],
+        )),
+        "browser_back" => Some(browser_policy(
+            "browser.back_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::ReadOnly],
+            &[ToolSafetyFlag::NetworkAccess, ToolSafetyFlag::ExternalWrite],
+        )),
+        "browser_press" => Some(browser_policy(
+            "browser.press_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::ExternalWrite],
+            &[ToolSafetyFlag::ReadOnly],
+        )),
+        "browser_console" => Some(browser_policy(
+            "browser.console_result.v1",
+            &["browser"],
+            &[ToolSafetyFlag::ReadOnly],
+            &[ToolSafetyFlag::NetworkAccess, ToolSafetyFlag::ExternalWrite],
+        )),
+        "browser_vision" => Some(browser_policy(
+            "browser.vision_capture_result.v1",
+            &["browser_vision"],
+            &[ToolSafetyFlag::ReadOnly],
+            &[ToolSafetyFlag::NetworkAccess, ToolSafetyFlag::ExternalWrite],
+        )),
+        _ => None,
+    }
+}
+
+fn web_policy(output_shape: &'static str) -> WebBrowserToolPolicy {
+    WebBrowserToolPolicy {
+        category: ToolCategory::Web,
+        output_shape,
+        required_toolsets: &["web_research"],
+        required_safety: &[ToolSafetyFlag::ReadOnly, ToolSafetyFlag::NetworkAccess],
+        forbidden_safety: &[ToolSafetyFlag::ExternalWrite],
+    }
+}
+
+fn browser_policy(
+    output_shape: &'static str,
+    required_toolsets: &'static [&'static str],
+    required_safety: &'static [ToolSafetyFlag],
+    forbidden_safety: &'static [ToolSafetyFlag],
+) -> WebBrowserToolPolicy {
+    WebBrowserToolPolicy {
+        category: ToolCategory::Browser,
+        output_shape,
+        required_toolsets,
+        required_safety,
+        forbidden_safety,
     }
 }
 
@@ -670,6 +765,7 @@ impl<'a> ToolMetadataValidator<'a> {
             }
         }
         self.validate_local_code_tool_policy(index, entry);
+        self.validate_web_browser_tool_policy(index, entry);
     }
 
     fn validate_local_code_tool_policy(&mut self, index: usize, entry: &ToolMetadata) {
@@ -752,6 +848,72 @@ impl<'a> ToolMetadataValidator<'a> {
                     entry.name
                 ),
             );
+        }
+    }
+
+    fn validate_web_browser_tool_policy(&mut self, index: usize, entry: &ToolMetadata) {
+        let Some(policy) = web_browser_tool_policy(entry.name.as_str()) else {
+            return;
+        };
+        if entry.category != policy.category {
+            self.error(
+                "invalid_web_browser_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].category"),
+                format!(
+                    "{} must stay in {:?} category for Rust-validated web/browser policy",
+                    entry.name, policy.category
+                ),
+            );
+        }
+        if entry.output_shape != policy.output_shape {
+            self.error(
+                "invalid_web_browser_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].outputShape"),
+                format!(
+                    "{} must use durable output shape {}",
+                    entry.name, policy.output_shape
+                ),
+            );
+        }
+        for required in policy.required_toolsets {
+            if !entry.toolsets.iter().any(|toolset| toolset == required) {
+                self.error(
+                    "invalid_web_browser_tool_policy",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].toolsets"),
+                    format!("{} must include toolset {required}", entry.name),
+                );
+            }
+        }
+        for required in policy.required_safety {
+            if !entry.safety.iter().any(|flag| flag == required) {
+                self.error(
+                    "invalid_web_browser_tool_policy",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].safety"),
+                    format!("{} must include safety flag {:?}", entry.name, required),
+                );
+            }
+        }
+        for forbidden in policy.forbidden_safety {
+            if entry.safety.iter().any(|flag| flag == forbidden) {
+                self.error(
+                    "invalid_web_browser_tool_policy",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].safety"),
+                    format!(
+                        "{} must not include safety flag {:?}",
+                        entry.name, forbidden
+                    ),
+                );
+            }
         }
     }
 
@@ -1173,11 +1335,41 @@ mod tests {
     }
 
     #[test]
+    fn rejects_web_browser_tool_policy_drift() {
+        let mut web_extract = web_extract_tool();
+        web_extract.safety = vec![ToolSafetyFlag::ReadOnly];
+
+        let mut browser_click = tool(
+            "browser_click",
+            ToolCategory::Browser,
+            "browser.click_result.v1",
+        );
+        browser_click.toolsets = vec!["browser".to_string()];
+        browser_click.safety = vec![ToolSafetyFlag::ReadOnly];
+
+        let mut browser_vision = tool(
+            "browser_vision",
+            ToolCategory::Browser,
+            "browser.vision_capture_result.v1",
+        );
+        browser_vision.toolsets = vec!["browser".to_string()];
+        browser_vision.safety = vec![ToolSafetyFlag::ReadOnly];
+
+        let result = validate_tool_metadata_list(&[web_extract, browser_click, browser_vision]);
+
+        assert_codes(
+            &result,
+            &[
+                "invalid_web_browser_tool_policy",
+                "invalid_web_browser_tool_policy",
+                "invalid_web_browser_tool_policy",
+            ],
+        );
+    }
+
+    #[test]
     fn validates_portable_metadata_without_executor_binding() {
-        let result = validate_tool_metadata_list(&[
-            local_read_file_tool(),
-            tool("web_extract", ToolCategory::Web, "web.extract_result.v1"),
-        ]);
+        let result = validate_tool_metadata_list(&[local_read_file_tool(), web_extract_tool()]);
 
         assert!(result.ok(), "{:?}", result.diagnostics);
     }
@@ -1597,6 +1789,13 @@ mod tests {
         let mut tool = tool("read_file", ToolCategory::Local, "local.file_text.v1");
         tool.toolsets = vec!["local_code_read".to_string()];
         tool.safety = vec![ToolSafetyFlag::ReadOnly];
+        tool
+    }
+
+    fn web_extract_tool() -> ToolMetadata {
+        let mut tool = tool("web_extract", ToolCategory::Web, "web.extract_result.v1");
+        tool.toolsets = vec!["web_research".to_string()];
+        tool.safety = vec![ToolSafetyFlag::ReadOnly, ToolSafetyFlag::NetworkAccess];
         tool
     }
 
