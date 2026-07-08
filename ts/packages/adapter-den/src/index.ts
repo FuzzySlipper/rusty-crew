@@ -34,6 +34,7 @@ export * from "./channel-presence.js";
 export * from "./channel-ingress.js";
 export * from "./channel-projection.js";
 export * from "./successor-gateway.js";
+export * from "./successor-conversation-resolution.js";
 export * from "./memory-client.js";
 
 export type DenAdapterConnectionState =

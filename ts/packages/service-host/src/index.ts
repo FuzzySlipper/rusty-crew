@@ -18,6 +18,7 @@ import {
   dispatchChannelMessageProjection,
   ingestChannelInboundMessage,
   projectAgentMessageToChannel,
+  resolveDenConversationChannels,
 } from "@rusty-crew/adapter-den";
 import {
   createSimulatedMcpTransportFactory,
@@ -166,6 +167,7 @@ async function handleHostHttpRequest(
 function defaultServiceAdapterFactories(): ServiceAdapterFactories {
   return {
     createDenSuccessorGatewayClient,
+    resolveDenConversationChannels,
     createDenMemoryClient,
     createMcpSurfaceManager: (input) => new McpSurfaceManager(input),
     createSimulatedMcpTransportFactory,

@@ -47,8 +47,8 @@ import {
 } from "@rusty-crew/native-bridge";
 import type {
   ChannelBindingDiagnostics,
+  DenConversationChannelResolution,
   DenSuccessorAgentIdentity,
-  DenSuccessorConversationChannel,
   DenSuccessorConversationMembership,
   DenSuccessorDeliveryIntent,
   DenSuccessorGatewayClient,
@@ -466,12 +466,6 @@ function roleplayRouteContext(state: ServiceState): RoleplayRouteContext {
     generateRoleplayAssistantAlternative: (input) =>
       generateRoleplayAssistantAlternativeViaWake(state, input),
   };
-}
-
-interface DenConversationChannelResolution {
-  channelId: number;
-  projectId: string;
-  slug: string;
 }
 
 interface ServiceBackgroundReviewRuntime {
@@ -3681,98 +3675,48 @@ async function ensureDenConversationChannels(
   }
 
   try {
-    const channelsByProjectId = new Map<
-      string,
-      Map<string, DenSuccessorConversationChannel>
-    >();
-    const nextResolutions = new Map<string, DenConversationChannelResolution>();
-    const nextChannelIds = new Map<string, number>();
-    let created = 0;
-    for (const binding of bindings) {
-      const projectId = conversationProjectIdForBinding(state, binding);
-      const slug = binding.externalChannelId;
-      if (binding.conversationChannelId !== undefined) {
-        nextResolutions.set(binding.bindingId, {
-          channelId: binding.conversationChannelId,
-          projectId,
-          slug,
-        });
-        nextChannelIds.set(
-          conversationExternalChannelKey(projectId, slug),
-          binding.conversationChannelId,
-        );
-        continue;
-      }
-      let channelsBySlug = channelsByProjectId.get(projectId);
-      if (channelsBySlug === undefined) {
-        const channels = await state.denGatewayClient.listConversationChannels({
-          projectId,
-          limit: 100,
-        });
-        channelsBySlug = new Map(
-          channels.map((channel) => [channel.slug, channel]),
-        );
-        channelsByProjectId.set(projectId, channelsBySlug);
-      }
-      const existing = channelsBySlug.get(slug);
-      if (existing !== undefined) {
-        nextResolutions.set(binding.bindingId, {
-          channelId: existing.id,
-          projectId,
-          slug: existing.slug,
-        });
-        nextChannelIds.set(
-          conversationExternalChannelKey(projectId, slug),
-          existing.id,
-        );
-        continue;
-      }
-      const channel = await state.denGatewayClient.createConversationChannel({
-        slug,
-        display_name: displayNameForConversationBinding(binding),
-        kind: "agent_channel",
-        project_id: projectId,
-        created_by: "rusty-crew",
-        visibility: "normal",
-        settings: {
-          adapter_id: binding.adapterId,
-          binding_id: binding.bindingId,
-          provider: binding.provider,
-          profile_id: binding.profileId,
-          agent_id: binding.agentId,
-        },
+    const resolution =
+      await state.adapterFactories.resolveDenConversationChannels({
+        client: state.denGatewayClient,
+        bindings,
+        defaultProjectId: state.config.denConversationProjectId,
       });
-      created += 1;
-      channelsBySlug.set(channel.slug, channel);
-      nextResolutions.set(binding.bindingId, {
-        channelId: channel.id,
-        projectId,
-        slug: channel.slug,
-      });
-      nextChannelIds.set(
-        conversationExternalChannelKey(projectId, slug),
-        channel.id,
-      );
-    }
     state.denConversationChannelResolutionsByBindingId.clear();
-    for (const [bindingId, resolution] of nextResolutions) {
+    for (const [
+      bindingId,
+      channelResolution,
+    ] of resolution.resolutionsByBindingId) {
       state.denConversationChannelResolutionsByBindingId.set(
         bindingId,
-        resolution,
+        channelResolution,
       );
     }
     state.denConversationChannelIdsByExternalId.clear();
-    for (const [externalChannelKey, channelId] of nextChannelIds) {
+    for (const [
+      externalChannelKey,
+      channelId,
+    ] of resolution.channelIdsByExternalId) {
       state.denConversationChannelIdsByExternalId.set(
         externalChannelKey,
         channelId,
       );
     }
-    await refreshDenConversationMemberships(state, bindings, nextResolutions);
+    state.denConversationMembershipsByBindingId.clear();
+    for (const [bindingId, membership] of resolution.membershipsByBindingId) {
+      state.denConversationMembershipsByBindingId.set(bindingId, membership);
+    }
+    if (resolution.membershipResolutionFailure !== undefined) {
+      recordServiceEvent(state, {
+        source: "den-successor-gateway",
+        eventType: "den_conversation_memberships_degraded",
+        severity: "warning",
+        summary: resolution.membershipResolutionFailure,
+      });
+    }
     recordServiceEvent(state, {
       source: "den-successor-gateway",
       eventType: "den_conversation_channels_resolved",
-      summary: `Resolved ${nextResolutions.size} Den Conversation channel binding(s), created ${created}.`,
+      summary: `Resolved ${resolution.resolutionsByBindingId.size} Den Conversation channel binding(s), created ${resolution.createdCount}.`,
     });
   } catch (error) {
     recordServiceEvent(state, {
@@ -3798,104 +3742,6 @@ function activeDenChannelBindings(
   );
 }
 
-async function refreshDenConversationMemberships(
-  state: ServiceState,
-  bindings: readonly ChannelBindingRecord[],
-  resolutionsByBindingId: ReadonlyMap<string, DenConversationChannelResolution>,
-): Promise<void> {
-  if (state.denGatewayClient === undefined) return;
-  try {
-    const projectIds = [
-      ...new Set(
-        bindings.map((binding) =>
-          conversationProjectIdForBinding(state, binding),
-        ),
-      ),
-    ];
-    const memberships = (
-      await Promise.all(
-        projectIds.map((projectId) =>
-          state.denGatewayClient!.listConversationMemberships({
-            projectId,
-            includeLeft: true,
-            limit: Math.max(100, bindings.length * 2),
-          }),
-        ),
-      )
-    ).flat();
-    const membershipByChannelAndMember = new Map<
-      string,
-      DenSuccessorConversationMembership
-    >();
-    for (const membership of memberships) {
-      const key = conversationMembershipKey(
-        membership.channel_id,
-        membership.member_identity,
-      );
-      const existing = membershipByChannelAndMember.get(key);
-      if (preferConversationMembership(membership, existing)) {
-        membershipByChannelAndMember.set(key, membership);
-      }
-    }
-    state.denConversationMembershipsByBindingId.clear();
-    for (const binding of bindings) {
-      const resolution = resolutionsByBindingId.get(binding.bindingId);
-      if (resolution === undefined) continue;
-      const membership = membershipByChannelAndMember.get(
-        conversationMembershipKey(resolution.channelId, binding.agentId),
-      );
-      if (membership !== undefined) {
-        state.denConversationMembershipsByBindingId.set(
-          binding.bindingId,
-          membership,
-        );
-      }
-    }
-  } catch (error) {
-    state.denConversationMembershipsByBindingId.clear();
-    recordServiceEvent(state, {
-      source: "den-successor-gateway",
-      eventType: "den_conversation_memberships_degraded",
-      severity: "warning",
-      summary: errorMessage(
-        error,
-        "Den Conversation membership resolution failed",
-      ),
-    });
-  }
-}
-
-function conversationMembershipKey(
-  channelId: number,
-  memberIdentity: string,
-): string {
-  return `${channelId}:${memberIdentity}`;
-}
-
-function preferConversationMembership(
-  candidate: DenSuccessorConversationMembership,
-  existing: DenSuccessorConversationMembership | undefined,
-): boolean {
-  if (existing === undefined) return true;
-  return (
-    conversationMembershipRank(candidate.membership_status) >
-    conversationMembershipRank(existing.membership_status)
-  );
-}
-
-function conversationMembershipRank(status: string): number {
-  switch (status) {
-    case "active":
-      return 3;
-    case "invited":
-      return 2;
-    case "left":
-      return 1;
-    default:
-      return 0;
-  }
-}
-
 function conversationProjectIdForBinding(
   state: ServiceState,
   binding: ChannelBindingRecord,
@@ -3904,19 +3750,6 @@ function conversationProjectIdForBinding(
     binding.conversationProjectId?.trim() ??
     state.config.denConversationProjectId
   );
-}
-
-function conversationExternalChannelKey(
-  projectId: string,
-  slug: string,
-): string {
-  return `${projectId}:${slug}`;
-}
-
-function displayNameForConversationBinding(
-  binding: ChannelBindingRecord,
-): string {
-  return `${binding.agentId} (${binding.externalChannelId})`;
 }
 
 async function startTelegramConnector(state: ServiceState): Promise<void> {

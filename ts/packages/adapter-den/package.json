@@ -12,6 +12,7 @@
     "smoke:product-ingress": "tsx src/smoke-product-ingress.ts",
     "smoke:memory-client": "tsx src/smoke-memory-client.ts",
     "smoke:successor-gateway": "tsx src/smoke-successor-gateway.ts",
+    "smoke:successor-conversation-resolution": "tsx src/smoke-successor-conversation-resolution.ts",
     "smoke:successor-gateway-cassettes": "tsx src/smoke-successor-gateway-cassettes.ts"
   },
   "exports": {

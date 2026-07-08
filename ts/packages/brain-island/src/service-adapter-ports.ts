@@ -110,6 +110,23 @@ export interface DenSuccessorConversationMembership {
   left_at?: string;
 }
 
+export interface DenConversationChannelResolution {
+  channelId: number;
+  projectId: string;
+  slug: string;
+}
+
+export interface DenConversationChannelResolutionResult {
+  resolutionsByBindingId: ReadonlyMap<string, DenConversationChannelResolution>;
+  channelIdsByExternalId: ReadonlyMap<string, number>;
+  membershipsByBindingId: ReadonlyMap<
+    string,
+    DenSuccessorConversationMembership
+  >;
+  membershipResolutionFailure?: string;
+  createdCount: number;
+}
+
 export interface DenSuccessorAppendMessageRequest {
   sender_type: string;
   sender_identity: string;
@@ -583,6 +600,16 @@ export interface ServiceAdapterFactories {
   createDenSuccessorGatewayClient(
     config: DenSuccessorGatewayConfig,
   ): DenSuccessorGatewayClient;
+  resolveDenConversationChannels(input: {
+    client: Pick<
+      DenSuccessorGatewayClient,
+      | "listConversationChannels"
+      | "createConversationChannel"
+      | "listConversationMemberships"
+    >;
+    bindings: readonly ChannelBindingRecord[];
+    defaultProjectId: string;
+  }): Promise<DenConversationChannelResolutionResult>;
   createDenMemoryClient(input: {
     baseUrl: string;
     bearerToken?: string;
