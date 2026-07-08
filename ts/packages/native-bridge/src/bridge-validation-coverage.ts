@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 168;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 169;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 141;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 142;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -122,6 +122,7 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "Runtime config, create-profile planning, adapter registration, and external ingress are validated by focused config/adapter smokes; bridge fixtures should be added before new UI-facing wire fields land.",
     operations: [
       "register_platform_adapter",
+      "plan_tool_availability",
       "validate_runtime_config_draft",
       "plan_runtime_config",
       "plan_create_profile",

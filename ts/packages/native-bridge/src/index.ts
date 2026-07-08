@@ -313,6 +313,7 @@ interface NativeBridgeBinding {
   }): number;
   validateToolMetadataPolicyJson(inputJson: string): string;
   validateLocalToolProfilePolicyJson(inputJson: string): string;
+  planToolAvailabilityJson(inputJson: string): string;
   validateRuntimeConfigDraftJson(inputJson: string): string;
   planRuntimeConfigJson(inputJson: string): string;
   planCreateProfileJson(inputJson: string): string;
@@ -1582,6 +1583,35 @@ export interface NativeLocalToolProfilePolicyValidationResult {
   issues: NativeLocalToolProfilePolicyValidationIssue[];
 }
 
+export type NativeExternalMemoryToolMode =
+  | "off"
+  | "metadata"
+  | "candidate"
+  | "manual"
+  | "permissive";
+
+export interface NativeToolAvailabilityPlanInput {
+  selectedTools: string[];
+  denMemory: {
+    configured: boolean;
+    clientAvailable: boolean;
+    mode: NativeExternalMemoryToolMode;
+    lastError?: string;
+  };
+}
+
+export interface NativeToolAvailabilityOmission {
+  toolName: string;
+  reasonCode: string;
+  message: string;
+}
+
+export interface NativeToolAvailabilityPlan {
+  selectedTools: string[];
+  omittedTools: NativeToolAvailabilityOmission[];
+  diagnostics: NativeToolAvailabilityOmission[];
+}
+
 export interface NativeRuntimeConfigPlan {
   runtimeConfig: NativeRuntimeConfigDraft;
   diagnostics: NativeRuntimeConfigDiagnostic[];
@@ -1961,6 +1991,9 @@ export interface NativeBridgeModule {
   validateLocalToolProfilePolicy(
     input: NativeLocalToolProfilePolicyValidationInput,
   ): Promise<NativeLocalToolProfilePolicyValidationResult>;
+  planToolAvailability(
+    input: NativeToolAvailabilityPlanInput,
+  ): Promise<NativeToolAvailabilityPlan>;
   validateRuntimeConfigDraft(
     input: NativeRuntimeConfigValidationInput,
   ): Promise<NativeRuntimeConfigValidationResult>;
@@ -2487,6 +2520,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     validateLocalToolProfilePolicy: unavailable(
       "validate_local_tool_profile_policy",
     ),
+    planToolAvailability: unavailable("plan_tool_availability"),
     validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
     planRuntimeConfig: unavailable("plan_runtime_config"),
     planCreateProfile: unavailable("plan_create_profile"),
@@ -3225,6 +3259,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.validateLocalToolProfilePolicyJson(JSON.stringify(input)),
       ) as NativeLocalToolProfilePolicyValidationResult,
+    planToolAvailability: async (input) =>
+      JSON.parse(
+        binding.planToolAvailabilityJson(JSON.stringify(input)),
+      ) as NativeToolAvailabilityPlan,
     validateRuntimeConfigDraft: async (input) =>
       JSON.parse(
         binding.validateRuntimeConfigDraftJson(

@@ -1571,6 +1571,7 @@ export const manifestOperationNames = [
   "register_platform_adapter",
   "validate_tool_metadata_policy",
   "validate_local_tool_profile_policy",
+  "plan_tool_availability",
   "validate_runtime_config_draft",
   "plan_runtime_config",
   "plan_create_profile",
@@ -1718,6 +1719,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "e6f58e49fca01d0e0db16837de3fd610a8f0b46b3e31c114c9b45276dcb24589";
+  "be03d5b93e318f6adf77a065c22b2a7d75a14bd07365e84cc1ae4b19cb5096ca";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

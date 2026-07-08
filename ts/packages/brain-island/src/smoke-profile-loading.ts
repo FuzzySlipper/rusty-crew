@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProfileId } from "@rusty-crew/contracts";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   loadProfileContext,
   ProfileLoadError,
@@ -12,6 +13,13 @@ import {
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-profile-loading-"));
 const profilesDir = join(root, "profiles");
 const skillsDir = join(root, "skills");
+const native = await loadNativeBridge();
+const engine = await native.initializeEngine({
+  engineDataDir: join(root, "engine"),
+  clock: { fixed: "2026-07-08T00:00:00Z" },
+  defaultTurnBudget: 4,
+  defaultIdleTimeoutMs: 1_000,
+});
 mkdirSync(profilesDir, { recursive: true });
 mkdirSync(skillsDir, { recursive: true });
 
@@ -96,6 +104,29 @@ Use Codex for bounded coding delegation when context isolation helps.
       2,
     ),
   );
+  writeFileSync(
+    join(profilesDir, "memory-profile.json"),
+    JSON.stringify(
+      {
+        profileId: "memory-profile",
+        modelConfig: {
+          provider: "den-router",
+          modelName: "local-deterministic",
+        },
+        toolPolicy: {
+          requestedTools: [
+            "memory_recall",
+            "memory_read",
+            "memory_search",
+            "memory_store",
+            "memory_propose",
+          ],
+        },
+      },
+      null,
+      2,
+    ),
+  );
 
   const context = await loadProfileContext({
     profilesDir,
@@ -123,6 +154,57 @@ Use Codex for bounded coding delegation when context isolation helps.
   assert.equal(context.skills[0]?.title, "Repo Orientation");
   assert.deepEqual(context.skills[0]?.tags, ["repo", "architecture"]);
   assert.match(context.skills[0]?.bodyMarkdown ?? "", /Rusty Crew README/);
+
+  const missingMemory = await loadProfileContext({
+    profilesDir,
+    skillsDir,
+    profileId: "memory-profile" as ProfileId,
+    toolAvailabilityPlanner: (request) => native.planToolAvailability(request),
+    externalMemoryAvailability: {
+      configured: false,
+      clientAvailable: false,
+      mode: "metadata",
+      lastError: "den memory baseUrl is not configured",
+    },
+  });
+  assert.deepEqual(
+    missingMemory.toolSelection.toolProfile.tools.map((tool) => tool.name),
+    [],
+  );
+  assert.equal(
+    missingMemory.toolSelection.inventory.items.find(
+      (item) => item.name === "memory_search",
+    )?.status,
+    "resource_denied",
+  );
+  assert.match(
+    missingMemory.toolSelection.inventory.items.find(
+      (item) => item.name === "memory_search",
+    )?.reasons[0] ?? "",
+    /memory_external_dependency_missing/,
+  );
+
+  const metadataMemory = await loadProfileContext({
+    profilesDir,
+    skillsDir,
+    profileId: "memory-profile" as ProfileId,
+    toolAvailabilityPlanner: (request) => native.planToolAvailability(request),
+    externalMemoryAvailability: {
+      configured: true,
+      clientAvailable: true,
+      mode: "metadata",
+    },
+  });
+  assert.deepEqual(
+    metadataMemory.toolSelection.toolProfile.tools.map((tool) => tool.name),
+    ["memory_recall", "memory_read", "memory_search"],
+  );
+  assert.equal(
+    metadataMemory.toolSelection.inventory.items.find(
+      (item) => item.name === "memory_store",
+    )?.status,
+    "resource_denied",
+  );
 
   const nestedSkill = await loadProfileContext({
     profilesDir,
@@ -404,5 +486,6 @@ Use the profile-local skill source.
     ),
   );
 } finally {
+  await native.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
   rmSync(root, { recursive: true, force: true });
 }

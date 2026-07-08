@@ -193,6 +193,41 @@ export interface LoadedProfileContext {
   toolSelection: ToolProfileSelection;
 }
 
+export type ExternalMemoryToolMode =
+  | "off"
+  | "metadata"
+  | "candidate"
+  | "manual"
+  | "permissive";
+
+export interface ExternalMemoryToolAvailability {
+  configured: boolean;
+  clientAvailable: boolean;
+  mode: ExternalMemoryToolMode;
+  lastError?: string;
+}
+
+export interface ToolAvailabilityPlannerInput {
+  selectedTools: string[];
+  denMemory: ExternalMemoryToolAvailability;
+}
+
+export interface ToolAvailabilityOmission {
+  toolName: string;
+  reasonCode: string;
+  message: string;
+}
+
+export interface ToolAvailabilityPlan {
+  selectedTools: string[];
+  omittedTools: ToolAvailabilityOmission[];
+  diagnostics: ToolAvailabilityOmission[];
+}
+
+export type ToolAvailabilityPlanner = (
+  input: ToolAvailabilityPlannerInput,
+) => Promise<ToolAvailabilityPlan>;
+
 export interface LoadProfileContextInput {
   profilesDir: string;
   skillsDir?: string;
@@ -202,6 +237,8 @@ export interface LoadProfileContextInput {
   catalogId?: string;
   extraRequestedToolsets?: readonly string[];
   modelProviderResolver?: (alias: string) => Promise<BrainModelConfig>;
+  toolAvailabilityPlanner?: ToolAvailabilityPlanner;
+  externalMemoryAvailability?: ExternalMemoryToolAvailability;
 }
 
 export async function loadProfileContext(
@@ -226,7 +263,7 @@ export async function loadProfileContext(
     profile,
     input.skillsDir ?? join(input.profilesDir, "skills"),
   );
-  const toolSelection = selectToolProfile({
+  let toolSelection = selectToolProfile({
     profileId: profile.profileId,
     policy: withExtraRequestedToolsets(
       profile.toolPolicy ?? {},
@@ -236,6 +273,44 @@ export async function loadProfileContext(
     registry,
     catalogId: input.catalogId,
   });
+  if (
+    input.toolAvailabilityPlanner !== undefined &&
+    input.externalMemoryAvailability !== undefined
+  ) {
+    const availability = await input.toolAvailabilityPlanner({
+      selectedTools: toolSelection.toolProfile.tools.map((tool) => tool.name),
+      denMemory: input.externalMemoryAvailability,
+    });
+    if (availability.omittedTools.length > 0) {
+      const deniedTools = [
+        ...(input.session?.resourceDeniedTools ?? []),
+        ...availability.omittedTools.map((omission) => omission.toolName),
+      ];
+      const deniedReasons = Object.fromEntries(
+        availability.omittedTools.map((omission) => [
+          omission.toolName,
+          `${omission.reasonCode}: ${omission.message}`,
+        ]),
+      );
+      toolSelection = selectToolProfile({
+        profileId: profile.profileId,
+        policy: withExtraRequestedToolsets(
+          profile.toolPolicy ?? {},
+          input.extraRequestedToolsets,
+        ),
+        session: {
+          ...input.session,
+          resourceDeniedTools: deniedTools,
+          resourceDeniedReasons: {
+            ...(input.session?.resourceDeniedReasons ?? {}),
+            ...deniedReasons,
+          },
+        },
+        registry,
+        catalogId: input.catalogId,
+      });
+    }
+  }
 
   return {
     profile,

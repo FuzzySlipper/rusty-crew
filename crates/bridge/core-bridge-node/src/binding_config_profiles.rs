@@ -34,6 +34,20 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_tool_availability_json(&self, input_json: String) -> napi::Result<String> {
+        let input: ToolAvailabilityPlanInput =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid tool availability plan input JSON: {error}"),
+                )
+            })?;
+        let result = plan_tool_availability(&input);
+        serde_json::to_string(&result)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
     pub fn validate_runtime_config_draft_json(&self, input_json: String) -> napi::Result<String> {
         let input: RuntimeConfigValidationInput =
             serde_json::from_str(&input_json).map_err(|error| {

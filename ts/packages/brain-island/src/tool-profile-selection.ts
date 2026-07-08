@@ -23,6 +23,7 @@ export interface ProfileToolPolicy {
 export interface SessionToolConstraints {
   deniedTools?: readonly string[];
   resourceDeniedTools?: readonly string[];
+  resourceDeniedReasons?: Record<string, string>;
   readOnly?: boolean;
   disallowedSafetyFlags?: readonly ToolSafetyFlag[];
 }
@@ -71,6 +72,7 @@ export function selectToolProfile(
     profileDeniedTools: input.policy.deniedTools,
     sessionDeniedTools: input.session?.deniedTools,
     resourceDeniedTools: [...resourceDeniedTools],
+    resourceDeniedReasons: input.session?.resourceDeniedReasons,
     includeDeprecated: input.policy.includeDeprecated,
   });
 

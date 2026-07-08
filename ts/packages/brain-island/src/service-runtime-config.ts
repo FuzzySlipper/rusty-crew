@@ -756,6 +756,12 @@ export async function applyRustyCrewRuntimeConfig(input: {
         mcpToolCatalog.toolsetsForProfile(profileId).length > 0
           ? `service:mcp:${profileId}`
           : undefined,
+      toolAvailabilityPlanner: (request) =>
+        input.bridge.planToolAvailability(request),
+      externalMemoryAvailability: serviceDenMemoryAvailability(
+        input.serviceConfig,
+        input.adapterFactories,
+      ),
     });
     profileContexts.set(profileId, profile);
     return profile;
@@ -980,6 +986,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   mcpSurfaceDiagnostics?: readonly McpSurfaceDiagnostics[];
   mcpToolDiscoveryClientFactory?: ServiceMcpToolDiscoveryClientFactory;
   mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
+  adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   coordinationRuntime?: CoordinationToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
@@ -1014,6 +1021,12 @@ export async function rebuildConfiguredBrainRuntime(input: {
       mcpToolCatalog.toolsetsForProfile(input.profileId).length > 0
         ? `service:mcp:${input.profileId}`
         : undefined,
+    toolAvailabilityPlanner: (request) =>
+      input.bridge.planToolAvailability(request),
+    externalMemoryAvailability: serviceDenMemoryAvailability(
+      input.serviceConfig,
+      input.adapterFactories,
+    ),
   });
   const brainModuleRegistry = createBrainModuleRegistry();
   const selection = resolveBrainModuleSelection(profile.profile);
@@ -1501,6 +1514,31 @@ function createServiceDenMemoryClient(
     timeoutMs: config.timeoutMs,
     paths: config.paths,
   });
+}
+
+function serviceDenMemoryAvailability(
+  serviceConfig: RustyCrewServiceConfig | undefined,
+  adapterFactories:
+    | Pick<ServiceAdapterFactories, "createDenMemoryClient">
+    | undefined,
+): {
+  configured: boolean;
+  clientAvailable: boolean;
+  mode: "metadata";
+  lastError?: string;
+} {
+  const configured = Boolean(serviceConfig?.denMemory.baseUrl);
+  const clientAvailable = configured && adapterFactories !== undefined;
+  return {
+    configured,
+    clientAvailable,
+    mode: "metadata",
+    ...(!configured
+      ? { lastError: "den memory baseUrl is not configured" }
+      : !clientAvailable
+        ? { lastError: "den memory adapter factory is unavailable" }
+        : {}),
+  };
 }
 
 function denseProfileMemoryMode(

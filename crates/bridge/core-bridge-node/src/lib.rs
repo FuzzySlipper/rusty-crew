@@ -76,8 +76,8 @@ use rusty_crew_core_protocol::{
     ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_core_tool_registry::{
-    validate_local_tool_profile_policy, validate_tool_metadata_policy,
-    LocalToolProfileValidationInput, ToolMetadataPolicyValidationInput,
+    plan_tool_availability, validate_local_tool_profile_policy, validate_tool_metadata_policy,
+    LocalToolProfileValidationInput, ToolAvailabilityPlanInput, ToolMetadataPolicyValidationInput,
 };
 use rusty_crew_openai_responses_brain::{
     openai_oauth_envelope_from_exchange_result, resolve_openai_oauth_bearer, FakeResponsesClient,

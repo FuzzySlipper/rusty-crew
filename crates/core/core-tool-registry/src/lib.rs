@@ -287,6 +287,128 @@ pub fn validate_local_tool_profile_policy(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalMemoryToolMode {
+    Off,
+    Metadata,
+    Candidate,
+    Manual,
+    Permissive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalMemoryDependencyPolicy {
+    pub configured: bool,
+    pub client_available: bool,
+    pub mode: ExternalMemoryToolMode,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAvailabilityPlanInput {
+    #[serde(default)]
+    pub selected_tools: Vec<String>,
+    pub den_memory: ExternalMemoryDependencyPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAvailabilityOmission {
+    pub tool_name: String,
+    pub reason_code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAvailabilityPlan {
+    pub selected_tools: Vec<String>,
+    pub omitted_tools: Vec<ToolAvailabilityOmission>,
+    pub diagnostics: Vec<ToolAvailabilityOmission>,
+}
+
+pub fn plan_tool_availability(input: &ToolAvailabilityPlanInput) -> ToolAvailabilityPlan {
+    let mut selected_tools = Vec::new();
+    let mut omitted_tools = Vec::new();
+    for tool_name in &input.selected_tools {
+        if let Some(omission) = external_memory_tool_omission(tool_name, &input.den_memory) {
+            omitted_tools.push(omission);
+        } else {
+            selected_tools.push(tool_name.clone());
+        }
+    }
+    ToolAvailabilityPlan {
+        selected_tools,
+        diagnostics: omitted_tools.clone(),
+        omitted_tools,
+    }
+}
+
+fn external_memory_tool_omission(
+    tool_name: &str,
+    policy: &ExternalMemoryDependencyPolicy,
+) -> Option<ToolAvailabilityOmission> {
+    if !is_external_memory_tool(tool_name) {
+        return None;
+    }
+    if policy.mode == ExternalMemoryToolMode::Off {
+        return Some(omission(
+            tool_name,
+            "memory_policy_off",
+            "external memory policy is off",
+        ));
+    }
+    if !policy.configured {
+        return Some(omission(
+            tool_name,
+            "memory_external_dependency_missing",
+            "external memory is not configured",
+        ));
+    }
+    if !policy.client_available {
+        return Some(omission(
+            tool_name,
+            "memory_external_dependency_unavailable",
+            policy
+                .last_error
+                .as_deref()
+                .unwrap_or("external memory client is unavailable"),
+        ));
+    }
+    if policy.mode == ExternalMemoryToolMode::Metadata
+        && matches!(tool_name, "memory_store" | "memory_propose")
+    {
+        return Some(omission(
+            tool_name,
+            "memory_writes_disabled_metadata_mode",
+            "metadata-only external memory mode exposes read tools only",
+        ));
+    }
+    None
+}
+
+fn is_external_memory_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "memory_recall" | "memory_read" | "memory_search" | "memory_store" | "memory_propose"
+    )
+}
+
+fn omission(
+    tool_name: &str,
+    reason_code: impl Into<String>,
+    message: impl Into<String>,
+) -> ToolAvailabilityOmission {
+    ToolAvailabilityOmission {
+        tool_name: tool_name.to_string(),
+        reason_code: reason_code.into(),
+        message: message.into(),
+    }
+}
+
 struct ToolMetadataValidator<'a> {
     entries: &'a [ToolMetadata],
     diagnostics: Vec<ToolMetadataDiagnostic>,
@@ -1203,6 +1325,67 @@ mod tests {
                 "local_tool_profile_invalid_id",
                 "local_tool_profile_read_only_requires_system",
             ],
+        );
+    }
+
+    #[test]
+    fn tool_availability_omits_external_memory_when_client_unavailable() {
+        let plan = plan_tool_availability(&ToolAvailabilityPlanInput {
+            selected_tools: vec![
+                "memory_search".to_string(),
+                "memory_store".to_string(),
+                "den_project_list_tasks".to_string(),
+            ],
+            den_memory: ExternalMemoryDependencyPolicy {
+                configured: true,
+                client_available: false,
+                mode: ExternalMemoryToolMode::Candidate,
+                last_error: Some("memory endpoint timed out".to_string()),
+            },
+        });
+
+        assert_eq!(plan.selected_tools, vec!["den_project_list_tasks"]);
+        assert_eq!(plan.omitted_tools.len(), 2);
+        assert!(plan
+            .omitted_tools
+            .iter()
+            .all(|omission| { omission.reason_code == "memory_external_dependency_unavailable" }));
+    }
+
+    #[test]
+    fn tool_availability_metadata_mode_keeps_reads_and_omits_writes() {
+        let plan = plan_tool_availability(&ToolAvailabilityPlanInput {
+            selected_tools: vec![
+                "memory_recall".to_string(),
+                "memory_read".to_string(),
+                "memory_search".to_string(),
+                "memory_store".to_string(),
+                "memory_propose".to_string(),
+                "mcp_den_documents_read".to_string(),
+            ],
+            den_memory: ExternalMemoryDependencyPolicy {
+                configured: true,
+                client_available: true,
+                mode: ExternalMemoryToolMode::Metadata,
+                last_error: None,
+            },
+        });
+
+        assert_eq!(
+            plan.selected_tools,
+            vec![
+                "memory_recall",
+                "memory_read",
+                "memory_search",
+                "mcp_den_documents_read"
+            ]
+        );
+        assert_eq!(
+            plan.omitted_tools
+                .iter()
+                .map(|omission| omission.tool_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["memory_store", "memory_propose"]
         );
     }
 

@@ -43,6 +43,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "register_platform_adapter",
     "validate_tool_metadata_policy",
     "validate_local_tool_profile_policy",
+    "plan_tool_availability",
     "validate_runtime_config_draft",
     "plan_runtime_config",
     "plan_create_profile",

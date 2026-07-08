@@ -60,6 +60,54 @@ try {
     "resource_denied",
   );
 
+  const unavailableMemoryPlan = await native.planToolAvailability({
+    selectedTools: [
+      "memory_recall",
+      "memory_search",
+      "memory_store",
+      "mcp_den_documents_read",
+    ],
+    denMemory: {
+      configured: true,
+      clientAvailable: false,
+      mode: "candidate",
+      lastError: "memory endpoint timed out",
+    },
+  });
+  assert.deepEqual(unavailableMemoryPlan.selectedTools, [
+    "mcp_den_documents_read",
+  ]);
+  assert.deepEqual(
+    unavailableMemoryPlan.omittedTools.map((omission) => omission.toolName),
+    ["memory_recall", "memory_search", "memory_store"],
+  );
+  assert.equal(
+    unavailableMemoryPlan.omittedTools[0]?.reasonCode,
+    "memory_external_dependency_unavailable",
+  );
+
+  const metadataMemoryPlan = await native.planToolAvailability({
+    selectedTools: [
+      "memory_recall",
+      "memory_search",
+      "memory_store",
+      "memory_propose",
+    ],
+    denMemory: {
+      configured: true,
+      clientAvailable: true,
+      mode: "metadata",
+    },
+  });
+  assert.deepEqual(metadataMemoryPlan.selectedTools, [
+    "memory_recall",
+    "memory_search",
+  ]);
+  assert.deepEqual(
+    metadataMemoryPlan.omittedTools.map((omission) => omission.toolName),
+    ["memory_store", "memory_propose"],
+  );
+
   const registration = buildBrainRegistrationFromToolProfile({
     implementationId: "tool-profile-selection" as BrainImplementationId,
     profileId: delegatedProfileId,
