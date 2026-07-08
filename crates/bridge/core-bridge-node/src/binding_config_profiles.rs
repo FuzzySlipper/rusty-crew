@@ -124,6 +124,21 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_channel_ingress_route_json(&self, input_json: String) -> napi::Result<String> {
+        let input: ChannelIngressRoutePlanInput =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid channel ingress route plan input JSON: {error}"),
+                )
+            })?;
+        let bridge = self.bridge()?;
+        let plan = bridge.plan_channel_ingress_route(input);
+        serde_json::to_string(&plan)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
     pub fn plan_runtime_config_json(&self, input_json: String) -> napi::Result<String> {
         let input: RuntimeConfigValidationInput =
             serde_json::from_str(&input_json).map_err(|error| {

@@ -11,8 +11,16 @@ export type ChannelRouteResolution =
       binding: ChannelBindingRecord;
     }
   | {
-      status: "no_binding" | "ambiguous" | "inactive_binding";
+      status:
+        | "no_binding"
+        | "ambiguous"
+        | "inactive_binding"
+        | "expired"
+        | "duplicate"
+        | "denied";
       reason: string;
+      reasonCode?: string;
+      correlationId?: string;
       candidates: ChannelBindingRecord[];
       message: NormalizedChannelInboundMessage;
     };

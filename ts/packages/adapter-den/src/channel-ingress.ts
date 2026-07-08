@@ -12,6 +12,7 @@ import {
 import type { DenChannelsInboundDecision } from "./den-channel-transport.js";
 import type {
   ChannelRouteRequest,
+  ChannelRouteResolution,
   ChannelRoutingOptions,
 } from "./channel-routing.js";
 import { resolveChannelRoute } from "./channel-routing.js";
@@ -56,8 +57,11 @@ export type ChannelIngressResult =
         | "stale_cursor"
         | "no_binding"
         | "ambiguous"
-        | "inactive_binding";
+        | "inactive_binding"
+        | "denied";
       reason: string;
+      reasonCode?: string;
+      correlationId?: string;
       message: NormalizedChannelInboundMessage;
       candidates?: ChannelBindingRecord[];
     };
@@ -75,6 +79,18 @@ export interface ChannelIngressOptions {
     | undefined;
   now?: string;
   routing?: ChannelRoutingOptions;
+  routePlanner?:
+    | ((
+        input: ChannelIngressRoutePlannerInput,
+      ) => Promise<ChannelRouteResolution> | ChannelRouteResolution)
+    | undefined;
+}
+
+export interface ChannelIngressRoutePlannerInput {
+  message: NormalizedChannelInboundMessage;
+  bindings: readonly ChannelBindingRecord[];
+  routing?: ChannelRoutingOptions;
+  now?: string;
 }
 
 export async function ingestAcceptedChannelDecision(
@@ -96,23 +112,33 @@ export async function ingestChannelInboundMessage(
   message: NormalizedChannelInboundMessage,
   options: ChannelIngressOptions,
 ): Promise<ChannelIngressResult> {
-  if (isExpiredChannelInboundMessage(message, options.now)) {
+  if (
+    options.routePlanner === undefined &&
+    isExpiredChannelInboundMessage(message, options.now)
+  ) {
     return {
       status: "expired",
       reason: "channel message expired before Rust ingress",
+      reasonCode: "channel_message_expired",
       message,
     };
   }
 
-  const resolution = resolveChannelRoute(
-    message,
-    options.bindings,
-    options.routing,
-  );
+  const resolution =
+    options.routePlanner === undefined
+      ? resolveChannelRoute(message, options.bindings, options.routing)
+      : await options.routePlanner({
+          message,
+          bindings: options.bindings,
+          routing: options.routing,
+          now: options.now,
+        });
   if (resolution.status !== "routed") {
     return {
       status: resolution.status,
       reason: resolution.reason,
+      reasonCode: resolution.reasonCode,
+      correlationId: resolution.correlationId,
       message,
       candidates: resolution.candidates,
     };

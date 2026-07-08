@@ -50,6 +50,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "plan_profile_registry_mutation",
     "plan_new_session_control",
     "plan_reload_mcp_control",
+    "plan_channel_ingress_route",
     "inject_external_event",
     "inject_den_data_update",
     "enqueue_body_follow_up_message",

@@ -546,11 +546,52 @@ export type ChannelIngressResult =
         | "stale_cursor"
         | "no_binding"
         | "ambiguous"
-        | "inactive_binding";
+        | "inactive_binding"
+        | "denied";
       reason: string;
+      reasonCode?: string;
+      correlationId?: string;
       message: NormalizedChannelInboundMessage;
       candidates?: ChannelBindingRecord[];
     };
+
+export type ChannelRouteResolution =
+  | {
+      status: "routed";
+      route: {
+        from: AgentId;
+        to: AgentId;
+        body: string;
+        correlationId: string;
+        bindingId: string;
+        sessionId?: string;
+      };
+      binding: ChannelBindingRecord;
+    }
+  | {
+      status:
+        | "no_binding"
+        | "ambiguous"
+        | "inactive_binding"
+        | "expired"
+        | "duplicate"
+        | "denied";
+      reason: string;
+      reasonCode?: string;
+      correlationId?: string;
+      candidates: ChannelBindingRecord[];
+      message: NormalizedChannelInboundMessage;
+    };
+
+export interface ChannelIngressRoutePlannerInput {
+  message: NormalizedChannelInboundMessage;
+  bindings: readonly ChannelBindingRecord[];
+  routing?: {
+    systemAgentId?: AgentId;
+    mentionAliases?: Record<string, AgentId>;
+  };
+  now?: string;
+}
 
 export type ChannelOutboundProjectionResult =
   | {
@@ -587,6 +628,13 @@ export interface ChannelIngressOptions {
     binding: ChannelBindingRecord;
   }): Promise<unknown> | unknown;
   now?: string;
+  routing?: {
+    systemAgentId?: AgentId;
+    mentionAliases?: Record<string, AgentId>;
+  };
+  routePlanner?(
+    input: ChannelIngressRoutePlannerInput,
+  ): Promise<ChannelRouteResolution> | ChannelRouteResolution;
 }
 
 export interface ChannelProjectionSink {

@@ -4,10 +4,12 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
+  AdapterId,
   BrainEvent,
   BrainImplementationId,
   BrainModelConfig,
   AgentId,
+  AgentInstanceId,
   BrainImplementationHandle,
   ChannelBindingRecord,
   ChannelMembershipStatus,
@@ -17,6 +19,7 @@ import type {
   EngineHandle,
   EngineStorageConfig,
   McpBindingRecord,
+  NormalizedChannelInboundMessage,
   ProfileId,
   ScheduledRunSummary,
   SessionId,
@@ -32,6 +35,7 @@ import {
   type NativeCreateProfilePlan,
   type NativeModelProviderRecord,
   type NativeModelProviderWrite,
+  type NativeChannelIngressRoutePlan,
   type NativeProfilePurgeReport,
   type NativeProfileRegistryMutationPlan,
   type NativeProfileRegistryRecord,
@@ -54,6 +58,8 @@ import type {
   DenSuccessorGatewayClient,
   McpSurfaceManagerPort,
   TelegramChannelConnectorPort,
+  ChannelIngressRoutePlannerInput,
+  ChannelRouteResolution,
 } from "./service-adapter-ports.js";
 import {
   AgentActivityObservationProducer,
@@ -3824,6 +3830,7 @@ async function startTelegramConnector(state: ServiceState): Promise<void> {
             runtimeConfig: state.runtimeConfig,
             binding,
           }),
+        routePlanner: (input) => planChannelIngressRoute(state.bridge, input),
         now: state.now(),
       });
     },
@@ -3866,6 +3873,108 @@ function activeTelegramChannelBindings(
       binding.provider === "telegram" &&
       binding.adapterId === adapterId,
   );
+}
+
+async function planChannelIngressRoute(
+  bridge: NativeBridgeModule,
+  input: ChannelIngressRoutePlannerInput,
+): Promise<ChannelRouteResolution> {
+  const plan = await bridge.planChannelIngressRoute({
+    message: {
+      adapterId: input.message.adapterId,
+      bindingId: input.message.bindingId,
+      provider: String(input.message.providerRefs.provider),
+      externalChannelId: input.message.providerRefs.externalChannelId,
+      externalThreadId: input.message.providerRefs.externalThreadId,
+      externalUserId: input.message.author.externalUserId,
+      body: input.message.body,
+      mentions: input.message.mentions,
+      expiresAt: input.message.expiresAt,
+      idempotencyKey: input.message.idempotencyKey,
+      runtimeAgentId: input.message.runtime.agentId,
+    },
+    bindings: input.bindings.map((binding) => ({
+      bindingId: binding.bindingId,
+      adapterId: binding.adapterId,
+      provider: String(binding.provider),
+      agentId: binding.agentId,
+      instanceId: binding.instanceId,
+      sessionId: binding.sessionId,
+      profileId: binding.profileId,
+      externalChannelId: binding.externalChannelId,
+      externalThreadId: binding.externalThreadId,
+      externalUserId: binding.externalUserId,
+      conversationProjectId: binding.conversationProjectId,
+      conversationChannelId: binding.conversationChannelId,
+      providerSubscriptionId: binding.providerSubscriptionId,
+      status: binding.status,
+    })),
+    mentionAliases: input.routing?.mentionAliases,
+    systemAgentId: input.routing?.systemAgentId,
+    now: input.now,
+  });
+
+  return channelIngressRoutePlanToResolution(input.message, plan);
+}
+
+function channelIngressRoutePlanToResolution(
+  message: NormalizedChannelInboundMessage,
+  plan: NativeChannelIngressRoutePlan,
+): ChannelRouteResolution {
+  if (plan.status === "routed") {
+    if (plan.route === undefined || plan.binding === undefined) {
+      return {
+        status: "denied",
+        reason:
+          "Rust channel route planner returned a routed decision without route or binding data",
+        reasonCode: "route_plan_missing_route",
+        correlationId: plan.correlationId,
+        candidates: plan.candidates.map(nativeChannelBindingToRecord),
+        message,
+      };
+    }
+    return {
+      status: "routed",
+      binding: nativeChannelBindingToRecord(plan.binding),
+      route: {
+        from: plan.route.from,
+        to: plan.route.to,
+        body: plan.route.body,
+        correlationId: plan.route.correlationId,
+        bindingId: plan.route.bindingId,
+        sessionId: plan.route.sessionId,
+      },
+    };
+  }
+  return {
+    status: plan.status,
+    reason: plan.reason,
+    reasonCode: plan.reasonCode,
+    correlationId: plan.correlationId,
+    candidates: plan.candidates.map(nativeChannelBindingToRecord),
+    message,
+  };
+}
+
+function nativeChannelBindingToRecord(
+  binding: NativeChannelIngressRoutePlan["candidates"][number],
+): ChannelBindingRecord {
+  return {
+    bindingId: binding.bindingId,
+    adapterId: binding.adapterId as AdapterId,
+    provider: binding.provider,
+    agentId: binding.agentId as AgentId,
+    instanceId: binding.instanceId as AgentInstanceId | undefined,
+    sessionId: binding.sessionId as SessionId | undefined,
+    profileId: binding.profileId as ProfileId,
+    externalChannelId: binding.externalChannelId,
+    externalThreadId: binding.externalThreadId,
+    externalUserId: binding.externalUserId,
+    conversationProjectId: binding.conversationProjectId,
+    conversationChannelId: binding.conversationChannelId,
+    providerSubscriptionId: binding.providerSubscriptionId,
+    status: binding.status,
+  };
 }
 
 async function drainTelegramOutboundMessages(

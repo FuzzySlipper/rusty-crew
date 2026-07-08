@@ -25,6 +25,8 @@ import {
   piAgentBrainRunInputSchema,
   providerStateDiagnosticArraySchema,
   rawBodyStateSchema,
+  rawChannelIngressRoutePlanInputSchema,
+  rawChannelIngressRoutePlanSchema,
   rawModelProviderRefreshImpactSchema,
   rawModelProviderRefreshPlanSchema,
   rawModelProviderRecordArraySchema,
@@ -63,6 +65,7 @@ import type {
   BrainWakeRequest,
   BrainWakeStreamItem,
   BodyState,
+  ChannelBindingRecord,
   CompletionPacket,
   ContextCompactionArtifact,
   ContextCompactionArtifactQuery,
@@ -321,6 +324,7 @@ interface NativeBridgeBinding {
   planProfileRegistryMutationJson(inputJson: string): string;
   planNewSessionControlJson(inputJson: string): string;
   planReloadMcpControlJson(inputJson: string): string;
+  planChannelIngressRouteJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
     drainTimeoutMs: number,
@@ -1842,6 +1846,57 @@ export interface NativeReloadMcpControlPlan {
   }>;
 }
 
+export type NativeChannelIngressRouteDecision =
+  | "routed"
+  | "no_binding"
+  | "inactive_binding"
+  | "ambiguous"
+  | "expired"
+  | "duplicate"
+  | "denied";
+
+export interface NativeChannelIngressRouteMessage {
+  adapterId: AdapterId;
+  bindingId: string;
+  provider: string;
+  externalChannelId: string;
+  externalThreadId?: string;
+  externalUserId: string;
+  body: string;
+  mentions: string[];
+  expiresAt: string;
+  idempotencyKey: string;
+  runtimeAgentId?: AgentId;
+}
+
+export interface NativeChannelIngressRoutePlanInput {
+  message: NativeChannelIngressRouteMessage;
+  bindings: NativeChannelBindingConfigDraft[];
+  mentionAliases?: Record<string, AgentId>;
+  systemAgentId?: AgentId;
+  now?: string;
+  seenIdempotencyKeys?: string[];
+}
+
+export interface NativeChannelIngressRouteRequest {
+  from: AgentId;
+  to: AgentId;
+  body: string;
+  correlationId: string;
+  bindingId: string;
+  sessionId?: SessionId;
+}
+
+export interface NativeChannelIngressRoutePlan {
+  status: NativeChannelIngressRouteDecision;
+  reasonCode: string;
+  reason: string;
+  correlationId?: string;
+  binding?: NativeChannelBindingConfigDraft;
+  candidates: NativeChannelBindingConfigDraft[];
+  route?: NativeChannelIngressRouteRequest;
+}
+
 export interface NativeCreateProfileRequest {
   profileId: string;
   displayName?: string;
@@ -2122,6 +2177,9 @@ export interface NativeBridgeModule {
   planReloadMcpControl(
     input: NativeReloadMcpControlPlanInput,
   ): Promise<NativeReloadMcpControlPlan>;
+  planChannelIngressRoute(
+    input: NativeChannelIngressRoutePlanInput,
+  ): Promise<NativeChannelIngressRoutePlan>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   cancelDelegatedSession(
@@ -2645,6 +2703,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     planProfileRegistryMutation: unavailable("plan_profile_registry_mutation"),
     planNewSessionControl: unavailable("plan_new_session_control"),
     planReloadMcpControl: unavailable("plan_reload_mcp_control"),
+    planChannelIngressRoute: unavailable("plan_channel_ingress_route"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
@@ -3429,6 +3488,24 @@ function createNativeBridgeModule(
           ),
         ) as RawReloadMcpControlPlan,
       ),
+    planChannelIngressRoute: async (input) => {
+      const inputJson = JSON.stringify(
+        toRawChannelIngressRoutePlanInput(input),
+      );
+      validateBridgeJsonText({
+        operation: "plan_channel_ingress_route",
+        direction: "ts_to_rust",
+        schema: rawChannelIngressRoutePlanInputSchema,
+        text: inputJson,
+      });
+      const rawPlan = validateBridgeValue<RawChannelIngressRoutePlan>({
+        operation: "plan_channel_ingress_route",
+        direction: "rust_to_ts",
+        schema: rawChannelIngressRoutePlanSchema,
+        value: JSON.parse(binding.planChannelIngressRouteJson(inputJson)),
+      });
+      return toNativeChannelIngressRoutePlan(rawPlan);
+    },
     injectExternalEvent: async (event) =>
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
     injectDenDataUpdate: async (update) =>
@@ -5014,6 +5091,52 @@ function toRawReloadMcpControlPlanInput(
   };
 }
 
+function toRawChannelIngressRoutePlanInput(
+  input: NativeChannelIngressRoutePlanInput,
+): RawChannelIngressRoutePlanInput {
+  return {
+    message: {
+      adapter_id: input.message.adapterId,
+      binding_id: input.message.bindingId,
+      provider: input.message.provider,
+      external_channel_id: input.message.externalChannelId,
+      external_thread_id: input.message.externalThreadId,
+      external_user_id: input.message.externalUserId,
+      body: input.message.body,
+      mentions: input.message.mentions,
+      expires_at: input.message.expiresAt,
+      idempotency_key: input.message.idempotencyKey,
+      runtime_agent_id: input.message.runtimeAgentId,
+    },
+    bindings: input.bindings.map(toRawChannelBindingConfigDraft),
+    mention_aliases: input.mentionAliases ?? {},
+    system_agent_id: input.systemAgentId,
+    now: input.now,
+    seen_idempotency_keys: input.seenIdempotencyKeys ?? [],
+  };
+}
+
+function toRawChannelBindingConfigDraft(
+  binding: NativeChannelBindingConfigDraft | ChannelBindingRecord,
+): RawChannelBindingConfigDraft {
+  return {
+    binding_id: binding.bindingId,
+    adapter_id: binding.adapterId,
+    provider: binding.provider,
+    agent_id: binding.agentId,
+    instance_id: binding.instanceId,
+    session_id: binding.sessionId,
+    profile_id: binding.profileId,
+    external_channel_id: binding.externalChannelId,
+    external_thread_id: binding.externalThreadId,
+    external_user_id: binding.externalUserId,
+    conversation_project_id: binding.conversationProjectId,
+    conversation_channel_id: binding.conversationChannelId,
+    provider_subscription_id: binding.providerSubscriptionId,
+    status: binding.status,
+  };
+}
+
 function toNativeNewSessionControlPlan(
   plan: RawNewSessionControlPlan,
 ): NativeNewSessionControlPlan {
@@ -5086,6 +5209,55 @@ function toNativeReloadMcpControlPlan(
       bindingId: action.binding_id,
       reasonCode: action.reason_code,
     })),
+  };
+}
+
+function toNativeChannelIngressRoutePlan(
+  plan: RawChannelIngressRoutePlan,
+): NativeChannelIngressRoutePlan {
+  return {
+    status: plan.status,
+    reasonCode: plan.reason_code,
+    reason: plan.reason,
+    correlationId: plan.correlation_id ?? undefined,
+    binding: plan.binding
+      ? toNativeChannelBindingConfigDraft(plan.binding)
+      : undefined,
+    candidates: plan.candidates.map(toNativeChannelBindingConfigDraft),
+    route: plan.route
+      ? {
+          from: plan.route.from as AgentId,
+          to: plan.route.to as AgentId,
+          body: plan.route.body,
+          correlationId: plan.route.correlation_id,
+          bindingId: plan.route.binding_id,
+          ...(plan.route.session_id === undefined ||
+          plan.route.session_id === null
+            ? {}
+            : { sessionId: plan.route.session_id as SessionId }),
+        }
+      : undefined,
+  };
+}
+
+function toNativeChannelBindingConfigDraft(
+  binding: RawChannelBindingConfigDraft,
+): NativeChannelBindingConfigDraft {
+  return {
+    bindingId: binding.binding_id,
+    adapterId: binding.adapter_id,
+    provider: binding.provider,
+    agentId: binding.agent_id,
+    instanceId: binding.instance_id ?? undefined,
+    sessionId: binding.session_id ?? undefined,
+    profileId: binding.profile_id,
+    externalChannelId: binding.external_channel_id,
+    externalThreadId: binding.external_thread_id ?? undefined,
+    externalUserId: binding.external_user_id ?? undefined,
+    conversationProjectId: binding.conversation_project_id ?? undefined,
+    conversationChannelId: binding.conversation_channel_id ?? undefined,
+    providerSubscriptionId: binding.provider_subscription_id ?? undefined,
+    status: binding.status,
   };
 }
 
@@ -6442,6 +6614,48 @@ interface RawReloadMcpControlPlan {
     binding_id: string;
     reason_code: string;
   }>;
+}
+
+interface RawChannelIngressRoutePlanInput {
+  message: RawChannelIngressRouteMessage;
+  bindings: RawChannelBindingConfigDraft[];
+  mention_aliases: Record<string, string>;
+  system_agent_id?: string;
+  now?: string;
+  seen_idempotency_keys: string[];
+}
+
+interface RawChannelIngressRouteMessage {
+  adapter_id: string;
+  binding_id: string;
+  provider: string;
+  external_channel_id: string;
+  external_thread_id?: string;
+  external_user_id: string;
+  body: string;
+  mentions: string[];
+  expires_at: string;
+  idempotency_key: string;
+  runtime_agent_id?: string;
+}
+
+interface RawChannelIngressRoutePlan {
+  status: NativeChannelIngressRouteDecision;
+  reason_code: string;
+  reason: string;
+  correlation_id?: string | null;
+  binding?: RawChannelBindingConfigDraft | null;
+  candidates: RawChannelBindingConfigDraft[];
+  route?: RawChannelIngressRouteRequest | null;
+}
+
+interface RawChannelIngressRouteRequest {
+  from: string;
+  to: string;
+  body: string;
+  correlation_id: string;
+  binding_id: string;
+  session_id?: string | null;
 }
 
 interface RawProfileRegistryWrite {

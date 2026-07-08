@@ -9,6 +9,7 @@ export declare class NativeBridgeBinding {
   planProfileRegistryMutationJson(inputJson: string): string
   planNewSessionControlJson(inputJson: string): string
   planReloadMcpControlJson(inputJson: string): string
+  planChannelIngressRouteJson(inputJson: string): string
   planRuntimeConfigJson(inputJson: string): string
   createProfileRegistryRecordJson(writeJson: string): string
   updateProfileRegistryRecordJson(updateJson: string): string

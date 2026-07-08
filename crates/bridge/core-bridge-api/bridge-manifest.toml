@@ -317,6 +317,15 @@ errors = "core_protocol::CoreError"
 summary = "Plan /reload-mcp lifecycle controls with Rust-owned preconditions, stable denial codes, and ordered actions before TypeScript refreshes MCP surfaces."
 
 [[operation]]
+name = "plan_channel_ingress_route"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::ChannelIngressRoutePlanInput"
+output = "core_config::ChannelIngressRoutePlan"
+errors = "core_protocol::CoreError"
+summary = "Plan adapter-normalized channel ingress routing with Rust-owned binding, ambiguity, TTL, duplicate, and wake-route decisions before TypeScript emits internal messages."
+
+[[operation]]
 name = "inject_external_event"
 surface = "stable"
 direction = "ts_to_rust"

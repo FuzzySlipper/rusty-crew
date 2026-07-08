@@ -73,6 +73,69 @@ pub struct ReloadMcpControlPlanInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelIngressRoutePlanInput {
+    pub message: ChannelIngressRouteMessage,
+    #[serde(default)]
+    pub bindings: Vec<ChannelBindingConfigDraft>,
+    #[serde(default)]
+    pub mention_aliases: HashMap<String, AgentId>,
+    pub system_agent_id: Option<AgentId>,
+    pub now: Option<String>,
+    #[serde(default)]
+    pub seen_idempotency_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelIngressRouteMessage {
+    pub adapter_id: AdapterId,
+    pub binding_id: String,
+    pub provider: String,
+    pub external_channel_id: String,
+    pub external_thread_id: Option<String>,
+    pub external_user_id: String,
+    pub body: String,
+    #[serde(default)]
+    pub mentions: Vec<String>,
+    pub expires_at: String,
+    pub idempotency_key: String,
+    pub runtime_agent_id: Option<AgentId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelIngressRoutePlan {
+    pub status: ChannelIngressRouteDecision,
+    pub reason_code: String,
+    pub reason: String,
+    pub correlation_id: Option<String>,
+    pub binding: Option<ChannelBindingConfigDraft>,
+    #[serde(default)]
+    pub candidates: Vec<ChannelBindingConfigDraft>,
+    pub route: Option<ChannelIngressRouteRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelIngressRouteDecision {
+    Routed,
+    NoBinding,
+    InactiveBinding,
+    Ambiguous,
+    Expired,
+    Duplicate,
+    Denied,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelIngressRouteRequest {
+    pub from: AgentId,
+    pub to: AgentId,
+    pub body: String,
+    pub correlation_id: String,
+    pub binding_id: String,
+    pub session_id: Option<SessionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminControlPlanCommand {
     pub command_kind: String,
     pub target_session_id: Option<String>,
@@ -1713,6 +1776,201 @@ pub fn plan_reload_mcp_control(input: &ReloadMcpControlPlanInput) -> ReloadMcpCo
     }
 }
 
+pub fn plan_channel_ingress_route(input: &ChannelIngressRoutePlanInput) -> ChannelIngressRoutePlan {
+    let message = &input.message;
+    let denied = |reason_code: &str, reason: &str| ChannelIngressRoutePlan {
+        status: ChannelIngressRouteDecision::Denied,
+        reason_code: reason_code.to_string(),
+        reason: reason.to_string(),
+        correlation_id: None,
+        binding: None,
+        candidates: Vec::new(),
+        route: None,
+    };
+
+    if !is_valid_component_id(&message.binding_id) {
+        return denied(
+            "invalid_message_binding_id",
+            "Inbound channel message binding id is invalid.",
+        );
+    }
+    if message.idempotency_key.trim().is_empty() {
+        return denied(
+            "missing_idempotency_key",
+            "Inbound channel message must include an idempotency key.",
+        );
+    }
+    if message.provider.trim().is_empty() || message.external_channel_id.trim().is_empty() {
+        return denied(
+            "missing_provider_ref",
+            "Inbound channel message must include provider and external channel refs.",
+        );
+    }
+
+    let correlation_id = format!("channel:{}:{}", message.binding_id, message.idempotency_key);
+    if input
+        .seen_idempotency_keys
+        .iter()
+        .any(|key| key == &message.idempotency_key)
+    {
+        return ChannelIngressRoutePlan {
+            status: ChannelIngressRouteDecision::Duplicate,
+            reason_code: "duplicate_idempotency_key".to_string(),
+            reason: "Inbound channel message idempotency key was already routed.".to_string(),
+            correlation_id: Some(correlation_id),
+            binding: None,
+            candidates: Vec::new(),
+            route: None,
+        };
+    }
+
+    if let Some(now) = input.now.as_deref().filter(|value| !value.is_empty()) {
+        if !message.expires_at.trim().is_empty() && now >= message.expires_at.as_str() {
+            return ChannelIngressRoutePlan {
+                status: ChannelIngressRouteDecision::Expired,
+                reason_code: "message_ttl_expired".to_string(),
+                reason: "Inbound channel message expired before route planning.".to_string(),
+                correlation_id: Some(correlation_id),
+                binding: None,
+                candidates: Vec::new(),
+                route: None,
+            };
+        }
+    }
+
+    let matching_surface: Vec<ChannelBindingConfigDraft> = input
+        .bindings
+        .iter()
+        .filter(|binding| binding.status == ExternalBindingStatusDraft::Active)
+        .filter(|binding| binding.provider == message.provider)
+        .filter(|binding| binding.external_channel_id == message.external_channel_id)
+        .filter(|binding| {
+            message.external_thread_id.is_none()
+                || binding.external_thread_id.is_none()
+                || binding.external_thread_id == message.external_thread_id
+        })
+        .cloned()
+        .collect();
+
+    if matching_surface.is_empty() {
+        let inactive_candidates: Vec<ChannelBindingConfigDraft> = input
+            .bindings
+            .iter()
+            .filter(|binding| binding.provider == message.provider)
+            .filter(|binding| binding.external_channel_id == message.external_channel_id)
+            .cloned()
+            .collect();
+        if inactive_candidates.is_empty() {
+            return ChannelIngressRoutePlan {
+                status: ChannelIngressRouteDecision::NoBinding,
+                reason_code: "no_active_channel_binding".to_string(),
+                reason: "No active channel binding matches provider/channel.".to_string(),
+                correlation_id: Some(correlation_id),
+                binding: None,
+                candidates: Vec::new(),
+                route: None,
+            };
+        }
+        return ChannelIngressRoutePlan {
+            status: ChannelIngressRouteDecision::InactiveBinding,
+            reason_code: "channel_binding_inactive".to_string(),
+            reason: "Matching channel bindings are not active.".to_string(),
+            correlation_id: Some(correlation_id),
+            binding: None,
+            candidates: inactive_candidates,
+            route: None,
+        };
+    }
+
+    let explicit_binding: Vec<ChannelBindingConfigDraft> = matching_surface
+        .iter()
+        .filter(|binding| binding.binding_id == message.binding_id)
+        .cloned()
+        .collect();
+    let mention_targets = mentioned_agent_ids(&message.mentions, &input.mention_aliases);
+    let mentioned_bindings: Vec<ChannelBindingConfigDraft> = if mention_targets.is_empty() {
+        Vec::new()
+    } else {
+        matching_surface
+            .iter()
+            .filter(|binding| mention_targets.contains(&binding.agent_id))
+            .cloned()
+            .collect()
+    };
+    let runtime_binding: Vec<ChannelBindingConfigDraft> =
+        if let Some(runtime_agent_id) = message.runtime_agent_id.as_ref() {
+            matching_surface
+                .iter()
+                .filter(|binding| &binding.agent_id == runtime_agent_id)
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+    let singleton_surface = if matching_surface.len() == 1 {
+        matching_surface.clone()
+    } else {
+        Vec::new()
+    };
+    let candidates = first_non_empty(vec![
+        explicit_binding,
+        mentioned_bindings,
+        runtime_binding,
+        singleton_surface,
+    ]);
+
+    if candidates.len() != 1 {
+        let ambiguity_candidates = if candidates.len() > 1 {
+            candidates
+        } else {
+            matching_surface
+        };
+        let reason = if ambiguity_candidates.len() > 1 {
+            "Multiple bindings matched channel route."
+        } else {
+            "Multiple bindings share this channel and no mention/runtime binding disambiguated them."
+        };
+        return ChannelIngressRoutePlan {
+            status: ChannelIngressRouteDecision::Ambiguous,
+            reason_code: "channel_route_ambiguous".to_string(),
+            reason: reason.to_string(),
+            correlation_id: Some(correlation_id),
+            binding: None,
+            candidates: ambiguity_candidates,
+            route: None,
+        };
+    }
+
+    let binding = candidates
+        .into_iter()
+        .next()
+        .expect("checked one candidate");
+    let from = input.system_agent_id.clone().unwrap_or_else(|| {
+        AgentId::new(format!(
+            "channel:{}:{}",
+            message.provider, message.external_user_id
+        ))
+    });
+    let route = ChannelIngressRouteRequest {
+        from,
+        to: binding.agent_id.clone(),
+        body: message.body.clone(),
+        correlation_id: correlation_id.clone(),
+        binding_id: binding.binding_id.clone(),
+        session_id: binding.session_id.clone(),
+    };
+
+    ChannelIngressRoutePlan {
+        status: ChannelIngressRouteDecision::Routed,
+        reason_code: "channel_route_routed".to_string(),
+        reason: "Inbound channel message routed to an active binding.".to_string(),
+        correlation_id: Some(correlation_id),
+        binding: Some(binding),
+        candidates: Vec::new(),
+        route: Some(route),
+    }
+}
+
 pub fn plan_profile_registry_mutation(
     input: &ProfileRegistryMutationRequest,
 ) -> Result<ProfileRegistryMutationPlan, String> {
@@ -2752,6 +3010,29 @@ fn validate_schedule(validator: &mut RuntimeConfigValidator<'_>, path: &str, sch
     }
 }
 
+fn mentioned_agent_ids(
+    mentions: &[String],
+    aliases: &HashMap<String, AgentId>,
+) -> HashSet<AgentId> {
+    let mut result = HashSet::new();
+    for mention in mentions {
+        if is_valid_component_id(mention) {
+            result.insert(AgentId::new(mention.clone()));
+        }
+        if let Some(agent_id) = aliases.get(mention) {
+            result.insert(agent_id.clone());
+        }
+    }
+    result
+}
+
+fn first_non_empty<T>(groups: Vec<Vec<T>>) -> Vec<T> {
+    groups
+        .into_iter()
+        .find(|group| !group.is_empty())
+        .unwrap_or_default()
+}
+
 fn is_valid_component_id(value: &str) -> bool {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -3007,6 +3288,102 @@ mod tests {
             Some("missing_mcp_reload_handler"),
         );
         assert!(plan.actions.is_empty());
+    }
+
+    #[test]
+    fn plans_channel_ingress_route_with_mention_disambiguation() {
+        let input = ChannelIngressRoutePlanInput {
+            message: channel_message("unresolved-binding", None, vec!["reviewer".to_string()]),
+            bindings: vec![
+                channel_binding("binding-alpha", "agent-alpha", "session-alpha"),
+                channel_binding("binding-beta", "agent-beta", "session-beta"),
+            ],
+            mention_aliases: HashMap::from([("reviewer".to_string(), AgentId::new("agent-beta"))]),
+            system_agent_id: None,
+            now: Some("2026-06-20T05:00:01.000Z".to_string()),
+            seen_idempotency_keys: Vec::new(),
+        };
+
+        let plan = plan_channel_ingress_route(&input);
+
+        assert_eq!(plan.status, ChannelIngressRouteDecision::Routed);
+        assert_eq!(plan.reason_code, "channel_route_routed");
+        let route = plan.route.expect("route should be planned");
+        assert_eq!(route.to, AgentId::new("agent-beta"));
+        assert_eq!(route.binding_id, "binding-beta");
+        assert_eq!(route.session_id, Some(SessionId::new("session-beta")));
+        assert_eq!(
+            route.correlation_id,
+            "channel:unresolved-binding:message-alpha"
+        );
+    }
+
+    #[test]
+    fn channel_ingress_route_reports_ambiguous_and_inactive_bindings() {
+        let ambiguous = plan_channel_ingress_route(&ChannelIngressRoutePlanInput {
+            message: channel_message("unresolved-binding", None, Vec::new()),
+            bindings: vec![
+                channel_binding("binding-alpha", "agent-alpha", "session-alpha"),
+                channel_binding("binding-beta", "agent-beta", "session-beta"),
+            ],
+            mention_aliases: HashMap::new(),
+            system_agent_id: None,
+            now: Some("2026-06-20T05:00:01.000Z".to_string()),
+            seen_idempotency_keys: Vec::new(),
+        });
+        assert_eq!(ambiguous.status, ChannelIngressRouteDecision::Ambiguous);
+        assert_eq!(ambiguous.reason_code, "channel_route_ambiguous");
+        assert_eq!(ambiguous.candidates.len(), 2);
+
+        let inactive = plan_channel_ingress_route(&ChannelIngressRoutePlanInput {
+            message: channel_message("binding-alpha", None, Vec::new()),
+            bindings: vec![ChannelBindingConfigDraft {
+                status: ExternalBindingStatusDraft::Degraded,
+                ..channel_binding("binding-alpha", "agent-alpha", "session-alpha")
+            }],
+            mention_aliases: HashMap::new(),
+            system_agent_id: None,
+            now: Some("2026-06-20T05:00:01.000Z".to_string()),
+            seen_idempotency_keys: Vec::new(),
+        });
+        assert_eq!(
+            inactive.status,
+            ChannelIngressRouteDecision::InactiveBinding
+        );
+        assert_eq!(inactive.reason_code, "channel_binding_inactive");
+    }
+
+    #[test]
+    fn channel_ingress_route_reports_duplicate_and_expired_messages() {
+        let duplicate = plan_channel_ingress_route(&ChannelIngressRoutePlanInput {
+            message: channel_message("binding-alpha", None, Vec::new()),
+            bindings: vec![channel_binding(
+                "binding-alpha",
+                "agent-alpha",
+                "session-alpha",
+            )],
+            mention_aliases: HashMap::new(),
+            system_agent_id: None,
+            now: Some("2026-06-20T05:00:01.000Z".to_string()),
+            seen_idempotency_keys: vec!["message-alpha".to_string()],
+        });
+        assert_eq!(duplicate.status, ChannelIngressRouteDecision::Duplicate);
+        assert_eq!(duplicate.reason_code, "duplicate_idempotency_key");
+
+        let expired = plan_channel_ingress_route(&ChannelIngressRoutePlanInput {
+            message: channel_message("binding-alpha", None, Vec::new()),
+            bindings: vec![channel_binding(
+                "binding-alpha",
+                "agent-alpha",
+                "session-alpha",
+            )],
+            mention_aliases: HashMap::new(),
+            system_agent_id: None,
+            now: Some("2026-06-20T05:00:10.000Z".to_string()),
+            seen_idempotency_keys: Vec::new(),
+        });
+        assert_eq!(expired.status, ChannelIngressRouteDecision::Expired);
+        assert_eq!(expired.reason_code, "message_ttl_expired");
     }
 
     #[test]
@@ -3824,6 +4201,49 @@ mod tests {
             revision: 7,
             created_at: "2026-07-05T00:00:00.000Z".to_string(),
             updated_at: "2026-07-05T00:00:00.000Z".to_string(),
+        }
+    }
+
+    fn channel_message(
+        binding_id: &str,
+        runtime_agent_id: Option<&str>,
+        mentions: Vec<String>,
+    ) -> ChannelIngressRouteMessage {
+        ChannelIngressRouteMessage {
+            adapter_id: AdapterId::new("den-channel-main"),
+            binding_id: binding_id.to_string(),
+            provider: "den_channels".to_string(),
+            external_channel_id: "crew-room".to_string(),
+            external_thread_id: Some("thread-alpha".to_string()),
+            external_user_id: "den-user-alpha".to_string(),
+            body: "hello from channel".to_string(),
+            mentions,
+            expires_at: "2026-06-20T05:00:05.000Z".to_string(),
+            idempotency_key: "message-alpha".to_string(),
+            runtime_agent_id: runtime_agent_id.map(AgentId::new),
+        }
+    }
+
+    fn channel_binding(
+        binding_id: &str,
+        agent_id: &str,
+        session_id: &str,
+    ) -> ChannelBindingConfigDraft {
+        ChannelBindingConfigDraft {
+            binding_id: binding_id.to_string(),
+            adapter_id: AdapterId::new("den-channel-main"),
+            provider: "den_channels".to_string(),
+            agent_id: AgentId::new(agent_id),
+            instance_id: None,
+            session_id: Some(SessionId::new(session_id)),
+            profile_id: ProfileId::new(format!("{agent_id}-profile")),
+            external_channel_id: "crew-room".to_string(),
+            external_thread_id: Some("thread-alpha".to_string()),
+            external_user_id: None,
+            conversation_project_id: None,
+            conversation_channel_id: None,
+            provider_subscription_id: None,
+            status: ExternalBindingStatusDraft::Active,
         }
     }
 

@@ -14,8 +14,13 @@ import {
 } from "@rusty-crew/adapter-den";
 import { createSimulatedDenChannelsTransport } from "@rusty-crew/adapter-den/test-support";
 import type {
+  ChannelIngressRoutePlannerInput,
+  ChannelRouteResolution,
+} from "@rusty-crew/adapter-den";
+import type {
   AdapterId,
   AgentId,
+  AgentInstanceId,
   ChannelBindingRecord,
   CoreEvent,
   NormalizedChannelInboundMessage,
@@ -113,6 +118,55 @@ try {
       runtimeConfig,
       binding: request.binding,
     });
+  let routePlannerCalls = 0;
+  const routePlanner = async (
+    input: ChannelIngressRoutePlannerInput,
+  ): Promise<ChannelRouteResolution> => {
+    routePlannerCalls += 1;
+    const plan = await native.planChannelIngressRoute({
+      message: {
+        adapterId: input.message.adapterId,
+        bindingId: input.message.bindingId,
+        provider: String(input.message.providerRefs.provider),
+        externalChannelId: input.message.providerRefs.externalChannelId,
+        externalThreadId: input.message.providerRefs.externalThreadId,
+        externalUserId: input.message.author.externalUserId,
+        body: input.message.body,
+        mentions: input.message.mentions,
+        expiresAt: input.message.expiresAt,
+        idempotencyKey: input.message.idempotencyKey,
+        runtimeAgentId: input.message.runtime.agentId,
+      },
+      bindings: input.bindings.map(channelBindingForNativePlanner),
+      mentionAliases: input.routing?.mentionAliases,
+      systemAgentId: input.routing?.systemAgentId,
+      now: input.now,
+    });
+    if (plan.status === "routed") {
+      assert.ok(plan.binding);
+      assert.ok(plan.route);
+      return {
+        status: "routed",
+        binding: channelBindingFromNativePlanner(plan.binding),
+        route: {
+          from: plan.route.from,
+          to: plan.route.to,
+          body: plan.route.body,
+          correlationId: plan.route.correlationId,
+          bindingId: plan.route.bindingId,
+          sessionId: plan.route.sessionId,
+        },
+      };
+    }
+    return {
+      status: plan.status,
+      reason: plan.reason,
+      reasonCode: plan.reasonCode,
+      correlationId: plan.correlationId,
+      candidates: plan.candidates.map(channelBindingFromNativePlanner),
+      message: input.message,
+    };
+  };
 
   const alphaInbound = await alphaController.acceptInbound(
     {
@@ -147,12 +201,14 @@ try {
     bridge,
     bindings,
     ensureSessionForRoute,
+    routePlanner,
     now: "2026-06-20T11:30:02.000Z",
   });
   const betaIngress = await ingestAcceptedChannelDecision(betaInbound, {
     bridge,
     bindings,
     ensureSessionForRoute,
+    routePlanner,
     now: "2026-06-20T11:30:04.000Z",
   });
   const alphaTelegramIngress = await ingestChannelInboundMessage(
@@ -188,6 +244,7 @@ try {
       bridge,
       bindings,
       ensureSessionForRoute,
+      routePlanner,
       now: "2026-06-20T11:30:06.000Z",
     },
   );
@@ -214,6 +271,32 @@ try {
     alphaTelegramIngress.routedMessage.correlationId ?? "",
     /^channel:binding-alpha-telegram:/,
   );
+  assert.equal(routePlannerCalls, 3);
+
+  const ambiguousIngress = await ingestChannelInboundMessage(
+    {
+      ...alphaInbound.message,
+      bindingId: "binding-unresolved",
+      runtime: {},
+      providerRefs: {
+        ...alphaInbound.message.providerRefs,
+        externalThreadId: undefined,
+      },
+      mentions: [],
+      idempotencyKey: "den_channels:crew-room:thread-alpha:ambiguous-1",
+    },
+    {
+      bridge,
+      bindings,
+      routePlanner,
+      now: "2026-06-20T11:30:05.000Z",
+    },
+  );
+  assert.equal(ambiguousIngress.status, "ambiguous");
+  if (ambiguousIngress.status === "ambiguous") {
+    assert.equal(ambiguousIngress.reasonCode, "channel_route_ambiguous");
+    assert.equal(ambiguousIngress.candidates?.length, 2);
+  }
 
   const activeSessions = (await native.listSessions()).filter(
     (session) => session.status !== "archived",
@@ -370,6 +453,7 @@ try {
         betaRoute: betaIngress.routedMessage.to,
         routedEventTypes: eventTypes(routedEvents),
         duplicateDropped: !duplicateAlpha.accepted,
+        routePlannerCalls,
         staleDropped: !staleBeta.accepted,
         reconnectAttempts: reconnectAttempts.length,
         projectedMessages: projectedMessages.length,
@@ -430,6 +514,59 @@ function channelBinding(
       options.externalThreadId ?? bindingId.replace("binding-", "thread-"),
     externalUserId: options.externalUserId ?? `${agentId}-external`,
     status: "active",
+  };
+}
+
+function channelBindingForNativePlanner(binding: ChannelBindingRecord) {
+  return {
+    bindingId: binding.bindingId,
+    adapterId: binding.adapterId,
+    provider: String(binding.provider),
+    agentId: binding.agentId,
+    instanceId: binding.instanceId,
+    sessionId: binding.sessionId,
+    profileId: binding.profileId,
+    externalChannelId: binding.externalChannelId,
+    externalThreadId: binding.externalThreadId,
+    externalUserId: binding.externalUserId,
+    conversationProjectId: binding.conversationProjectId,
+    conversationChannelId: binding.conversationChannelId,
+    providerSubscriptionId: binding.providerSubscriptionId,
+    status: binding.status,
+  };
+}
+
+function channelBindingFromNativePlanner(binding: {
+  bindingId: string;
+  adapterId: string;
+  provider: string;
+  agentId: string;
+  instanceId?: string;
+  sessionId?: string;
+  profileId: string;
+  externalChannelId: string;
+  externalThreadId?: string;
+  externalUserId?: string;
+  conversationProjectId?: string;
+  conversationChannelId?: number;
+  providerSubscriptionId?: string;
+  status: ChannelBindingRecord["status"];
+}): ChannelBindingRecord {
+  return {
+    bindingId: binding.bindingId,
+    adapterId: binding.adapterId as AdapterId,
+    provider: binding.provider,
+    agentId: binding.agentId as AgentId,
+    instanceId: binding.instanceId as AgentInstanceId | undefined,
+    sessionId: binding.sessionId as SessionId | undefined,
+    profileId: binding.profileId as ProfileId,
+    externalChannelId: binding.externalChannelId,
+    externalThreadId: binding.externalThreadId,
+    externalUserId: binding.externalUserId,
+    conversationProjectId: binding.conversationProjectId,
+    conversationChannelId: binding.conversationChannelId,
+    providerSubscriptionId: binding.providerSubscriptionId,
+    status: binding.status,
   };
 }
 

@@ -33,6 +33,13 @@ impl NativeBridge {
         rusty_crew_core_config::plan_reload_mcp_control(&input)
     }
 
+    pub fn plan_channel_ingress_route(
+        &self,
+        input: ChannelIngressRoutePlanInput,
+    ) -> ChannelIngressRoutePlan {
+        plan_channel_ingress_route(&input)
+    }
+
     pub fn plan_runtime_config(&self, input: RuntimeConfigValidationInput) -> RuntimeConfigPlan {
         plan_runtime_config(&input)
     }

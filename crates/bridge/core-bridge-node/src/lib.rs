@@ -18,8 +18,9 @@ use rusty_crew_core_bridge_api::{
     ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
-    plan_create_profile, plan_runtime_config, validate_runtime_config_input, CreateProfilePlan,
-    CreateProfilePlanInput, NewSessionControlPlan, NewSessionControlPlanInput,
+    plan_channel_ingress_route, plan_create_profile, plan_runtime_config,
+    validate_runtime_config_input, ChannelIngressRoutePlan, ChannelIngressRoutePlanInput,
+    CreateProfilePlan, CreateProfilePlanInput, NewSessionControlPlan, NewSessionControlPlanInput,
     ProfileRegistryMutationPlan, ProfileRegistryMutationRequest, ReloadMcpControlPlan,
     ReloadMcpControlPlanInput, RuntimeConfigPlan, RuntimeConfigValidationInput,
 };

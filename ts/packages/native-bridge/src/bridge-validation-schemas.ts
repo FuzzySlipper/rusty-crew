@@ -115,6 +115,98 @@ const rawAgentMessageSchema = Type.Object(
   { additionalProperties: true },
 );
 
+const rawExternalBindingStatusSchema = Type.Union([
+  Type.Literal("active"),
+  Type.Literal("degraded"),
+  Type.Literal("disconnected"),
+  Type.Literal("archived"),
+]);
+
+const rawChannelBindingConfigDraftSchema = Type.Object(
+  {
+    binding_id: Type.String(),
+    adapter_id: Type.String(),
+    provider: Type.String(),
+    agent_id: Type.String(),
+    instance_id: Type.Optional(nullableString),
+    session_id: Type.Optional(nullableString),
+    profile_id: Type.String(),
+    external_channel_id: Type.String(),
+    external_thread_id: Type.Optional(nullableString),
+    external_user_id: Type.Optional(nullableString),
+    conversation_project_id: Type.Optional(nullableString),
+    conversation_channel_id: Type.Optional(nullableNumber),
+    provider_subscription_id: Type.Optional(nullableString),
+    status: rawExternalBindingStatusSchema,
+  },
+  { additionalProperties: true },
+);
+
+export const rawChannelIngressRoutePlanInputSchema = Type.Object(
+  {
+    message: Type.Object(
+      {
+        adapter_id: Type.String(),
+        binding_id: Type.String(),
+        provider: Type.String(),
+        external_channel_id: Type.String(),
+        external_thread_id: Type.Optional(Type.String()),
+        external_user_id: Type.String(),
+        body: Type.String(),
+        mentions: Type.Array(Type.String()),
+        expires_at: Type.String(),
+        idempotency_key: Type.String(),
+        runtime_agent_id: Type.Optional(Type.String()),
+      },
+      { additionalProperties: true },
+    ),
+    bindings: Type.Array(rawChannelBindingConfigDraftSchema),
+    mention_aliases: Type.Record(Type.String(), Type.String()),
+    system_agent_id: Type.Optional(Type.String()),
+    now: Type.Optional(Type.String()),
+    seen_idempotency_keys: Type.Array(Type.String()),
+  },
+  { additionalProperties: true },
+);
+
+export const rawChannelIngressRoutePlanSchema = Type.Object(
+  {
+    status: Type.Union([
+      Type.Literal("routed"),
+      Type.Literal("no_binding"),
+      Type.Literal("inactive_binding"),
+      Type.Literal("ambiguous"),
+      Type.Literal("expired"),
+      Type.Literal("duplicate"),
+      Type.Literal("denied"),
+    ]),
+    reason_code: Type.String(),
+    reason: Type.String(),
+    correlation_id: Type.Optional(nullableString),
+    binding: Type.Optional(
+      Type.Union([rawChannelBindingConfigDraftSchema, Type.Null()]),
+    ),
+    candidates: Type.Array(rawChannelBindingConfigDraftSchema),
+    route: Type.Optional(
+      Type.Union([
+        Type.Object(
+          {
+            from: Type.String(),
+            to: Type.String(),
+            body: Type.String(),
+            correlation_id: Type.String(),
+            binding_id: Type.String(),
+            session_id: Type.Optional(nullableString),
+          },
+          { additionalProperties: true },
+        ),
+        Type.Null(),
+      ]),
+    ),
+  },
+  { additionalProperties: true },
+);
+
 export const rawSessionStateSchema = Type.Object(
   {
     handle: Type.Number(),

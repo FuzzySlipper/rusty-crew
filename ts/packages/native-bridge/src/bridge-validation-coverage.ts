@@ -19,10 +19,10 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 171;
-const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 36;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 172;
+const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 38;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 31;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 32;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 140;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
@@ -39,6 +39,7 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "list_sessions",
   "model_provider_refresh_impact",
   "plan_model_provider_refresh",
+  "plan_channel_ingress_route",
   "provider_state_diagnostics",
   "purge_profile",
   "query_chat_events",
