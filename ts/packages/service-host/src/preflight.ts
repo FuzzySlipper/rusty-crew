@@ -4,13 +4,20 @@ import {
   acquireRustyCrewServiceLock,
   loadRustyCrewServiceConfig,
 } from "@rusty-crew/brain-island";
+import {
+  assertServiceHostStorageBootReady,
+  preflightServiceHostStorageBoot,
+} from "./storage-preflight.js";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
 export function runRustyCrewServicePreflight(): void {
-  const config = loadRustyCrewServiceConfig();
+  const env = process.env;
+  const config = loadRustyCrewServiceConfig(env);
+  const storage = preflightServiceHostStorageBoot(config, env);
+  assertServiceHostStorageBootReady(storage);
   const lock = acquireRustyCrewServiceLock(config);
   lock.release();
   console.log(
@@ -23,6 +30,7 @@ export function runRustyCrewServicePreflight(): void {
         adminHost: config.admin.host,
         adminPort: config.admin.port,
         storageBackend: config.storage.backend,
+        storage,
       },
       null,
       2,

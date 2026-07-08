@@ -7,6 +7,7 @@ import {
 
 import {
   createRustyCrewServiceApp,
+  loadRustyCrewServiceConfig,
   type ServiceAdapterFactories,
   type RustyCrewServiceApp,
   type RustyCrewServiceAppOptions,
@@ -33,6 +34,10 @@ import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 import { handleHostShellRequest, requestId } from "./host-shell-routes.js";
 import { hostFailure, writeHostRouteResult } from "./host-route-results.js";
+import {
+  assertServiceHostStorageBootReady,
+  preflightServiceHostStorageBoot,
+} from "./storage-preflight.js";
 
 export {
   createSystemdNotifier,
@@ -41,6 +46,11 @@ export {
   type SystemdNotifier,
   type SystemdNotifierOptions,
 } from "./systemd-notify.js";
+export {
+  assertServiceHostStorageBootReady,
+  preflightServiceHostStorageBoot,
+  type ServiceHostStorageBootPreflight,
+} from "./storage-preflight.js";
 
 export interface RustyCrewServiceHostOptions extends Omit<
   RustyCrewServiceAppOptions,
@@ -62,8 +72,15 @@ export interface RustyCrewServiceHost {
 export async function startRustyCrewServiceHost(
   options: RustyCrewServiceHostOptions = {},
 ): Promise<RustyCrewServiceHost> {
+  const env = options.env ?? process.env;
+  const config = options.config ?? loadRustyCrewServiceConfig(env);
+  assertServiceHostStorageBootReady(
+    preflightServiceHostStorageBoot(config, env),
+  );
   const app = await createRustyCrewServiceApp({
     ...options,
+    env,
+    config,
     adapterFactories: {
       ...defaultServiceAdapterFactories(),
       ...options.adapterFactories,

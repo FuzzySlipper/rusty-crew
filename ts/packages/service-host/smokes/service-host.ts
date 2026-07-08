@@ -28,10 +28,14 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
-import { createDebugApiClient } from "@rusty-crew/brain-island";
+import {
+  createDebugApiClient,
+  loadRustyCrewServiceConfig,
+} from "@rusty-crew/brain-island";
 import {
   createSystemdNotifier,
   localHealthBaseUrl,
+  preflightServiceHostStorageBoot,
   startRustyCrewServiceHost,
   watchdogIntervalFromUsec,
 } from "@rusty-crew/service-host";
@@ -70,7 +74,6 @@ try {
   assert.equal(initializeCalled, false);
 
   initializeCalled = false;
-  let capturedStorageBackend: string | undefined;
   await assert.rejects(
     () =>
       startRustyCrewServiceHost({
@@ -84,8 +87,46 @@ try {
           RUSTY_CREW_DATABASE_URL:
             "postgres://rusty_crew:local@127.0.0.1:5432/rusty_crew",
           RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
-          RUSTY_CREW_POSTGRES_BOOT_MODE: "active",
+          RUSTY_CREW_POSTGRES_BOOT_MODE: "proof_admin",
         },
+        bridge: {
+          manifestVersion: 1,
+          operationNames: [],
+          initializeEngine: async () => {
+            initializeCalled = true;
+            throw new Error("initializeEngine should not be called");
+          },
+        } as unknown as NativeBridgeModule,
+      }),
+    /storage\.backend=postgres requires storage\.postgres\.bootMode=active/,
+  );
+  assert.equal(initializeCalled, false);
+
+  initializeCalled = false;
+  let capturedStorageBackend: string | undefined;
+  const postgresReadyEnv = {
+    RUSTY_CREW_DATA_DIR: blockedPostgresRoot,
+    RUSTY_CREW_ADMIN_HOST: "127.0.0.1",
+    RUSTY_CREW_ADMIN_ALLOW_LAN: "false",
+    RUSTY_CREW_ADMIN_PORT: String(blockedPostgresPort),
+    RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+    RUSTY_CREW_STORAGE_BACKEND: "postgres",
+    RUSTY_CREW_DATABASE_URL:
+      "postgres://rusty_crew:local@127.0.0.1:5432/rusty_crew",
+    RUSTY_CREW_POSTGRES_DATABASE_URL_ENV: "RUSTY_CREW_DATABASE_URL",
+    RUSTY_CREW_POSTGRES_BOOT_MODE: "active",
+  };
+  const postgresReadyPreflight = preflightServiceHostStorageBoot(
+    loadRustyCrewServiceConfig(postgresReadyEnv),
+    postgresReadyEnv,
+  );
+  assert.equal(postgresReadyPreflight.ready, true);
+  assert.equal(postgresReadyPreflight.backend, "postgres");
+  assert.equal(postgresReadyPreflight.postgres.databaseUrlPresent, true);
+  await assert.rejects(
+    () =>
+      startRustyCrewServiceHost({
+        env: postgresReadyEnv,
         bridge: {
           manifestVersion: 1,
           operationNames: [],
