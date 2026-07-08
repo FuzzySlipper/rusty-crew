@@ -812,6 +812,79 @@ export const rawMemoryGovernanceDecisionRecordSchema = Type.Object(
   { additionalProperties: true },
 );
 
+export const rawSessionActivityDigestSchema = Type.Object(
+  {
+    digest_id: Type.String(),
+    profile_id: Type.String(),
+    session_id: Type.String(),
+    wake_id: Type.String(),
+    source: Type.String(),
+    summary_text: Type.String(),
+    event_counts_json: Type.Unknown(),
+    tool_calls_json: Type.Unknown(),
+    signals_json: Type.Unknown(),
+    completion_summary: Type.Optional(nullableString),
+    allowed_capture_spaces: Type.Array(Type.String()),
+    created_at: Type.String(),
+    retention_until: Type.Optional(nullableString),
+    reviewed_at: Type.Optional(nullableString),
+  },
+  { additionalProperties: false },
+);
+
+export const rawSessionActivityDigestArraySchema = Type.Array(
+  rawSessionActivityDigestSchema,
+);
+
+export const rawSessionActivityDigestQuerySchema = Type.Object(
+  {
+    profile_id: Type.Optional(Type.String()),
+    session_id: Type.Optional(Type.String()),
+    wake_id: Type.Optional(Type.String()),
+    include_reviewed: Type.Boolean(),
+    limit: Type.Optional(Type.Number()),
+    offset: Type.Optional(Type.Number()),
+  },
+  { additionalProperties: false },
+);
+
+export const rawContextCompactionArtifactSchema = Type.Object(
+  {
+    artifact_id: Type.String(),
+    session_id: Type.String(),
+    branch_id: Type.Optional(nullableString),
+    strategy_id: Type.String(),
+    source_refs_json: Type.Unknown(),
+    provider_metadata_json: Type.Unknown(),
+    estimate_before_json: Type.Unknown(),
+    estimate_after_json: Type.Optional(Type.Unknown()),
+    summary_text: Type.String(),
+    enters_future_context: Type.Boolean(),
+    context_policy: Type.String(),
+    metadata_json: Type.Unknown(),
+    created_at: Type.String(),
+    updated_at: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+export const rawContextCompactionArtifactArraySchema = Type.Array(
+  rawContextCompactionArtifactSchema,
+);
+
+export const rawContextCompactionArtifactQuerySchema = Type.Object(
+  {
+    session_id: Type.Optional(Type.String()),
+    branch_id: Type.Optional(Type.String()),
+    strategy_id: Type.Optional(Type.String()),
+    enters_future_context: Type.Optional(Type.Boolean()),
+    latest_only: Type.Boolean(),
+    limit: Type.Optional(Type.Number()),
+    offset: Type.Optional(Type.Number()),
+  },
+  { additionalProperties: false },
+);
+
 const openAiResponsesClientSchema = Type.Union([
   Type.Object(
     {

@@ -18,6 +18,7 @@ import {
   eventReceiptSchema,
   openAiResponsesBrainRunInputSchema,
   rawBodyStateSchema,
+  rawContextCompactionArtifactSchema,
   rawModelProviderRefreshImpactSchema,
   rawMemoryGovernanceDecisionRecordSchema,
   rawMemoryProposalRecordSchema,
@@ -25,6 +26,7 @@ import {
   rawModelProviderRecordSchema,
   rawOpenAiResponsesBrainRunResultSchema,
   rawProfileRegistryRecordSchema,
+  rawSessionActivityDigestSchema,
   rawSessionStateArraySchema,
 } from "./bridge-validation-schemas.js";
 import {
@@ -544,6 +546,18 @@ validateRustFixture({
   operation: "rust_fixture_memory_governance_decision_record",
   schema: rawMemoryGovernanceDecisionRecordSchema,
   name: "memory_governance_decision_record_v1",
+});
+
+validateRustFixture({
+  operation: "rust_fixture_session_activity_digest",
+  schema: rawSessionActivityDigestSchema,
+  name: "session_activity_digest_v1",
+});
+
+validateRustFixture({
+  operation: "rust_fixture_context_compaction_artifact",
+  schema: rawContextCompactionArtifactSchema,
+  name: "context_compaction_artifact_v1",
 });
 
 try {

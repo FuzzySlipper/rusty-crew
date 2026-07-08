@@ -25,6 +25,9 @@ import {
   piAgentBrainRunInputSchema,
   providerStateDiagnosticArraySchema,
   rawBodyStateSchema,
+  rawContextCompactionArtifactArraySchema,
+  rawContextCompactionArtifactQuerySchema,
+  rawContextCompactionArtifactSchema,
   rawModelProviderRefreshImpactSchema,
   rawModelProviderRefreshPlanSchema,
   rawModelProviderRecordArraySchema,
@@ -34,6 +37,9 @@ import {
   rawProfilePurgeReportSchema,
   rawProfileRegistryRecordArraySchema,
   rawProfileRegistryRecordSchema,
+  rawSessionActivityDigestArraySchema,
+  rawSessionActivityDigestQuerySchema,
+  rawSessionActivityDigestSchema,
   rawSessionStateArraySchema,
 } from "./bridge-validation-schemas.js";
 import {
@@ -600,7 +606,9 @@ export type NativeBridgeRoundTripFixtureName =
   | "model_provider_refresh_impact_v1"
   | "memory_space_descriptor_v1"
   | "memory_proposal_record_v1"
-  | "memory_governance_decision_record_v1";
+  | "memory_governance_decision_record_v1"
+  | "session_activity_digest_v1"
+  | "context_compaction_artifact_v1";
 
 export interface OpenAiResponsesTransportMetrics {
   effectiveTransport: string;
@@ -2581,6 +2589,8 @@ export function roundTripNativeBridgeFixture(input: {
     case "memory_space_descriptor_v1":
     case "memory_proposal_record_v1":
     case "memory_governance_decision_record_v1":
+    case "session_activity_digest_v1":
+    case "context_compaction_artifact_v1":
       return input.value;
   }
 }
@@ -3966,22 +3976,79 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.listMemoryProposalsJson(JSON.stringify(query)),
       ) as MemoryProposalRecord[],
-    saveSessionActivityDigest: async (digest) =>
-      JSON.parse(
-        binding.saveSessionActivityDigestJson(JSON.stringify(digest)),
-      ) as SessionActivityDigest,
-    listSessionActivityDigests: async (query) =>
-      JSON.parse(
-        binding.listSessionActivityDigestsJson(JSON.stringify(query)),
-      ) as SessionActivityDigest[],
-    saveContextCompactionArtifact: async (artifact) =>
-      JSON.parse(
-        binding.saveContextCompactionArtifactJson(JSON.stringify(artifact)),
-      ) as ContextCompactionArtifact,
-    listContextCompactionArtifacts: async (query) =>
-      JSON.parse(
-        binding.listContextCompactionArtifactsJson(JSON.stringify(query)),
-      ) as ContextCompactionArtifact[],
+    saveSessionActivityDigest: async (digest) => {
+      const validatedDigest = validateBridgeValue<SessionActivityDigest>({
+        operation: "save_session_activity_digest",
+        direction: "ts_to_rust",
+        schema: rawSessionActivityDigestSchema,
+        value: digest,
+      });
+      return validateBridgeValue<SessionActivityDigest>({
+        operation: "save_session_activity_digest",
+        direction: "rust_to_ts",
+        schema: rawSessionActivityDigestSchema,
+        value: JSON.parse(
+          binding.saveSessionActivityDigestJson(
+            JSON.stringify(validatedDigest),
+          ),
+        ),
+      });
+    },
+    listSessionActivityDigests: async (query) => {
+      const validatedQuery = validateBridgeValue<SessionActivityDigestQuery>({
+        operation: "list_session_activity_digests",
+        direction: "ts_to_rust",
+        schema: rawSessionActivityDigestQuerySchema,
+        value: query,
+      });
+      return validateBridgeValue<SessionActivityDigest[]>({
+        operation: "list_session_activity_digests",
+        direction: "rust_to_ts",
+        schema: rawSessionActivityDigestArraySchema,
+        value: JSON.parse(
+          binding.listSessionActivityDigestsJson(
+            JSON.stringify(validatedQuery),
+          ),
+        ),
+      });
+    },
+    saveContextCompactionArtifact: async (artifact) => {
+      const validatedArtifact = validateBridgeValue<ContextCompactionArtifact>({
+        operation: "save_context_compaction_artifact",
+        direction: "ts_to_rust",
+        schema: rawContextCompactionArtifactSchema,
+        value: artifact,
+      });
+      return validateBridgeValue<ContextCompactionArtifact>({
+        operation: "save_context_compaction_artifact",
+        direction: "rust_to_ts",
+        schema: rawContextCompactionArtifactSchema,
+        value: JSON.parse(
+          binding.saveContextCompactionArtifactJson(
+            JSON.stringify(validatedArtifact),
+          ),
+        ),
+      });
+    },
+    listContextCompactionArtifacts: async (query) => {
+      const validatedQuery =
+        validateBridgeValue<ContextCompactionArtifactQuery>({
+          operation: "list_context_compaction_artifacts",
+          direction: "ts_to_rust",
+          schema: rawContextCompactionArtifactQuerySchema,
+          value: query,
+        });
+      return validateBridgeValue<ContextCompactionArtifact[]>({
+        operation: "list_context_compaction_artifacts",
+        direction: "rust_to_ts",
+        schema: rawContextCompactionArtifactArraySchema,
+        value: JSON.parse(
+          binding.listContextCompactionArtifactsJson(
+            JSON.stringify(validatedQuery),
+          ),
+        ),
+      });
+    },
     recordMemoryGovernanceDecision: async (decision) =>
       JSON.parse(
         binding.recordMemoryGovernanceDecisionJson(JSON.stringify(decision)),
