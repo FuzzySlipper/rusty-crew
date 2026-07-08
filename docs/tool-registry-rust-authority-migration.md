@@ -43,11 +43,17 @@ shared portable fixture:
 `fixtures/tool-registry/default-tool-registry-metadata.json` is the current
 portable artifact consumed by Rust tests.
 
+Task #4677 moved the default TypeScript registry to consume that portable
+artifact directly. `tool-registry.ts` now keeps only the private executable
+binding ledger for built-in tools; public descriptors, admin catalog data, and
+normal diagnostics are derived from the artifact-backed metadata. The
+`implementationModule` field remains binding/debug data only.
+
 TypeScript still owns several policy surfaces:
 
-- `ts/packages/brain-island/src/tool-registry.ts` defines the public metadata
-  types, default metadata records, executable bindings, validation, inventory
-  status, denial reasons, and toolset catalog construction.
+- `ts/packages/brain-island/src/tool-registry.ts` defines TypeScript-facing
+  public metadata types, private executable bindings, validation adapters,
+  inventory status, denial reasons, and toolset catalog construction.
 - `ts/packages/brain-island/src/tool-profile-selection.ts` owns profile/session
   selection rules and safety-flag denials.
 - `ts/packages/brain-island/src/local-tool-profiles.ts` owns local tool profile
@@ -110,6 +116,15 @@ Acceptance:
 Change TS so the portable catalog is either generated from Rust/codegen output
 or imported from a Rust-validated artifact. TS should keep a separate
 `ToolExecutableBinding[]` keyed by canonical tool name.
+
+Current implementation: the default TS catalog imports
+`fixtures/tool-registry/default-tool-registry-metadata.json` through
+`tool-registry-portable-catalog.ts`. Rust validates that artifact in
+`cargo test -p rusty-crew-core-tool-registry`; TS parity smokes verify fixture
+formatting, one binding per public metadata entry, and that public metadata does
+not expose executable implementation modules. New built-in tools should add or
+modify portable metadata in the fixture, then add the matching TS executable
+binding.
 
 Acceptance:
 
@@ -179,4 +194,3 @@ diagnostic and no model exposure.
 Do not move ordinary tool execution into Rust as part of this work. The purpose
 is authority over metadata and policy, not reimplementing browser, web, memory,
 MCP, or local code tools.
-

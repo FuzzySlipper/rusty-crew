@@ -40,6 +40,16 @@ const metadataNames = defaultToolRegistryMetadata.map((entry) => entry.name);
 const bindingNames = defaultToolExecutableBindings.map(
   (binding) => binding.name,
 );
+assert.equal(
+  Object.hasOwn(defaultToolRegistryMetadata[0]!, "implementationModule"),
+  false,
+  "portable metadata must not expose executable implementation modules",
+);
+assert.deepEqual(
+  defaultToolRegistry.entries,
+  defaultToolRegistryMetadata,
+  "default registry public entries must be loaded from the portable catalog",
+);
 assert.deepEqual(
   [...bindingNames].sort(),
   [...metadataNames].sort(),
