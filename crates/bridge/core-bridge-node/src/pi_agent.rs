@@ -143,6 +143,7 @@ pub(crate) fn drain_pi_agent_brain_stream_json(
                     "pi-agent buffered wake {wake_id} exceeded {}ms timeout",
                     run.wake_timeout_ms
                 ));
+                run.record_transition();
             }
             let mut items = Vec::new();
             for _ in 0..max_items {
@@ -163,6 +164,9 @@ pub(crate) fn drain_pi_agent_brain_stream_json(
                 if is_terminal {
                     break;
                 }
+            }
+            if !items.is_empty() {
+                run.record_transition();
             }
             let tool_requests = run.drain_pending_tool_requests();
             let terminal = run.terminal && run.items.is_empty();
@@ -283,6 +287,7 @@ fn run_pi_agent_brain_buffered(
             }
         }
         run.terminal = true;
+        run.record_transition();
     });
 }
 
@@ -474,6 +479,7 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
                         "pi-agent buffered wake {} exceeded {}ms timeout while waiting for tool output {}",
                         self.wake_id, run.wake_timeout_ms, call_id
                     ));
+                    run.record_transition();
                     return PiAgentToolOutput::timed_out(
                         run.error
                             .clone()

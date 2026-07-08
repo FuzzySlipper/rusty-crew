@@ -198,6 +198,24 @@ errors = "core_protocol::CoreError"
 summary = "Cancel a buffered Rust pi-agent brain wake cooperatively."
 
 [[operation]]
+name = "buffered_brain_run_diagnostics"
+surface = "stable"
+direction = "ts_to_rust"
+input = "()"
+output = "brain_runtime::BufferedBrainRunDiagnostics"
+errors = "core_protocol::CoreError"
+summary = "Read metadata-only diagnostics for active native buffered brain runs without prompt, tool argument, tool output, credential, or provider payload bodies."
+
+[[operation]]
+name = "cleanup_buffered_brain_runs"
+surface = "stable"
+direction = "ts_to_rust"
+input = "{ reason_code: String, summary: String }"
+output = "brain_runtime::BufferedBrainRunCleanupSummary"
+errors = "core_protocol::CoreError"
+summary = "Cancel nonterminal native buffered brain runs and clear host-owned buffered run state during shutdown or explicit operator cleanup."
+
+[[operation]]
 name = "exchange_openai_oauth_code"
 surface = "stable"
 direction = "ts_to_rust"

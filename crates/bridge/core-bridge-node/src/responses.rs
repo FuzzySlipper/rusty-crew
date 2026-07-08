@@ -264,6 +264,7 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
                 "OpenAI Responses buffered wake {wake_id} exceeded {}ms timeout",
                 run.wake_timeout_ms
             ));
+            run.record_transition();
         }
         let mut items = Vec::new();
         for _ in 0..max_items {
@@ -284,6 +285,9 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
             if is_terminal {
                 break;
             }
+        }
+        if !items.is_empty() {
+            run.record_transition();
         }
         let tool_requests = run.drain_pending_tool_requests();
         let terminal = run.terminal && run.items.is_empty();
@@ -393,6 +397,7 @@ fn run_openai_responses_brain_buffered(
                 return;
             }
             run.items.push_back(item);
+            run.record_transition();
         });
     };
     let result = run_openai_responses_brain_with_buffered_tools(
@@ -416,6 +421,7 @@ fn run_openai_responses_brain_buffered(
             }
         }
         run.terminal = true;
+        run.record_transition();
     });
 }
 
@@ -490,6 +496,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         "OpenAI Responses buffered wake {} exceeded {}ms timeout while waiting for tool output {}",
                         self.wake_id, run.wake_timeout_ms, call.call_id
                     ));
+                    run.record_transition();
                     return NeutralToolOutput {
                         output: run
                             .error

@@ -38,6 +38,11 @@ impl NativeBridge {
     }
 
     pub fn shutdown_engine(&mut self, request: ShutdownRequest) -> CoreResult<ShutdownSummary> {
+        self.cleanup_buffered_brain_runs(
+            "service_shutdown",
+            "service shutdown cleaned up active buffered brain runs",
+        )
+        .map_err(brain_runtime_error_to_core)?;
         let engine = self.engine.take().ok_or_else(|| {
             CoreError::new(
                 CoreErrorKind::NotFound,

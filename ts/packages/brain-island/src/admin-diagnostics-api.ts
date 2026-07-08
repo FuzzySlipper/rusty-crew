@@ -242,6 +242,11 @@ export function handleAdminDiagnosticsRequest(
           responsesWakeMetrics: module.responsesWakeMetrics ?? [],
         })),
       );
+    case "/v1/admin/diagnostics/buffered-brain-runs":
+      return success(
+        requestId,
+        context.diagnostics.runtime.bufferedBrainRuns ?? null,
+      );
     case "/v1/admin/diagnostics/observation":
       return success(requestId, context.diagnostics.observation ?? null);
     case "/v1/admin/diagnostics/background":

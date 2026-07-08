@@ -4,6 +4,9 @@
 //! the current manifest surface and own runtime buffers without leaking native
 //! transport dependencies into core crates.
 
+use rusty_crew_brain_runtime::{
+    BrainRuntimeError, BufferedNeutralRunCleanupReport, BufferedNeutralRunDiagnostic,
+};
 use rusty_crew_core_bridge_api::{
     manifest_summary, wire_shape_fingerprint, ActionBatchReceipt, BrainActionBatch,
     BrainEventEnvelope, BrainImplementationHandle, BrainImplementationRegistration,
@@ -137,7 +140,7 @@ use responses::{
 };
 #[cfg(test)]
 use responses::{normalize_responses_tool_schema, run_openai_responses_brain_json_blocking};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub(crate) use sessions::*;
 use std::sync::{Arc, Mutex};
@@ -156,6 +159,28 @@ pub struct NativeBridge {
     subscriptions: SubscriptionRegistry,
     openai_responses_buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
     pi_agent_buffered_runs: Arc<PiAgentBufferedRunRegistry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BufferedBrainRunDiagnostics {
+    active_run_count: usize,
+    modules: Vec<BufferedBrainRunModuleDiagnostics>,
+    runs: Vec<BufferedNeutralRunDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BufferedBrainRunModuleDiagnostics {
+    module_label: String,
+    active_run_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BufferedBrainRunCleanupSummary {
+    active_runs: usize,
+    terminal_runs: usize,
+    cancelled_nonterminal_runs: usize,
+    removed_runs: usize,
+    modules: Vec<BufferedNeutralRunCleanupReport>,
 }
 
 impl NativeBridge {
@@ -179,6 +204,59 @@ impl NativeBridge {
 
     pub(crate) fn pi_agent_buffered_runs(&self) -> Arc<PiAgentBufferedRunRegistry> {
         Arc::clone(&self.pi_agent_buffered_runs)
+    }
+
+    fn buffered_brain_run_diagnostics(
+        &self,
+    ) -> Result<BufferedBrainRunDiagnostics, BrainRuntimeError> {
+        let mut runs = Vec::new();
+        let mut modules = Vec::new();
+        let responses = self.openai_responses_buffered_runs.diagnostics()?;
+        modules.push(BufferedBrainRunModuleDiagnostics {
+            module_label: "OpenAI Responses".to_string(),
+            active_run_count: responses.len(),
+        });
+        runs.extend(responses);
+
+        let pi_agent = self.pi_agent_buffered_runs.diagnostics()?;
+        modules.push(BufferedBrainRunModuleDiagnostics {
+            module_label: "pi-agent".to_string(),
+            active_run_count: pi_agent.len(),
+        });
+        runs.extend(pi_agent);
+        runs.sort_by(|left, right| {
+            left.module_label
+                .cmp(&right.module_label)
+                .then_with(|| left.wake_id.cmp(&right.wake_id))
+        });
+
+        Ok(BufferedBrainRunDiagnostics {
+            active_run_count: runs.len(),
+            modules,
+            runs,
+        })
+    }
+
+    fn cleanup_buffered_brain_runs(
+        &self,
+        reason_code: &str,
+        summary: &str,
+    ) -> Result<BufferedBrainRunCleanupSummary, BrainRuntimeError> {
+        let modules = vec![
+            self.openai_responses_buffered_runs
+                .cleanup(reason_code, summary)?,
+            self.pi_agent_buffered_runs.cleanup(reason_code, summary)?,
+        ];
+        Ok(BufferedBrainRunCleanupSummary {
+            active_runs: modules.iter().map(|module| module.active_runs).sum(),
+            terminal_runs: modules.iter().map(|module| module.terminal_runs).sum(),
+            cancelled_nonterminal_runs: modules
+                .iter()
+                .map(|module| module.cancelled_nonterminal_runs)
+                .sum(),
+            removed_runs: modules.iter().map(|module| module.removed_runs).sum(),
+            modules,
+        })
     }
 }
 
@@ -291,6 +369,42 @@ impl NativeBridgeBinding {
         })
     }
 
+    #[napi]
+    pub fn buffered_brain_run_diagnostics_json(&self) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        serde_json::to_string(
+            &bridge
+                .buffered_brain_run_diagnostics()
+                .map_err(brain_runtime_error_to_napi)?,
+        )
+        .map_err(|error| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("serialize buffered brain run diagnostics: {error}"),
+            )
+        })
+    }
+
+    #[napi]
+    pub fn cleanup_buffered_brain_runs_json(
+        &self,
+        reason_code: String,
+        summary: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        serde_json::to_string(
+            &bridge
+                .cleanup_buffered_brain_runs(&reason_code, &summary)
+                .map_err(brain_runtime_error_to_napi)?,
+        )
+        .map_err(|error| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("serialize buffered brain run cleanup report: {error}"),
+            )
+        })
+    }
+
     fn bridge(&self) -> napi::Result<std::sync::MutexGuard<'_, NativeBridge>> {
         self.inner.lock().map_err(|_| {
             napi::Error::new(
@@ -299,6 +413,22 @@ impl NativeBridgeBinding {
             )
         })
     }
+}
+
+fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
+    let status = if error.is_invalid_argument() {
+        napi::Status::InvalidArg
+    } else {
+        napi::Status::GenericFailure
+    };
+    napi::Error::new(status, error.to_string())
+}
+
+fn brain_runtime_error_to_core(error: BrainRuntimeError) -> CoreError {
+    CoreError::new(
+        CoreErrorKind::InternalError,
+        format!("buffered brain run registry failure: {error}"),
+    )
 }
 
 #[cfg(test)]

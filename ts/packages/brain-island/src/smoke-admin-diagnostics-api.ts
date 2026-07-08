@@ -167,6 +167,31 @@ const diagnostics = buildRuntimeDiagnosticsProjection({
       lastWakeId: "wake-alpha",
     },
   ],
+  bufferedBrainRuns: {
+    active_run_count: 1,
+    modules: [
+      {
+        module_label: "pi-agent",
+        active_run_count: 1,
+      },
+    ],
+    runs: [
+      {
+        module_label: "pi-agent",
+        wake_id: "wake-active",
+        queued_stream_item_count: 2,
+        pending_tool_request_count: 1,
+        submitted_tool_output_count: 0,
+        age_ms: 50,
+        wake_timeout_ms: 10_000,
+        terminal: false,
+        cancelled: false,
+        has_error: false,
+        started_at: now,
+        last_transition_at: now,
+      },
+    ],
+  },
 });
 const background = buildBackgroundServiceDiagnosticsProjection({
   now,
@@ -529,6 +554,26 @@ assert.equal(
     ?.providerState?.status,
   "valid",
 );
+
+const bufferedRuns = handleAdminDiagnosticsRequest(
+  { method: "GET", url: "/v1/admin/diagnostics/buffered-brain-runs" },
+  { diagnostics },
+);
+assert.equal(bufferedRuns.status, 200);
+const bufferedRunsData = okData<{
+  active_run_count: number;
+  runs: Array<{
+    wake_id: string;
+    pending_tool_request_count: number;
+    arguments_json?: string;
+    output?: string;
+  }>;
+}>(bufferedRuns);
+assert.equal(bufferedRunsData.active_run_count, 1);
+assert.equal(bufferedRunsData.runs[0]?.wake_id, "wake-active");
+assert.equal(bufferedRunsData.runs[0]?.pending_tool_request_count, 1);
+assert.equal(bufferedRunsData.runs[0]?.arguments_json, undefined);
+assert.equal(bufferedRunsData.runs[0]?.output, undefined);
 
 const storageRoute = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics/storage" },

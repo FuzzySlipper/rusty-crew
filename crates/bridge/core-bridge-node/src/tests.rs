@@ -662,6 +662,50 @@ fn native_bridge_shutdown_reports_and_clears_subscriptions() {
     assert_eq!(error.kind, CoreErrorKind::NotFound);
 }
 
+#[test]
+fn native_bridge_shutdown_cleans_buffered_brain_runs() {
+    let mut bridge = NativeBridge::new();
+    let engine = bridge
+        .initialize_engine(EngineConfig {
+            engine_data_dir: std::env::temp_dir()
+                .join(format!(
+                    "rusty-crew-native-buffered-shutdown-{}",
+                    std::process::id()
+                ))
+                .to_string_lossy()
+                .to_string(),
+            clock: rusty_crew_core_bridge_api::ClockConfig::Fixed {
+                at: "2026-06-19T00:00:00Z".to_string(),
+            },
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1000,
+            storage: None,
+        })
+        .unwrap();
+
+    bridge
+        .pi_agent_buffered_runs()
+        .insert(
+            "shutdown-buffered-wake".to_string(),
+            rusty_crew_brain_runtime::BufferedNeutralRun::new(10_000),
+        )
+        .unwrap();
+    let active = bridge.buffered_brain_run_diagnostics().unwrap();
+    assert_eq!(active.active_run_count, 1);
+    assert_eq!(active.runs[0].module_label, "pi-agent");
+    assert_eq!(active.runs[0].wake_id, "shutdown-buffered-wake");
+
+    bridge
+        .shutdown_engine(ShutdownRequest {
+            engine,
+            drain_timeout_ms: 25,
+        })
+        .unwrap();
+
+    let after_shutdown = bridge.buffered_brain_run_diagnostics().unwrap();
+    assert_eq!(after_shutdown.active_run_count, 0);
+}
+
 fn brain_registration(
     implementation_id: &str,
     profile_id: &str,

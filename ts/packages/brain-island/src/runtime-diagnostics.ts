@@ -129,6 +129,7 @@ export interface RuntimeDiagnosticsInput {
   brainModules?: readonly RuntimeBrainModuleDiagnostics[];
   providerStates?: readonly RuntimeProviderStateSessionDiagnostics[];
   responsesWakeMetrics?: readonly RuntimeResponsesWakeMetrics[];
+  bufferedBrainRuns?: RuntimeBufferedBrainRunDiagnostics;
   runtimePauses?: readonly RuntimePauseDiagnostics[];
   recentErrors?: readonly RuntimeDiagnosticError[];
   staleSessionMs?: number;
@@ -163,6 +164,7 @@ export interface RuntimeDiagnosticsProjection {
     counters?: RuntimeCounterSummary;
     brainModules: RuntimeBrainModuleDiagnostics[];
     responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
+    bufferedBrainRuns?: RuntimeBufferedBrainRunDiagnostics;
     sessions: RuntimeSessionDiagnostics[];
     delegatedSessions: RuntimeDelegationDiagnostics[];
     runtimePauses: RuntimePauseDiagnostics[];
@@ -244,6 +246,32 @@ export interface RuntimeResponsesWakeMetrics {
   brainStreamItemCounts: Record<string, number>;
   firstTextDeltaLatencyMs?: number | null;
   totalTurnDurationMs: number;
+}
+
+export interface RuntimeBufferedBrainRunModuleDiagnostics {
+  module_label: string;
+  active_run_count: number;
+}
+
+export interface RuntimeBufferedBrainRunDiagnostic {
+  module_label: string;
+  wake_id: string;
+  queued_stream_item_count: number;
+  pending_tool_request_count: number;
+  submitted_tool_output_count: number;
+  age_ms: number;
+  wake_timeout_ms: number;
+  terminal: boolean;
+  cancelled: boolean;
+  has_error: boolean;
+  started_at: string;
+  last_transition_at: string;
+}
+
+export interface RuntimeBufferedBrainRunDiagnostics {
+  active_run_count: number;
+  modules: RuntimeBufferedBrainRunModuleDiagnostics[];
+  runs: RuntimeBufferedBrainRunDiagnostic[];
 }
 
 export interface RuntimeSessionEffectiveDefaults {
@@ -549,6 +577,9 @@ export function buildRuntimeDiagnosticsProjection(
       counters: input.runtimeSummary,
       brainModules,
       responsesWakeMetrics: [...(input.responsesWakeMetrics ?? [])],
+      ...(input.bufferedBrainRuns === undefined
+        ? {}
+        : { bufferedBrainRuns: input.bufferedBrainRuns }),
       sessions,
       delegatedSessions,
       runtimePauses: [...(input.runtimePauses ?? [])],

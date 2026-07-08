@@ -181,6 +181,8 @@ export declare class NativeBridgeBinding {
   constructor()
   initializeEngine(config: JsEngineConfig): number
   shutdownEngine(engine: number, drainTimeoutMs: number): JsShutdownSummary
+  bufferedBrainRunDiagnosticsJson(): string
+  cleanupBufferedBrainRunsJson(reasonCode: string, summary: string): string
 }
 
 export interface JsActionBatchReceipt {

@@ -82,6 +82,31 @@ pub struct BufferedNeutralCancellation {
     pub cancelled_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BufferedNeutralRunDiagnostic {
+    pub module_label: String,
+    pub wake_id: String,
+    pub queued_stream_item_count: usize,
+    pub pending_tool_request_count: usize,
+    pub submitted_tool_output_count: usize,
+    pub age_ms: u64,
+    pub wake_timeout_ms: u64,
+    pub terminal: bool,
+    pub cancelled: bool,
+    pub has_error: bool,
+    pub started_at: String,
+    pub last_transition_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BufferedNeutralRunCleanupReport {
+    pub module_label: String,
+    pub active_runs: usize,
+    pub terminal_runs: usize,
+    pub cancelled_nonterminal_runs: usize,
+    pub removed_runs: usize,
+}
+
 #[derive(Debug)]
 pub struct BufferedNeutralRun<Metrics, SecretUpdate> {
     pub items: VecDeque<BrainWakeStreamItem>,
@@ -89,6 +114,7 @@ pub struct BufferedNeutralRun<Metrics, SecretUpdate> {
     pub submitted_tool_outputs: HashMap<String, BufferedNeutralToolOutput>,
     pub terminal: bool,
     pub started_at: OffsetDateTime,
+    pub last_transition_at: OffsetDateTime,
     pub wake_timeout_ms: u64,
     pub provider_state: Option<BrainWakeProviderStateOutput>,
     pub transport_metrics: Option<Metrics>,
@@ -99,12 +125,14 @@ pub struct BufferedNeutralRun<Metrics, SecretUpdate> {
 
 impl<Metrics, SecretUpdate> BufferedNeutralRun<Metrics, SecretUpdate> {
     pub fn new(wake_timeout_ms: u64) -> Self {
+        let now = OffsetDateTime::now_utc();
         Self {
             items: VecDeque::new(),
             pending_tool_requests: VecDeque::new(),
             submitted_tool_outputs: HashMap::new(),
             terminal: false,
-            started_at: OffsetDateTime::now_utc(),
+            started_at: now,
+            last_transition_at: now,
             wake_timeout_ms,
             provider_state: None,
             transport_metrics: None,
@@ -133,6 +161,7 @@ impl<Metrics, SecretUpdate> BufferedNeutralRun<Metrics, SecretUpdate> {
         self.submitted_tool_outputs.clear();
         self.error = Some(summary);
         self.terminal = true;
+        self.record_transition();
     }
 
     pub fn is_cancelled(&self) -> bool {
@@ -141,21 +170,35 @@ impl<Metrics, SecretUpdate> BufferedNeutralRun<Metrics, SecretUpdate> {
 
     pub fn queue_pending_tool_request(&mut self, request: BufferedNeutralPendingToolRequest) {
         self.pending_tool_requests.push_back(request);
+        self.record_transition();
     }
 
     pub fn drain_pending_tool_requests(&mut self) -> Vec<BufferedNeutralPendingToolRequest> {
-        self.pending_tool_requests.drain(..).collect()
+        let drained: Vec<_> = self.pending_tool_requests.drain(..).collect();
+        if !drained.is_empty() {
+            self.record_transition();
+        }
+        drained
     }
 
     pub fn submit_tool_output(&mut self, call_id: String, output: BufferedNeutralToolOutput) {
         self.submitted_tool_outputs.insert(call_id, output);
+        self.record_transition();
     }
 
     pub fn take_submitted_tool_output(
         &mut self,
         call_id: &str,
     ) -> Option<BufferedNeutralToolOutput> {
-        self.submitted_tool_outputs.remove(call_id)
+        let output = self.submitted_tool_outputs.remove(call_id);
+        if output.is_some() {
+            self.record_transition();
+        }
+        output
+    }
+
+    pub fn record_transition(&mut self) {
+        self.last_transition_at = OffsetDateTime::now_utc();
     }
 }
 
@@ -217,6 +260,55 @@ impl<Metrics, SecretUpdate> BufferedNeutralRunRegistry<Metrics, SecretUpdate> {
         Ok(runs.contains_key(wake_id))
     }
 
+    pub fn diagnostics(&self) -> BrainRuntimeResult<Vec<BufferedNeutralRunDiagnostic>> {
+        let now = OffsetDateTime::now_utc();
+        let runs = self.lock_runs()?;
+        let mut diagnostics = runs
+            .iter()
+            .map(|(wake_id, run)| BufferedNeutralRunDiagnostic {
+                module_label: self.module_label.to_string(),
+                wake_id: wake_id.clone(),
+                queued_stream_item_count: run.items.len(),
+                pending_tool_request_count: run.pending_tool_requests.len(),
+                submitted_tool_output_count: run.submitted_tool_outputs.len(),
+                age_ms: elapsed_ms(run.started_at, now),
+                wake_timeout_ms: run.wake_timeout_ms,
+                terminal: run.terminal,
+                cancelled: run.is_cancelled(),
+                has_error: run.error.is_some(),
+                started_at: format_rfc3339(run.started_at),
+                last_transition_at: format_rfc3339(run.last_transition_at),
+            })
+            .collect::<Vec<_>>();
+        diagnostics.sort_by(|left, right| left.wake_id.cmp(&right.wake_id));
+        Ok(diagnostics)
+    }
+
+    pub fn cleanup(
+        &self,
+        reason_code: &str,
+        summary: &str,
+    ) -> BrainRuntimeResult<BufferedNeutralRunCleanupReport> {
+        let mut runs = self.lock_runs()?;
+        let active_runs = runs.len();
+        let terminal_runs = runs.values().filter(|run| run.terminal).count();
+        let mut cancelled_nonterminal_runs = 0;
+        for run in runs.values_mut() {
+            if !run.terminal {
+                run.cancel(reason_code.to_string(), summary.to_string());
+                cancelled_nonterminal_runs += 1;
+            }
+        }
+        runs.clear();
+        Ok(BufferedNeutralRunCleanupReport {
+            module_label: self.module_label.to_string(),
+            active_runs,
+            terminal_runs,
+            cancelled_nonterminal_runs,
+            removed_runs: active_runs,
+        })
+    }
+
     fn lock_runs(
         &self,
     ) -> BrainRuntimeResult<
@@ -228,6 +320,16 @@ impl<Metrics, SecretUpdate> BufferedNeutralRunRegistry<Metrics, SecretUpdate> {
                 module_label: self.module_label,
             })
     }
+}
+
+fn elapsed_ms(start: OffsetDateTime, end: OffsetDateTime) -> u64 {
+    (end - start).whole_milliseconds().max(0) as u64
+}
+
+fn format_rfc3339(timestamp: OffsetDateTime) -> String {
+    timestamp
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 #[cfg(test)]

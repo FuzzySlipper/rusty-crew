@@ -496,6 +496,8 @@ interface NativeBridgeBinding {
   databaseSize(): NativeRuntimeDatabaseSize;
   storageDiagnostics(): NativeRuntimeStorageDiagnostics;
   storageSchema(): NativeRuntimeModuleSchemaRegistryDiagnostics;
+  bufferedBrainRunDiagnosticsJson(): string;
+  cleanupBufferedBrainRunsJson(reasonCode: string, summary: string): string;
   createProfileRegistryRecordJson(writeJson: string): string;
   updateProfileRegistryRecordJson(updateJson: string): string;
   listProfileRegistryRecordsJson(queryJson: string): string;
@@ -1410,6 +1412,48 @@ export interface NativeRuntimeStorageDiagnostics {
   pressure: boolean;
 }
 
+export interface NativeBufferedBrainRunModuleDiagnostics {
+  module_label: string;
+  active_run_count: number;
+}
+
+export interface NativeBufferedBrainRunDiagnostic {
+  module_label: string;
+  wake_id: string;
+  queued_stream_item_count: number;
+  pending_tool_request_count: number;
+  submitted_tool_output_count: number;
+  age_ms: number;
+  wake_timeout_ms: number;
+  terminal: boolean;
+  cancelled: boolean;
+  has_error: boolean;
+  started_at: string;
+  last_transition_at: string;
+}
+
+export interface NativeBufferedBrainRunDiagnostics {
+  active_run_count: number;
+  modules: NativeBufferedBrainRunModuleDiagnostics[];
+  runs: NativeBufferedBrainRunDiagnostic[];
+}
+
+export interface NativeBufferedBrainRunCleanupModuleReport {
+  module_label: string;
+  active_runs: number;
+  terminal_runs: number;
+  cancelled_nonterminal_runs: number;
+  removed_runs: number;
+}
+
+export interface NativeBufferedBrainRunCleanupSummary {
+  active_runs: number;
+  terminal_runs: number;
+  cancelled_nonterminal_runs: number;
+  removed_runs: number;
+  modules: NativeBufferedBrainRunCleanupModuleReport[];
+}
+
 export interface NativeRuntimeMaintenancePolicy {
   expireQueuedMessagesAt?: string;
   purgeTerminalQueuedMessagesBefore?: string;
@@ -2023,6 +2067,11 @@ export interface NativeBridgeModule {
   diagnosticCountRows(table: string): Promise<number>;
   databaseSize(): Promise<NativeRuntimeDatabaseSize>;
   storageDiagnostics(): Promise<NativeRuntimeStorageDiagnostics>;
+  bufferedBrainRunDiagnostics(): Promise<NativeBufferedBrainRunDiagnostics>;
+  cleanupBufferedBrainRuns(input: {
+    reasonCode: string;
+    summary: string;
+  }): Promise<NativeBufferedBrainRunCleanupSummary>;
   storageSchema(): Promise<NativeRuntimeModuleSchemaRegistryDiagnostics>;
   createProfileRegistryRecord(
     write: NativeProfileRegistryWrite,
@@ -2587,6 +2636,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     removeDataBankScope: unavailable("remove_data_bank_scope"),
     removeChatDataBankScope: unavailable("remove_chat_data_bank_scope"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
+    bufferedBrainRunDiagnostics: unavailable("buffered_brain_run_diagnostics"),
+    cleanupBufferedBrainRuns: unavailable("cleanup_buffered_brain_runs"),
     runOpenAiResponsesBrain: unavailable("wake_brain"),
     exchangeOpenAiOauthCode: unavailable("wake_brain"),
     startOpenAiResponsesBrain: unavailable("wake_brain"),
@@ -2618,7 +2669,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
 }
 
 function unavailable<Args extends unknown[], Result>(
-  operation: ManifestOperationName,
+  operation: string,
 ): (...args: Args) => Promise<Result> {
   return async () => {
     throw new Error(`native bridge operation ${operation} is unavailable`);
@@ -3427,6 +3478,14 @@ function createNativeBridgeModule(
     diagnosticCountRows: async (table) => binding.countRows(table),
     databaseSize: async () => binding.databaseSize(),
     storageDiagnostics: async () => binding.storageDiagnostics(),
+    bufferedBrainRunDiagnostics: async () =>
+      JSON.parse(
+        binding.bufferedBrainRunDiagnosticsJson(),
+      ) as NativeBufferedBrainRunDiagnostics,
+    cleanupBufferedBrainRuns: async (input) =>
+      JSON.parse(
+        binding.cleanupBufferedBrainRunsJson(input.reasonCode, input.summary),
+      ) as NativeBufferedBrainRunCleanupSummary,
     storageSchema: async () => binding.storageSchema(),
     createProfileRegistryRecord: async (write) =>
       toNativeProfileRegistryRecord(

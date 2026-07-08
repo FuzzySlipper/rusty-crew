@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 159;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 161;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 132;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 134;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -106,6 +106,15 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     reason:
       "Rust pi-agent start/drain are TypeBox validated; submit/cancel are narrow buffered-run receipts covered by Rust bridge tests until per-operation fixtures are added.",
     operations: ["submit_pi_agent_tool_output", "cancel_pi_agent_brain"],
+  },
+  {
+    group: "buffered_run_host_diagnostics",
+    reason:
+      "Buffered run host diagnostics and cleanup are metadata-only native helper surfaces covered by Rust shutdown tests and the pi-agent bridge smoke; add fixture coverage if their envelopes become UI-write contracts.",
+    operations: [
+      "buffered_brain_run_diagnostics",
+      "cleanup_buffered_brain_runs",
+    ],
   },
   {
     group: "config_and_adapter_ingress",

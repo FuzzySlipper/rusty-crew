@@ -12,6 +12,11 @@ const firstDrain = await waitForToolRequest(native, started.wakeId);
 assert.equal(firstDrain.toolRequests.length, 1);
 assert.equal(firstDrain.toolRequests[0]?.name, "echo_tool");
 assert.equal(firstDrain.toolRequests[0]?.callId, "fake-pi-call");
+const activeDiagnostics = await native.bufferedBrainRunDiagnostics();
+assert.equal(activeDiagnostics.active_run_count, 1);
+assert.equal(activeDiagnostics.runs[0]?.module_label, "pi-agent");
+assert.equal(activeDiagnostics.runs[0]?.wake_id, started.wakeId);
+assertNoBufferedPayloads(activeDiagnostics);
 
 await native.submitPiAgentToolOutput({
   wakeId: started.wakeId,
@@ -50,6 +55,7 @@ assert.ok(events.some((event) => event.type === "finished"));
 assert.equal(stream.at(-1)?.type, "actions");
 
 const hostIsolation = await runSameWakeHostIsolationScenario();
+const cleanup = await runExplicitCleanupScenario();
 
 console.log(
   JSON.stringify(
@@ -59,6 +65,7 @@ console.log(
       eventTypes: events.map((event) => event.type),
       terminal: stream.at(-1)?.type,
       hostIsolation,
+      cleanup,
     },
     null,
     2,
@@ -173,6 +180,46 @@ async function runSameWakeHostIsolationScenario(): Promise<{
   };
 }
 
+async function runExplicitCleanupScenario(): Promise<{
+  activeBeforeCleanup: number;
+  cancelledNonterminalRuns: number;
+  removedRuns: number;
+  activeAfterCleanup: number;
+}> {
+  const cleanupHost = await loadNativeBridge();
+  const cleanupWakeId = "pi-agent-cleanup-host-wake";
+  await cleanupHost.startPiAgentBrain(
+    piAgentWakeInput(cleanupWakeId, "cleanup-host"),
+  );
+  await waitForToolRequest(cleanupHost, cleanupWakeId);
+  const beforeCleanup = await cleanupHost.bufferedBrainRunDiagnostics();
+  assert.equal(beforeCleanup.active_run_count, 1);
+  assert.equal(beforeCleanup.runs[0]?.pending_tool_request_count, 0);
+  assertNoBufferedPayloads(beforeCleanup);
+
+  const cleanup = await cleanupHost.cleanupBufferedBrainRuns({
+    reasonCode: "smoke_cleanup",
+    summary: "pi-agent bridge smoke cleanup",
+  });
+  assert.equal(cleanup.active_runs, 1);
+  assert.equal(cleanup.cancelled_nonterminal_runs, 1);
+  assert.equal(cleanup.removed_runs, 1);
+
+  const afterCleanup = await cleanupHost.bufferedBrainRunDiagnostics();
+  assert.equal(afterCleanup.active_run_count, 0);
+  await assert.rejects(
+    () => cleanupHost.drainPiAgentBrainStream({ wakeId: cleanupWakeId }),
+    /pi-agent buffered wake pi-agent-cleanup-host-wake was not found/,
+  );
+
+  return {
+    activeBeforeCleanup: beforeCleanup.active_run_count,
+    cancelledNonterminalRuns: cleanup.cancelled_nonterminal_runs,
+    removedRuns: cleanup.removed_runs,
+    activeAfterCleanup: afterCleanup.active_run_count,
+  };
+}
+
 function streamText(stream: BrainWakeStreamItem[]): string {
   return stream
     .flatMap((item) =>
@@ -181,6 +228,14 @@ function streamText(stream: BrainWakeStreamItem[]): string {
         : [],
     )
     .join("");
+}
+
+function assertNoBufferedPayloads(value: unknown): void {
+  const serialized = JSON.stringify(value);
+  assert.ok(!serialized.includes("argumentsJson"));
+  assert.ok(!serialized.includes("arguments_json"));
+  assert.ok(!serialized.includes("SENTINEL_PI_AGENT_TOOL_OUTPUT"));
+  assert.ok(!serialized.includes("FIRST_HOST_OUTPUT_ONLY"));
 }
 
 async function waitForToolRequest(

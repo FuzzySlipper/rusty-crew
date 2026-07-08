@@ -512,6 +512,8 @@ interface ServiceRecentEvent {
   eventType: string;
   summary: string;
   severity?: string;
+  workRef?: Record<string, unknown>;
+  resultRef?: Record<string, unknown>;
 }
 
 type RuntimePauseScope = "session" | "profile" | "agent";
@@ -2329,24 +2331,31 @@ async function buildDiagnosticsContext(
   options: { includeProfileRegistry?: boolean } = {},
 ): Promise<AdminDiagnosticsContext> {
   const now = state.now();
-  const [runtimeSummary, sessions, storage, providerStates, memorySpaces] =
-    await Promise.all([
-      state.bridge
-        .runtimeSummary({ scopeType: "runtime" })
-        .catch(() => undefined),
-      state.bridge.listSessions().catch(() => []),
-      state.bridge
-        .storageDiagnostics()
-        .then((diagnostics) =>
-          storageDiagnosticsProjection(
-            diagnostics,
-            state.runtimeConfig.storage ?? state.config.storage,
-          ),
-        )
-        .catch(() => undefined),
-      state.bridge.providerStateDiagnostics().catch(() => []),
-      buildMemorySpaceDiagnostics(state).catch(() => undefined),
-    ]);
+  const [
+    runtimeSummary,
+    sessions,
+    storage,
+    providerStates,
+    bufferedBrainRuns,
+    memorySpaces,
+  ] = await Promise.all([
+    state.bridge
+      .runtimeSummary({ scopeType: "runtime" })
+      .catch(() => undefined),
+    state.bridge.listSessions().catch(() => []),
+    state.bridge
+      .storageDiagnostics()
+      .then((diagnostics) =>
+        storageDiagnosticsProjection(
+          diagnostics,
+          state.runtimeConfig.storage ?? state.config.storage,
+        ),
+      )
+      .catch(() => undefined),
+    state.bridge.providerStateDiagnostics().catch(() => []),
+    state.bridge.bufferedBrainRunDiagnostics().catch(() => undefined),
+    buildMemorySpaceDiagnostics(state).catch(() => undefined),
+  ]);
   const profileRegistry = options.includeProfileRegistry
     ? await buildAdminProfileRegistryDiagnostics({
         bridge: state.bridge,
@@ -2364,6 +2373,7 @@ async function buildDiagnosticsContext(
     brainModules: brainModuleDiagnostics(state),
     providerStates,
     responsesWakeMetrics: state.responsesWakeMetrics,
+    ...(bufferedBrainRuns === undefined ? {} : { bufferedBrainRuns }),
     adapters: buildServiceAdapterDiagnostics(state, now),
     tools: buildSelectedToolDiagnostics(state, sessions),
     persistence: {
@@ -11295,6 +11305,27 @@ async function stopService(state: ServiceState): Promise<void> {
       .unsubscribeEvents(state.wakeSubscription)
       .catch(() => undefined);
     await state.mcpManager.shutdown();
+    const bufferedCleanup = await state.bridge
+      .cleanupBufferedBrainRuns({
+        reasonCode: "service_shutdown",
+        summary: "service shutdown cleaned up active buffered brain runs",
+      })
+      .catch(() => undefined);
+    if (bufferedCleanup !== undefined && bufferedCleanup.removed_runs > 0) {
+      recordServiceEvent(state, {
+        source: "native-bridge",
+        eventType: "buffered_brain_run_cleanup",
+        severity:
+          bufferedCleanup.cancelled_nonterminal_runs > 0 ? "warning" : "info",
+        summary: `Cleaned up ${bufferedCleanup.removed_runs} buffered brain run(s); cancelled ${bufferedCleanup.cancelled_nonterminal_runs} nonterminal run(s).`,
+        resultRef: {
+          activeRuns: bufferedCleanup.active_runs,
+          terminalRuns: bufferedCleanup.terminal_runs,
+          removedRuns: bufferedCleanup.removed_runs,
+          cancelledNonterminalRuns: bufferedCleanup.cancelled_nonterminal_runs,
+        },
+      });
+    }
     await state.bridge.shutdownEngine({
       engine: state.engine,
       drainTimeoutMs: 5_000,

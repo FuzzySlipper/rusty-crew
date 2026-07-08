@@ -37,6 +37,8 @@ pub const OPERATION_NAMES: &[&str] = &[
     "drain_pi_agent_brain_stream",
     "submit_pi_agent_tool_output",
     "cancel_pi_agent_brain",
+    "buffered_brain_run_diagnostics",
+    "cleanup_buffered_brain_runs",
     "exchange_openai_oauth_code",
     "register_platform_adapter",
     "validate_tool_metadata_policy",

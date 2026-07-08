@@ -1269,6 +1269,14 @@ export const API_CAPABILITIES = [
     ["diagnostics"],
   ),
   readCapability(
+    "admin.diagnostics.buffered_brain_runs",
+    "GET",
+    "/v1/admin/diagnostics/buffered-brain-runs",
+    "Read metadata-only diagnostics for active Rust brain buffered runs.",
+    "admin",
+    ["diagnostics"],
+  ),
+  readCapability(
     "admin.diagnostics.observation",
     "GET",
     "/v1/admin/diagnostics/observation",
