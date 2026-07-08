@@ -559,6 +559,10 @@ pub struct RoleplayAssistantAlternativePlanInput {
     #[serde(default)]
     pub requested_slot_id: Option<String>,
     #[serde(default)]
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub body: JsonValue,
+    #[serde(default)]
     pub slots: Vec<RoleplayMessageSlot>,
     #[serde(default)]
     pub active_branch_id: Option<String>,
@@ -578,12 +582,29 @@ pub struct RoleplayAssistantAlternativePlan {
     pub previous_message_id: Option<String>,
     pub branch_head_update: Option<RoleplayBranchHeadUpdatePlan>,
     pub append_chat_message: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_write: Option<RoleplayAssistantAlternativeVariantWritePlan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleplayBranchHeadUpdatePlan {
     pub branch_id: String,
     pub head_message_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayAssistantAlternativeVariantWritePlan {
+    pub slot_id: String,
+    pub variant_id: String,
+    pub message_id: String,
+    pub source: String,
+    pub ordinal: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -695,6 +716,16 @@ pub fn plan_assistant_alternative(
                 branch_id: branch_id.clone(),
                 head_message_id: active_variant.message.message_id.clone(),
             });
+    let variant_write = match input.request_id.as_deref() {
+        Some(request_id) => Some(plan_assistant_alternative_variant_write(
+            &terminal,
+            request_id,
+            &input.body,
+            next_alternate_ordinal(&terminal),
+            branch_id_for_variant.clone(),
+        )?),
+        None => None,
+    };
     Ok(RoleplayAssistantAlternativePlan {
         session_id: input.session_id,
         next_alternate_ordinal: next_alternate_ordinal(&terminal),
@@ -706,6 +737,7 @@ pub fn plan_assistant_alternative(
         active_variant,
         terminal_slot: terminal,
         append_chat_message: false,
+        variant_write,
     })
 }
 
@@ -2365,6 +2397,51 @@ fn terminal_assistant_slot(
     Ok(terminal)
 }
 
+fn plan_assistant_alternative_variant_write(
+    terminal: &RoleplayMessageSlot,
+    request_id: &str,
+    body: &JsonValue,
+    ordinal: u32,
+    branch_id: Option<String>,
+) -> RoleplayDomainResult<RoleplayAssistantAlternativeVariantWritePlan> {
+    validate_roleplay_identifier("roleplay assistant alternative request_id", request_id)?;
+    let body = json_object(body, "roleplay assistant alternative body")?;
+    let variant_id = first_string(body, &["variantId", "variant_id"]).unwrap_or_else(|| {
+        stable_roleplay_record_id(
+            "variant",
+            format!("{}:{request_id}", terminal.slot_id).as_str(),
+        )
+    });
+    let message_id = first_string(body, &["messageId", "message_id"])
+        .unwrap_or_else(|| stable_roleplay_record_id("message", &variant_id));
+    validate_roleplay_identifier("roleplay assistant alternative variant_id", &variant_id)?;
+    validate_roleplay_identifier("roleplay assistant alternative message_id", &message_id)?;
+    for variant in std::iter::once(&terminal.primary).chain(terminal.alternates.iter()) {
+        if variant.variant_id == variant_id {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_assistant_alternative_variant_conflict",
+                format!("assistant alternative variant {variant_id} already exists"),
+            ));
+        }
+        if variant.message.message_id == message_id {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_assistant_alternative_message_conflict",
+                format!("assistant alternative message {message_id} already exists"),
+            ));
+        }
+    }
+    Ok(RoleplayAssistantAlternativeVariantWritePlan {
+        slot_id: terminal.slot_id.clone(),
+        variant_id,
+        message_id,
+        source: "alternate".to_string(),
+        ordinal,
+        branch_id,
+        parent_message_id: terminal.primary.message.parent_message_id.clone(),
+        previous_message_id: terminal.primary.message.previous_message_id.clone(),
+    })
+}
+
 fn active_branch_head_slot(
     active_branch_id: Option<&str>,
     branches: &[RoleplayConversationBranch],
@@ -3033,6 +3110,8 @@ mod tests {
         let plan = plan_assistant_alternative(RoleplayAssistantAlternativePlanInput {
             session_id: "session-rp".to_string(),
             requested_slot_id: Some("slot-2".to_string()),
+            request_id: None,
+            body: serde_json::json!({}),
             slots: vec![assistant.clone(), user],
             active_branch_id: Some("branch-main".to_string()),
             branches: vec![branch("branch-main", Some("msg-2"))],
@@ -3076,6 +3155,8 @@ mod tests {
         let error = plan_assistant_alternative(RoleplayAssistantAlternativePlanInput {
             session_id: "session-rp".to_string(),
             requested_slot_id: Some("slot-1".to_string()),
+            request_id: None,
+            body: serde_json::json!({}),
             slots: vec![first, second],
             active_branch_id: None,
             branches: vec![],
@@ -3106,6 +3187,8 @@ mod tests {
         let error = plan_assistant_alternative(RoleplayAssistantAlternativePlanInput {
             session_id: "session-rp".to_string(),
             requested_slot_id: None,
+            request_id: None,
+            body: serde_json::json!({}),
             slots: vec![user, assistant],
             active_branch_id: Some("branch-main".to_string()),
             branches: vec![branch("branch-main", Some("msg-1"))],
@@ -3113,6 +3196,121 @@ mod tests {
         .expect_err("user branch head should fail");
 
         assert_eq!(error.reason_code, "roleplay_terminal_slot_not_assistant");
+    }
+
+    #[test]
+    fn plans_assistant_alternative_variant_write_ids_and_lineage() {
+        let assistant = slot(
+            "slot-2",
+            "msg-2",
+            "assistant",
+            Some("msg-1"),
+            Some("branch-main"),
+            "2026-07-07T00:01:00Z",
+        );
+        let plan = plan_assistant_alternative(RoleplayAssistantAlternativePlanInput {
+            session_id: "session-rp".to_string(),
+            requested_slot_id: Some("slot-2".to_string()),
+            request_id: Some("request-1".to_string()),
+            body: serde_json::json!({}),
+            slots: vec![assistant],
+            active_branch_id: Some("branch-main".to_string()),
+            branches: vec![branch("branch-main", Some("msg-2"))],
+        })
+        .expect("variant write plan");
+        let write = plan.variant_write.expect("variant write");
+        assert_eq!(write.slot_id, "slot-2");
+        assert_eq!(write.variant_id, "variant:slot-2:request-1");
+        assert_eq!(write.message_id, "message:variant:slot-2:request-1");
+        assert_eq!(write.source, "alternate");
+        assert_eq!(write.ordinal, 1);
+        assert_eq!(write.branch_id.as_deref(), Some("branch-main"));
+        assert_eq!(write.previous_message_id.as_deref(), Some("msg-1"));
+    }
+
+    #[test]
+    fn plans_assistant_alternative_explicit_variant_ids() {
+        let assistant = slot(
+            "slot-2",
+            "msg-2",
+            "assistant",
+            Some("msg-1"),
+            None,
+            "2026-07-07T00:01:00Z",
+        );
+        let plan = plan_assistant_alternative(RoleplayAssistantAlternativePlanInput {
+            session_id: "session-rp".to_string(),
+            requested_slot_id: Some("slot-2".to_string()),
+            request_id: Some("request-1".to_string()),
+            body: serde_json::json!({
+                "variantId": "variant-custom",
+                "message_id": "message-custom"
+            }),
+            slots: vec![assistant],
+            active_branch_id: None,
+            branches: vec![],
+        })
+        .expect("explicit variant write plan");
+        let write = plan.variant_write.expect("variant write");
+        assert_eq!(write.variant_id, "variant-custom");
+        assert_eq!(write.message_id, "message-custom");
+    }
+
+    #[test]
+    fn rejects_assistant_alternative_variant_write_conflicts() {
+        let mut assistant = slot(
+            "slot-2",
+            "msg-2",
+            "assistant",
+            Some("msg-1"),
+            None,
+            "2026-07-07T00:01:00Z",
+        );
+        assistant.alternates = vec![variant(
+            "slot-2",
+            "variant-custom",
+            "message-custom",
+            "assistant",
+            "active",
+            1,
+            None,
+            Some("msg-1"),
+        )];
+        let duplicate_variant = plan_assistant_alternative(RoleplayAssistantAlternativePlanInput {
+            session_id: "session-rp".to_string(),
+            requested_slot_id: Some("slot-2".to_string()),
+            request_id: Some("request-1".to_string()),
+            body: serde_json::json!({
+                "variantId": "variant-custom",
+                "messageId": "message-new"
+            }),
+            slots: vec![assistant.clone()],
+            active_branch_id: None,
+            branches: vec![],
+        })
+        .expect_err("duplicate variant rejected");
+        assert_eq!(
+            duplicate_variant.reason_code,
+            "roleplay_assistant_alternative_variant_conflict"
+        );
+
+        let duplicate_message = plan_assistant_alternative(RoleplayAssistantAlternativePlanInput {
+            session_id: "session-rp".to_string(),
+            requested_slot_id: Some("slot-2".to_string()),
+            request_id: Some("request-1".to_string()),
+            body: serde_json::json!({
+                "variantId": "variant-new",
+                "messageId": "message-custom"
+            }),
+            slots: vec![assistant],
+            active_branch_id: None,
+            branches: vec![],
+        })
+        .expect_err("duplicate message rejected");
+        assert_eq!(
+            duplicate_message.reason_code,
+            "roleplay_assistant_alternative_message_conflict"
+        );
     }
 
     #[test]
