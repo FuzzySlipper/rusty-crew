@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 169;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 170;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 142;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 143;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -127,6 +127,7 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "plan_runtime_config",
       "plan_create_profile",
       "plan_profile_registry_mutation",
+      "plan_new_session_control",
       "inject_external_event",
       "inject_den_data_update",
       "enqueue_body_follow_up_message",

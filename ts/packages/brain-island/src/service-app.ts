@@ -5720,6 +5720,8 @@ function createServiceControlExecutor(
             state.nextWakeSequence,
           ].join("-");
         },
+        planNewSessionControl: (input) =>
+          state.bridge.planNewSessionControl(input),
         archiveSession: async ({ sessionId, newSessionId }) => {
           const oldSession = await serviceSessionById(state, sessionId);
           const plan = await planRuntimeSessionReplacementInConfig(

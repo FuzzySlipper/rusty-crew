@@ -11,6 +11,10 @@ import type {
   AdminControlExecutor,
   AdminControlOutcome,
 } from "./admin-control-api.js";
+import type {
+  NativeNewSessionControlPlan,
+  NativeNewSessionControlPlanInput,
+} from "@rusty-crew/native-bridge";
 
 export type NewSessionLifecyclePhase =
   | "template_loaded"
@@ -55,6 +59,9 @@ export interface NewSessionLifecycleOptions {
     template: NewSessionTemplate,
     command: AdminControlCommand,
   ): string;
+  planNewSessionControl(
+    input: NativeNewSessionControlPlanInput,
+  ): Promise<NativeNewSessionControlPlan> | NativeNewSessionControlPlan;
   archiveSession(input: {
     sessionId: string;
     newSessionId: string;
@@ -114,21 +121,57 @@ export function createNewSessionLifecycleExecutor(
       reasonCode,
     });
 
-    const newSessionId = options.generateSessionId(template, command);
-    if (!newSessionId || newSessionId === oldSessionId) {
+    const generatedSessionId = options.generateSessionId(template, command);
+    const plan = await options.planNewSessionControl({
+      command: {
+        commandKind: command.name,
+        targetSessionId: oldSessionId,
+        requestId: command.requestId,
+        idempotencyKey: command.idempotencyKey,
+        operatorReason: reason,
+        operatorReasonCode: reasonCode,
+      },
+      template: {
+        agentId: template.agentId,
+        profileId: template.profileId,
+        kind: template.kind,
+        channelBindingId: template.channelBindingId,
+        channelId:
+          template.channelId === undefined
+            ? undefined
+            : String(template.channelId),
+        toolProfileKey: template.toolProfileKey,
+      },
+      generatedSessionId,
+      rebindHandlerAvailable: options.rebindChannel !== undefined,
+    });
+    if (!plan.accepted) {
       return failed(
-        "new_session_identity_not_distinct",
-        "New session ID must be distinct from the archived session.",
+        plan.denial?.reasonCode ?? "new_session_control_denied",
+        plan.denial?.summary ??
+          "Rust new-session control plan denied execution.",
       );
     }
 
+    const newSessionId = plan.target.newSessionId;
+    if (!newSessionId) {
+      return failed(
+        "new_session_plan_missing_new_session_id",
+        "Rust new-session control plan did not include a new session id.",
+      );
+    }
+    const plannedActions = new Set(plan.actions.map((action) => action.action));
     const requiresRebind = Boolean(
       template.channelBindingId ?? template.channelId,
     );
-    if (requiresRebind && !options.rebindChannel) {
+    if (
+      !plannedActions.has("archive_session") ||
+      !plannedActions.has("create_session") ||
+      (requiresRebind && !plannedActions.has("rebind_channel"))
+    ) {
       return failed(
-        "missing_channel_rebind",
-        "Channel binding context requires an explicit rebind handler.",
+        "new_session_plan_missing_action",
+        "Rust new-session control plan did not include required lifecycle actions.",
       );
     }
 

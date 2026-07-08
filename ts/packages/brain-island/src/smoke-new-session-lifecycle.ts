@@ -17,8 +17,10 @@ import {
   createMemoryAgentActivityObservationSink,
   createMemoryNewSessionLifecycleAuditSink,
 } from "./test-support.js";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 
 const order: string[] = [];
+const native = await loadNativeBridge();
 const lifecycleAudit = createMemoryNewSessionLifecycleAuditSink();
 const adminAudit = createMemoryAdminControlAuditSink();
 const observationSink = createMemoryAgentActivityObservationSink();
@@ -44,6 +46,7 @@ const newSession = createNewSessionLifecycleExecutor({
     order.push("generate");
     return "session-alpha-new";
   },
+  planNewSessionControl: (input) => native.planNewSessionControl(input),
   archiveSession(input) {
     order.push(`archive:${input.sessionId}:${input.reasonCode}`);
   },
@@ -133,6 +136,7 @@ assert.equal(
 const duplicateId = await createNewSessionLifecycleExecutor({
   loadTemplate: () => template,
   generateSessionId: () => "session-alpha",
+  planNewSessionControl: (input) => native.planNewSessionControl(input),
   archiveSession: () => {
     throw new Error("should not archive");
   },
@@ -154,6 +158,7 @@ assert.equal(duplicateId.reasonCode, "new_session_identity_not_distinct");
 const missingRebind = await createNewSessionLifecycleExecutor({
   loadTemplate: () => template,
   generateSessionId: () => "session-beta",
+  planNewSessionControl: (input) => native.planNewSessionControl(input),
   archiveSession: () => {
     throw new Error("should not archive without rebind");
   },

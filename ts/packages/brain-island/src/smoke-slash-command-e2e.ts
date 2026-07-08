@@ -28,6 +28,7 @@ import {
   type SlashCommandRouteResult,
   type SlashCommandSession,
 } from "./index.js";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   createMemoryAdminControlAuditSink,
   createMemoryAgentActivityObservationSink,
@@ -36,6 +37,7 @@ import {
 } from "./test-support.js";
 
 const now = "2026-06-20T19:00:00.000Z";
+const native = await loadNativeBridge();
 const adapterId = "mcp-main" as AdapterId;
 let currentSessionId = "session-alpha";
 let currentMcpBinding = mcpBinding("mcp-alpha", currentSessionId);
@@ -91,6 +93,7 @@ const newSessionExecutor = createNewSessionLifecycleExecutor({
     channelId: "crew-room",
   }),
   generateSessionId: () => "session-alpha-new",
+  planNewSessionControl: (input) => native.planNewSessionControl(input),
   archiveSession: () => undefined,
   createSession: () => undefined,
   rebindChannel(input) {

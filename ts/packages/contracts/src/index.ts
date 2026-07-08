@@ -1576,6 +1576,7 @@ export const manifestOperationNames = [
   "plan_runtime_config",
   "plan_create_profile",
   "plan_profile_registry_mutation",
+  "plan_new_session_control",
   "inject_external_event",
   "inject_den_data_update",
   "enqueue_body_follow_up_message",
@@ -1719,6 +1720,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "be03d5b93e318f6adf77a065c22b2a7d75a14bd07365e84cc1ae4b19cb5096ca";
+  "84b32858fb1ad91362c85ebea2ee36a661ebb052da3d6653f29172123477ee79";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

@@ -318,6 +318,7 @@ interface NativeBridgeBinding {
   planRuntimeConfigJson(inputJson: string): string;
   planCreateProfileJson(inputJson: string): string;
   planProfileRegistryMutationJson(inputJson: string): string;
+  planNewSessionControlJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
     drainTimeoutMs: number,
@@ -1732,6 +1733,62 @@ export interface NativeCreateProfilePlanInput {
   request: NativeCreateProfileRequest;
 }
 
+export interface NativeNewSessionControlPlanInput {
+  command: {
+    commandKind: string;
+    targetSessionId?: string;
+    requestId?: string;
+    idempotencyKey?: string;
+    operatorReason?: string;
+    operatorReasonCode?: string;
+  };
+  template?: NativeNewSessionControlTemplate;
+  generatedSessionId?: string;
+  rebindHandlerAvailable?: boolean;
+}
+
+export interface NativeNewSessionControlTemplate {
+  agentId: string;
+  profileId: string;
+  kind: "full" | "worker" | "delegated";
+  channelBindingId?: string;
+  channelId?: string;
+  toolProfileKey?: string;
+}
+
+export interface NativeNewSessionControlPlan {
+  accepted: boolean;
+  commandKind: string;
+  target: {
+    oldSessionId?: string;
+    newSessionId?: string;
+    agentId?: string;
+    profileId?: string;
+    channelBindingId?: string;
+    channelId?: string;
+    toolProfileKey?: string;
+  };
+  idempotencyKey?: string;
+  operatorReason: string;
+  reasonCode: string;
+  denial?: {
+    reasonCode: string;
+    summary: string;
+  };
+  preconditions: Array<{
+    code: string;
+    status: "satisfied" | "failed";
+    summary: string;
+  }>;
+  actions: Array<{
+    action: "archive_session" | "create_session" | "rebind_channel";
+    sessionId?: string;
+    oldSessionId?: string;
+    newSessionId?: string;
+    reasonCode: string;
+  }>;
+}
+
 export interface NativeCreateProfileRequest {
   profileId: string;
   displayName?: string;
@@ -2006,6 +2063,9 @@ export interface NativeBridgeModule {
   planProfileRegistryMutation(
     input: NativeProfileRegistryMutationRequest,
   ): Promise<NativeProfileRegistryMutationPlan>;
+  planNewSessionControl(
+    input: NativeNewSessionControlPlanInput,
+  ): Promise<NativeNewSessionControlPlan>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   cancelDelegatedSession(
@@ -2525,6 +2585,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     planRuntimeConfig: unavailable("plan_runtime_config"),
     planCreateProfile: unavailable("plan_create_profile"),
     planProfileRegistryMutation: unavailable("plan_profile_registry_mutation"),
+    planNewSessionControl: unavailable("plan_new_session_control"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
@@ -3292,6 +3353,14 @@ function createNativeBridgeModule(
             JSON.stringify(toRawProfileRegistryMutationRequest(input)),
           ),
         ) as RawProfileRegistryMutationPlan,
+      ),
+    planNewSessionControl: async (input) =>
+      toNativeNewSessionControlPlan(
+        JSON.parse(
+          binding.planNewSessionControlJson(
+            JSON.stringify(toRawNewSessionControlPlanInput(input)),
+          ),
+        ) as RawNewSessionControlPlan,
       ),
     injectExternalEvent: async (event) =>
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
@@ -4873,6 +4942,72 @@ function toNativeCreateProfilePlanInput(
   return toCoreConfigWireCreateProfilePlanInput(input);
 }
 
+function toRawNewSessionControlPlanInput(
+  input: NativeNewSessionControlPlanInput,
+): unknown {
+  return {
+    command: {
+      command_kind: input.command.commandKind,
+      target_session_id: input.command.targetSessionId,
+      request_id: input.command.requestId,
+      idempotency_key: input.command.idempotencyKey,
+      operator_reason: input.command.operatorReason,
+      operator_reason_code: input.command.operatorReasonCode,
+    },
+    template: input.template
+      ? {
+          agent_id: input.template.agentId,
+          profile_id: input.template.profileId,
+          kind: input.template.kind,
+          channel_binding_id: input.template.channelBindingId,
+          channel_id: input.template.channelId,
+          tool_profile_key: input.template.toolProfileKey,
+        }
+      : undefined,
+    generated_session_id: input.generatedSessionId,
+    rebind_handler_available: input.rebindHandlerAvailable ?? false,
+  };
+}
+
+function toNativeNewSessionControlPlan(
+  plan: RawNewSessionControlPlan,
+): NativeNewSessionControlPlan {
+  return {
+    accepted: plan.accepted,
+    commandKind: plan.command_kind,
+    target: {
+      oldSessionId: plan.target.old_session_id ?? undefined,
+      newSessionId: plan.target.new_session_id ?? undefined,
+      agentId: plan.target.agent_id ?? undefined,
+      profileId: plan.target.profile_id ?? undefined,
+      channelBindingId: plan.target.channel_binding_id ?? undefined,
+      channelId: plan.target.channel_id ?? undefined,
+      toolProfileKey: plan.target.tool_profile_key ?? undefined,
+    },
+    idempotencyKey: plan.idempotency_key ?? undefined,
+    operatorReason: plan.operator_reason,
+    reasonCode: plan.reason_code,
+    denial: plan.denial
+      ? {
+          reasonCode: plan.denial.reason_code,
+          summary: plan.denial.summary,
+        }
+      : undefined,
+    preconditions: (plan.preconditions ?? []).map((precondition) => ({
+      code: precondition.code,
+      status: precondition.status,
+      summary: precondition.summary,
+    })),
+    actions: (plan.actions ?? []).map((action) => ({
+      action: action.action,
+      sessionId: action.session_id ?? undefined,
+      oldSessionId: action.old_session_id ?? undefined,
+      newSessionId: action.new_session_id ?? undefined,
+      reasonCode: action.reason_code,
+    })),
+  };
+}
+
 function toNativeCreateProfilePlan(
   plan: RawCreateProfilePlan,
 ): NativeCreateProfilePlan {
@@ -6163,6 +6298,39 @@ interface RawCreateProfilePlan {
     tool_profile?: string;
   };
   runtime_mcp_bindings?: RawMcpBindingConfigDraft[];
+}
+
+interface RawNewSessionControlPlan {
+  accepted: boolean;
+  command_kind: string;
+  target: {
+    old_session_id?: string | null;
+    new_session_id?: string | null;
+    agent_id?: string | null;
+    profile_id?: string | null;
+    channel_binding_id?: string | null;
+    channel_id?: string | null;
+    tool_profile_key?: string | null;
+  };
+  idempotency_key?: string | null;
+  operator_reason: string;
+  reason_code: string;
+  denial?: {
+    reason_code: string;
+    summary: string;
+  } | null;
+  preconditions?: Array<{
+    code: string;
+    status: "satisfied" | "failed";
+    summary: string;
+  }>;
+  actions?: Array<{
+    action: "archive_session" | "create_session" | "rebind_channel";
+    session_id?: string | null;
+    old_session_id?: string | null;
+    new_session_id?: string | null;
+    reason_code: string;
+  }>;
 }
 
 interface RawProfileRegistryWrite {

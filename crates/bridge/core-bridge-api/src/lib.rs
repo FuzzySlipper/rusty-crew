@@ -48,6 +48,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "plan_runtime_config",
     "plan_create_profile",
     "plan_profile_registry_mutation",
+    "plan_new_session_control",
     "inject_external_event",
     "inject_den_data_update",
     "enqueue_body_follow_up_message",

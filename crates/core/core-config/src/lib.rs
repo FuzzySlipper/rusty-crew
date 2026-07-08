@@ -56,6 +56,98 @@ pub struct CreateProfilePlanInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewSessionControlPlanInput {
+    pub command: AdminControlPlanCommand,
+    pub template: Option<NewSessionControlTemplate>,
+    pub generated_session_id: Option<String>,
+    #[serde(default)]
+    pub rebind_handler_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdminControlPlanCommand {
+    pub command_kind: String,
+    pub target_session_id: Option<String>,
+    pub request_id: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub operator_reason: Option<String>,
+    pub operator_reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewSessionControlTemplate {
+    pub agent_id: AgentId,
+    pub profile_id: ProfileId,
+    pub kind: SessionKind,
+    pub channel_binding_id: Option<String>,
+    pub channel_id: Option<String>,
+    pub tool_profile_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewSessionControlPlan {
+    pub accepted: bool,
+    pub command_kind: String,
+    pub target: NewSessionControlTarget,
+    pub idempotency_key: Option<String>,
+    pub operator_reason: String,
+    pub reason_code: String,
+    pub denial: Option<AdminControlPlanDenial>,
+    #[serde(default)]
+    pub preconditions: Vec<AdminControlPlanPrecondition>,
+    #[serde(default)]
+    pub actions: Vec<NewSessionControlAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewSessionControlTarget {
+    pub old_session_id: Option<String>,
+    pub new_session_id: Option<String>,
+    pub agent_id: Option<AgentId>,
+    pub profile_id: Option<ProfileId>,
+    pub channel_binding_id: Option<String>,
+    pub channel_id: Option<String>,
+    pub tool_profile_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdminControlPlanDenial {
+    pub reason_code: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdminControlPlanPrecondition {
+    pub code: String,
+    pub status: AdminControlPlanPreconditionStatus,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminControlPlanPreconditionStatus {
+    Satisfied,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewSessionControlAction {
+    pub action: NewSessionControlActionKind,
+    pub session_id: Option<String>,
+    pub old_session_id: Option<String>,
+    pub new_session_id: Option<String>,
+    pub reason_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NewSessionControlActionKind {
+    ArchiveSession,
+    CreateSession,
+    RebindChannel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateProfileRequest {
     pub profile_id: String,
     pub display_name: Option<String>,
@@ -1171,6 +1263,228 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
     }
 }
 
+pub fn plan_new_session_control(input: &NewSessionControlPlanInput) -> NewSessionControlPlan {
+    let command_kind = input.command.command_kind.trim().to_string();
+    let old_session_id = input
+        .command
+        .target_session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let new_session_id = input
+        .generated_session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let operator_reason = input
+        .command
+        .operator_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("slash command /new")
+        .to_string();
+    let reason_code = input
+        .command
+        .operator_reason_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("slash_command_new")
+        .to_string();
+    let target = NewSessionControlTarget {
+        old_session_id: old_session_id.clone(),
+        new_session_id: new_session_id.clone(),
+        agent_id: input
+            .template
+            .as_ref()
+            .map(|template| template.agent_id.clone()),
+        profile_id: input
+            .template
+            .as_ref()
+            .map(|template| template.profile_id.clone()),
+        channel_binding_id: input
+            .template
+            .as_ref()
+            .and_then(|template| template.channel_binding_id.clone()),
+        channel_id: input
+            .template
+            .as_ref()
+            .and_then(|template| template.channel_id.clone()),
+        tool_profile_key: input
+            .template
+            .as_ref()
+            .and_then(|template| template.tool_profile_key.clone()),
+    };
+    let mut preconditions = Vec::new();
+    let denied_context = |preconditions| DeniedNewSessionPlanInput {
+        command_kind: command_kind.clone(),
+        target: target.clone(),
+        idempotency_key: input.command.idempotency_key.clone(),
+        operator_reason: operator_reason.clone(),
+        reason_code: reason_code.clone(),
+        preconditions,
+    };
+
+    if command_kind != "new_session" {
+        preconditions.push(failed_precondition(
+            "unsupported_control_command",
+            format!("control command {command_kind} is not supported by the /new planner"),
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "unsupported_control_command",
+            "Only new_session controls can use the new-session planner.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "command_kind_supported",
+        "new_session command is supported by the Rust planner",
+    ));
+
+    let Some(old_session_id) = old_session_id else {
+        preconditions.push(failed_precondition(
+            "target_session_required",
+            "new_session requires the current session id",
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "missing_session_id",
+            "Cannot create a new session without a current session.",
+        );
+    };
+    if !is_valid_component_id(&old_session_id) {
+        preconditions.push(failed_precondition(
+            "target_session_valid",
+            format!("target session id {ID_PATTERN_DESCRIPTION}"),
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "invalid_session_id",
+            "Current session id is invalid.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "target_session_valid",
+        "current session id is present and valid",
+    ));
+
+    let Some(template) = input.template.as_ref() else {
+        preconditions.push(failed_precondition(
+            "session_template_loaded",
+            "new_session requires a loaded current-session template",
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "missing_session_template",
+            "Cannot create a new session without a current-session template.",
+        );
+    };
+    preconditions.push(satisfied_precondition(
+        "session_template_loaded",
+        "current-session template is loaded",
+    ));
+
+    let Some(new_session_id) = new_session_id else {
+        preconditions.push(failed_precondition(
+            "new_session_identity_distinct",
+            "generated new session id is missing",
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "new_session_identity_not_distinct",
+            "New session ID must be distinct from the archived session.",
+        );
+    };
+    if !is_valid_component_id(&new_session_id) {
+        preconditions.push(failed_precondition(
+            "new_session_identity_valid",
+            format!("new session id {ID_PATTERN_DESCRIPTION}"),
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "invalid_new_session_id",
+            "New session id is invalid.",
+        );
+    }
+    if new_session_id == old_session_id {
+        preconditions.push(failed_precondition(
+            "new_session_identity_distinct",
+            "new session id matches the current session id",
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "new_session_identity_not_distinct",
+            "New session ID must be distinct from the archived session.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "new_session_identity_distinct",
+        "new session id is valid and distinct",
+    ));
+
+    let requires_rebind = template.channel_binding_id.is_some() || template.channel_id.is_some();
+    if requires_rebind && !input.rebind_handler_available {
+        preconditions.push(failed_precondition(
+            "channel_rebind_available",
+            "current session has channel binding context but no rebind handler is available",
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "missing_channel_rebind",
+            "Channel binding context requires an explicit rebind handler.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "channel_rebind_available",
+        if requires_rebind {
+            "channel rebind handler is available"
+        } else {
+            "no channel rebind is required"
+        },
+    ));
+
+    let mut actions = vec![
+        NewSessionControlAction {
+            action: NewSessionControlActionKind::ArchiveSession,
+            session_id: Some(old_session_id.clone()),
+            old_session_id: Some(old_session_id.clone()),
+            new_session_id: Some(new_session_id.clone()),
+            reason_code: reason_code.clone(),
+        },
+        NewSessionControlAction {
+            action: NewSessionControlActionKind::CreateSession,
+            session_id: Some(new_session_id.clone()),
+            old_session_id: Some(old_session_id.clone()),
+            new_session_id: Some(new_session_id.clone()),
+            reason_code: reason_code.clone(),
+        },
+    ];
+    if requires_rebind {
+        actions.push(NewSessionControlAction {
+            action: NewSessionControlActionKind::RebindChannel,
+            session_id: None,
+            old_session_id: Some(old_session_id),
+            new_session_id: Some(new_session_id),
+            reason_code: reason_code.clone(),
+        });
+    }
+
+    NewSessionControlPlan {
+        accepted: true,
+        command_kind,
+        target,
+        idempotency_key: input.command.idempotency_key.clone(),
+        operator_reason,
+        reason_code,
+        denial: None,
+        preconditions,
+        actions,
+    }
+}
+
 pub fn plan_profile_registry_mutation(
     input: &ProfileRegistryMutationRequest,
 ) -> Result<ProfileRegistryMutationPlan, String> {
@@ -2123,6 +2437,52 @@ fn collect_non_empty_diagnostic(
     }
 }
 
+fn denied_new_session_plan(
+    input: DeniedNewSessionPlanInput,
+    denial_reason_code: &str,
+    summary: &str,
+) -> NewSessionControlPlan {
+    NewSessionControlPlan {
+        accepted: false,
+        command_kind: input.command_kind,
+        target: input.target,
+        idempotency_key: input.idempotency_key,
+        operator_reason: input.operator_reason,
+        reason_code: input.reason_code,
+        denial: Some(AdminControlPlanDenial {
+            reason_code: denial_reason_code.to_string(),
+            summary: summary.to_string(),
+        }),
+        preconditions: input.preconditions,
+        actions: Vec::new(),
+    }
+}
+
+struct DeniedNewSessionPlanInput {
+    command_kind: String,
+    target: NewSessionControlTarget,
+    idempotency_key: Option<String>,
+    operator_reason: String,
+    reason_code: String,
+    preconditions: Vec<AdminControlPlanPrecondition>,
+}
+
+fn satisfied_precondition(code: &str, summary: impl Into<String>) -> AdminControlPlanPrecondition {
+    AdminControlPlanPrecondition {
+        code: code.to_string(),
+        status: AdminControlPlanPreconditionStatus::Satisfied,
+        summary: summary.into(),
+    }
+}
+
+fn failed_precondition(code: &str, summary: impl Into<String>) -> AdminControlPlanPrecondition {
+    AdminControlPlanPrecondition {
+        code: code.to_string(),
+        status: AdminControlPlanPreconditionStatus::Failed,
+        summary: summary.into(),
+    }
+}
+
 fn validate_schedule(validator: &mut RuntimeConfigValidator<'_>, path: &str, schedule: &str) {
     validate_non_empty(validator, "invalid_schedule", path, schedule);
     if !looks_like_cron(schedule) {
@@ -2153,6 +2513,117 @@ fn looks_like_cron(schedule: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plans_new_session_archive_create_and_rebind_in_rust() {
+        let plan = plan_new_session_control(&NewSessionControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "new_session".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-new".to_string()),
+                idempotency_key: Some("idem-new".to_string()),
+                operator_reason: Some("fresh planning context".to_string()),
+                operator_reason_code: Some("slash_command_new".to_string()),
+            },
+            template: Some(NewSessionControlTemplate {
+                agent_id: AgentId::new("agent-alpha"),
+                profile_id: ProfileId::new("prime"),
+                kind: SessionKind::Full,
+                channel_binding_id: Some("binding-alpha".to_string()),
+                channel_id: Some("crew-room".to_string()),
+                tool_profile_key: Some("prime-tools".to_string()),
+            }),
+            generated_session_id: Some("session-alpha-new".to_string()),
+            rebind_handler_available: true,
+        });
+
+        assert!(plan.accepted, "{:?}", plan.denial);
+        assert_eq!(plan.denial, None);
+        assert_eq!(plan.reason_code, "slash_command_new");
+        assert_eq!(
+            plan.actions
+                .iter()
+                .map(|action| action.action.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                NewSessionControlActionKind::ArchiveSession,
+                NewSessionControlActionKind::CreateSession,
+                NewSessionControlActionKind::RebindChannel,
+            ],
+        );
+        assert!(plan.preconditions.iter().all(|precondition| {
+            precondition.status == AdminControlPlanPreconditionStatus::Satisfied
+        }));
+    }
+
+    #[test]
+    fn denies_new_session_when_identity_is_not_distinct() {
+        let plan = plan_new_session_control(&NewSessionControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "new_session".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-new".to_string()),
+                idempotency_key: None,
+                operator_reason: None,
+                operator_reason_code: None,
+            },
+            template: Some(NewSessionControlTemplate {
+                agent_id: AgentId::new("agent-alpha"),
+                profile_id: ProfileId::new("prime"),
+                kind: SessionKind::Full,
+                channel_binding_id: None,
+                channel_id: None,
+                tool_profile_key: None,
+            }),
+            generated_session_id: Some("session-alpha".to_string()),
+            rebind_handler_available: false,
+        });
+
+        assert!(!plan.accepted);
+        assert_eq!(
+            plan.denial
+                .as_ref()
+                .map(|denial| denial.reason_code.as_str()),
+            Some("new_session_identity_not_distinct"),
+        );
+        assert!(plan.actions.is_empty());
+    }
+
+    #[test]
+    fn denies_new_session_without_required_channel_rebind() {
+        let plan = plan_new_session_control(&NewSessionControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "new_session".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-new".to_string()),
+                idempotency_key: None,
+                operator_reason: None,
+                operator_reason_code: None,
+            },
+            template: Some(NewSessionControlTemplate {
+                agent_id: AgentId::new("agent-alpha"),
+                profile_id: ProfileId::new("prime"),
+                kind: SessionKind::Full,
+                channel_binding_id: Some("binding-alpha".to_string()),
+                channel_id: None,
+                tool_profile_key: None,
+            }),
+            generated_session_id: Some("session-beta".to_string()),
+            rebind_handler_available: false,
+        });
+
+        assert!(!plan.accepted);
+        assert_eq!(
+            plan.denial
+                .as_ref()
+                .map(|denial| denial.reason_code.as_str()),
+            Some("missing_channel_rebind"),
+        );
+        assert!(plan.preconditions.iter().any(|precondition| {
+            precondition.code == "channel_rebind_available"
+                && precondition.status == AdminControlPlanPreconditionStatus::Failed
+        }));
+    }
 
     #[test]
     fn profile_registry_mutation_reports_revision_mismatch() {

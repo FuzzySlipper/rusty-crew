@@ -816,11 +816,11 @@ pub fn evaluate_memory_proposal_policy(
             }
         }
         if policy.requires_expected_revision
-            && !proposal
+            && proposal
                 .content
                 .get("expected_revision")
                 .and_then(Value::as_u64)
-                .is_some_and(|revision| revision > 0)
+                .is_none_or(|revision| revision == 0)
         {
             report.push_rejection(
                 "memory_policy_expected_revision_required",
@@ -1475,10 +1475,7 @@ fn capture_candidate_to_memory_proposal(
     } else {
         typed_capture_candidate_to_proposal(run_id, candidate)?
     };
-    if !allowed_spaces
-        .iter()
-        .any(|space_id| *space_id == proposal.space_id)
-    {
+    if !allowed_spaces.contains(&proposal.space_id) {
         return Err(MemoryPolicyDiagnostic {
             reason_code: "capture_space_not_allowed".to_string(),
             message: format!("capture space {} is not allowed", proposal.space_id),
@@ -1813,7 +1810,7 @@ fn evidence_kind_from_event(event_type: Option<&str>) -> Option<MemoryEvidenceKi
 fn capture_proposal_id(run_id: &str, explicit_id: Option<&str>, summary: &str) -> String {
     let raw = explicit_id
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| summary);
+        .unwrap_or(summary);
     let normalized = snake_identifier(raw);
     if is_valid_capture_identifier(&normalized) {
         normalized

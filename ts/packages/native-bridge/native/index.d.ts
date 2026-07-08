@@ -7,6 +7,7 @@ export declare class NativeBridgeBinding {
   validateRuntimeConfigDraftJson(inputJson: string): string
   planCreateProfileJson(inputJson: string): string
   planProfileRegistryMutationJson(inputJson: string): string
+  planNewSessionControlJson(inputJson: string): string
   planRuntimeConfigJson(inputJson: string): string
   createProfileRegistryRecordJson(writeJson: string): string
   updateProfileRegistryRecordJson(updateJson: string): string

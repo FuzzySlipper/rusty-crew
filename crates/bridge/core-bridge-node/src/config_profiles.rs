@@ -19,6 +19,13 @@ impl NativeBridge {
         rusty_crew_core_config::plan_profile_registry_mutation(&input)
     }
 
+    pub fn plan_new_session_control(
+        &self,
+        input: NewSessionControlPlanInput,
+    ) -> NewSessionControlPlan {
+        rusty_crew_core_config::plan_new_session_control(&input)
+    }
+
     pub fn plan_runtime_config(&self, input: RuntimeConfigValidationInput) -> RuntimeConfigPlan {
         plan_runtime_config(&input)
     }

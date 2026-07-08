@@ -299,6 +299,15 @@ errors = "core_protocol::CoreError"
 summary = "Plan profile registry field, prompt, and lifecycle mutations from a frozen current record without mutating files or engine state."
 
 [[operation]]
+name = "plan_new_session_control"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::NewSessionControlPlanInput"
+output = "core_config::NewSessionControlPlan"
+errors = "core_protocol::CoreError"
+summary = "Plan /new archive-and-create lifecycle controls with Rust-owned preconditions, stable denial codes, and ordered actions before TypeScript mutates runtime state."
+
+[[operation]]
 name = "inject_external_event"
 surface = "stable"
 direction = "ts_to_rust"
