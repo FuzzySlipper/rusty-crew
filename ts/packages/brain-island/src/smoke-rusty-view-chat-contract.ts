@@ -61,6 +61,58 @@ assert.ok(schema("DataBankScopeRecord").properties?.scope_id);
 assert.ok(schema("DataBankScopeMutationResult").properties?.scope);
 assert.ok(schema("ActiveBranchExpectation").oneOf?.length);
 assert.ok(schema("BranchHeadExpectation").oneOf?.length);
+assert.deepEqual(schema("ChatSessionOpenResult").required, [
+  "session",
+  "events",
+  "latest_cursor",
+  "has_more_before",
+]);
+assert.deepEqual(schema("ChatEventPage").required, [
+  "items",
+  "latest_cursor",
+  "has_more",
+]);
+assert.equal(schema("MessageSlotMutationResult").oneOf?.length, 2);
+assert.deepEqual(schema("MessageSlotMutationResult").oneOf?.[0]?.required, [
+  "status",
+  "slot",
+  "latest_cursor",
+]);
+assert.deepEqual(schema("MessageSlotMutationResult").oneOf?.[1]?.required, [
+  "status",
+  "branch",
+  "conflict",
+]);
+assert.ok(
+  schema("MessageSlotMutationResult").oneOf?.[1]?.properties?.latest_cursor,
+);
+assert.deepEqual(schema("ToolCallDebugDetail").required, [
+  "debug_detail_id",
+  "tool_call_id",
+  "session_id",
+  "wake_id",
+  "tool_name",
+  "status",
+  "arguments",
+  "partial_updates",
+  "source_metadata",
+  "started_at",
+  "updated_at",
+  "expires_at",
+  "limits",
+]);
+assert.deepEqual(schema("ProviderRequestDebugDetail").required, [
+  "debug_detail_id",
+  "session_id",
+  "wake_id",
+  "provider",
+  "request",
+  "request_sha256",
+  "request_json_chars",
+  "recorded_at",
+  "expires_at",
+  "limits",
+]);
 
 const commandDescriptor = schema("ChatCommandDescriptor");
 assert.ok(commandDescriptor.required?.includes("positional_args"));

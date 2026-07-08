@@ -12,6 +12,42 @@ The machine-readable source artifact is
 Frontend protocol types should be generated from that artifact or from a later
 Rust-derived replacement. Rusty View should not hand-copy backend shapes.
 
+## Contract Source And Ratchets
+
+For browser-facing chat HTTP/SSE envelopes, the current source of truth is the
+OpenAPI artifact:
+
+```bash
+docs/rusty-view-chat-api-v0.openapi.json
+```
+
+The TypeScript constants in
+`ts/packages/brain-island/src/rusty-view-chat-contract.ts` are ratchets against
+that OpenAPI file for route paths, event kind names, and required core event
+fields. They are not an independent source of truth.
+
+Rust-owned native/domain request and result shapes remain governed by the bridge
+manifest and its fingerprint/fixture checks:
+
+```bash
+cargo run -p rusty-crew-core-bridge-codegen -- check-contracts ts/packages/contracts/src/index.ts
+cargo run -p rusty-crew-core-bridge-codegen -- check-fingerprint crates/bridge/core-bridge-api/bridge-wire-shape-fingerprint.txt ts/packages/contracts/src/index.ts
+cargo run -p rusty-crew-core-bridge-codegen -- check-native-surface ts/packages/native-bridge/native/index.d.ts ts/packages/native-bridge/src/index.ts
+```
+
+Run these chat contract checks whenever routes, event kinds, cursor fields,
+debug-detail references, or public chat mutation envelopes change:
+
+```bash
+npm run smoke:rusty-view-chat-contract
+npm run smoke:rusty-view-chat-read-api
+npm run smoke -- bridge-validation
+```
+
+`smoke:rusty-view-chat-contract` must fail when the OpenAPI artifact, TS route
+constants, capability registry paths, cursor-bearing page envelopes, debug detail
+schemas, or chat mutation conflict envelopes drift.
+
 ## Route Families
 
 - `GET /v1/chat/sessions`: list chat-capable sessions.

@@ -2163,14 +2163,29 @@
         "additionalProperties": false
       },
       "MessageSlotMutationResult": {
-        "type": "object",
-        "required": ["status", "slot", "latest_cursor"],
-        "properties": {
-          "status": { "type": "string", "enum": ["created", "deleted"] },
-          "slot": { "$ref": "#/components/schemas/MessageSlotRecord" },
-          "latest_cursor": { "type": "string" }
-        },
-        "additionalProperties": false
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["status", "slot", "latest_cursor"],
+            "properties": {
+              "status": { "type": "string", "enum": ["created", "deleted"] },
+              "slot": { "$ref": "#/components/schemas/MessageSlotRecord" },
+              "latest_cursor": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["status", "branch", "conflict"],
+            "properties": {
+              "status": { "type": "string", "enum": ["conflict"] },
+              "branch": { "$ref": "#/components/schemas/ConversationBranchRecord" },
+              "conflict": { "$ref": "#/components/schemas/BranchHeadConflict" },
+              "latest_cursor": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        ]
       },
       "MessageVariantMutationResult": {
         "type": "object",
