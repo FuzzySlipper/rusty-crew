@@ -633,68 +633,146 @@ impl PostgresBackendStore {
         &self,
         branch: &ConversationBranchWrite,
     ) -> CoreResult<ConversationBranchRecord> {
-        let metadata_json = to_json_text(&branch.metadata_json)?;
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         let mut tx = client
             .transaction()
             .map_err(|error| postgres_error("start save PostgreSQL conversation branch", error))?;
-        tx.execute(
-            &format!(
-                "INSERT INTO {schema}.conversation_branches (
-                    branch_id,
-                    session_id,
-                    parent_branch_id,
-                    parent_message_id,
-                    origin_message_id,
-                    head_message_id,
-                    label,
-                    metadata_json,
-                    created_at,
-                    updated_at,
-                    version
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0)
-                 ON CONFLICT(branch_id) DO UPDATE SET
-                    session_id = EXCLUDED.session_id,
-                    parent_branch_id = EXCLUDED.parent_branch_id,
-                    parent_message_id = EXCLUDED.parent_message_id,
-                    origin_message_id = EXCLUDED.origin_message_id,
-                    head_message_id = EXCLUDED.head_message_id,
-                    label = EXCLUDED.label,
-                    metadata_json = EXCLUDED.metadata_json,
-                    updated_at = EXCLUDED.updated_at,
-                    version = conversation_branches.version + 1"
-            ),
-            &[
-                &branch.branch_id.0,
-                &branch.session_id.0,
-                &branch
-                    .parent_branch_id
-                    .as_ref()
-                    .map(|value| value.0.as_str()),
-                &branch
-                    .parent_message_id
-                    .as_ref()
-                    .map(|value| value.0.as_str()),
-                &branch
-                    .origin_message_id
-                    .as_ref()
-                    .map(|value| value.0.as_str()),
-                &branch
-                    .head_message_id
-                    .as_ref()
-                    .map(|value| value.0.as_str()),
-                &branch.label,
-                &metadata_json,
-                &branch.created_at,
-                &branch.updated_at,
-            ],
-        )
-        .map_err(|error| postgres_error("save PostgreSQL conversation branch", error))?;
+        save_conversation_branch_in_tx(&mut tx, &schema, branch)?;
         let record = load_conversation_branch_in_tx(&mut tx, &schema, &branch.branch_id)?;
         tx.commit()
             .map_err(|error| postgres_error("commit save PostgreSQL conversation branch", error))?;
         Ok(record)
+    }
+
+    pub fn create_chat_conversation_branch(
+        &self,
+        request: &CreateChatConversationBranchRequest,
+    ) -> CoreResult<ConversationBranchRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start create PostgreSQL chat conversation branch", error)
+        })?;
+        validate_chat_conversation_branch_write(&mut tx, &schema, &request.branch)?;
+        save_conversation_branch_in_tx(&mut tx, &schema, &request.branch)?;
+        let record = load_conversation_branch_in_tx(&mut tx, &schema, &request.branch.branch_id)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit create PostgreSQL chat conversation branch", error)
+        })?;
+        Ok(record)
+    }
+
+    pub fn ensure_active_chat_conversation_branch(
+        &self,
+        request: &EnsureActiveChatConversationBranchRequest,
+    ) -> CoreResult<EnsureActiveChatConversationBranchResult> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start ensure PostgreSQL active chat branch", error))?;
+        let fallback = load_conversation_branch_in_tx(&mut tx, &schema, &request.branch_id)
+            .or_else(|error| {
+                if error.kind != CoreErrorKind::NotFound {
+                    return Err(error);
+                }
+                let branch = ConversationBranchWrite {
+                    branch_id: request.branch_id.clone(),
+                    session_id: request.session_id.clone(),
+                    parent_branch_id: None,
+                    parent_message_id: None,
+                    origin_message_id: None,
+                    head_message_id: None,
+                    label: request.label.clone(),
+                    metadata_json: request.metadata_json.clone(),
+                    created_at: request.created_at.clone(),
+                    updated_at: request.updated_at.clone(),
+                };
+                save_conversation_branch_in_tx(&mut tx, &schema, &branch)?;
+                load_conversation_branch_in_tx(&mut tx, &schema, &branch.branch_id)
+            })?;
+        if fallback.session_id != request.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "conversation branch {} not found for session {}",
+                    request.branch_id, request.session_id
+                ),
+            ));
+        }
+        let current = current_active_branch_in_tx(&mut tx, &schema, &request.session_id)?;
+        if current.as_ref() == Some(&request.branch_id) {
+            let state = load_conversation_branch_state_in_tx(
+                &mut tx,
+                &schema,
+                &request.session_id,
+                &request.updated_at,
+            )?;
+            tx.commit().map_err(|error| {
+                postgres_error("commit ensure PostgreSQL active chat branch", error)
+            })?;
+            return Ok(EnsureActiveChatConversationBranchResult {
+                branch: fallback,
+                state,
+                conflict: None,
+            });
+        }
+        if let Some(active_branch_id) = current {
+            let state = load_conversation_branch_state_in_tx(
+                &mut tx,
+                &schema,
+                &request.session_id,
+                &request.updated_at,
+            )?;
+            let branch = load_conversation_branch_in_tx(&mut tx, &schema, &active_branch_id)
+                .unwrap_or(fallback);
+            tx.commit().map_err(|error| {
+                postgres_error(
+                    "commit ensure PostgreSQL active chat branch conflict",
+                    error,
+                )
+            })?;
+            return Ok(EnsureActiveChatConversationBranchResult {
+                branch,
+                state,
+                conflict: Some(ActiveBranchConflict {
+                    expected: None,
+                    actual: Some(active_branch_id),
+                }),
+            });
+        }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.conversation_branch_state (
+                    session_id, active_branch_id, updated_at, version
+                 ) VALUES ($1, $2, $3, 0)
+                 ON CONFLICT(session_id) DO UPDATE SET
+                    active_branch_id = EXCLUDED.active_branch_id,
+                    updated_at = EXCLUDED.updated_at,
+                    version = conversation_branch_state.version + 1"
+            ),
+            &[
+                &request.session_id.0,
+                &request.branch_id.0,
+                &request.updated_at,
+            ],
+        )
+        .map_err(|error| postgres_error("select ensured PostgreSQL active chat branch", error))?;
+        let state = load_conversation_branch_state_in_tx(
+            &mut tx,
+            &schema,
+            &request.session_id,
+            &request.updated_at,
+        )?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit ensure PostgreSQL active chat branch", error)
+        })?;
+        Ok(EnsureActiveChatConversationBranchResult {
+            branch: fallback,
+            state,
+            conflict: None,
+        })
     }
 
     pub fn query_conversation_branches(
@@ -1015,5 +1093,115 @@ impl PostgresBackendStore {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         resolve_conversation_jump(&mut *client, &schema, request)
+    }
+}
+
+fn save_conversation_branch_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    branch: &ConversationBranchWrite,
+) -> CoreResult<()> {
+    let metadata_json = to_json_text(&branch.metadata_json)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.conversation_branches (
+                branch_id,
+                session_id,
+                parent_branch_id,
+                parent_message_id,
+                origin_message_id,
+                head_message_id,
+                label,
+                metadata_json,
+                created_at,
+                updated_at,
+                version
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0)
+             ON CONFLICT(branch_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                parent_branch_id = EXCLUDED.parent_branch_id,
+                parent_message_id = EXCLUDED.parent_message_id,
+                origin_message_id = EXCLUDED.origin_message_id,
+                head_message_id = EXCLUDED.head_message_id,
+                label = EXCLUDED.label,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = EXCLUDED.updated_at,
+                version = conversation_branches.version + 1"
+        ),
+        &[
+            &branch.branch_id.0,
+            &branch.session_id.0,
+            &branch
+                .parent_branch_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            &branch
+                .parent_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            &branch
+                .origin_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            &branch
+                .head_message_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            &branch.label,
+            &metadata_json,
+            &branch.created_at,
+            &branch.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL conversation branch", error))?;
+    Ok(())
+}
+
+fn validate_chat_conversation_branch_write(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    branch: &ConversationBranchWrite,
+) -> CoreResult<()> {
+    if let Some(parent_branch_id) = &branch.parent_branch_id {
+        ensure_branch_belongs_to_session_in_tx(tx, schema, &branch.session_id, parent_branch_id)?;
+    }
+    if let Some(parent_message_id) = &branch.parent_message_id {
+        ensure_message_belongs_to_session_in_tx(tx, schema, &branch.session_id, parent_message_id)?;
+    }
+    if let Some(origin_message_id) = &branch.origin_message_id {
+        ensure_message_belongs_to_session_in_tx(tx, schema, &branch.session_id, origin_message_id)?;
+    }
+    if let Some(head_message_id) = &branch.head_message_id {
+        ensure_message_belongs_to_session_in_tx(tx, schema, &branch.session_id, head_message_id)?;
+    }
+    Ok(())
+}
+
+fn ensure_message_belongs_to_session_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    session_id: &SessionId,
+    message_id: &MessageId,
+) -> CoreResult<()> {
+    let row = tx
+        .query_one(
+            &format!(
+                "SELECT EXISTS(
+                    SELECT 1 FROM {schema}.messages
+                    WHERE session_id = $1 AND message_id = $2
+                )"
+            ),
+            &[&session_id.0, &message_id.0],
+        )
+        .map_err(|error| {
+            postgres_error("check PostgreSQL durable message session ownership", error)
+        })?;
+    if row.get::<_, bool>(0) {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message {message_id} not found for session {session_id}"),
+        ))
     }
 }

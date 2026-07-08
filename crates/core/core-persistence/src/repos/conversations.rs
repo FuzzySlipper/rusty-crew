@@ -245,6 +245,119 @@ impl CoordinationStore {
         Ok(record)
     }
 
+    pub fn create_chat_conversation_branch(
+        &self,
+        request: &CreateChatConversationBranchRequest,
+    ) -> CoreResult<ConversationBranchRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin create chat conversation branch", error))?;
+        validate_chat_conversation_branch_write(&tx, &request.branch)?;
+        save_conversation_branch_in_tx(&tx, &request.branch)?;
+        let record = load_conversation_branch_in_tx(&tx, &request.branch.branch_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit create chat conversation branch", error))?;
+        Ok(record)
+    }
+
+    pub fn ensure_active_chat_conversation_branch(
+        &self,
+        request: &EnsureActiveChatConversationBranchRequest,
+    ) -> CoreResult<EnsureActiveChatConversationBranchResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin ensure active chat branch", error))?;
+        let fallback =
+            load_conversation_branch_in_tx(&tx, &request.branch_id).or_else(|error| {
+                if error.kind != CoreErrorKind::NotFound {
+                    return Err(error);
+                }
+                let branch = ConversationBranchWrite {
+                    branch_id: request.branch_id.clone(),
+                    session_id: request.session_id.clone(),
+                    parent_branch_id: None,
+                    parent_message_id: None,
+                    origin_message_id: None,
+                    head_message_id: None,
+                    label: request.label.clone(),
+                    metadata_json: request.metadata_json.clone(),
+                    created_at: request.created_at.clone(),
+                    updated_at: request.updated_at.clone(),
+                };
+                save_conversation_branch_in_tx(&tx, &branch)?;
+                load_conversation_branch_in_tx(&tx, &branch.branch_id)
+            })?;
+        if fallback.session_id != request.session_id {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "conversation branch {} not found for session {}",
+                    request.branch_id, request.session_id
+                ),
+            ));
+        }
+        let current = current_active_branch_in_tx(&tx, &request.session_id)?;
+        if current.as_ref() == Some(&request.branch_id) {
+            let state = load_conversation_branch_state_in_tx(
+                &tx,
+                &request.session_id,
+                &request.updated_at,
+            )?;
+            tx.commit()
+                .map_err(|error| persistence_error("commit ensure active chat branch", error))?;
+            return Ok(EnsureActiveChatConversationBranchResult {
+                branch: fallback,
+                state,
+                conflict: None,
+            });
+        }
+        if let Some(active_branch_id) = current {
+            let state = load_conversation_branch_state_in_tx(
+                &tx,
+                &request.session_id,
+                &request.updated_at,
+            )?;
+            let branch = load_conversation_branch_in_tx(&tx, &active_branch_id).unwrap_or(fallback);
+            tx.commit().map_err(|error| {
+                persistence_error("commit ensure active chat branch conflict", error)
+            })?;
+            return Ok(EnsureActiveChatConversationBranchResult {
+                branch,
+                state,
+                conflict: Some(ActiveBranchConflict {
+                    expected: None,
+                    actual: Some(active_branch_id),
+                }),
+            });
+        }
+        tx.execute(
+            "INSERT INTO conversation_branch_state (
+                session_id, active_branch_id, updated_at, version
+             ) VALUES (?1, ?2, ?3, 0)
+             ON CONFLICT(session_id) DO UPDATE SET
+                active_branch_id = excluded.active_branch_id,
+                updated_at = excluded.updated_at,
+                version = conversation_branch_state.version + 1",
+            params![
+                request.session_id.0,
+                request.branch_id.0,
+                request.updated_at,
+            ],
+        )
+        .map_err(|error| persistence_error("select ensured active chat branch", error))?;
+        let state =
+            load_conversation_branch_state_in_tx(&tx, &request.session_id, &request.updated_at)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit ensure active chat branch", error))?;
+        Ok(EnsureActiveChatConversationBranchResult {
+            branch: fallback,
+            state,
+            conflict: None,
+        })
+    }
+
     pub fn query_conversation_branches(
         &self,
         query: &ConversationBranchQuery,
@@ -1268,6 +1381,50 @@ fn ensure_branch_belongs_to_session_in_tx(
         Err(CoreError::new(
             CoreErrorKind::NotFound,
             format!("conversation branch {branch_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn validate_chat_conversation_branch_write(
+    tx: &rusqlite::Transaction<'_>,
+    branch: &ConversationBranchWrite,
+) -> CoreResult<()> {
+    if let Some(parent_branch_id) = &branch.parent_branch_id {
+        ensure_branch_belongs_to_session_in_tx(tx, &branch.session_id, parent_branch_id)?;
+    }
+    if let Some(parent_message_id) = &branch.parent_message_id {
+        ensure_message_belongs_to_session_in_tx(tx, &branch.session_id, parent_message_id)?;
+    }
+    if let Some(origin_message_id) = &branch.origin_message_id {
+        ensure_message_belongs_to_session_in_tx(tx, &branch.session_id, origin_message_id)?;
+    }
+    if let Some(head_message_id) = &branch.head_message_id {
+        ensure_message_belongs_to_session_in_tx(tx, &branch.session_id, head_message_id)?;
+    }
+    Ok(())
+}
+
+fn ensure_message_belongs_to_session_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    message_id: &MessageId,
+) -> CoreResult<()> {
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM messages
+                WHERE session_id = ?1 AND message_id = ?2
+            )",
+            params![session_id.0, message_id.0],
+            |row| row.get(0),
+        )
+        .map_err(|error| persistence_error("check durable message session ownership", error))?;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message {message_id} not found for session {session_id}"),
         ))
     }
 }

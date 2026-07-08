@@ -20,26 +20,28 @@ use rusty_crew_core_persistence::{
     ChatReadModelQuery, ConversationBranchQuery, ConversationBranchRecord,
     ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
-    ConversationSnapshotWrite, CoreCoordinationStore, CreateChatMessageSlotRequest,
-    CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
-    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DeleteChatMessageVariantRequest,
-    DurableMessageRecord, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
-    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
-    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
-    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
-    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
-    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
-    ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState,
-    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
-    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
-    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
-    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
-    RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
-    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
-    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics,
-    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
+    ConversationSnapshotWrite, CoreCoordinationStore, CreateChatConversationBranchRequest,
+    CreateChatMessageSlotRequest, CreateChatMessageSlotResult, CreateChatMessageVariantRequest,
+    CreateChatMessageVariantResult, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
+    DeleteChatMessageVariantRequest, DurableMessageRecord,
+    EnsureActiveChatConversationBranchRequest, EnsureActiveChatConversationBranchResult,
+    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
+    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord,
+    QueuedMessageState, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
+    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
+    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
+    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
+    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
     SelectActiveChatMessageVariantResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
     SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
@@ -1146,6 +1148,24 @@ impl CoreEngine {
         query: &ConversationBranchQuery,
     ) -> CoreResult<Vec<ConversationBranchRecord>> {
         self.store.conversation().query_conversation_branches(query)
+    }
+
+    pub fn create_chat_conversation_branch(
+        &self,
+        request: &CreateChatConversationBranchRequest,
+    ) -> CoreResult<ConversationBranchRecord> {
+        self.store
+            .conversation()
+            .create_chat_conversation_branch(request)
+    }
+
+    pub fn ensure_active_chat_conversation_branch(
+        &self,
+        request: &EnsureActiveChatConversationBranchRequest,
+    ) -> CoreResult<EnsureActiveChatConversationBranchResult> {
+        self.store
+            .conversation()
+            .ensure_active_chat_conversation_branch(request)
     }
 
     pub fn get_conversation_branch_state(
@@ -6483,6 +6503,156 @@ mod tests {
     }
 
     #[test]
+    fn ensure_active_chat_conversation_branch_creates_and_selects_default() {
+        let engine = test_engine();
+
+        let result = engine
+            .ensure_active_chat_conversation_branch(&EnsureActiveChatConversationBranchRequest {
+                session_id: SessionId::new("ensure-branch-session"),
+                branch_id: ConversationBranchId::new("ensure-branch-default"),
+                label: Some("Default".to_string()),
+                metadata_json: json!({ "source": "test" }),
+                created_at: "2026-06-19T00:01:00Z".to_string(),
+                updated_at: "2026-06-19T00:01:00Z".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            result.branch.branch_id,
+            ConversationBranchId::new("ensure-branch-default")
+        );
+        assert_eq!(
+            result.state.active_branch_id,
+            Some(ConversationBranchId::new("ensure-branch-default"))
+        );
+        assert!(result.conflict.is_none());
+    }
+
+    #[test]
+    fn ensure_active_chat_conversation_branch_selects_existing_default_when_none_active() {
+        let engine = test_engine();
+        save_test_branch(
+            &engine,
+            "ensure-existing-session",
+            "ensure-existing-default",
+            None,
+            None,
+        );
+
+        let result = engine
+            .ensure_active_chat_conversation_branch(&EnsureActiveChatConversationBranchRequest {
+                session_id: SessionId::new("ensure-existing-session"),
+                branch_id: ConversationBranchId::new("ensure-existing-default"),
+                label: Some("Default".to_string()),
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:01:00Z".to_string(),
+                updated_at: "2026-06-19T00:02:00Z".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            result.state.active_branch_id,
+            Some(ConversationBranchId::new("ensure-existing-default"))
+        );
+        assert!(result.conflict.is_none());
+    }
+
+    #[test]
+    fn ensure_active_chat_conversation_branch_returns_active_conflict() {
+        let engine = test_engine();
+        save_test_branch(
+            &engine,
+            "ensure-conflict-session",
+            "ensure-conflict-active",
+            None,
+            None,
+        );
+        engine
+            .select_active_conversation_branch(&SelectActiveBranchRequest {
+                session_id: SessionId::new("ensure-conflict-session"),
+                active_branch_id: Some(ConversationBranchId::new("ensure-conflict-active")),
+                expected: rusty_crew_core_persistence::ActiveBranchExpectation::Any,
+                updated_at: "2026-06-19T00:01:00Z".to_string(),
+            })
+            .unwrap();
+
+        let result = engine
+            .ensure_active_chat_conversation_branch(&EnsureActiveChatConversationBranchRequest {
+                session_id: SessionId::new("ensure-conflict-session"),
+                branch_id: ConversationBranchId::new("ensure-conflict-default"),
+                label: Some("Default".to_string()),
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:02:00Z".to_string(),
+                updated_at: "2026-06-19T00:02:00Z".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            result.branch.branch_id,
+            ConversationBranchId::new("ensure-conflict-active")
+        );
+        assert_eq!(
+            result.conflict,
+            Some(rusty_crew_core_persistence::ActiveBranchConflict {
+                expected: None,
+                actual: Some(ConversationBranchId::new("ensure-conflict-active")),
+            })
+        );
+    }
+
+    #[test]
+    fn create_chat_conversation_branch_rejects_wrong_session_parent_and_head() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "branch-owner-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        save_test_message_slot(
+            &engine,
+            "branch-other-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        save_test_branch(
+            &engine,
+            "branch-other-session",
+            "branch-other-parent",
+            None,
+            None,
+        );
+
+        let parent_error = engine
+            .create_chat_conversation_branch(&CreateChatConversationBranchRequest {
+                branch: test_branch_write(
+                    "branch-owner-session",
+                    "branch-owner-child",
+                    Some("branch-other-parent"),
+                    Some("branch-owner-session-message-1"),
+                ),
+            })
+            .unwrap_err();
+        assert_eq!(parent_error.kind, CoreErrorKind::NotFound);
+
+        let head_error = engine
+            .create_chat_conversation_branch(&CreateChatConversationBranchRequest {
+                branch: test_branch_write(
+                    "branch-owner-session",
+                    "branch-owner-child-2",
+                    None,
+                    Some("branch-other-session-message-1"),
+                ),
+            })
+            .unwrap_err();
+        assert_eq!(head_error.kind, CoreErrorKind::NotFound);
+    }
+
+    #[test]
     fn delete_chat_message_variant_validates_slot_session_ownership() {
         let engine = test_engine();
         save_test_message_slot(
@@ -6714,6 +6884,43 @@ mod tests {
                 updated_at: timestamp,
             })
             .unwrap();
+    }
+
+    fn save_test_branch(
+        engine: &CoreEngine,
+        session_id: &str,
+        branch_id: &str,
+        parent_branch_id: Option<&str>,
+        head_message_id: Option<&str>,
+    ) {
+        engine
+            .save_conversation_branch(&test_branch_write(
+                session_id,
+                branch_id,
+                parent_branch_id,
+                head_message_id,
+            ))
+            .unwrap();
+    }
+
+    fn test_branch_write(
+        session_id: &str,
+        branch_id: &str,
+        parent_branch_id: Option<&str>,
+        head_message_id: Option<&str>,
+    ) -> ConversationBranchWrite {
+        ConversationBranchWrite {
+            branch_id: ConversationBranchId::new(branch_id),
+            session_id: SessionId::new(session_id),
+            parent_branch_id: parent_branch_id.map(ConversationBranchId::new),
+            parent_message_id: None,
+            origin_message_id: None,
+            head_message_id: head_message_id.map(MessageId::new),
+            label: Some("Branch".to_string()),
+            metadata_json: json!({}),
+            created_at: "2026-06-19T00:00:00Z".to_string(),
+            updated_at: "2026-06-19T00:00:00Z".to_string(),
+        }
     }
 
     fn test_message_write(

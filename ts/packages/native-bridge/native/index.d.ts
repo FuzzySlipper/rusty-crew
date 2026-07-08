@@ -28,6 +28,8 @@ export declare class NativeBridgeBinding {
   appendChatEventJson(inputJson: string): string
   queryChatEventsJson(inputJson: string): string
   saveConversationBranchJson(inputJson: string): string
+  createChatConversationBranchJson(inputJson: string): string
+  ensureActiveChatConversationBranchJson(inputJson: string): string
   queryConversationBranchesJson(inputJson: string): string
   getConversationBranchStateJson(inputJson: string): string
   selectActiveConversationBranchJson(inputJson: string): string

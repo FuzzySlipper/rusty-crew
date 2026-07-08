@@ -936,6 +936,28 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_chat_conversation_branch(
+        &self,
+        request: &CreateChatConversationBranchRequest,
+    ) -> CoreResult<ConversationBranchRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.create_chat_conversation_branch(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.create_chat_conversation_branch(request),
+        }
+    }
+
+    pub fn ensure_active_chat_conversation_branch(
+        &self,
+        request: &EnsureActiveChatConversationBranchRequest,
+    ) -> CoreResult<EnsureActiveChatConversationBranchResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.ensure_active_chat_conversation_branch(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.ensure_active_chat_conversation_branch(request),
+        }
+    }
+
     pub fn get_conversation_branch_state(
         &self,
         session_id: &SessionId,
@@ -1792,6 +1814,20 @@ impl ConversationRepositorySet<'_> {
         query: &ConversationBranchQuery,
     ) -> CoreResult<Vec<ConversationBranchRecord>> {
         self.store.query_conversation_branches(query)
+    }
+
+    pub fn create_chat_conversation_branch(
+        &self,
+        request: &CreateChatConversationBranchRequest,
+    ) -> CoreResult<ConversationBranchRecord> {
+        self.store.create_chat_conversation_branch(request)
+    }
+
+    pub fn ensure_active_chat_conversation_branch(
+        &self,
+        request: &EnsureActiveChatConversationBranchRequest,
+    ) -> CoreResult<EnsureActiveChatConversationBranchResult> {
+        self.store.ensure_active_chat_conversation_branch(request)
     }
 
     pub fn get_conversation_branch_state(

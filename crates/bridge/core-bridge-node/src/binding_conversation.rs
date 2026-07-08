@@ -99,6 +99,35 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_chat_conversation_branch_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<CreateChatConversationBranchRequest>(
+            &input_json,
+            "create chat conversation branch request",
+        )?;
+        let record = bridge
+            .create_chat_conversation_branch(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "conversation branch record")
+    }
+
+    #[napi]
+    pub fn ensure_active_chat_conversation_branch_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<EnsureActiveChatConversationBranchRequest>(
+            &input_json,
+            "ensure active chat conversation branch request",
+        )?;
+        let result = bridge
+            .ensure_active_chat_conversation_branch(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "ensure active chat conversation branch result")
+    }
+
+    #[napi]
     pub fn query_conversation_branches_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query =

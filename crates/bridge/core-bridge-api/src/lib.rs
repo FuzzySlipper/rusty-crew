@@ -85,6 +85,8 @@ pub const OPERATION_NAMES: &[&str] = &[
     "delete_message_variant",
     "reorder_message_variants",
     "save_conversation_branch",
+    "create_chat_conversation_branch",
+    "ensure_active_chat_conversation_branch",
     "query_conversation_branches",
     "get_conversation_branch_state",
     "select_active_conversation_branch",

@@ -8632,17 +8632,19 @@ async function createRustyViewConversationBranch(
       "branch",
       `${input.session.sessionId}:${input.requestId}`,
     );
-  const branch = (await state.bridge.saveConversationBranch({
-    branch_id: branchId,
-    session_id: input.session.sessionId,
-    parent_branch_id: input.request.parent_branch_id ?? null,
-    parent_message_id: input.request.parent_message_id ?? null,
-    origin_message_id: input.request.origin_message_id ?? null,
-    head_message_id: input.request.head_message_id ?? null,
-    label: input.request.label ?? null,
-    metadata_json: input.request.metadata_json ?? {},
-    created_at: now,
-    updated_at: now,
+  const branch = (await state.bridge.createChatConversationBranch({
+    branch: {
+      branch_id: branchId,
+      session_id: input.session.sessionId,
+      parent_branch_id: input.request.parent_branch_id ?? null,
+      parent_message_id: input.request.parent_message_id ?? null,
+      origin_message_id: input.request.origin_message_id ?? null,
+      head_message_id: input.request.head_message_id ?? null,
+      label: input.request.label ?? null,
+      metadata_json: input.request.metadata_json ?? {},
+      created_at: now,
+      updated_at: now,
+    },
   })) as ConversationBranchRecord;
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "conversation_branch_created",
@@ -8948,58 +8950,19 @@ async function ensureActiveConversationBranch(
   now: string,
 ): Promise<ConversationBranchRecord> {
   const branchId = stableChatRecordId("branch", `${session.sessionId}:default`);
-  const existing = (await state.bridge.queryConversationBranches({
+  const result = (await state.bridge.ensureActiveChatConversationBranch({
     session_id: session.sessionId,
-    page: { limit: 500, offset: 0 },
-  })) as ConversationBranchRecord[];
-  const found = existing.find((branch) => branch.branch_id === branchId);
-  if (found) return found;
-  const branch = (await state.bridge.saveConversationBranch({
     branch_id: branchId,
-    session_id: session.sessionId,
-    parent_branch_id: null,
-    parent_message_id: null,
-    origin_message_id: null,
-    head_message_id: null,
     label: "Default",
     metadata_json: { source: "rusty_view_chat_default" },
     created_at: now,
     updated_at: now,
-  })) as ConversationBranchRecord;
-  await state.bridge
-    .selectActiveConversationBranch({
-      session_id: session.sessionId,
-      active_branch_id: branchId,
-      expected: { type: "none" },
-      updated_at: now,
-    })
-    .catch(() => undefined);
-  return activeConversationBranchOrDefault(state, session.sessionId, branch);
-}
-
-async function activeConversationBranchOrDefault(
-  state: ServiceState,
-  sessionId: SessionId,
-  fallback: ConversationBranchRecord,
-): Promise<ConversationBranchRecord> {
-  const stateRecord = (await state.bridge
-    .getConversationBranchState({
-      session_id: sessionId,
-      default_updated_at: state.now(),
-    })
-    .catch(() => undefined)) as ConversationBranchStateRecord | undefined;
-  if (stateRecord?.active_branch_id == null) {
-    return fallback;
-  }
-  const branches = (await state.bridge.queryConversationBranches({
-    session_id: sessionId,
-    page: { limit: 500, offset: 0 },
-  })) as ConversationBranchRecord[];
-  return (
-    branches.find(
-      (candidate) => candidate.branch_id === stateRecord.active_branch_id,
-    ) ?? fallback
-  );
+  })) as {
+    branch: ConversationBranchRecord;
+    state: ConversationBranchStateRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  return result.branch;
 }
 
 async function listRustyViewMessageVariants(

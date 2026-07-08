@@ -62,6 +62,21 @@ impl NativeBridge {
         self.engine()?.save_conversation_branch(branch)
     }
 
+    pub fn create_chat_conversation_branch(
+        &self,
+        request: &CreateChatConversationBranchRequest,
+    ) -> CoreResult<ConversationBranchRecord> {
+        self.engine()?.create_chat_conversation_branch(request)
+    }
+
+    pub fn ensure_active_chat_conversation_branch(
+        &self,
+        request: &EnsureActiveChatConversationBranchRequest,
+    ) -> CoreResult<EnsureActiveChatConversationBranchResult> {
+        self.engine()?
+            .ensure_active_chat_conversation_branch(request)
+    }
+
     pub fn query_conversation_branches(
         &self,
         query: &ConversationBranchQuery,

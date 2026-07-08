@@ -254,6 +254,8 @@ interface NativeBridgeBinding {
   deleteMessageVariantJson(inputJson: string): string;
   reorderMessageVariantsJson(inputJson: string): string;
   saveConversationBranchJson(inputJson: string): string;
+  createChatConversationBranchJson(inputJson: string): string;
+  ensureActiveChatConversationBranchJson(inputJson: string): string;
   queryConversationBranchesJson(inputJson: string): string;
   getConversationBranchStateJson(inputJson: string): string;
   selectActiveConversationBranchJson(inputJson: string): string;
@@ -2184,6 +2186,8 @@ export interface NativeBridgeModule {
   deleteMessageVariant(input: unknown): Promise<unknown>;
   reorderMessageVariants(input: unknown): Promise<unknown[]>;
   saveConversationBranch(input: unknown): Promise<unknown>;
+  createChatConversationBranch(input: unknown): Promise<unknown>;
+  ensureActiveChatConversationBranch(input: unknown): Promise<unknown>;
   queryConversationBranches(query: unknown): Promise<unknown[]>;
   getConversationBranchState(input: unknown): Promise<unknown>;
   selectActiveConversationBranch(input: unknown): Promise<unknown>;
@@ -2542,6 +2546,12 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     deleteMessageVariant: unavailable("delete_message_variant"),
     reorderMessageVariants: unavailable("reorder_message_variants"),
     saveConversationBranch: unavailable("save_conversation_branch"),
+    createChatConversationBranch: unavailable(
+      "create_chat_conversation_branch",
+    ),
+    ensureActiveChatConversationBranch: unavailable(
+      "ensure_active_chat_conversation_branch",
+    ),
     queryConversationBranches: unavailable("query_conversation_branches"),
     getConversationBranchState: unavailable("get_conversation_branch_state"),
     selectActiveConversationBranch: unavailable(
@@ -3826,6 +3836,14 @@ function createNativeBridgeModule(
     saveConversationBranch: async (input) =>
       JSON.parse(
         binding.saveConversationBranchJson(JSON.stringify(input)),
+      ) as unknown,
+    createChatConversationBranch: async (input) =>
+      JSON.parse(
+        binding.createChatConversationBranchJson(JSON.stringify(input)),
+      ) as unknown,
+    ensureActiveChatConversationBranch: async (input) =>
+      JSON.parse(
+        binding.ensureActiveChatConversationBranchJson(JSON.stringify(input)),
       ) as unknown,
     queryConversationBranches: async (query) =>
       JSON.parse(

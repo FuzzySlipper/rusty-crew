@@ -506,6 +506,28 @@ pub struct ConversationBranchWrite {
     pub updated_at: IsoTimestamp,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatConversationBranchRequest {
+    pub branch: ConversationBranchWrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnsureActiveChatConversationBranchRequest {
+    pub session_id: SessionId,
+    pub branch_id: ConversationBranchId,
+    pub label: Option<String>,
+    pub metadata_json: JsonValue,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnsureActiveChatConversationBranchResult {
+    pub branch: ConversationBranchRecord,
+    pub state: ConversationBranchStateRecord,
+    pub conflict: Option<ActiveBranchConflict>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ConversationBranchQuery {
     pub session_id: Option<SessionId>,

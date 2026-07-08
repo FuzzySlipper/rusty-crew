@@ -1189,9 +1189,9 @@ mod tests {
         );
         assert_eq!(POSTGRES_SCHEMA_MIGRATIONS[0].version, 1);
         assert!(POSTGRES_SCHEMA_MIGRATIONS[0].apply.is_some());
-        assert!(POSTGRES_SCHEMA_MIGRATIONS[1..]
+        assert!(POSTGRES_SCHEMA_MIGRATIONS
             .iter()
-            .all(|migration| migration.apply.is_none()));
+            .any(|migration| { migration.version > 1 && migration.apply.is_some() }));
     }
 
     #[test]
