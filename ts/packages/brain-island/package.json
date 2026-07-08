@@ -33,6 +33,8 @@
     "smoke:tool-registry": "tsx src/smoke-tool-registry.ts",
     "smoke:tool-registry-parity": "tsx src/smoke-tool-registry-parity.ts",
     "smoke:tool-registry-diagnostics": "tsx src/smoke-tool-registry-diagnostics.ts",
+    "smoke:local-tool-profile-policy": "tsx src/smoke-local-tool-profile-policy.ts",
+    "smoke:tool-registry-authority": "npm run smoke:tool-registry-parity && npm run smoke:tool-registry-diagnostics && npm run smoke:mcp-tool-registry && npm run smoke:local-tool-profile-policy",
     "smoke:web-search-tool": "tsx src/smoke-web-search-tool.ts",
     "smoke:web-extract-tool": "tsx src/smoke-web-extract-tool.ts",
     "smoke:browser-session-manager": "tsx src/smoke-browser-session-manager.ts",

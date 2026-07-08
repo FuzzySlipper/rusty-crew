@@ -29,6 +29,11 @@ assert.equal(report.summary.missingTools, 1);
 assert.equal(report.validation.ok, true);
 assert.equal(report.debug, undefined);
 assert.equal(Object.hasOwn(report.tools[0]!, "implementationModule"), false);
+assert.doesNotMatch(
+  JSON.stringify(report),
+  /implementationModule|local-code-tools|\.js#/,
+  "normal public diagnostics must not expose executable binding details",
+);
 assert.equal(
   report.tools.find((tool) => tool.name === "git_diff")?.status,
   "session_denied",

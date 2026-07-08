@@ -23,6 +23,12 @@ const artifactPath = fileURLToPath(
 
 const artifactText = await readFile(artifactPath, "utf8");
 const artifact = JSON.parse(artifactText) as ToolRegistryMetadataArtifact;
+const packageJsonPath = fileURLToPath(
+  new URL("../package.json", import.meta.url),
+);
+const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+  scripts?: Record<string, string>;
+};
 const currentArtifact = buildToolRegistryMetadataArtifact({
   catalogId: "default-local-tools",
   metadata: defaultToolRegistryMetadata,
@@ -55,6 +61,20 @@ assert.deepEqual(
   [...metadataNames].sort(),
   "every default metadata entry must have exactly one executable binding",
 );
+
+const knownSmokeScripts = new Set(Object.keys(packageJson.scripts ?? {}));
+for (const binding of defaultToolExecutableBindings) {
+  assert.match(
+    binding.inventoryTest,
+    /^smoke:[a-z0-9:-]+$/,
+    `tool binding ${binding.name} must name a smoke proof command`,
+  );
+  assert.equal(
+    knownSmokeScripts.has(binding.inventoryTest),
+    true,
+    `tool binding ${binding.name} references missing smoke proof ${binding.inventoryTest}`,
+  );
+}
 
 const validation = validateToolRegistry(
   defaultToolRegistryMetadata,
@@ -111,6 +131,9 @@ console.log(
       artifactTools: artifact.tools.length,
       metadataTools: metadataNames.length,
       bindingTools: bindingNames.length,
+      bindingProofs: new Set(
+        defaultToolExecutableBindings.map((binding) => binding.inventoryTest),
+      ).size,
       selectedDescriptors: inventory.selectedDescriptors.length,
     },
     null,

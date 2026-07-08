@@ -137,12 +137,24 @@ export function buildToolRegistryDiagnostics(
   return {
     catalogId,
     validation,
-    inventory,
+    inventory: inventory ? publicDiagnosticInventory(inventory) : undefined,
     summary: summarizeDiagnostics(catalogId, validation, inventory, entries),
     tools,
     debug: input.includeDebugBindings
       ? { bindings: debugBindings(entries, bindings) }
       : undefined,
+  };
+}
+
+function publicDiagnosticInventory(inventory: ToolInventory): ToolInventory {
+  return {
+    selectedTools: inventory.selectedTools,
+    selectedBindings: [],
+    selectedDescriptors: inventory.selectedDescriptors,
+    items: inventory.items.map((item) => {
+      const { binding: _binding, ...publicItem } = item;
+      return publicItem;
+    }),
   };
 }
 

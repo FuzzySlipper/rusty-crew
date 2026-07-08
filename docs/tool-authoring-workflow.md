@@ -16,9 +16,14 @@ the architecture. This document is the day-to-day workflow.
 
 ## Where Tools Live
 
-Model-callable tools are TypeScript brain-island code.
+Model-callable tool execution is TypeScript brain-island code, but public tool
+metadata is Rust/codegen-validated portable policy.
 
-- Registry metadata lives in
+- Portable public metadata lives in
+  `fixtures/tool-registry/default-tool-registry-metadata.json`.
+- Rust-owned portable policy validation lives in
+  `crates/core/core-tool-registry`.
+- Executable bindings live in
   `ts/packages/brain-island/src/tool-registry.ts`.
 - Registry diagnostics live in
   `ts/packages/brain-island/src/tool-registry-diagnostics.ts`.
@@ -40,31 +45,34 @@ ToolProfile selection, and session filtering path.
 1. Search first:
    - `rg -n "tool_name|output_shape|category" ts/packages/brain-island/src`
    - Run or inspect `npm run smoke:tool-registry-diagnostics`.
-2. Add or update one canonical registry entry in `tool-registry.ts`.
+2. Add or update one canonical portable metadata entry in
+   `fixtures/tool-registry/default-tool-registry-metadata.json`.
 3. Include required metadata:
    - canonical lower-snake-case `name`
    - `description`
    - `category`
    - `toolsets`
-   - `implementationModule`
    - `surfaces`
    - `safety`
    - `outputShape`
    - `version`
-   - `inventoryTest`
-4. Add the implementation in the correct TS module.
-5. Wire the implementation into a resolver such as `resolveLocalCodeTools`.
-6. Add a focused smoke proving the tool can be selected and invoked.
-7. Add or extend a production wake proof if the tool changes bridge behavior,
+4. Add exactly one executable binding in `tool-registry.ts` with:
+   - matching canonical `name`
+   - private `implementationModule`
+   - `inventoryTest` naming an existing `smoke:*` script
+5. Add the implementation in the correct TS module.
+6. Wire the implementation into a resolver such as `resolveLocalCodeTools`.
+7. Add a focused smoke proving the tool can be selected and invoked.
+8. Add or extend a production wake proof if the tool changes bridge behavior,
    resource enforcement, or durable telemetry.
-8. Regenerate the shared portable metadata artifact when registry metadata
-   changes:
+9. If you deliberately change metadata through TS constants or codegen during a
+   larger migration, regenerate the shared portable metadata artifact:
    - `npm run generate:tool-registry-artifact`
-9. Run:
+10. Run:
    - `npm run format`
    - `npm run typecheck`
-   - `npm run smoke:tool-registry-parity`
-   - relevant `npm run smoke:*`
+   - `npm run tool-registry-authority`
+   - the relevant `npm run smoke:*` named by `inventoryTest`
    - `cargo test -p rusty-crew-core-tool-registry`
    - `cargo clippy --all-targets --all-features -- -D warnings` when Rust
      contracts, bridge shapes, persistence, or telemetry changed.
@@ -140,6 +148,9 @@ Existing proof scripts:
 - `npm run smoke:tool-registry`
 - `npm run smoke:tool-registry-parity`
 - `npm run smoke:tool-registry-diagnostics`
+- `npm run smoke:mcp-tool-registry`
+- `npm run smoke:local-tool-profile-policy`
+- `npm run tool-registry-authority`
 - `npm run smoke:tool-profile-selection`
 - `npm run smoke:tool-session-selection`
 - `npm run smoke:local-code-tools`

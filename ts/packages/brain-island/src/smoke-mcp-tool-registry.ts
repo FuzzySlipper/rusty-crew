@@ -50,11 +50,18 @@ const discovery = convertMcpToolsToCandidates(binding, [
 const metadataPolicyValidator = createBridgeToolMetadataPolicyValidator(
   await loadNativeBridge(),
 );
+let metadataPolicyCalls = 0;
+const countingMetadataPolicyValidator: typeof metadataPolicyValidator = async (
+  entries,
+) => {
+  metadataPolicyCalls += 1;
+  return metadataPolicyValidator(entries);
+};
 
 const report = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:prime-mcp",
   candidates: discovery.candidates,
-  metadataPolicyValidator,
+  metadataPolicyValidator: countingMetadataPolicyValidator,
   inventoryRequest: {
     requestedToolsets: ["local_code_read", "mcp:prime-mcp"],
   },
@@ -123,7 +130,7 @@ const localCollisionCandidate: McpRegistryCandidate = {
 const collisionReport = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:collision",
   candidates: [localCollisionCandidate],
-  metadataPolicyValidator,
+  metadataPolicyValidator: countingMetadataPolicyValidator,
 });
 assert.equal(collisionReport.validation.ok, false);
 assert.equal(collisionReport.registry, undefined);
@@ -138,7 +145,7 @@ assert.equal(
 const prefixedReport = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:prefixed",
   candidates: [localCollisionCandidate],
-  metadataPolicyValidator,
+  metadataPolicyValidator: countingMetadataPolicyValidator,
   nameCollisionPolicy: "prefix_source",
   inventoryRequest: {
     requestedToolsets: ["mcp:prime-mcp"],
@@ -157,7 +164,7 @@ assert.equal(
 
 const duplicateMcpReport = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:duplicate",
-  metadataPolicyValidator,
+  metadataPolicyValidator: countingMetadataPolicyValidator,
   candidates: [
     discovery.candidates[0]!,
     {
@@ -178,7 +185,7 @@ assert.equal(
 
 const invalidMetadataReport = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:invalid-metadata",
-  metadataPolicyValidator,
+  metadataPolicyValidator: countingMetadataPolicyValidator,
   candidates: [
     {
       ...discovery.candidates[0]!,
@@ -191,10 +198,19 @@ assert.equal(invalidMetadataReport.validation.ok, false);
 assert.equal(invalidMetadataReport.registry, undefined);
 assert.equal(invalidMetadataReport.inventory, undefined);
 assert.equal(
+  invalidMetadataReport.entries.some((entry) => entry.name === "den_bad_shape"),
+  true,
+);
+assert.equal(
   invalidMetadataReport.validation.issues.find(
     (issue) => issue.code === "invalid_output_shape",
   )?.toolName,
   "den_bad_shape",
+);
+assert.equal(
+  metadataPolicyCalls,
+  5,
+  "every MCP merge path must call the Rust/codegen metadata policy validator",
 );
 
 console.log(
@@ -207,6 +223,7 @@ console.log(
       prefixedName: prefixedReport.mcpEntries[0]?.name,
       duplicateIssue: duplicateMcpReport.validation.issues[0]?.code,
       invalidMetadataIssue: invalidMetadataReport.validation.issues[0]?.code,
+      metadataPolicyCalls,
     },
     null,
     2,
