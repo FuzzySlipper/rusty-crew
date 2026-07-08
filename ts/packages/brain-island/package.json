@@ -54,6 +54,7 @@
     "smoke:session-memory-prompt-context": "tsx src/smoke-session-memory-prompt-context.ts",
     "smoke:memory-proposals": "tsx src/smoke-memory-proposals.ts",
     "smoke:capture-memory-proposals": "tsx src/smoke-capture-memory-proposals.ts",
+    "smoke:memory-document-boundary": "tsx src/smoke-memory-document-boundary.ts",
     "smoke:capture-producer-provider": "tsx src/smoke-capture-producer-provider.ts",
     "smoke:capture-producer-e2e": "tsx src/smoke-capture-producer-e2e.ts",
     "smoke:session-activity-digest": "tsx src/smoke-session-activity-digest.ts",
