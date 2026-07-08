@@ -641,6 +641,20 @@ fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
                 rust_type: "rusty_crew_core_protocol::MemoryGovernanceDecisionRecord".to_owned(),
                 value: serde_json::to_value(sample_memory_governance_decision_record())?,
             },
+            BridgeValidationFixture {
+                name: "session_activity_digest_v1".to_owned(),
+                operation: "list_session_activity_digests".to_owned(),
+                direction: "rust_to_ts".to_owned(),
+                rust_type: "rusty_crew_core_protocol::SessionActivityDigest".to_owned(),
+                value: serde_json::to_value(sample_session_activity_digest())?,
+            },
+            BridgeValidationFixture {
+                name: "context_compaction_artifact_v1".to_owned(),
+                operation: "list_context_compaction_artifacts".to_owned(),
+                direction: "rust_to_ts".to_owned(),
+                rust_type: "rusty_crew_core_protocol::ContextCompactionArtifact".to_owned(),
+                value: serde_json::to_value(sample_context_compaction_artifact())?,
+            },
         ],
     })
 }
@@ -1221,6 +1235,76 @@ fn sample_memory_governance_decision_record() -> MemoryGovernanceDecisionRecord 
         message: Some("Approved by bridge validation fixture.".to_owned()),
         resulting_revision: Some(7),
         decided_at: sample_timestamp(),
+    }
+}
+
+fn sample_session_activity_digest() -> SessionActivityDigest {
+    SessionActivityDigest {
+        digest_id: "digest_one".to_owned(),
+        profile_id: sample_profile_id(),
+        session_id: sample_session_id(),
+        wake_id: "wake-validation".to_owned(),
+        source: "post_turn_capture".to_owned(),
+        summary_text: "The agent inspected bridge fixture coverage.".to_owned(),
+        event_counts_json: json!({
+            "assistant_text_delta": 4,
+            "tool_call_started": 1,
+            "tool_call_completed": 1
+        }),
+        tool_calls_json: json!([
+            {
+                "tool": "storage_query_catalog",
+                "status": "completed",
+                "duration_ms": 12
+            }
+        ]),
+        signals_json: json!({
+            "candidate_memory": true,
+            "context_pressure": "moderate"
+        }),
+        completion_summary: Some("Bridge fixture expansion completed.".to_owned()),
+        allowed_capture_spaces: vec![MemorySpaceId::unchecked("profile_dense")],
+        created_at: sample_timestamp(),
+        retention_until: Some("2026-08-02T00:00:00.000Z".to_owned()),
+        reviewed_at: None,
+    }
+}
+
+fn sample_context_compaction_artifact() -> ContextCompactionArtifact {
+    ContextCompactionArtifact {
+        artifact_id: "compaction_one".to_owned(),
+        session_id: sample_session_id(),
+        branch_id: None,
+        strategy_id: "rolling_summary".to_owned(),
+        source_refs_json: json!([
+            {
+                "kind": "message_range",
+                "from": "slot-1",
+                "to": "slot-8"
+            }
+        ]),
+        provider_metadata_json: json!({
+            "provider_alias": "validation-provider",
+            "model_id": "gpt-fixture"
+        }),
+        estimate_before_json: json!({
+            "estimated_prompt_tokens": 78000,
+            "context_window_tokens": 128000
+        }),
+        estimate_after_json: Some(json!({
+            "estimated_prompt_tokens": 18000,
+            "context_window_tokens": 128000
+        })),
+        summary_text: "Condensed prior bridge validation discussion into a short durable summary."
+            .to_owned(),
+        enters_future_context: true,
+        context_policy: "default_context_policy".to_owned(),
+        metadata_json: json!({
+            "fixture": true,
+            "strategy_revision": 1
+        }),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
     }
 }
 

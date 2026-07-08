@@ -21,9 +21,9 @@ interface OperationExemptionGroup {
 
 const EXPECTED_MANIFEST_OPERATION_COUNT = 171;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
-const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 144;
+const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 31;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 140;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -61,10 +61,15 @@ const RUST_FIXTURE_BACKED_OPERATIONS = [
   "list_memory_space_descriptors",
   "list_memory_proposals",
   "record_memory_governance_decision",
+  "save_session_activity_digest",
+  "list_session_activity_digests",
+  "save_context_compaction_artifact",
+  "list_context_compaction_artifacts",
 ] as const satisfies readonly ManifestOperationName[];
 
 const RUST_FIXTURE_FAMILY_NAMES = [
   "body_state_v1",
+  "context_compaction_artifact_v1",
   "list_sessions_v1",
   "brain_wake_stream_result_v1",
   "profile_registry_record_v1",
@@ -73,6 +78,7 @@ const RUST_FIXTURE_FAMILY_NAMES = [
   "memory_space_descriptor_v1",
   "memory_proposal_record_v1",
   "memory_governance_decision_record_v1",
+  "session_activity_digest_v1",
 ] as const;
 
 const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
@@ -286,7 +292,7 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   {
     group: "local_stores_memory_compaction",
     reason:
-      "Simple KV, session memory, digests, and compaction artifacts are covered by storage/API tests today; bridge fixtures are pending a storage-family expansion.",
+      "Simple KV, session memory, and memory planning are covered by storage/API tests today; digest and compaction record shapes are fixture-backed separately.",
     operations: [
       "list_simple_kv",
       "put_simple_kv",
@@ -296,10 +302,6 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "save_memory_proposal",
       "plan_capture_memory_proposals",
       "plan_curator_governance_transition",
-      "save_session_activity_digest",
-      "list_session_activity_digests",
-      "save_context_compaction_artifact",
-      "list_context_compaction_artifacts",
     ],
   },
   {
