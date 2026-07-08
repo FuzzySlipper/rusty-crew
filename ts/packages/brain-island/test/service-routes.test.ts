@@ -814,7 +814,7 @@ function chatStreamContext() {
     async listSessions() {
       return [session];
     },
-    streamReplayEvents(replaySession, cursor, url) {
+    async streamReplayEvents(replaySession, cursor, url) {
       assert.equal(replaySession.sessionId, "field-session");
       assert.equal(cursor, undefined);
       assert.equal(url.pathname, "/v1/chat/sessions/field-session/stream");

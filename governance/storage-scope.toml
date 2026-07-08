@@ -116,6 +116,7 @@ owns = [
   "attachments",
   "attachment_links",
   "data_bank_scopes",
+  "chat_events",
 ]
 notes = "Transcripts, branch state, message variants, attachments, and data-bank scopes."
 
