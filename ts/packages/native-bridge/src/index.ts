@@ -33,6 +33,10 @@ import {
   rawProfileRegistryRecordSchema,
   rawSessionStateArraySchema,
 } from "./bridge-validation-schemas.js";
+import {
+  toCoreConfigWireCreateProfilePlanInput,
+  toCoreConfigWireRuntimeConfigValidationInput,
+} from "./generated/core-config-facade.js";
 
 import type {
   ActionBatchReceipt,
@@ -4458,187 +4462,13 @@ function encodeJson(value: unknown): Uint8Array {
 function toNativeRuntimeConfigValidationInput(
   input: NativeRuntimeConfigValidationInput,
 ): unknown {
-  return {
-    runtime_config: {
-      profiles_dir: input.runtimeConfig.profilesDir,
-      skills_dir: input.runtimeConfig.skillsDir,
-      brains: input.runtimeConfig.brains.map((brain) => ({
-        implementation_id: brain.implementationId,
-        profile_id: brain.profileId,
-      })),
-      sessions: input.runtimeConfig.sessions.map((session) => ({
-        session_id: session.sessionId,
-        agent_id: session.agentId,
-        profile_id: session.profileId,
-        kind: session.kind,
-        resource_limits: toNativeResourceLimits(session.resourceLimits),
-        owner_id: session.ownerId,
-        history_window: session.historyWindow
-          ? {
-              max_messages: session.historyWindow.maxMessages,
-            }
-          : undefined,
-        max_history_messages: session.maxHistoryMessages,
-        turn_timeout_ms: session.turnTimeoutMs,
-      })),
-      scheduled_jobs: input.runtimeConfig.scheduledJobs.map((job) => ({
-        id: job.id,
-        schedule: job.schedule,
-        shape: job.shape,
-        job_kind: job.jobKind,
-        target_session_id: job.targetSessionId,
-        script: job.script,
-        delivery_channel_id: job.deliveryChannelId,
-      })),
-      channel_bindings: input.runtimeConfig.channelBindings.map((binding) => ({
-        binding_id: binding.bindingId,
-        adapter_id: binding.adapterId,
-        provider: binding.provider,
-        agent_id: binding.agentId,
-        instance_id: binding.instanceId,
-        session_id: binding.sessionId,
-        profile_id: binding.profileId,
-        external_channel_id: binding.externalChannelId,
-        external_thread_id: binding.externalThreadId,
-        external_user_id: binding.externalUserId,
-        conversation_project_id: binding.conversationProjectId,
-        conversation_channel_id: binding.conversationChannelId,
-        provider_subscription_id: binding.providerSubscriptionId,
-        status: binding.status,
-      })),
-      mcp_bindings: input.runtimeConfig.mcpBindings.map((binding) => ({
-        binding_id: binding.bindingId,
-        adapter_id: binding.adapterId,
-        agent_id: binding.agentId,
-        instance_id: binding.instanceId,
-        session_id: binding.sessionId,
-        profile_id: binding.profileId,
-        server_names: binding.serverNames,
-        endpoint_ref: binding.endpointRef,
-        transport: binding.transport,
-        tool_profile_key: binding.toolProfileKey,
-        status: binding.status,
-      })),
-    },
-    profiles: input.profiles.map((profile) => ({
-      profile_id: profile.profileId,
-      brain: profile.brain
-        ? {
-            module: profile.brain.module,
-            strategy: profile.brain.strategy,
-          }
-        : undefined,
-      runtime: profile.runtime
-        ? {
-            default_resource_limits: toNativeResourceLimits(
-              profile.runtime.defaultResourceLimits,
-            ),
-            max_turn_duration_ms: profile.runtime.maxTurnDurationMs,
-            max_tokens_per_turn: profile.runtime.maxTokensPerTurn,
-          }
-        : undefined,
-      session_defaults: profile.sessionDefaults
-        ? {
-            owner_id: profile.sessionDefaults.ownerId,
-            max_history_messages: profile.sessionDefaults.maxHistoryMessages,
-            turn_timeout_ms: profile.sessionDefaults.turnTimeoutMs,
-          }
-        : undefined,
-      mcp_config: profile.mcpConfig
-        ? {
-            binding_id: profile.mcpConfig.bindingId,
-            endpoint_ref: profile.mcpConfig.endpointRef,
-            server_names: profile.mcpConfig.serverNames,
-            transport: profile.mcpConfig.transport,
-            tool_profile: profile.mcpConfig.toolProfile,
-          }
-        : undefined,
-      background_review: profile.backgroundReview
-        ? {
-            enabled: profile.backgroundReview.enabled,
-            review_type: profile.backgroundReview.reviewType,
-            schedule: profile.backgroundReview.schedule,
-          }
-        : undefined,
-      channel_defaults: profile.channelDefaults
-        ? {
-            wake_policy: profile.channelDefaults.wakePolicy,
-          }
-        : undefined,
-    })),
-  };
+  return toCoreConfigWireRuntimeConfigValidationInput(input);
 }
 
 function toNativeCreateProfilePlanInput(
   input: NativeCreateProfilePlanInput,
 ): unknown {
-  const base = toNativeRuntimeConfigValidationInput({
-    runtimeConfig: input.runtimeConfig,
-    profiles: input.profiles,
-  }) as Record<string, unknown>;
-  return {
-    ...base,
-    profile_registry: input.profileRegistry?.map((record) => ({
-      profile_id: record.profileId,
-      lifecycle_status: record.lifecycleStatus,
-      revision: record.revision,
-    })),
-    request: {
-      profile_id: input.request.profileId,
-      display_name: input.request.displayName,
-      agent_id: input.request.agentId,
-      session_id: input.request.sessionId,
-      implementation_id: input.request.implementationId,
-      kind: input.request.kind,
-      provider_alias: input.request.providerAlias,
-      model_config: input.request.modelConfig
-        ? {
-            provider: input.request.modelConfig.provider,
-            model_name: input.request.modelConfig.modelName,
-            base_url: input.request.modelConfig.baseUrl,
-            api: input.request.modelConfig.api,
-            api_key_env: input.request.modelConfig.apiKeyEnv,
-            temperature_milli: input.request.modelConfig.temperatureMilli,
-            max_output_tokens: input.request.modelConfig.maxOutputTokens,
-          }
-        : undefined,
-      brain: input.request.brain
-        ? {
-            module: input.request.brain.module,
-            strategy: input.request.brain.strategy,
-          }
-        : undefined,
-      mcp_bindings: input.request.mcpBindings?.map((binding) => ({
-        server_id: binding.serverId,
-        binding_id: binding.bindingId,
-        adapter_id: binding.adapterId,
-        server_names: binding.serverNames,
-        transport: binding.transport,
-        tool_profile_key: binding.toolProfileKey,
-      })),
-      mcp_tool_profile: input.request.mcpToolProfile,
-      source: input.request.source
-        ? {
-            template_id: input.request.source.templateId,
-            source_profile_id: input.request.source.sourceProfileId,
-            source_bundle_path: input.request.source.sourceBundlePath,
-          }
-        : undefined,
-      now: input.request.now,
-      profile_file_exists: input.request.profileFileExists ?? false,
-    },
-  };
-}
-
-function toNativeResourceLimits(limits: ResourceLimits | undefined): unknown {
-  if (!limits) {
-    return undefined;
-  }
-  return {
-    workdir: limits.workdir,
-    max_duration_ms: limits.maxDurationMs,
-    max_delegation_depth: limits.maxDelegationDepth,
-  };
+  return toCoreConfigWireCreateProfilePlanInput(input);
 }
 
 function toNativeCreateProfilePlan(

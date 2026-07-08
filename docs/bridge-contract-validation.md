@@ -6,13 +6,32 @@ Rusty Crew is moving bridge contract checks in three steps:
 2. Generated napi `*Json` method surface coverage against the manifest.
 3. TypeScript runtime validation at native bridge chokepoints.
 4. Rust-authored wire fixtures emitted by `core-bridge-codegen`.
-5. Later generated schemas/bindings for full operation families.
+5. Rust-emitted helper modules for operation families as their shapes stabilize.
+6. Later generated schemas/bindings for full operation families.
 
 The active incremental source is:
 
 ```bash
 cargo run -p rusty-crew-core-bridge-codegen -- emit-fixtures
 ```
+
+The native bridge `core-config` request facade is also Rust-emitted. It keeps
+runtime-config validation and create-profile request serialization out of the
+hand-authored native bridge mapping layer:
+
+```bash
+npm run codegen:core-config-facade
+npm run smoke:core-config-facade-drift
+```
+
+The generated file lives at:
+
+```text
+ts/packages/native-bridge/src/generated/core-config-facade.ts
+```
+
+Do not edit that file manually. If `crates/core/core-config` changes one of the
+covered request shapes, regenerate the facade and keep the drift smoke green.
 
 The checked-in fixture file lives at:
 
