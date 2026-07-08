@@ -166,6 +166,103 @@ pub fn validate_tool_metadata_list(entries: &[ToolMetadata]) -> ToolMetadataVali
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalToolProfileValidationInput {
+    pub profile: LocalToolProfilePolicy,
+    pub catalog: LocalToolProfileCatalogPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalToolProfileCatalogPolicy {
+    #[serde(default)]
+    pub toolsets: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalToolProfilePolicy {
+    pub id: String,
+    pub enabled: bool,
+    pub system: bool,
+    pub read_only: bool,
+    #[serde(default)]
+    pub toolsets: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalToolProfileValidationIssue {
+    pub reason_code: String,
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalToolProfileValidationResult {
+    pub ok: bool,
+    pub issues: Vec<LocalToolProfileValidationIssue>,
+}
+
+pub fn validate_local_tool_profile_policy(
+    input: &LocalToolProfileValidationInput,
+) -> LocalToolProfileValidationResult {
+    let mut issues = Vec::new();
+    validate_local_profile_id(&input.profile.id, &mut issues);
+    if input.profile.read_only && !input.profile.system {
+        issues.push(LocalToolProfileValidationIssue {
+            reason_code: "local_tool_profile_read_only_requires_system".to_string(),
+            path: "readOnly".to_string(),
+            message: format!(
+                "local tool profile {} cannot be read-only unless it is a system profile",
+                input.profile.id
+            ),
+        });
+    }
+
+    let known_toolsets = input
+        .catalog
+        .toolsets
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let known_tools = input
+        .catalog
+        .tools
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    validate_local_profile_refs(
+        &input.profile.id,
+        "toolsets",
+        &input.profile.toolsets,
+        &known_toolsets,
+        "local_tool_profile_unknown_toolset",
+        "built-in toolset",
+        &mut issues,
+    );
+    validate_local_profile_refs(
+        &input.profile.id,
+        "tools",
+        &input.profile.tools,
+        &known_tools,
+        "local_tool_profile_unknown_tool",
+        "built-in tool",
+        &mut issues,
+    );
+
+    LocalToolProfileValidationResult {
+        ok: issues.is_empty(),
+        issues,
+    }
+}
+
 struct ToolMetadataValidator<'a> {
     entries: &'a [ToolMetadata],
     diagnostics: Vec<ToolMetadataDiagnostic>,
@@ -602,6 +699,75 @@ fn valid_tool_name(value: &str) -> bool {
     !previous_underscore
 }
 
+fn validate_local_profile_id(id: &str, issues: &mut Vec<LocalToolProfileValidationIssue>) {
+    if id.trim().is_empty() {
+        issues.push(LocalToolProfileValidationIssue {
+            reason_code: "local_tool_profile_id_required".to_string(),
+            path: "id".to_string(),
+            message: "local tool profile id is required".to_string(),
+        });
+        return;
+    }
+    let mut chars = id.chars();
+    let Some(first) = chars.next() else {
+        return;
+    };
+    if !first.is_ascii_alphanumeric()
+        || id.len() > 80
+        || !chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | ':' | '-'))
+    {
+        issues.push(LocalToolProfileValidationIssue {
+            reason_code: "local_tool_profile_invalid_id".to_string(),
+            path: "id".to_string(),
+            message:
+                "local tool profile id must start with a letter or number and contain only letters, numbers, underscore, dot, colon, or hyphen"
+                    .to_string(),
+        });
+    }
+}
+
+fn validate_local_profile_refs(
+    profile_id: &str,
+    field: &str,
+    refs: &[String],
+    known_refs: &HashSet<&str>,
+    unknown_reason_code: &str,
+    label: &str,
+    issues: &mut Vec<LocalToolProfileValidationIssue>,
+) {
+    let mut seen = HashSet::new();
+    for (index, item) in refs.iter().enumerate() {
+        let path = format!("{field}[{index}]");
+        if !seen.insert(item.as_str()) {
+            issues.push(LocalToolProfileValidationIssue {
+                reason_code: format!("local_tool_profile_duplicate_{field}"),
+                path,
+                message: format!("local tool profile {profile_id} repeats {label} {item}"),
+            });
+            continue;
+        }
+        if field == "toolsets" && item.starts_with("mcp:") {
+            issues.push(LocalToolProfileValidationIssue {
+                reason_code: "local_tool_profile_rejects_mcp_toolset".to_string(),
+                path,
+                message: format!(
+                    "local tool profile {profile_id} cannot reference dynamic MCP toolset {item}"
+                ),
+            });
+            continue;
+        }
+        if !known_refs.contains(item.as_str()) {
+            issues.push(LocalToolProfileValidationIssue {
+                reason_code: unknown_reason_code.to_string(),
+                path,
+                message: format!(
+                    "local tool profile {profile_id} references unknown {label} {item}"
+                ),
+            });
+        }
+    }
+}
+
 fn valid_output_shape(value: &str) -> bool {
     let mut parts = value.split('.').collect::<Vec<_>>();
     if parts.len() < 3 {
@@ -890,6 +1056,81 @@ mod tests {
         );
     }
 
+    #[test]
+    fn validates_local_tool_profile_policy() {
+        let result = validate_local_tool_profile_policy(&LocalToolProfileValidationInput {
+            profile: LocalToolProfilePolicy {
+                id: "code_read".to_string(),
+                enabled: true,
+                system: true,
+                read_only: true,
+                toolsets: vec!["local_code_read".to_string()],
+                tools: vec!["read_file".to_string()],
+            },
+            catalog: local_profile_catalog(),
+        });
+
+        assert!(result.ok, "{:?}", result.issues);
+    }
+
+    #[test]
+    fn rejects_local_tool_profile_unknown_refs_and_dynamic_mcp() {
+        let result = validate_local_tool_profile_policy(&LocalToolProfileValidationInput {
+            profile: LocalToolProfilePolicy {
+                id: "custom".to_string(),
+                enabled: true,
+                system: false,
+                read_only: false,
+                toolsets: vec![
+                    "mcp:planner".to_string(),
+                    "missing_toolset".to_string(),
+                    "local_code_read".to_string(),
+                    "local_code_read".to_string(),
+                ],
+                tools: vec![
+                    "missing_tool".to_string(),
+                    "read_file".to_string(),
+                    "read_file".to_string(),
+                ],
+            },
+            catalog: local_profile_catalog(),
+        });
+
+        assert_local_profile_codes(
+            &result,
+            &[
+                "local_tool_profile_rejects_mcp_toolset",
+                "local_tool_profile_unknown_toolset",
+                "local_tool_profile_duplicate_toolsets",
+                "local_tool_profile_unknown_tool",
+                "local_tool_profile_duplicate_tools",
+            ],
+        );
+    }
+
+    #[test]
+    fn rejects_local_tool_profile_bad_id_and_read_only_custom_profile() {
+        let result = validate_local_tool_profile_policy(&LocalToolProfileValidationInput {
+            profile: LocalToolProfilePolicy {
+                id: "-bad".to_string(),
+                enabled: true,
+                system: false,
+                read_only: true,
+                toolsets: vec![],
+                tools: vec![],
+            },
+            catalog: local_profile_catalog(),
+        });
+
+        assert_local_profile_codes(
+            &result,
+            &[
+                "local_tool_profile_invalid_id",
+                "local_tool_profile_read_only_requires_system",
+            ],
+        );
+    }
+
     fn tool(name: &str, category: ToolCategory, output_shape: &str) -> ToolMetadata {
         ToolMetadata {
             name: name.to_string(),
@@ -919,6 +1160,25 @@ mod tests {
                 panic!("missing diagnostic code {code}; actual={actual:?}");
             };
             actual.remove(index);
+        }
+    }
+
+    fn assert_local_profile_codes(result: &LocalToolProfileValidationResult, expected: &[&str]) {
+        let actual = result
+            .issues
+            .iter()
+            .map(|issue| issue.reason_code.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
+
+    fn local_profile_catalog() -> LocalToolProfileCatalogPolicy {
+        LocalToolProfileCatalogPolicy {
+            toolsets: vec![
+                "local_code_read".to_string(),
+                "local_code_write".to_string(),
+            ],
+            tools: vec!["read_file".to_string(), "write_file".to_string()],
         }
     }
 }

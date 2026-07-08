@@ -150,6 +150,13 @@ Acceptance:
   profiles;
 - profile APIs return stable reason codes from the portable policy vocabulary.
 
+Current implementation: `core-tool-registry` owns
+`LocalToolProfileValidationInput` and the stable validation result vocabulary.
+The native bridge exposes it as `validate_local_tool_profile_policy`, and
+`local-tool-profiles.ts` calls that Rust policy for seeded, created, and updated
+profiles. TypeScript still owns DB route plumbing and catalog projection, but no
+longer makes the final local tool profile reference decision.
+
 ### 4. Route Dynamic MCP Metadata Through The Same Gate
 
 `adapter-mcp` should keep discovering tools and building execution candidates,

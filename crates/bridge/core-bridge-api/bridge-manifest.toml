@@ -218,6 +218,15 @@ errors = "core_protocol::CoreError"
 summary = "Register a TS platform adapter such as Den, Telegram, MCP, TUI, or CLI."
 
 [[operation]]
+name = "validate_local_tool_profile_policy"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_tool_registry::LocalToolProfileValidationInput"
+output = "core_tool_registry::LocalToolProfileValidationResult"
+errors = "core_protocol::CoreError"
+summary = "Validate DB-backed local built-in tool profile policy against the portable tool catalog boundary without mutating storage."
+
+[[operation]]
 name = "validate_runtime_config_draft"
 surface = "stable"
 direction = "ts_to_rust"

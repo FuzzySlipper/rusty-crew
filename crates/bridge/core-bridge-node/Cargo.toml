@@ -22,6 +22,7 @@ rusty-crew-core-config = { path = "../../core/core-config" }
 rusty-crew-core-engine = { path = "../../core/core-engine" }
 rusty-crew-core-persistence = { path = "../../core/core-persistence" }
 rusty-crew-core-protocol = { path = "../../core/core-protocol" }
+rusty-crew-core-tool-registry = { path = "../../core/core-tool-registry" }
 rusty-crew-openai-responses-brain = { path = "../../brains/openai-responses" }
 rusty-crew-pi-agent-brain = { path = "../../brains/pi-agent" }
 rusty-crew-roleplay-core = { path = "../../roleplay/roleplay-core" }

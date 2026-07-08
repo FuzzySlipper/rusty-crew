@@ -1077,6 +1077,38 @@ try {
       invalidToolProfile.body.error.reason_code,
       "local_tool_profile_rejects_mcp_toolset",
     );
+
+    const unknownToolsetProfile = await post(
+      "/v1/admin/local-tool-profiles",
+      undefined,
+      {
+        id: "bad_toolset",
+        displayName: "Bad Toolset",
+        toolsets: ["missing_toolset"],
+      },
+      noAuthPort,
+    );
+    assert.equal(unknownToolsetProfile.status, 400);
+    assert.equal(
+      unknownToolsetProfile.body.error.reason_code,
+      "local_tool_profile_unknown_toolset",
+    );
+
+    const unknownToolProfile = await post(
+      "/v1/admin/local-tool-profiles",
+      undefined,
+      {
+        id: "bad_tool",
+        displayName: "Bad Tool",
+        tools: ["missing_tool"],
+      },
+      noAuthPort,
+    );
+    assert.equal(unknownToolProfile.status, 400);
+    assert.equal(
+      unknownToolProfile.body.error.reason_code,
+      "local_tool_profile_unknown_tool",
+    );
     checkpoint("local tool profiles");
 
     const updatedToolProfile = await patch(
@@ -1827,7 +1859,12 @@ try {
       undefined,
       noAuthPort,
     );
-    assert.equal(noAuthAfterProfile.body.data.overview.summary.sessions, 2);
+    assert.equal(noAuthAfterProfile.body.data.overview.summary.sessions, 3);
+    assert.equal(noAuthAfterProfile.body.data.overview.summary.idleSessions, 2);
+    assert.equal(
+      noAuthAfterProfile.body.data.overview.summary.archivedSessions,
+      1,
+    );
     assert.deepEqual(
       noAuthAfterProfile.body.data.overview.runtime.brainModules.map(
         (module: { profileId: string; moduleId: string }) => [

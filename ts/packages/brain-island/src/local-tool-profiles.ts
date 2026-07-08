@@ -61,7 +61,10 @@ export interface LocalToolProfileStore {
 export function createLocalToolProfileStore(input: {
   bridge: Pick<
     NativeBridgeModule,
-    "listSimpleKv" | "putSimpleKv" | "deleteSimpleKv"
+    | "listSimpleKv"
+    | "putSimpleKv"
+    | "deleteSimpleKv"
+    | "validateLocalToolProfilePolicy"
   >;
   now: () => string;
   catalog?: BuiltInToolCatalog;
@@ -85,7 +88,15 @@ export function createLocalToolProfileStore(input: {
     },
     async create(write) {
       const now = input.now();
-      const id = requiredId(write.id);
+      const id = stringValue(write.id) ?? "";
+      const profile = normalizeProfileWrite(write, now, {
+        id,
+        system: false,
+        readOnly: false,
+        createdAt: now,
+        revision: undefined,
+      });
+      await validateProfileReferences(input.bridge, profile, catalog);
       const existing = await getProfile(input.bridge, id);
       if (existing !== undefined) {
         throw new LocalToolProfileError(
@@ -94,17 +105,22 @@ export function createLocalToolProfileStore(input: {
           409,
         );
       }
-      const profile = normalizeProfileWrite(write, catalog, now, {
-        id,
-        system: false,
-        readOnly: false,
-        createdAt: now,
-        revision: undefined,
-      });
       return putProfile(input.bridge, profile, now);
     },
     async update(id, write) {
-      const profileId = requiredId(id);
+      const profileId = stringValue(id) ?? "";
+      await validateProfileReferences(
+        input.bridge,
+        {
+          id: profileId,
+          enabled: true,
+          system: false,
+          readOnly: false,
+          toolsets: [],
+          tools: [],
+        },
+        catalog,
+      );
       const current = await getProfile(input.bridge, profileId);
       if (current === undefined) {
         throw new LocalToolProfileError(
@@ -122,7 +138,7 @@ export function createLocalToolProfileStore(input: {
       }
       assertExpectedRevision(current, write.expectedRevision);
       const now = input.now();
-      const profile = normalizeProfileWrite(write, catalog, now, {
+      const profile = normalizeProfileWrite(write, now, {
         id: profileId,
         system: current.system,
         readOnly: current.readOnly,
@@ -130,6 +146,7 @@ export function createLocalToolProfileStore(input: {
         revision: current.revision,
         current,
       });
+      await validateProfileReferences(input.bridge, profile, catalog);
       return putProfile(input.bridge, profile, now);
     },
     async delete(id) {
@@ -205,7 +222,10 @@ export class LocalToolProfileError extends Error {
 }
 
 async function seedDefaultLocalToolProfiles(
-  bridge: Pick<NativeBridgeModule, "listSimpleKv" | "putSimpleKv">,
+  bridge: Pick<
+    NativeBridgeModule,
+    "listSimpleKv" | "putSimpleKv" | "validateLocalToolProfilePolicy"
+  >,
   now: () => string,
   catalog: BuiltInToolCatalog,
 ): Promise<void> {
@@ -228,7 +248,7 @@ async function seedDefaultLocalToolProfiles(
           : undefined;
     if (seedProfile === undefined) continue;
     if (current !== undefined && profilesMatch(current, seedProfile)) continue;
-    validateProfileReferences(seedProfile, catalog);
+    await validateProfileReferences(bridge, seedProfile, catalog);
     await putProfile(bridge, seedProfile, timestamp);
   }
 }
@@ -423,7 +443,6 @@ function profileFromRecord(record: NativeSimpleKvRecord): LocalToolProfile {
 
 function normalizeProfileWrite(
   write: LocalToolProfileWrite,
-  catalog: BuiltInToolCatalog,
   now: string,
   defaults: {
     id: string;
@@ -449,39 +468,37 @@ function normalizeProfileWrite(
     updatedAt: now,
     revision: defaults.revision,
   };
-  validateProfileReferences(profile, catalog);
   return profile;
 }
 
-function validateProfileReferences(
-  profile: Pick<LocalToolProfile, "id" | "toolsets" | "tools">,
+async function validateProfileReferences(
+  bridge: Pick<NativeBridgeModule, "validateLocalToolProfilePolicy">,
+  profile: Pick<LocalToolProfile, "id" | "toolsets" | "tools"> &
+    Partial<Pick<LocalToolProfile, "enabled" | "system" | "readOnly">>,
   catalog: BuiltInToolCatalog,
-): void {
-  requiredId(profile.id);
-  const validToolsets = new Set(catalog.toolsets.map((item) => item.id));
-  const validTools = new Set(catalog.tools.map((item) => item.name));
-  for (const toolset of profile.toolsets) {
-    if (toolset.startsWith("mcp:")) {
-      throw new LocalToolProfileError(
-        "local_tool_profile_rejects_mcp_toolset",
-        `local tool profile ${profile.id} cannot reference dynamic MCP toolset ${toolset}`,
-      );
-    }
-    if (!validToolsets.has(toolset)) {
-      throw new LocalToolProfileError(
-        "local_tool_profile_unknown_toolset",
-        `local tool profile ${profile.id} references unknown built-in toolset ${toolset}`,
-      );
-    }
+): Promise<void> {
+  const result = await bridge.validateLocalToolProfilePolicy({
+    profile: {
+      id: profile.id,
+      enabled: "enabled" in profile ? profile.enabled === true : true,
+      system: "system" in profile ? profile.system === true : false,
+      readOnly: "readOnly" in profile ? profile.readOnly === true : false,
+      toolsets: [...profile.toolsets],
+      tools: [...profile.tools],
+    },
+    catalog: {
+      toolsets: catalog.toolsets.map((item) => item.id),
+      tools: catalog.tools.map((item) => item.name),
+    },
+  });
+  if (result.ok) {
+    return;
   }
-  for (const tool of profile.tools) {
-    if (!validTools.has(tool)) {
-      throw new LocalToolProfileError(
-        "local_tool_profile_unknown_tool",
-        `local tool profile ${profile.id} references unknown built-in tool ${tool}`,
-      );
-    }
-  }
+  const issue = result.issues[0];
+  throw new LocalToolProfileError(
+    issue?.reasonCode ?? "local_tool_profile_invalid",
+    issue?.message ?? `local tool profile ${profile.id} is invalid`,
+  );
 }
 
 function assertExpectedRevision(

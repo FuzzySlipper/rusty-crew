@@ -39,6 +39,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "cancel_pi_agent_brain",
     "exchange_openai_oauth_code",
     "register_platform_adapter",
+    "validate_local_tool_profile_policy",
     "validate_runtime_config_draft",
     "plan_runtime_config",
     "plan_create_profile",

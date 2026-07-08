@@ -1267,6 +1267,7 @@ dependencies = [
  "rusty-crew-core-engine",
  "rusty-crew-core-persistence",
  "rusty-crew-core-protocol",
+ "rusty-crew-core-tool-registry",
  "rusty-crew-openai-responses-brain",
  "rusty-crew-pi-agent-brain",
  "rusty-crew-roleplay-core",

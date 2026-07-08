@@ -288,6 +288,7 @@ interface NativeBridgeBinding {
     kind: string;
     displayName: string;
   }): number;
+  validateLocalToolProfilePolicyJson(inputJson: string): string;
   validateRuntimeConfigDraftJson(inputJson: string): string;
   planRuntimeConfigJson(inputJson: string): string;
   planCreateProfileJson(inputJson: string): string;
@@ -1446,6 +1447,32 @@ export interface NativeRuntimeConfigValidationResult {
   diagnostics: NativeRuntimeConfigDiagnostic[];
 }
 
+export interface NativeLocalToolProfilePolicyValidationInput {
+  profile: {
+    id: string;
+    enabled: boolean;
+    system: boolean;
+    readOnly: boolean;
+    toolsets: string[];
+    tools: string[];
+  };
+  catalog: {
+    toolsets: string[];
+    tools: string[];
+  };
+}
+
+export interface NativeLocalToolProfilePolicyValidationIssue {
+  reasonCode: string;
+  path: string;
+  message: string;
+}
+
+export interface NativeLocalToolProfilePolicyValidationResult {
+  ok: boolean;
+  issues: NativeLocalToolProfilePolicyValidationIssue[];
+}
+
 export interface NativeRuntimeConfigPlan {
   runtimeConfig: NativeRuntimeConfigDraft;
   diagnostics: NativeRuntimeConfigDiagnostic[];
@@ -1789,6 +1816,9 @@ export interface NativeBridgeModule {
   registerPlatformAdapter(
     registration: PlatformAdapterRegistration,
   ): Promise<PlatformAdapterHandle>;
+  validateLocalToolProfilePolicy(
+    input: NativeLocalToolProfilePolicyValidationInput,
+  ): Promise<NativeLocalToolProfilePolicyValidationResult>;
   validateRuntimeConfigDraft(
     input: NativeRuntimeConfigValidationInput,
   ): Promise<NativeRuntimeConfigValidationResult>;
@@ -2284,6 +2314,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     submitBrainEvent: unavailable("submit_brain_event"),
     submitBrainActions: unavailable("submit_brain_actions"),
     registerPlatformAdapter: unavailable("register_platform_adapter"),
+    validateLocalToolProfilePolicy: unavailable(
+      "validate_local_tool_profile_policy",
+    ),
     validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
     planRuntimeConfig: unavailable("plan_runtime_config"),
     planCreateProfile: unavailable("plan_create_profile"),
@@ -2974,6 +3007,10 @@ function createNativeBridgeModule(
         kind: registration.kind,
         displayName: registration.displayName,
       }) as PlatformAdapterHandle,
+    validateLocalToolProfilePolicy: async (input) =>
+      JSON.parse(
+        binding.validateLocalToolProfilePolicyJson(JSON.stringify(input)),
+      ) as NativeLocalToolProfilePolicyValidationResult,
     validateRuntimeConfigDraft: async (input) =>
       JSON.parse(
         binding.validateRuntimeConfigDraftJson(
