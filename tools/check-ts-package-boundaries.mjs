@@ -57,6 +57,54 @@ const adapterAuthorityForbiddenCalls = [
   "wakeBrainFromBridgeRequest",
 ];
 const legacyBrainIslandSrcSmokeCount = 131;
+const relocatedSmokePathRatchets = [
+  {
+    oldPath: normalizePath(
+      "ts/packages/brain-island/src/smoke-admin-profile-create-concurrency.ts",
+    ),
+    newPath: normalizePath(
+      "ts/packages/service-host/smokes/admin-profile-create-concurrency.ts",
+    ),
+  },
+  {
+    oldPath: normalizePath(
+      "ts/packages/brain-island/src/smoke-new-session-config-transaction.ts",
+    ),
+    newPath: normalizePath(
+      "ts/packages/service-host/smokes/new-session-config-transaction.ts",
+    ),
+  },
+  {
+    oldPath: normalizePath(
+      "ts/packages/brain-island/src/smoke-mcp-tool-registry.ts",
+    ),
+    newPath: normalizePath("ts/smokes/mcp-tool-registry.ts"),
+  },
+  {
+    oldPath: normalizePath(
+      "ts/packages/brain-island/src/smoke-tool-registry-parity.ts",
+    ),
+    newPath: normalizePath(
+      "ts/packages/brain-island/smokes/tool-registry-parity.ts",
+    ),
+  },
+  {
+    oldPath: normalizePath(
+      "ts/packages/brain-island/src/smoke-tool-registry-diagnostics.ts",
+    ),
+    newPath: normalizePath(
+      "ts/packages/brain-island/smokes/tool-registry-diagnostics.ts",
+    ),
+  },
+  {
+    oldPath: normalizePath(
+      "ts/packages/brain-island/src/smoke-local-tool-profile-policy.ts",
+    ),
+    newPath: normalizePath(
+      "ts/packages/brain-island/smokes/local-tool-profile-policy.ts",
+    ),
+  },
+];
 const legacySrcSmokeAllowedImports = new Map([
   [
     normalizePath("ts/packages/brain-island/src/smoke-adapter-diagnostics.ts"),
@@ -233,6 +281,8 @@ expectNoNewSrcSmokes(
   "@rusty-crew/brain-island",
   legacyBrainIslandSrcSmokeCount,
 );
+expectRelocatedSmokesStayMoved();
+expectLegacySmokeImportExemptionsStayLive();
 for (const adapterName of adapterPackages) {
   expectNoSourceImports(adapterName, [
     "@rusty-crew/brain-island",
@@ -270,6 +320,11 @@ console.log(
             calls: [...calls].sort(),
           }),
         ),
+      },
+      smokeRelocationRatchet: {
+        movedFiles: relocatedSmokePathRatchets.length,
+        legacySrcSmokeCeiling: legacyBrainIslandSrcSmokeCount,
+        legacySrcImportExemptions: legacySrcSmokeAllowedImports.size,
       },
     },
     null,
@@ -442,6 +497,36 @@ function expectNoNewSrcSmokes(packageName, expectedCount) {
     violations.push(
       `${packageName} has ${srcSmokeFiles.length} src smoke files; move new smokes to ts/packages/<package>/smokes/ and keep the legacy ceiling at ${expectedCount}`,
     );
+  }
+}
+
+function expectRelocatedSmokesStayMoved() {
+  for (const { oldPath, newPath } of relocatedSmokePathRatchets) {
+    if (existsSync(join(root, oldPath))) {
+      violations.push(
+        `relocated smoke ${oldPath} must stay moved to ${newPath}`,
+      );
+    }
+    if (!existsSync(join(root, newPath))) {
+      violations.push(
+        `relocated smoke ratchet expects ${newPath}; update the ratchet only with the relocation commit that moves it again`,
+      );
+    }
+  }
+}
+
+function expectLegacySmokeImportExemptionsStayLive() {
+  for (const relativePath of legacySrcSmokeAllowedImports.keys()) {
+    if (!existsSync(join(root, relativePath))) {
+      violations.push(
+        `legacy src smoke import exemption ${relativePath} no longer points at an existing file; remove the exemption when the smoke moves`,
+      );
+    }
+    if (!relativePath.includes("/src/smoke-")) {
+      violations.push(
+        `legacy src smoke import exemption ${relativePath} must target an exact src smoke file`,
+      );
+    }
   }
 }
 
