@@ -48,7 +48,7 @@ pub enum ToolCategory {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSurface {
     Brain,
@@ -58,7 +58,7 @@ pub enum ToolSurface {
     Diagnostic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSafetyFlag {
     ReadOnly,
@@ -76,6 +76,35 @@ pub struct ToolDeprecation {
     pub since: String,
     pub replacement: Option<String>,
     pub sunset: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolInventoryStatus {
+    Selected,
+    NotRequested,
+    ProfileDenied,
+    SessionDenied,
+    ResourceDenied,
+    Deprecated,
+    Missing,
+    Shadowed,
+    Collision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolDenialReasonCode {
+    UnknownTool,
+    UnknownToolset,
+    ProfileDenied,
+    SessionDenied,
+    ResourceDenied,
+    Deprecated,
+    Shadowed,
+    Collision,
+    MissingExternalDependency,
+    InvalidMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,6 +252,15 @@ impl<'a> ToolMetadataValidator<'a> {
                 "at least one toolset is required",
             );
         }
+        if entry.safety.is_empty() {
+            self.error(
+                "missing_metadata",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].safety"),
+                "at least one safety flag is required",
+            );
+        }
         if entry.surfaces.is_empty() {
             self.error(
                 "missing_metadata",
@@ -250,6 +288,30 @@ impl<'a> ToolMetadataValidator<'a> {
                 "version is required",
             );
         }
+        if !entry.output_shape.trim().is_empty() && !valid_output_shape(&entry.output_shape) {
+            self.error(
+                "invalid_output_shape",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].outputShape"),
+                format!(
+                    "output shape {} must be dot-delimited lower ids ending in vN",
+                    entry.output_shape
+                ),
+            );
+        }
+        if !entry.version.trim().is_empty() && !valid_semver(&entry.version) {
+            self.error(
+                "invalid_version",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].version"),
+                format!(
+                    "version {} must be semver-like MAJOR.MINOR.PATCH",
+                    entry.version
+                ),
+            );
+        }
 
         for (alias_index, alias) in entry.aliases.iter().enumerate() {
             if !valid_tool_name(alias) {
@@ -268,6 +330,20 @@ impl<'a> ToolMetadataValidator<'a> {
                     Some(entry.name.as_str()),
                     format!("tools[{index}].aliases[{alias_index}]"),
                     format!("alias {alias} duplicates its canonical tool name"),
+                );
+            }
+        }
+        self.validate_unique_named_values(index, entry, "toolsets", &entry.toolsets);
+        self.validate_unique_enum_values(index, entry, "surfaces", &entry.surfaces);
+        self.validate_unique_enum_values(index, entry, "safety", &entry.safety);
+        for (toolset_index, toolset) in entry.toolsets.iter().enumerate() {
+            if !valid_tool_name(toolset) {
+                self.error(
+                    "invalid_toolset",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].toolsets[{toolset_index}]"),
+                    format!("toolset {toolset} must be lower snake case"),
                 );
             }
         }
@@ -351,6 +427,51 @@ impl<'a> ToolMetadataValidator<'a> {
                     format!("deprecated tool {} needs a replacement", entry.name),
                 );
             }
+            if entry.deprecated.is_none() && replacement.is_some() {
+                self.error(
+                    "replacement_without_deprecation",
+                    Some(entry.name.as_str()),
+                    replacement,
+                    format!("tools[{index}].replacement"),
+                    format!(
+                        "replacement is only valid for deprecated tool {}",
+                        entry.name
+                    ),
+                );
+            }
+            if let Some(deprecated) = &entry.deprecated {
+                if deprecated.reason.trim().is_empty() {
+                    self.error(
+                        "bad_deprecation",
+                        Some(entry.name.as_str()),
+                        None,
+                        format!("tools[{index}].deprecated.reason"),
+                        "deprecation reason is required",
+                    );
+                }
+                if !valid_semver(&deprecated.since) {
+                    self.error(
+                        "bad_deprecation",
+                        Some(entry.name.as_str()),
+                        None,
+                        format!("tools[{index}].deprecated.since"),
+                        format!("deprecation since {} must be semver-like", deprecated.since),
+                    );
+                }
+                if deprecated
+                    .sunset
+                    .as_deref()
+                    .is_some_and(|sunset| !valid_semver(sunset))
+                {
+                    self.error(
+                        "bad_deprecation",
+                        Some(entry.name.as_str()),
+                        None,
+                        format!("tools[{index}].deprecated.sunset"),
+                        "deprecation sunset must be semver-like when present",
+                    );
+                }
+            }
             if let Some(replacement) = replacement {
                 if !valid_tool_name(replacement) {
                     self.error(
@@ -379,6 +500,50 @@ impl<'a> ToolMetadataValidator<'a> {
                         format!("replacement tool {replacement} is not registered"),
                     );
                 }
+            }
+        }
+    }
+
+    fn validate_unique_named_values(
+        &mut self,
+        index: usize,
+        entry: &ToolMetadata,
+        field: &str,
+        values: &[String],
+    ) {
+        let mut seen = HashSet::new();
+        for (value_index, value) in values.iter().enumerate() {
+            if !seen.insert(value.as_str()) {
+                self.error(
+                    "duplicate_metadata_value",
+                    Some(entry.name.as_str()),
+                    Some(entry.name.as_str()),
+                    format!("tools[{index}].{field}[{value_index}]"),
+                    format!("{field} value {value} is repeated on {}", entry.name),
+                );
+            }
+        }
+    }
+
+    fn validate_unique_enum_values<T>(
+        &mut self,
+        index: usize,
+        entry: &ToolMetadata,
+        field: &str,
+        values: &[T],
+    ) where
+        T: std::fmt::Debug + Eq + std::hash::Hash,
+    {
+        let mut seen = HashSet::new();
+        for (value_index, value) in values.iter().enumerate() {
+            if !seen.insert(value) {
+                self.error(
+                    "duplicate_metadata_value",
+                    Some(entry.name.as_str()),
+                    Some(entry.name.as_str()),
+                    format!("tools[{index}].{field}[{value_index}]"),
+                    format!("{field} value {value:?} is repeated on {}", entry.name),
+                );
             }
         }
     }
@@ -437,6 +602,33 @@ fn valid_tool_name(value: &str) -> bool {
     !previous_underscore
 }
 
+fn valid_output_shape(value: &str) -> bool {
+    let mut parts = value.split('.').collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return false;
+    }
+    let Some(version) = parts.pop() else {
+        return false;
+    };
+    if !version
+        .strip_prefix('v')
+        .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return false;
+    }
+    parts.into_iter().all(valid_tool_name)
+}
+
+fn valid_semver(value: &str) -> bool {
+    let parts = value.split('.').collect::<Vec<_>>();
+    parts.len() == 3
+        && parts.iter().all(|part| {
+            !part.is_empty()
+                && part.chars().all(|ch| ch.is_ascii_digit())
+                && (part == &"0" || !part.starts_with('0'))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,7 +650,7 @@ mod tests {
 
         assert_eq!(artifact.schema_version, 1);
         assert_eq!(artifact.catalog_id, "default-local-tools");
-        assert_eq!(artifact.tools.len(), 52);
+        assert_eq!(artifact.tools.len(), 57);
 
         let result = validate_tool_metadata_list(&artifact.tools);
 
@@ -586,6 +778,7 @@ mod tests {
         bad.description.clear();
         bad.toolsets.clear();
         bad.surfaces.clear();
+        bad.safety.clear();
         bad.output_shape.clear();
         bad.version.clear();
 
@@ -600,7 +793,100 @@ mod tests {
                 "missing_metadata",
                 "missing_metadata",
                 "missing_metadata",
+                "missing_metadata",
             ],
+        );
+    }
+
+    #[test]
+    fn reports_invalid_portable_ids_and_versions() {
+        let mut bad = tool("read_file", ToolCategory::Local, "Local.FileText.v1");
+        bad.toolsets = vec!["local_code_read".to_string(), "BadToolset".to_string()];
+        bad.version = "01.0".to_string();
+
+        let result = validate_tool_metadata_list(&[bad]);
+
+        assert_codes(
+            &result,
+            &["invalid_output_shape", "invalid_version", "invalid_toolset"],
+        );
+    }
+
+    #[test]
+    fn reports_duplicate_portable_metadata_values() {
+        let mut bad = tool("read_file", ToolCategory::Local, "local.file_text.v1");
+        bad.toolsets = vec!["local_code_read".to_string(), "local_code_read".to_string()];
+        bad.surfaces = vec![ToolSurface::Brain, ToolSurface::Brain];
+        bad.safety = vec![ToolSafetyFlag::ReadOnly, ToolSafetyFlag::ReadOnly];
+
+        let result = validate_tool_metadata_list(&[bad]);
+
+        assert_codes(
+            &result,
+            &[
+                "duplicate_metadata_value",
+                "duplicate_metadata_value",
+                "duplicate_metadata_value",
+            ],
+        );
+    }
+
+    #[test]
+    fn reports_bad_deprecation_shape() {
+        let replacement = tool("memory_recall", ToolCategory::Memory, "memory.recall.v2");
+        let mut old = tool(
+            "old_memory_recall",
+            ToolCategory::Memory,
+            "memory.recall.v1",
+        );
+        old.deprecated = Some(ToolDeprecation {
+            reason: String::new(),
+            since: "next".to_string(),
+            replacement: Some("memory_recall".to_string()),
+            sunset: Some("soon".to_string()),
+        });
+
+        let result = validate_tool_metadata_list(&[replacement, old]);
+
+        assert_codes(
+            &result,
+            &["bad_deprecation", "bad_deprecation", "bad_deprecation"],
+        );
+    }
+
+    #[test]
+    fn reports_replacement_without_deprecation() {
+        let replacement = tool("memory_recall", ToolCategory::Memory, "memory.recall.v2");
+        let mut current = tool(
+            "old_memory_recall",
+            ToolCategory::Memory,
+            "memory.recall.v1",
+        );
+        current.replacement = Some("memory_recall".to_string());
+
+        let result = validate_tool_metadata_list(&[replacement, current]);
+
+        assert_codes(&result, &["replacement_without_deprecation"]);
+    }
+
+    #[test]
+    fn rejects_unsupported_enum_values_during_deserialization() {
+        let raw = serde_json::json!({
+            "name": "read_file",
+            "description": "read file",
+            "category": "wormhole",
+            "toolsets": ["local_code_read"],
+            "surfaces": ["brain"],
+            "safety": ["read_only"],
+            "output_shape": "local.file_text.v1",
+            "version": "1.0.0"
+        });
+
+        let error = serde_json::from_value::<ToolMetadata>(raw).unwrap_err();
+
+        assert!(
+            error.to_string().contains("unknown variant"),
+            "unexpected error: {error}"
         );
     }
 

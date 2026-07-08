@@ -103,6 +103,17 @@
       "version": "0.1.0"
     },
     {
+      "name": "spawn_subagent_md",
+      "description": "Queue one Rust-owned delegated subagent request from markdown and simple frontmatter so agents do not hand-author JSON.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "delegation.spawn_subagent_result.v1",
+      "version": "0.1.0",
+      "coexistence_note": "Markdown/frontmatter input surface over the same delegation action shape as spawn_subagent; intended to avoid agent-authored JSON."
+    },
+    {
       "name": "fan_out_subagents",
       "description": "Queue a bounded Rust-owned fan-out group of delegated subagent requests.",
       "category": "delegation",
@@ -111,6 +122,17 @@
       "safety": ["coordination_action"],
       "output_shape": "delegation.fan_out_request_actions.v1",
       "version": "0.1.0"
+    },
+    {
+      "name": "fan_out_subagents_md",
+      "description": "Queue a bounded Rust-owned fan-out group from markdown sections and simple frontmatter so agents do not hand-author JSON.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "delegation.fan_out_request_actions.v1",
+      "version": "0.1.0",
+      "coexistence_note": "Markdown/frontmatter input surface over the same delegation action shape as fan_out_subagents; intended to avoid agent-authored JSON."
     },
     {
       "name": "scout_codebase",
@@ -140,6 +162,16 @@
       "surfaces": ["brain"],
       "safety": ["read_only", "coordination_action"],
       "output_shape": "delegation.find_relevant_paths_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "deliver_completion_md",
+      "description": "Queue a completion packet from markdown and simple frontmatter so workers do not hand-author completion JSON.",
+      "category": "delegation",
+      "toolsets": ["delegation_basic"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "completion.markdown_packet_result.v1",
       "version": "0.1.0"
     },
     {
@@ -273,8 +305,8 @@
       "version": "0.1.0"
     },
     {
-      "name": "den_memory_recall",
-      "description": "Recall relevant Den-owned memory summaries for the current profile or work context.",
+      "name": "memory_recall",
+      "description": "Recall relevant memory summaries for the current profile or work context. This is not a Den document, task, project, or guidance lookup tool.",
       "category": "memory",
       "toolsets": ["memory_den_read"],
       "surfaces": ["brain"],
@@ -283,8 +315,8 @@
       "version": "0.1.0"
     },
     {
-      "name": "den_memory_read",
-      "description": "Read a specific Den-owned memory entry by stable reference.",
+      "name": "memory_read",
+      "description": "Read a specific memory entry by stable reference. This is not a Den document, task, project, or guidance lookup tool.",
       "category": "memory",
       "toolsets": ["memory_den_read"],
       "surfaces": ["brain"],
@@ -293,8 +325,8 @@
       "version": "0.1.0"
     },
     {
-      "name": "den_memory_search",
-      "description": "Search Den-owned memories through the configured Den Memories service.",
+      "name": "memory_search",
+      "description": "Search memory entries through the configured memory service. This is not a Den document, task, project, or guidance lookup tool.",
       "category": "memory",
       "toolsets": ["memory_den_read"],
       "surfaces": ["brain"],
@@ -303,8 +335,8 @@
       "version": "0.1.0"
     },
     {
-      "name": "den_memory_store",
-      "description": "Store a new Den-owned memory through the configured Den Memories service.",
+      "name": "memory_store",
+      "description": "Store a new memory entry through the configured memory service. This is not a Den document, task, project, or guidance update tool.",
       "category": "memory",
       "toolsets": ["memory_den_write"],
       "surfaces": ["brain"],
@@ -313,8 +345,8 @@
       "version": "0.1.0"
     },
     {
-      "name": "den_memory_propose",
-      "description": "Propose a Den-owned memory change for later review or acceptance.",
+      "name": "memory_propose",
+      "description": "Propose a memory change for later review or acceptance. This is not a Den document, task, project, or guidance update tool.",
       "category": "memory",
       "toolsets": ["memory_den_write"],
       "surfaces": ["brain"],
@@ -420,6 +452,26 @@
       "surfaces": ["brain"],
       "safety": ["read_only", "coordination_action"],
       "output_shape": "roleplay.lore_layer_config_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "get_scene_state",
+      "description": "Read lightweight roleplay scene state for the current session.",
+      "category": "memory",
+      "toolsets": ["roleplay_scene_state"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "coordination_action"],
+      "output_shape": "roleplay.scene_state.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "update_scene_state",
+      "description": "Update lightweight roleplay scene state for the current session.",
+      "category": "memory",
+      "toolsets": ["roleplay_scene_state"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action"],
+      "output_shape": "roleplay.scene_state_update.v1",
       "version": "0.1.0"
     },
     {
