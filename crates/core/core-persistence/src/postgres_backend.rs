@@ -52,20 +52,21 @@ use crate::{
     ConversationSnapshotId, ConversationSnapshotQuery, ConversationSnapshotRecord,
     ConversationSnapshotSource, ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreEvent,
     CoreEventKind, CoreResult, CreateChatMessageSlotRequest, CreateChatMessageSlotResult,
-    DataBankScopeId, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus,
-    DataBankScopeWrite, DelegatedCompletion, DenRuntimeReference, DurableAgentKind,
-    DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord, DurableMessageStatus,
-    DurableMessageWrite, ExternalBindingStatus, IsoTimestamp, LoreRecallEntry, LoreRecallQuery,
-    LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord, McpBindingQuery,
-    McpBindingRecord, MessageBlockRecord, MessageId, MessageSlotId, MessageSlotQuery,
-    MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
-    ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
-    ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
-    ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
-    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
-    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    CreateChatMessageVariantRequest, CreateChatMessageVariantResult, DataBankScopeId,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite,
+    DelegatedCompletion, DenRuntimeReference, DurableAgentKind, DurableAgentRecord,
+    DurableIdentityStatus, DurableMessageRecord, DurableMessageStatus, DurableMessageWrite,
+    ExternalBindingStatus, IsoTimestamp, LoreRecallEntry, LoreRecallQuery, LoreRecallResult,
+    LoreRecallTraceQuery, LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord,
+    MessageBlockRecord, MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord,
+    MessageSlotWrite, MessageVariantId, MessageVariantQuery, MessageVariantRecord,
+    MessageVariantSource, MessageVariantStatus, MessageVariantWrite, ModelProviderCredential,
+    ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope,
+    ModelProviderStatus, ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport, ProfilePurgeTableCount,
+    ProfileRegistryLifecycleStatus, ProfileRegistryQuery, ProfileRegistryRecord,
+    ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
     ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
     ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
     ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
@@ -4793,6 +4794,30 @@ fn validate_create_chat_message_slot_request(
     Ok(())
 }
 
+fn validate_create_chat_message_variant_request(
+    request: &CreateChatMessageVariantRequest,
+) -> CoreResult<()> {
+    if request.slot_id != request.variant.slot_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message variant request slot_id must match variant slot_id",
+        ));
+    }
+    if request.session_id != request.variant.message.session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message variant request session_id must match variant message session_id",
+        ));
+    }
+    if request.variant.source != MessageVariantSource::Alternate {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message variant requires an alternate variant",
+        ));
+    }
+    Ok(())
+}
+
 fn save_durable_message_in_tx(
     tx: &mut Transaction<'_>,
     schema: &str,
@@ -5608,6 +5633,57 @@ fn ensure_variant_belongs_to_slot_in_tx(
             format!("message variant {variant_id} not found in slot {slot_id}"),
         ))
     }
+}
+
+fn ensure_slot_belongs_to_session_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    session_id: &SessionId,
+    slot_id: &MessageSlotId,
+) -> CoreResult<()> {
+    let row = tx
+        .query_one(
+            &format!(
+                "SELECT EXISTS(
+                    SELECT 1 FROM {schema}.message_slots
+                    WHERE session_id = $1 AND slot_id = $2
+                )"
+            ),
+            &[&session_id.0, &slot_id.0],
+        )
+        .map_err(|error| postgres_error("check PostgreSQL message slot session", error))?;
+    if row.get::<_, bool>(0) {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message slot {slot_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn next_alternate_variant_ordinal_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    slot_id: &MessageSlotId,
+) -> CoreResult<u32> {
+    let row = tx
+        .query_one(
+            &format!(
+                "SELECT COALESCE(MAX(ordinal), 0)
+                 FROM {schema}.message_variants
+                 WHERE slot_id = $1 AND source = 'alternate'"
+            ),
+            &[&slot_id.0],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL next alternate variant ordinal", error))?;
+    let max_ordinal = row.get::<_, i64>(0);
+    u32::try_from(max_ordinal.saturating_add(1)).map_err(|_| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("too many alternate variants for slot {slot_id}"),
+        )
+    })
 }
 
 fn insert_session_memory_record_in_tx<C: GenericClient>(

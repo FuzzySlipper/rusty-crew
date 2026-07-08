@@ -225,6 +225,32 @@ impl PostgresBackendStore {
         })
     }
 
+    pub fn create_chat_message_variant(
+        &self,
+        request: &CreateChatMessageVariantRequest,
+    ) -> CoreResult<CreateChatMessageVariantResult> {
+        validate_create_chat_message_variant_request(request)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start create PostgreSQL chat message variant", error)
+        })?;
+        ensure_slot_belongs_to_session_in_tx(
+            &mut tx,
+            &schema,
+            &request.session_id,
+            &request.slot_id,
+        )?;
+        let mut variant = request.variant.clone();
+        variant.ordinal = next_alternate_variant_ordinal_in_tx(&mut tx, &schema, &request.slot_id)?;
+        save_message_variant_in_tx(&mut tx, &schema, &variant)?;
+        let record = load_message_variant_in_tx(&mut tx, &schema, &variant.variant_id)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit create PostgreSQL chat message variant", error)
+        })?;
+        Ok(CreateChatMessageVariantResult { variant: record })
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,

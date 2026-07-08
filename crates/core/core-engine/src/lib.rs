@@ -21,24 +21,24 @@ use rusty_crew_core_persistence::{
     ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
     ConversationSnapshotWrite, CoreCoordinationStore, CreateChatMessageSlotRequest,
-    CreateChatMessageSlotResult, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
-    DurableMessageRecord, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
-    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
-    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
-    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
-    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
-    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
-    ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord,
-    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
-    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
-    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
-    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
-    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
-    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
+    CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DurableMessageRecord,
+    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
+    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord,
+    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
+    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
+    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
+    RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
+    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite,
+    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
+    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics,
+    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
     SelectActiveChatMessageVariantResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
     SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
@@ -1032,6 +1032,15 @@ impl CoreEngine {
         request: &CreateChatMessageSlotRequest,
     ) -> CoreResult<CreateChatMessageSlotResult> {
         self.store.conversation().create_chat_message_slot(request)
+    }
+
+    pub fn create_chat_message_variant(
+        &self,
+        request: &CreateChatMessageVariantRequest,
+    ) -> CoreResult<CreateChatMessageVariantResult> {
+        self.store
+            .conversation()
+            .create_chat_message_variant(request)
     }
 
     pub fn query_message_slots(
@@ -6350,6 +6359,108 @@ mod tests {
         assert!(slots
             .iter()
             .all(|slot| slot.slot_id != MessageSlotId::new("create-conflict-session-slot-2")));
+    }
+
+    #[test]
+    fn create_chat_message_variant_allocates_next_ordinal() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "create-variant-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        let mut first = test_message_write(
+            "create-variant-session",
+            2,
+            "assistant",
+            "assistant",
+            "alt 1",
+        );
+        first.branch_id = Some(ConversationBranchId::new("variant-branch"));
+        let mut second = test_message_write(
+            "create-variant-session",
+            3,
+            "assistant",
+            "assistant",
+            "alt 2",
+        );
+        second.branch_id = Some(ConversationBranchId::new("variant-branch"));
+
+        let first_result = engine
+            .create_chat_message_variant(&CreateChatMessageVariantRequest {
+                session_id: SessionId::new("create-variant-session"),
+                slot_id: MessageSlotId::new("create-variant-session-slot-1"),
+                variant: MessageVariantWrite {
+                    variant_id: MessageVariantId::new("create-variant-session-alt-1"),
+                    slot_id: MessageSlotId::new("create-variant-session-slot-1"),
+                    source: MessageVariantSource::Alternate,
+                    ordinal: 0,
+                    status: MessageVariantStatus::Active,
+                    message: first,
+                    metadata_json: json!({}),
+                    created_at: "2026-06-19T00:02:00Z".to_string(),
+                    updated_at: "2026-06-19T00:02:00Z".to_string(),
+                },
+            })
+            .unwrap();
+        let second_result = engine
+            .create_chat_message_variant(&CreateChatMessageVariantRequest {
+                session_id: SessionId::new("create-variant-session"),
+                slot_id: MessageSlotId::new("create-variant-session-slot-1"),
+                variant: MessageVariantWrite {
+                    variant_id: MessageVariantId::new("create-variant-session-alt-2"),
+                    slot_id: MessageSlotId::new("create-variant-session-slot-1"),
+                    source: MessageVariantSource::Alternate,
+                    ordinal: 0,
+                    status: MessageVariantStatus::Active,
+                    message: second,
+                    metadata_json: json!({}),
+                    created_at: "2026-06-19T00:03:00Z".to_string(),
+                    updated_at: "2026-06-19T00:03:00Z".to_string(),
+                },
+            })
+            .unwrap();
+
+        assert_eq!(first_result.variant.ordinal, 1);
+        assert_eq!(second_result.variant.ordinal, 2);
+    }
+
+    #[test]
+    fn create_chat_message_variant_validates_slot_session_ownership() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "owned-variant-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        let message =
+            test_message_write("other-variant-session", 2, "assistant", "assistant", "alt");
+
+        let error = engine
+            .create_chat_message_variant(&CreateChatMessageVariantRequest {
+                session_id: SessionId::new("other-variant-session"),
+                slot_id: MessageSlotId::new("owned-variant-session-slot-1"),
+                variant: MessageVariantWrite {
+                    variant_id: MessageVariantId::new("owned-variant-session-alt-1"),
+                    slot_id: MessageSlotId::new("owned-variant-session-slot-1"),
+                    source: MessageVariantSource::Alternate,
+                    ordinal: 0,
+                    status: MessageVariantStatus::Active,
+                    message,
+                    metadata_json: json!({}),
+                    created_at: "2026-06-19T00:02:00Z".to_string(),
+                    updated_at: "2026-06-19T00:02:00Z".to_string(),
+                },
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
     }
 
     fn save_test_message_slot(

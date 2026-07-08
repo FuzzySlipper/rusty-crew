@@ -33,6 +33,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_chat_message_variant_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<CreateChatMessageVariantRequest>(
+            &input_json,
+            "create chat message variant request",
+        )?;
+        let result = bridge
+            .create_chat_message_variant(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "create chat message variant result")
+    }
+
+    #[napi]
     pub fn query_message_slots_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<MessageSlotQuery>(&input_json, "message slot query")?;

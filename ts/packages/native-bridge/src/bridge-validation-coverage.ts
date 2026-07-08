@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 149;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 150;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 122;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 123;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -155,6 +155,7 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "save_message_slot",
       "save_message_variant",
       "create_chat_message_slot",
+      "create_chat_message_variant",
       "query_message_slots",
       "query_message_variants",
       "select_active_message_variant",

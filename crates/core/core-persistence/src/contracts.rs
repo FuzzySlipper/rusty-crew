@@ -444,6 +444,18 @@ pub struct CreateChatMessageSlotResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatMessageVariantRequest {
+    pub session_id: SessionId,
+    pub slot_id: MessageSlotId,
+    pub variant: MessageVariantWrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatMessageVariantResult {
+    pub variant: MessageVariantRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveVariantConflict {
     pub expected: Option<MessageVariantId>,
     pub actual: Option<MessageVariantId>,

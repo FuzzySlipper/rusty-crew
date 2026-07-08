@@ -9122,22 +9122,23 @@ async function createRustyViewMessageVariant(
   const variantId =
     input.request.variant_id ??
     stableChatRecordId("variant", `${input.slotId}:${input.requestId}`);
-  const ordinal = slot.alternates.length + 1;
   const speakerIdentity = await roleplaySpeakerIdentitySnapshotForMessage(
     roleplayRouteContext(state),
     input.session,
     input.request.actor,
     now,
   ).catch(() => undefined);
-  const variant = (await state.bridge.saveMessageVariant(
-    messageVariantWrite({
+  const result = (await state.bridge.createChatMessageVariant({
+    session_id: input.session.sessionId,
+    slot_id: input.slotId,
+    variant: messageVariantWrite({
       sessionId: input.session.sessionId,
       slotId: input.slotId,
       variantId,
       messageId:
         input.request.message_id ?? stableChatRecordId("message", variantId),
       source: "alternate",
-      ordinal,
+      ordinal: 0,
       actor: input.request.actor,
       body: input.request.body,
       branchId: slot.primary.message.branch_id ?? undefined,
@@ -9152,7 +9153,8 @@ async function createRustyViewMessageVariant(
       blocks: input.request.blocks,
       now,
     }),
-  )) as MessageVariantRecord;
+  })) as { variant: MessageVariantRecord };
+  const variant = result.variant;
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_variant_created",
     payload: { slot_id: input.slotId, variant },

@@ -72,6 +72,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "save_message_slot",
     "save_message_variant",
     "create_chat_message_slot",
+    "create_chat_message_variant",
     "chat_read_model_page",
     "append_chat_event",
     "query_chat_events",

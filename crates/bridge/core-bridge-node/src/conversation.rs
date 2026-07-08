@@ -19,6 +19,13 @@ impl NativeBridge {
         self.engine()?.create_chat_message_slot(request)
     }
 
+    pub fn create_chat_message_variant(
+        &self,
+        request: &CreateChatMessageVariantRequest,
+    ) -> CoreResult<CreateChatMessageVariantResult> {
+        self.engine()?.create_chat_message_variant(request)
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,

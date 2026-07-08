@@ -82,6 +82,25 @@ impl CoordinationStore {
         })
     }
 
+    pub fn create_chat_message_variant(
+        &self,
+        request: &CreateChatMessageVariantRequest,
+    ) -> CoreResult<CreateChatMessageVariantResult> {
+        validate_create_chat_message_variant_request(request)?;
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin create chat message variant", error))?;
+        ensure_slot_belongs_to_session_in_tx(&tx, &request.session_id, &request.slot_id)?;
+        let mut variant = request.variant.clone();
+        variant.ordinal = next_alternate_variant_ordinal_in_tx(&tx, &request.slot_id)?;
+        save_message_variant_in_tx(&tx, &variant)?;
+        let record = load_message_variant_in_tx(&tx, &variant.variant_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit create chat message variant", error))?;
+        Ok(CreateChatMessageVariantResult { variant: record })
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,
@@ -559,6 +578,30 @@ fn validate_create_chat_message_slot_request(
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
             "create chat message slot primary message branch_id must match target branch_id",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_create_chat_message_variant_request(
+    request: &CreateChatMessageVariantRequest,
+) -> CoreResult<()> {
+    if request.slot_id != request.variant.slot_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message variant request slot_id must match variant slot_id",
+        ));
+    }
+    if request.session_id != request.variant.message.session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message variant request session_id must match variant message session_id",
+        ));
+    }
+    if request.variant.source != MessageVariantSource::Alternate {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message variant requires an alternate variant",
         ));
     }
     Ok(())
@@ -1899,6 +1942,53 @@ fn ensure_variant_belongs_to_slot_in_tx(
             format!("message variant {variant_id} not found in slot {slot_id}"),
         ))
     }
+}
+
+fn ensure_slot_belongs_to_session_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    session_id: &SessionId,
+    slot_id: &MessageSlotId,
+) -> CoreResult<()> {
+    let exists = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM message_slots
+                WHERE session_id = ?1 AND slot_id = ?2
+            )",
+            params![session_id.0, slot_id.0],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| persistence_error("check message slot session", error))?
+        != 0;
+    if exists {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::NotFound,
+            format!("message slot {slot_id} not found for session {session_id}"),
+        ))
+    }
+}
+
+fn next_alternate_variant_ordinal_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    slot_id: &MessageSlotId,
+) -> CoreResult<u32> {
+    let max_ordinal = tx
+        .query_row(
+            "SELECT COALESCE(MAX(ordinal), 0)
+             FROM message_variants
+             WHERE slot_id = ?1 AND source = 'alternate'",
+            params![slot_id.0],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| persistence_error("load next alternate variant ordinal", error))?;
+    u32::try_from(max_ordinal.saturating_add(1)).map_err(|_| {
+        CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("too many alternate variants for slot {slot_id}"),
+        )
+    })
 }
 
 fn insert_or_replace_context_compaction_artifact(

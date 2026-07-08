@@ -525,6 +525,15 @@ errors = "core_protocol::CoreError"
 summary = "Create a durable chat message slot, primary variant, and branch-head update atomically."
 
 [[operation]]
+name = "create_chat_message_variant"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::CreateChatMessageVariantRequest"
+output = "core_persistence::CreateChatMessageVariantResult"
+errors = "core_protocol::CoreError"
+summary = "Create a durable alternate chat message variant with Rust-owned ordinal allocation."
+
+[[operation]]
 name = "chat_read_model_page"
 surface = "stable"
 direction = "ts_to_rust"
