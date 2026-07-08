@@ -44,6 +44,20 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn normalize_roleplay_lore_search_controls_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<RoleplayLoreSearchControlsInput>(
+            &input_json,
+            "roleplay lore search controls input",
+        )?;
+        let controls =
+            normalize_lore_search_controls(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&controls, "roleplay lore search controls")
+    }
+
+    #[napi]
     pub fn build_roleplay_prompt_context_json(&self, input_json: String) -> napi::Result<String> {
         let input =
             parse_json::<RoleplayPromptContextInput>(&input_json, "roleplay prompt context input")?;

@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 163;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 164;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 136;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 137;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -228,6 +228,7 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "plan_roleplay_assistant_alternative",
       "plan_roleplay_session_lifecycle",
       "plan_roleplay_chat_layer_binding",
+      "normalize_roleplay_lore_search_controls",
       "build_roleplay_prompt_context",
       "roleplay_speaker_identity",
       "write_roleplay_character",

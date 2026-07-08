@@ -1229,6 +1229,15 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Plan deterministic roleplay chat layer writes and active-layer metadata side effects before route-layer persistence."
 
 [[operation]]
+name = "normalize_roleplay_lore_search_controls"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayLoreSearchControlsInput"
+output = "roleplay_core::RoleplayLoreSearchControls"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Normalize browser lore search layer filters and pagination controls before route-layer query execution."
+
+[[operation]]
 name = "build_roleplay_prompt_context"
 surface = "stable"
 direction = "ts_to_rust"

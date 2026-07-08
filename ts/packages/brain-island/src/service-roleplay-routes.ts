@@ -2398,7 +2398,9 @@ function requiredRoleplayAssistantAlternativeVariantWrite(
   plan: RoleplayAssistantAlternativePlan,
 ): NonNullable<RoleplayAssistantAlternativePlan["variant_write"]> {
   if (plan.variant_write === undefined) {
-    throw new Error("roleplay assistant alternative variant write plan missing");
+    throw new Error(
+      "roleplay assistant alternative variant write plan missing",
+    );
   }
   return plan.variant_write;
 }

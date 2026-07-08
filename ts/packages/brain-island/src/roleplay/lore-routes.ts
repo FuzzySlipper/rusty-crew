@@ -28,6 +28,11 @@ interface RoleplayChatLayerBindingPlan {
   no_op: boolean;
 }
 
+interface RoleplayLoreSearchControls {
+  explicit_layer_ids: string[];
+  page: { limit: number; offset: number };
+}
+
 export interface RoleplayLoreRouteOptions {
   sessionMetadata(sessionId: string): Promise<unknown>;
   upsertSessionMetadata(
@@ -452,13 +457,14 @@ async function roleplayLoreEntrySearchResult(
   const params = url.searchParams;
   const profileId = optionalString(params.get("profile_id"));
   const chatId = optionalString(params.get("chat_id"));
-  const explicitLayerIds = roleplayLoreSearchLayerIds(params);
+  const controls = await roleplayLoreSearchControls(state, params);
+  const explicitLayerIds = controls.explicit_layer_ids;
   const layerScope = await roleplayLoreSearchLayerScope(state, {
     profileId,
     chatId,
     explicitLayerIds,
   });
-  const page = roleplayLoreSearchPage(params);
+  const page = controls.page;
   const query = roleplayLoreSearchQuery(params, page);
   const pageResult =
     layerScope.recordIds === undefined
@@ -1219,30 +1225,28 @@ function roleplayLoreSearchLayerIds(params: URLSearchParams): string[] {
   ];
 }
 
-function roleplayLoreSearchPage(params: URLSearchParams): {
-  limit: number;
-  offset: number;
-} {
-  const limit = integerQueryParam(params, "limit", 50);
-  const offset = integerQueryParam(params, "offset", 0);
-  return {
-    limit: Math.min(Math.max(limit, 1), 200),
-    offset: Math.max(offset, 0),
-  };
+async function roleplayLoreSearchControls(
+  state: RoleplayRouteContext,
+  params: URLSearchParams,
+): Promise<RoleplayLoreSearchControls> {
+  return (await state.bridge.normalizeRoleplayLoreSearchControls({
+    params: roleplayLoreSearchControlParams(params),
+  })) as RoleplayLoreSearchControls;
 }
 
-function integerQueryParam(
+function roleplayLoreSearchControlParams(
   params: URLSearchParams,
-  name: string,
-  fallback: number,
-): number {
-  const raw = params.get(name);
-  if (raw === null || raw.trim().length === 0) return fallback;
-  const value = Number(raw);
-  if (!Number.isInteger(value)) {
-    throw new Error(`${name} must be an integer`);
+): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  for (const key of ["layer_id", "layerId", "layer_ids", "layerIds"]) {
+    const values = params.getAll(key);
+    if (values.length > 0) normalized[key] = values;
   }
-  return value;
+  for (const key of ["limit", "offset"]) {
+    const value = params.get(key);
+    if (value !== null) normalized[key] = value;
+  }
+  return normalized;
 }
 
 function optionalBooleanQuery(

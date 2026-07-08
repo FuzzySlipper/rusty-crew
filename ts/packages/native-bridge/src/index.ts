@@ -227,6 +227,7 @@ interface NativeBridgeBinding {
   planRoleplayAssistantAlternativeJson(inputJson: string): string;
   planRoleplaySessionLifecycleJson(inputJson: string): string;
   planRoleplayChatLayerBindingJson(inputJson: string): string;
+  normalizeRoleplayLoreSearchControlsJson(inputJson: string): string;
   buildRoleplayPromptContextJson(inputJson: string): string;
   roleplaySpeakerIdentityJson(inputJson: string): string;
   writeRoleplayCharacterJson(inputJson: string): string;
@@ -2213,6 +2214,7 @@ export interface NativeBridgeModule {
   planRoleplayAssistantAlternative(input: unknown): Promise<unknown>;
   planRoleplaySessionLifecycle(input: unknown): Promise<unknown>;
   planRoleplayChatLayerBinding(input: unknown): Promise<unknown>;
+  normalizeRoleplayLoreSearchControls(input: unknown): Promise<unknown>;
   buildRoleplayPromptContext(input: unknown): Promise<unknown>;
   roleplaySpeakerIdentity(input: unknown): Promise<unknown>;
   writeRoleplayCharacter(input: unknown): Promise<unknown>;
@@ -2573,6 +2575,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     ),
     planRoleplayChatLayerBinding: unavailable(
       "plan_roleplay_chat_layer_binding",
+    ),
+    normalizeRoleplayLoreSearchControls: unavailable(
+      "normalize_roleplay_lore_search_controls",
     ),
     buildRoleplayPromptContext: unavailable("build_roleplay_prompt_context"),
     roleplaySpeakerIdentity: unavailable("roleplay_speaker_identity"),
@@ -3801,6 +3806,10 @@ function createNativeBridgeModule(
     planRoleplayChatLayerBinding: async (input) =>
       JSON.parse(
         binding.planRoleplayChatLayerBindingJson(JSON.stringify(input)),
+      ) as unknown,
+    normalizeRoleplayLoreSearchControls: async (input) =>
+      JSON.parse(
+        binding.normalizeRoleplayLoreSearchControlsJson(JSON.stringify(input)),
       ) as unknown,
     buildRoleplayPromptContext: async (input) =>
       JSON.parse(

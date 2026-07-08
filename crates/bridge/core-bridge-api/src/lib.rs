@@ -123,6 +123,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "plan_roleplay_assistant_alternative",
     "plan_roleplay_session_lifecycle",
     "plan_roleplay_chat_layer_binding",
+    "normalize_roleplay_lore_search_controls",
     "build_roleplay_prompt_context",
     "roleplay_speaker_identity",
     "write_roleplay_character",

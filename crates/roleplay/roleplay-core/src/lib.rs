@@ -433,6 +433,24 @@ pub struct RoleplayChatLayerBindingPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayLoreSearchControlsInput {
+    #[serde(default)]
+    pub params: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayLoreSearchPagePlan {
+    pub limit: u32,
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayLoreSearchControls {
+    pub explicit_layer_ids: Vec<String>,
+    pub page: RoleplayLoreSearchPagePlan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorConfig {
     pub tone: String,
@@ -1378,6 +1396,20 @@ pub fn plan_chat_layer_binding(
         chat_layers_changed,
         active_layer_ids_changed,
         no_op: !chat_layers_changed && !active_layer_ids_changed,
+    })
+}
+
+pub fn normalize_lore_search_controls(
+    input: RoleplayLoreSearchControlsInput,
+) -> RoleplayDomainResult<RoleplayLoreSearchControls> {
+    let params = json_object(&input.params, "roleplay lore search params")?;
+    let explicit_layer_ids = roleplay_lore_search_layer_ids(params)?;
+    validate_unique_roleplay_identifiers("roleplay lore search layer_ids", &explicit_layer_ids)?;
+    let limit = normalized_lore_search_page_value(params, &["limit"], 50, 1, 200, "limit")?;
+    let offset = normalized_lore_search_page_value(params, &["offset"], 0, 0, u32::MAX, "offset")?;
+    Ok(RoleplayLoreSearchControls {
+        explicit_layer_ids,
+        page: RoleplayLoreSearchPagePlan { limit, offset },
     })
 }
 
@@ -2637,6 +2669,32 @@ fn parse_string_list_value(
     ))
 }
 
+fn parse_query_string_list_value(
+    value: &JsonValue,
+    field_name: &'static str,
+) -> RoleplayDomainResult<Vec<String>> {
+    if let Some(items) = value.as_array() {
+        let mut parsed = Vec::new();
+        for (index, item) in items.iter().enumerate() {
+            let Some(value) = item.as_str() else {
+                return Err(RoleplayDomainError::invalid(
+                    "roleplay_invalid_string_array",
+                    format!("{field_name}[{index}] must be a string"),
+                ));
+            };
+            parsed.extend(
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+                    .map(str::to_string),
+            );
+        }
+        return Ok(parsed);
+    }
+    parse_string_list_value(value, field_name)
+}
+
 fn optional_json_object<'a>(
     body: &'a serde_json::Map<String, JsonValue>,
     keys: &[&str],
@@ -2917,6 +2975,93 @@ fn roleplay_chat_layer_binding_from_value(
         enabled: optional_bool_strict(record, &["enabled"], "roleplay chat layer enabled")?
             .unwrap_or(true),
     })
+}
+
+fn roleplay_lore_search_layer_ids(
+    params: &serde_json::Map<String, JsonValue>,
+) -> RoleplayDomainResult<Vec<String>> {
+    let mut layer_ids = Vec::new();
+    for key in ["layer_id", "layerId", "layer_ids", "layerIds"] {
+        if let Some(value) = params.get(key) {
+            layer_ids.extend(parse_query_string_list_value(value, "layer_ids")?);
+        }
+    }
+    let mut seen = BTreeSet::new();
+    Ok(layer_ids
+        .into_iter()
+        .filter(|layer_id| seen.insert(layer_id.clone()))
+        .collect())
+}
+
+fn normalized_lore_search_page_value(
+    params: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    fallback: u32,
+    min: u32,
+    max: u32,
+    field_name: &'static str,
+) -> RoleplayDomainResult<u32> {
+    let Some(value) = keys.iter().find_map(|key| params.get(*key)) else {
+        return Ok(fallback);
+    };
+    let Some(parsed) = query_param_integer_value(value, field_name)? else {
+        return Ok(fallback);
+    };
+    let clamped = parsed.clamp(i64::from(min), i64::from(max));
+    u32::try_from(clamped).map_err(|_| {
+        RoleplayDomainError::invalid(
+            "roleplay_invalid_integer",
+            format!("{field_name} must fit in an unsigned 32-bit integer"),
+        )
+    })
+}
+
+fn query_param_integer_value(
+    value: &JsonValue,
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<i64>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    if let Some(items) = value.as_array() {
+        let Some(first) = items.first() else {
+            return Ok(None);
+        };
+        return query_param_integer_value(first, field_name);
+    }
+    if let Some(number) = value.as_i64() {
+        return Ok(Some(number));
+    }
+    if let Some(number) = value.as_u64() {
+        return i64::try_from(number).map(Some).map_err(|_| {
+            RoleplayDomainError::invalid(
+                "roleplay_invalid_integer",
+                format!("{field_name} must fit in a signed 64-bit integer"),
+            )
+        });
+    }
+    if value.as_f64().is_some() {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_integer",
+            format!("{field_name} must be an integer"),
+        ));
+    }
+    if let Some(text) = value.as_str() {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        return trimmed.parse::<i64>().map(Some).map_err(|_| {
+            RoleplayDomainError::invalid(
+                "roleplay_invalid_integer",
+                format!("{field_name} must be an integer"),
+            )
+        });
+    }
+    Err(RoleplayDomainError::invalid(
+        "roleplay_invalid_integer",
+        format!("{field_name} must be an integer"),
+    ))
 }
 
 fn required_lifecycle_source(
@@ -3904,6 +4049,53 @@ mod tests {
         })
         .expect_err("bad enabled rejected");
         assert_eq!(bad_enabled.reason_code, "roleplay_invalid_boolean");
+    }
+
+    #[test]
+    fn normalizes_lore_search_controls() {
+        let controls = normalize_lore_search_controls(RoleplayLoreSearchControlsInput {
+            params: serde_json::json!({
+                "layer_id": ["world, scene", "world"],
+                "layerIds": "notes",
+                "limit": "500",
+                "offset": "-8"
+            }),
+        })
+        .expect("search controls");
+
+        assert_eq!(
+            controls.explicit_layer_ids,
+            vec![
+                "world".to_string(),
+                "scene".to_string(),
+                "notes".to_string()
+            ]
+        );
+        assert_eq!(controls.page.limit, 200);
+        assert_eq!(controls.page.offset, 0);
+    }
+
+    #[test]
+    fn normalizes_lore_search_control_defaults_and_rejects_invalid_values() {
+        let defaults = normalize_lore_search_controls(RoleplayLoreSearchControlsInput {
+            params: serde_json::json!({}),
+        })
+        .expect("default search controls");
+        assert!(defaults.explicit_layer_ids.is_empty());
+        assert_eq!(defaults.page.limit, 50);
+        assert_eq!(defaults.page.offset, 0);
+
+        let bad_limit = normalize_lore_search_controls(RoleplayLoreSearchControlsInput {
+            params: serde_json::json!({"limit": "many"}),
+        })
+        .expect_err("bad limit rejected");
+        assert_eq!(bad_limit.reason_code, "roleplay_invalid_integer");
+
+        let bad_layer = normalize_lore_search_controls(RoleplayLoreSearchControlsInput {
+            params: serde_json::json!({"layer_id": ["valid", "\0"]}),
+        })
+        .expect_err("bad layer rejected");
+        assert_eq!(bad_layer.reason_code, "roleplay_identifier_invalid");
     }
 
     #[test]
