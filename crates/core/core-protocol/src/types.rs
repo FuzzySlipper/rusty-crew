@@ -1370,6 +1370,20 @@ pub struct ModelProviderRefreshImpactRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderRefreshMode {
+    None,
+    Plan,
+    Apply,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderRefreshPlanRequest {
+    pub provider_alias: String,
+    pub mode: ModelProviderRefreshMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProviderAffectedProfile {
     pub profile_id: ProfileId,
     pub session_ids: Vec<SessionId>,
@@ -1381,6 +1395,25 @@ pub struct ModelProviderAffectedProfile {
 pub struct ModelProviderRefreshImpact {
     pub provider_alias: String,
     pub affected_profiles: Vec<ModelProviderAffectedProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderRefreshProfileAction {
+    pub profile_id: ProfileId,
+    pub command_name: String,
+    pub reason: String,
+    pub planned_summary: String,
+    pub applied_summary: String,
+    pub blocked_summary: String,
+    pub failure_reason_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderRefreshPlan {
+    pub provider_alias: String,
+    pub mode: ModelProviderRefreshMode,
+    pub affected_profiles: Vec<ModelProviderAffectedProfile>,
+    pub actions: Vec<ModelProviderRefreshProfileAction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

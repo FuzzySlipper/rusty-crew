@@ -157,4 +157,17 @@ impl NativeBridgeBinding {
             .map_err(to_napi_error)?;
         serialize_json(&impact, "model provider refresh impact")
     }
+
+    #[napi]
+    pub fn plan_model_provider_refresh_json(&self, request_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<ModelProviderRefreshPlanRequest>(
+            &request_json,
+            "model provider refresh plan request",
+        )?;
+        let plan = bridge
+            .plan_model_provider_refresh(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&plan, "model provider refresh plan")
+    }
 }

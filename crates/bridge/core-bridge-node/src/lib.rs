@@ -57,9 +57,9 @@ use rusty_crew_core_protocol::{
     ContextCompactionArtifact, ContextCompactionArtifactQuery, DataBankScopeId,
     MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord, MemoryProposalEnvelope,
     MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId,
-    MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest, ModelProviderWrite,
-    ProfileRegistryLifecycleStatus, ProfileRegistryUpdate, ProfileRegistryWrite,
-    SessionActivityDigest, SessionActivityDigestQuery,
+    MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest,
+    ModelProviderRefreshPlanRequest, ModelProviderWrite, ProfileRegistryLifecycleStatus,
+    ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_openai_responses_brain::{
     openai_oauth_envelope_from_exchange_result, resolve_openai_oauth_bearer, FakeResponsesClient,

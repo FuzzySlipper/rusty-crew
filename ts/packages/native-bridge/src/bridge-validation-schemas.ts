@@ -562,6 +562,33 @@ export const rawModelProviderRefreshImpactSchema = Type.Object(
   { additionalProperties: true },
 );
 
+const rawModelProviderRefreshProfileActionSchema = Type.Object(
+  {
+    profile_id: Type.String(),
+    command_name: Type.String(),
+    reason: Type.String(),
+    planned_summary: Type.String(),
+    applied_summary: Type.String(),
+    blocked_summary: Type.String(),
+    failure_reason_code: Type.String(),
+  },
+  { additionalProperties: true },
+);
+
+export const rawModelProviderRefreshPlanSchema = Type.Object(
+  {
+    provider_alias: Type.String(),
+    mode: Type.Union([
+      Type.Literal("none"),
+      Type.Literal("plan"),
+      Type.Literal("apply"),
+    ]),
+    affected_profiles: Type.Array(rawModelProviderAffectedProfileSchema),
+    actions: Type.Array(rawModelProviderRefreshProfileActionSchema),
+  },
+  { additionalProperties: true },
+);
+
 const memoryEvidenceRefSchema = Type.Object(
   {
     evidence_type: Type.String(),

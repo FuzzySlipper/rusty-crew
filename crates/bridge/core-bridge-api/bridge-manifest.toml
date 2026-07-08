@@ -1022,6 +1022,15 @@ errors = "core_protocol::CoreError"
 summary = "Plan profiles and sessions affected by a model-provider alias update from Rust-owned profile registry and session state."
 
 [[operation]]
+name = "plan_model_provider_refresh"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelProviderRefreshPlanRequest"
+output = "core_protocol::ModelProviderRefreshPlan"
+errors = "core_protocol::CoreError"
+summary = "Plan model-provider refresh control commands and summaries from Rust-owned profile/session impact state."
+
+[[operation]]
 name = "plan_roleplay_assistant_alternative"
 surface = "stable"
 direction = "ts_to_rust"

@@ -23,6 +23,7 @@ import {
   providerStateDiagnosticArraySchema,
   rawBodyStateSchema,
   rawModelProviderRefreshImpactSchema,
+  rawModelProviderRefreshPlanSchema,
   rawModelProviderRecordArraySchema,
   rawModelProviderRecordSchema,
   rawOpenAiResponsesBrainRunResultSchema,
@@ -479,6 +480,7 @@ interface NativeBridgeBinding {
   getModelProviderJson(alias: string): string;
   getModelProviderSecretJson(alias: string): string;
   modelProviderRefreshImpactJson(requestJson: string): string;
+  planModelProviderRefreshJson(requestJson: string): string;
   runMaintenance(
     policy: NativeRuntimeMaintenancePolicy,
   ): NativeRuntimeMaintenanceReport;
@@ -1019,6 +1021,30 @@ export interface NativeModelProviderRefreshImpact {
 
 export interface NativeModelProviderRefreshImpactRequest {
   providerAlias: string;
+}
+
+export type NativeModelProviderRefreshMode = "none" | "plan" | "apply";
+
+export interface NativeModelProviderRefreshPlanRequest {
+  providerAlias: string;
+  mode: NativeModelProviderRefreshMode;
+}
+
+export interface NativeModelProviderRefreshProfileAction {
+  profileId: string;
+  commandName: string;
+  reason: string;
+  plannedSummary: string;
+  appliedSummary: string;
+  blockedSummary: string;
+  failureReasonCode: string;
+}
+
+export interface NativeModelProviderRefreshPlan {
+  providerAlias: string;
+  mode: NativeModelProviderRefreshMode;
+  affectedProfiles: NativeModelProviderAffectedProfile[];
+  actions: NativeModelProviderRefreshProfileAction[];
 }
 
 export type NativeRoleplayLoreRecord = Record<string, unknown>;
@@ -1897,6 +1923,9 @@ export interface NativeBridgeModule {
   modelProviderRefreshImpact(
     request: NativeModelProviderRefreshImpactRequest,
   ): Promise<NativeModelProviderRefreshImpact>;
+  planModelProviderRefresh(
+    request: NativeModelProviderRefreshPlanRequest,
+  ): Promise<NativeModelProviderRefreshPlan>;
   createLoreLayer(
     write: NativeRoleplayLoreLayerWrite,
   ): Promise<NativeRoleplayLoreLayerRecord>;
@@ -2298,6 +2327,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     getModelProvider: unavailable("initialize_engine"),
     getModelProviderSecret: unavailable("initialize_engine"),
     modelProviderRefreshImpact: unavailable("initialize_engine"),
+    planModelProviderRefresh: unavailable("initialize_engine"),
     createLoreLayer: unavailable("initialize_engine"),
     getLoreLayer: unavailable("initialize_engine"),
     listLoreLayers: unavailable("initialize_engine"),
@@ -3334,6 +3364,22 @@ function createNativeBridgeModule(
           value: JSON.parse(
             binding.modelProviderRefreshImpactJson(
               JSON.stringify({ provider_alias: request.providerAlias }),
+            ),
+          ),
+        }),
+      ),
+    planModelProviderRefresh: async (request) =>
+      toNativeModelProviderRefreshPlan(
+        validateBridgeValue<RawModelProviderRefreshPlan>({
+          operation: "plan_model_provider_refresh",
+          direction: "rust_to_ts",
+          schema: rawModelProviderRefreshPlanSchema,
+          value: JSON.parse(
+            binding.planModelProviderRefreshJson(
+              JSON.stringify({
+                provider_alias: request.providerAlias,
+                mode: request.mode,
+              }),
             ),
           ),
         }),
@@ -4924,6 +4970,30 @@ function toRawModelProviderRefreshImpact(
   };
 }
 
+function toNativeModelProviderRefreshPlan(
+  plan: RawModelProviderRefreshPlan,
+): NativeModelProviderRefreshPlan {
+  return {
+    providerAlias: plan.provider_alias,
+    mode: plan.mode,
+    affectedProfiles: plan.affected_profiles.map((profile) => ({
+      profileId: profile.profile_id,
+      sessionIds: profile.session_ids,
+      configuredSessionIds: profile.configured_session_ids,
+      activeSessionIds: profile.active_session_ids,
+    })),
+    actions: plan.actions.map((action) => ({
+      profileId: action.profile_id,
+      commandName: action.command_name,
+      reason: action.reason,
+      plannedSummary: action.planned_summary,
+      appliedSummary: action.applied_summary,
+      blockedSummary: action.blocked_summary,
+      failureReasonCode: action.failure_reason_code,
+    })),
+  };
+}
+
 function toNativeModelProviderRecord(
   record: RawModelProviderRecord,
 ): NativeModelProviderRecord {
@@ -6067,6 +6137,23 @@ interface RawModelProviderAffectedProfile {
 interface RawModelProviderRefreshImpact {
   provider_alias: string;
   affected_profiles: RawModelProviderAffectedProfile[];
+}
+
+interface RawModelProviderRefreshProfileAction {
+  profile_id: string;
+  command_name: string;
+  reason: string;
+  planned_summary: string;
+  applied_summary: string;
+  blocked_summary: string;
+  failure_reason_code: string;
+}
+
+interface RawModelProviderRefreshPlan {
+  provider_alias: string;
+  mode: NativeModelProviderRefreshMode;
+  affected_profiles: RawModelProviderAffectedProfile[];
+  actions: RawModelProviderRefreshProfileAction[];
 }
 
 interface RawRuntimeConfigDraft {

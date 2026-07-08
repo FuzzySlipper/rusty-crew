@@ -132,6 +132,13 @@ impl NativeBridge {
     ) -> CoreResult<rusty_crew_core_bridge_api::ModelProviderRefreshImpact> {
         self.engine()?.model_provider_refresh_impact(request)
     }
+
+    pub fn plan_model_provider_refresh(
+        &self,
+        request: &ModelProviderRefreshPlanRequest,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ModelProviderRefreshPlan> {
+        self.engine()?.plan_model_provider_refresh(request)
+    }
 }
 
 pub(crate) fn to_profile_registry_query(

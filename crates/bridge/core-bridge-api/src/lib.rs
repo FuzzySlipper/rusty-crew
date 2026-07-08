@@ -100,6 +100,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "get_model_provider",
     "get_model_provider_secret",
     "model_provider_refresh_impact",
+    "plan_model_provider_refresh",
     "plan_roleplay_assistant_alternative",
     "build_roleplay_prompt_context",
     "roleplay_speaker_identity",

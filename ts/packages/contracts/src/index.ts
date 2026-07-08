@@ -1628,6 +1628,7 @@ export const manifestOperationNames = [
   "get_model_provider",
   "get_model_provider_secret",
   "model_provider_refresh_impact",
+  "plan_model_provider_refresh",
   "plan_roleplay_assistant_alternative",
   "build_roleplay_prompt_context",
   "roleplay_speaker_identity",
@@ -1691,6 +1692,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "9b317550eefd3178e00804d9ec3bc78e35ce389618de86359ed5bebc4e65b641";
+  "515cd34b830d31a8d66ff318fe81d81252a8dd8d81ab968a83f71d9c8dc558f2";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

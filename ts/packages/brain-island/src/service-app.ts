@@ -81,6 +81,7 @@ import { buildChatWakeFailureSummaryFromEvents } from "./chat-wake-failure-summa
 import {
   createMemoryAdminControlAuditSink,
   type AdminControlCommand,
+  type AdminControlCommandName,
   type AdminControlExecutor,
   type AdminControlResponse,
   handleAdminControlRequest,
@@ -2091,48 +2092,45 @@ async function modelProviderRefreshAfterWrite(input: {
   provider: NativeModelProviderRecord;
   refreshMode: ModelProviderRefreshMode;
 }): Promise<ModelProviderWriteRefreshResult> {
-  const affectedProfiles = await modelProviderAffectedProfiles(
-    input.state,
-    input.provider.alias,
-  );
+  const plan = await input.state.bridge.planModelProviderRefresh({
+    providerAlias: input.provider.alias,
+    mode: input.refreshMode,
+  });
   const outcomes: ModelProviderWriteRefreshResult["refresh"]["outcomes"] = [];
-  if (input.refreshMode !== "none") {
-    for (const affected of affectedProfiles) {
+  if (plan.mode !== "none") {
+    for (const action of plan.actions) {
       const command: AdminControlCommand = {
-        name:
-          input.refreshMode === "apply"
-            ? "apply_runtime_rebuild"
-            : "plan_runtime_rebuild",
-        target: { scope: "profile", profileId: affected.profileId },
+        name: modelProviderRefreshCommandName(action.commandName),
+        target: { scope: "profile", profileId: action.profileId },
         actor: { operatorId: "model-provider-admin" },
         requestId: input.requestId,
-        reason: `model provider ${input.provider.alias} updated`,
+        reason: action.reason,
         body: {},
       };
       try {
         const outcome =
-          input.refreshMode === "apply"
+          plan.mode === "apply"
             ? await applyServiceRuntimeRebuild(input.state, command)
             : await planServiceRuntimeRebuild(input.state, command);
         const applyOutcome =
-          input.refreshMode === "apply"
+          plan.mode === "apply"
             ? (outcome as ServiceRuntimeRebuildApplyResult)
             : undefined;
         const applyStatus = applyOutcome?.apply.status;
         outcomes.push({
-          profileId: affected.profileId,
+          profileId: action.profileId,
           status:
-            input.refreshMode === "plan"
+            plan.mode === "plan"
               ? "planned"
               : applyStatus === "completed"
                 ? "applied"
                 : "blocked",
           summary:
-            input.refreshMode === "plan"
-              ? `runtime rebuild plan prepared for profile ${affected.profileId}`
+            plan.mode === "plan"
+              ? action.plannedSummary
               : applyStatus === "completed"
-                ? `runtime rebuild applied for profile ${affected.profileId}`
-                : `runtime rebuild blocked for profile ${affected.profileId}`,
+                ? action.appliedSummary
+                : action.blockedSummary,
           reasonCode:
             applyOutcome?.apply.status === "blocked"
               ? applyOutcome.apply.reasonCode
@@ -2141,13 +2139,13 @@ async function modelProviderRefreshAfterWrite(input: {
         });
       } catch (error) {
         outcomes.push({
-          profileId: affected.profileId,
+          profileId: action.profileId,
           status: "failed",
           summary: errorMessage(
             error,
-            `runtime rebuild failed for profile ${affected.profileId}`,
+            `runtime rebuild failed for profile ${action.profileId}`,
           ),
-          reasonCode: "model_provider_refresh_failed",
+          reasonCode: action.failureReasonCode,
         });
       }
     }
@@ -2155,21 +2153,18 @@ async function modelProviderRefreshAfterWrite(input: {
 
   return {
     refresh: {
-      mode: input.refreshMode,
-      affectedProfiles,
+      mode: plan.mode,
+      affectedProfiles: plan.affectedProfiles,
       outcomes,
     },
   };
 }
 
-async function modelProviderAffectedProfiles(
-  state: ServiceState,
-  alias: string,
-): Promise<ModelProviderWriteRefreshResult["refresh"]["affectedProfiles"]> {
-  const impact = await state.bridge.modelProviderRefreshImpact({
-    providerAlias: alias,
-  });
-  return impact.affectedProfiles;
+function modelProviderRefreshCommandName(value: string): AdminControlCommandName {
+  if (value === "plan_runtime_rebuild" || value === "apply_runtime_rebuild") {
+    return value;
+  }
+  throw new Error(`unknown model-provider refresh command ${value}`);
 }
 
 async function handleDirectDebugRequest(

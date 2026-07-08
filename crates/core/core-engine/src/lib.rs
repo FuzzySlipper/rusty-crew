@@ -54,11 +54,13 @@ use rusty_crew_core_protocol::{
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
     ModelProviderQuery, ModelProviderRecord, ModelProviderRefreshImpact,
-    ModelProviderRefreshImpactRequest, ModelProviderWrite, ParentConsumptionPolicy, ProfileId,
-    ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderStateClearReason, ProviderStateMode, ResourceLimits, RunId, SessionActivityDigest,
-    SessionActivityDigestQuery, SessionConfig, SessionId, SessionKind, SessionState, SessionStatus,
-    ShutdownSummary, ToolProfile, WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
+    ModelProviderRefreshImpactRequest, ModelProviderRefreshMode, ModelProviderRefreshPlan,
+    ModelProviderRefreshPlanRequest, ModelProviderRefreshProfileAction, ModelProviderWrite,
+    ParentConsumptionPolicy, ProfileId, ProfilePurgeReport, ProfileRegistryRecord,
+    ProfileRegistryWrite, ProviderStateAbsenceReason, ProviderStateClearReason, ProviderStateMode,
+    ResourceLimits, RunId, SessionActivityDigest, SessionActivityDigestQuery, SessionConfig,
+    SessionId, SessionKind, SessionState, SessionStatus, ShutdownSummary, ToolProfile,
+    WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
 use std::collections::{HashMap, HashSet};
@@ -767,6 +769,53 @@ impl CoreEngine {
         Ok(ModelProviderRefreshImpact {
             provider_alias: provider_alias.to_string(),
             affected_profiles,
+        })
+    }
+
+    pub fn plan_model_provider_refresh(
+        &self,
+        request: &ModelProviderRefreshPlanRequest,
+    ) -> CoreResult<ModelProviderRefreshPlan> {
+        let impact = self.model_provider_refresh_impact(&ModelProviderRefreshImpactRequest {
+            provider_alias: request.provider_alias.clone(),
+        })?;
+        let command_name = match request.mode {
+            ModelProviderRefreshMode::None => None,
+            ModelProviderRefreshMode::Plan => Some("plan_runtime_rebuild"),
+            ModelProviderRefreshMode::Apply => Some("apply_runtime_rebuild"),
+        };
+        let actions = command_name
+            .map(|command_name| {
+                impact
+                    .affected_profiles
+                    .iter()
+                    .map(|affected| {
+                        let profile_id = affected.profile_id.to_string();
+                        ModelProviderRefreshProfileAction {
+                            profile_id: affected.profile_id.clone(),
+                            command_name: command_name.to_string(),
+                            reason: format!("model provider {} updated", impact.provider_alias),
+                            planned_summary: format!(
+                                "runtime rebuild plan prepared for profile {profile_id}"
+                            ),
+                            applied_summary: format!(
+                                "runtime rebuild applied for profile {profile_id}"
+                            ),
+                            blocked_summary: format!(
+                                "runtime rebuild blocked for profile {profile_id}"
+                            ),
+                            failure_reason_code: "model_provider_refresh_failed".to_string(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok(ModelProviderRefreshPlan {
+            provider_alias: impact.provider_alias,
+            mode: request.mode.clone(),
+            affected_profiles: impact.affected_profiles,
+            actions,
         })
     }
 
@@ -5611,6 +5660,66 @@ mod tests {
                 SessionId::new("configured-planner-session")
             ]
         );
+    }
+
+    #[test]
+    fn model_provider_refresh_plan_none_keeps_impact_but_no_actions() {
+        let engine = test_engine();
+        engine
+            .create_profile_registry_record(&profile_registry_write(
+                "planner-profile",
+                "alternate",
+                "configured-planner-session",
+            ))
+            .unwrap();
+
+        let plan = engine
+            .plan_model_provider_refresh(&ModelProviderRefreshPlanRequest {
+                provider_alias: "alternate".to_string(),
+                mode: ModelProviderRefreshMode::None,
+            })
+            .unwrap();
+
+        assert_eq!(plan.provider_alias, "alternate");
+        assert_eq!(plan.mode, ModelProviderRefreshMode::None);
+        assert_eq!(plan.affected_profiles.len(), 1);
+        assert!(plan.actions.is_empty());
+    }
+
+    #[test]
+    fn model_provider_refresh_plan_apply_builds_rebuild_actions() {
+        let engine = test_engine();
+        engine
+            .create_profile_registry_record(&profile_registry_write(
+                "planner-profile",
+                "alternate",
+                "configured-planner-session",
+            ))
+            .unwrap();
+
+        let plan = engine
+            .plan_model_provider_refresh(&ModelProviderRefreshPlanRequest {
+                provider_alias: "alternate".to_string(),
+                mode: ModelProviderRefreshMode::Apply,
+            })
+            .unwrap();
+
+        assert_eq!(plan.provider_alias, "alternate");
+        assert_eq!(plan.mode, ModelProviderRefreshMode::Apply);
+        assert_eq!(plan.actions.len(), 1);
+        let action = &plan.actions[0];
+        assert_eq!(action.profile_id, ProfileId::new("planner-profile"));
+        assert_eq!(action.command_name, "apply_runtime_rebuild");
+        assert_eq!(action.reason, "model provider alternate updated");
+        assert_eq!(
+            action.applied_summary,
+            "runtime rebuild applied for profile planner-profile"
+        );
+        assert_eq!(
+            action.blocked_summary,
+            "runtime rebuild blocked for profile planner-profile"
+        );
+        assert_eq!(action.failure_reason_code, "model_provider_refresh_failed");
     }
 
     fn test_engine() -> CoreEngine {
