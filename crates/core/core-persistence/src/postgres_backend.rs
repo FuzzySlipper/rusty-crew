@@ -44,20 +44,22 @@ use crate::{
     AgentInstanceId, AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite,
     AttachmentQuery, AttachmentRecord, AttachmentStatus, AttachmentWrite,
     BranchAwareSessionMemoryQuery, BranchHeadConflict, BranchHeadExpectation, ChannelBindingQuery,
-    ChannelBindingRecord, ChatAttachmentMutationStatus, ChatEventLogAppend, ChatEventLogEvent,
-    ChatEventLogPage, ChatEventLogQuery, CompletionPacketQuery, CompletionPacketRecord,
-    ContextCompactionArtifact, ContextCompactionArtifactQuery, ConversationBranchId,
-    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
-    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
-    ConversationJumpTarget, ConversationSnapshotId, ConversationSnapshotQuery,
-    ConversationSnapshotRecord, ConversationSnapshotSource, ConversationSnapshotWrite, CoreError,
-    CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, CreateChatAttachmentRequest,
-    CreateChatAttachmentResult, CreateChatConversationBranchRequest, CreateChatMessageSlotRequest,
-    CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
-    DataBankScopeId, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus,
-    DataBankScopeWrite, DelegatedCompletion, DeleteChatMessageVariantRequest, DenRuntimeReference,
-    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord,
-    DurableMessageStatus, DurableMessageWrite, EnsureActiveChatConversationBranchRequest,
+    ChannelBindingRecord, ChatAttachmentMutationStatus, ChatDataBankScopeMutationStatus,
+    ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage, ChatEventLogQuery,
+    CompletionPacketQuery, CompletionPacketRecord, ContextCompactionArtifact,
+    ContextCompactionArtifactQuery, ConversationBranchId, ConversationBranchQuery,
+    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
+    ConversationJumpRequest, ConversationJumpResult, ConversationJumpTarget,
+    ConversationSnapshotId, ConversationSnapshotQuery, ConversationSnapshotRecord,
+    ConversationSnapshotSource, ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreEvent,
+    CoreEventKind, CoreResult, CreateChatAttachmentRequest, CreateChatAttachmentResult,
+    CreateChatConversationBranchRequest, CreateChatDataBankScopeRequest,
+    CreateChatDataBankScopeResult, CreateChatMessageSlotRequest, CreateChatMessageSlotResult,
+    CreateChatMessageVariantRequest, CreateChatMessageVariantResult, DataBankScopeId,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite,
+    DelegatedCompletion, DeleteChatMessageVariantRequest, DenRuntimeReference, DurableAgentKind,
+    DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord, DurableMessageStatus,
+    DurableMessageWrite, EnsureActiveChatConversationBranchRequest,
     EnsureActiveChatConversationBranchResult, ExternalBindingStatus, IsoTimestamp, LoreRecallEntry,
     LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
     McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord, MessageId,
@@ -73,15 +75,15 @@ use crate::{
     ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
     ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
     QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
-    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
-    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
-    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
-    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
-    RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent,
-    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
-    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeCounterQuery,
-    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter,
-    RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
+    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
+    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
+    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy,
+    RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus,
+    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId,
+    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
+    RuntimeEventFilter, RuntimeEventRecord, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
     RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter, RuntimeSearchResult,
     RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
     RuntimeStorageConnectionHealth, RuntimeStorageTableCount, ScheduledJobQuery,
@@ -4736,6 +4738,30 @@ fn save_data_bank_scope_in_tx(
     )
     .map_err(|error| postgres_error("save PostgreSQL data-bank scope", error))?;
     Ok(())
+}
+
+fn data_bank_scope_session_created_at_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    scope_id: &DataBankScopeId,
+) -> CoreResult<Option<(SessionId, IsoTimestamp)>> {
+    tx.query_opt(
+        &format!(
+            "SELECT session_id, created_at
+             FROM {schema}.data_bank_scopes
+             WHERE scope_id = $1"
+        ),
+        &[&scope_id.0],
+    )
+    .map_err(|error| postgres_error("load PostgreSQL data-bank scope session ownership", error))
+    .map(|row| {
+        row.map(|row| {
+            (
+                SessionId::new(row.get::<_, String>(0)),
+                row.get::<_, String>(1),
+            )
+        })
+    })
 }
 
 fn query_data_bank_scopes<C: GenericClient>(

@@ -275,6 +275,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_chat_data_bank_scope_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<CreateChatDataBankScopeRequest>(
+            &input_json,
+            "create chat data-bank scope request",
+        )?;
+        let result = bridge
+            .create_chat_data_bank_scope(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "create chat data-bank scope result")
+    }
+
+    #[napi]
     pub fn query_data_bank_scopes_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<DataBankScopeQuery>(&input_json, "data-bank scope query")?;
@@ -293,6 +306,19 @@ impl NativeBridgeBinding {
         )?;
         let record = bridge
             .remove_data_bank_scope(&request.scope_id, &request.updated_at)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "data-bank scope record")
+    }
+
+    #[napi]
+    pub fn remove_chat_data_bank_scope_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<RemoveChatDataBankScopeRequest>(
+            &input_json,
+            "remove chat data-bank scope request",
+        )?;
+        let record = bridge
+            .remove_chat_data_bank_scope(&request)
             .map_err(to_napi_error)?;
         serialize_json(&record, "data-bank scope record")
     }

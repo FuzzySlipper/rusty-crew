@@ -165,6 +165,13 @@ impl NativeBridge {
         self.engine()?.save_data_bank_scope(scope)
     }
 
+    pub fn create_chat_data_bank_scope(
+        &self,
+        request: &CreateChatDataBankScopeRequest,
+    ) -> CoreResult<CreateChatDataBankScopeResult> {
+        self.engine()?.create_chat_data_bank_scope(request)
+    }
+
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
@@ -178,6 +185,13 @@ impl NativeBridge {
         updated_at: &rusty_crew_core_bridge_api::IsoTimestamp,
     ) -> CoreResult<DataBankScopeRecord> {
         self.engine()?.remove_data_bank_scope(scope_id, updated_at)
+    }
+
+    pub fn remove_chat_data_bank_scope(
+        &self,
+        request: &RemoveChatDataBankScopeRequest,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.engine()?.remove_chat_data_bank_scope(request)
     }
 
     pub fn select_active_message_variant(

@@ -269,8 +269,10 @@ interface NativeBridgeBinding {
   removeAttachmentJson(inputJson: string): string;
   removeChatAttachmentJson(inputJson: string): string;
   saveDataBankScopeJson(inputJson: string): string;
+  createChatDataBankScopeJson(inputJson: string): string;
   queryDataBankScopesJson(inputJson: string): string;
   removeDataBankScopeJson(inputJson: string): string;
+  removeChatDataBankScopeJson(inputJson: string): string;
   addLoreEntryJson(inputJson: string): string;
   replaceLoreEntryJson(inputJson: string): string;
   supersedeLoreEntryJson(inputJson: string): string;
@@ -2203,8 +2205,10 @@ export interface NativeBridgeModule {
   removeAttachment(input: unknown): Promise<unknown>;
   removeChatAttachment(input: unknown): Promise<unknown>;
   saveDataBankScope(input: unknown): Promise<unknown>;
+  createChatDataBankScope(input: unknown): Promise<unknown>;
   queryDataBankScopes(query: unknown): Promise<unknown[]>;
   removeDataBankScope(input: unknown): Promise<unknown>;
+  removeChatDataBankScope(input: unknown): Promise<unknown>;
   providerStateDiagnostics(
     limit?: number,
   ): Promise<NativeProviderStateDiagnostic[]>;
@@ -2573,8 +2577,10 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     removeAttachment: unavailable("remove_attachment"),
     removeChatAttachment: unavailable("remove_chat_attachment"),
     saveDataBankScope: unavailable("save_data_bank_scope"),
+    createChatDataBankScope: unavailable("create_chat_data_bank_scope"),
     queryDataBankScopes: unavailable("query_data_bank_scopes"),
     removeDataBankScope: unavailable("remove_data_bank_scope"),
+    removeChatDataBankScope: unavailable("remove_chat_data_bank_scope"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
     runOpenAiResponsesBrain: unavailable("wake_brain"),
     exchangeOpenAiOauthCode: unavailable("wake_brain"),
@@ -3901,6 +3907,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.saveDataBankScopeJson(JSON.stringify(input)),
       ) as unknown,
+    createChatDataBankScope: async (input) =>
+      JSON.parse(
+        binding.createChatDataBankScopeJson(JSON.stringify(input)),
+      ) as unknown,
     queryDataBankScopes: async (query) =>
       JSON.parse(
         binding.queryDataBankScopesJson(JSON.stringify(query)),
@@ -3908,6 +3918,10 @@ function createNativeBridgeModule(
     removeDataBankScope: async (input) =>
       JSON.parse(
         binding.removeDataBankScopeJson(JSON.stringify(input)),
+      ) as unknown,
+    removeChatDataBankScope: async (input) =>
+      JSON.parse(
+        binding.removeChatDataBankScopeJson(JSON.stringify(input)),
       ) as unknown,
     providerStateDiagnostics: async (limit = 100) => {
       const stored = binding

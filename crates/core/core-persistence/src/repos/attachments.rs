@@ -128,6 +128,42 @@ impl CoordinationStore {
         Ok(record)
     }
 
+    pub fn create_chat_data_bank_scope(
+        &self,
+        request: &CreateChatDataBankScopeRequest,
+    ) -> CoreResult<CreateChatDataBankScopeResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin create chat data-bank scope", error))?;
+        let existing = data_bank_scope_session_created_at_in_tx(&tx, &request.scope.scope_id)?;
+        let mut scope = request.scope.clone();
+        let status = match existing {
+            Some((session_id, created_at)) if session_id == scope.session_id => {
+                scope.created_at = created_at;
+                ChatDataBankScopeMutationStatus::Updated
+            }
+            Some((session_id, _)) => {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "data-bank scope {} already belongs to session {} and cannot be written by {}",
+                        scope.scope_id, session_id, scope.session_id
+                    ),
+                ));
+            }
+            None => ChatDataBankScopeMutationStatus::Created,
+        };
+        save_data_bank_scope_in_tx(&tx, &scope)?;
+        let record = load_data_bank_scope_in_tx(&tx, &scope.scope_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit create chat data-bank scope", error))?;
+        Ok(CreateChatDataBankScopeResult {
+            status,
+            scope: record,
+        })
+    }
+
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
@@ -155,6 +191,41 @@ impl CoordinationStore {
         let record = load_data_bank_scope_in_tx(&tx, scope_id)?;
         tx.commit()
             .map_err(|error| persistence_error("commit remove data-bank scope", error))?;
+        Ok(record)
+    }
+
+    pub fn remove_chat_data_bank_scope(
+        &self,
+        request: &RemoveChatDataBankScopeRequest,
+    ) -> CoreResult<DataBankScopeRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin remove chat data-bank scope", error))?;
+        let changed = tx
+            .execute(
+                "UPDATE data_bank_scopes
+                 SET status = 'removed', updated_at = ?3
+                 WHERE scope_id = ?1 AND session_id = ?2",
+                params![
+                    request.scope_id.0.as_str(),
+                    request.session_id.0.as_str(),
+                    request.updated_at,
+                ],
+            )
+            .map_err(|error| persistence_error("remove chat data-bank scope", error))?;
+        if changed == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "data-bank scope {} not found for session {}",
+                    request.scope_id, request.session_id
+                ),
+            ));
+        }
+        let record = load_data_bank_scope_in_tx(&tx, &request.scope_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit remove chat data-bank scope", error))?;
         Ok(record)
     }
 }
@@ -688,6 +759,26 @@ fn save_data_bank_scope_in_tx(
     )
     .map_err(|error| persistence_error("save data-bank scope", error))?;
     Ok(())
+}
+
+fn data_bank_scope_session_created_at_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    scope_id: &DataBankScopeId,
+) -> CoreResult<Option<(SessionId, IsoTimestamp)>> {
+    tx.query_row(
+        "SELECT session_id, created_at
+         FROM data_bank_scopes
+         WHERE scope_id = ?1",
+        params![scope_id.0.as_str()],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load data-bank scope session ownership", error))
 }
 
 fn query_data_bank_scopes(

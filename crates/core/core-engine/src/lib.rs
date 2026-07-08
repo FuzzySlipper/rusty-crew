@@ -21,7 +21,8 @@ use rusty_crew_core_persistence::{
     ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
     ConversationSnapshotWrite, CoreCoordinationStore, CreateChatAttachmentRequest,
-    CreateChatAttachmentResult, CreateChatConversationBranchRequest, CreateChatMessageSlotRequest,
+    CreateChatAttachmentResult, CreateChatConversationBranchRequest,
+    CreateChatDataBankScopeRequest, CreateChatDataBankScopeResult, CreateChatMessageSlotRequest,
     CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
     DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DeleteChatMessageVariantRequest,
     DurableMessageRecord, EnsureActiveChatConversationBranchRequest,
@@ -32,16 +33,17 @@ use rusty_crew_core_persistence::{
     ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
     ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
     ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
-    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
-    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
-    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
-    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
-    RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
-    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
-    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics,
-    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
+    RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
+    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
+    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
+    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
+    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
     SelectActiveChatMessageVariantResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
     SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
@@ -1260,6 +1262,15 @@ impl CoreEngine {
         self.store.conversation().save_data_bank_scope(scope)
     }
 
+    pub fn create_chat_data_bank_scope(
+        &self,
+        request: &CreateChatDataBankScopeRequest,
+    ) -> CoreResult<CreateChatDataBankScopeResult> {
+        self.store
+            .conversation()
+            .create_chat_data_bank_scope(request)
+    }
+
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
@@ -1275,6 +1286,15 @@ impl CoreEngine {
         self.store
             .conversation()
             .remove_data_bank_scope(scope_id, updated_at)
+    }
+
+    pub fn remove_chat_data_bank_scope(
+        &self,
+        request: &RemoveChatDataBankScopeRequest,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.store
+            .conversation()
+            .remove_chat_data_bank_scope(request)
     }
 
     pub fn select_active_message_variant(
@@ -2775,11 +2795,12 @@ mod tests {
     use super::*;
     use rusty_crew_core_persistence::{
         ActiveVariantConflict, AgentMessageQuery, AttachmentLinkWrite, AttachmentStatus,
-        BranchHeadConflict, ChatAttachmentMutationStatus, CompletionPacketQuery, CoordinationStore,
-        DurableMessageStatus, DurableMessageWrite, MessageVariantSource, MessageVariantStatus,
-        QueryPage, QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState,
-        RuntimeCounterScope, RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType,
-        ScheduledRunQuery, ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
+        BranchHeadConflict, ChatAttachmentMutationStatus, ChatDataBankScopeMutationStatus,
+        CompletionPacketQuery, CoordinationStore, DataBankScopeStatus, DurableMessageStatus,
+        DurableMessageWrite, MessageVariantSource, MessageVariantStatus, QueryPage,
+        QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope,
+        RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
+        ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
     };
     #[cfg(feature = "postgres")]
     use rusty_crew_core_protocol::EngineStorageConfig;
@@ -6800,6 +6821,61 @@ mod tests {
     }
 
     #[test]
+    fn create_chat_data_bank_scope_rejects_cross_session_scope_collision() {
+        let engine = test_engine();
+        let first = engine
+            .create_chat_data_bank_scope(&CreateChatDataBankScopeRequest {
+                scope: test_data_bank_scope_write("scope-session-a", "shared-scope"),
+            })
+            .unwrap();
+        assert_eq!(first.status, ChatDataBankScopeMutationStatus::Created);
+
+        let error = engine
+            .create_chat_data_bank_scope(&CreateChatDataBankScopeRequest {
+                scope: test_data_bank_scope_write("scope-session-b", "shared-scope"),
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+
+        let records = engine
+            .query_data_bank_scopes(&DataBankScopeQuery {
+                session_id: Some(SessionId::new("scope-session-a")),
+                include_removed: true,
+                ..DataBankScopeQuery::default()
+            })
+            .unwrap();
+        assert_eq!(records[0].session_id, SessionId::new("scope-session-a"));
+    }
+
+    #[test]
+    fn remove_chat_data_bank_scope_is_session_scoped() {
+        let engine = test_engine();
+        engine
+            .create_chat_data_bank_scope(&CreateChatDataBankScopeRequest {
+                scope: test_data_bank_scope_write("remove-scope-session", "remove-scope"),
+            })
+            .unwrap();
+
+        let error = engine
+            .remove_chat_data_bank_scope(&RemoveChatDataBankScopeRequest {
+                session_id: SessionId::new("remove-other-session"),
+                scope_id: DataBankScopeId::new("remove-scope"),
+                updated_at: "2026-06-19T00:02:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+
+        let record = engine
+            .remove_chat_data_bank_scope(&RemoveChatDataBankScopeRequest {
+                session_id: SessionId::new("remove-scope-session"),
+                scope_id: DataBankScopeId::new("remove-scope"),
+                updated_at: "2026-06-19T00:03:00Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(record.status, DataBankScopeStatus::Removed);
+    }
+
+    #[test]
     fn delete_chat_message_variant_validates_slot_session_ownership() {
         let engine = test_engine();
         save_test_message_slot(
@@ -7092,6 +7168,19 @@ mod tests {
             updated_at: "2026-06-19T00:01:00Z".to_string(),
             expires_at: None,
             link,
+        }
+    }
+
+    fn test_data_bank_scope_write(session_id: &str, scope_id: &str) -> DataBankScopeWrite {
+        DataBankScopeWrite {
+            scope_id: DataBankScopeId::new(scope_id),
+            session_id: SessionId::new(session_id),
+            status: DataBankScopeStatus::Active,
+            label: Some(format!("Scope {scope_id}")),
+            description: Some("Reusable scope".to_string()),
+            metadata_json: json!({}),
+            created_at: "2026-06-19T00:01:00Z".to_string(),
+            updated_at: "2026-06-19T00:01:00Z".to_string(),
         }
     }
 

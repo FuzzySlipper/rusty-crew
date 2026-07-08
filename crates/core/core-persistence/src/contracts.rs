@@ -874,6 +874,31 @@ pub struct DataBankScopeWrite {
     pub updated_at: IsoTimestamp,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatDataBankScopeMutationStatus {
+    Created,
+    Updated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatDataBankScopeRequest {
+    pub scope: DataBankScopeWrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatDataBankScopeResult {
+    pub status: ChatDataBankScopeMutationStatus,
+    pub scope: DataBankScopeRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoveChatDataBankScopeRequest {
+    pub session_id: SessionId,
+    pub scope_id: DataBankScopeId,
+    pub updated_at: IsoTimestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DataBankScopeQuery {
     pub session_id: Option<SessionId>,

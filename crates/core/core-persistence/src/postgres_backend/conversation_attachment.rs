@@ -146,6 +146,45 @@ impl PostgresBackendStore {
         Ok(record)
     }
 
+    pub fn create_chat_data_bank_scope(
+        &self,
+        request: &CreateChatDataBankScopeRequest,
+    ) -> CoreResult<CreateChatDataBankScopeResult> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start create PostgreSQL chat data-bank scope", error)
+        })?;
+        let existing =
+            data_bank_scope_session_created_at_in_tx(&mut tx, &schema, &request.scope.scope_id)?;
+        let mut scope = request.scope.clone();
+        let status = match existing {
+            Some((session_id, created_at)) if session_id == scope.session_id => {
+                scope.created_at = created_at;
+                ChatDataBankScopeMutationStatus::Updated
+            }
+            Some((session_id, _)) => {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "data-bank scope {} already belongs to session {} and cannot be written by {}",
+                        scope.scope_id, session_id, scope.session_id
+                    ),
+                ));
+            }
+            None => ChatDataBankScopeMutationStatus::Created,
+        };
+        save_data_bank_scope_in_tx(&mut tx, &schema, &scope)?;
+        let record = load_data_bank_scope(&mut tx, &schema, &scope.scope_id)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit create PostgreSQL chat data-bank scope", error)
+        })?;
+        Ok(CreateChatDataBankScopeResult {
+            status,
+            scope: record,
+        })
+    }
+
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
@@ -178,6 +217,46 @@ impl PostgresBackendStore {
         let record = load_data_bank_scope(&mut tx, &schema, scope_id)?;
         tx.commit()
             .map_err(|error| postgres_error("commit remove PostgreSQL data-bank scope", error))?;
+        Ok(record)
+    }
+
+    pub fn remove_chat_data_bank_scope(
+        &self,
+        request: &RemoveChatDataBankScopeRequest,
+    ) -> CoreResult<DataBankScopeRecord> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start remove PostgreSQL chat data-bank scope", error)
+        })?;
+        let changed = tx
+            .execute(
+                &format!(
+                    "UPDATE {schema}.data_bank_scopes
+                     SET status = 'removed',
+                         updated_at = $3
+                     WHERE scope_id = $1 AND session_id = $2"
+                ),
+                &[
+                    &request.scope_id.0,
+                    &request.session_id.0,
+                    &request.updated_at,
+                ],
+            )
+            .map_err(|error| postgres_error("remove PostgreSQL chat data-bank scope", error))?;
+        if changed == 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::NotFound,
+                format!(
+                    "data-bank scope {} not found for session {}",
+                    request.scope_id, request.session_id
+                ),
+            ));
+        }
+        let record = load_data_bank_scope(&mut tx, &schema, &request.scope_id)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit remove PostgreSQL chat data-bank scope", error)
+        })?;
         Ok(record)
     }
 

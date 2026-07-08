@@ -8874,27 +8874,28 @@ async function createRustyViewDataBankScope(
       "scope",
       `${input.session.sessionId}:${input.requestId}`,
     );
-  const existing = await findRustyViewDataBankScope(
-    state,
-    input.session.sessionId,
-    scopeId,
-  );
-  const scope = (await state.bridge.saveDataBankScope({
-    scope_id: scopeId,
-    session_id: input.session.sessionId,
-    status: "active",
-    label: input.request.label ?? null,
-    description: input.request.description ?? null,
-    metadata_json: input.request.metadata_json ?? {},
-    created_at: existing?.created_at ?? now,
-    updated_at: now,
-  })) as DataBankScopeRecord;
+  const result = (await state.bridge.createChatDataBankScope({
+    scope: {
+      scope_id: scopeId,
+      session_id: input.session.sessionId,
+      status: "active",
+      label: input.request.label ?? null,
+      description: input.request.description ?? null,
+      metadata_json: input.request.metadata_json ?? {},
+      created_at: now,
+      updated_at: now,
+    },
+  })) as {
+    status: "created" | "updated";
+    scope: DataBankScopeRecord;
+  };
+  const scope = result.scope;
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "data_bank_scope_created",
     payload: { scope },
   });
   return {
-    status: existing ? "updated" : "created",
+    status: result.status,
     scope,
     latest_cursor: event.event_id,
   };
@@ -8924,15 +8925,11 @@ async function removeRustyViewDataBankScope(
   state: ServiceState,
   input: RemoveDataBankScopeInput,
 ): Promise<DataBankScopeMutationResult> {
-  const removed = (await state.bridge.removeDataBankScope({
+  const removed = (await state.bridge.removeChatDataBankScope({
+    session_id: input.session.sessionId,
     scope_id: input.scopeId,
     updated_at: state.now(),
   })) as DataBankScopeRecord;
-  if (removed.session_id !== input.session.sessionId) {
-    throw new Error(
-      `data-bank scope ${input.scopeId} was not found for ${input.session.sessionId}`,
-    );
-  }
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "data_bank_scope_removed",
     payload: { scope_id: input.scopeId, scope: removed },
@@ -9316,19 +9313,6 @@ async function findRustyViewAttachment(
     page: { limit: 1000, offset: 0 },
   })) as AttachmentRecord[];
   return records.find((record) => record.attachment_id === attachmentId);
-}
-
-async function findRustyViewDataBankScope(
-  state: ServiceState,
-  sessionId: SessionId,
-  scopeId: string,
-): Promise<DataBankScopeRecord | undefined> {
-  const records = (await state.bridge.queryDataBankScopes({
-    session_id: sessionId,
-    include_removed: true,
-    page: { limit: 1000, offset: 0 },
-  })) as DataBankScopeRecord[];
-  return records.find((record) => record.scope_id === scopeId);
 }
 
 function attachmentLinkRecord(input: {

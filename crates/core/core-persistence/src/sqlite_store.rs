@@ -1090,6 +1090,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_chat_data_bank_scope(
+        &self,
+        request: &CreateChatDataBankScopeRequest,
+    ) -> CoreResult<CreateChatDataBankScopeResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.create_chat_data_bank_scope(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.create_chat_data_bank_scope(request),
+        }
+    }
+
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
@@ -1110,6 +1121,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.remove_data_bank_scope(scope_id, updated_at),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.remove_data_bank_scope(scope_id, updated_at),
+        }
+    }
+
+    pub fn remove_chat_data_bank_scope(
+        &self,
+        request: &RemoveChatDataBankScopeRequest,
+    ) -> CoreResult<DataBankScopeRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.remove_chat_data_bank_scope(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.remove_chat_data_bank_scope(request),
         }
     }
 
@@ -1933,6 +1955,13 @@ impl ConversationRepositorySet<'_> {
         self.store.save_data_bank_scope(scope)
     }
 
+    pub fn create_chat_data_bank_scope(
+        &self,
+        request: &CreateChatDataBankScopeRequest,
+    ) -> CoreResult<CreateChatDataBankScopeResult> {
+        self.store.create_chat_data_bank_scope(request)
+    }
+
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
@@ -1946,6 +1975,13 @@ impl ConversationRepositorySet<'_> {
         updated_at: &IsoTimestamp,
     ) -> CoreResult<DataBankScopeRecord> {
         self.store.remove_data_bank_scope(scope_id, updated_at)
+    }
+
+    pub fn remove_chat_data_bank_scope(
+        &self,
+        request: &RemoveChatDataBankScopeRequest,
+    ) -> CoreResult<DataBankScopeRecord> {
+        self.store.remove_chat_data_bank_scope(request)
     }
 
     pub fn select_active_message_variant(

@@ -1628,8 +1628,10 @@ export const manifestOperationNames = [
   "remove_attachment",
   "remove_chat_attachment",
   "save_data_bank_scope",
+  "create_chat_data_bank_scope",
   "query_data_bank_scopes",
   "remove_data_bank_scope",
+  "remove_chat_data_bank_scope",
   "database_size",
   "storage_schema",
   "create_profile_registry_record",
@@ -1706,6 +1708,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "340f0ab68270b6f251d376bce02ba8ff54f09b8f6a627a883d1524de61e21c06";
+  "177f4e27ba7385e339a834908e712c81fdb2da18cff3aca622d8364b8aa913fa";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];
