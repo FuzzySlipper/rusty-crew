@@ -56,7 +56,7 @@ const adapterAuthorityForbiddenCalls = [
   "submitBrainTextDelta",
   "wakeBrainFromBridgeRequest",
 ];
-const legacyBrainIslandSrcSmokeCount = 137;
+const legacyBrainIslandSrcSmokeCount = 135;
 const legacySrcSmokeAllowedImports = new Map([
   [
     normalizePath("ts/packages/brain-island/src/smoke-adapter-diagnostics.ts"),
@@ -99,12 +99,6 @@ const legacySrcSmokeAllowedImports = new Map([
     new Set(["@rusty-crew/service-host"]),
   ],
   [
-    normalizePath(
-      "ts/packages/brain-island/src/smoke-admin-profile-create-concurrency.ts",
-    ),
-    new Set(["@rusty-crew/service-host"]),
-  ],
-  [
     normalizePath("ts/packages/brain-island/src/smoke-pi-agent-rust-bridge.ts"),
     new Set(),
   ],
@@ -139,12 +133,6 @@ const legacySrcSmokeAllowedImports = new Map([
   [
     normalizePath("ts/packages/brain-island/src/smoke-memory-skills-wake.ts"),
     new Set(["@rusty-crew/adapter-den"]),
-  ],
-  [
-    normalizePath(
-      "ts/packages/brain-island/src/smoke-new-session-config-transaction.ts",
-    ),
-    new Set(["@rusty-crew/service-host"]),
   ],
   [
     normalizePath("ts/packages/brain-island/src/smoke-reload-mcp-control.ts"),
