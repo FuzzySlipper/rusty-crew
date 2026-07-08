@@ -80,11 +80,11 @@ the bridge coverage ratchet in
 
 The ratchet currently pins:
 
-- manifest operations: 141;
-- exported TypeBox bridge schemas: 26;
-- Rust fixture families: 9;
-- manifest operations with TypeBox runtime validation and/or Rust fixtures: 21;
-- explicit operation exemptions: 120.
+- manifest operations: 171;
+- exported TypeBox bridge schemas: 36;
+- Rust fixture families: 11;
+- manifest operations with TypeBox runtime validation and/or Rust fixtures: 31;
+- explicit operation exemptions: 140.
 
 Together these provide the CI-capable drift guard while the full generator
 matures: adding a field to a covered Rust protocol shape fails until the TS
@@ -183,6 +183,7 @@ Checker-backed Rust fixtures currently cover:
 | Wake/session/action | `project_body_state`, `list_sessions`, Responses-style brain wake stream result | `rawBodyStateSchema`, `rawSessionStateArraySchema`, `rawOpenAiResponsesBrainRunResultSchema` |
 | Profile/model admin | profile registry records and model provider records returned by admin bridge methods | `rawProfileRegistryRecordSchema`, `rawModelProviderRecordSchema` |
 | Memory/governance | memory-space descriptors, memory proposal records, and governance decision records | `rawMemorySpaceDescriptorSchema`, `rawMemoryProposalRecordSchema`, `rawMemoryGovernanceDecisionRecordSchema` |
+| Memory activity/context | session activity digest records and context-compaction artifact records | `rawSessionActivityDigestSchema`, `rawContextCompactionArtifactSchema` |
 
 Not yet fixture-backed:
 
@@ -191,7 +192,6 @@ Not yet fixture-backed:
 - scheduler/runtime diagnostics and maintenance reports;
 - roleplay lore records and recall traces;
 - runtime search/counter records;
-- session activity digests and context-compaction artifact records.
 
 Until those families are covered, bump `MANIFEST_VERSION` for any breaking or
 renaming change to their Rust/TS wire keys, enum tags, required fields, or
@@ -210,6 +210,8 @@ Runtime validation currently wraps:
 - profile registry create/update/list/get record reads
 - model provider upsert/list/get record reads
 - OpenAI Responses brain run input/result
+- session activity digest save/list inputs and outputs
+- context-compaction artifact save/list inputs and outputs
 
 Bridge validation defaults are now fail-safe for development, test, and local
 service runs. `RUSTY_CREW_BRIDGE_VALIDATE=1` still forces validation on, and
@@ -230,13 +232,29 @@ explicit bridge validation opt-out.
    the Rust protocol type or a small wrapper struct when the bridge returns an
    envelope.
 4. Regenerate fixtures with `npm run codegen:bridge-fixtures`.
-5. After the wire-shape fingerprint guard lands, regenerate the fingerprint and
-   commit it with the fixture change.
+5. Regenerate the fingerprint with `npm run codegen:bridge-fingerprint`, then
+   copy the generated value into the `bridgeWireShapeFingerprint` export in
+   `ts/packages/contracts/src/index.ts`.
 6. Add or extend the matching TypeBox schema in
    `ts/packages/native-bridge/src/bridge-validation-schemas.ts`.
 7. Validate the fixture in
    `ts/packages/native-bridge/src/smoke-bridge-validation.ts`.
 8. Wrap the native bridge parse/cast chokepoint with `validateBridgeValue`.
-9. Run `npm run smoke:bridge-contract-parity`,
-   `npm run smoke:bridge-native-surface`, `npm run smoke:bridge-fixture-drift`,
-   `npm run smoke:bridge-validation`, and the relevant package typecheck/smoke.
+9. Add the operation to either `RUNTIME_VALIDATED_MANIFEST_OPERATIONS` or
+   `RUST_FIXTURE_BACKED_OPERATIONS` in
+   `ts/packages/native-bridge/src/bridge-validation-coverage.ts`. If the
+   family is intentionally uncovered, add every operation to exactly one
+   `BRIDGE_OPERATION_EXEMPTION_GROUP` with a narrow reason instead.
+10. Update the exact ratchets in `bridge-validation-coverage.ts`.
+11. Run the full bridge gate:
+
+```bash
+npm run typecheck
+npm run smoke:bridge-contract-parity
+npm run smoke:bridge-native-surface
+npm run smoke:bridge-fixture-drift
+npm run smoke:bridge-fingerprint-drift
+npm run smoke:bridge-validation
+npm run format
+git diff --check
+```

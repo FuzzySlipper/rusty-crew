@@ -75,6 +75,35 @@ TypeScript owns:
 
 ## Migration Slices
 
+### Current Guardrail Ratchets
+
+As of the task 4696 ratchet pass, the bridge validation gate pins:
+
+- manifest operations: 171;
+- exported TypeBox bridge schemas: 36;
+- Rust fixture families: 11;
+- manifest operations with TypeBox runtime validation and/or Rust fixtures: 31;
+- explicit operation exemptions: 140.
+
+New bridge operations must either become runtime validated or fixture-backed,
+or be added to exactly one documented exemption group in
+`ts/packages/native-bridge/src/bridge-validation-coverage.ts`. Active UI and
+service families should prefer fixture/schema coverage instead of growing the
+exemption count.
+
+The full bridge gate is:
+
+```bash
+npm run typecheck
+npm run smoke:bridge-contract-parity
+npm run smoke:bridge-native-surface
+npm run smoke:bridge-fixture-drift
+npm run smoke:bridge-fingerprint-drift
+npm run smoke:bridge-validation
+npm run format
+git diff --check
+```
+
 ### 1. Generate Or Check The Raw Native Binding Interface
 
 Use `bridge-manifest.toml` plus the generated napi declaration to generate or
@@ -161,4 +190,3 @@ safer.
 Do not treat `MANIFEST_VERSION` as a substitute for fixture/schema coverage on
 active UI paths. Version bumps are a coarse compatibility guard for uncovered
 families, not a reason to let covered shapes drift.
-

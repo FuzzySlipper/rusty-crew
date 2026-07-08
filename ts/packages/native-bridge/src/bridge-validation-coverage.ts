@@ -29,17 +29,21 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
   "chat_read_model_page",
   "create_profile_registry_record",
+  "drain_pi_agent_brain_stream",
   "get_model_provider",
   "get_profile_registry_record",
+  "list_context_compaction_artifacts",
   "list_model_providers",
   "list_profile_registry_records",
+  "list_session_activity_digests",
   "list_sessions",
   "model_provider_refresh_impact",
   "plan_model_provider_refresh",
   "provider_state_diagnostics",
   "purge_profile",
   "query_chat_events",
-  "drain_pi_agent_brain_stream",
+  "save_context_compaction_artifact",
+  "save_session_activity_digest",
   "run_openai_responses_brain",
   "start_pi_agent_brain",
   "submit_brain_actions",
@@ -317,6 +321,14 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
   },
 ] as const satisfies readonly OperationExemptionGroup[];
 
+const BRIDGE_COVERAGE_GREENPATH = [
+  "Bridge coverage ratchet failed.",
+  "Follow docs/bridge-contract-validation.md#adding-a-bridge-family and docs/native-bridge-rust-contract-mapping-migration.md.",
+  "Greenpath: manifest operation -> Rust operation name -> native surface check -> Rust fixture or exact exemption -> fingerprint update when fixture-backed -> TypeBox schema/validation -> wrapper mapping.",
+  "Useful commands: npm run smoke:bridge-contract-parity && npm run smoke:bridge-native-surface && npm run codegen:bridge-fixtures && npm run codegen:bridge-fingerprint && npm run smoke:bridge-fixture-drift && npm run smoke:bridge-fingerprint-drift && npm run smoke:bridge-validation.",
+  "If the operation is intentionally uncovered, add it to exactly one BRIDGE_OPERATION_EXEMPTION_GROUP with a narrow reason; active UI/service families should prefer fixture and schema coverage.",
+].join("\n");
+
 export function assertBridgeValidationCoverageRatchet(
   rustFixtures: RustBridgeValidationFixtureSummary,
 ): void {
@@ -401,12 +413,16 @@ function sortedUnique(values: readonly string[]): string[] {
 
 function assertEqual(label: string, actual: number, expected: number): void {
   if (actual === expected) return;
-  throw new Error(`${label} expected ${expected}, got ${actual}`);
+  throw new Error(
+    `${label} expected ${expected}, got ${actual}\n\n${BRIDGE_COVERAGE_GREENPATH}`,
+  );
 }
 
 function assertEmpty(label: string, values: readonly string[]): void {
   if (values.length === 0) return;
-  throw new Error(`${label}: ${values.join(", ")}`);
+  throw new Error(
+    `${label}: ${values.join(", ")}\n\n${BRIDGE_COVERAGE_GREENPATH}`,
+  );
 }
 
 function assertStringArrayEqual(
@@ -421,6 +437,6 @@ function assertStringArrayEqual(
     return;
   }
   throw new Error(
-    `${label} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    `${label} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}\n\n${BRIDGE_COVERAGE_GREENPATH}`,
   );
 }
