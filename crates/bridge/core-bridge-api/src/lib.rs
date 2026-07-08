@@ -92,6 +92,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "select_active_conversation_branch",
     "update_conversation_branch_head",
     "save_conversation_snapshot",
+    "create_chat_conversation_snapshot",
     "query_conversation_snapshots",
     "resolve_conversation_jump",
     "save_attachment",

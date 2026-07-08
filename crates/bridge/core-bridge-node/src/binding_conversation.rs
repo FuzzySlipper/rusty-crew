@@ -192,6 +192,22 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_chat_conversation_snapshot_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<CreateChatConversationSnapshotRequest>(
+            &input_json,
+            "create chat conversation snapshot request",
+        )?;
+        let result = bridge
+            .create_chat_conversation_snapshot(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "create chat conversation snapshot result")
+    }
+
+    #[napi]
     pub fn query_conversation_snapshots_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query =

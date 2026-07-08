@@ -8725,19 +8725,22 @@ async function createRustyViewConversationSnapshot(
       "snapshot",
       `${input.session.sessionId}:${input.requestId}`,
     );
-  const snapshot = (await state.bridge.saveConversationSnapshot({
-    snapshot_id: snapshotId,
-    session_id: input.session.sessionId,
-    branch_id: input.request.branch_id ?? null,
-    message_id: input.request.message_id ?? null,
-    cursor: input.request.cursor ?? null,
-    label: input.request.label ?? null,
-    summary: input.request.summary ?? null,
-    source: input.request.source ?? "user",
-    metadata_json: input.request.metadata_json ?? {},
-    created_at: now,
-    updated_at: now,
-  })) as ConversationSnapshotRecord;
+  const result = (await state.bridge.createChatConversationSnapshot({
+    snapshot: {
+      snapshot_id: snapshotId,
+      session_id: input.session.sessionId,
+      branch_id: input.request.branch_id ?? null,
+      message_id: input.request.message_id ?? null,
+      cursor: input.request.cursor ?? null,
+      label: input.request.label ?? null,
+      summary: input.request.summary ?? null,
+      source: input.request.source ?? "user",
+      metadata_json: input.request.metadata_json ?? {},
+      created_at: now,
+      updated_at: now,
+    },
+  })) as { snapshot: ConversationSnapshotRecord };
+  const snapshot = result.snapshot;
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "conversation_snapshot_created",
     payload: { snapshot },

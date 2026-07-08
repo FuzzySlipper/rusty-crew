@@ -1156,59 +1156,60 @@ impl PostgresBackendStore {
         &self,
         snapshot: &ConversationSnapshotWrite,
     ) -> CoreResult<ConversationSnapshotRecord> {
-        let metadata_json = to_json_text(&snapshot.metadata_json)?;
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         let mut tx = client.transaction().map_err(|error| {
             postgres_error("start save PostgreSQL conversation snapshot", error)
         })?;
-        let source = conversation_snapshot_source_as_str(snapshot.source);
-        tx.execute(
-            &format!(
-                "INSERT INTO {schema}.conversation_snapshots (
-                    snapshot_id,
-                    session_id,
-                    branch_id,
-                    message_id,
-                    cursor,
-                    label,
-                    summary,
-                    source,
-                    metadata_json,
-                    created_at,
-                    updated_at
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                 ON CONFLICT(snapshot_id) DO UPDATE SET
-                    session_id = EXCLUDED.session_id,
-                    branch_id = EXCLUDED.branch_id,
-                    message_id = EXCLUDED.message_id,
-                    cursor = EXCLUDED.cursor,
-                    label = EXCLUDED.label,
-                    summary = EXCLUDED.summary,
-                    source = EXCLUDED.source,
-                    metadata_json = EXCLUDED.metadata_json,
-                    updated_at = EXCLUDED.updated_at"
-            ),
-            &[
-                &snapshot.snapshot_id.0,
-                &snapshot.session_id.0,
-                &snapshot.branch_id.as_ref().map(|value| value.0.as_str()),
-                &snapshot.message_id.as_ref().map(|value| value.0.as_str()),
-                &snapshot.cursor,
-                &snapshot.label,
-                &snapshot.summary,
-                &source,
-                &metadata_json,
-                &snapshot.created_at,
-                &snapshot.updated_at,
-            ],
-        )
-        .map_err(|error| postgres_error("save PostgreSQL conversation snapshot", error))?;
+        save_conversation_snapshot_in_tx(&mut tx, &schema, snapshot)?;
         let record = load_conversation_snapshot_in_tx(&mut tx, &schema, &snapshot.snapshot_id)?;
         tx.commit().map_err(|error| {
             postgres_error("commit save PostgreSQL conversation snapshot", error)
         })?;
         Ok(record)
+    }
+
+    pub fn create_chat_conversation_snapshot(
+        &self,
+        request: &CreateChatConversationSnapshotRequest,
+    ) -> CoreResult<CreateChatConversationSnapshotResult> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start create PostgreSQL chat conversation snapshot", error)
+        })?;
+        validate_chat_conversation_snapshot_write(&mut tx, &schema, &request.snapshot)?;
+        let existing = conversation_snapshot_session_created_at_in_tx(
+            &mut tx,
+            &schema,
+            &request.snapshot.snapshot_id,
+        )?;
+        let mut snapshot = request.snapshot.clone();
+        let status = match existing {
+            Some((session_id, created_at)) if session_id == snapshot.session_id => {
+                snapshot.created_at = created_at;
+                ChatConversationSnapshotMutationStatus::Updated
+            }
+            Some((session_id, _)) => {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "conversation snapshot {} already belongs to session {} and cannot be written by {}",
+                        snapshot.snapshot_id, session_id, snapshot.session_id
+                    ),
+                ));
+            }
+            None => ChatConversationSnapshotMutationStatus::Created,
+        };
+        save_conversation_snapshot_in_tx(&mut tx, &schema, &snapshot)?;
+        let record = load_conversation_snapshot_in_tx(&mut tx, &schema, &snapshot.snapshot_id)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit create PostgreSQL chat conversation snapshot", error)
+        })?;
+        Ok(CreateChatConversationSnapshotResult {
+            status,
+            snapshot: record,
+        })
     }
 
     pub fn query_conversation_snapshots(
@@ -1318,6 +1319,57 @@ fn save_conversation_branch_in_tx(
     Ok(())
 }
 
+fn save_conversation_snapshot_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    snapshot: &ConversationSnapshotWrite,
+) -> CoreResult<()> {
+    let metadata_json = to_json_text(&snapshot.metadata_json)?;
+    let source = conversation_snapshot_source_as_str(snapshot.source);
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.conversation_snapshots (
+                snapshot_id,
+                session_id,
+                branch_id,
+                message_id,
+                cursor,
+                label,
+                summary,
+                source,
+                metadata_json,
+                created_at,
+                updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             ON CONFLICT(snapshot_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                branch_id = EXCLUDED.branch_id,
+                message_id = EXCLUDED.message_id,
+                cursor = EXCLUDED.cursor,
+                label = EXCLUDED.label,
+                summary = EXCLUDED.summary,
+                source = EXCLUDED.source,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = EXCLUDED.updated_at"
+        ),
+        &[
+            &snapshot.snapshot_id.0,
+            &snapshot.session_id.0,
+            &snapshot.branch_id.as_ref().map(|value| value.0.as_str()),
+            &snapshot.message_id.as_ref().map(|value| value.0.as_str()),
+            &snapshot.cursor,
+            &snapshot.label,
+            &snapshot.summary,
+            &source,
+            &metadata_json,
+            &snapshot.created_at,
+            &snapshot.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL conversation snapshot", error))?;
+    Ok(())
+}
+
 fn validate_chat_conversation_branch_write(
     tx: &mut Transaction<'_>,
     schema: &str,
@@ -1336,6 +1388,49 @@ fn validate_chat_conversation_branch_write(
         ensure_message_belongs_to_session_in_tx(tx, schema, &branch.session_id, head_message_id)?;
     }
     Ok(())
+}
+
+fn validate_chat_conversation_snapshot_write(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    snapshot: &ConversationSnapshotWrite,
+) -> CoreResult<()> {
+    if let Some(branch_id) = &snapshot.branch_id {
+        ensure_branch_belongs_to_session_in_tx(tx, schema, &snapshot.session_id, branch_id)?;
+    }
+    if let Some(message_id) = &snapshot.message_id {
+        ensure_message_belongs_to_session_in_tx(tx, schema, &snapshot.session_id, message_id)?;
+    }
+    Ok(())
+}
+
+fn conversation_snapshot_session_created_at_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    snapshot_id: &ConversationSnapshotId,
+) -> CoreResult<Option<(SessionId, IsoTimestamp)>> {
+    tx.query_opt(
+        &format!(
+            "SELECT session_id, created_at
+             FROM {schema}.conversation_snapshots
+             WHERE snapshot_id = $1"
+        ),
+        &[&snapshot_id.0],
+    )
+    .map_err(|error| {
+        postgres_error(
+            "load PostgreSQL conversation snapshot session ownership",
+            error,
+        )
+    })
+    .map(|row| {
+        row.map(|row| {
+            (
+                SessionId::new(row.get::<_, String>(0)),
+                row.get::<_, String>(1),
+            )
+        })
+    })
 }
 
 fn ensure_message_belongs_to_session_in_tx(

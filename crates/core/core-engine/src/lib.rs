@@ -22,6 +22,7 @@ use rusty_crew_core_persistence::{
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
     ConversationSnapshotWrite, CoreCoordinationStore, CreateChatAttachmentRequest,
     CreateChatAttachmentResult, CreateChatConversationBranchRequest,
+    CreateChatConversationSnapshotRequest, CreateChatConversationSnapshotResult,
     CreateChatDataBankScopeRequest, CreateChatDataBankScopeResult, CreateChatMessageSlotRequest,
     CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
     DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DeleteChatMessageVariantRequest,
@@ -1205,6 +1206,15 @@ impl CoreEngine {
         self.store
             .conversation()
             .save_conversation_snapshot(snapshot)
+    }
+
+    pub fn create_chat_conversation_snapshot(
+        &self,
+        request: &CreateChatConversationSnapshotRequest,
+    ) -> CoreResult<CreateChatConversationSnapshotResult> {
+        self.store
+            .conversation()
+            .create_chat_conversation_snapshot(request)
     }
 
     pub fn query_conversation_snapshots(
@@ -2795,8 +2805,9 @@ mod tests {
     use super::*;
     use rusty_crew_core_persistence::{
         ActiveVariantConflict, AgentMessageQuery, AttachmentLinkWrite, AttachmentStatus,
-        BranchHeadConflict, ChatAttachmentMutationStatus, ChatDataBankScopeMutationStatus,
-        CompletionPacketQuery, CoordinationStore, DataBankScopeStatus, DurableMessageStatus,
+        BranchHeadConflict, ChatAttachmentMutationStatus, ChatConversationSnapshotMutationStatus,
+        ChatDataBankScopeMutationStatus, CompletionPacketQuery, ConversationJumpTarget,
+        ConversationSnapshotSource, CoordinationStore, DataBankScopeStatus, DurableMessageStatus,
         DurableMessageWrite, MessageVariantSource, MessageVariantStatus, QueryPage,
         QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope,
         RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
@@ -2807,10 +2818,10 @@ mod tests {
     use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, AttachmentLinkId, BrainAction, BrainEvent, ClockConfig,
-        CompletionPacket, CompletionStatus, ConversationBranchId, CoreErrorKind, CoreEventKind,
-        DelegatedRunStatus, DelegationLifecyclePhase, ExternalEventPayload, MessageId, ProfileId,
-        ProjectId, ResourceLimits, SessionKind, ToolCallMetadata, ToolCallPolicyMetadata,
-        ToolCallSource, ToolDescriptor, ToolProfile,
+        CompletionPacket, CompletionStatus, ConversationBranchId, ConversationSnapshotId,
+        CoreErrorKind, CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase,
+        ExternalEventPayload, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind,
+        ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor, ToolProfile,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -6688,6 +6699,261 @@ mod tests {
     }
 
     #[test]
+    fn create_chat_conversation_snapshot_rejects_cross_session_snapshot_collision() {
+        let engine = test_engine();
+        let first = engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: test_snapshot_write("snapshot-session-a", "shared-snapshot", None, None),
+            })
+            .unwrap();
+        assert_eq!(
+            first.status,
+            ChatConversationSnapshotMutationStatus::Created
+        );
+
+        let updated = engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: ConversationSnapshotWrite {
+                    label: Some("Updated".to_string()),
+                    created_at: "2026-06-19T00:09:00Z".to_string(),
+                    updated_at: "2026-06-19T00:09:00Z".to_string(),
+                    ..test_snapshot_write("snapshot-session-a", "shared-snapshot", None, None)
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            updated.status,
+            ChatConversationSnapshotMutationStatus::Updated
+        );
+        assert_eq!(
+            updated.snapshot.created_at,
+            "2026-06-19T00:01:00Z".to_string()
+        );
+        assert_eq!(updated.snapshot.label, Some("Updated".to_string()));
+
+        let error = engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: test_snapshot_write("snapshot-session-b", "shared-snapshot", None, None),
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+
+        let records = engine
+            .query_conversation_snapshots(&ConversationSnapshotQuery {
+                session_id: Some(SessionId::new("snapshot-session-a")),
+                branch_id: None,
+                message_id: None,
+                page: None,
+            })
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].session_id, SessionId::new("snapshot-session-a"));
+    }
+
+    #[test]
+    fn create_chat_conversation_snapshot_validates_branch_and_message_ownership() {
+        let engine = test_engine();
+        save_test_branch(
+            &engine,
+            "snapshot-owner-session",
+            "snapshot-owner-branch",
+            None,
+            None,
+        );
+        save_test_branch(
+            &engine,
+            "snapshot-other-session",
+            "snapshot-other-branch",
+            None,
+            None,
+        );
+        save_test_message_slot(
+            &engine,
+            "snapshot-other-session",
+            1,
+            "assistant",
+            "assistant",
+            "other",
+        );
+
+        let wrong_branch = engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: test_snapshot_write(
+                    "snapshot-owner-session",
+                    "wrong-branch-snapshot",
+                    Some("snapshot-other-branch"),
+                    None,
+                ),
+            })
+            .unwrap_err();
+        assert_eq!(wrong_branch.kind, CoreErrorKind::NotFound);
+
+        let wrong_message = engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: test_snapshot_write(
+                    "snapshot-owner-session",
+                    "wrong-message-snapshot",
+                    None,
+                    Some("snapshot-other-session-message-1"),
+                ),
+            })
+            .unwrap_err();
+        assert_eq!(wrong_message.kind, CoreErrorKind::NotFound);
+    }
+
+    #[test]
+    fn create_chat_conversation_snapshot_allows_same_session_branch_and_message_anchors() {
+        let engine = test_engine();
+        save_test_branch(
+            &engine,
+            "snapshot-branch-session",
+            "snapshot-branch-a",
+            None,
+            None,
+        );
+        save_test_branch(
+            &engine,
+            "snapshot-branch-session",
+            "snapshot-branch-b",
+            None,
+            None,
+        );
+        engine
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: MessageSlotId::new("snapshot-branch-slot"),
+                session_id: SessionId::new("snapshot-branch-session"),
+                primary_variant_id: MessageVariantId::new("snapshot-branch-primary"),
+                active_variant_id: None,
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:01:00Z".to_string(),
+                updated_at: "2026-06-19T00:01:00Z".to_string(),
+            })
+            .unwrap();
+        let mut message = test_message_write(
+            "snapshot-branch-session",
+            1,
+            "assistant",
+            "assistant",
+            "body",
+        );
+        message.branch_id = Some(ConversationBranchId::new("snapshot-branch-b"));
+        engine
+            .save_message_variant(&MessageVariantWrite {
+                variant_id: MessageVariantId::new("snapshot-branch-primary"),
+                slot_id: MessageSlotId::new("snapshot-branch-slot"),
+                source: MessageVariantSource::Primary,
+                ordinal: 0,
+                status: MessageVariantStatus::Active,
+                message,
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:01:00Z".to_string(),
+                updated_at: "2026-06-19T00:01:00Z".to_string(),
+            })
+            .unwrap();
+
+        let result = engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: test_snapshot_write(
+                    "snapshot-branch-session",
+                    "independent-branch-message-snapshot",
+                    Some("snapshot-branch-a"),
+                    Some("snapshot-branch-session-message-1"),
+                ),
+            })
+            .unwrap();
+        assert_eq!(
+            result.status,
+            ChatConversationSnapshotMutationStatus::Created
+        );
+    }
+
+    #[test]
+    fn create_chat_conversation_snapshot_allows_message_referenced_by_branch_head() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "snapshot-head-session",
+            1,
+            "assistant",
+            "assistant",
+            "head",
+        );
+        save_test_branch(
+            &engine,
+            "snapshot-head-session",
+            "snapshot-head-branch",
+            None,
+            Some("snapshot-head-session-message-1"),
+        );
+
+        let result = engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: test_snapshot_write(
+                    "snapshot-head-session",
+                    "snapshot-head-snapshot",
+                    Some("snapshot-head-branch"),
+                    Some("snapshot-head-session-message-1"),
+                ),
+            })
+            .unwrap();
+
+        assert_eq!(
+            result.status,
+            ChatConversationSnapshotMutationStatus::Created
+        );
+    }
+
+    #[test]
+    fn resolve_conversation_jump_rejects_wrong_session_targets() {
+        let engine = test_engine();
+        save_test_branch(
+            &engine,
+            "jump-owner-session",
+            "jump-owner-branch",
+            None,
+            None,
+        );
+        save_test_message_slot(
+            &engine,
+            "jump-owner-session",
+            1,
+            "assistant",
+            "assistant",
+            "owner",
+        );
+        engine
+            .create_chat_conversation_snapshot(&CreateChatConversationSnapshotRequest {
+                snapshot: test_snapshot_write(
+                    "jump-owner-session",
+                    "jump-owner-snapshot",
+                    Some("jump-owner-branch"),
+                    None,
+                ),
+            })
+            .unwrap();
+
+        for target in [
+            ConversationJumpTarget::Branch {
+                branch_id: ConversationBranchId::new("jump-owner-branch"),
+            },
+            ConversationJumpTarget::Message {
+                message_id: MessageId::new("jump-owner-session-message-1"),
+            },
+            ConversationJumpTarget::Snapshot {
+                snapshot_id: ConversationSnapshotId::new("jump-owner-snapshot"),
+            },
+        ] {
+            let error = engine
+                .resolve_conversation_jump(&ConversationJumpRequest {
+                    session_id: SessionId::new("jump-other-session"),
+                    target,
+                })
+                .unwrap_err();
+            assert_eq!(error.kind, CoreErrorKind::NotFound);
+        }
+    }
+
+    #[test]
     fn create_chat_attachment_rejects_cross_session_attachment_collision() {
         let engine = test_engine();
         let first = engine
@@ -7143,6 +7409,27 @@ mod tests {
             metadata_json: json!({}),
             created_at: "2026-06-19T00:00:00Z".to_string(),
             updated_at: "2026-06-19T00:00:00Z".to_string(),
+        }
+    }
+
+    fn test_snapshot_write(
+        session_id: &str,
+        snapshot_id: &str,
+        branch_id: Option<&str>,
+        message_id: Option<&str>,
+    ) -> ConversationSnapshotWrite {
+        ConversationSnapshotWrite {
+            snapshot_id: ConversationSnapshotId::new(snapshot_id),
+            session_id: SessionId::new(session_id),
+            branch_id: branch_id.map(ConversationBranchId::new),
+            message_id: message_id.map(MessageId::new),
+            cursor: Some(format!("{session_id}:cursor")),
+            label: Some("Snapshot".to_string()),
+            summary: Some("Snapshot summary".to_string()),
+            source: ConversationSnapshotSource::User,
+            metadata_json: json!({}),
+            created_at: "2026-06-19T00:01:00Z".to_string(),
+            updated_at: "2026-06-19T00:01:00Z".to_string(),
         }
     }
 

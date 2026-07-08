@@ -261,6 +261,7 @@ interface NativeBridgeBinding {
   selectActiveConversationBranchJson(inputJson: string): string;
   updateConversationBranchHeadJson(inputJson: string): string;
   saveConversationSnapshotJson(inputJson: string): string;
+  createChatConversationSnapshotJson(inputJson: string): string;
   queryConversationSnapshotsJson(inputJson: string): string;
   resolveConversationJumpJson(inputJson: string): string;
   saveAttachmentJson(inputJson: string): string;
@@ -2197,6 +2198,7 @@ export interface NativeBridgeModule {
   selectActiveConversationBranch(input: unknown): Promise<unknown>;
   updateConversationBranchHead(input: unknown): Promise<unknown>;
   saveConversationSnapshot(input: unknown): Promise<unknown>;
+  createChatConversationSnapshot(input: unknown): Promise<unknown>;
   queryConversationSnapshots(query: unknown): Promise<unknown[]>;
   resolveConversationJump(input: unknown): Promise<unknown>;
   saveAttachment(input: unknown): Promise<unknown>;
@@ -2569,6 +2571,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
       "update_conversation_branch_head",
     ),
     saveConversationSnapshot: unavailable("save_conversation_snapshot"),
+    createChatConversationSnapshot: unavailable(
+      "create_chat_conversation_snapshot",
+    ),
     queryConversationSnapshots: unavailable("query_conversation_snapshots"),
     resolveConversationJump: unavailable("resolve_conversation_jump"),
     saveAttachment: unavailable("save_attachment"),
@@ -3876,6 +3881,10 @@ function createNativeBridgeModule(
     saveConversationSnapshot: async (input) =>
       JSON.parse(
         binding.saveConversationSnapshotJson(JSON.stringify(input)),
+      ) as unknown,
+    createChatConversationSnapshot: async (input) =>
+      JSON.parse(
+        binding.createChatConversationSnapshotJson(JSON.stringify(input)),
       ) as unknown,
     queryConversationSnapshots: async (query) =>
       JSON.parse(

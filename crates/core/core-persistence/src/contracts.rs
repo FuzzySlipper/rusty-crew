@@ -659,6 +659,24 @@ pub struct ConversationSnapshotWrite {
     pub updated_at: IsoTimestamp,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatConversationSnapshotMutationStatus {
+    Created,
+    Updated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatConversationSnapshotRequest {
+    pub snapshot: ConversationSnapshotWrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateChatConversationSnapshotResult {
+    pub status: ChatConversationSnapshotMutationStatus,
+    pub snapshot: ConversationSnapshotRecord,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ConversationSnapshotQuery {
     pub session_id: Option<SessionId>,

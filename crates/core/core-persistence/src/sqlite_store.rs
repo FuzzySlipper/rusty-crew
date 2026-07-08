@@ -1007,6 +1007,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_chat_conversation_snapshot(
+        &self,
+        request: &CreateChatConversationSnapshotRequest,
+    ) -> CoreResult<CreateChatConversationSnapshotResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.create_chat_conversation_snapshot(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.create_chat_conversation_snapshot(request),
+        }
+    }
+
     pub fn query_conversation_snapshots(
         &self,
         query: &ConversationSnapshotQuery,
@@ -1902,6 +1913,13 @@ impl ConversationRepositorySet<'_> {
         snapshot: &ConversationSnapshotWrite,
     ) -> CoreResult<ConversationSnapshotRecord> {
         self.store.save_conversation_snapshot(snapshot)
+    }
+
+    pub fn create_chat_conversation_snapshot(
+        &self,
+        request: &CreateChatConversationSnapshotRequest,
+    ) -> CoreResult<CreateChatConversationSnapshotResult> {
+        self.store.create_chat_conversation_snapshot(request)
     }
 
     pub fn query_conversation_snapshots(

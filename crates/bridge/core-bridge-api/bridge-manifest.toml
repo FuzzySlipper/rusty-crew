@@ -705,6 +705,15 @@ errors = "core_protocol::CoreError"
 summary = "Persist a generic conversation snapshot/navigation checkpoint."
 
 [[operation]]
+name = "create_chat_conversation_snapshot"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::CreateChatConversationSnapshotRequest"
+output = "core_persistence::CreateChatConversationSnapshotResult"
+errors = "core_protocol::CoreError"
+summary = "Create or update a chat-scoped conversation snapshot with Rust-owned session ownership validation."
+
+[[operation]]
 name = "query_conversation_snapshots"
 surface = "stable"
 direction = "ts_to_rust"

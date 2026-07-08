@@ -505,6 +505,45 @@ impl CoordinationStore {
         Ok(record)
     }
 
+    pub fn create_chat_conversation_snapshot(
+        &self,
+        request: &CreateChatConversationSnapshotRequest,
+    ) -> CoreResult<CreateChatConversationSnapshotResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin create chat conversation snapshot", error))?;
+        validate_chat_conversation_snapshot_write(&tx, &request.snapshot)?;
+        let existing =
+            conversation_snapshot_session_created_at_in_tx(&tx, &request.snapshot.snapshot_id)?;
+        let mut snapshot = request.snapshot.clone();
+        let status = match existing {
+            Some((session_id, created_at)) if session_id == snapshot.session_id => {
+                snapshot.created_at = created_at;
+                ChatConversationSnapshotMutationStatus::Updated
+            }
+            Some((session_id, _)) => {
+                return Err(CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!(
+                        "conversation snapshot {} already belongs to session {} and cannot be written by {}",
+                        snapshot.snapshot_id, session_id, snapshot.session_id
+                    ),
+                ));
+            }
+            None => ChatConversationSnapshotMutationStatus::Created,
+        };
+        save_conversation_snapshot_in_tx(&tx, &snapshot)?;
+        let record = load_conversation_snapshot_in_tx(&tx, &snapshot.snapshot_id)?;
+        tx.commit().map_err(|error| {
+            persistence_error("commit create chat conversation snapshot", error)
+        })?;
+        Ok(CreateChatConversationSnapshotResult {
+            status,
+            snapshot: record,
+        })
+    }
+
     pub fn query_conversation_snapshots(
         &self,
         query: &ConversationSnapshotQuery,
@@ -1427,6 +1466,39 @@ fn ensure_message_belongs_to_session_in_tx(
             format!("message {message_id} not found for session {session_id}"),
         ))
     }
+}
+
+fn validate_chat_conversation_snapshot_write(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot: &ConversationSnapshotWrite,
+) -> CoreResult<()> {
+    if let Some(branch_id) = &snapshot.branch_id {
+        ensure_branch_belongs_to_session_in_tx(tx, &snapshot.session_id, branch_id)?;
+    }
+    if let Some(message_id) = &snapshot.message_id {
+        ensure_message_belongs_to_session_in_tx(tx, &snapshot.session_id, message_id)?;
+    }
+    Ok(())
+}
+
+fn conversation_snapshot_session_created_at_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot_id: &ConversationSnapshotId,
+) -> CoreResult<Option<(SessionId, IsoTimestamp)>> {
+    tx.query_row(
+        "SELECT session_id, created_at
+         FROM conversation_snapshots
+         WHERE snapshot_id = ?1",
+        params![snapshot_id.0.as_str()],
+        |row| {
+            Ok((
+                SessionId::new(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| persistence_error("load conversation snapshot session ownership", error))
 }
 
 fn ensure_message_exists_in_tx(

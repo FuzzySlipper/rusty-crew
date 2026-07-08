@@ -114,6 +114,13 @@ impl NativeBridge {
         self.engine()?.save_conversation_snapshot(snapshot)
     }
 
+    pub fn create_chat_conversation_snapshot(
+        &self,
+        request: &CreateChatConversationSnapshotRequest,
+    ) -> CoreResult<CreateChatConversationSnapshotResult> {
+        self.engine()?.create_chat_conversation_snapshot(request)
+    }
+
     pub fn query_conversation_snapshots(
         &self,
         query: &ConversationSnapshotQuery,
