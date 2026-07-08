@@ -159,6 +159,7 @@ impl<Metrics, SecretUpdate> BufferedNeutralRun<Metrics, SecretUpdate> {
     }
 }
 
+#[derive(Debug)]
 pub struct BufferedNeutralRunRegistry<Metrics, SecretUpdate> {
     module_label: &'static str,
     runs: Mutex<HashMap<String, BufferedNeutralRun<Metrics, SecretUpdate>>>,

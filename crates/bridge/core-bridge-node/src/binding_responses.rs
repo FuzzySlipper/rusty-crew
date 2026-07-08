@@ -25,7 +25,8 @@ impl NativeBridgeBinding {
 
     #[napi]
     pub fn start_openai_responses_brain_json(&self, input_json: String) -> napi::Result<String> {
-        start_openai_responses_brain_json(input_json)
+        let buffered_runs = self.bridge()?.openai_responses_buffered_runs();
+        start_openai_responses_brain_json(buffered_runs, input_json)
     }
 
     #[napi]
@@ -34,7 +35,8 @@ impl NativeBridgeBinding {
         wake_id: String,
         max_items: Option<u32>,
     ) -> napi::Result<String> {
-        drain_openai_responses_brain_stream_json(wake_id, max_items)
+        let buffered_runs = self.bridge()?.openai_responses_buffered_runs();
+        drain_openai_responses_brain_stream_json(&buffered_runs, wake_id, max_items)
     }
 
     #[napi]
@@ -42,11 +44,13 @@ impl NativeBridgeBinding {
         &self,
         input_json: String,
     ) -> napi::Result<String> {
-        submit_openai_responses_tool_output_json(input_json)
+        let buffered_runs = self.bridge()?.openai_responses_buffered_runs();
+        submit_openai_responses_tool_output_json(&buffered_runs, input_json)
     }
 
     #[napi]
     pub fn cancel_openai_responses_brain_json(&self, input_json: String) -> napi::Result<String> {
-        cancel_openai_responses_brain_json(input_json)
+        let buffered_runs = self.bridge()?.openai_responses_buffered_runs();
+        cancel_openai_responses_brain_json(&buffered_runs, input_json)
     }
 }

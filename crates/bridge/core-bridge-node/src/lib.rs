@@ -127,20 +127,20 @@ pub(crate) use events::*;
 pub(crate) use memory::*;
 use pi_agent::{
     cancel_pi_agent_brain_json, drain_pi_agent_brain_stream_json, start_pi_agent_brain_json,
-    submit_pi_agent_tool_output_json,
+    submit_pi_agent_tool_output_json, PiAgentBufferedRunRegistry,
 };
 use registries::{BrainImplementationRegistry, PlatformAdapterRegistry, SubscriptionRegistry};
 use responses::{
     cancel_openai_responses_brain_json, drain_openai_responses_brain_stream_json,
     start_openai_responses_brain_json, submit_openai_responses_tool_output_json,
-    OpenAiOauthCodeExchangeTask, OpenAiResponsesBrainRunTask,
+    OpenAiOauthCodeExchangeTask, OpenAiResponsesBrainRunTask, OpenAiResponsesBufferedRunRegistry,
 };
 #[cfg(test)]
 use responses::{normalize_responses_tool_schema, run_openai_responses_brain_json_blocking};
 use serde::Deserialize;
 use serde_json::{json, Value};
 pub(crate) use sessions::*;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 pub(crate) use storage_admin::*;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -154,6 +154,8 @@ pub struct NativeBridge {
     brain_registrations: BrainImplementationRegistry,
     adapter_registrations: PlatformAdapterRegistry,
     subscriptions: SubscriptionRegistry,
+    openai_responses_buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
+    pi_agent_buffered_runs: Arc<PiAgentBufferedRunRegistry>,
 }
 
 impl NativeBridge {
@@ -164,7 +166,19 @@ impl NativeBridge {
             brain_registrations: BrainImplementationRegistry::new(),
             adapter_registrations: PlatformAdapterRegistry::new(),
             subscriptions: SubscriptionRegistry::new(),
+            openai_responses_buffered_runs: Arc::new(OpenAiResponsesBufferedRunRegistry::new(
+                "OpenAI Responses",
+            )),
+            pi_agent_buffered_runs: Arc::new(PiAgentBufferedRunRegistry::new("pi-agent")),
         }
+    }
+
+    pub(crate) fn openai_responses_buffered_runs(&self) -> Arc<OpenAiResponsesBufferedRunRegistry> {
+        Arc::clone(&self.openai_responses_buffered_runs)
+    }
+
+    pub(crate) fn pi_agent_buffered_runs(&self) -> Arc<PiAgentBufferedRunRegistry> {
+        Arc::clone(&self.pi_agent_buffered_runs)
     }
 }
 

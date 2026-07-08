@@ -4,7 +4,8 @@ use super::*;
 impl NativeBridgeBinding {
     #[napi]
     pub fn start_pi_agent_brain_json(&self, input_json: String) -> napi::Result<String> {
-        start_pi_agent_brain_json(input_json)
+        let buffered_runs = self.bridge()?.pi_agent_buffered_runs();
+        start_pi_agent_brain_json(buffered_runs, input_json)
     }
 
     #[napi]
@@ -13,16 +14,19 @@ impl NativeBridgeBinding {
         wake_id: String,
         max_items: Option<u32>,
     ) -> napi::Result<String> {
-        drain_pi_agent_brain_stream_json(wake_id, max_items)
+        let buffered_runs = self.bridge()?.pi_agent_buffered_runs();
+        drain_pi_agent_brain_stream_json(&buffered_runs, wake_id, max_items)
     }
 
     #[napi]
     pub fn submit_pi_agent_tool_output_json(&self, input_json: String) -> napi::Result<String> {
-        submit_pi_agent_tool_output_json(input_json)
+        let buffered_runs = self.bridge()?.pi_agent_buffered_runs();
+        submit_pi_agent_tool_output_json(&buffered_runs, input_json)
     }
 
     #[napi]
     pub fn cancel_pi_agent_brain_json(&self, input_json: String) -> napi::Result<String> {
-        cancel_pi_agent_brain_json(input_json)
+        let buffered_runs = self.bridge()?.pi_agent_buffered_runs();
+        cancel_pi_agent_brain_json(&buffered_runs, input_json)
     }
 }

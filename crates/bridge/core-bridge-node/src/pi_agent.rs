@@ -10,6 +10,7 @@ use rusty_crew_pi_agent_brain::{
     PiAgentChatConfig, PiAgentFinalMessage, PiAgentNeutralToolExecutor, PiAgentToolOutput,
 };
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,19 +84,14 @@ struct JsPiAgentCancelInput {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct PiAgentTransportMetrics {
+pub(crate) struct PiAgentTransportMetrics {
     provider_request_count: usize,
     tool_round_count: usize,
 }
 
 type PiAgentBufferedRun = BufferedNeutralRun<PiAgentTransportMetrics, ()>;
-type PiAgentBufferedRunRegistry = BufferedNeutralRunRegistry<PiAgentTransportMetrics, ()>;
-
-static PI_AGENT_BUFFERED_RUNS: OnceLock<PiAgentBufferedRunRegistry> = OnceLock::new();
-
-fn pi_agent_buffered_runs() -> &'static PiAgentBufferedRunRegistry {
-    PI_AGENT_BUFFERED_RUNS.get_or_init(|| BufferedNeutralRunRegistry::new("pi-agent"))
-}
+pub(crate) type PiAgentBufferedRunRegistry =
+    BufferedNeutralRunRegistry<PiAgentTransportMetrics, ()>;
 
 fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
     let status = if error.is_invalid_argument() {
@@ -106,7 +102,10 @@ fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
     napi::Error::new(status, error.to_string())
 }
 
-pub(crate) fn start_pi_agent_brain_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn start_pi_agent_brain_json(
+    buffered_runs: Arc<PiAgentBufferedRunRegistry>,
+    input_json: String,
+) -> napi::Result<String> {
     let input: JsPiAgentBrainRunInput = serde_json::from_str(&input_json).map_err(|error| {
         napi::Error::new(
             napi::Status::InvalidArg,
@@ -115,11 +114,13 @@ pub(crate) fn start_pi_agent_brain_json(input_json: String) -> napi::Result<Stri
     })?;
     let wake_id = input.wake_id;
     let wake_timeout_ms = input.config.wake_timeout_ms.unwrap_or(300_000);
-    pi_agent_buffered_runs()
+    buffered_runs
         .insert(wake_id.clone(), PiAgentBufferedRun::new(wake_timeout_ms))
         .map_err(brain_runtime_error_to_napi)?;
     let thread_wake_id = wake_id.clone();
-    std::thread::spawn(move || run_pi_agent_brain_buffered(thread_wake_id, input_json));
+    std::thread::spawn(move || {
+        run_pi_agent_brain_buffered(buffered_runs, thread_wake_id, input_json)
+    });
     serde_json::to_string(&json!({ "wake_id": wake_id })).map_err(|error| {
         napi::Error::new(
             napi::Status::GenericFailure,
@@ -129,11 +130,12 @@ pub(crate) fn start_pi_agent_brain_json(input_json: String) -> napi::Result<Stri
 }
 
 pub(crate) fn drain_pi_agent_brain_stream_json(
+    buffered_runs: &PiAgentBufferedRunRegistry,
     wake_id: String,
     max_items: Option<u32>,
 ) -> napi::Result<String> {
     let max_items = max_items.unwrap_or(64).max(1) as usize;
-    let terminal = pi_agent_buffered_runs()
+    let terminal = buffered_runs
         .with_run_mut(&wake_id, |run| {
             if !run.terminal && run.is_timed_out() {
                 run.terminal = true;
@@ -178,7 +180,7 @@ pub(crate) fn drain_pi_agent_brain_stream_json(
         .map_err(brain_runtime_error_to_napi)?;
     let (terminal, output) = terminal;
     if terminal {
-        pi_agent_buffered_runs()
+        buffered_runs
             .remove(&wake_id)
             .map_err(brain_runtime_error_to_napi)?;
     }
@@ -190,14 +192,17 @@ pub(crate) fn drain_pi_agent_brain_stream_json(
     })
 }
 
-pub(crate) fn submit_pi_agent_tool_output_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn submit_pi_agent_tool_output_json(
+    buffered_runs: &PiAgentBufferedRunRegistry,
+    input_json: String,
+) -> napi::Result<String> {
     let input: JsPiAgentToolOutputInput = serde_json::from_str(&input_json).map_err(|error| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("invalid pi-agent tool output JSON: {error}"),
         )
     })?;
-    pi_agent_buffered_runs()
+    buffered_runs
         .with_run_mut(&input.wake_id, |run| {
             run.submit_tool_output(
                 input.call_id.clone(),
@@ -221,14 +226,17 @@ pub(crate) fn submit_pi_agent_tool_output_json(input_json: String) -> napi::Resu
     })
 }
 
-pub(crate) fn cancel_pi_agent_brain_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn cancel_pi_agent_brain_json(
+    buffered_runs: &PiAgentBufferedRunRegistry,
+    input_json: String,
+) -> napi::Result<String> {
     let input: JsPiAgentCancelInput = serde_json::from_str(&input_json).map_err(|error| {
         napi::Error::new(
             napi::Status::InvalidArg,
             format!("invalid pi-agent cancel JSON: {error}"),
         )
     })?;
-    let output = pi_agent_buffered_runs()
+    let output = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
             run.cancel(input.reason_code, input.summary);
             json!({
@@ -248,9 +256,17 @@ pub(crate) fn cancel_pi_agent_brain_json(input_json: String) -> napi::Result<Str
     })
 }
 
-fn run_pi_agent_brain_buffered(wake_id: String, input_json: String) {
-    let result = run_pi_agent_brain_with_buffered_tools(wake_id.clone(), input_json);
-    let _ = pi_agent_buffered_runs().with_run_mut(&wake_id, |run| {
+fn run_pi_agent_brain_buffered(
+    buffered_runs: Arc<PiAgentBufferedRunRegistry>,
+    wake_id: String,
+    input_json: String,
+) {
+    let result = run_pi_agent_brain_with_buffered_tools(
+        Arc::clone(&buffered_runs),
+        wake_id.clone(),
+        input_json,
+    );
+    let _ = buffered_runs.with_run_mut(&wake_id, |run| {
         if run.is_cancelled() {
             return;
         }
@@ -271,6 +287,7 @@ fn run_pi_agent_brain_buffered(wake_id: String, input_json: String) {
 }
 
 fn run_pi_agent_brain_with_buffered_tools(
+    buffered_runs: Arc<PiAgentBufferedRunRegistry>,
     wake_id: String,
     input_json: String,
 ) -> napi::Result<rusty_crew_pi_agent_brain::PiAgentBrainLoopOutput> {
@@ -316,7 +333,10 @@ fn run_pi_agent_brain_with_buffered_tools(
             let client = fake_pi_agent_client(!descriptors.is_empty());
             let mut brain = PiAgentBrainLoop::new(
                 client,
-                BufferedPiAgentToolExecutor { wake_id },
+                BufferedPiAgentToolExecutor {
+                    wake_id,
+                    buffered_runs,
+                },
                 chat_config,
                 descriptors,
             )
@@ -332,7 +352,10 @@ fn run_pi_agent_brain_with_buffered_tools(
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?;
             let mut brain = PiAgentBrainLoop::new(
                 client,
-                BufferedPiAgentToolExecutor { wake_id },
+                BufferedPiAgentToolExecutor {
+                    wake_id,
+                    buffered_runs,
+                },
                 chat_config,
                 descriptors,
             )
@@ -397,6 +420,7 @@ fn fake_pi_agent_client(with_tool: bool) -> FakeChatCompletionsClient {
 
 struct BufferedPiAgentToolExecutor {
     wake_id: String,
+    buffered_runs: Arc<PiAgentBufferedRunRegistry>,
 }
 
 impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
@@ -412,7 +436,7 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
             arguments_json: call.arguments_json.clone(),
         };
         {
-            let queued = pi_agent_buffered_runs().with_run_mut(&self.wake_id, |run| {
+            let queued = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
                 run.queue_pending_tool_request(request);
             });
             if queued.is_err() {
@@ -424,7 +448,7 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
         }
 
         loop {
-            let result = pi_agent_buffered_runs().with_run_mut(&self.wake_id, |run| {
+            let result = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
                 if let Some(cancellation) = run.cancellation.clone() {
                     return PiAgentToolOutput::cancelled(format!(
                         "pi-agent buffered wake {} cancelled before tool output {}: {}",

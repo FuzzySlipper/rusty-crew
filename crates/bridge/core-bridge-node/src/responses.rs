@@ -4,6 +4,7 @@ use rusty_crew_brain_runtime::{
     BufferedNeutralRunRegistry, BufferedNeutralToolOutput,
 };
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,7 +109,7 @@ struct OpenAiResponsesBrainRunOutput {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct OpenAiResponsesCredentialSecretUpdate {
+pub(crate) struct OpenAiResponsesCredentialSecretUpdate {
     provider_alias: String,
     secret: String,
 }
@@ -132,7 +133,7 @@ struct JsOpenAiResponsesCancelInput {
 
 type OpenAiResponsesBufferedRun =
     BufferedNeutralRun<ResponsesTransportMetrics, OpenAiResponsesCredentialSecretUpdate>;
-type OpenAiResponsesBufferedRunRegistry =
+pub(crate) type OpenAiResponsesBufferedRunRegistry =
     BufferedNeutralRunRegistry<ResponsesTransportMetrics, OpenAiResponsesCredentialSecretUpdate>;
 
 struct OneShotOpenAiOauthSecretStore {
@@ -185,14 +186,6 @@ impl OpenAiOauthSecretStore for OneShotOpenAiOauthSecretStore {
     }
 }
 
-static OPENAI_RESPONSES_BUFFERED_RUNS: OnceLock<OpenAiResponsesBufferedRunRegistry> =
-    OnceLock::new();
-
-fn openai_responses_buffered_runs() -> &'static OpenAiResponsesBufferedRunRegistry {
-    OPENAI_RESPONSES_BUFFERED_RUNS
-        .get_or_init(|| BufferedNeutralRunRegistry::new("OpenAI Responses"))
-}
-
 fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
     let status = if error.is_invalid_argument() {
         napi::Status::InvalidArg
@@ -228,7 +221,10 @@ impl napi::Task for OpenAiOauthCodeExchangeTask {
     }
 }
 
-pub(crate) fn start_openai_responses_brain_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn start_openai_responses_brain_json(
+    buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
+    input_json: String,
+) -> napi::Result<String> {
     let input: JsOpenAiResponsesBrainRunInput =
         serde_json::from_str(&input_json).map_err(|error| {
             napi::Error::new(
@@ -237,14 +233,16 @@ pub(crate) fn start_openai_responses_brain_json(input_json: String) -> napi::Res
             )
         })?;
     let wake_id = input.wake_id;
-    openai_responses_buffered_runs()
+    buffered_runs
         .insert(
             wake_id.clone(),
             OpenAiResponsesBufferedRun::new(input.config.wake_timeout_ms),
         )
         .map_err(brain_runtime_error_to_napi)?;
     let thread_wake_id = wake_id.clone();
-    std::thread::spawn(move || run_openai_responses_brain_buffered(thread_wake_id, input_json));
+    std::thread::spawn(move || {
+        run_openai_responses_brain_buffered(buffered_runs, thread_wake_id, input_json)
+    });
     serde_json::to_string(&json!({ "wake_id": wake_id })).map_err(|error| {
         napi::Error::new(
             napi::Status::GenericFailure,
@@ -254,11 +252,12 @@ pub(crate) fn start_openai_responses_brain_json(input_json: String) -> napi::Res
 }
 
 pub(crate) fn drain_openai_responses_brain_stream_json(
+    buffered_runs: &OpenAiResponsesBufferedRunRegistry,
     wake_id: String,
     max_items: Option<u32>,
 ) -> napi::Result<String> {
     let max_items = max_items.unwrap_or(64).max(1) as usize;
-    let terminal = openai_responses_buffered_runs().with_run_mut(&wake_id, |run| {
+    let terminal = buffered_runs.with_run_mut(&wake_id, |run| {
         if !run.terminal && run.is_timed_out() {
             run.terminal = true;
             run.error = Some(format!(
@@ -303,7 +302,7 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
     }).map_err(brain_runtime_error_to_napi)?;
     let (terminal, output) = terminal;
     if terminal {
-        openai_responses_buffered_runs()
+        buffered_runs
             .remove(&wake_id)
             .map_err(brain_runtime_error_to_napi)?;
     }
@@ -315,7 +314,10 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
     })
 }
 
-pub(crate) fn cancel_openai_responses_brain_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn cancel_openai_responses_brain_json(
+    buffered_runs: &OpenAiResponsesBufferedRunRegistry,
+    input_json: String,
+) -> napi::Result<String> {
     let input: JsOpenAiResponsesCancelInput =
         serde_json::from_str(&input_json).map_err(|error| {
             napi::Error::new(
@@ -323,7 +325,7 @@ pub(crate) fn cancel_openai_responses_brain_json(input_json: String) -> napi::Re
                 format!("invalid OpenAI Responses cancel JSON: {error}"),
             )
         })?;
-    let output = openai_responses_buffered_runs()
+    let output = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
             run.cancel(input.reason_code, input.summary);
             json!({
@@ -343,7 +345,10 @@ pub(crate) fn cancel_openai_responses_brain_json(input_json: String) -> napi::Re
     })
 }
 
-pub(crate) fn submit_openai_responses_tool_output_json(input_json: String) -> napi::Result<String> {
+pub(crate) fn submit_openai_responses_tool_output_json(
+    buffered_runs: &OpenAiResponsesBufferedRunRegistry,
+    input_json: String,
+) -> napi::Result<String> {
     let input: JsOpenAiResponsesToolOutputInput =
         serde_json::from_str(&input_json).map_err(|error| {
             napi::Error::new(
@@ -351,7 +356,7 @@ pub(crate) fn submit_openai_responses_tool_output_json(input_json: String) -> na
                 format!("invalid OpenAI Responses tool output JSON: {error}"),
             )
         })?;
-    openai_responses_buffered_runs()
+    buffered_runs
         .with_run_mut(&input.wake_id, |run| {
             run.submit_tool_output(
                 input.call_id.clone(),
@@ -375,19 +380,28 @@ pub(crate) fn submit_openai_responses_tool_output_json(input_json: String) -> na
     })
 }
 
-fn run_openai_responses_brain_buffered(wake_id: String, input_json: String) {
+fn run_openai_responses_brain_buffered(
+    buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
+    wake_id: String,
+    input_json: String,
+) {
     let sink_wake_id = wake_id.clone();
+    let sink_buffered_runs = Arc::clone(&buffered_runs);
     let mut sink = move |item: BrainWakeStreamItem| {
-        let _ = openai_responses_buffered_runs().with_run_mut(&sink_wake_id, |run| {
+        let _ = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
             if run.is_cancelled() {
                 return;
             }
             run.items.push_back(item);
         });
     };
-    let result =
-        run_openai_responses_brain_with_buffered_tools(wake_id.clone(), input_json, &mut sink);
-    let _ = openai_responses_buffered_runs().with_run_mut(&wake_id, |run| {
+    let result = run_openai_responses_brain_with_buffered_tools(
+        Arc::clone(&buffered_runs),
+        wake_id.clone(),
+        input_json,
+        &mut sink,
+    );
+    let _ = buffered_runs.with_run_mut(&wake_id, |run| {
         if run.is_cancelled() {
             return;
         }
@@ -418,6 +432,7 @@ impl NeutralToolExecutor for EchoNeutralToolExecutor {
 
 struct BufferedOpenAiResponsesToolExecutor {
     wake_id: String,
+    buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
 }
 
 impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
@@ -429,7 +444,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
             arguments_json: call.arguments_json.clone(),
         };
         {
-            let queued = openai_responses_buffered_runs().with_run_mut(&self.wake_id, |run| {
+            let queued = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
                 run.queue_pending_tool_request(request);
             });
             if queued.is_err() {
@@ -444,7 +459,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
         }
 
         loop {
-            let result = openai_responses_buffered_runs().with_run_mut(&self.wake_id, |run| {
+            let result = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
                 if let Some(cancellation) = run.cancellation.clone() {
                     return NeutralToolOutput {
                         output: format!(
@@ -609,6 +624,7 @@ fn run_openai_responses_brain(input_json: String) -> napi::Result<OpenAiResponse
 }
 
 fn run_openai_responses_brain_with_buffered_tools(
+    buffered_runs: Arc<OpenAiResponsesBufferedRunRegistry>,
     wake_id: String,
     input_json: String,
     sink: &mut dyn FnMut(BrainWakeStreamItem),
@@ -616,7 +632,10 @@ fn run_openai_responses_brain_with_buffered_tools(
     run_openai_responses_brain_internal(
         input_json,
         Some(sink),
-        BufferedOpenAiResponsesToolExecutor { wake_id },
+        BufferedOpenAiResponsesToolExecutor {
+            wake_id,
+            buffered_runs,
+        },
     )
 }
 
