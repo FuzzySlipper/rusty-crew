@@ -396,6 +396,43 @@ pub struct RoleplaySessionLifecyclePlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayChatLayerBindingPlanInput {
+    pub now: String,
+    #[serde(default)]
+    pub body: JsonValue,
+    #[serde(default)]
+    pub current_metadata: Option<RoleplaySessionMetadata>,
+    #[serde(default)]
+    pub current_chat_layers: Vec<RoleplayChatLayerBinding>,
+    #[serde(default)]
+    pub available_layer_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayChatLayersWritePlan {
+    pub chat_id: String,
+    pub layers: Vec<RoleplayChatLayerBinding>,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleplaySessionActiveLayerPatch {
+    pub active_layer_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayChatLayerBindingPlan {
+    pub chat_layers_write: RoleplayChatLayersWritePlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_patch: Option<RoleplaySessionActiveLayerPatch>,
+    pub active_layer_ids: Vec<String>,
+    pub chat_layers_changed: bool,
+    pub active_layer_ids_changed: bool,
+    pub no_op: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorConfig {
     pub tone: String,
@@ -1249,6 +1286,67 @@ pub fn plan_session_lifecycle(
             format!("roleplay session lifecycle action {action} is not supported"),
         )),
     }
+}
+
+pub fn plan_chat_layer_binding(
+    input: RoleplayChatLayerBindingPlanInput,
+) -> RoleplayDomainResult<RoleplayChatLayerBindingPlan> {
+    let body = json_object(&input.body, "roleplay chat layer binding body")?;
+    let chat_id = required_json_string(
+        body,
+        &["chat_id", "chatId", "session_id", "sessionId"],
+        "chat_id",
+    )?;
+    validate_roleplay_identifier("roleplay chat_id", &chat_id)?;
+    if let Some(metadata) = &input.current_metadata {
+        if metadata.session_id != chat_id {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_chat_layer_metadata_session_mismatch",
+                format!(
+                    "roleplay chat layer metadata session {} does not match chat id {}",
+                    metadata.session_id, chat_id
+                ),
+            ));
+        }
+    }
+    let layers = roleplay_chat_layer_bindings_from_body(body)?;
+    let layer_ids = layers
+        .iter()
+        .map(|layer| layer.layer_id.clone())
+        .collect::<Vec<_>>();
+    validate_unique_roleplay_identifiers("roleplay chat layer_ids", &layer_ids)?;
+    if let Some(available_layer_ids) = &input.available_layer_ids {
+        validate_layer_refs(&layer_ids, available_layer_ids)?;
+    }
+    let active_layer_ids = layers
+        .iter()
+        .filter(|layer| layer.enabled)
+        .map(|layer| layer.layer_id.clone())
+        .collect::<Vec<_>>();
+    let active_layer_ids_changed = input
+        .current_metadata
+        .as_ref()
+        .is_none_or(|metadata| metadata.active_layer_ids != active_layer_ids);
+    let chat_layers_changed = input.current_chat_layers != layers;
+    let metadata_patch = if active_layer_ids_changed {
+        Some(RoleplaySessionActiveLayerPatch {
+            active_layer_ids: active_layer_ids.clone(),
+        })
+    } else {
+        None
+    };
+    Ok(RoleplayChatLayerBindingPlan {
+        chat_layers_write: RoleplayChatLayersWritePlan {
+            chat_id,
+            layers,
+            now: input.now,
+        },
+        metadata_patch,
+        active_layer_ids,
+        chat_layers_changed,
+        active_layer_ids_changed,
+        no_op: !chat_layers_changed && !active_layer_ids_changed,
+    })
 }
 
 fn plan_session_create(
@@ -2416,6 +2514,52 @@ fn optional_string_array(
     Ok(Some(parsed))
 }
 
+fn optional_string_list(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<Vec<String>>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(None);
+    };
+    parse_string_list_value(value, field_name).map(Some)
+}
+
+fn parse_string_list_value(
+    value: &JsonValue,
+    field_name: &'static str,
+) -> RoleplayDomainResult<Vec<String>> {
+    if let Some(items) = value.as_array() {
+        let mut parsed = Vec::with_capacity(items.len());
+        for (index, item) in items.iter().enumerate() {
+            let Some(value) = item
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return Err(RoleplayDomainError::invalid(
+                    "roleplay_invalid_string_array",
+                    format!("{field_name}[{index}] must be a non-empty string"),
+                ));
+            };
+            parsed.push(value.to_string());
+        }
+        return Ok(parsed);
+    }
+    if let Some(value) = value.as_str() {
+        return Ok(value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect());
+    }
+    Err(RoleplayDomainError::invalid(
+        "roleplay_invalid_string_array",
+        format!("{field_name} must be an array or comma-separated string"),
+    ))
+}
+
 fn optional_json_object<'a>(
     body: &'a serde_json::Map<String, JsonValue>,
     keys: &[&str],
@@ -2439,6 +2583,38 @@ fn optional_bool(body: &serde_json::Map<String, JsonValue>, keys: &[&str]) -> Op
     keys.iter()
         .find_map(|key| body.get(*key))
         .and_then(JsonValue::as_bool)
+}
+
+fn optional_bool_strict(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<bool>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(None);
+    };
+    value.as_bool().map(Some).ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_invalid_boolean",
+            format!("{field_name} must be a boolean"),
+        )
+    })
+}
+
+fn optional_i64(
+    body: &serde_json::Map<String, JsonValue>,
+    keys: &[&str],
+    field_name: &'static str,
+) -> RoleplayDomainResult<Option<i64>> {
+    let Some(value) = keys.iter().find_map(|key| body.get(*key)) else {
+        return Ok(None);
+    };
+    value.as_i64().map(Some).ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_invalid_integer",
+            format!("{field_name} must be an integer"),
+        )
+    })
 }
 
 fn optional_u32(
@@ -2560,6 +2736,110 @@ fn validate_layer_refs(selected: &[String], available: &[String]) -> RoleplayDom
         }
     }
     Ok(())
+}
+
+fn validate_roleplay_identifier(label: &'static str, value: &str) -> RoleplayDomainResult<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_identifier_empty",
+            format!("{label} must not be empty"),
+        ));
+    }
+    if trimmed.len() > 256 {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_identifier_too_long",
+            format!("{label} must be at most 256 characters"),
+        ));
+    }
+    if trimmed.contains('\0') {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_identifier_invalid",
+            format!("{label} must not contain NUL"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_unique_roleplay_identifiers(
+    label: &'static str,
+    ids: &[String],
+) -> RoleplayDomainResult<()> {
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        validate_roleplay_identifier(label, id)?;
+        if !seen.insert(id.as_str()) {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_identifier_duplicate",
+                format!("{label} contains duplicate id {id}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn roleplay_chat_layer_bindings_from_body(
+    body: &serde_json::Map<String, JsonValue>,
+) -> RoleplayDomainResult<Vec<RoleplayChatLayerBinding>> {
+    if let Some(raw_layers) = body.get("layers") {
+        let Some(items) = raw_layers.as_array() else {
+            return Err(RoleplayDomainError::invalid(
+                "roleplay_invalid_chat_layers",
+                "layers must be an array",
+            ));
+        };
+        return items
+            .iter()
+            .enumerate()
+            .map(|(index, value)| roleplay_chat_layer_binding_from_value(index, value))
+            .collect();
+    }
+    let layer_ids =
+        optional_string_list(body, &["layer_ids", "layerIds"], "layer_ids")?.unwrap_or_default();
+    Ok(layer_ids
+        .into_iter()
+        .enumerate()
+        .map(|(index, layer_id)| RoleplayChatLayerBinding {
+            layer_id,
+            priority: i64::try_from(index).unwrap_or(i64::MAX),
+            enabled: true,
+        })
+        .collect())
+}
+
+fn roleplay_chat_layer_binding_from_value(
+    index: usize,
+    value: &JsonValue,
+) -> RoleplayDomainResult<RoleplayChatLayerBinding> {
+    if let Some(layer_id) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(RoleplayChatLayerBinding {
+            layer_id: layer_id.to_string(),
+            priority: i64::try_from(index).unwrap_or(i64::MAX),
+            enabled: true,
+        });
+    }
+    let Some(record) = value.as_object() else {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_invalid_chat_layer",
+            format!("layers[{index}] must be a string or object"),
+        ));
+    };
+    let layer_id = required_json_string(
+        record,
+        &["layer_id", "layerId"],
+        "roleplay chat layer layer_id",
+    )?;
+    Ok(RoleplayChatLayerBinding {
+        layer_id,
+        priority: optional_i64(record, &["priority"], "roleplay chat layer priority")?
+            .unwrap_or_else(|| i64::try_from(index).unwrap_or(i64::MAX)),
+        enabled: optional_bool_strict(record, &["enabled"], "roleplay chat layer enabled")?
+            .unwrap_or(true),
+    })
 }
 
 fn required_lifecycle_source(
@@ -3309,6 +3589,123 @@ mod tests {
             source_archived.reason_code,
             "roleplay_session_fork_source_archived"
         );
+    }
+
+    #[test]
+    fn plans_chat_layer_binding_metadata_and_write_side_effects() {
+        let plan = plan_chat_layer_binding(RoleplayChatLayerBindingPlanInput {
+            now: "2026-07-07T06:00:00Z".to_string(),
+            body: serde_json::json!({
+                "chatId": "session-rp",
+                "layers": [
+                    "world",
+                    {"layerId": "scene", "priority": 8, "enabled": false},
+                    {"layer_id": "notes"}
+                ]
+            }),
+            current_metadata: Some(metadata(vec!["old".to_string()])),
+            current_chat_layers: vec![],
+            available_layer_ids: Some(vec![
+                "world".to_string(),
+                "scene".to_string(),
+                "notes".to_string(),
+            ]),
+        })
+        .expect("chat layer binding plan");
+
+        assert_eq!(plan.chat_layers_write.chat_id, "session-rp");
+        assert_eq!(plan.chat_layers_write.layers[1].priority, 8);
+        assert!(!plan.chat_layers_write.layers[1].enabled);
+        assert_eq!(
+            plan.active_layer_ids,
+            vec!["world".to_string(), "notes".to_string()]
+        );
+        assert_eq!(
+            plan.metadata_patch
+                .expect("metadata patch")
+                .active_layer_ids,
+            vec!["world".to_string(), "notes".to_string()]
+        );
+        assert!(plan.chat_layers_changed);
+        assert!(plan.active_layer_ids_changed);
+        assert!(!plan.no_op);
+    }
+
+    #[test]
+    fn plans_chat_layer_binding_noop_when_write_and_metadata_match() {
+        let current_layers = vec![
+            RoleplayChatLayerBinding {
+                layer_id: "world".to_string(),
+                priority: 0,
+                enabled: true,
+            },
+            RoleplayChatLayerBinding {
+                layer_id: "scene".to_string(),
+                priority: 1,
+                enabled: true,
+            },
+        ];
+        let plan = plan_chat_layer_binding(RoleplayChatLayerBindingPlanInput {
+            now: "2026-07-07T06:00:00Z".to_string(),
+            body: serde_json::json!({
+                "session_id": "session-rp",
+                "layer_ids": "world, scene"
+            }),
+            current_metadata: Some(metadata(vec!["world".to_string(), "scene".to_string()])),
+            current_chat_layers: current_layers,
+            available_layer_ids: Some(vec!["world".to_string(), "scene".to_string()]),
+        })
+        .expect("chat layer binding no-op plan");
+
+        assert!(plan.metadata_patch.is_none());
+        assert!(!plan.chat_layers_changed);
+        assert!(!plan.active_layer_ids_changed);
+        assert!(plan.no_op);
+    }
+
+    #[test]
+    fn rejects_invalid_chat_layer_binding_inputs() {
+        let duplicate = plan_chat_layer_binding(RoleplayChatLayerBindingPlanInput {
+            now: "2026-07-07T06:00:00Z".to_string(),
+            body: serde_json::json!({
+                "chat_id": "session-rp",
+                "layer_ids": ["world", "world"]
+            }),
+            current_metadata: Some(metadata(vec![])),
+            current_chat_layers: vec![],
+            available_layer_ids: Some(vec!["world".to_string()]),
+        })
+        .expect_err("duplicate layer rejected");
+        assert_eq!(duplicate.reason_code, "roleplay_identifier_duplicate");
+
+        let missing_layer = plan_chat_layer_binding(RoleplayChatLayerBindingPlanInput {
+            now: "2026-07-07T06:00:00Z".to_string(),
+            body: serde_json::json!({
+                "chat_id": "session-rp",
+                "layers": [{"layer_id": "missing"}]
+            }),
+            current_metadata: Some(metadata(vec![])),
+            current_chat_layers: vec![],
+            available_layer_ids: Some(vec!["world".to_string()]),
+        })
+        .expect_err("unknown layer rejected");
+        assert_eq!(
+            missing_layer.reason_code,
+            "roleplay_lore_layer_reference_invalid"
+        );
+
+        let bad_enabled = plan_chat_layer_binding(RoleplayChatLayerBindingPlanInput {
+            now: "2026-07-07T06:00:00Z".to_string(),
+            body: serde_json::json!({
+                "chat_id": "session-rp",
+                "layers": [{"layer_id": "world", "enabled": "yes"}]
+            }),
+            current_metadata: Some(metadata(vec![])),
+            current_chat_layers: vec![],
+            available_layer_ids: Some(vec!["world".to_string()]),
+        })
+        .expect_err("bad enabled rejected");
+        assert_eq!(bad_enabled.reason_code, "roleplay_invalid_boolean");
     }
 
     #[test]

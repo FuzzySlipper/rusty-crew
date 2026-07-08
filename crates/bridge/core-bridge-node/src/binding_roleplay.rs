@@ -31,6 +31,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_roleplay_chat_layer_binding_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<RoleplayChatLayerBindingPlanInput>(
+            &input_json,
+            "roleplay chat layer binding plan input",
+        )?;
+        let plan = plan_chat_layer_binding(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&plan, "roleplay chat layer binding plan")
+    }
+
+    #[napi]
     pub fn build_roleplay_prompt_context_json(&self, input_json: String) -> napi::Result<String> {
         let input =
             parse_json::<RoleplayPromptContextInput>(&input_json, "roleplay prompt context input")?;

@@ -1220,6 +1220,15 @@ errors = "roleplay_core::RoleplayDomainError"
 summary = "Plan deterministic roleplay session create, fork, archive, and restore lifecycle decisions before route-layer persistence."
 
 [[operation]]
+name = "plan_roleplay_chat_layer_binding"
+surface = "stable"
+direction = "ts_to_rust"
+input = "roleplay_core::RoleplayChatLayerBindingPlanInput"
+output = "roleplay_core::RoleplayChatLayerBindingPlan"
+errors = "roleplay_core::RoleplayDomainError"
+summary = "Plan deterministic roleplay chat layer writes and active-layer metadata side effects before route-layer persistence."
+
+[[operation]]
 name = "build_roleplay_prompt_context"
 surface = "stable"
 direction = "ts_to_rust"

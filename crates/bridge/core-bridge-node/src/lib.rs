@@ -89,13 +89,14 @@ use rusty_crew_roleplay_core::{
     build_prompt_context, merge_character, merge_player_persona, narrator_auto_capture_request,
     narrator_mandatory_explore_requests, narrator_review_requests_revision, next_narrator_phase,
     normalize_narrator_config, patch_session_metadata, plan_assistant_alternative,
-    plan_session_lifecycle, speaker_identity_snapshot, start_narrator_turn, write_character,
-    write_player_persona, RoleplayAssistantAlternativePlanInput, RoleplayCharacterMergeInput,
-    RoleplayCharacterWriteInput, RoleplayNarratorAutoCaptureInput,
-    RoleplayNarratorMandatoryExploreInput, RoleplayNarratorNextInput, RoleplayNarratorStartInput,
-    RoleplayPlayerPersonaMergeInput, RoleplayPlayerPersonaWriteInput, RoleplayPromptContextInput,
-    RoleplaySessionLifecyclePlanInput, RoleplaySessionMetadataPatchInput,
-    RoleplaySpeakerIdentityInput,
+    plan_chat_layer_binding, plan_session_lifecycle, speaker_identity_snapshot,
+    start_narrator_turn, write_character, write_player_persona,
+    RoleplayAssistantAlternativePlanInput, RoleplayCharacterMergeInput,
+    RoleplayCharacterWriteInput, RoleplayChatLayerBindingPlanInput,
+    RoleplayNarratorAutoCaptureInput, RoleplayNarratorMandatoryExploreInput,
+    RoleplayNarratorNextInput, RoleplayNarratorStartInput, RoleplayPlayerPersonaMergeInput,
+    RoleplayPlayerPersonaWriteInput, RoleplayPromptContextInput, RoleplaySessionLifecyclePlanInput,
+    RoleplaySessionMetadataPatchInput, RoleplaySpeakerIdentityInput,
 };
 mod binding_config_profiles;
 mod binding_conversation;

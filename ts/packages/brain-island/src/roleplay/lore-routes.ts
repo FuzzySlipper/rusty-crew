@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type {
-  NativeRoleplayChatLayersWrite,
   NativeRoleplayLoreEntryPromotion,
   NativeRoleplayLoreFactCapture,
   NativeRoleplayLoreLayerWrite,
@@ -13,12 +12,24 @@ import type { AdminRouteResult } from "../admin-diagnostics-api.js";
 import { failure, successRoute } from "../service-route-results.js";
 import type { RoleplayRouteContext } from "../service-roleplay-routes.js";
 
-interface RoleplayChatLayersBrowserWrite extends NativeRoleplayChatLayersWrite {
+interface RoleplayChatLayersWritePlan {
+  [key: string]: unknown;
   chat_id: string;
   layers: Array<{ layer_id: string; priority: number; enabled: boolean }>;
+  now: string;
+}
+
+interface RoleplayChatLayerBindingPlan {
+  chat_layers_write: RoleplayChatLayersWritePlan;
+  metadata_patch?: { activeLayerIds: string[] };
+  active_layer_ids: string[];
+  chat_layers_changed: boolean;
+  active_layer_ids_changed: boolean;
+  no_op: boolean;
 }
 
 export interface RoleplayLoreRouteOptions {
+  sessionMetadata(sessionId: string): Promise<unknown>;
   upsertSessionMetadata(
     sessionId: string,
     patch: { activeLayerIds?: string[] },
@@ -323,14 +334,42 @@ export async function handleAdminRoleplayLoreRequest(
         );
       }
       const body = recordBody(await readJsonBody(request));
-      const write = roleplayChatLayersWriteFromBody(body, state.now());
-      await state.bridge.setChatLayers(write);
-      await options.upsertSessionMetadata(write.chat_id, {
-        activeLayerIds: write.layers.map((layer) => layer.layer_id),
-      });
+      const chatId = roleplayChatLayerBindingChatIdFromBody(body);
+      const [currentMetadata, currentChatLayers] = await Promise.all([
+        options.sessionMetadata(chatId),
+        state.bridge.getChatLayers(chatId),
+      ]);
+      const profileId = roleplaySessionMetadataProfileId(currentMetadata);
+      const availableLayerIds =
+        profileId === undefined
+          ? undefined
+          : await state.bridge
+              .listLoreLayers(profileId)
+              .then((layers) => layers.map((layer) => String(layer.layer_id)));
+      const plan = (await state.bridge.planRoleplayChatLayerBinding(
+        compactRecord({
+          now: state.now(),
+          body,
+          current_metadata: currentMetadata,
+          current_chat_layers:
+            roleplayChatLayerBindingsForPlan(currentChatLayers),
+          available_layer_ids: availableLayerIds,
+        }),
+      )) as RoleplayChatLayerBindingPlan;
+      if (plan.chat_layers_changed) {
+        await state.bridge.setChatLayers(plan.chat_layers_write);
+      }
+      if (plan.metadata_patch !== undefined) {
+        await options.upsertSessionMetadata(
+          plan.chat_layers_write.chat_id,
+          plan.metadata_patch,
+        );
+      }
       return successRoute(requestIdValue, {
         saved: true,
-        chatId: write.chat_id,
+        chatId: plan.chat_layers_write.chat_id,
+        activeLayerIds: plan.active_layer_ids,
+        noOp: plan.no_op,
       });
     }
 
@@ -1895,42 +1934,43 @@ function roleplayLoreLayerUpdateFromBody(
   };
 }
 
-function roleplayChatLayersWriteFromBody(
+function roleplayChatLayerBindingChatIdFromBody(
   body: Record<string, unknown>,
-  now: string,
-): RoleplayChatLayersBrowserWrite {
-  const chatId = requiredRouteString(
+): string {
+  return requiredRouteString(
     optionalString(body.chat_id) ??
       optionalString(body.chatId) ??
       optionalString(body.session_id) ??
       optionalString(body.sessionId),
     "chat_id",
   );
-  const rawLayers = arrayValue(body.layers);
-  const layerIds =
-    rawLayers.length > 0
-      ? rawLayers.map((layer, index) => {
-          if (typeof layer === "string") {
-            return { layer_id: layer, priority: index, enabled: true };
-          }
-          const record = recordBody(layer);
-          return {
-            layer_id: requiredRouteString(
-              optionalString(record.layer_id) ?? optionalString(record.layerId),
-              `layers[${index}].layer_id`,
-            ),
-            priority: optionalNumber(record.priority) ?? index,
-            enabled: optionalBoolean(record.enabled) ?? true,
-          };
-        })
-      : stringArray(body.layer_ids ?? body.layerIds, "layer_ids").map(
-          (layerId, index) => ({
-            layer_id: layerId,
-            priority: index,
-            enabled: true,
-          }),
-        );
-  return { chat_id: chatId, layers: layerIds, now };
+}
+
+function roleplaySessionMetadataProfileId(value: unknown): string | undefined {
+  const record = optionalRecord(value);
+  if (record === undefined) return undefined;
+  return optionalString(record.profileId) ?? optionalString(record.profile_id);
+}
+
+function roleplayChatLayerBindingsForPlan(
+  layers: readonly Record<string, unknown>[],
+): Array<{ layer_id: string; priority: number; enabled: boolean }> {
+  return layers.map((layer) => ({
+    layer_id: String(layer.layer_id ?? layer.layerId),
+    priority: optionalNumber(layer.priority) ?? 0,
+    enabled: optionalBoolean(layer.enabled) ?? true,
+  }));
+}
+
+function compactRecord(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record).filter(
+      (entry): entry is [string, unknown] =>
+        entry[1] !== undefined && entry[1] !== null,
+    ),
+  );
 }
 
 function requiredRouteString(
@@ -1963,6 +2003,10 @@ function arrayValue(value: unknown): unknown[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
 }
 
 function optionalString(value: unknown): string | undefined {

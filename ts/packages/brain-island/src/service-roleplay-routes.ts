@@ -287,6 +287,10 @@ export async function handleAdminRoleplayRequest(
   }
   if (url.pathname.startsWith("/v1/admin/roleplay/lore/")) {
     return handleAdminRoleplayLoreRequest(request, state, url, {
+      sessionMetadata: async (sessionId) => {
+        const session = await state.serviceSessionById(sessionId);
+        return roleplaySessionMetadata(state, session);
+      },
       upsertSessionMetadata: (sessionId, patch) =>
         upsertRoleplaySessionMetadata(state, sessionId, patch),
     });

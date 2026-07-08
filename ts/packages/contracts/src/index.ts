@@ -1650,6 +1650,7 @@ export const manifestOperationNames = [
   "plan_model_provider_refresh",
   "plan_roleplay_assistant_alternative",
   "plan_roleplay_session_lifecycle",
+  "plan_roleplay_chat_layer_binding",
   "build_roleplay_prompt_context",
   "roleplay_speaker_identity",
   "write_roleplay_character",
