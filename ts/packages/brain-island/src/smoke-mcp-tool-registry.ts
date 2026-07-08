@@ -207,9 +207,46 @@ assert.equal(
   )?.toolName,
   "den_bad_shape",
 );
+
+const adapterNormalizedButRustInvalidDiscovery = convertMcpToolsToCandidates(
+  binding,
+  [
+    {
+      name: "",
+      description:
+        "This source name normalizes to den_, which old TS accepted but Rust rejects.",
+      inputSchema: true,
+    },
+  ],
+);
+assert.equal(
+  adapterNormalizedButRustInvalidDiscovery.candidates[0]?.name,
+  "den_",
+);
+const adapterNormalizedButRustInvalidReport =
+  await integrateMcpToolsWithRegistry({
+    catalogId: "mcp:adapter-normalized-invalid",
+    metadataPolicyValidator: countingMetadataPolicyValidator,
+    candidates: adapterNormalizedButRustInvalidDiscovery.candidates,
+  });
+assert.equal(adapterNormalizedButRustInvalidReport.validation.ok, false);
+assert.equal(adapterNormalizedButRustInvalidReport.registry, undefined);
+assert.equal(adapterNormalizedButRustInvalidReport.inventory, undefined);
+assert.equal(
+  adapterNormalizedButRustInvalidReport.validation.issues.find(
+    (issue) => issue.code === "invalid_name",
+  )?.toolName,
+  "den_",
+);
+assert.equal(
+  adapterNormalizedButRustInvalidReport.validation.issues.find(
+    (issue) => issue.code === "invalid_output_shape",
+  )?.toolName,
+  "den_",
+);
 assert.equal(
   metadataPolicyCalls,
-  5,
+  6,
   "every MCP merge path must call the Rust/codegen metadata policy validator",
 );
 
@@ -223,6 +260,8 @@ console.log(
       prefixedName: prefixedReport.mcpEntries[0]?.name,
       duplicateIssue: duplicateMcpReport.validation.issues[0]?.code,
       invalidMetadataIssue: invalidMetadataReport.validation.issues[0]?.code,
+      adapterNormalizedInvalidIssue:
+        adapterNormalizedButRustInvalidReport.validation.issues[0]?.code,
       metadataPolicyCalls,
     },
     null,
