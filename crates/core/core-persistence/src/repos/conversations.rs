@@ -101,6 +101,119 @@ impl CoordinationStore {
         Ok(CreateChatMessageVariantResult { variant: record })
     }
 
+    pub fn delete_chat_message_variant(
+        &self,
+        request: &DeleteChatMessageVariantRequest,
+    ) -> CoreResult<MessageSlotRecord> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin delete chat message variant", error))?;
+        ensure_slot_belongs_to_session_in_tx(&tx, &request.session_id, &request.slot_id)?;
+        ensure_variant_belongs_to_slot_in_tx(&tx, &request.slot_id, &request.variant_id)?;
+        let changed = tx
+            .execute(
+                "UPDATE message_variants
+                 SET status = 'deleted', updated_at = ?3
+                 WHERE slot_id = ?1 AND variant_id = ?2 AND source <> 'primary'",
+                params![request.slot_id.0, request.variant_id.0, request.updated_at,],
+            )
+            .map_err(|error| persistence_error("delete chat message variant", error))?;
+        if changed != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "message variant {} cannot be deleted because it is the primary variant for slot {}",
+                    request.variant_id, request.slot_id
+                ),
+            ));
+        }
+        tx.execute(
+            "UPDATE message_slots
+             SET active_variant_id = CASE
+                    WHEN active_variant_id = ?2 THEN NULL
+                    ELSE active_variant_id
+                 END,
+                 updated_at = ?3,
+                 version = version + 1
+             WHERE slot_id = ?1",
+            params![request.slot_id.0, request.variant_id.0, request.updated_at,],
+        )
+        .map_err(|error| persistence_error("clear deleted chat active variant", error))?;
+        let slot = load_message_slot_in_tx(&tx, &request.slot_id, true)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit delete chat message variant", error))?;
+        Ok(slot)
+    }
+
+    pub fn reorder_chat_message_variants(
+        &self,
+        request: &ReorderChatMessageVariantsRequest,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin reorder chat message variants", error))?;
+        ensure_slot_belongs_to_session_in_tx(&tx, &request.session_id, &request.slot_id)?;
+        for (index, variant_id) in request.ordered_variant_ids.iter().enumerate() {
+            ensure_variant_belongs_to_slot_in_tx(&tx, &request.slot_id, variant_id)?;
+            let changed = tx
+                .execute(
+                    "UPDATE message_variants
+                     SET ordinal = ?3, updated_at = ?4
+                     WHERE slot_id = ?1 AND variant_id = ?2 AND source <> 'primary'",
+                    params![
+                        request.slot_id.0,
+                        variant_id.0,
+                        -((index + 1) as i64),
+                        request.updated_at,
+                    ],
+                )
+                .map_err(|error| persistence_error("stage reorder chat message variant", error))?;
+            if changed != 1 {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    format!(
+                        "message variant {variant_id} cannot be reordered because it is the primary variant for slot {}",
+                        request.slot_id
+                    ),
+                ));
+            }
+        }
+        for (index, variant_id) in request.ordered_variant_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE message_variants
+                 SET ordinal = ?3, updated_at = ?4
+                 WHERE slot_id = ?1 AND variant_id = ?2 AND source <> 'primary'",
+                params![
+                    request.slot_id.0,
+                    variant_id.0,
+                    (index + 1) as i64,
+                    request.updated_at,
+                ],
+            )
+            .map_err(|error| persistence_error("reorder chat message variant", error))?;
+        }
+        tx.execute(
+            "UPDATE message_slots
+             SET updated_at = ?2, version = version + 1
+             WHERE slot_id = ?1",
+            params![request.slot_id.0, request.updated_at],
+        )
+        .map_err(|error| persistence_error("touch reordered chat message slot", error))?;
+        let variants = query_message_variants_in_tx(
+            &tx,
+            &MessageVariantQuery {
+                slot_id: Some(request.slot_id.clone()),
+                include_deleted: false,
+                page: None,
+            },
+        )?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit reorder chat message variants", error))?;
+        Ok(variants)
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,

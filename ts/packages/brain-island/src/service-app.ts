@@ -9166,12 +9166,8 @@ async function deleteRustyViewMessageVariant(
   state: ServiceState,
   input: DeleteMessageVariantInput,
 ): Promise<MessageSlotMutationResult> {
-  await requireMessageSlotForSession(
-    state,
-    input.session.sessionId,
-    input.slotId,
-  );
-  const slot = (await state.bridge.deleteMessageVariant({
+  const slot = (await state.bridge.deleteChatMessageVariant({
+    session_id: input.session.sessionId,
     slot_id: input.slotId,
     variant_id: input.variantId,
     updated_at: state.now(),
@@ -9187,12 +9183,8 @@ async function reorderRustyViewMessageVariants(
   state: ServiceState,
   input: ReorderMessageVariantsInput,
 ): Promise<MessageVariantsReorderResult> {
-  await requireMessageSlotForSession(
-    state,
-    input.session.sessionId,
-    input.slotId,
-  );
-  const variants = (await state.bridge.reorderMessageVariants({
+  const variants = (await state.bridge.reorderChatMessageVariants({
+    session_id: input.session.sessionId,
     slot_id: input.slotId,
     ordered_variant_ids: input.orderedVariantIds,
     updated_at: state.now(),

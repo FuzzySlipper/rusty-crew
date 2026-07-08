@@ -456,6 +456,22 @@ pub struct CreateChatMessageVariantResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteChatMessageVariantRequest {
+    pub session_id: SessionId,
+    pub slot_id: MessageSlotId,
+    pub variant_id: MessageVariantId,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReorderChatMessageVariantsRequest {
+    pub session_id: SessionId,
+    pub slot_id: MessageSlotId,
+    pub ordered_variant_ids: Vec<MessageVariantId>,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveVariantConflict {
     pub expected: Option<MessageVariantId>,
     pub actual: Option<MessageVariantId>,

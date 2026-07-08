@@ -1608,6 +1608,8 @@ export const manifestOperationNames = [
   "query_message_variants",
   "select_active_message_variant",
   "select_active_chat_message_variant",
+  "delete_chat_message_variant",
+  "reorder_chat_message_variants",
   "delete_message_variant",
   "reorder_message_variants",
   "save_conversation_branch",
@@ -1700,6 +1702,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "062aa51a860a43e1637655714a12e99e6b08f438f713f6c7fae18a040bd8e24b";
+  "4035dc6759031615c4bef82a6fda1d3666c4ebf3647f875bedc573c273cf678c";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

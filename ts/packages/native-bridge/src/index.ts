@@ -249,6 +249,8 @@ interface NativeBridgeBinding {
   queryChatEventsJson(inputJson: string): string;
   selectActiveMessageVariantJson(inputJson: string): string;
   selectActiveChatMessageVariantJson(inputJson: string): string;
+  deleteChatMessageVariantJson(inputJson: string): string;
+  reorderChatMessageVariantsJson(inputJson: string): string;
   deleteMessageVariantJson(inputJson: string): string;
   reorderMessageVariantsJson(inputJson: string): string;
   saveConversationBranchJson(inputJson: string): string;
@@ -2177,6 +2179,8 @@ export interface NativeBridgeModule {
   queryMessageVariants(query: unknown): Promise<unknown[]>;
   selectActiveMessageVariant(input: unknown): Promise<unknown>;
   selectActiveChatMessageVariant(input: unknown): Promise<unknown>;
+  deleteChatMessageVariant(input: unknown): Promise<unknown>;
+  reorderChatMessageVariants(input: unknown): Promise<unknown[]>;
   deleteMessageVariant(input: unknown): Promise<unknown>;
   reorderMessageVariants(input: unknown): Promise<unknown[]>;
   saveConversationBranch(input: unknown): Promise<unknown>;
@@ -2533,6 +2537,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     selectActiveChatMessageVariant: unavailable(
       "select_active_chat_message_variant",
     ),
+    deleteChatMessageVariant: unavailable("delete_chat_message_variant"),
+    reorderChatMessageVariants: unavailable("reorder_chat_message_variants"),
     deleteMessageVariant: unavailable("delete_message_variant"),
     reorderMessageVariants: unavailable("reorder_message_variants"),
     saveConversationBranch: unavailable("save_conversation_branch"),
@@ -3801,6 +3807,14 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.selectActiveChatMessageVariantJson(JSON.stringify(input)),
       ) as unknown,
+    deleteChatMessageVariant: async (input) =>
+      JSON.parse(
+        binding.deleteChatMessageVariantJson(JSON.stringify(input)),
+      ) as unknown,
+    reorderChatMessageVariants: async (input) =>
+      JSON.parse(
+        binding.reorderChatMessageVariantsJson(JSON.stringify(input)),
+      ) as unknown[],
     deleteMessageVariant: async (input) =>
       JSON.parse(
         binding.deleteMessageVariantJson(JSON.stringify(input)),

@@ -22,14 +22,15 @@ use rusty_crew_core_persistence::{
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
     ConversationSnapshotWrite, CoreCoordinationStore, CreateChatMessageSlotRequest,
     CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
-    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DurableMessageRecord,
-    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord,
-    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DeleteChatMessageVariantRequest,
+    DurableMessageRecord, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
+    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
+    ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState,
+    ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
     RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
     RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
     RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
@@ -1041,6 +1042,24 @@ impl CoreEngine {
         self.store
             .conversation()
             .create_chat_message_variant(request)
+    }
+
+    pub fn delete_chat_message_variant(
+        &self,
+        request: &DeleteChatMessageVariantRequest,
+    ) -> CoreResult<MessageSlotRecord> {
+        self.store
+            .conversation()
+            .delete_chat_message_variant(request)
+    }
+
+    pub fn reorder_chat_message_variants(
+        &self,
+        request: &ReorderChatMessageVariantsRequest,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.store
+            .conversation()
+            .reorder_chat_message_variants(request)
     }
 
     pub fn query_message_slots(
@@ -6463,6 +6482,170 @@ mod tests {
         assert_eq!(error.kind, CoreErrorKind::NotFound);
     }
 
+    #[test]
+    fn delete_chat_message_variant_validates_slot_session_ownership() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "delete-owned-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        save_test_alternate_variant(&engine, "delete-owned-session", 1, 2, "alt");
+
+        let error = engine
+            .delete_chat_message_variant(&DeleteChatMessageVariantRequest {
+                session_id: SessionId::new("other-delete-session"),
+                slot_id: MessageSlotId::new("delete-owned-session-slot-1"),
+                variant_id: MessageVariantId::new("delete-owned-session-variant-2-alt"),
+                updated_at: "2026-06-19T00:04:00Z".to_string(),
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::NotFound);
+    }
+
+    #[test]
+    fn delete_chat_message_variant_rejects_primary_variant() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "delete-primary-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+
+        let error = engine
+            .delete_chat_message_variant(&DeleteChatMessageVariantRequest {
+                session_id: SessionId::new("delete-primary-session"),
+                slot_id: MessageSlotId::new("delete-primary-session-slot-1"),
+                variant_id: MessageVariantId::new("delete-primary-session-variant-1-primary"),
+                updated_at: "2026-06-19T00:04:00Z".to_string(),
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn delete_chat_message_variant_clears_active_alternate() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "delete-active-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        save_test_alternate_variant(&engine, "delete-active-session", 1, 2, "alt");
+        engine
+            .select_active_message_variant(&SelectActiveVariantRequest {
+                slot_id: MessageSlotId::new("delete-active-session-slot-1"),
+                active_variant_id: Some(MessageVariantId::new(
+                    "delete-active-session-variant-2-alt",
+                )),
+                expected: rusty_crew_core_persistence::ActiveVariantExpectation::Any,
+                updated_at: "2026-06-19T00:03:00Z".to_string(),
+            })
+            .unwrap();
+
+        let slot = engine
+            .delete_chat_message_variant(&DeleteChatMessageVariantRequest {
+                session_id: SessionId::new("delete-active-session"),
+                slot_id: MessageSlotId::new("delete-active-session-slot-1"),
+                variant_id: MessageVariantId::new("delete-active-session-variant-2-alt"),
+                updated_at: "2026-06-19T00:04:00Z".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(slot.active_variant_id, None);
+        assert!(slot.alternates.is_empty());
+    }
+
+    #[test]
+    fn reorder_chat_message_variants_validates_session_and_reorders() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "reorder-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+        save_test_alternate_variant(&engine, "reorder-session", 1, 2, "alt 1");
+        save_test_alternate_variant(&engine, "reorder-session", 1, 3, "alt 2");
+
+        let mismatch = engine
+            .reorder_chat_message_variants(&ReorderChatMessageVariantsRequest {
+                session_id: SessionId::new("other-reorder-session"),
+                slot_id: MessageSlotId::new("reorder-session-slot-1"),
+                ordered_variant_ids: vec![
+                    MessageVariantId::new("reorder-session-variant-3-alt"),
+                    MessageVariantId::new("reorder-session-variant-2-alt"),
+                ],
+                updated_at: "2026-06-19T00:04:00Z".to_string(),
+            })
+            .unwrap_err();
+        assert_eq!(mismatch.kind, CoreErrorKind::NotFound);
+
+        let variants = engine
+            .reorder_chat_message_variants(&ReorderChatMessageVariantsRequest {
+                session_id: SessionId::new("reorder-session"),
+                slot_id: MessageSlotId::new("reorder-session-slot-1"),
+                ordered_variant_ids: vec![
+                    MessageVariantId::new("reorder-session-variant-3-alt"),
+                    MessageVariantId::new("reorder-session-variant-2-alt"),
+                ],
+                updated_at: "2026-06-19T00:05:00Z".to_string(),
+            })
+            .unwrap();
+
+        let alternate_order = variants
+            .iter()
+            .filter(|variant| variant.source == MessageVariantSource::Alternate)
+            .map(|variant| (variant.variant_id.clone(), variant.ordinal))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            alternate_order,
+            vec![
+                (MessageVariantId::new("reorder-session-variant-3-alt"), 1),
+                (MessageVariantId::new("reorder-session-variant-2-alt"), 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn reorder_chat_message_variants_rejects_primary_variant() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "reorder-primary-session",
+            1,
+            "assistant",
+            "assistant",
+            "primary",
+        );
+
+        let error = engine
+            .reorder_chat_message_variants(&ReorderChatMessageVariantsRequest {
+                session_id: SessionId::new("reorder-primary-session"),
+                slot_id: MessageSlotId::new("reorder-primary-session-slot-1"),
+                ordered_variant_ids: vec![MessageVariantId::new(
+                    "reorder-primary-session-variant-1-primary",
+                )],
+                updated_at: "2026-06-19T00:04:00Z".to_string(),
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+    }
+
     fn save_test_message_slot(
         engine: &CoreEngine,
         session_id: &str,
@@ -6495,6 +6678,37 @@ mod tests {
                 ordinal: 0,
                 status: MessageVariantStatus::Active,
                 message: test_message_write(session_id, ordinal, author_id, author_role, body),
+                metadata_json: json!({}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp,
+            })
+            .unwrap();
+    }
+
+    fn save_test_alternate_variant(
+        engine: &CoreEngine,
+        session_id: &str,
+        slot_ordinal: u32,
+        variant_ordinal: u32,
+        body: &str,
+    ) {
+        let timestamp = format!("2026-06-19T00:{variant_ordinal:02}:00Z");
+        engine
+            .save_message_variant(&MessageVariantWrite {
+                variant_id: MessageVariantId::new(format!(
+                    "{session_id}-variant-{variant_ordinal}-alt"
+                )),
+                slot_id: MessageSlotId::new(format!("{session_id}-slot-{slot_ordinal}")),
+                source: MessageVariantSource::Alternate,
+                ordinal: variant_ordinal.saturating_sub(1),
+                status: MessageVariantStatus::Active,
+                message: test_message_write(
+                    session_id,
+                    variant_ordinal,
+                    "assistant",
+                    "assistant",
+                    body,
+                ),
                 metadata_json: json!({}),
                 created_at: timestamp.clone(),
                 updated_at: timestamp,

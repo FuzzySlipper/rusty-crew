@@ -597,6 +597,24 @@ errors = "core_protocol::CoreError"
 summary = "Select the active variant for a chat message slot and synchronize branch head state."
 
 [[operation]]
+name = "delete_chat_message_variant"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::DeleteChatMessageVariantRequest"
+output = "core_persistence::MessageSlotRecord"
+errors = "core_protocol::CoreError"
+summary = "Delete an alternate chat message variant with session-aware slot ownership validation."
+
+[[operation]]
+name = "reorder_chat_message_variants"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ReorderChatMessageVariantsRequest"
+output = "Vec<core_persistence::MessageVariantRecord>"
+errors = "core_protocol::CoreError"
+summary = "Reorder alternate chat message variants with session-aware slot ownership validation."
+
+[[operation]]
 name = "delete_message_variant"
 surface = "stable"
 direction = "ts_to_rust"

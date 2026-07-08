@@ -165,6 +165,20 @@ impl NativeBridge {
         self.engine()?.select_active_chat_message_variant(request)
     }
 
+    pub fn delete_chat_message_variant(
+        &self,
+        request: &DeleteChatMessageVariantRequest,
+    ) -> CoreResult<MessageSlotRecord> {
+        self.engine()?.delete_chat_message_variant(request)
+    }
+
+    pub fn reorder_chat_message_variants(
+        &self,
+        request: &ReorderChatMessageVariantsRequest,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.engine()?.reorder_chat_message_variants(request)
+    }
+
     pub fn delete_message_variant(
         &self,
         slot_id: &MessageSlotId,

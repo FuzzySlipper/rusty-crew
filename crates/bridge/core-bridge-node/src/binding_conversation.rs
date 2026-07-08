@@ -272,6 +272,32 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn delete_chat_message_variant_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<DeleteChatMessageVariantRequest>(
+            &input_json,
+            "delete chat message variant request",
+        )?;
+        let slot = bridge
+            .delete_chat_message_variant(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&slot, "message slot record")
+    }
+
+    #[napi]
+    pub fn reorder_chat_message_variants_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<ReorderChatMessageVariantsRequest>(
+            &input_json,
+            "reorder chat message variants request",
+        )?;
+        let variants = bridge
+            .reorder_chat_message_variants(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&variants, "message variant records")
+    }
+
+    #[napi]
     pub fn delete_message_variant_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let request = parse_json::<WireDeleteMessageVariantRequest>(

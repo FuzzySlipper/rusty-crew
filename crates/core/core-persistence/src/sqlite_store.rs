@@ -811,6 +811,28 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn delete_chat_message_variant(
+        &self,
+        request: &DeleteChatMessageVariantRequest,
+    ) -> CoreResult<MessageSlotRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.delete_chat_message_variant(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.delete_chat_message_variant(request),
+        }
+    }
+
+    pub fn reorder_chat_message_variants(
+        &self,
+        request: &ReorderChatMessageVariantsRequest,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.reorder_chat_message_variants(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.reorder_chat_message_variants(request),
+        }
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,
@@ -1728,6 +1750,20 @@ impl ConversationRepositorySet<'_> {
         request: &CreateChatMessageVariantRequest,
     ) -> CoreResult<CreateChatMessageVariantResult> {
         self.store.create_chat_message_variant(request)
+    }
+
+    pub fn delete_chat_message_variant(
+        &self,
+        request: &DeleteChatMessageVariantRequest,
+    ) -> CoreResult<MessageSlotRecord> {
+        self.store.delete_chat_message_variant(request)
+    }
+
+    pub fn reorder_chat_message_variants(
+        &self,
+        request: &ReorderChatMessageVariantsRequest,
+    ) -> CoreResult<Vec<MessageVariantRecord>> {
+        self.store.reorder_chat_message_variants(request)
     }
 
     pub fn query_message_slots(
