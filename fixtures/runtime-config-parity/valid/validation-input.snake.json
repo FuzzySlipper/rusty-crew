@@ -20,6 +20,9 @@
           "max_delegation_depth": 4
         },
         "owner_id": "parity-owner",
+        "history_window": {
+          "max_messages": 12
+        },
         "max_history_messages": 24,
         "turn_timeout_ms": 30000
       }
@@ -35,7 +38,9 @@
         "id": "parity-runner-maintenance",
         "schedule": "0 4 * * *",
         "shape": "host_job",
-        "job_kind": "runtime.review.memory_skills"
+        "job_kind": "runtime.review.memory_skills",
+        "script": "runtime-maintenance",
+        "delivery_channel_id": "runtime-maintenance-output"
       },
       {
         "id": "background-review-parity-runner",
@@ -50,11 +55,15 @@
         "adapter_id": "den-gateway",
         "provider": "den_conversation",
         "agent_id": "parity-runner",
+        "instance_id": "parity-runner-instance",
         "session_id": "parity-runner-session",
         "profile_id": "parity-runner",
         "external_channel_id": "40",
+        "external_thread_id": "parity-thread",
+        "external_user_id": "parity-user",
         "conversation_project_id": "rusty-crew",
         "conversation_channel_id": 40,
+        "provider_subscription_id": "parity-subscription",
         "status": "disconnected"
       }
     ],
@@ -63,6 +72,7 @@
         "binding_id": "parity-audit-mcp",
         "adapter_id": "mcp-ts-main",
         "agent_id": "parity-runner",
+        "instance_id": "parity-runner-instance",
         "session_id": "parity-runner-session",
         "profile_id": "parity-runner",
         "server_names": ["den"],

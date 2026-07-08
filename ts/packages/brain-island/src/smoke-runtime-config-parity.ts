@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import {
+  coreConfigFacadeArtifact,
+  loadNativeBridge,
+} from "@rusty-crew/native-bridge";
 import type { ProfileId } from "@rusty-crew/contracts";
 import type {
   NativeCreateProfileRequest,
+  NativeProfileRegistryRuntimeMetadata,
   NativeRuntimeConfigValidationInput,
 } from "@rusty-crew/native-bridge";
 import { loadProfileConfig } from "./profile-loading.js";
@@ -91,6 +95,13 @@ try {
     "valid/create-profile-request.camel.json",
     tempRoot,
   );
+  const profileRegistry = await readFixtureJson<
+    NativeProfileRegistryRuntimeMetadata[]
+  >("valid/profile-registry-runtime-metadata.camel.json", tempRoot);
+  const expectedProfileRegistrySnake = await readFixtureJson<unknown[]>(
+    "valid/profile-registry-runtime-metadata.snake.json",
+    tempRoot,
+  );
   const expectedCreateRequestSnake = await readFixtureJson<unknown>(
     "valid/create-profile-request.snake.json",
     tempRoot,
@@ -100,10 +111,28 @@ try {
     expectedCreateRequestSnake,
     "create-profile parity fixture drifted from the Rust serde snake_case shape",
   );
+  assert.deepEqual(
+    snakeCaseKeys(jsonRoundTrip(profileRegistry)),
+    expectedProfileRegistrySnake,
+    "profile registry runtime metadata fixture drifted from the Rust serde snake_case shape",
+  );
+  assertRuntimeConfigFixtureCoverage({
+    validationInputSnake: expectedSnakeInput,
+    createProfilePlanInputSnake: {
+      ...(expectedSnakeInput as Record<string, unknown>),
+      profile_registry: expectedProfileRegistrySnake,
+      request: expectedCreateRequestSnake,
+    },
+    manifest: await readFixtureJson<RuntimeConfigCoverageManifest>(
+      "coverage-manifest.json",
+      tempRoot,
+    ),
+  });
   const createPlan = await planCreateProfileWithRust({
     bridge,
     runtimeConfig,
     profiles: [profile],
+    profileRegistry,
     request: createRequest,
   });
   assert.deepEqual(createPlan.diagnostics, []);
@@ -139,6 +168,14 @@ try {
         scheduledJobs: actualInput.runtimeConfig.scheduledJobs.length,
         channelBindings: actualInput.runtimeConfig.channelBindings.length,
         mcpBindings: actualInput.runtimeConfig.mcpBindings.length,
+        coverage: {
+          validationInputFields:
+            coreConfigFacadeArtifact.wire_field_inventory
+              .RuntimeConfigValidationInput.length,
+          createProfilePlanInputFields:
+            coreConfigFacadeArtifact.wire_field_inventory.CreateProfilePlanInput
+              .length,
+        },
         invalidCodes: invalidReport.diagnostics.map(
           (diagnostic) => diagnostic.code,
         ),
@@ -198,4 +235,89 @@ function snakeCaseKeys(value: unknown): unknown {
 
 function camelToSnake(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+interface RuntimeConfigCoverageManifest {
+  formatVersion: 1;
+  families: Record<
+    keyof typeof coreConfigFacadeArtifact.wire_field_inventory,
+    {
+      exemptFieldPaths?: Array<{
+        path: string;
+        reason: string;
+      }>;
+    }
+  >;
+}
+
+function assertRuntimeConfigFixtureCoverage(input: {
+  validationInputSnake: unknown;
+  createProfilePlanInputSnake: unknown;
+  manifest: RuntimeConfigCoverageManifest;
+}): void {
+  assertCoveredFieldPaths({
+    family: "RuntimeConfigValidationInput",
+    value: input.validationInputSnake,
+    manifest: input.manifest,
+  });
+  assertCoveredFieldPaths({
+    family: "CreateProfilePlanInput",
+    value: input.createProfilePlanInputSnake,
+    manifest: input.manifest,
+  });
+}
+
+function assertCoveredFieldPaths(input: {
+  family: keyof typeof coreConfigFacadeArtifact.wire_field_inventory;
+  value: unknown;
+  manifest: RuntimeConfigCoverageManifest;
+}): void {
+  const fixturePaths = new Set(jsonFieldPaths(input.value));
+  const exemptions = new Map(
+    (input.manifest.families[input.family]?.exemptFieldPaths ?? []).map(
+      (entry) => [entry.path, entry.reason],
+    ),
+  );
+  const missing = coreConfigFacadeArtifact.wire_field_inventory[
+    input.family
+  ].filter(
+    (path) =>
+      !fixturePaths.has(path) && !validCoverageExemption(exemptions.get(path)),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    `${input.family} fixture coverage is missing Rust-owned fields without exemptions`,
+  );
+}
+
+function validCoverageExemption(reason: string | undefined): boolean {
+  return reason !== undefined && reason.trim().length >= 12;
+}
+
+function jsonFieldPaths(value: unknown): string[] {
+  const paths: string[] = [];
+  collectJsonFieldPaths(value, "", paths);
+  return paths;
+}
+
+function collectJsonFieldPaths(
+  value: unknown,
+  prefix: string,
+  paths: string[],
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectJsonFieldPaths(item, `${prefix}[]`, paths);
+    }
+    return;
+  }
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const path = prefix.length === 0 ? key : `${prefix}.${key}`;
+    paths.push(path);
+    collectJsonFieldPaths(child, path, paths);
+  }
 }

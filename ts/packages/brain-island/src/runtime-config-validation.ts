@@ -29,6 +29,7 @@ export function runtimeConfigValidationInput(
         kind: session.kind,
         resourceLimits: session.resourceLimits,
         ownerId: session.ownerId,
+        historyWindow: session.historyWindow,
         maxHistoryMessages: session.maxHistoryMessages,
         turnTimeoutMs: session.turnTimeoutMs,
       })),

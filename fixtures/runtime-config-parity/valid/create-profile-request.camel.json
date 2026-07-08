@@ -5,9 +5,13 @@
   "sessionId": "parity-created-session",
   "implementationId": "parity-created-brain",
   "kind": "full",
+  "providerAlias": "parity-provider",
   "modelConfig": {
     "provider": "den-router",
     "modelName": "local-deterministic",
+    "baseUrl": "http://127.0.0.1:18082",
+    "api": "openai-completions",
+    "apiKeyEnv": "PARITY_API_KEY",
     "temperatureMilli": 200,
     "maxOutputTokens": 1024
   },
@@ -15,6 +19,22 @@
     "module": "pi",
     "strategy": "default"
   },
+  "mcpBindings": [
+    {
+      "serverId": "den",
+      "bindingId": "parity-created-mcp",
+      "adapterId": "mcp-ts-main",
+      "serverNames": ["den", "memory"],
+      "transport": "streamable_http",
+      "toolProfileKey": "planner"
+    }
+  ],
   "mcpToolProfile": "planner",
+  "source": {
+    "templateId": "default",
+    "sourceProfileId": "parity-template",
+    "sourceBundlePath": "__FIXTURE_ROOT__/bundles/parity-template"
+  },
+  "now": "2026-07-07T00:00:00Z",
   "profileFileExists": false
 }

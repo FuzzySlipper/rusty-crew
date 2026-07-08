@@ -38,6 +38,8 @@ import {
   toCoreConfigWireRuntimeConfigValidationInput,
 } from "./generated/core-config-facade.js";
 
+export { coreConfigFacadeArtifact } from "./generated/core-config-facade.js";
+
 import type {
   ActionBatchReceipt,
   AdapterId,

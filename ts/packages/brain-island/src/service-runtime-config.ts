@@ -2029,6 +2029,11 @@ function configuredSession(
       ? resourceLimits(parsed.resourceLimits)
       : undefined,
     ownerId: optionalString(parsed.ownerId),
+    historyWindow: isRecord(parsed.historyWindow)
+      ? {
+          maxMessages: optionalNumber(parsed.historyWindow.maxMessages),
+        }
+      : undefined,
     maxHistoryMessages: optionalNumber(parsed.maxHistoryMessages),
     turnTimeoutMs: optionalNumber(parsed.turnTimeoutMs),
     sessionMemoryPrompt: isRecord(parsed.sessionMemoryPrompt)
@@ -2071,6 +2076,7 @@ function configuredChannelBinding(
       parsed.agentId,
       `channelBindings[${index}].agentId`,
     ) as AgentId,
+    instanceId: optionalString(parsed.instanceId) as never,
     sessionId: optionalString(parsed.sessionId) as SessionId | undefined,
     profileId: requiredString(
       parsed.profileId,
@@ -2120,6 +2126,7 @@ function configuredMcpBinding(
       parsed.agentId,
       `mcpBindings[${index}].agentId`,
     ) as AgentId,
+    instanceId: optionalString(parsed.instanceId) as never,
     sessionId: optionalString(parsed.sessionId) as SessionId | undefined,
     profileId: profileId as ProfileId,
     serverNames: stringList(
