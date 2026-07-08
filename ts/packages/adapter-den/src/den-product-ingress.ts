@@ -27,6 +27,25 @@ export type DenProductIngressOperation =
   | "retry"
   | "expire";
 
+export interface DenProductIngressPolicyInput {
+  operation: DenProductIngressOperation | string;
+  entityKind: DenProductEntityKind;
+  entityId: string;
+  projectId: ProjectId | string;
+}
+
+export interface DenProductIngressPolicyPlan {
+  status: "allowed" | "denied";
+  operation: DenProductIngressOperation | string;
+  reasonCode: string;
+  reason: string;
+  lifecycleOperation: boolean;
+}
+
+export type DenProductIngressPolicyPlanner = (
+  input: DenProductIngressPolicyInput,
+) => Promise<DenProductIngressPolicyPlan> | DenProductIngressPolicyPlan;
+
 export interface DenProductReferenceInput {
   projectId: ProjectId | string;
   entityKind: DenProductEntityKind;
@@ -56,8 +75,9 @@ export type DenProductIngressResult =
     }
   | {
       status: "denied";
-      operation: Exclude<DenProductIngressOperation, "observe">;
-      reasonCode: "adapter_lifecycle_operation_denied";
+      operation: DenProductIngressOperation | string;
+      reasonCode: string;
+      reason: string;
       workRef: WorkReference;
       provenance: Record<string, unknown>;
     }
@@ -97,27 +117,36 @@ export function denProductReferenceWorkRef(
 export async function ingestDenProductReference(
   input: DenProductReferenceInput,
   ingress: DenProductDataIngress,
+  policyPlanner: DenProductIngressPolicyPlanner = planDenProductIngressPolicy,
 ): Promise<DenProductIngressResult> {
   const operation = input.operation ?? "observe";
   const workRef = denProductReferenceWorkRef(input);
   const provenance = sanitizeRouterMetadataProvenance(input.provenance ?? {});
+  const policy = await policyPlanner({
+    operation,
+    entityKind: input.entityKind,
+    entityId: input.entityId,
+    projectId: input.projectId,
+  });
 
-  if (operation !== "observe") {
+  if (policy.status === "denied") {
     return {
       status: "denied",
-      operation,
-      reasonCode: "adapter_lifecycle_operation_denied",
+      operation: policy.operation,
+      reasonCode: policy.reasonCode,
+      reason: policy.reason,
       workRef,
       provenance,
     };
   }
+  const observeOperation = "observe" as const;
 
   const update = toDenProductDataUpdate(input);
   try {
     const receipt = await ingress.injectDenDataUpdate(update);
     return {
       status: "accepted",
-      operation,
+      operation: observeOperation,
       update,
       receipt,
       workRef,
@@ -126,7 +155,7 @@ export async function ingestDenProductReference(
   } catch (error) {
     return {
       status: "degraded",
-      operation,
+      operation: observeOperation,
       reasonCode: "den_product_update_failed",
       message: error instanceof Error ? error.message : String(error),
       update,
@@ -134,6 +163,30 @@ export async function ingestDenProductReference(
       provenance,
     };
   }
+}
+
+export function planDenProductIngressPolicy(
+  input: DenProductIngressPolicyInput,
+): DenProductIngressPolicyPlan {
+  const operation = input.operation.trim() || "observe";
+  const lifecycleOperation = operation !== "observe";
+  if (lifecycleOperation) {
+    return {
+      status: "denied",
+      operation,
+      reasonCode: "adapter_lifecycle_operation_denied",
+      reason:
+        "Den product ingress may observe/reference Den data but cannot mutate Crew lifecycle state.",
+      lifecycleOperation,
+    };
+  }
+  return {
+    status: "allowed",
+    operation,
+    reasonCode: "den_product_observe_allowed",
+    reason: "Den product ingress observation/reference update is allowed.",
+    lifecycleOperation,
+  };
 }
 
 function productEntityToWorkRefKind(

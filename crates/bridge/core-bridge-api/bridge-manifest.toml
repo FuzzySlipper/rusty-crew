@@ -326,6 +326,15 @@ errors = "core_protocol::CoreError"
 summary = "Plan adapter-normalized channel ingress routing with Rust-owned binding, ambiguity, TTL, duplicate, and wake-route decisions before TypeScript emits internal messages."
 
 [[operation]]
+name = "plan_den_product_ingress_policy"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::DenProductIngressPolicyInput"
+output = "core_config::DenProductIngressPolicyPlan"
+errors = "core_protocol::CoreError"
+summary = "Plan Den product ingress policy with Rust-owned denial of adapter lifecycle operations while allowing observe/reference updates."
+
+[[operation]]
 name = "inject_external_event"
 surface = "stable"
 direction = "ts_to_rust"

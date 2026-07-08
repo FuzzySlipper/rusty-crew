@@ -40,6 +40,13 @@ impl NativeBridge {
         plan_channel_ingress_route(&input)
     }
 
+    pub fn plan_den_product_ingress_policy(
+        &self,
+        input: DenProductIngressPolicyInput,
+    ) -> DenProductIngressPolicyPlan {
+        plan_den_product_ingress_policy(&input)
+    }
+
     pub fn plan_runtime_config(&self, input: RuntimeConfigValidationInput) -> RuntimeConfigPlan {
         plan_runtime_config(&input)
     }

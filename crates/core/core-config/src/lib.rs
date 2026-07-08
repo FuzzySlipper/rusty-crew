@@ -136,6 +136,30 @@ pub struct ChannelIngressRouteRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenProductIngressPolicyInput {
+    pub operation: String,
+    pub entity_kind: String,
+    pub entity_id: String,
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DenProductIngressPolicyPlan {
+    pub status: DenProductIngressPolicyStatus,
+    pub operation: String,
+    pub reason_code: String,
+    pub reason: String,
+    pub lifecycle_operation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DenProductIngressPolicyStatus {
+    Allowed,
+    Denied,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminControlPlanCommand {
     pub command_kind: String,
     pub target_session_id: Option<String>,
@@ -1971,6 +1995,38 @@ pub fn plan_channel_ingress_route(input: &ChannelIngressRoutePlanInput) -> Chann
     }
 }
 
+pub fn plan_den_product_ingress_policy(
+    input: &DenProductIngressPolicyInput,
+) -> DenProductIngressPolicyPlan {
+    let operation = input.operation.trim();
+    let normalized_operation = if operation.is_empty() {
+        "observe"
+    } else {
+        operation
+    };
+    let lifecycle_operation = !matches!(normalized_operation, "observe");
+
+    if lifecycle_operation {
+        return DenProductIngressPolicyPlan {
+            status: DenProductIngressPolicyStatus::Denied,
+            operation: normalized_operation.to_string(),
+            reason_code: "adapter_lifecycle_operation_denied".to_string(),
+            reason:
+                "Den product ingress may observe/reference Den data but cannot claim, complete, retry, expire, or otherwise mutate Crew lifecycle state."
+                    .to_string(),
+            lifecycle_operation,
+        };
+    }
+
+    DenProductIngressPolicyPlan {
+        status: DenProductIngressPolicyStatus::Allowed,
+        operation: normalized_operation.to_string(),
+        reason_code: "den_product_observe_allowed".to_string(),
+        reason: "Den product ingress observation/reference update is allowed.".to_string(),
+        lifecycle_operation,
+    }
+}
+
 pub fn plan_profile_registry_mutation(
     input: &ProfileRegistryMutationRequest,
 ) -> Result<ProfileRegistryMutationPlan, String> {
@@ -3384,6 +3440,31 @@ mod tests {
         });
         assert_eq!(expired.status, ChannelIngressRouteDecision::Expired);
         assert_eq!(expired.reason_code, "message_ttl_expired");
+    }
+
+    #[test]
+    fn den_product_ingress_policy_allows_observe_only() {
+        let observed = plan_den_product_ingress_policy(&DenProductIngressPolicyInput {
+            operation: "observe".to_string(),
+            entity_kind: "assignment".to_string(),
+            entity_id: "assignment-1".to_string(),
+            project_id: Some("rusty-crew".to_string()),
+        });
+        assert_eq!(observed.status, DenProductIngressPolicyStatus::Allowed);
+        assert_eq!(observed.reason_code, "den_product_observe_allowed");
+        assert!(!observed.lifecycle_operation);
+
+        for operation in ["claim", "complete", "retry", "expire"] {
+            let denied = plan_den_product_ingress_policy(&DenProductIngressPolicyInput {
+                operation: operation.to_string(),
+                entity_kind: "assignment".to_string(),
+                entity_id: "assignment-1".to_string(),
+                project_id: Some("rusty-crew".to_string()),
+            });
+            assert_eq!(denied.status, DenProductIngressPolicyStatus::Denied);
+            assert_eq!(denied.reason_code, "adapter_lifecycle_operation_denied");
+            assert!(denied.lifecycle_operation);
+        }
     }
 
     #[test]

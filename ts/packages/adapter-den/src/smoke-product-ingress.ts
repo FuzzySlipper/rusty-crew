@@ -57,6 +57,24 @@ assert.equal(denied.status, "denied");
 assert.equal(denied.reasonCode, "adapter_lifecycle_operation_denied");
 assert.equal(updates.length, 1);
 
+for (const operation of ["complete", "retry", "expire"] as const) {
+  const lifecycleAttempt = await ingestDenProductReference(
+    {
+      projectId: "rusty-crew" as ProjectId,
+      entityKind: "assignment",
+      entityId: "assignment-3054",
+      operation,
+    },
+    ingress,
+  );
+  assert.equal(lifecycleAttempt.status, "denied");
+  assert.equal(
+    lifecycleAttempt.reasonCode,
+    "adapter_lifecycle_operation_denied",
+  );
+}
+assert.equal(updates.length, 1);
+
 const degraded = await ingestDenProductReference(
   {
     projectId: "rusty-crew" as ProjectId,

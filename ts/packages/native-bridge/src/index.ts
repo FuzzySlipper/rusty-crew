@@ -27,6 +27,8 @@ import {
   rawBodyStateSchema,
   rawChannelIngressRoutePlanInputSchema,
   rawChannelIngressRoutePlanSchema,
+  rawDenProductIngressPolicyInputSchema,
+  rawDenProductIngressPolicyPlanSchema,
   rawModelProviderRefreshImpactSchema,
   rawModelProviderRefreshPlanSchema,
   rawModelProviderRecordArraySchema,
@@ -325,6 +327,7 @@ interface NativeBridgeBinding {
   planNewSessionControlJson(inputJson: string): string;
   planReloadMcpControlJson(inputJson: string): string;
   planChannelIngressRouteJson(inputJson: string): string;
+  planDenProductIngressPolicyJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
     drainTimeoutMs: number,
@@ -1897,6 +1900,21 @@ export interface NativeChannelIngressRoutePlan {
   route?: NativeChannelIngressRouteRequest;
 }
 
+export interface NativeDenProductIngressPolicyInput {
+  operation: string;
+  entityKind: string;
+  entityId: string;
+  projectId?: string;
+}
+
+export interface NativeDenProductIngressPolicyPlan {
+  status: "allowed" | "denied";
+  operation: string;
+  reasonCode: string;
+  reason: string;
+  lifecycleOperation: boolean;
+}
+
 export interface NativeCreateProfileRequest {
   profileId: string;
   displayName?: string;
@@ -2180,6 +2198,9 @@ export interface NativeBridgeModule {
   planChannelIngressRoute(
     input: NativeChannelIngressRoutePlanInput,
   ): Promise<NativeChannelIngressRoutePlan>;
+  planDenProductIngressPolicy(
+    input: NativeDenProductIngressPolicyInput,
+  ): Promise<NativeDenProductIngressPolicyPlan>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   cancelDelegatedSession(
@@ -2704,6 +2725,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     planNewSessionControl: unavailable("plan_new_session_control"),
     planReloadMcpControl: unavailable("plan_reload_mcp_control"),
     planChannelIngressRoute: unavailable("plan_channel_ingress_route"),
+    planDenProductIngressPolicy: unavailable("plan_den_product_ingress_policy"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
@@ -3505,6 +3527,24 @@ function createNativeBridgeModule(
         value: JSON.parse(binding.planChannelIngressRouteJson(inputJson)),
       });
       return toNativeChannelIngressRoutePlan(rawPlan);
+    },
+    planDenProductIngressPolicy: async (input) => {
+      const inputJson = JSON.stringify(
+        toRawDenProductIngressPolicyInput(input),
+      );
+      validateBridgeJsonText({
+        operation: "plan_den_product_ingress_policy",
+        direction: "ts_to_rust",
+        schema: rawDenProductIngressPolicyInputSchema,
+        text: inputJson,
+      });
+      const rawPlan = validateBridgeValue<RawDenProductIngressPolicyPlan>({
+        operation: "plan_den_product_ingress_policy",
+        direction: "rust_to_ts",
+        schema: rawDenProductIngressPolicyPlanSchema,
+        value: JSON.parse(binding.planDenProductIngressPolicyJson(inputJson)),
+      });
+      return toNativeDenProductIngressPolicyPlan(rawPlan);
     },
     injectExternalEvent: async (event) =>
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
@@ -5137,6 +5177,17 @@ function toRawChannelBindingConfigDraft(
   };
 }
 
+function toRawDenProductIngressPolicyInput(
+  input: NativeDenProductIngressPolicyInput,
+): RawDenProductIngressPolicyInput {
+  return {
+    operation: input.operation,
+    entity_kind: input.entityKind,
+    entity_id: input.entityId,
+    project_id: input.projectId,
+  };
+}
+
 function toNativeNewSessionControlPlan(
   plan: RawNewSessionControlPlan,
 ): NativeNewSessionControlPlan {
@@ -5258,6 +5309,18 @@ function toNativeChannelBindingConfigDraft(
     conversationChannelId: binding.conversation_channel_id ?? undefined,
     providerSubscriptionId: binding.provider_subscription_id ?? undefined,
     status: binding.status,
+  };
+}
+
+function toNativeDenProductIngressPolicyPlan(
+  plan: RawDenProductIngressPolicyPlan,
+): NativeDenProductIngressPolicyPlan {
+  return {
+    status: plan.status,
+    operation: plan.operation,
+    reasonCode: plan.reason_code,
+    reason: plan.reason,
+    lifecycleOperation: plan.lifecycle_operation,
   };
 }
 
@@ -6656,6 +6719,21 @@ interface RawChannelIngressRouteRequest {
   correlation_id: string;
   binding_id: string;
   session_id?: string | null;
+}
+
+interface RawDenProductIngressPolicyInput {
+  operation: string;
+  entity_kind: string;
+  entity_id: string;
+  project_id?: string;
+}
+
+interface RawDenProductIngressPolicyPlan {
+  status: "allowed" | "denied";
+  operation: string;
+  reason_code: string;
+  reason: string;
+  lifecycle_operation: boolean;
 }
 
 interface RawProfileRegistryWrite {

@@ -207,6 +207,27 @@ export const rawChannelIngressRoutePlanSchema = Type.Object(
   { additionalProperties: true },
 );
 
+export const rawDenProductIngressPolicyInputSchema = Type.Object(
+  {
+    operation: Type.String(),
+    entity_kind: Type.String(),
+    entity_id: Type.String(),
+    project_id: Type.Optional(nullableString),
+  },
+  { additionalProperties: true },
+);
+
+export const rawDenProductIngressPolicyPlanSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal("allowed"), Type.Literal("denied")]),
+    operation: Type.String(),
+    reason_code: Type.String(),
+    reason: Type.String(),
+    lifecycle_operation: Type.Boolean(),
+  },
+  { additionalProperties: true },
+);
+
 export const rawSessionStateSchema = Type.Object(
   {
     handle: Type.Number(),

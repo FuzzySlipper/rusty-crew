@@ -60,6 +60,18 @@ try {
       return native.injectDenDataUpdate(update);
     },
   };
+  const denProductPolicyPlanner = (input: {
+    operation: string;
+    entityKind: string;
+    entityId: string;
+    projectId: string;
+  }) =>
+    native.planDenProductIngressPolicy({
+      operation: input.operation,
+      entityKind: input.entityKind,
+      entityId: input.entityId,
+      projectId: input.projectId,
+    });
 
   await native.createSession({
     sessionId,
@@ -85,6 +97,7 @@ try {
       },
     },
     denProductIngress,
+    denProductPolicyPlanner,
   );
   assert.equal(assignment.status, "accepted");
   assert.equal(denProductIngressCalls, 1);
@@ -97,8 +110,10 @@ try {
       operation: "claim",
     },
     denProductIngress,
+    denProductPolicyPlanner,
   );
   assert.equal(claimAttempt.status, "denied");
+  assert.equal(claimAttempt.reasonCode, "adapter_lifecycle_operation_denied");
   assert.equal(denProductIngressCalls, 1);
 
   const metadataStore = createMemoryDenRouterMetadataStore({

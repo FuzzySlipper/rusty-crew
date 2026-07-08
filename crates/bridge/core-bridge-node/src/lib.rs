@@ -18,11 +18,13 @@ use rusty_crew_core_bridge_api::{
     ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
-    plan_channel_ingress_route, plan_create_profile, plan_runtime_config,
-    validate_runtime_config_input, ChannelIngressRoutePlan, ChannelIngressRoutePlanInput,
-    CreateProfilePlan, CreateProfilePlanInput, NewSessionControlPlan, NewSessionControlPlanInput,
-    ProfileRegistryMutationPlan, ProfileRegistryMutationRequest, ReloadMcpControlPlan,
-    ReloadMcpControlPlanInput, RuntimeConfigPlan, RuntimeConfigValidationInput,
+    plan_channel_ingress_route, plan_create_profile, plan_den_product_ingress_policy,
+    plan_runtime_config, validate_runtime_config_input, ChannelIngressRoutePlan,
+    ChannelIngressRoutePlanInput, CreateProfilePlan, CreateProfilePlanInput,
+    DenProductIngressPolicyInput, DenProductIngressPolicyPlan, NewSessionControlPlan,
+    NewSessionControlPlanInput, ProfileRegistryMutationPlan, ProfileRegistryMutationRequest,
+    ReloadMcpControlPlan, ReloadMcpControlPlanInput, RuntimeConfigPlan,
+    RuntimeConfigValidationInput,
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
