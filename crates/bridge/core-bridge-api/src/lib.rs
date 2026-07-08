@@ -175,6 +175,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "query_session_memory_records",
     "build_session_memory_prompt_context",
     "save_memory_proposal",
+    "plan_capture_memory_proposals",
     "list_memory_proposals",
     "save_session_activity_digest",
     "list_session_activity_digests",

@@ -1454,6 +1454,15 @@ errors = "core_protocol::CoreError"
 summary = "Persist a governed memory proposal without directly mutating accepted memory."
 
 [[operation]]
+name = "plan_capture_memory_proposals"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::CaptureMemoryProposalPlanInput"
+output = "core_protocol::CaptureMemoryProposalPlan"
+errors = "core_protocol::CoreError"
+summary = "Normalize near-raw capture candidates into governed Crew memory proposal envelopes with diagnostics."
+
+[[operation]]
 name = "list_memory_proposals"
 surface = "stable"
 direction = "ts_to_rust"

@@ -10,6 +10,7 @@ import type {
   MemorySpaceId,
   ProfileId,
 } from "@rusty-crew/contracts";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
 export type CaptureTargetSpaceId =
   | "profile_dense"
@@ -70,6 +71,19 @@ export interface CaptureProducerOutput {
   skippedReasons: readonly string[];
 }
 
+export interface CaptureMemoryProposalPlan {
+  proposals: MemoryProposalEnvelope[];
+  rejected: CaptureMemoryProposalRejection[];
+  skipped_reasons: string[];
+  truncated: boolean;
+}
+
+export interface CaptureMemoryProposalRejection {
+  index: number;
+  reason_code: string;
+  message: string;
+}
+
 export function isLegacyDenseMemoryCaptureProposal(
   proposal: TypedCaptureMemoryProposal | LegacyDenseMemoryCaptureProposal,
 ): proposal is LegacyDenseMemoryCaptureProposal {
@@ -90,6 +104,40 @@ export function captureProposalToMemoryProposal(input: {
     });
   }
   return typedCaptureProposalToMemoryProposal({ runId, profileId, proposal });
+}
+
+export async function planCaptureMemoryProposalsWithRust(input: {
+  bridge: Pick<NativeBridgeModule, "planCaptureMemoryProposals">;
+  runId: string;
+  profileId: ProfileId | string;
+  proposals: readonly (
+    | TypedCaptureMemoryProposal
+    | LegacyDenseMemoryCaptureProposal
+  )[];
+  allowedSpaces?: readonly CaptureTargetSpaceId[];
+  maxProposals?: number;
+}): Promise<CaptureMemoryProposalPlan> {
+  const request: {
+    run_id: string;
+    profile_id: string;
+    allowed_spaces: readonly CaptureTargetSpaceId[];
+    max_proposals?: number;
+    candidates: readonly (
+      | TypedCaptureMemoryProposal
+      | LegacyDenseMemoryCaptureProposal
+    )[];
+  } = {
+    run_id: input.runId,
+    profile_id: input.profileId.toString(),
+    allowed_spaces: input.allowedSpaces ?? ["profile_dense"],
+    candidates: input.proposals,
+  };
+  if (input.maxProposals !== undefined) {
+    request.max_proposals = input.maxProposals;
+  }
+  return (await input.bridge.planCaptureMemoryProposals(
+    request,
+  )) as CaptureMemoryProposalPlan;
 }
 
 export function typedCaptureProposalToMemoryProposal(input: {

@@ -12,7 +12,7 @@ import {
   workActivity,
 } from "./agent-activity-observation.js";
 import {
-  captureProposalToMemoryProposal,
+  type CaptureMemoryProposalPlan,
   type LegacyDenseMemoryCaptureProposal,
   type TypedCaptureMemoryProposal,
 } from "./capture-memory-proposals.js";
@@ -74,6 +74,9 @@ export interface BackgroundReviewRunnerInput {
   captureProvider?: (
     input: BackgroundReviewCaptureProviderInput,
   ) => Promise<BackgroundReviewCaptureProviderResult>;
+  capturePlanner?: (
+    input: BackgroundReviewCapturePlannerInput,
+  ) => Promise<CaptureMemoryProposalPlan>;
   observation?: {
     identity: AgentObservationIdentity;
     sink?: AgentActivityObservationSink;
@@ -94,6 +97,16 @@ export interface BackgroundReviewCaptureProviderInput {
 export interface BackgroundReviewCaptureProviderResult {
   proposals: readonly TypedCaptureMemoryProposal[];
   skippedReasons: readonly string[];
+}
+
+export interface BackgroundReviewCapturePlannerInput {
+  runId: string;
+  profileId: ProfileId | string;
+  proposals: readonly (
+    | TypedCaptureMemoryProposal
+    | LegacyDenseMemoryCaptureProposal
+  )[];
+  maxProposals?: number;
 }
 
 export interface BackgroundReviewSourceRef {
@@ -194,11 +207,34 @@ export async function runBackgroundMemorySkillReview(
     }
   }
 
+  const capturePlan =
+    captureProposals.length === 0
+      ? undefined
+      : input.capturePlanner === undefined
+        ? undefined
+        : await input.capturePlanner(
+            capturePlannerInput(input, captureProposals),
+          );
+  if (captureProposals.length > 0 && capturePlan === undefined) {
+    skippedReasons.push("capture_planner_unavailable");
+  }
+  if (capturePlan !== undefined) {
+    skippedReasons.push(...capturePlan.skipped_reasons);
+    skippedReasons.push(
+      ...capturePlan.rejected.map(
+        (rejection) => `capture_rejected:${rejection.reason_code}`,
+      ),
+    );
+    if (capturePlan.truncated) {
+      skippedReasons.push("capture_proposals_truncated");
+    }
+  }
+
   const candidates = [
     ...diagnosticCandidates(input),
     ...skillCandidates(input),
     ...denseMemoryCandidates(input),
-    ...captureProposalCandidates(input, captureProposals),
+    ...captureProposalCandidates(input, capturePlan?.proposals ?? []),
     ...roleAssemblyCandidates(input),
   ].slice(0, maxCandidates);
   const findings = candidates
@@ -230,6 +266,24 @@ export async function runBackgroundMemorySkillReview(
     startedAt: input.now,
     finishedAt: input.now,
   };
+}
+
+function capturePlannerInput(
+  input: BackgroundReviewRunnerInput,
+  proposals: readonly (
+    | TypedCaptureMemoryProposal
+    | LegacyDenseMemoryCaptureProposal
+  )[],
+): BackgroundReviewCapturePlannerInput {
+  const plannerInput: BackgroundReviewCapturePlannerInput = {
+    runId: input.runId,
+    profileId: input.payload.profileId,
+    proposals,
+  };
+  if (input.payload.captureMaxProposals !== undefined) {
+    plannerInput.maxProposals = input.payload.captureMaxProposals;
+  }
+  return plannerInput;
 }
 
 interface Candidate {
@@ -353,21 +407,22 @@ function denseMemoryCandidates(
 
 function captureProposalCandidates(
   input: BackgroundReviewRunnerInput,
-  proposals: readonly (
-    | TypedCaptureMemoryProposal
-    | LegacyDenseMemoryCaptureProposal
-  )[],
+  proposals: readonly MemoryProposalEnvelope[],
 ): Candidate[] {
-  return proposals.map((proposal) => {
-    const memoryProposal = captureProposalToMemoryProposal({
-      runId: input.runId,
-      profileId: input.payload.profileId,
-      proposal,
-    });
+  return proposals.map((memoryProposal) => {
     return {
       severity: "info",
       confidence: memoryProposal.confidence,
-      summary: proposal.summary,
+      summary:
+        typeof memoryProposal.content === "object" &&
+        memoryProposal.content !== null &&
+        "metadata_json" in memoryProposal.content &&
+        typeof memoryProposal.content.metadata_json === "object" &&
+        memoryProposal.content.metadata_json !== null &&
+        "capture_summary" in memoryProposal.content.metadata_json &&
+        typeof memoryProposal.content.metadata_json.capture_summary === "string"
+          ? memoryProposal.content.metadata_json.capture_summary
+          : (memoryProposal.durability_rationale ?? "Capture memory proposal"),
       proposedAction:
         "Route typed Crew memory proposal through curator/manual review.",
       candidateKind: "llm_review",

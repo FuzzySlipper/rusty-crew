@@ -4,10 +4,9 @@ import type {
   SessionActivityDigest,
 } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
-import {
-  captureProposalToMemoryProposal,
-  type CaptureTargetSpaceId,
-  type TypedCaptureMemoryProposal,
+import type {
+  CaptureTargetSpaceId,
+  TypedCaptureMemoryProposal,
 } from "./capture-memory-proposals.js";
 import type { BackgroundReviewDenseMemoryRecord } from "./background-memory-skill-review.js";
 import type { LoadedSkill } from "./profile-loading.js";
@@ -167,16 +166,7 @@ export function normalizeCaptureProviderOutput(input: {
     if (proposals.length >= maxProposals) break;
     const proposal = typedProposal(raw);
     if (!proposal || !allowed.has(proposal.space_id)) continue;
-    try {
-      captureProposalToMemoryProposal({
-        runId: input.runId,
-        profileId: input.profileId,
-        proposal,
-      });
-      proposals.push(proposal);
-    } catch {
-      continue;
-    }
+    proposals.push(proposal);
   }
   return {
     proposals,

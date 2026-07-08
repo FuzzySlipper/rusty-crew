@@ -10,6 +10,7 @@ import type {
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   captureProposalToMemoryProposal,
+  planCaptureMemoryProposalsWithRust,
   runBackgroundMemorySkillReview,
   type LegacyDenseMemoryCaptureProposal,
   type TypedCaptureMemoryProposal,
@@ -17,6 +18,7 @@ import {
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-capture-proposals-"));
 const profileId = "prime-profile" as ProfileId;
+const bridge = await loadNativeBridge();
 
 try {
   const legacyAdd: LegacyDenseMemoryCaptureProposal = {
@@ -116,6 +118,24 @@ try {
   assert.equal(sessionEnvelope.operation, "merge");
   assert.equal(sessionEnvelope.governance_mode, "manual_review");
 
+  const rustPlan = await planCaptureMemoryProposalsWithRust({
+    bridge,
+    runId: "capture-run-1",
+    profileId,
+    proposals: [legacyAdd, legacyReplace, legacyRemove, sessionProposal],
+    allowedSpaces: ["profile_dense", "session_memory"],
+  });
+  assert.equal(rustPlan.proposals.length, 3);
+  assert.equal(rustPlan.proposals[0]?.space_id, "profile_dense");
+  assert.equal(rustPlan.proposals[0]?.source, "capture_producer");
+  assert.equal(rustPlan.proposals[0]?.governance_mode, "curator_route");
+  assert.equal(
+    rustPlan.rejected.some(
+      (rejection) => rejection.reason_code === "capture_space_disabled",
+    ),
+    true,
+  );
+
   const review = await runBackgroundMemorySkillReview({
     runId: "capture-run-1",
     now: "2026-06-26T01:00:00.000Z",
@@ -127,6 +147,8 @@ try {
       dryRun: true,
     },
     captureProposals: [legacyAdd],
+    capturePlanner: (input) =>
+      planCaptureMemoryProposalsWithRust({ bridge, ...input }),
   });
   const captureFinding = review.findings.find(
     (finding) => finding.candidateKind === "llm_review",
@@ -167,27 +189,48 @@ try {
     captureProvider: async (input) => {
       assert.equal(input.providerAlias, "capture");
       assert.equal(input.sessionActivityDigests.length, 1);
-      return { proposals: [sessionProposal], skippedReasons: [] };
+      return {
+        proposals: [
+          {
+            id: "typed_profile_dense_add",
+            summary: "Remember review summary style.",
+            space_id: "profile_dense",
+            operation: "add",
+            scope: { scope_type: "profile", scope_id: profileId },
+            shape: { shape_id: "profile_dense_item" as never, version: 1 },
+            content: {
+              key: "review_summary_style",
+              content: "Prefers compact review summaries.",
+            },
+            evidence_refs: [{ eventType: "wake", wakeId: "wake-alpha" }],
+            confidence: 0.87,
+            durability_rationale:
+              "The preference applies across future review sessions.",
+          },
+        ],
+        skippedReasons: [],
+      };
     },
+    capturePlanner: (input) =>
+      planCaptureMemoryProposalsWithRust({ bridge, ...input }),
   });
   assert.equal(providerReview.skippedReasons.length, 0);
   assert.equal(
     providerReview.findings.some(
       (finding) =>
         finding.candidateKind === "llm_review" &&
-        finding.memoryProposal?.space_id === "session_memory",
+        finding.memoryProposal?.space_id === "profile_dense",
     ),
     true,
   );
 
-  const bridge = await loadNativeBridge();
   const engine = await bridge.initializeEngine({
     engineDataDir: root,
     clock: { fixed: "2026-06-26T01:00:00Z" },
     defaultTurnBudget: 4,
     defaultIdleTimeoutMs: 1_000,
   });
-  const stored = await bridge.saveMemoryProposal(addProposal);
+  const stored = await bridge.saveMemoryProposal(rustPlan.proposals[0]!);
   assert.equal(stored.proposal.space_id, "profile_dense");
   assert.equal(stored.proposal.operation, "add");
   assert.equal(stored.status, "pending_review");

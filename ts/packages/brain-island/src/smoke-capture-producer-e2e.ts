@@ -17,6 +17,7 @@ import {
 } from "@rusty-crew/native-bridge";
 import {
   buildSessionActivityDigest,
+  planCaptureMemoryProposalsWithRust,
   runBackgroundMemorySkillReview,
   type TypedCaptureMemoryProposal,
 } from "./index.js";
@@ -158,6 +159,11 @@ try {
       );
       return { proposals: [profileDenseProposal], skippedReasons: [] };
     },
+    capturePlanner: (input) =>
+      planCaptureMemoryProposalsWithRust({
+        bridge: bridge!,
+        ...input,
+      }),
   });
 
   assert.equal(review.dryRun, false);

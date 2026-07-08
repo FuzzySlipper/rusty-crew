@@ -288,6 +288,7 @@ import {
   type CuratorLifecycleReport,
 } from "./curator-lifecycle.js";
 import { runStructuredCaptureProvider } from "./capture-producer-provider.js";
+import type { CaptureMemoryProposalPlan } from "./capture-memory-proposals.js";
 import { buildSessionActivityDigest } from "./session-activity-digest.js";
 import {
   MemoryToolCallDebugStore,
@@ -10363,6 +10364,26 @@ async function runServiceBackgroundReview(
           ...captureInput,
           bridge: state.bridge,
         }),
+      capturePlanner: (captureInput) => {
+        const request: {
+          run_id: string;
+          profile_id: string;
+          allowed_spaces: string[];
+          max_proposals?: number;
+          candidates: typeof captureInput.proposals;
+        } = {
+          run_id: captureInput.runId,
+          profile_id: captureInput.profileId.toString(),
+          allowed_spaces: ["profile_dense"],
+          candidates: captureInput.proposals,
+        };
+        if (captureInput.maxProposals !== undefined) {
+          request.max_proposals = captureInput.maxProposals;
+        }
+        return state.bridge.planCaptureMemoryProposals(
+          request,
+        ) as Promise<CaptureMemoryProposalPlan>;
+      },
     });
     const persistedCaptureProposalCount =
       await persistBackgroundReviewProposals(state, result);

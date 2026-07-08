@@ -1174,6 +1174,560 @@ pub fn validate_memory_governance_transition_policy(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CaptureMemoryProposalPlanInput {
+    pub run_id: String,
+    pub profile_id: String,
+    #[serde(default)]
+    pub allowed_spaces: Vec<MemorySpaceId>,
+    #[serde(default)]
+    pub max_proposals: Option<u32>,
+    #[serde(default)]
+    pub candidates: Vec<CaptureMemoryProposalCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CaptureMemoryProposalCandidate {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub space_id: Option<MemorySpaceId>,
+    #[serde(default)]
+    pub operation: Option<MemoryOperation>,
+    #[serde(default)]
+    pub scope: Option<MemoryScope>,
+    #[serde(default)]
+    pub shape: Option<MemoryRecordShapeRef>,
+    #[serde(default)]
+    pub content: Option<Value>,
+    #[serde(default)]
+    pub evidence_refs: Vec<CaptureMemoryEvidenceRef>,
+    #[serde(default)]
+    pub confidence: Option<f32>,
+    #[serde(default, alias = "durabilityRationale")]
+    pub durability_rationale: Option<String>,
+    #[serde(default, alias = "governancePolicy")]
+    pub governance_policy: Option<MemoryGovernanceMode>,
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default, alias = "memoryKey")]
+    pub memory_key: Option<String>,
+    #[serde(default, alias = "memoryContent")]
+    pub memory_content: Option<String>,
+    #[serde(default, alias = "replacesKey")]
+    pub replaces_key: Option<String>,
+    #[serde(default, alias = "expectedRevision")]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureMemoryEvidenceRef {
+    #[serde(default, alias = "eventType")]
+    pub event_type: Option<String>,
+    #[serde(default, alias = "wakeId")]
+    pub wake_id: Option<String>,
+    #[serde(default, alias = "refId")]
+    pub ref_id: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default, alias = "evidenceType")]
+    pub evidence_type: Option<MemoryEvidenceKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CaptureMemoryProposalPlan {
+    pub proposals: Vec<MemoryProposalEnvelope>,
+    pub rejected: Vec<CaptureMemoryProposalRejection>,
+    pub skipped_reasons: Vec<String>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureMemoryProposalRejection {
+    pub index: u32,
+    pub reason_code: String,
+    pub message: String,
+}
+
+pub fn plan_capture_memory_proposals(
+    input: CaptureMemoryProposalPlanInput,
+) -> CaptureMemoryProposalPlan {
+    let allowed_spaces = if input.allowed_spaces.is_empty() {
+        vec![MemorySpaceId::unchecked("profile_dense")]
+    } else {
+        input.allowed_spaces
+    };
+    let max_proposals = input.max_proposals.unwrap_or(8).clamp(1, 64) as usize;
+    let mut proposals = Vec::new();
+    let mut rejected = Vec::new();
+    let mut truncated = false;
+    for (index, candidate) in input.candidates.into_iter().enumerate() {
+        if proposals.len() >= max_proposals {
+            truncated = true;
+            break;
+        }
+        match capture_candidate_to_memory_proposal(
+            &input.run_id,
+            &input.profile_id,
+            candidate,
+            &allowed_spaces,
+        ) {
+            Ok(proposal) => proposals.push(proposal),
+            Err(rejection) => rejected.push(CaptureMemoryProposalRejection {
+                index: index as u32,
+                reason_code: rejection.reason_code,
+                message: rejection.message,
+            }),
+        }
+    }
+    let skipped_reasons = if proposals.is_empty() {
+        vec!["capture_no_supported_proposals".to_string()]
+    } else {
+        Vec::new()
+    };
+    CaptureMemoryProposalPlan {
+        proposals,
+        rejected,
+        skipped_reasons,
+        truncated,
+    }
+}
+
+fn capture_candidate_to_memory_proposal(
+    run_id: &str,
+    profile_id: &str,
+    candidate: CaptureMemoryProposalCandidate,
+    allowed_spaces: &[MemorySpaceId],
+) -> Result<MemoryProposalEnvelope, MemoryPolicyDiagnostic> {
+    let proposal = if candidate.kind.as_deref().is_some_and(|kind| {
+        matches!(
+            kind,
+            "dense_memory_add" | "dense_memory_replace" | "dense_memory_remove"
+        )
+    }) {
+        legacy_dense_capture_candidate_to_proposal(run_id, profile_id, candidate)?
+    } else {
+        typed_capture_candidate_to_proposal(run_id, candidate)?
+    };
+    if !allowed_spaces
+        .iter()
+        .any(|space_id| *space_id == proposal.space_id)
+    {
+        return Err(MemoryPolicyDiagnostic {
+            reason_code: "capture_space_not_allowed".to_string(),
+            message: format!("capture space {} is not allowed", proposal.space_id),
+        });
+    }
+    if proposal.space_id.as_str() != "profile_dense" {
+        return Err(MemoryPolicyDiagnostic {
+            reason_code: "capture_space_disabled".to_string(),
+            message: format!(
+                "capture space {} is not enabled for Rust capture proposal planning yet",
+                proposal.space_id
+            ),
+        });
+    }
+    let descriptor = capture_profile_dense_descriptor();
+    validate_memory_proposal_policy(&proposal, &descriptor).map_err(|error| {
+        let text = error.to_string();
+        let (reason_code, message) = policy_reason_from_error_text(&text);
+        MemoryPolicyDiagnostic {
+            reason_code,
+            message,
+        }
+    })?;
+    Ok(proposal)
+}
+
+fn typed_capture_candidate_to_proposal(
+    run_id: &str,
+    candidate: CaptureMemoryProposalCandidate,
+) -> Result<MemoryProposalEnvelope, MemoryPolicyDiagnostic> {
+    let space_id = candidate.space_id.ok_or_else(|| {
+        capture_rejection(
+            "capture_space_missing",
+            "typed capture proposal requires space_id",
+        )
+    })?;
+    let operation = candidate.operation.ok_or_else(|| {
+        capture_rejection(
+            "capture_operation_missing",
+            "typed capture proposal requires operation",
+        )
+    })?;
+    let scope = candidate.scope.ok_or_else(|| {
+        capture_rejection(
+            "capture_scope_missing",
+            "typed capture proposal requires scope",
+        )
+    })?;
+    let shape = candidate.shape.ok_or_else(|| {
+        capture_rejection(
+            "capture_shape_missing",
+            "typed capture proposal requires shape",
+        )
+    })?;
+    let content = candidate.content.ok_or_else(|| {
+        capture_rejection(
+            "capture_content_missing",
+            "typed capture proposal requires content",
+        )
+    })?;
+    let summary = normalized_capture_text(candidate.summary.as_deref())
+        .unwrap_or_else(|| "capture proposal".to_string());
+    let proposal_id = capture_proposal_id(run_id, candidate.id.as_deref(), &summary);
+    let evidence_refs = capture_evidence_refs(run_id, candidate.evidence_refs);
+    let confidence = candidate.confidence.unwrap_or(0.0).clamp(0.0, 1.0);
+    let durability_rationale = normalized_capture_text(candidate.durability_rationale.as_deref())
+        .ok_or_else(|| {
+        capture_rejection(
+            "capture_rationale_missing",
+            "typed capture proposal requires durability_rationale",
+        )
+    })?;
+    let dedupe_key = candidate.dedupe_key.or_else(|| {
+        Some(capture_dedupe_key(&[
+            space_id.as_str(),
+            &format!("{operation:?}"),
+            &format!("{:?}", scope.scope_type),
+            scope.scope_id.as_str(),
+            &stable_capture_json(&content),
+        ]))
+    });
+    Ok(MemoryProposalEnvelope {
+        proposal_id,
+        space_id,
+        operation,
+        scope,
+        shape,
+        content,
+        evidence_refs,
+        confidence,
+        durability_rationale: Some(durability_rationale),
+        governance_mode: select_memory_governance_mode(
+            candidate
+                .governance_policy
+                .unwrap_or(MemoryGovernanceMode::CuratorRoute),
+            MemoryProposalSource::CaptureProducer,
+        ),
+        source: MemoryProposalSource::CaptureProducer,
+        dedupe_key,
+        created_at: None,
+    })
+}
+
+fn legacy_dense_capture_candidate_to_proposal(
+    run_id: &str,
+    profile_id: &str,
+    candidate: CaptureMemoryProposalCandidate,
+) -> Result<MemoryProposalEnvelope, MemoryPolicyDiagnostic> {
+    let kind = candidate.kind.as_deref().unwrap_or_default();
+    let operation = match kind {
+        "dense_memory_add" => MemoryOperation::Add,
+        "dense_memory_replace" => MemoryOperation::Replace,
+        "dense_memory_remove" => MemoryOperation::Remove,
+        _ => {
+            return Err(capture_rejection(
+                "capture_legacy_kind_unsupported",
+                format!("unsupported legacy capture kind {kind}"),
+            ))
+        }
+    };
+    let key = normalized_capture_text(
+        candidate
+            .memory_key
+            .as_deref()
+            .or(candidate.replaces_key.as_deref()),
+    )
+    .ok_or_else(|| {
+        capture_rejection(
+            "capture_memory_key_missing",
+            format!("{kind} requires memoryKey or replacesKey"),
+        )
+    })?;
+    let summary = normalized_capture_text(candidate.summary.as_deref())
+        .unwrap_or_else(|| "legacy dense memory capture".to_string());
+    let mut content = serde_json::Map::new();
+    content.insert("key".to_string(), Value::String(key.clone()));
+    if operation != MemoryOperation::Remove {
+        let body =
+            normalized_capture_text(candidate.memory_content.as_deref()).ok_or_else(|| {
+                capture_rejection(
+                    "capture_memory_content_missing",
+                    format!("{kind} requires memoryContent"),
+                )
+            })?;
+        content.insert("content".to_string(), Value::String(body));
+    }
+    if let Some(replaces_key) = normalized_capture_text(candidate.replaces_key.as_deref()) {
+        content.insert("replaces_key".to_string(), Value::String(replaces_key));
+    }
+    if let Some(expected_revision) = candidate.expected_revision {
+        content.insert(
+            "expected_revision".to_string(),
+            Value::Number(expected_revision.into()),
+        );
+    }
+    content.insert(
+        "metadata_json".to_string(),
+        Value::Object({
+            let mut metadata = serde_json::Map::new();
+            metadata.insert(
+                "capture_summary".to_string(),
+                Value::String(summary.clone()),
+            );
+            metadata.insert(
+                "legacy_capture_kind".to_string(),
+                Value::String(kind.to_string()),
+            );
+            metadata
+        }),
+    );
+    Ok(MemoryProposalEnvelope {
+        proposal_id: capture_proposal_id(run_id, candidate.id.as_deref(), &summary),
+        space_id: MemorySpaceId::unchecked("profile_dense"),
+        operation,
+        scope: MemoryScope {
+            scope_type: MemoryScopeType::Profile,
+            scope_id: profile_id.to_string(),
+        },
+        shape: MemoryRecordShapeRef {
+            shape_id: MemoryRecordShapeId::unchecked("profile_dense_item"),
+            version: 1,
+        },
+        content: Value::Object(content),
+        evidence_refs: capture_evidence_refs(run_id, candidate.evidence_refs),
+        confidence: candidate.confidence.unwrap_or(0.0).clamp(0.0, 1.0),
+        durability_rationale: normalized_capture_text(candidate.durability_rationale.as_deref()),
+        governance_mode: MemoryGovernanceMode::CuratorRoute,
+        source: MemoryProposalSource::CaptureProducer,
+        dedupe_key: Some(capture_dedupe_key(&[
+            "profile_dense",
+            &format!("{operation:?}"),
+            "profile",
+            profile_id,
+            key.as_str(),
+        ])),
+        created_at: None,
+    })
+}
+
+fn capture_profile_dense_descriptor() -> MemorySpaceDescriptor {
+    MemorySpaceDescriptor {
+        space_id: MemorySpaceId::unchecked("profile_dense"),
+        schema_version: 1,
+        module_id: Some("runtime_memory".to_string()),
+        description: "Capture planner profile dense memory descriptor.".to_string(),
+        record_shapes: vec![MemoryRecordShapeDescriptor {
+            shape_id: MemoryRecordShapeId::unchecked("profile_dense_item"),
+            version: 1,
+            description: "Keyed profile dense memory item.".to_string(),
+            fields: vec![
+                descriptor_field("key", MemoryFieldType::String, true),
+                descriptor_field("content", MemoryFieldType::Markdown, false),
+                descriptor_field("expected_revision", MemoryFieldType::Integer, false),
+                descriptor_field("metadata_json", MemoryFieldType::Json, false),
+            ],
+        }],
+        scope_model: MemoryScopeModel {
+            allowed_scopes: vec![MemoryScopeType::Profile, MemoryScopeType::User],
+            primary_scope: MemoryScopeType::Profile,
+        },
+        visibility_model: MemoryVisibilityModel::ProfileLocal,
+        retrieval_strategies: vec![MemoryRetrievalStrategy::DirectLookup],
+        indexing: MemoryIndexingPolicy {
+            required_capabilities: vec!["profile_target_key_lookup".to_string()],
+            optional_capabilities: vec![],
+        },
+        prompt_policy: MemoryPromptPolicy::SummaryContext,
+        write_policy: MemoryWritePolicy {
+            default_mode: MemoryGovernanceMode::CuratorRoute,
+            operation_policies: vec![
+                descriptor_op_policy(
+                    MemoryOperation::Add,
+                    MemoryGovernanceMode::CuratorRoute,
+                    false,
+                ),
+                descriptor_op_policy(
+                    MemoryOperation::Replace,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                descriptor_op_policy(
+                    MemoryOperation::Remove,
+                    MemoryGovernanceMode::CuratorRoute,
+                    true,
+                ),
+                descriptor_op_policy(
+                    MemoryOperation::CandidateOnly,
+                    MemoryGovernanceMode::CuratorRoute,
+                    false,
+                ),
+            ],
+        },
+        operations: vec![
+            MemoryOperation::Read,
+            MemoryOperation::List,
+            MemoryOperation::Add,
+            MemoryOperation::Replace,
+            MemoryOperation::Remove,
+            MemoryOperation::CandidateOnly,
+        ],
+        provenance_policy: MemoryProvenancePolicy {
+            required_evidence: vec![MemoryEvidenceKind::Wake],
+            source_required: false,
+            rationale_required: false,
+        },
+        retention_policy: MemoryRetentionPolicy::ManualOnly,
+        conflict_policy: MemoryConflictPolicy::ExpectedRevision,
+        diagnostics: MemoryDiagnosticsPolicy {
+            expose_catalog: true,
+            expose_record_counts: true,
+            expose_policy_decisions: true,
+        },
+        export_import: MemoryExportImportPolicy {
+            export_supported: true,
+            import_supported: true,
+            import_governance_mode: MemoryGovernanceMode::ManualReview,
+        },
+    }
+}
+
+fn capture_evidence_refs(
+    run_id: &str,
+    refs: Vec<CaptureMemoryEvidenceRef>,
+) -> Vec<MemoryEvidenceRef> {
+    let mut mapped: Vec<MemoryEvidenceRef> = refs
+        .iter()
+        .map(|evidence| MemoryEvidenceRef {
+            evidence_type: evidence
+                .evidence_type
+                .or_else(|| evidence_kind_from_event(evidence.event_type.as_deref()))
+                .unwrap_or(MemoryEvidenceKind::Event),
+            ref_id: normalized_capture_text(evidence.ref_id.as_deref())
+                .or_else(|| normalized_capture_text(evidence.wake_id.as_deref()))
+                .unwrap_or_else(|| format!("{run_id}:capture_producer")),
+            label: normalized_capture_text(evidence.summary.as_deref()),
+        })
+        .collect();
+    if !mapped
+        .iter()
+        .any(|evidence| evidence.evidence_type == MemoryEvidenceKind::Wake)
+    {
+        mapped.insert(
+            0,
+            MemoryEvidenceRef {
+                evidence_type: MemoryEvidenceKind::Wake,
+                ref_id: refs
+                    .iter()
+                    .find_map(|evidence| normalized_capture_text(evidence.wake_id.as_deref()))
+                    .unwrap_or_else(|| format!("{run_id}:wake")),
+                label: Some("capture producer wake evidence".to_string()),
+            },
+        );
+    }
+    mapped
+}
+
+fn evidence_kind_from_event(event_type: Option<&str>) -> Option<MemoryEvidenceKind> {
+    let event_type = event_type?;
+    if event_type.contains("correction") {
+        Some(MemoryEvidenceKind::UserCorrection)
+    } else if event_type.contains("tool") {
+        Some(MemoryEvidenceKind::ToolCall)
+    } else if event_type.contains("transcript") {
+        Some(MemoryEvidenceKind::Transcript)
+    } else if event_type.contains("wake") {
+        Some(MemoryEvidenceKind::Wake)
+    } else {
+        Some(MemoryEvidenceKind::Event)
+    }
+}
+
+fn capture_proposal_id(run_id: &str, explicit_id: Option<&str>, summary: &str) -> String {
+    let raw = explicit_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| summary);
+    let normalized = snake_identifier(raw);
+    if is_valid_capture_identifier(&normalized) {
+        normalized
+    } else {
+        format!("cap_{:016x}", stable_hash64(&format!("{run_id}:{raw}")))
+    }
+}
+
+fn capture_dedupe_key(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .map(|part| part.trim().to_lowercase().replace(char::is_whitespace, " "))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+fn stable_capture_json(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
+}
+
+fn normalized_capture_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn snake_identifier(value: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_underscore = false;
+    for ch in value.trim().to_lowercase().chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            output.push(ch);
+            last_was_underscore = false;
+        } else if !last_was_underscore {
+            output.push('_');
+            last_was_underscore = true;
+        }
+    }
+    output.trim_matches('_').to_string()
+}
+
+fn is_valid_capture_identifier(value: &str) -> bool {
+    validate_identifier("capture proposal id", value).is_ok()
+}
+
+fn stable_hash64(value: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn capture_rejection(
+    reason_code: impl Into<String>,
+    message: impl Into<String>,
+) -> MemoryPolicyDiagnostic {
+    MemoryPolicyDiagnostic {
+        reason_code: reason_code.into(),
+        message: message.into(),
+    }
+}
+
+fn policy_reason_from_error_text(text: &str) -> (String, String) {
+    if let Some(start) = text.find("memory_policy_") {
+        let policy_text = &text[start..];
+        if let Some((reason_code, message)) = policy_text.split_once(':') {
+            return (reason_code.trim().to_string(), message.trim().to_string());
+        }
+        return (policy_text.trim().to_string(), text.to_string());
+    }
+    ("memory_policy_rejected".to_string(), text.to_string())
+}
+
 fn validate_identifier(label: &str, value: &str) -> CoreResult<()> {
     if value.is_empty() {
         return invalid(format!("{label} must not be empty"));
@@ -1611,6 +2165,157 @@ mod tests {
     }
 
     #[test]
+    fn capture_planner_accepts_profile_dense_and_reports_disabled_spaces() {
+        let plan = plan_capture_memory_proposals(CaptureMemoryProposalPlanInput {
+            run_id: "capture_run_one".to_string(),
+            profile_id: "profile-alpha".to_string(),
+            allowed_spaces: vec![
+                MemorySpaceId::unchecked("profile_dense"),
+                MemorySpaceId::unchecked("session_memory"),
+            ],
+            max_proposals: None,
+            candidates: vec![
+                CaptureMemoryProposalCandidate {
+                    id: Some("remember_review_style".to_string()),
+                    summary: Some("Remember compact review style.".to_string()),
+                    kind: Some("dense_memory_add".to_string()),
+                    memory_key: Some("review_style".to_string()),
+                    memory_content: Some("Prefers compact review summaries.".to_string()),
+                    confidence: Some(0.9),
+                    durability_rationale: Some(
+                        "Stable profile preference for future reviews.".to_string(),
+                    ),
+                    evidence_refs: vec![CaptureMemoryEvidenceRef {
+                        event_type: Some("user_correction".to_string()),
+                        wake_id: Some("wake-one".to_string()),
+                        ref_id: None,
+                        summary: Some("User corrected review style.".to_string()),
+                        evidence_type: None,
+                    }],
+                    ..empty_capture_candidate()
+                },
+                CaptureMemoryProposalCandidate {
+                    id: Some("session_memory_candidate".to_string()),
+                    summary: Some("Remember session fact.".to_string()),
+                    space_id: Some(MemorySpaceId::unchecked("session_memory")),
+                    operation: Some(MemoryOperation::Add),
+                    scope: Some(MemoryScope {
+                        scope_type: MemoryScopeType::Session,
+                        scope_id: "session-alpha".to_string(),
+                    }),
+                    shape: Some(MemoryRecordShapeRef {
+                        shape_id: MemoryRecordShapeId::unchecked("session_fact"),
+                        version: 1,
+                    }),
+                    content: Some(json!({
+                        "record_id": "session-fact-one",
+                        "content": "The user prefers compact reviews.",
+                        "fact_kind": "preference",
+                        "confidence": 0.9,
+                        "source_summary": "User corrected review style.",
+                        "created_at": "2026-07-08T00:00:00Z",
+                        "updated_at": "2026-07-08T00:00:00Z"
+                    })),
+                    evidence_refs: vec![CaptureMemoryEvidenceRef {
+                        event_type: Some("wake".to_string()),
+                        wake_id: Some("wake-one".to_string()),
+                        ref_id: None,
+                        summary: None,
+                        evidence_type: None,
+                    }],
+                    confidence: Some(0.8),
+                    durability_rationale: Some("Stable session fact.".to_string()),
+                    governance_policy: Some(MemoryGovernanceMode::Candidate),
+                    ..empty_capture_candidate()
+                },
+            ],
+        });
+        assert_eq!(plan.proposals.len(), 1);
+        assert_eq!(plan.proposals[0].proposal_id, "remember_review_style");
+        assert_eq!(plan.proposals[0].space_id.as_str(), "profile_dense");
+        assert_eq!(
+            plan.proposals[0].governance_mode,
+            MemoryGovernanceMode::CuratorRoute
+        );
+        assert!(plan.proposals[0]
+            .evidence_refs
+            .iter()
+            .any(|evidence| evidence.evidence_type == MemoryEvidenceKind::Wake));
+        assert_eq!(plan.rejected.len(), 1);
+        assert_eq!(plan.rejected[0].reason_code, "capture_space_disabled");
+    }
+
+    #[test]
+    fn capture_planner_reports_policy_diagnostics_and_truncation() {
+        let plan = plan_capture_memory_proposals(CaptureMemoryProposalPlanInput {
+            run_id: "capture_run_two".to_string(),
+            profile_id: "profile-alpha".to_string(),
+            allowed_spaces: vec![MemorySpaceId::unchecked("profile_dense")],
+            max_proposals: Some(1),
+            candidates: vec![
+                CaptureMemoryProposalCandidate {
+                    id: Some("replace_without_revision".to_string()),
+                    summary: Some("Replace memory without revision.".to_string()),
+                    kind: Some("dense_memory_replace".to_string()),
+                    memory_key: Some("review_style".to_string()),
+                    memory_content: Some("Prefers concise summaries.".to_string()),
+                    confidence: Some(0.8),
+                    durability_rationale: Some("Stable correction.".to_string()),
+                    evidence_refs: vec![CaptureMemoryEvidenceRef {
+                        event_type: Some("wake".to_string()),
+                        wake_id: Some("wake-two".to_string()),
+                        ref_id: None,
+                        summary: None,
+                        evidence_type: None,
+                    }],
+                    ..empty_capture_candidate()
+                },
+                CaptureMemoryProposalCandidate {
+                    id: Some("valid_add".to_string()),
+                    summary: Some("Remember valid add.".to_string()),
+                    kind: Some("dense_memory_add".to_string()),
+                    memory_key: Some("valid_add".to_string()),
+                    memory_content: Some("A valid add.".to_string()),
+                    confidence: Some(0.8),
+                    durability_rationale: Some("Stable.".to_string()),
+                    evidence_refs: vec![CaptureMemoryEvidenceRef {
+                        event_type: Some("wake".to_string()),
+                        wake_id: Some("wake-two".to_string()),
+                        ref_id: None,
+                        summary: None,
+                        evidence_type: None,
+                    }],
+                    ..empty_capture_candidate()
+                },
+                CaptureMemoryProposalCandidate {
+                    id: Some("second_valid_add".to_string()),
+                    summary: Some("Remember second valid add.".to_string()),
+                    kind: Some("dense_memory_add".to_string()),
+                    memory_key: Some("second_valid_add".to_string()),
+                    memory_content: Some("Another valid add.".to_string()),
+                    confidence: Some(0.8),
+                    durability_rationale: Some("Stable.".to_string()),
+                    evidence_refs: vec![CaptureMemoryEvidenceRef {
+                        event_type: Some("wake".to_string()),
+                        wake_id: Some("wake-two".to_string()),
+                        ref_id: None,
+                        summary: None,
+                        evidence_type: None,
+                    }],
+                    ..empty_capture_candidate()
+                },
+            ],
+        });
+        assert_eq!(plan.proposals.len(), 1);
+        assert!(plan.truncated);
+        assert_eq!(plan.rejected.len(), 1);
+        assert_eq!(
+            plan.rejected[0].reason_code,
+            "memory_policy_expected_revision_required"
+        );
+    }
+
+    #[test]
     fn serializes_descriptor_and_proposal_with_snake_case_enums() {
         let descriptor = roleplay_lore_descriptor();
         let value = serde_json::to_value(&descriptor).expect("serialize descriptor");
@@ -1788,6 +2493,28 @@ mod tests {
             source: MemoryProposalSource::InWakeTool,
             dedupe_key: Some("profile_dense:memory_boundary".to_string()),
             created_at: Some("2026-06-26T00:00:00Z".to_string()),
+        }
+    }
+
+    fn empty_capture_candidate() -> CaptureMemoryProposalCandidate {
+        CaptureMemoryProposalCandidate {
+            id: None,
+            summary: None,
+            space_id: None,
+            operation: None,
+            scope: None,
+            shape: None,
+            content: None,
+            evidence_refs: Vec::new(),
+            confidence: None,
+            durability_rationale: None,
+            governance_policy: None,
+            dedupe_key: None,
+            kind: None,
+            memory_key: None,
+            memory_content: None,
+            replaces_key: None,
+            expected_revision: None,
         }
     }
 

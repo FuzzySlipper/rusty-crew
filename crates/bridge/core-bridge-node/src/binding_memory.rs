@@ -63,6 +63,14 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_capture_memory_proposals_json(&self, input_json: String) -> napi::Result<String> {
+        let input =
+            parse_json::<CaptureMemoryProposalPlanInput>(&input_json, "capture proposal plan")?;
+        let plan = plan_capture_memory_proposals(input);
+        serialize_json(&plan, "capture proposal plan")
+    }
+
+    #[napi]
     pub fn list_memory_proposals_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<MemoryProposalQuery>(&input_json, "memory proposal query")?;

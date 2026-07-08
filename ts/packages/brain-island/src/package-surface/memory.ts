@@ -100,9 +100,12 @@ export {
   captureProposalToMemoryProposal,
   isLegacyDenseMemoryCaptureProposal,
   legacyDenseCaptureProposalToMemoryProposal,
+  planCaptureMemoryProposalsWithRust,
   typedCaptureProposalToMemoryProposal,
 } from "../capture-memory-proposals.js";
 export type {
+  CaptureMemoryProposalPlan,
+  CaptureMemoryProposalRejection,
   CaptureProducerEvidenceRef,
   CaptureProducerOutput,
   CaptureTargetSpaceId,
