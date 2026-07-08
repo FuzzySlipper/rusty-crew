@@ -105,7 +105,6 @@ mod binding_roleplay;
 mod binding_scheduler;
 mod binding_sessions;
 mod binding_storage;
-mod buffered_tools;
 mod config_profiles;
 mod conversation;
 mod delegation;

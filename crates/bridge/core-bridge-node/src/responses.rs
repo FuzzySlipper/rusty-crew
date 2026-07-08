@@ -1,7 +1,7 @@
 use super::*;
-use crate::buffered_tools::{
-    BufferedNeutralPendingToolRequest, BufferedNeutralRun, BufferedNeutralRunRegistry,
-    BufferedNeutralToolOutput,
+use rusty_crew_brain_runtime::{
+    BrainRuntimeError, BufferedNeutralPendingToolRequest, BufferedNeutralRun,
+    BufferedNeutralRunRegistry, BufferedNeutralToolOutput,
 };
 use serde::Serialize;
 
@@ -193,6 +193,15 @@ fn openai_responses_buffered_runs() -> &'static OpenAiResponsesBufferedRunRegist
         .get_or_init(|| BufferedNeutralRunRegistry::new("OpenAI Responses"))
 }
 
+fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
+    let status = if error.is_invalid_argument() {
+        napi::Status::InvalidArg
+    } else {
+        napi::Status::GenericFailure
+    };
+    napi::Error::new(status, error.to_string())
+}
+
 impl napi::Task for OpenAiResponsesBrainRunTask {
     type Output = String;
     type JsValue = String;
@@ -228,10 +237,12 @@ pub(crate) fn start_openai_responses_brain_json(input_json: String) -> napi::Res
             )
         })?;
     let wake_id = input.wake_id;
-    openai_responses_buffered_runs().insert(
-        wake_id.clone(),
-        OpenAiResponsesBufferedRun::new(input.config.wake_timeout_ms),
-    )?;
+    openai_responses_buffered_runs()
+        .insert(
+            wake_id.clone(),
+            OpenAiResponsesBufferedRun::new(input.config.wake_timeout_ms),
+        )
+        .map_err(brain_runtime_error_to_napi)?;
     let thread_wake_id = wake_id.clone();
     std::thread::spawn(move || run_openai_responses_brain_buffered(thread_wake_id, input_json));
     serde_json::to_string(&json!({ "wake_id": wake_id })).map_err(|error| {
@@ -275,10 +286,7 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
                 break;
             }
         }
-        let mut tool_requests = Vec::new();
-        while let Some(request) = run.pending_tool_requests.pop_front() {
-            tool_requests.push(request);
-        }
+        let tool_requests = run.drain_pending_tool_requests();
         let terminal = run.terminal && run.items.is_empty();
         let output = json!({
             "wake_id": wake_id,
@@ -292,10 +300,12 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
             "cancellation": terminal.then(|| run.cancellation.clone()).flatten(),
         });
         (terminal, output)
-    })?;
+    }).map_err(brain_runtime_error_to_napi)?;
     let (terminal, output) = terminal;
     if terminal {
-        openai_responses_buffered_runs().remove(&wake_id)?;
+        openai_responses_buffered_runs()
+            .remove(&wake_id)
+            .map_err(brain_runtime_error_to_napi)?;
     }
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::new(
@@ -313,16 +323,18 @@ pub(crate) fn cancel_openai_responses_brain_json(input_json: String) -> napi::Re
                 format!("invalid OpenAI Responses cancel JSON: {error}"),
             )
         })?;
-    let output = openai_responses_buffered_runs().with_run_mut(&input.wake_id, |run| {
-        run.cancel(input.reason_code, input.summary);
-        json!({
-        "ok": true,
-        "wake_id": input.wake_id,
-        "cancelled": true,
-        "terminal": run.terminal,
-        "cancellation": run.cancellation.clone(),
+    let output = openai_responses_buffered_runs()
+        .with_run_mut(&input.wake_id, |run| {
+            run.cancel(input.reason_code, input.summary);
+            json!({
+            "ok": true,
+            "wake_id": input.wake_id,
+            "cancelled": true,
+            "terminal": run.terminal,
+            "cancellation": run.cancellation.clone(),
+            })
         })
-    })?;
+        .map_err(brain_runtime_error_to_napi)?;
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::new(
             napi::Status::GenericFailure,
@@ -339,15 +351,17 @@ pub(crate) fn submit_openai_responses_tool_output_json(input_json: String) -> na
                 format!("invalid OpenAI Responses tool output JSON: {error}"),
             )
         })?;
-    openai_responses_buffered_runs().with_run_mut(&input.wake_id, |run| {
-        run.submitted_tool_outputs.insert(
-            input.call_id.clone(),
-            BufferedNeutralToolOutput {
-                output: input.output,
-                is_error: input.is_error,
-            },
-        );
-    })?;
+    openai_responses_buffered_runs()
+        .with_run_mut(&input.wake_id, |run| {
+            run.submit_tool_output(
+                input.call_id.clone(),
+                BufferedNeutralToolOutput {
+                    output: input.output,
+                    is_error: input.is_error,
+                },
+            );
+        })
+        .map_err(brain_runtime_error_to_napi)?;
     serde_json::to_string(&json!({
         "ok": true,
         "wake_id": input.wake_id,
@@ -416,7 +430,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
         };
         {
             let queued = openai_responses_buffered_runs().with_run_mut(&self.wake_id, |run| {
-                run.pending_tool_requests.push_back(request);
+                run.queue_pending_tool_request(request);
             });
             if queued.is_err() {
                 return NeutralToolOutput {
@@ -440,7 +454,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         is_error: true,
                     };
                 }
-                if let Some(output) = run.submitted_tool_outputs.remove(&call.call_id) {
+                if let Some(output) = run.take_submitted_tool_output(&call.call_id) {
                     return NeutralToolOutput {
                         output: output.output,
                         is_error: output.is_error,

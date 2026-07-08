@@ -12,6 +12,7 @@ members = [
     "crates/bridge/core-bridge-api",
     "crates/bridge/core-bridge-node",
     "crates/bridge/core-bridge-codegen",
+    "crates/brains/brain-runtime",
     "crates/brains/openai-responses",
     "crates/brains/pi-agent",
     "crates/roleplay/roleplay-core",

@@ -1,7 +1,7 @@
 use super::*;
-use crate::buffered_tools::{
-    BufferedNeutralPendingToolRequest, BufferedNeutralRun, BufferedNeutralRunRegistry,
-    BufferedNeutralToolOutput,
+use rusty_crew_brain_runtime::{
+    BrainRuntimeError, BufferedNeutralPendingToolRequest, BufferedNeutralRun,
+    BufferedNeutralRunRegistry, BufferedNeutralToolOutput,
 };
 use rusty_crew_pi_agent_brain::{
     ChatCompletionMessage, ChatCompletionsEvent, FakeChatCompletionsClient,
@@ -97,6 +97,15 @@ fn pi_agent_buffered_runs() -> &'static PiAgentBufferedRunRegistry {
     PI_AGENT_BUFFERED_RUNS.get_or_init(|| BufferedNeutralRunRegistry::new("pi-agent"))
 }
 
+fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
+    let status = if error.is_invalid_argument() {
+        napi::Status::InvalidArg
+    } else {
+        napi::Status::GenericFailure
+    };
+    napi::Error::new(status, error.to_string())
+}
+
 pub(crate) fn start_pi_agent_brain_json(input_json: String) -> napi::Result<String> {
     let input: JsPiAgentBrainRunInput = serde_json::from_str(&input_json).map_err(|error| {
         napi::Error::new(
@@ -106,7 +115,9 @@ pub(crate) fn start_pi_agent_brain_json(input_json: String) -> napi::Result<Stri
     })?;
     let wake_id = input.wake_id;
     let wake_timeout_ms = input.config.wake_timeout_ms.unwrap_or(300_000);
-    pi_agent_buffered_runs().insert(wake_id.clone(), PiAgentBufferedRun::new(wake_timeout_ms))?;
+    pi_agent_buffered_runs()
+        .insert(wake_id.clone(), PiAgentBufferedRun::new(wake_timeout_ms))
+        .map_err(brain_runtime_error_to_napi)?;
     let thread_wake_id = wake_id.clone();
     std::thread::spawn(move || run_pi_agent_brain_buffered(thread_wake_id, input_json));
     serde_json::to_string(&json!({ "wake_id": wake_id })).map_err(|error| {
@@ -122,53 +133,54 @@ pub(crate) fn drain_pi_agent_brain_stream_json(
     max_items: Option<u32>,
 ) -> napi::Result<String> {
     let max_items = max_items.unwrap_or(64).max(1) as usize;
-    let terminal = pi_agent_buffered_runs().with_run_mut(&wake_id, |run| {
-        if !run.terminal && run.is_timed_out() {
-            run.terminal = true;
-            run.error = Some(format!(
-                "pi-agent buffered wake {wake_id} exceeded {}ms timeout",
-                run.wake_timeout_ms
-            ));
-        }
-        let mut items = Vec::new();
-        for _ in 0..max_items {
-            if run.terminal
-                && !items.is_empty()
-                && run
-                    .items
-                    .front()
-                    .is_some_and(BrainWakeStreamItem::is_terminal)
-            {
-                break;
+    let terminal = pi_agent_buffered_runs()
+        .with_run_mut(&wake_id, |run| {
+            if !run.terminal && run.is_timed_out() {
+                run.terminal = true;
+                run.error = Some(format!(
+                    "pi-agent buffered wake {wake_id} exceeded {}ms timeout",
+                    run.wake_timeout_ms
+                ));
             }
-            let Some(item) = run.items.pop_front() else {
-                break;
-            };
-            let is_terminal = item.is_terminal();
-            items.push(item);
-            if is_terminal {
-                break;
+            let mut items = Vec::new();
+            for _ in 0..max_items {
+                if run.terminal
+                    && !items.is_empty()
+                    && run
+                        .items
+                        .front()
+                        .is_some_and(BrainWakeStreamItem::is_terminal)
+                {
+                    break;
+                }
+                let Some(item) = run.items.pop_front() else {
+                    break;
+                };
+                let is_terminal = item.is_terminal();
+                items.push(item);
+                if is_terminal {
+                    break;
+                }
             }
-        }
-        let mut tool_requests = Vec::new();
-        while let Some(request) = run.pending_tool_requests.pop_front() {
-            tool_requests.push(request);
-        }
-        let terminal = run.terminal && run.items.is_empty();
-        let output = json!({
-            "wake_id": wake_id,
-            "items": items,
-            "tool_requests": tool_requests,
-            "terminal": terminal,
-            "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
-            "error": terminal.then(|| run.error.clone()).flatten(),
-            "cancellation": terminal.then(|| run.cancellation.clone()).flatten(),
-        });
-        (terminal, output)
-    })?;
+            let tool_requests = run.drain_pending_tool_requests();
+            let terminal = run.terminal && run.items.is_empty();
+            let output = json!({
+                "wake_id": wake_id,
+                "items": items,
+                "tool_requests": tool_requests,
+                "terminal": terminal,
+                "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
+                "error": terminal.then(|| run.error.clone()).flatten(),
+                "cancellation": terminal.then(|| run.cancellation.clone()).flatten(),
+            });
+            (terminal, output)
+        })
+        .map_err(brain_runtime_error_to_napi)?;
     let (terminal, output) = terminal;
     if terminal {
-        pi_agent_buffered_runs().remove(&wake_id)?;
+        pi_agent_buffered_runs()
+            .remove(&wake_id)
+            .map_err(brain_runtime_error_to_napi)?;
     }
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::new(
@@ -185,15 +197,17 @@ pub(crate) fn submit_pi_agent_tool_output_json(input_json: String) -> napi::Resu
             format!("invalid pi-agent tool output JSON: {error}"),
         )
     })?;
-    pi_agent_buffered_runs().with_run_mut(&input.wake_id, |run| {
-        run.submitted_tool_outputs.insert(
-            input.call_id.clone(),
-            BufferedNeutralToolOutput {
-                output: input.output,
-                is_error: input.is_error,
-            },
-        );
-    })?;
+    pi_agent_buffered_runs()
+        .with_run_mut(&input.wake_id, |run| {
+            run.submit_tool_output(
+                input.call_id.clone(),
+                BufferedNeutralToolOutput {
+                    output: input.output,
+                    is_error: input.is_error,
+                },
+            );
+        })
+        .map_err(brain_runtime_error_to_napi)?;
     serde_json::to_string(&json!({
         "ok": true,
         "wake_id": input.wake_id,
@@ -214,16 +228,18 @@ pub(crate) fn cancel_pi_agent_brain_json(input_json: String) -> napi::Result<Str
             format!("invalid pi-agent cancel JSON: {error}"),
         )
     })?;
-    let output = pi_agent_buffered_runs().with_run_mut(&input.wake_id, |run| {
-        run.cancel(input.reason_code, input.summary);
-        json!({
-            "ok": true,
-            "wake_id": input.wake_id,
-            "cancelled": true,
-            "terminal": run.terminal,
-            "cancellation": run.cancellation.clone(),
+    let output = pi_agent_buffered_runs()
+        .with_run_mut(&input.wake_id, |run| {
+            run.cancel(input.reason_code, input.summary);
+            json!({
+                "ok": true,
+                "wake_id": input.wake_id,
+                "cancelled": true,
+                "terminal": run.terminal,
+                "cancellation": run.cancellation.clone(),
+            })
         })
-    })?;
+        .map_err(brain_runtime_error_to_napi)?;
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::new(
             napi::Status::GenericFailure,
@@ -397,7 +413,7 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
         };
         {
             let queued = pi_agent_buffered_runs().with_run_mut(&self.wake_id, |run| {
-                run.pending_tool_requests.push_back(request);
+                run.queue_pending_tool_request(request);
             });
             if queued.is_err() {
                 return PiAgentToolOutput::error(format!(
@@ -415,7 +431,7 @@ impl PiAgentNeutralToolExecutor for BufferedPiAgentToolExecutor {
                         self.wake_id, call_id, cancellation.summary
                     ));
                 }
-                if let Some(output) = run.submitted_tool_outputs.remove(&call_id) {
+                if let Some(output) = run.take_submitted_tool_output(&call_id) {
                     return if output.is_error {
                         PiAgentToolOutput::error(output.output)
                     } else {

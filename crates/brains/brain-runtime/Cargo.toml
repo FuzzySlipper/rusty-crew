@@ -1,0 +1,10 @@
+[package]
+name = "rusty-crew-brain-runtime"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusty-crew-core-protocol = { path = "../../core/core-protocol" }
+serde.workspace = true
+time.workspace = true
