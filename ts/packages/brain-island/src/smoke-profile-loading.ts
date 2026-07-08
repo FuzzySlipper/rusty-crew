@@ -523,6 +523,32 @@ Use the profile-local skill source.
       /channelDefaults\.wakePolicy/.test(error.message),
   );
 
+  writeFileSync(
+    join(profilesDir, "bad-context-policy.json"),
+    JSON.stringify({
+      profileId: "bad-context-policy",
+      modelConfig: {
+        provider: "den-router",
+        modelName: "local-deterministic",
+      },
+      contextPolicy: {
+        strategyId: "mystery_strategy",
+      },
+    }),
+  );
+  await assert.rejects(
+    () =>
+      loadProfileContext({
+        profilesDir,
+        skillsDir,
+        profileId: "bad-context-policy" as ProfileId,
+      }),
+    (error) =>
+      error instanceof ProfileLoadError &&
+      error.code === "invalid_profile_config" &&
+      /unknown context strategy mystery_strategy/.test(error.message),
+  );
+
   console.log(
     JSON.stringify(
       {

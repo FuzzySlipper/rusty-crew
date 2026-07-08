@@ -40,5 +40,18 @@
   "channelDefaults": {
     "wakePolicy": "subscription"
   },
+  "contextPolicy": {
+    "enabled": true,
+    "strategyId": "rolling_summary_compaction",
+    "autoCompactionEnabled": true,
+    "compactAtPercent": 82,
+    "targetPercentAfterCompaction": 58,
+    "maxContextPercentForWake": 95,
+    "debugVisibility": "status",
+    "includeDebugEventsInModelContext": false,
+    "strategyConfig": {
+      "summaryShape": "brief"
+    }
+  },
   "skills": "all"
 }

@@ -14,7 +14,7 @@ import {
 } from "./tool-profile-selection.js";
 import { defaultToolRegistry, type ToolRegistry } from "./tool-registry.js";
 import {
-  contextStrategyPolicyFromUnknown,
+  contextStrategyPolicyFromUnknownWithDiagnostics,
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
 
@@ -176,6 +176,16 @@ export const profileRuntimeGraphWireFieldPaths = [
   "profiles[].brain.strategy",
   "profiles[].channel_defaults",
   "profiles[].channel_defaults.wake_policy",
+  "profiles[].context_policy",
+  "profiles[].context_policy.auto_compaction_enabled",
+  "profiles[].context_policy.compact_at_percent",
+  "profiles[].context_policy.debug_visibility",
+  "profiles[].context_policy.enabled",
+  "profiles[].context_policy.include_debug_events_in_model_context",
+  "profiles[].context_policy.max_context_percent_for_wake",
+  "profiles[].context_policy.strategy_config",
+  "profiles[].context_policy.strategy_id",
+  "profiles[].context_policy.target_percent_after_compaction",
   "profiles[].mcp_config",
   "profiles[].mcp_config.binding_id",
   "profiles[].mcp_config.endpoint_ref",
@@ -810,9 +820,9 @@ function validateProfileConfig(
       ? roleplayNarratorConfig(parsed.roleplayNarrator)
       : undefined,
     contextPolicy: isRecord(parsed.contextPolicy)
-      ? contextStrategyPolicyFromUnknown(parsed.contextPolicy)
+      ? profileContextPolicy(parsed.contextPolicy, profileId, profilePath)
       : isRecord(parsed.context_policy)
-        ? contextStrategyPolicyFromUnknown(parsed.context_policy)
+        ? profileContextPolicy(parsed.context_policy, profileId, profilePath)
         : undefined,
     sessionDefaults: isRecord(parsed.sessionDefaults)
       ? {
@@ -937,6 +947,25 @@ function profileMemoryConfig(
       ? sessionMemoryPromptConfig(raw.sessionMemoryPrompt)
       : undefined,
   };
+}
+
+function profileContextPolicy(
+  raw: Record<string, unknown>,
+  profileId: ProfileId,
+  profilePath: string,
+): ContextStrategyPolicy {
+  const result = contextStrategyPolicyFromUnknownWithDiagnostics(raw);
+  const errors = result.diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (errors.length > 0) {
+    throw invalidProfile(
+      profileId,
+      profilePath,
+      errors.map((diagnostic) => diagnostic.message).join("; "),
+    );
+  }
+  return result.policy;
 }
 
 export function sessionMemoryPromptConfig(

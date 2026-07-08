@@ -1735,6 +1735,17 @@ export interface NativeProfileRuntimeMetadata {
   channelDefaults?: {
     wakePolicy?: "subscription" | "manual" | "disabled";
   };
+  contextPolicy?: {
+    enabled: boolean;
+    strategyId: string;
+    autoCompactionEnabled: boolean;
+    compactAtPercent: number;
+    targetPercentAfterCompaction: number;
+    maxContextPercentForWake: number;
+    debugVisibility: string;
+    includeDebugEventsInModelContext: boolean;
+    strategyConfig: Record<string, unknown>;
+  };
 }
 
 export interface NativeCreateProfilePlanInput {

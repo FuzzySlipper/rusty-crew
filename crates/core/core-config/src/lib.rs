@@ -21,6 +21,12 @@ const MAX_TURN_TIMEOUT_MS: u32 = 24 * 60 * 60 * 1_000;
 const ID_PATTERN_DESCRIPTION: &str =
     "must start with a letter or digit and contain only letters, digits, '.', '_', ':' or '-'";
 const RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND: &str = "runtime.review.memory_skills";
+const CONTEXT_STRATEGY_IDS: &[&str] = &[
+    "recent_window",
+    "session_memory_augmented",
+    "rolling_summary_compaction",
+];
+const CONTEXT_DEBUG_VISIBILITY_VALUES: &[&str] = &["off", "status", "verbose"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeConfigDraft {
@@ -550,6 +556,7 @@ pub struct ProfileRuntimeMetadata {
     pub mcp_config: Option<ProfileMcpConfig>,
     pub background_review: Option<ProfileBackgroundReviewConfig>,
     pub channel_defaults: Option<ProfileChannelDefaults>,
+    pub context_policy: Option<ProfileContextPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -607,6 +614,20 @@ pub enum ChannelWakePolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileChannelDefaults {
     pub wake_policy: Option<ChannelWakePolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileContextPolicy {
+    pub enabled: bool,
+    pub strategy_id: String,
+    pub auto_compaction_enabled: bool,
+    pub compact_at_percent: u32,
+    pub target_percent_after_compaction: u32,
+    pub max_context_percent_for_wake: u32,
+    pub debug_visibility: String,
+    pub include_debug_events_in_model_context: bool,
+    #[serde(default)]
+    pub strategy_config: Value,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2484,6 +2505,9 @@ impl<'a> RuntimeConfigValidator<'a> {
                     );
                 }
             }
+            if let Some(context_policy) = &profile.context_policy {
+                validate_context_policy(self, index, context_policy);
+            }
         }
     }
 
@@ -2890,6 +2914,67 @@ fn validate_resource_limits(
         limits.max_delegation_depth,
         MAX_DELEGATION_DEPTH,
     );
+}
+
+fn validate_context_policy(
+    validator: &mut RuntimeConfigValidator<'_>,
+    profile_index: usize,
+    policy: &ProfileContextPolicy,
+) {
+    let path = format!("profiles[{profile_index}].contextPolicy");
+    if !CONTEXT_STRATEGY_IDS.contains(&policy.strategy_id.as_str()) {
+        validator.error(
+            "context_strategy_unknown",
+            format!("{path}.strategyId"),
+            format!("unknown context strategy {}", policy.strategy_id),
+        );
+    }
+    validate_percent(
+        validator,
+        &format!("{path}.compactAtPercent"),
+        policy.compact_at_percent,
+    );
+    validate_percent(
+        validator,
+        &format!("{path}.targetPercentAfterCompaction"),
+        policy.target_percent_after_compaction,
+    );
+    validate_percent(
+        validator,
+        &format!("{path}.maxContextPercentForWake"),
+        policy.max_context_percent_for_wake,
+    );
+    if policy.target_percent_after_compaction >= policy.compact_at_percent {
+        validator.error(
+            "context_policy_target_not_below_trigger",
+            format!("{path}.targetPercentAfterCompaction"),
+            "targetPercentAfterCompaction must be lower than compactAtPercent",
+        );
+    }
+    if policy.compact_at_percent > policy.max_context_percent_for_wake {
+        validator.error(
+            "context_policy_trigger_above_wake_guard",
+            format!("{path}.compactAtPercent"),
+            "compactAtPercent must not exceed maxContextPercentForWake",
+        );
+    }
+    if !CONTEXT_DEBUG_VISIBILITY_VALUES.contains(&policy.debug_visibility.as_str()) {
+        validator.error(
+            "context_policy_debug_visibility_invalid",
+            format!("{path}.debugVisibility"),
+            "debugVisibility must be off, status, or verbose",
+        );
+    }
+}
+
+fn validate_percent(validator: &mut RuntimeConfigValidator<'_>, path: &str, value: u32) {
+    if !(1..=100).contains(&value) {
+        validator.error(
+            "context_policy_percent_out_of_range",
+            path,
+            format!("{path} must be between 1 and 100"),
+        );
+    }
 }
 
 fn validate_history_window(
@@ -3771,6 +3856,37 @@ mod tests {
     }
 
     #[test]
+    fn validates_profile_context_policy_in_rust() {
+        let mut runner = profile("runner");
+        runner.context_policy = Some(ProfileContextPolicy {
+            enabled: true,
+            strategy_id: "mystery_strategy".to_string(),
+            auto_compaction_enabled: true,
+            compact_at_percent: 110,
+            target_percent_after_compaction: 80,
+            max_context_percent_for_wake: 75,
+            debug_visibility: "loud".to_string(),
+            include_debug_events_in_model_context: true,
+            strategy_config: json!({}),
+        });
+
+        let result = validate_runtime_config_input(&RuntimeConfigValidationInput {
+            runtime_config: valid_draft(),
+            profiles: vec![runner],
+        });
+
+        assert_codes(
+            &result,
+            &[
+                "context_strategy_unknown",
+                "context_policy_percent_out_of_range",
+                "context_policy_trigger_above_wake_guard",
+                "context_policy_debug_visibility_invalid",
+            ],
+        );
+    }
+
+    #[test]
     fn plans_create_profile_with_defaults_without_mutating_runtime() {
         let input = CreateProfilePlanInput {
             runtime_config: valid_draft(),
@@ -4231,6 +4347,17 @@ mod tests {
             }),
             channel_defaults: Some(ProfileChannelDefaults {
                 wake_policy: Some(ChannelWakePolicy::Subscription),
+            }),
+            context_policy: Some(ProfileContextPolicy {
+                enabled: true,
+                strategy_id: "recent_window".to_string(),
+                auto_compaction_enabled: false,
+                compact_at_percent: 80,
+                target_percent_after_compaction: 55,
+                max_context_percent_for_wake: 95,
+                debug_visibility: "status".to_string(),
+                include_debug_events_in_model_context: false,
+                strategy_config: json!({}),
             }),
         }
     }

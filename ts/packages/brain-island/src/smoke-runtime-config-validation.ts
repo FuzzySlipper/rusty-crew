@@ -65,6 +65,17 @@ const profile: ProfileConfig = {
   channelDefaults: {
     wakePolicy: "subscription",
   },
+  contextPolicy: {
+    enabled: true,
+    strategyId: "recent_window",
+    autoCompactionEnabled: false,
+    compactAtPercent: 80,
+    targetPercentAfterCompaction: 55,
+    maxContextPercentForWake: 95,
+    debugVisibility: "status",
+    includeDebugEventsInModelContext: false,
+    strategyConfig: {},
+  },
 };
 
 const runtimeConfig: RustyCrewRuntimeConfig = {
@@ -145,6 +156,8 @@ const valid = await validateRuntimeConfigWithRust({
 assert.deepEqual(valid.diagnostics, []);
 
 const input = runtimeConfigValidationInput(runtimeConfig, [profile]);
+assert.equal(input.profiles[0]?.contextPolicy?.strategyId, "recent_window");
+assert.equal(input.profiles[0]?.contextPolicy?.debugVisibility, "status");
 const invalid = await bridge.validateRuntimeConfigDraft({
   ...input,
   runtimeConfig: {
@@ -191,6 +204,56 @@ assert(
       diagnostic.severity === "error" &&
       diagnostic.code === "mcp_binding_missing_server_names" &&
       diagnostic.path === "mcpBindings[0].serverNames",
+  ),
+);
+
+const invalidContextPolicy = await bridge.validateRuntimeConfigDraft({
+  ...input,
+  profiles: [
+    {
+      ...input.profiles[0]!,
+      contextPolicy: {
+        ...input.profiles[0]!.contextPolicy!,
+        strategyId: "mystery_strategy",
+        compactAtPercent: 90,
+        targetPercentAfterCompaction: 95,
+        maxContextPercentForWake: 85,
+        debugVisibility: "loud",
+      },
+    },
+  ],
+});
+assert(
+  invalidContextPolicy.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === "error" &&
+      diagnostic.code === "context_strategy_unknown" &&
+      diagnostic.path === "profiles[0].contextPolicy.strategyId",
+  ),
+);
+assert(
+  invalidContextPolicy.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === "error" &&
+      diagnostic.code === "context_policy_target_not_below_trigger" &&
+      diagnostic.path ===
+        "profiles[0].contextPolicy.targetPercentAfterCompaction",
+  ),
+);
+assert(
+  invalidContextPolicy.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === "error" &&
+      diagnostic.code === "context_policy_trigger_above_wake_guard" &&
+      diagnostic.path === "profiles[0].contextPolicy.compactAtPercent",
+  ),
+);
+assert(
+  invalidContextPolicy.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === "error" &&
+      diagnostic.code === "context_policy_debug_visibility_invalid" &&
+      diagnostic.path === "profiles[0].contextPolicy.debugVisibility",
   ),
 );
 

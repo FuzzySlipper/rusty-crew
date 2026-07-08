@@ -130,6 +130,19 @@
       },
       "channel_defaults": {
         "wake_policy": "subscription"
+      },
+      "context_policy": {
+        "enabled": true,
+        "strategy_id": "rolling_summary_compaction",
+        "auto_compaction_enabled": true,
+        "compact_at_percent": 82,
+        "target_percent_after_compaction": 58,
+        "max_context_percent_for_wake": 95,
+        "debug_visibility": "status",
+        "include_debug_events_in_model_context": false,
+        "strategy_config": {
+          "summary_shape": "brief"
+        }
       }
     }
   ]

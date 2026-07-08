@@ -168,11 +168,27 @@ export function contextStrategyPolicyFromUnknown(
   value: unknown,
   fallback: ContextStrategyPolicy = defaultContextStrategyPolicy(),
 ): ContextStrategyPolicy {
+  return contextStrategyPolicyFromUnknownWithDiagnostics(value, fallback).policy;
+}
+
+export function contextStrategyPolicyFromUnknownWithDiagnostics(
+  value: unknown,
+  fallback: ContextStrategyPolicy = defaultContextStrategyPolicy(),
+): {
+  policy: ContextStrategyPolicy;
+  diagnostics: ContextStrategyPolicyDiagnostic[];
+} {
   if (!isRecord(value)) {
-    return { ...fallback, strategyConfig: { ...fallback.strategyConfig } };
+    return {
+      policy: { ...fallback, strategyConfig: { ...fallback.strategyConfig } },
+      diagnostics: [],
+    };
   }
   const diagnostics: ContextStrategyPolicyDiagnostic[] = [];
-  return normalizeContextStrategyPolicy(value, fallback, diagnostics);
+  return {
+    policy: normalizeContextStrategyPolicy(value, fallback, diagnostics),
+    diagnostics,
+  };
 }
 
 export function contextStrategyPolicyFromPatch(

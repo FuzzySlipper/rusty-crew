@@ -4,9 +4,9 @@ use rusty_crew_core_config::{
     BrainConfigDraft, ChannelBindingConfigDraft, ChannelWakePolicy, CreateProfileMcpBindingRequest,
     CreateProfilePlanInput, CreateProfileRequest, CreateProfileSourceRequest,
     ExternalBindingStatusDraft, McpBindingConfigDraft, ProfileBackgroundReviewConfig,
-    ProfileBackgroundReviewType, ProfileBrainMetadata, ProfileChannelDefaults, ProfileMcpConfig,
-    ProfileModelConfigSeed, ProfileRegistryRuntimeMetadata, ProfileRuntimeMetadata,
-    ProfileRuntimeOptions, ProfileSessionDefaults, RuntimeConfigDraft,
+    ProfileBackgroundReviewType, ProfileBrainMetadata, ProfileChannelDefaults,
+    ProfileContextPolicy, ProfileMcpConfig, ProfileModelConfigSeed, ProfileRegistryRuntimeMetadata,
+    ProfileRuntimeMetadata, ProfileRuntimeOptions, ProfileSessionDefaults, RuntimeConfigDraft,
     RuntimeConfigValidationInput, ScheduledJobConfigDraft, ScheduledJobShape, SessionConfigDraft,
 };
 use rusty_crew_core_protocol::{
@@ -557,6 +557,17 @@ fn sample_profile_runtime_metadata() -> ProfileRuntimeMetadata {
         }),
         channel_defaults: Some(ProfileChannelDefaults {
             wake_policy: Some(ChannelWakePolicy::Subscription),
+        }),
+        context_policy: Some(ProfileContextPolicy {
+            enabled: true,
+            strategy_id: "recent_window".to_owned(),
+            auto_compaction_enabled: false,
+            compact_at_percent: 80,
+            target_percent_after_compaction: 55,
+            max_context_percent_for_wake: 95,
+            debug_visibility: "status".to_owned(),
+            include_debug_events_in_model_context: false,
+            strategy_config: json!({}),
         }),
     }
 }

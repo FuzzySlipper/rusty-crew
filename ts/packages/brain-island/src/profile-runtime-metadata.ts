@@ -37,6 +37,21 @@ export function profileRuntimeMetadata(
         }
       : undefined,
     channelDefaults: profile.channelDefaults,
+    contextPolicy: profile.contextPolicy
+      ? {
+          enabled: profile.contextPolicy.enabled,
+          strategyId: profile.contextPolicy.strategyId,
+          autoCompactionEnabled: profile.contextPolicy.autoCompactionEnabled,
+          compactAtPercent: profile.contextPolicy.compactAtPercent,
+          targetPercentAfterCompaction:
+            profile.contextPolicy.targetPercentAfterCompaction,
+          maxContextPercentForWake: profile.contextPolicy.maxContextPercentForWake,
+          debugVisibility: profile.contextPolicy.debugVisibility,
+          includeDebugEventsInModelContext:
+            profile.contextPolicy.includeDebugEventsInModelContext,
+          strategyConfig: profile.contextPolicy.strategyConfig,
+        }
+      : undefined,
   };
 }
 
