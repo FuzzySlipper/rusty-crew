@@ -56,7 +56,7 @@ const adapterAuthorityForbiddenCalls = [
   "submitBrainTextDelta",
   "wakeBrainFromBridgeRequest",
 ];
-const legacyBrainIslandSrcSmokeCount = 135;
+const legacyBrainIslandSrcSmokeCount = 134;
 const legacySrcSmokeAllowedImports = new Map([
   [
     normalizePath("ts/packages/brain-island/src/smoke-adapter-diagnostics.ts"),
@@ -114,10 +114,6 @@ const legacySrcSmokeAllowedImports = new Map([
   ],
   [
     normalizePath("ts/packages/brain-island/src/smoke-mcp-surfaces-e2e.ts"),
-    new Set(["@rusty-crew/adapter-mcp"]),
-  ],
-  [
-    normalizePath("ts/packages/brain-island/src/smoke-mcp-tool-registry.ts"),
     new Set(["@rusty-crew/adapter-mcp"]),
   ],
   [

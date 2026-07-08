@@ -13,7 +13,7 @@ import {
   defaultToolRegistry,
   integrateMcpToolsWithRegistry,
   type ToolRegistryEntry,
-} from "./index.js";
+} from "@rusty-crew/brain-island";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 
 const binding: McpBindingRecord = {

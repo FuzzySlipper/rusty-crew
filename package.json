@@ -107,7 +107,7 @@
     "smoke:telegram-service-connector": "npm run smoke:telegram-service-connector -w @rusty-crew/service-host",
     "smoke:den-successor-service": "npm run smoke:den-successor-service -w @rusty-crew/service-host",
     "smoke:den-assignment-evidence-e2e": "npm run smoke:den-assignment-evidence-e2e -w @rusty-crew/brain-island",
-    "smoke:mcp-tool-registry": "npm run smoke:mcp-tool-registry -w @rusty-crew/brain-island",
+    "smoke:mcp-tool-registry": "tsx ts/smokes/mcp-tool-registry.ts",
     "smoke:mcp-reload": "npm run smoke:mcp-reload -w @rusty-crew/service-host",
     "smoke:mcp-tool-telemetry": "npm run smoke:mcp-tool-telemetry -w @rusty-crew/brain-island",
     "smoke:web-browser-tool-telemetry": "npm run smoke:web-browser-tool-telemetry -w @rusty-crew/brain-island",
