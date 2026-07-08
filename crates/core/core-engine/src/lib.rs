@@ -15,33 +15,33 @@ use rusty_crew_core_body::{
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
     AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
-    ChatReadModelEvent, ChatReadModelEventKind, ChatReadModelPage, ChatReadModelQuery,
-    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
-    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
-    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
-    CoreCoordinationStore, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
-    DurableMessageRecord, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
-    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
-    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
-    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
-    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
-    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
-    ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord,
-    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
-    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
-    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
-    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
-    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
-    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
-    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
-    SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
-    SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
-    WorkerPoolClaimRecord, WorkerPoolClaimRequest, WorkerPoolCompletionRequest,
-    WorkerPoolMemberStatus, WorkerPoolNoCapacityReason, WorkerPoolWorkItemRecord,
-    WorkerPoolWorkStatus, WorkerRunRecord, WorkerRunStatus,
+    ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage, ChatEventLogQuery, ChatReadModelEvent,
+    ChatReadModelEventKind, ChatReadModelPage, ChatReadModelQuery, ConversationBranchQuery,
+    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
+    ConversationJumpRequest, ConversationJumpResult, ConversationSnapshotQuery,
+    ConversationSnapshotRecord, ConversationSnapshotWrite, CoreCoordinationStore,
+    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DurableMessageRecord,
+    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
+    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
+    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord,
+    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
+    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
+    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
+    RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
+    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite,
+    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
+    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics,
+    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics,
+    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
+    SelectActiveVariantResult, SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord,
+    SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest,
+    UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
+    WorkerPoolCompletionRequest, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
+    WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     session_memory_space_descriptor, ActionBatchReceipt, ActionRejection, AgentId, AgentMessage,
@@ -1086,6 +1086,14 @@ impl CoreEngine {
             latest_cursor: chat_cursor_for(&query.session_id, latest_sequence),
             has_more,
         })
+    }
+
+    pub fn append_chat_event(&self, event: &ChatEventLogAppend) -> CoreResult<ChatEventLogEvent> {
+        self.store.chat_events().append_chat_event(event)
+    }
+
+    pub fn query_chat_events(&self, query: &ChatEventLogQuery) -> CoreResult<ChatEventLogPage> {
+        self.store.chat_events().query_chat_events(query)
     }
 
     pub fn save_conversation_branch(
@@ -5950,6 +5958,91 @@ mod tests {
         assert_eq!(page.items[0].payload_json["body"], "alternate");
         assert_eq!(page.latest_cursor, "variant-session:1");
         assert!(!page.has_more);
+    }
+
+    #[test]
+    fn chat_event_log_allocates_sequences_and_pages_after_cursor() {
+        let engine = test_engine();
+
+        let first = engine
+            .append_chat_event(&ChatEventLogAppend {
+                session_id: SessionId::new("stream-session"),
+                created_at: "2026-06-19T00:01:00Z".to_string(),
+                kind: "message_created".to_string(),
+                payload_json: json!({ "body": "hello" }),
+            })
+            .unwrap();
+        let second = engine
+            .append_chat_event(&ChatEventLogAppend {
+                session_id: SessionId::new("stream-session"),
+                created_at: "2026-06-19T00:02:00Z".to_string(),
+                kind: "assistant_text_delta".to_string(),
+                payload_json: json!({ "delta": "hi" }),
+            })
+            .unwrap();
+
+        assert_eq!(first.event_id, "stream-session:1");
+        assert_eq!(second.event_id, "stream-session:2");
+
+        let page = engine
+            .query_chat_events(&ChatEventLogQuery {
+                session_id: SessionId::new("stream-session"),
+                cursor: Some("stream-session:1".to_string()),
+                limit: Some(1),
+            })
+            .unwrap();
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].event_id, "stream-session:2");
+        assert_eq!(page.items[0].kind, "assistant_text_delta");
+        assert_eq!(page.latest_cursor, "stream-session:2");
+        assert!(!page.has_more);
+
+        let latest = engine
+            .query_chat_events(&ChatEventLogQuery {
+                session_id: SessionId::new("stream-session"),
+                cursor: None,
+                limit: Some(1),
+            })
+            .unwrap();
+
+        assert_eq!(latest.items.len(), 1);
+        assert_eq!(latest.items[0].event_id, "stream-session:2");
+        assert_eq!(latest.latest_cursor, "stream-session:2");
+        assert!(latest.has_more);
+    }
+
+    #[test]
+    fn chat_event_log_replays_after_store_reload_without_memory_state() {
+        let data_dir = unique_data_dir("chat-events-reload");
+        {
+            let engine = test_engine_with_data_dir(data_dir.clone());
+            for index in 1..=3 {
+                engine
+                    .append_chat_event(&ChatEventLogAppend {
+                        session_id: SessionId::new("reload-session"),
+                        created_at: format!("2026-06-19T00:0{index}:00Z"),
+                        kind: "message_created".to_string(),
+                        payload_json: json!({ "body": format!("message {index}") }),
+                    })
+                    .unwrap();
+            }
+        }
+
+        let engine = test_engine_with_data_dir(data_dir);
+        let page = engine
+            .query_chat_events(&ChatEventLogQuery {
+                session_id: SessionId::new("reload-session"),
+                cursor: Some("reload-session:1".to_string()),
+                limit: Some(1),
+            })
+            .unwrap();
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].event_id, "reload-session:2");
+        assert_eq!(page.items[0].payload_json["body"], "message 2");
+        assert_eq!(page.latest_cursor, "reload-session:2");
+        assert!(page.has_more);
     }
 
     fn save_test_message_slot(

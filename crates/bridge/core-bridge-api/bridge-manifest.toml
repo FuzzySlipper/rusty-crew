@@ -525,6 +525,24 @@ errors = "core_protocol::CoreError"
 summary = "Project durable message slots into a Rusty View chat read-model page."
 
 [[operation]]
+name = "append_chat_event"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ChatEventLogAppend"
+output = "core_persistence::ChatEventLogEvent"
+errors = "core_protocol::CoreError"
+summary = "Append a Rusty View chat event and allocate its session-local sequence."
+
+[[operation]]
+name = "query_chat_events"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ChatEventLogQuery"
+output = "core_persistence::ChatEventLogPage"
+errors = "core_protocol::CoreError"
+summary = "Replay Rusty View chat events after a session cursor."
+
+[[operation]]
 name = "query_message_slots"
 surface = "stable"
 direction = "ts_to_rust"

@@ -46,6 +46,22 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn append_chat_event_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let event = parse_json::<ChatEventLogAppend>(&input_json, "chat event append")?;
+        let record = bridge.append_chat_event(&event).map_err(to_napi_error)?;
+        serialize_json(&record, "chat event record")
+    }
+
+    #[napi]
+    pub fn query_chat_events_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<ChatEventLogQuery>(&input_json, "chat event query")?;
+        let page = bridge.query_chat_events(&query).map_err(to_napi_error)?;
+        serialize_json(&page, "chat event page")
+    }
+
+    #[napi]
     pub fn save_conversation_branch_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let branch =

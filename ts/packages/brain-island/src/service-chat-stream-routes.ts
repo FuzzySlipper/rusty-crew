@@ -18,7 +18,7 @@ export interface RustyViewChatStreamRouteContext {
     session: SessionState,
     cursor: string | undefined,
     url: URL,
-  ): readonly ChatEvent[];
+  ): Promise<readonly ChatEvent[]>;
   subscribersForSession(sessionId: SessionId): Set<ChatStreamSubscriber>;
   deleteSubscribersForSession(sessionId: SessionId): void;
   timers: Set<NodeJS.Timeout>;
@@ -105,7 +105,7 @@ export async function handleRustyViewChatStreamRequest(
 
   const cursor =
     stringHeader(request, "last-event-id") ?? stringParam(url, "cursor");
-  const replay = context.streamReplayEvents(session, cursor, url);
+  const replay = await context.streamReplayEvents(session, cursor, url);
   const closeAfterReplay =
     url.searchParams.get("once") === "true" ||
     url.searchParams.get("close_after_replay") === "true";

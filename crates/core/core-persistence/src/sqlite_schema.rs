@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 31;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 32;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -173,6 +173,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 31,
         description: "link worker runs to optional worker-pool leases",
         apply: migrate_v31_add_worker_run_pool_provenance,
+    },
+    SchemaMigration {
+        version: 32,
+        description: "add durable chat event replay log",
+        apply: repos::chat_events::migrate_v32_add_chat_event_log,
     },
 ];
 

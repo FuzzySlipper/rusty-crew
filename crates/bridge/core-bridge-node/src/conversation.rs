@@ -33,6 +33,14 @@ impl NativeBridge {
         self.engine()?.chat_read_model_page(query)
     }
 
+    pub fn append_chat_event(&self, event: &ChatEventLogAppend) -> CoreResult<ChatEventLogEvent> {
+        self.engine()?.append_chat_event(event)
+    }
+
+    pub fn query_chat_events(&self, query: &ChatEventLogQuery) -> CoreResult<ChatEventLogPage> {
+        self.engine()?.query_chat_events(query)
+    }
+
     pub fn save_conversation_branch(
         &self,
         branch: &ConversationBranchWrite,

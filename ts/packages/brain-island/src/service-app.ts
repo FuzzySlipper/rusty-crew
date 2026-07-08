@@ -352,9 +352,6 @@ import {
   defaultToolRegistry,
 } from "./tool-registry.js";
 import type { ServiceAdapterFactories } from "./service-adapter-ports.js";
-import { ChatEventStore } from "./chat-event-store.js";
-
-const CHAT_EVENT_RETENTION_LIMIT = 50_000;
 
 export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
@@ -418,9 +415,6 @@ interface ServiceState {
   readonly unmatchedDeliveryIntentIds: Set<number>;
   readonly directDispatchSessions: Set<SessionId>;
   readonly chatMessageReceipts: Map<string, SendChatMessageResult>;
-  readonly chatEventStore: ChatEventStore;
-  readonly chatEventsBySession: Map<SessionId, ChatEvent[]>;
-  readonly chatSequencesBySession: Map<SessionId, number>;
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
   readonly toolCallDebugStore: ToolCallDebugStore;
   readonly providerRequestDebugStore: ProviderRequestDebugStore;
@@ -634,11 +628,6 @@ export async function createRustyCrewServiceApp(
       unmatchedDeliveryIntentIds: new Set(),
       directDispatchSessions: new Set(),
       chatMessageReceipts: new Map(),
-      chatEventStore: new ChatEventStore(
-        join(config.paths.dataDir, "data", "chat-events"),
-      ),
-      chatEventsBySession: new Map(),
-      chatSequencesBySession: new Map(),
       chatSubscribersBySession: new Map(),
       toolCallDebugStore,
       providerRequestDebugStore,
@@ -2209,7 +2198,7 @@ async function handleDirectDebugRequest(
       });
     }
     const body = recordBody(await readJsonBody(request));
-    const result = emitContextCompactionDebugEvents(state, session, {
+    const result = await emitContextCompactionDebugEvents(state, session, {
       wakeId: optionalString(body.wakeId) ?? optionalString(body.wake_id),
       strategyId:
         optionalString(body.strategyId) ??
@@ -4925,8 +4914,6 @@ async function deleteServiceProfile(
   for (const sessionId of purgedSessionIds) {
     state.directDispatchSessions.delete(sessionId as SessionId);
     state.chatSubscribersBySession.delete(sessionId as SessionId);
-    state.chatEventsBySession.delete(sessionId as SessionId);
-    state.chatSequencesBySession.delete(sessionId as SessionId);
     state.suppressedWakeEvents.delete(sessionId as SessionId);
   }
 
@@ -7990,7 +7977,7 @@ async function submitRustyViewChatMessage(
       now,
     }),
   );
-  const inbound = appendChatEvent(state, input.session.sessionId, {
+  const inbound = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_created",
     payload: {
       message_id: messageId,
@@ -8029,8 +8016,7 @@ async function submitRustyViewChatMessage(
     primary_variant_id: primaryVariantId,
     wake_id: wakeReport.wakeId,
     correlation_id: correlationId,
-    latest_cursor:
-      latestChatCursor(state, input.session.sessionId) ?? inbound.event_id,
+    latest_cursor: inbound.event_id,
     summary: wakeReport.summary,
     reason_code: wakeReport.reasonCode,
   };
@@ -8042,7 +8028,7 @@ async function generateRoleplayAssistantAlternativeViaWake(
   state: ServiceState,
   input: RoleplayAssistantAlternativeGenerationInput,
 ): Promise<RoleplayAssistantAlternativeGenerationResult> {
-  const beforeCursor = latestChatCursor(state, input.session.sessionId);
+  const beforeCursor = undefined;
   const correlationId = `roleplay-alternative:${input.requestId}`;
   const wakeReport = await submitServiceTurn(state, {
     sessionId: input.session.sessionId,
@@ -8164,8 +8150,12 @@ async function rustyViewSessionContextUsage(
   const activeMcpBindings = mcpBindings.filter(
     (binding) => binding.status === undefined || binding.status === "active",
   );
-  const sampledEvents =
-    state.chatEventsBySession.get(input.session.sessionId) ?? [];
+  const sampledEvents = await listChatEventsAfterCursor(
+    state,
+    input.session,
+    undefined,
+    1_000,
+  );
   const sampledMessageCount = sampledEvents.filter(
     (event) =>
       event.kind === "message_created" ||
@@ -8654,7 +8644,7 @@ async function createRustyViewConversationBranch(
     created_at: now,
     updated_at: now,
   })) as ConversationBranchRecord;
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "conversation_branch_created",
     payload: { branch },
   });
@@ -8675,7 +8665,7 @@ async function selectRustyViewActiveConversationBranch(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "selected";
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "conversation_active_branch_selected",
     payload: {
       active_branch_id: result.state.active_branch_id,
@@ -8705,7 +8695,7 @@ async function updateRustyViewConversationBranchHead(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "updated";
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "conversation_branch_head_updated",
     payload: {
       branch_id: input.branchId,
@@ -8746,7 +8736,7 @@ async function createRustyViewConversationSnapshot(
     created_at: now,
     updated_at: now,
   })) as ConversationSnapshotRecord;
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "conversation_snapshot_created",
     payload: { snapshot },
   });
@@ -8806,12 +8796,12 @@ async function createRustyViewAttachment(
     expires_at: input.request.expires_at ?? null,
     link: link.message_id || link.block_id || link.scope_id ? link : undefined,
   })) as AttachmentRecord;
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: existing ? "attachment_updated" : "attachment_uploaded",
     payload: { attachment },
   });
   if (link.message_id || link.block_id || link.scope_id) {
-    appendChatEvent(state, input.session.sessionId, {
+    await appendChatEvent(state, input.session.sessionId, {
       kind: "attachment_linked",
       payload: { attachment_id: attachmentId, link, attachment },
     });
@@ -8823,8 +8813,7 @@ async function createRustyViewAttachment(
         ? "linked"
         : "created",
     attachment,
-    latest_cursor:
-      latestChatCursor(state, input.session.sessionId) ?? event.event_id,
+    latest_cursor: event.event_id,
   };
 }
 
@@ -8865,7 +8854,7 @@ async function removeRustyViewAttachment(
       `attachment ${input.attachmentId} was not found for ${input.session.sessionId}`,
     );
   }
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "attachment_removed",
     payload: { attachment_id: input.attachmentId, attachment: removed },
   });
@@ -8902,7 +8891,7 @@ async function createRustyViewDataBankScope(
     created_at: existing?.created_at ?? now,
     updated_at: now,
   })) as DataBankScopeRecord;
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "data_bank_scope_created",
     payload: { scope },
   });
@@ -8946,7 +8935,7 @@ async function removeRustyViewDataBankScope(
       `data-bank scope ${input.scopeId} was not found for ${input.session.sessionId}`,
     );
   }
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "data_bank_scope_removed",
     payload: { scope_id: input.scopeId, scope: removed },
   });
@@ -9109,7 +9098,7 @@ async function createRustyViewMessageSlot(
     slotId,
     true,
   );
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_slot_created",
     payload: { slot },
   });
@@ -9161,7 +9150,7 @@ async function createRustyViewMessageVariant(
       now,
     }),
   )) as MessageVariantRecord;
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_variant_created",
     payload: { slot_id: input.slotId, variant },
   });
@@ -9182,7 +9171,7 @@ async function deleteRustyViewMessageVariant(
     variant_id: input.variantId,
     updated_at: state.now(),
   })) as MessageSlotRecord;
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_variant_deleted",
     payload: { slot_id: input.slotId, variant_id: input.variantId, slot },
   });
@@ -9203,7 +9192,7 @@ async function reorderRustyViewMessageVariants(
     ordered_variant_ids: input.orderedVariantIds,
     updated_at: state.now(),
   })) as MessageVariantRecord[];
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_variants_reordered",
     payload: {
       slot_id: input.slotId,
@@ -9250,7 +9239,7 @@ async function selectRustyViewActiveMessageVariant(
       });
     }
   }
-  const event = appendChatEvent(state, input.session.sessionId, {
+  const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_active_variant_selected",
     payload: {
       slot_id: input.slotId,
@@ -9435,7 +9424,7 @@ async function executeRustyViewChatCommand(
   state: ServiceState,
   input: ExecuteChatCommandInput,
 ): Promise<ExecuteChatCommandResult> {
-  const started = appendChatEvent(state, input.session.sessionId, {
+  const started = await appendChatEvent(state, input.session.sessionId, {
     kind: "command_started",
     payload: {
       command: input.command,
@@ -9567,12 +9556,12 @@ async function executeRustyViewChatCommand(
   });
 }
 
-function completeChatCommand(
+async function completeChatCommand(
   state: ServiceState,
   sessionId: SessionId,
   result: ExecuteChatCommandResult,
-): ExecuteChatCommandResult {
-  const completed = appendChatEvent(state, sessionId, {
+): Promise<ExecuteChatCommandResult> {
+  const completed = await appendChatEvent(state, sessionId, {
     kind:
       result.status === "completed" ? "command_completed" : "command_failed",
     payload: { ...result },
@@ -9626,23 +9615,28 @@ function rememberChatMessageReceipt(
   }
 }
 
-function appendCoreEventsToChatLog(
+async function appendCoreEventsToChatLog(
   state: ServiceState,
   session: SessionState,
   wakeId: string,
   events: readonly CoreEvent[],
-): void {
+): Promise<void> {
   for (const event of events) {
     if (
       event.type === "brain_event_observed" &&
       event.sessionId === session.sessionId
     ) {
-      appendBrainEventToChatLog(state, session, event.wakeId, event.event);
+      await appendBrainEventToChatLog(
+        state,
+        session,
+        event.wakeId,
+        event.event,
+      );
     } else if (
       event.type === "completion_packet_delivered" &&
       event.packet.sessionId === session.sessionId
     ) {
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "assistant_message_completed",
         payload: {
           status: event.packet.status,
@@ -9654,7 +9648,7 @@ function appendCoreEventsToChatLog(
       event.type === "brain_actions_accepted" &&
       event.sessionId === session.sessionId
     ) {
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "unknown",
         payload: {
           source_event_type: event.type,
@@ -9665,27 +9659,27 @@ function appendCoreEventsToChatLog(
   }
 }
 
-function appendBrainEventToChatLog(
+async function appendBrainEventToChatLog(
   state: ServiceState,
   session: SessionState,
   wakeId: string | undefined,
   event: BrainEvent,
-): void {
+): Promise<void> {
   switch (event.type) {
     case "started":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "assistant_turn_started",
         payload: { wake_id: wakeId },
       });
       return;
     case "text_delta":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "assistant_text_delta",
         payload: { wake_id: wakeId, text: event.text },
       });
       return;
     case "reasoning_delta":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "assistant_reasoning_delta",
         payload: {
           wake_id: wakeId,
@@ -9696,7 +9690,7 @@ function appendBrainEventToChatLog(
       });
       return;
     case "phase_change":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "phase_change",
         payload: {
           wake_id: wakeId,
@@ -9706,7 +9700,7 @@ function appendBrainEventToChatLog(
       });
       return;
     case "provider_status":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "provider_status",
         payload: {
           wake_id: wakeId,
@@ -9719,7 +9713,7 @@ function appendBrainEventToChatLog(
       });
       return;
     case "tool_call_started":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "tool_call_started",
         payload: {
           wake_id: wakeId,
@@ -9731,7 +9725,7 @@ function appendBrainEventToChatLog(
       });
       return;
     case "tool_call_finished":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: event.isError ? "tool_call_failed" : "tool_call_completed",
         payload: {
           wake_id: wakeId,
@@ -9744,7 +9738,7 @@ function appendBrainEventToChatLog(
       });
       return;
     case "finished":
-      appendChatEvent(state, session.sessionId, {
+      await appendChatEvent(state, session.sessionId, {
         kind: "assistant_turn_finished",
         payload: { wake_id: wakeId },
       });
@@ -9768,13 +9762,13 @@ function chatToolCallId(
     .join(":");
 }
 
-function ensureChatWakeTerminalEvents(
+async function ensureChatWakeTerminalEvents(
   state: ServiceState,
   session: SessionState,
   wakeId: string,
   events: readonly CoreEvent[],
   fallback: { summary?: string },
-): void {
+): Promise<void> {
   const wakeEvents = events.filter(
     (event) =>
       (event.type === "brain_event_observed" &&
@@ -9802,7 +9796,7 @@ function ensureChatWakeTerminalEvents(
       event.type === "brain_event_observed" && event.event.type === "finished",
   );
 
-  ensureChatWakeTerminalEventsFromChatLog(state, session, wakeId, {
+  await ensureChatWakeTerminalEventsFromChatLog(state, session, wakeId, {
     status: "completed",
     summary: fallback.summary,
     source: "terminal_fallback",
@@ -9811,7 +9805,7 @@ function ensureChatWakeTerminalEvents(
   });
 }
 
-function ensureChatWakeTerminalEventsFromChatLog(
+async function ensureChatWakeTerminalEventsFromChatLog(
   state: ServiceState,
   session: SessionState,
   wakeId: string,
@@ -9824,8 +9818,13 @@ function ensureChatWakeTerminalEventsFromChatLog(
     requireFinished?: boolean;
     allowWithoutAssistantTurn?: boolean;
   },
-): void {
-  const events = state.chatEventsBySession.get(session.sessionId) ?? [];
+): Promise<void> {
+  const events = await listChatEventsAfterCursor(
+    state,
+    session,
+    undefined,
+    1_000,
+  );
   const wakeEvents = events.filter((event) => {
     const payload = event.payload;
     return isRecord(payload) && payload.wake_id === wakeId;
@@ -9850,7 +9849,7 @@ function ensureChatWakeTerminalEventsFromChatLog(
     !wakeEvents.some((event) => event.kind === "assistant_turn_finished");
   const summary = input.summary?.trim();
   if (needsCompletion && summary) {
-    appendChatEvent(state, session.sessionId, {
+    await appendChatEvent(state, session.sessionId, {
       kind: "assistant_message_completed",
       payload: {
         status: input.status,
@@ -9864,7 +9863,7 @@ function ensureChatWakeTerminalEventsFromChatLog(
     });
   }
   if (needsFinished) {
-    appendChatEvent(state, session.sessionId, {
+    await appendChatEvent(state, session.sessionId, {
       kind: "assistant_turn_finished",
       payload: {
         wake_id: wakeId,
@@ -9878,17 +9877,17 @@ function ensureChatWakeTerminalEventsFromChatLog(
   }
 }
 
-function buildChatWakeFailureSummary(
+async function buildChatWakeFailureSummary(
   state: ServiceState,
   session: SessionState | undefined,
   wakeId: string | undefined,
   failureSummary: string,
-): string {
+): Promise<string> {
   const base = failureSummary.trim() || "assistant turn failed";
   if (!session || !wakeId) return base;
 
   const events = (
-    state.chatEventsBySession.get(session.sessionId) ?? []
+    await listChatEventsAfterCursor(state, session, undefined, 1_000)
   ).filter((event) => {
     const payload = event.payload;
     return isRecord(payload) && payload.wake_id === wakeId;
@@ -9903,32 +9902,19 @@ function buildChatWakeFailureSummary(
   });
 }
 
-function appendChatEvent(
+async function appendChatEvent(
   state: ServiceState,
   sessionId: SessionId,
   event: Pick<ChatEvent, "kind" | "payload">,
-): ChatEvent {
-  const sequence =
-    Math.max(
-      state.chatSequencesBySession.get(sessionId) ?? 0,
-      state.chatEventStore.latestSequence(sessionId) ?? 0,
-    ) + 1;
-  state.chatSequencesBySession.set(sessionId, sequence);
-  const chatEvent: ChatEvent = {
-    event_id: `${sessionId}:${sequence}`,
-    session_id: sessionId,
-    sequence_id: sequence,
-    created_at: state.now(),
-    kind: event.kind,
-    payload: event.payload,
-  };
-  const events = state.chatEventsBySession.get(sessionId) ?? [];
-  events.push(chatEvent);
-  if (events.length > CHAT_EVENT_RETENTION_LIMIT) {
-    events.splice(0, events.length - CHAT_EVENT_RETENTION_LIMIT);
-  }
-  state.chatEventsBySession.set(sessionId, events);
-  state.chatEventStore.append(chatEvent);
+): Promise<ChatEvent> {
+  const chatEvent = nativeChatEventToChatEvent(
+    await state.bridge.appendChatEvent({
+      session_id: sessionId,
+      created_at: state.now(),
+      kind: event.kind,
+      payload: event.payload,
+    }),
+  );
   const subscribers = state.chatSubscribersBySession.get(sessionId);
   if (subscribers !== undefined) {
     for (const subscriber of subscribers) {
@@ -9936,6 +9922,20 @@ function appendChatEvent(
     }
   }
   return chatEvent;
+}
+
+function nativeChatEventToChatEvent(value: unknown): ChatEvent {
+  const record = value as ChatEvent;
+  return {
+    event_id: String(record.event_id),
+    session_id: String(record.session_id),
+    sequence_id: Number(record.sequence_id),
+    created_at: String(record.created_at),
+    kind: (typeof record.kind === "string"
+      ? record.kind
+      : "unknown") as ChatEvent["kind"],
+    payload: isRecord(record.payload) ? record.payload : {},
+  };
 }
 
 interface ContextCompactionDebugEventInput {
@@ -9950,21 +9950,21 @@ interface ContextCompactionDebugEventInput {
   fail: boolean;
 }
 
-function emitContextCompactionDebugEvents(
+async function emitContextCompactionDebugEvents(
   state: ServiceState,
   session: SessionState,
   input: ContextCompactionDebugEventInput,
-): { events: ChatEvent[]; latest_cursor: string } {
+): Promise<{ events: ChatEvent[]; latest_cursor: string }> {
   const basePayload = contextDebugPayload(session.sessionId, input);
   const events = [
-    appendChatEvent(state, session.sessionId, {
+    await appendChatEvent(state, session.sessionId, {
       kind: "context_status",
       payload: {
         ...basePayload,
         status: input.fail ? "will_fail" : "ready",
       },
     }),
-    appendChatEvent(state, session.sessionId, {
+    await appendChatEvent(state, session.sessionId, {
       kind: "context_compaction_started",
       payload: {
         ...basePayload,
@@ -9973,7 +9973,7 @@ function emitContextCompactionDebugEvents(
     }),
   ];
   events.push(
-    appendChatEvent(state, session.sessionId, {
+    await appendChatEvent(state, session.sessionId, {
       kind: input.fail
         ? "context_compaction_failed"
         : "context_compaction_completed",
@@ -9988,10 +9988,7 @@ function emitContextCompactionDebugEvents(
   );
   return {
     events,
-    latest_cursor:
-      events.at(-1)?.event_id ??
-      latestChatCursor(state, session.sessionId) ??
-      "",
+    latest_cursor: events.at(-1)?.event_id ?? "",
   };
 }
 
@@ -10026,62 +10023,32 @@ function boundedPercent(value: number | undefined): number | undefined {
   return Math.max(0, Math.min(100, Math.trunc(value)));
 }
 
-function listChatEventsAfterCursor(
+async function listChatEventsAfterCursor(
   state: ServiceState,
   session: SessionState,
   cursor: string | undefined,
   limit: number,
-): readonly ChatEvent[] {
+): Promise<readonly ChatEvent[]> {
   if (limit <= 0) return [];
-  const events = state.chatEventsBySession.get(session.sessionId) ?? [];
-  const storedEvents = state.chatEventStore.listAfterCursor(
-    session.sessionId,
-    cursor,
+  const page = await state.bridge.queryChatEvents({
+    session_id: session.sessionId,
+    cursor: cursor ?? null,
     limit,
-  );
-  if (storedEvents.length > 0) {
-    const mergedEvents = mergeChatEventPages(
-      storedEvents,
-      events,
-      session.sessionId,
-      cursor,
-    );
-    return cursor === undefined
-      ? mergedEvents.slice(Math.max(0, mergedEvents.length - limit))
-      : mergedEvents.slice(0, limit);
-  }
-  if (cursor === undefined)
-    return events.slice(Math.max(0, events.length - limit));
-  const after = cursorSequence(cursor, session.sessionId);
-  return events.filter((event) => event.sequence_id > after).slice(0, limit);
-}
-
-function mergeChatEventPages(
-  storedEvents: readonly ChatEvent[],
-  memoryEvents: readonly ChatEvent[],
-  sessionId: SessionId,
-  cursor: string | undefined,
-): readonly ChatEvent[] {
-  const after = cursorSequence(cursor, sessionId);
-  const eventsBySequence = new Map<number, ChatEvent>();
-  for (const event of [...storedEvents, ...memoryEvents]) {
-    if (event.session_id !== sessionId || event.sequence_id <= after) continue;
-    eventsBySequence.set(event.sequence_id, event);
-  }
-  return [...eventsBySequence.values()].sort(
-    (left, right) => left.sequence_id - right.sequence_id,
+  });
+  return ((page as { items?: unknown[] }).items ?? []).map(
+    nativeChatEventToChatEvent,
   );
 }
 
-function streamReplayEvents(
+async function streamReplayEvents(
   state: ServiceState,
   session: SessionState,
   cursor: string | undefined,
   url: URL,
-): readonly ChatEvent[] {
+): Promise<readonly ChatEvent[]> {
   const limit = optionalInteger(url.searchParams.get("limit")) ?? 500;
-  const after = cursorSequence(cursor, session.sessionId);
-  const events = listChatEventsAfterCursor(
+  const after = chatCursorSequence(cursor, session.sessionId);
+  const events = await listChatEventsAfterCursor(
     state,
     session,
     cursor,
@@ -10106,15 +10073,15 @@ function streamReplayEvents(
   ];
 }
 
-function latestChatCursor(
-  state: ServiceState,
-  sessionId: SessionId,
-): string | undefined {
-  const latestSequence = Math.max(
-    state.chatEventStore.latestSequence(sessionId) ?? 0,
-    state.chatEventsBySession.get(sessionId)?.at(-1)?.sequence_id ?? 0,
-  );
-  return latestSequence > 0 ? `${sessionId}:${latestSequence}` : undefined;
+function chatCursorSequence(
+  cursor: string | undefined,
+  sessionId: string,
+): number {
+  if (!cursor) return 0;
+  const prefix = `${sessionId}:`;
+  if (!cursor.startsWith(prefix)) return 0;
+  const sequence = Number(cursor.slice(prefix.length));
+  return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : 0;
 }
 
 function chatSubscribers(
@@ -11097,9 +11064,15 @@ async function dispatchWake(
       observedEvents: observed.events,
     };
     if (appendChatEvents && report.status === "completed") {
-      ensureChatWakeTerminalEvents(state, session, wakeId, observed.events, {
-        summary: completionSummary ?? report.summary,
-      });
+      await ensureChatWakeTerminalEvents(
+        state,
+        session,
+        wakeId,
+        observed.events,
+        {
+          summary: completionSummary ?? report.summary,
+        },
+      );
     }
     recordServiceEvent(state, {
       source: "service-host",
@@ -11133,7 +11106,7 @@ async function dispatchWake(
         sessionId,
         wakeId: error.wakeId,
         status: "failed",
-        summary: buildChatWakeFailureSummary(
+        summary: await buildChatWakeFailureSummary(
           state,
           activeWake?.session,
           error.wakeId,
@@ -11142,7 +11115,7 @@ async function dispatchWake(
         reasonCode: "wake_timeout",
       };
       if (appendChatEvents && activeWake !== undefined) {
-        ensureChatWakeTerminalEventsFromChatLog(
+        await ensureChatWakeTerminalEventsFromChatLog(
           state,
           activeWake.session,
           error.wakeId,
@@ -11167,7 +11140,7 @@ async function dispatchWake(
       sessionId,
       wakeId: activeWake?.wakeId,
       status: "failed",
-      summary: buildChatWakeFailureSummary(
+      summary: await buildChatWakeFailureSummary(
         state,
         activeWake?.session,
         activeWake?.wakeId,
@@ -11176,7 +11149,7 @@ async function dispatchWake(
       reasonCode: "wake_dispatch_failed",
     };
     if (appendChatEvents && activeWake !== undefined) {
-      ensureChatWakeTerminalEventsFromChatLog(
+      await ensureChatWakeTerminalEventsFromChatLog(
         state,
         activeWake.session,
         activeWake.wakeId,
@@ -11205,7 +11178,7 @@ async function observeWakeEvents<T>(
   state: ServiceState,
   sessionId: SessionId,
   callback: () => Promise<T>,
-  onEvents?: (events: readonly CoreEvent[]) => void,
+  onEvents?: (events: readonly CoreEvent[]) => void | Promise<void>,
   signal?: AbortSignal,
 ): Promise<{ accepted: T; events: CoreEvent[] }> {
   const subscription = await state.bridge.subscribeEvents({
@@ -11243,7 +11216,7 @@ async function observeWakeEvents<T>(
       }
       if (chunk.length > 0) {
         events.push(...chunk);
-        onEvents?.(chunk);
+        await onEvents?.(chunk);
       }
     }
 
@@ -11256,7 +11229,7 @@ async function observeWakeEvents<T>(
     );
     if (finalEvents.length > 0) {
       events.push(...finalEvents);
-      onEvents?.(finalEvents);
+      await onEvents?.(finalEvents);
     }
     return { accepted: result.value, events };
   } finally {
@@ -11562,7 +11535,6 @@ async function stopService(state: ServiceState): Promise<void> {
     await state.bridge
       .unsubscribeEvents(state.wakeSubscription)
       .catch(() => undefined);
-    await state.chatEventStore.flush();
     await state.mcpManager.shutdown();
     await state.bridge.shutdownEngine({
       engine: state.engine,

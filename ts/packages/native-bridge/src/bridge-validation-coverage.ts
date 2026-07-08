@@ -19,13 +19,14 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 145;
-const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 28;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 147;
+const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 25;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 120;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
+  "append_chat_event",
   "chat_read_model_page",
   "create_profile_registry_record",
   "get_model_provider",
@@ -37,6 +38,7 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "plan_model_provider_refresh",
   "provider_state_diagnostics",
   "purge_profile",
+  "query_chat_events",
   "drain_pi_agent_brain_stream",
   "run_openai_responses_brain",
   "start_pi_agent_brain",

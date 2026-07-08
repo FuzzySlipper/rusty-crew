@@ -46,7 +46,7 @@ export interface RustyViewChatContext {
     session: SessionState,
     cursor: string | undefined,
     limit: number,
-  ): readonly ChatEvent[];
+  ): Promise<readonly ChatEvent[]>;
   chatReadModelPage?(
     input: ChatReadModelPageInput,
   ): Promise<ChatReadModelEventPage>;
@@ -2128,7 +2128,7 @@ async function sessionPage(
     .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
   const items = await Promise.all(
     filtered.slice(offset, offset + limit).map(async (session) => {
-      const stats = chatEventStats(session, context);
+      const stats = await chatEventStats(session, context);
       const slotCount =
         stats.hasLoggedEvents || context.listMessageSlots === undefined
           ? undefined
@@ -2173,12 +2173,12 @@ async function openSessionResult(
 ): Promise<ChatSessionOpenResult> {
   const now = context.now?.() ?? new Date().toISOString();
   const pendingMessages = await pendingMessagesForSession(session, context);
-  const stats = chatEventStats(session, context);
+  const stats = await chatEventStats(session, context);
   const eventLimit = Math.max(0, limit - 1);
   const loggedEvents =
     eventLimit === 0
       ? []
-      : (context.listChatEvents?.(session, cursor, eventLimit) ?? []);
+      : ((await context.listChatEvents?.(session, cursor, eventLimit)) ?? []);
   const durableReadModelPage =
     loggedEvents.length > 0 || eventLimit === 0
       ? undefined
@@ -2263,7 +2263,7 @@ async function eventPageResult(
 ): Promise<{ items: ChatEvent[]; latest_cursor: string; has_more: boolean }> {
   const pageProbeLimit = limit + 1;
   const loggedEvents =
-    context.listChatEvents?.(session, cursor, pageProbeLimit) ?? [];
+    (await context.listChatEvents?.(session, cursor, pageProbeLimit)) ?? [];
   const durableEvents =
     loggedEvents.length > 0
       ? undefined
@@ -2412,17 +2412,20 @@ function sessionSummary(
   };
 }
 
-function chatEventStats(
+async function chatEventStats(
   session: SessionState,
   context: RustyViewChatContext,
-): {
+): Promise<{
   hasLoggedEvents: boolean;
   latestCursor?: string;
   messageCount: number;
-} {
+}> {
   const events =
-    context.listChatEvents?.(session, undefined, CHAT_SUMMARY_EVENT_LIMIT) ??
-    [];
+    (await context.listChatEvents?.(
+      session,
+      undefined,
+      CHAT_SUMMARY_EVENT_LIMIT,
+    )) ?? [];
   return {
     hasLoggedEvents: events.length > 0,
     latestCursor: events.at(-1)?.event_id,

@@ -36,7 +36,7 @@ export interface RoleplayRouteContext {
     session: SessionState,
     afterCursor: string | undefined,
     limit: number,
-  ): readonly ChatEvent[];
+  ): Promise<readonly ChatEvent[]>;
   generateRoleplayAssistantAlternative?(
     input: RoleplayAssistantAlternativeGenerationInput,
   ): Promise<RoleplayAssistantAlternativeGenerationResult>;
@@ -1086,9 +1086,9 @@ async function roleplaySessionSummary(
               numberValue(left.priority) - numberValue(right.priority),
           )
           .map((layer) => String(layer.layer_id));
-  const lastEvent = state
-    .listChatEventsAfterCursor(session, undefined, 1)
-    .at(-1);
+  const lastEvent = (
+    await state.listChatEventsAfterCursor(session, undefined, 1)
+  ).at(-1);
   return {
     session_id: session.sessionId,
     profile_id: session.profileId,

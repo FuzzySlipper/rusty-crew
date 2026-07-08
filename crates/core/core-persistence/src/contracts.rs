@@ -22,6 +22,11 @@ pub struct ConversationRepositorySet<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct ChatEventRepositorySet<'a> {
+    pub(crate) store: &'a CoreCoordinationStore,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct MemoryRepositorySet<'a> {
     pub(crate) store: &'a CoreCoordinationStore,
 }
@@ -342,6 +347,40 @@ pub struct ChatReadModelEvent {
 #[serde(rename_all = "snake_case")]
 pub enum ChatReadModelEventKind {
     MessageCreated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatEventLogAppend {
+    pub session_id: SessionId,
+    pub created_at: IsoTimestamp,
+    pub kind: String,
+    #[serde(rename = "payload")]
+    pub payload_json: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatEventLogQuery {
+    pub session_id: SessionId,
+    pub cursor: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatEventLogPage {
+    pub items: Vec<ChatEventLogEvent>,
+    pub latest_cursor: String,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatEventLogEvent {
+    pub event_id: String,
+    pub session_id: SessionId,
+    pub sequence_id: u64,
+    pub created_at: IsoTimestamp,
+    pub kind: String,
+    #[serde(rename = "payload")]
+    pub payload_json: JsonValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

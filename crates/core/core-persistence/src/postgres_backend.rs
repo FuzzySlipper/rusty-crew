@@ -5,6 +5,7 @@
 //! honestly while repository split/parity work continues.
 
 mod capabilities;
+mod chat_events;
 mod conversation_attachment;
 mod memory_lore;
 mod pool;
@@ -43,7 +44,8 @@ use crate::{
     AgentInstanceId, AttachmentId, AttachmentLinkId, AttachmentLinkRecord, AttachmentLinkWrite,
     AttachmentQuery, AttachmentRecord, AttachmentStatus, AttachmentWrite,
     BranchAwareSessionMemoryQuery, BranchHeadConflict, BranchHeadExpectation, ChannelBindingQuery,
-    ChannelBindingRecord, CompletionPacketQuery, CompletionPacketRecord, ContextCompactionArtifact,
+    ChannelBindingRecord, ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage,
+    ChatEventLogQuery, CompletionPacketQuery, CompletionPacketRecord, ContextCompactionArtifact,
     ContextCompactionArtifactQuery, ConversationBranchId, ConversationBranchQuery,
     ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
     ConversationJumpRequest, ConversationJumpResult, ConversationJumpTarget,

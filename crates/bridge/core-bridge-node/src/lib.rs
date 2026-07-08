@@ -22,7 +22,8 @@ use rusty_crew_core_config::{
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{
     AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
-    ChatReadModelPage, ChatReadModelQuery, ConversationBranchQuery, ConversationBranchRecord,
+    ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage, ChatEventLogQuery, ChatReadModelPage,
+    ChatReadModelQuery, ConversationBranchQuery, ConversationBranchRecord,
     ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
     ConversationSnapshotWrite, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,

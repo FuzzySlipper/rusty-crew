@@ -90,6 +90,10 @@ impl CoreCoordinationStore {
         ConversationRepositorySet { store: self }
     }
 
+    pub fn chat_events(&self) -> ChatEventRepositorySet<'_> {
+        ChatEventRepositorySet { store: self }
+    }
+
     pub fn memory(&self) -> MemoryRepositorySet<'_> {
         MemoryRepositorySet { store: self }
     }
@@ -804,6 +808,22 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.query_message_variants(query),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.query_message_variants(query),
+        }
+    }
+
+    pub fn append_chat_event(&self, event: &ChatEventLogAppend) -> CoreResult<ChatEventLogEvent> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.append_chat_event(event),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.append_chat_event(event),
+        }
+    }
+
+    pub fn query_chat_events(&self, query: &ChatEventLogQuery) -> CoreResult<ChatEventLogPage> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_chat_events(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_chat_events(query),
         }
     }
 
@@ -1823,6 +1843,16 @@ impl ConversationRepositorySet<'_> {
         query: &ContextCompactionArtifactQuery,
     ) -> CoreResult<Vec<ContextCompactionArtifact>> {
         self.store.list_context_compaction_artifacts(query)
+    }
+}
+
+impl ChatEventRepositorySet<'_> {
+    pub fn append_chat_event(&self, event: &ChatEventLogAppend) -> CoreResult<ChatEventLogEvent> {
+        self.store.append_chat_event(event)
+    }
+
+    pub fn query_chat_events(&self, query: &ChatEventLogQuery) -> CoreResult<ChatEventLogPage> {
+        self.store.query_chat_events(query)
     }
 }
 

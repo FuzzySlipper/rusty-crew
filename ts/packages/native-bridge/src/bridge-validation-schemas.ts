@@ -188,6 +188,27 @@ export const chatReadModelPageSchema = Type.Object(
   { additionalProperties: true },
 );
 
+export const chatEventLogEventSchema = Type.Object(
+  {
+    event_id: Type.String(),
+    session_id: Type.String(),
+    sequence_id: Type.Number(),
+    created_at: Type.String(),
+    kind: Type.String(),
+    payload: Type.Record(Type.String(), Type.Unknown()),
+  },
+  { additionalProperties: false },
+);
+
+export const chatEventLogPageSchema = Type.Object(
+  {
+    items: Type.Array(chatEventLogEventSchema),
+    latest_cursor: Type.String(),
+    has_more: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
 export const rawBodyStateSchema = Type.Object(
   {
     session: rawSessionStateSchema,

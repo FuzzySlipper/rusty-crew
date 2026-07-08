@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 16;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 17;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -94,6 +94,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 16,
         description: "baseline includes roleplay lore layers and recall traces",
         apply: None,
+    },
+    PostgresSchemaMigration {
+        version: 17,
+        description: "add durable chat event replay log",
+        apply: Some(apply_postgres_chat_event_log),
     },
 ];
 
@@ -292,6 +297,19 @@ fn apply_postgres_baseline_schema(tx: &mut Transaction<'_>, schema: &str) -> Cor
                  );
                  CREATE INDEX IF NOT EXISTS event_index_lookup_idx
                     ON {schema}.event_index(projection, value, sequence);
+                 CREATE TABLE IF NOT EXISTS {schema}.chat_events (
+                    session_id TEXT NOT NULL,
+                    sequence_id BIGINT NOT NULL,
+                    event_id TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY(session_id, sequence_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS chat_events_session_created_idx
+                    ON {schema}.chat_events(session_id, created_at, sequence_id);
+                 CREATE INDEX IF NOT EXISTS chat_events_kind_idx
+                    ON {schema}.chat_events(kind, created_at, session_id, sequence_id);
                  CREATE TABLE IF NOT EXISTS {schema}.queued_messages (
                     message_id TEXT PRIMARY KEY,
                     owner_session_id TEXT,
@@ -923,6 +941,25 @@ fn apply_postgres_baseline_schema(tx: &mut Transaction<'_>, schema: &str) -> Cor
                  );"
             ))
             .map_err(|error| postgres_error("migrate PostgreSQL durable backend baseline", error))
+}
+
+fn apply_postgres_chat_event_log(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.chat_events (
+            session_id TEXT NOT NULL,
+            sequence_id BIGINT NOT NULL,
+            event_id TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY(session_id, sequence_id)
+         );
+         CREATE INDEX IF NOT EXISTS chat_events_session_created_idx
+            ON {schema}.chat_events(session_id, created_at, sequence_id);
+         CREATE INDEX IF NOT EXISTS chat_events_kind_idx
+            ON {schema}.chat_events(kind, created_at, session_id, sequence_id);"
+    ))
+    .map_err(|error| postgres_error("apply PostgreSQL chat event log migration", error))
 }
 
 fn prepare_postgres_migration_metadata(client: &mut Client, schema: &str) -> CoreResult<()> {
