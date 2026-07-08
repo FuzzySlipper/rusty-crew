@@ -425,6 +425,12 @@ struct WebBrowserToolPolicy {
     forbidden_safety: &'static [ToolSafetyFlag],
 }
 
+struct SkillsToolPolicy {
+    output_shape: &'static str,
+    required_toolsets: &'static [&'static str],
+    required_safety: &'static [ToolSafetyFlag],
+}
+
 fn local_code_tool_policy(tool_name: &str) -> Option<LocalCodeToolPolicy> {
     match tool_name {
         "read_file" => Some(LocalCodeToolPolicy {
@@ -489,6 +495,30 @@ fn local_code_tool_policy(tool_name: &str) -> Option<LocalCodeToolPolicy> {
             required_toolsets: &["worker_code_write"],
             required_safety: &[ToolSafetyFlag::WritesFiles, ToolSafetyFlag::WorkdirScoped],
             workdir_scoped: true,
+        }),
+        _ => None,
+    }
+}
+
+fn skills_tool_policy(tool_name: &str) -> Option<SkillsToolPolicy> {
+    match tool_name {
+        "skills_list" => Some(SkillsToolPolicy {
+            output_shape: "skills.list_result.v1",
+            required_toolsets: &["skills_read"],
+            required_safety: &[ToolSafetyFlag::ReadOnly],
+        }),
+        "skill_view" => Some(SkillsToolPolicy {
+            output_shape: "skills.view_result.v1",
+            required_toolsets: &["skills_read"],
+            required_safety: &[ToolSafetyFlag::ReadOnly],
+        }),
+        "skill_manage" => Some(SkillsToolPolicy {
+            output_shape: "skills.manage_result.v1",
+            required_toolsets: &["skills_manage"],
+            required_safety: &[
+                ToolSafetyFlag::WritesFiles,
+                ToolSafetyFlag::CoordinationAction,
+            ],
         }),
         _ => None,
     }
@@ -766,6 +796,8 @@ impl<'a> ToolMetadataValidator<'a> {
         }
         self.validate_local_code_tool_policy(index, entry);
         self.validate_web_browser_tool_policy(index, entry);
+        self.validate_skills_tool_policy(index, entry);
+        self.validate_mcp_tool_policy(index, entry);
     }
 
     fn validate_local_code_tool_policy(&mut self, index: usize, entry: &ToolMetadata) {
@@ -914,6 +946,103 @@ impl<'a> ToolMetadataValidator<'a> {
                     ),
                 );
             }
+        }
+    }
+
+    fn validate_skills_tool_policy(&mut self, index: usize, entry: &ToolMetadata) {
+        let Some(policy) = skills_tool_policy(entry.name.as_str()) else {
+            return;
+        };
+        if entry.category != ToolCategory::Skills {
+            self.error(
+                "invalid_skills_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].category"),
+                format!(
+                    "{} must stay in skills category for Rust-validated skills policy",
+                    entry.name
+                ),
+            );
+        }
+        if entry.output_shape != policy.output_shape {
+            self.error(
+                "invalid_skills_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].outputShape"),
+                format!(
+                    "{} must use durable output shape {}",
+                    entry.name, policy.output_shape
+                ),
+            );
+        }
+        for required in policy.required_toolsets {
+            if !entry.toolsets.iter().any(|toolset| toolset == required) {
+                self.error(
+                    "invalid_skills_tool_policy",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].toolsets"),
+                    format!("{} must include toolset {required}", entry.name),
+                );
+            }
+        }
+        for required in policy.required_safety {
+            if !entry.safety.iter().any(|flag| flag == required) {
+                self.error(
+                    "invalid_skills_tool_policy",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].safety"),
+                    format!("{} must include safety flag {:?}", entry.name, required),
+                );
+            }
+        }
+    }
+
+    fn validate_mcp_tool_policy(&mut self, index: usize, entry: &ToolMetadata) {
+        if entry.category != ToolCategory::Mcp {
+            return;
+        }
+        if !entry
+            .toolsets
+            .iter()
+            .any(|toolset| toolset.starts_with("mcp:"))
+        {
+            self.error(
+                "invalid_mcp_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].toolsets"),
+                "MCP imported tools must belong to at least one dynamic mcp: toolset",
+            );
+        }
+        if !entry
+            .surfaces
+            .iter()
+            .any(|surface| surface == &ToolSurface::Brain)
+            || !entry
+                .surfaces
+                .iter()
+                .any(|surface| surface == &ToolSurface::Mcp)
+        {
+            self.error(
+                "invalid_mcp_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].surfaces"),
+                "MCP imported tools must declare both brain and mcp surfaces",
+            );
+        }
+        if !entry.output_shape.starts_with("mcp.") {
+            self.error(
+                "invalid_mcp_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].outputShape"),
+                "MCP imported tools must use the mcp.* durable output-shape namespace",
+            );
         }
     }
 
@@ -1363,6 +1492,35 @@ mod tests {
                 "invalid_web_browser_tool_policy",
                 "invalid_web_browser_tool_policy",
                 "invalid_web_browser_tool_policy",
+            ],
+        );
+    }
+
+    #[test]
+    fn rejects_skills_and_mcp_policy_drift() {
+        let mut skill_manage = tool(
+            "skill_manage",
+            ToolCategory::Skills,
+            "skills.manage_result.v1",
+        );
+        skill_manage.toolsets = vec!["skills_read".to_string()];
+        skill_manage.safety = vec![ToolSafetyFlag::ReadOnly];
+
+        let mut mcp_import = tool("den_search", ToolCategory::Mcp, "den.search_result.v1");
+        mcp_import.toolsets = vec!["planner".to_string()];
+        mcp_import.surfaces = vec![ToolSurface::Brain];
+        mcp_import.safety = vec![ToolSafetyFlag::NetworkAccess];
+
+        let result = validate_tool_metadata_list(&[skill_manage, mcp_import]);
+
+        assert_codes(
+            &result,
+            &[
+                "invalid_skills_tool_policy",
+                "invalid_skills_tool_policy",
+                "invalid_mcp_tool_policy",
+                "invalid_mcp_tool_policy",
+                "invalid_mcp_tool_policy",
             ],
         );
     }
