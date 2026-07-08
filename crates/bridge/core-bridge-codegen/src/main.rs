@@ -3,7 +3,11 @@ use rusty_crew_core_bridge_api::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeSet, env, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    env, fs,
+    path::Path,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct BridgeValidationFixtureFile {
@@ -26,6 +30,14 @@ struct BridgeValidationFixture {
 #[derive(Debug, Clone, Serialize)]
 struct BrainWakeStreamResultFixture {
     stream: Vec<BrainWakeStreamItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NativeJsonMethodSignature {
+    operation_name: String,
+    method_name: String,
+    parameter_count: usize,
+    return_kind: String,
 }
 
 fn main() -> Result<()> {
@@ -70,7 +82,8 @@ fn main() -> Result<()> {
             let path = args
                 .next()
                 .context("check-native-surface requires a native index.d.ts path")?;
-            check_native_surface(Path::new(&path))?;
+            let ts_binding_path = args.next();
+            check_native_surface(Path::new(&path), ts_binding_path.as_deref().map(Path::new))?;
             println!("bridge native surface inventory check passed");
         }
         Some("--help" | "-h") => {
@@ -95,7 +108,8 @@ Commands:
   emit-fingerprint                Emit SHA-256 wire-shape fingerprint for fixture-backed bridge shapes.
   check-fingerprint <path> <ts>   Compare <path> and TypeScript export with fresh fingerprint.
   check-contracts <path>          Check manifest/Rust/TS operation inventory parity.
-  check-native-surface <path>     Check generated napi *Json methods have manifest entries.
+  check-native-surface <path> [ts] Check generated napi *Json methods have manifest entries
+                                  and optionally compare the TS raw binding interface.
 
 The fixtures are an incremental drift-check scaffold. They do not replace the
 bridge manifest operation inventory; they give TS validation smokes a Rust
@@ -201,7 +215,7 @@ fn check_contracts(contracts_index_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn check_native_surface(native_index_path: &Path) -> Result<()> {
+fn check_native_surface(native_index_path: &Path, ts_binding_path: Option<&Path>) -> Result<()> {
     let manifest_operation_names = operation_names_from_manifest(MANIFEST_TEXT)?;
     let native_source = fs::read_to_string(native_index_path).with_context(|| {
         format!(
@@ -216,7 +230,34 @@ fn check_native_surface(native_index_path: &Path) -> Result<()> {
         &manifest_operation_names,
         "generated napi NativeBridgeBinding *Json methods",
         &native_json_operations,
-    )
+    )?;
+
+    if let Some(ts_binding_path) = ts_binding_path {
+        let ts_source = fs::read_to_string(ts_binding_path).with_context(|| {
+            format!(
+                "failed to read TypeScript native bridge source {}",
+                ts_binding_path.display()
+            )
+        })?;
+        let native_signatures = native_json_method_signatures(
+            &native_source,
+            "export declare class NativeBridgeBinding {",
+            "generated napi NativeBridgeBinding declaration",
+        )?;
+        let ts_signatures = native_json_method_signatures(
+            &ts_source,
+            "interface NativeBridgeBinding {",
+            "TypeScript NativeBridgeBinding raw interface",
+        )?;
+        compare_native_json_method_signatures(
+            &native_signatures,
+            &ts_signatures,
+            native_index_path,
+            ts_binding_path,
+        )?;
+    }
+
+    Ok(())
 }
 
 fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
@@ -360,32 +401,165 @@ fn wire_shape_fingerprint_from_ts_contracts(source: &str) -> Result<String> {
 }
 
 fn operation_names_from_native_json_methods(source: &str) -> Result<Vec<String>> {
-    let marker = "export declare class NativeBridgeBinding {";
+    let names = native_json_method_signatures(
+        source,
+        "export declare class NativeBridgeBinding {",
+        "generated napi NativeBridgeBinding declaration",
+    )?
+    .into_iter()
+    .map(|signature| signature.operation_name)
+    .collect::<Vec<_>>();
+    ensure_no_duplicate_operations("generated napi NativeBridgeBinding *Json methods", &names)?;
+    Ok(names)
+}
+
+fn native_json_method_signatures(
+    source: &str,
+    marker: &str,
+    label: &str,
+) -> Result<Vec<NativeJsonMethodSignature>> {
+    let block = native_bridge_binding_block(source, marker, label)?;
+    let lines = block.lines().collect::<Vec<_>>();
+    let mut signatures = Vec::new();
+    let mut index = 0;
+
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        let Some(open_paren) = trimmed.find('(') else {
+            index += 1;
+            continue;
+        };
+        let method_name = trimmed[..open_paren].trim();
+        if !method_name.ends_with("Json") || !is_camel_method_name(method_name) {
+            index += 1;
+            continue;
+        }
+
+        let mut declaration = trimmed.to_owned();
+        while !declaration.contains("):") && index + 1 < lines.len() {
+            index += 1;
+            declaration.push(' ');
+            declaration.push_str(lines[index].trim());
+        }
+        let Some(close_params) = declaration.find("):") else {
+            bail!("{label} method `{method_name}` is missing a return type marker");
+        };
+        let params = &declaration[open_paren + 1..close_params];
+        let return_source = declaration[close_params + 2..].trim();
+        let signature = NativeJsonMethodSignature {
+            operation_name: camel_json_method_to_operation_name(method_name)?,
+            method_name: method_name.to_owned(),
+            parameter_count: count_signature_parameters(params),
+            return_kind: return_kind(return_source),
+        };
+        signatures.push(signature);
+        index += 1;
+    }
+
+    let names = signatures
+        .iter()
+        .map(|signature| signature.operation_name.clone())
+        .collect::<Vec<_>>();
+    ensure_no_duplicate_operations(label, &names)?;
+    Ok(signatures)
+}
+
+fn native_bridge_binding_block<'a>(source: &'a str, marker: &str, label: &str) -> Result<&'a str> {
     let start = source
         .find(marker)
-        .context("failed to find NativeBridgeBinding class in native declaration file")?
+        .with_context(|| format!("failed to find {marker:?} in {label}"))?
         + marker.len();
     let rest = &source[start..];
     let end = rest
         .find("\n}")
-        .context("failed to find end of NativeBridgeBinding class in native declaration file")?;
-    let block = &rest[..end];
-    let mut names = Vec::new();
+        .with_context(|| format!("failed to find end of NativeBridgeBinding in {label}"))?;
+    Ok(&rest[..end])
+}
 
-    for line in block.lines() {
-        let trimmed = line.trim();
-        let Some(open_paren) = trimmed.find('(') else {
+fn is_camel_method_name(value: &str) -> bool {
+    value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn count_signature_parameters(params: &str) -> usize {
+    let trimmed = params.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+    trimmed
+        .split(',')
+        .filter(|part| !part.trim().is_empty())
+        .count()
+}
+
+fn return_kind(return_source: &str) -> String {
+    let trimmed = return_source.trim_start();
+    if trimmed.starts_with('{') {
+        return "object".to_owned();
+    }
+    let kind = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '[' || *ch == ']')
+        .collect::<String>();
+    match kind.as_str() {
+        "Buffer" => "Uint8Array".to_owned(),
+        value if value.starts_with("Js") => "object".to_owned(),
+        _ => kind,
+    }
+}
+
+fn compare_native_json_method_signatures(
+    native: &[NativeJsonMethodSignature],
+    ts: &[NativeJsonMethodSignature],
+    native_index_path: &Path,
+    ts_binding_path: &Path,
+) -> Result<()> {
+    let native_ops = native
+        .iter()
+        .map(|signature| signature.operation_name.clone())
+        .collect::<Vec<_>>();
+    let ts_ops = ts
+        .iter()
+        .map(|signature| signature.operation_name.clone())
+        .collect::<Vec<_>>();
+    compare_operation_sets(
+        &format!("generated napi declaration {}", native_index_path.display()),
+        &native_ops,
+        &format!(
+            "TypeScript raw binding interface {}",
+            ts_binding_path.display()
+        ),
+        &ts_ops,
+    )?;
+
+    let ts_by_operation = ts
+        .iter()
+        .map(|signature| (signature.operation_name.as_str(), signature))
+        .collect::<BTreeMap<_, _>>();
+    for native_signature in native {
+        let Some(ts_signature) = ts_by_operation.get(native_signature.operation_name.as_str())
+        else {
             continue;
         };
-        let method_name = &trimmed[..open_paren];
-        if !method_name.ends_with("Json") {
-            continue;
+        if native_signature.method_name != ts_signature.method_name
+            || native_signature.parameter_count != ts_signature.parameter_count
+            || native_signature.return_kind != ts_signature.return_kind
+        {
+            bail!(
+                "native raw binding signature drift for operation `{}`; generated declaration has {}({} params) -> {}, TypeScript interface has {}({} params) -> {}",
+                native_signature.operation_name,
+                native_signature.method_name,
+                native_signature.parameter_count,
+                native_signature.return_kind,
+                ts_signature.method_name,
+                ts_signature.parameter_count,
+                ts_signature.return_kind
+            );
         }
-        names.push(camel_json_method_to_operation_name(method_name)?);
     }
 
-    ensure_no_duplicate_operations("generated napi NativeBridgeBinding *Json methods", &names)?;
-    Ok(names)
+    Ok(())
 }
 
 fn camel_json_method_to_operation_name(method_name: &str) -> Result<String> {
