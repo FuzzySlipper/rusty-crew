@@ -173,6 +173,22 @@ assert.equal(degraded.runtime.sessions[1]?.stale, true);
 assert.equal(degraded.queues?.backlog, true);
 assert.equal(degraded.persistence?.pressure, true);
 assert.equal(
+  sectionAuthority(degraded, "runtime.sessions"),
+  "rust_coordination",
+);
+assert.equal(
+  sectionAuthority(degraded, "runtime.counters"),
+  "rust_coordination",
+);
+assert.equal(sectionAuthority(degraded, "queues"), "rust_coordination");
+assert.equal(sectionAuthority(degraded, "persistence"), "rust_coordination");
+assert.equal(sectionAuthority(degraded, "adapters"), "ts_adapter_projection");
+assert.equal(sectionAuthority(degraded, "tools"), "ts_service_projection");
+assert.equal(
+  sectionAuthority(degraded, "observation"),
+  "external_service_projection",
+);
+assert.equal(
   degraded.tools.find((tool) => tool.catalogId === "broken-tools")?.invalid,
   true,
 );
@@ -215,6 +231,16 @@ assert.deepEqual(healthy.reasonCodes, ["ok"]);
 const missingInputs = buildRuntimeDiagnosticsProjection({ now });
 assert.equal(missingInputs.health, "degraded");
 assert.equal(missingInputs.reasonCodes.includes("diagnostics_missing"), true);
+assert.equal(
+  sectionAuthority(missingInputs, "runtime.sessions"),
+  "not_supplied",
+);
+assert.equal(
+  missingInputs.ownership.sections.find(
+    (section) => section.section === "runtime.sessions",
+  )?.reasonCode,
+  "diagnostics_missing",
+);
 
 console.log(
   JSON.stringify(
@@ -255,4 +281,13 @@ function session(
     createdAt: "2026-06-20T10:00:00.000Z",
     lastActiveAt: options.lastActiveAt,
   };
+}
+
+function sectionAuthority(
+  diagnostics: ReturnType<typeof buildRuntimeDiagnosticsProjection>,
+  section: string,
+) {
+  return diagnostics.ownership.sections.find(
+    (entry) => entry.section === section,
+  )?.authority;
 }

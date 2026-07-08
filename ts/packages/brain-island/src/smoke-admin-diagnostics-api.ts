@@ -935,9 +935,30 @@ const rootDiagnostics = handleAdminDiagnosticsRequest(
   { method: "GET", url: "/v1/admin/diagnostics" },
   { diagnostics },
 );
-const diagnosticsText = JSON.stringify(
-  okData<{ overview: unknown }>(rootDiagnostics),
+const rootDiagnosticsData = okData<{
+  overview: {
+    ownership: {
+      sections: Array<{ section: string; authority: string; source: string }>;
+    };
+  };
+}>(rootDiagnostics);
+assert.equal(
+  ownershipAuthority(rootDiagnosticsData, "runtime.sessions"),
+  "rust_coordination",
 );
+assert.equal(
+  ownershipAuthority(rootDiagnosticsData, "runtime.provider_states"),
+  "rust_coordination",
+);
+assert.equal(
+  ownershipAuthority(rootDiagnosticsData, "adapters"),
+  "ts_adapter_projection",
+);
+assert.match(
+  ownershipSource(rootDiagnosticsData, "runtime.sessions") ?? "",
+  /native_bridge/,
+);
+const diagnosticsText = JSON.stringify(rootDiagnosticsData);
 assert.match(diagnosticsText, /previous-response-chain/);
 assert.match(diagnosticsText, /provider_state_expired/);
 assert.doesNotMatch(diagnosticsText, /responseId|rawJson|encrypted_content/);
@@ -1067,6 +1088,32 @@ function okData<T>(result: AdminRouteResult): T {
   assert.equal(result.body.ok, true);
   if (!result.body.ok) throw new Error("expected admin route success");
   return result.body.data as T;
+}
+
+function ownershipAuthority(
+  data: {
+    overview: {
+      ownership: { sections: Array<{ section: string; authority: string }> };
+    };
+  },
+  section: string,
+): string | undefined {
+  return data.overview.ownership.sections.find(
+    (entry) => entry.section === section,
+  )?.authority;
+}
+
+function ownershipSource(
+  data: {
+    overview: {
+      ownership: { sections: Array<{ section: string; source: string }> };
+    };
+  },
+  section: string,
+): string | undefined {
+  return data.overview.ownership.sections.find(
+    (entry) => entry.section === section,
+  )?.source;
 }
 
 function profileDenseDescriptor(): MemorySpaceDescriptor {

@@ -148,6 +148,7 @@ export interface RuntimeDiagnosticsProjection {
   health: DiagnosticsHealth;
   degraded: boolean;
   reasonCodes: DiagnosticsReasonCode[];
+  ownership: RuntimeDiagnosticsOwnershipProjection;
   summary: {
     sessions: number;
     activeSessions: number;
@@ -175,6 +176,25 @@ export interface RuntimeDiagnosticsProjection {
   tools: ToolDiagnosticsProjection[];
   observation?: ObservationDiagnosticsProjection;
   issues: DiagnosticsIssue[];
+}
+
+export type RuntimeDiagnosticsAuthority =
+  | "rust_coordination"
+  | "ts_service_projection"
+  | "ts_adapter_projection"
+  | "external_service_projection"
+  | "not_supplied";
+
+export interface RuntimeDiagnosticsSectionOwnership {
+  section: string;
+  authority: RuntimeDiagnosticsAuthority;
+  source: string;
+  status: "available" | "not_supplied";
+  reasonCode?: DiagnosticsReasonCode;
+}
+
+export interface RuntimeDiagnosticsOwnershipProjection {
+  sections: RuntimeDiagnosticsSectionOwnership[];
 }
 
 export interface RuntimeSessionDiagnostics {
@@ -555,6 +575,7 @@ export function buildRuntimeDiagnosticsProjection(
     health,
     degraded: health !== "ok",
     reasonCodes: reasonCodes.length > 0 ? reasonCodes : ["ok"],
+    ownership: diagnosticsOwnership(input),
     summary: {
       sessions: sessions.length,
       activeSessions: sessions.filter((session) => session.status === "active")
@@ -590,6 +611,96 @@ export function buildRuntimeDiagnosticsProjection(
     tools,
     observation,
     issues,
+  };
+}
+
+function diagnosticsOwnership(
+  input: RuntimeDiagnosticsInput,
+): RuntimeDiagnosticsOwnershipProjection {
+  return {
+    sections: [
+      sectionOwnership(
+        "runtime.counters",
+        "rust_coordination",
+        "native_bridge.runtime_summary",
+        input.runtimeSummary !== undefined,
+      ),
+      sectionOwnership(
+        "runtime.sessions",
+        "rust_coordination",
+        "native_bridge.list_sessions",
+        input.sessions !== undefined,
+      ),
+      sectionOwnership(
+        "runtime.provider_states",
+        "rust_coordination",
+        "native_bridge.provider_state_diagnostics",
+        input.providerStates !== undefined,
+      ),
+      sectionOwnership(
+        "runtime.buffered_brain_runs",
+        "rust_coordination",
+        "native_bridge.buffered_brain_run_diagnostics",
+        input.bufferedBrainRuns !== undefined,
+      ),
+      sectionOwnership(
+        "runtime.pauses",
+        "ts_service_projection",
+        "service_host.runtime_pause_registry",
+        input.runtimePauses !== undefined,
+      ),
+      sectionOwnership(
+        "runtime.brain_modules",
+        "ts_service_projection",
+        "service_host.brain_module_registry",
+        input.brainModules !== undefined,
+      ),
+      sectionOwnership(
+        "queues",
+        "rust_coordination",
+        "native_bridge.queue_read_models",
+        input.queues !== undefined,
+      ),
+      sectionOwnership(
+        "persistence",
+        "rust_coordination",
+        "native_bridge.storage_diagnostics",
+        input.persistence !== undefined,
+      ),
+      sectionOwnership(
+        "adapters",
+        "ts_adapter_projection",
+        "service_host.adapter_diagnostics",
+        input.adapters !== undefined,
+      ),
+      sectionOwnership(
+        "tools",
+        "ts_service_projection",
+        "service_host.tool_registry_projection",
+        input.tools !== undefined,
+      ),
+      sectionOwnership(
+        "observation",
+        "external_service_projection",
+        "adapter_observation_writer",
+        input.observation !== undefined,
+      ),
+    ],
+  };
+}
+
+function sectionOwnership(
+  section: string,
+  authority: RuntimeDiagnosticsAuthority,
+  source: string,
+  available: boolean,
+): RuntimeDiagnosticsSectionOwnership {
+  return {
+    section,
+    authority: available ? authority : "not_supplied",
+    source,
+    status: available ? "available" : "not_supplied",
+    ...(available ? {} : { reasonCode: "diagnostics_missing" as const }),
   };
 }
 

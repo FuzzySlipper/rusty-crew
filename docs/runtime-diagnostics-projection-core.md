@@ -24,9 +24,33 @@ The projection returns:
 
 - `health`: `ok`, `degraded`, or `blocked`;
 - `reasonCodes`: stable reason codes for admin/health/TUI consumers;
+- `ownership.sections`: source ownership labels for each major diagnostics
+  section;
 - summary counts for sessions, delegations, queues, tools, and errors;
 - sectioned diagnostics for runtime, queues, persistence, adapters, tools, and observation;
 - bounded issue records with source, severity, reason code, and optional session id.
+
+## Ownership Labels
+
+The projection explicitly labels whether each section is durable Rust-owned
+state or a TypeScript/external projection. This prevents admin clients from
+treating adapter health or TS assembly metadata as coordination authority.
+
+Current section authority families:
+
+- `rust_coordination`: durable runtime facts read through native bridge read
+  models, including `runtime.counters`, `runtime.sessions`,
+  `runtime.provider_states`, `runtime.buffered_brain_runs`, `queues`, and
+  `persistence`;
+- `ts_service_projection`: service-host assembly/readback, including
+  `runtime.brain_modules`, `runtime.pauses`, and selected tool catalog
+  projection;
+- `ts_adapter_projection`: adapter-owned projections such as channel and MCP
+  diagnostics;
+- `external_service_projection`: external dependency readbacks such as
+  observation writer health;
+- `not_supplied`: the caller did not supply a section. Missing required durable
+  inputs produce `diagnostics_missing` instead of invented defaults.
 
 Reason codes include:
 

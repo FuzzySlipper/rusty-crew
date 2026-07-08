@@ -17,6 +17,12 @@ The route layer is not an HTTP listener. It accepts a method/path request shape 
 
 It does not read storage directly, mutate runtime state, run maintenance, reload adapters, redeliver queues, or inspect private adapter objects. Mutating routes belong to guarded control endpoints.
 
+The full `GET /v1/admin/diagnostics` bundle includes
+`overview.ownership.sections`. Clients should use those labels to distinguish
+Rust-owned durable runtime facts from TypeScript adapter/service projections.
+Missing Rust read-model inputs are reported as `not_supplied` with
+`diagnostics_missing`; the route must not invent authoritative defaults.
+
 ## Routes
 
 Implemented read-only route families:
