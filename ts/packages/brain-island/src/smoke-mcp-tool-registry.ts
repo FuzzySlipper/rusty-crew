@@ -9,10 +9,12 @@ import type {
   SessionId,
 } from "@rusty-crew/contracts";
 import {
+  createBridgeToolMetadataPolicyValidator,
   defaultToolRegistry,
   integrateMcpToolsWithRegistry,
   type ToolRegistryEntry,
 } from "./index.js";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 
 const binding: McpBindingRecord = {
   bindingId: "mcp-alpha",
@@ -45,17 +47,25 @@ const discovery = convertMcpToolsToCandidates(binding, [
     inputSchema: true,
   },
 ]);
+const metadataPolicyValidator = createBridgeToolMetadataPolicyValidator(
+  await loadNativeBridge(),
+);
 
-const report = integrateMcpToolsWithRegistry({
+const report = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:prime-mcp",
   candidates: discovery.candidates,
+  metadataPolicyValidator,
   inventoryRequest: {
     requestedToolsets: ["local_code_read", "mcp:prime-mcp"],
   },
   unavailableTools: ["den_read_resource"],
 });
 
-assert.equal(report.validation.ok, true);
+assert.equal(
+  report.validation.ok,
+  true,
+  JSON.stringify(report.validation.issues),
+);
 assert.ok(report.registry);
 assert.ok(report.inventory);
 assert.equal(report.catalogChangedPayload.type, "tool_catalog_changed");
@@ -110,9 +120,10 @@ const localCollisionCandidate: McpRegistryCandidate = {
   name: "read_file",
   outputShape: "mcp.den.read_file.result.v1",
 };
-const collisionReport = integrateMcpToolsWithRegistry({
+const collisionReport = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:collision",
   candidates: [localCollisionCandidate],
+  metadataPolicyValidator,
 });
 assert.equal(collisionReport.validation.ok, false);
 assert.equal(collisionReport.registry, undefined);
@@ -124,9 +135,10 @@ assert.equal(
   "read_file",
 );
 
-const prefixedReport = integrateMcpToolsWithRegistry({
+const prefixedReport = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:prefixed",
   candidates: [localCollisionCandidate],
+  metadataPolicyValidator,
   nameCollisionPolicy: "prefix_source",
   inventoryRequest: {
     requestedToolsets: ["mcp:prime-mcp"],
@@ -143,8 +155,9 @@ assert.equal(
   true,
 );
 
-const duplicateMcpReport = integrateMcpToolsWithRegistry({
+const duplicateMcpReport = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:duplicate",
+  metadataPolicyValidator,
   candidates: [
     discovery.candidates[0]!,
     {
@@ -163,6 +176,27 @@ assert.equal(
   "den_search",
 );
 
+const invalidMetadataReport = await integrateMcpToolsWithRegistry({
+  catalogId: "mcp:invalid-metadata",
+  metadataPolicyValidator,
+  candidates: [
+    {
+      ...discovery.candidates[0]!,
+      name: "den_bad_shape",
+      outputShape: "MCP.Bad.Shape",
+    },
+  ],
+});
+assert.equal(invalidMetadataReport.validation.ok, false);
+assert.equal(invalidMetadataReport.registry, undefined);
+assert.equal(invalidMetadataReport.inventory, undefined);
+assert.equal(
+  invalidMetadataReport.validation.issues.find(
+    (issue) => issue.code === "invalid_output_shape",
+  )?.toolName,
+  "den_bad_shape",
+);
+
 console.log(
   JSON.stringify(
     {
@@ -172,6 +206,7 @@ console.log(
       collisionIssue: collisionReport.validation.issues[0]?.code,
       prefixedName: prefixedReport.mcpEntries[0]?.name,
       duplicateIssue: duplicateMcpReport.validation.issues[0]?.code,
+      invalidMetadataIssue: invalidMetadataReport.validation.issues[0]?.code,
     },
     null,
     2,

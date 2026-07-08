@@ -19,10 +19,10 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 143;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 144;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 27;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 23;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 24;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 120;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
@@ -43,6 +43,7 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "submit_brain_event",
   "update_profile_registry_record",
   "upsert_model_provider",
+  "validate_tool_metadata_policy",
   "validate_local_tool_profile_policy",
   "wake_brain",
 ] as const satisfies readonly ManifestOperationName[];

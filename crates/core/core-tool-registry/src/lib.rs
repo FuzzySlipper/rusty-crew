@@ -168,6 +168,30 @@ pub fn validate_tool_metadata_list(entries: &[ToolMetadata]) -> ToolMetadataVali
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ToolMetadataPolicyValidationInput {
+    #[serde(default)]
+    pub tools: Vec<ToolMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolMetadataPolicyValidationResult {
+    pub ok: bool,
+    pub diagnostics: Vec<ToolMetadataDiagnostic>,
+}
+
+pub fn validate_tool_metadata_policy(
+    input: &ToolMetadataPolicyValidationInput,
+) -> ToolMetadataPolicyValidationResult {
+    let validation = validate_tool_metadata_list(&input.tools);
+    ToolMetadataPolicyValidationResult {
+        ok: validation.ok(),
+        diagnostics: validation.diagnostics,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalToolProfileValidationInput {
     pub profile: LocalToolProfilePolicy,
     pub catalog: LocalToolProfileCatalogPolicy,
@@ -434,13 +458,15 @@ impl<'a> ToolMetadataValidator<'a> {
         self.validate_unique_enum_values(index, entry, "surfaces", &entry.surfaces);
         self.validate_unique_enum_values(index, entry, "safety", &entry.safety);
         for (toolset_index, toolset) in entry.toolsets.iter().enumerate() {
-            if !valid_tool_name(toolset) {
+            if !valid_toolset_name(toolset) {
                 self.error(
                     "invalid_toolset",
                     Some(entry.name.as_str()),
                     None,
                     format!("tools[{index}].toolsets[{toolset_index}]"),
-                    format!("toolset {toolset} must be lower snake case"),
+                    format!(
+                        "toolset {toolset} must be lower snake case or an mcp: dynamic toolset id"
+                    ),
                 );
             }
         }
@@ -699,6 +725,24 @@ fn valid_tool_name(value: &str) -> bool {
     !previous_underscore
 }
 
+fn valid_toolset_name(value: &str) -> bool {
+    if let Some(dynamic_id) = value.strip_prefix("mcp:") {
+        return valid_dynamic_mcp_toolset_id(dynamic_id);
+    }
+    valid_tool_name(value)
+}
+
+fn valid_dynamic_mcp_toolset_id(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '-' | '.'))
+}
+
 fn validate_local_profile_id(id: &str, issues: &mut Vec<LocalToolProfileValidationIssue>) {
     if id.trim().is_empty() {
         issues.push(LocalToolProfileValidationIssue {
@@ -841,6 +885,37 @@ mod tests {
         ]);
 
         assert_codes(&result, &["duplicate_name"]);
+    }
+
+    #[test]
+    fn validates_tool_metadata_policy_with_ok_flag() {
+        let result = validate_tool_metadata_policy(&ToolMetadataPolicyValidationInput {
+            tools: vec![
+                tool("read_file", ToolCategory::Local, "local.file_text.v1"),
+                tool(
+                    "read_file",
+                    ToolCategory::Mcp,
+                    "mcp.den.read_file.result.v1",
+                ),
+            ],
+        });
+
+        assert!(!result.ok);
+        assert_eq!(result.diagnostics[0].code, "duplicate_name");
+    }
+
+    #[test]
+    fn allows_dynamic_mcp_toolset_ids_in_portable_metadata() {
+        let mut entry = tool("den_search", ToolCategory::Mcp, "mcp.den.search.result.v1");
+        entry.toolsets = vec!["mcp:prime-mcp".to_string()];
+        entry.surfaces = vec![ToolSurface::Brain, ToolSurface::Mcp];
+        entry.safety = vec![ToolSafetyFlag::NetworkAccess];
+
+        let result = validate_tool_metadata_policy(&ToolMetadataPolicyValidationInput {
+            tools: vec![entry],
+        });
+
+        assert!(result.ok, "{:?}", result.diagnostics);
     }
 
     #[test]

@@ -1567,6 +1567,7 @@ export const manifestOperationNames = [
   "cancel_pi_agent_brain",
   "exchange_openai_oauth_code",
   "register_platform_adapter",
+  "validate_tool_metadata_policy",
   "validate_local_tool_profile_policy",
   "validate_runtime_config_draft",
   "plan_runtime_config",
@@ -1693,6 +1694,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "71169ac81bc70f2ee70732e2162d5148d2a8faa9eb9c88de1c0710c8ab7a520f";
+  "a83b8e92250a6542d3522c46f5dc51175ba9b74837b629c7cedb17b7def15853";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

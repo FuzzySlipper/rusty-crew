@@ -11,6 +11,7 @@ import type { ToolInventoryRequest } from "./tool-registry.js";
 import {
   integrateMcpToolsWithRegistry,
   type McpRegistryIntegrationReport,
+  type PortableToolMetadataPolicyValidator,
 } from "./mcp-tool-registry-integration.js";
 
 export interface McpSurfaceReloadInput {
@@ -18,6 +19,7 @@ export interface McpSurfaceReloadInput {
   manager: McpSurfaceManagerPort;
   discoveryClient: McpToolDiscoveryClient;
   catalogId: string;
+  metadataPolicyValidator: PortableToolMetadataPolicyValidator;
   previousToolNames?: readonly string[];
   inventoryRequest?: ToolInventoryRequest;
   requestedBy: string;
@@ -91,9 +93,10 @@ export async function reloadMcpSurface(
     input.binding,
     input.discoveryClient,
   );
-  const registry = integrateMcpToolsWithRegistry({
+  const registry = await integrateMcpToolsWithRegistry({
     catalogId: input.catalogId,
     candidates: discovery.candidates,
+    metadataPolicyValidator: input.metadataPolicyValidator,
     inventoryRequest: input.inventoryRequest,
   });
   const newTools =

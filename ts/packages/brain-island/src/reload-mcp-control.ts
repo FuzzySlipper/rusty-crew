@@ -19,6 +19,7 @@ import {
   reloadMcpSurface,
   type McpSurfaceReloadReport,
 } from "./mcp-surface-reload.js";
+import type { PortableToolMetadataPolicyValidator } from "./mcp-tool-registry-integration.js";
 
 export type ReloadMcpLifecyclePhase =
   | "reload_started"
@@ -51,6 +52,7 @@ export interface ReloadMcpControlOptions {
     binding: McpBindingRecord,
     command: AdminControlCommand,
   ): McpToolDiscoveryClient | undefined;
+  metadataPolicyValidator: PortableToolMetadataPolicyValidator;
   catalogId(binding: McpBindingRecord, command: AdminControlCommand): string;
   previousToolNames?(
     binding: McpBindingRecord,
@@ -124,6 +126,7 @@ export function createReloadMcpControlExecutor(
       manager: options.manager,
       discoveryClient,
       catalogId: options.catalogId(binding, command),
+      metadataPolicyValidator: options.metadataPolicyValidator,
       previousToolNames: options.previousToolNames?.(binding, command),
       inventoryRequest: options.inventoryRequest?.(binding, command),
       requestedBy: command.actor.operatorId,

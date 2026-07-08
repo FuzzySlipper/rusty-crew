@@ -731,6 +731,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   );
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
+    bridge: input.bridge,
     runtimeConfig,
     mcpConfig: input.serviceConfig.mcp,
     discoveryClientFactory: input.mcpToolDiscoveryClientFactory,
@@ -995,6 +996,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   }
 
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
+    bridge: input.bridge,
     runtimeConfig,
     mcpConfig: input.serviceConfig.mcp,
     discoveryClientFactory: input.mcpToolDiscoveryClientFactory,

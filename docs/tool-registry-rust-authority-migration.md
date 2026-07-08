@@ -172,6 +172,14 @@ Acceptance:
   exposed to the model;
 - source routing remains TS binding data, not public portable metadata.
 
+Current implementation: dynamic MCP candidates stay TS-discovered and
+TS-executed, but `integrateMcpToolsWithRegistry` now requires a portable
+metadata policy validator. The service and reload paths provide
+`createBridgeToolMetadataPolicyValidator(state.bridge)`, which calls the native
+`validate_tool_metadata_policy` operation backed by `core-tool-registry`. MCP
+source routing, annotations, schemas, and executor module strings remain private
+binding data outside the Rust metadata payload.
+
 ### 5. Ratchet Fixtures And Smokes Around The New Source
 
 The current fixture checks should survive the migration and become stricter.

@@ -20,11 +20,15 @@ import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   createMcpToolFinishedEvent,
   createMcpToolStartedEvent,
+  createBridgeToolMetadataPolicyValidator,
   evaluateMcpResourceHooks,
   integrateMcpToolsWithRegistry,
   reloadMcpSurface,
 } from "./index.js";
 
+const metadataPolicyValidator = createBridgeToolMetadataPolicyValidator(
+  await loadNativeBridge(),
+);
 const adapterId = "mcp-ts-main" as AdapterId;
 const alphaBinding = mcpBinding(
   "mcp-alpha",
@@ -73,14 +77,16 @@ const betaDiscovery = convertMcpToolsToCandidates(betaBinding, [
   },
 ]);
 
-const alphaRegistry = integrateMcpToolsWithRegistry({
+const alphaRegistry = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:prime",
   candidates: alphaDiscovery.candidates,
+  metadataPolicyValidator,
   inventoryRequest: { requestedToolsets: ["mcp:prime-mcp"] },
 });
-const betaRegistry = integrateMcpToolsWithRegistry({
+const betaRegistry = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:review",
   candidates: betaDiscovery.candidates,
+  metadataPolicyValidator,
   inventoryRequest: { requestedToolsets: ["mcp:review-mcp"] },
 });
 assert.equal(alphaRegistry.validation.ok, true);
@@ -94,15 +100,17 @@ assert.deepEqual(
   ["beta_summarize"],
 );
 
-const collisionRegistry = integrateMcpToolsWithRegistry({
+const collisionRegistry = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:collision",
   candidates: [{ ...alphaDiscovery.candidates[0]!, name: "read_file" }],
+  metadataPolicyValidator,
   inventoryRequest: { requestedToolsets: ["mcp:prime-mcp"] },
 });
 assert.equal(collisionRegistry.validation.ok, false);
-const namespacedCollision = integrateMcpToolsWithRegistry({
+const namespacedCollision = await integrateMcpToolsWithRegistry({
   catalogId: "mcp:collision",
   candidates: [{ ...alphaDiscovery.candidates[0]!, name: "read_file" }],
+  metadataPolicyValidator,
   inventoryRequest: { requestedToolsets: ["mcp:prime-mcp"] },
   nameCollisionPolicy: "prefix_source",
 });
@@ -309,6 +317,7 @@ try {
     binding: alphaBinding,
     manager,
     catalogId: "mcp:prime",
+    metadataPolicyValidator,
     previousToolNames: ["alpha_search"],
     inventoryRequest: { requestedToolsets: ["mcp:prime-mcp"] },
     requestedBy: "smoke",

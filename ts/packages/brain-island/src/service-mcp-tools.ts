@@ -23,6 +23,7 @@ import {
   evaluateMcpResourceHooks,
 } from "./mcp-tool-telemetry.js";
 import {
+  createBridgeToolMetadataPolicyValidator,
   integrateMcpToolsWithRegistry,
   type McpRegistryIntegrationReport,
 } from "./mcp-tool-registry-integration.js";
@@ -55,6 +56,7 @@ export interface ServiceMcpServerEndpointConfig {
 }
 
 export interface ServiceMcpToolCatalogInput {
+  bridge: Pick<NativeBridgeModule, "validateToolMetadataPolicy">;
   runtimeConfig: {
     mcpServers?: readonly ServiceMcpServerEndpointConfig[];
     mcpBindings: readonly McpBindingRecord[];
@@ -146,26 +148,30 @@ export async function buildServiceMcpToolCatalog(
     }
   }
 
-  const reports = [...profiles.values()].map<ServiceMcpToolProfileReport>(
-    (profile) => {
-      const integration =
-        profile.candidates.length === 0
-          ? undefined
-          : integrateMcpToolsWithRegistry({
-              catalogId: `service:mcp:${profile.profileId}`,
-              candidates: profile.candidates.map((item) => item.candidate),
-              inventoryRequest: {
-                requestedToolsets: [...profile.toolsets],
-              },
-            });
-      return {
-        profileId: profile.profileId,
-        toolsets: [...profile.toolsets].sort(),
-        discoveryReports: profile.discoveryReports,
-        integration,
-        unavailableBindings: [...profile.unavailableBindings].sort(),
-      };
-    },
+  const reports = await Promise.all(
+    [...profiles.values()].map(
+      async (profile): Promise<ServiceMcpToolProfileReport> => {
+        const integration =
+          profile.candidates.length === 0
+            ? undefined
+            : await integrateMcpToolsWithRegistry({
+                catalogId: `service:mcp:${profile.profileId}`,
+                candidates: profile.candidates.map((item) => item.candidate),
+                metadataPolicyValidator:
+                  createBridgeToolMetadataPolicyValidator(input.bridge),
+                inventoryRequest: {
+                  requestedToolsets: [...profile.toolsets],
+                },
+              });
+        return {
+          profileId: profile.profileId,
+          toolsets: [...profile.toolsets].sort(),
+          discoveryReports: profile.discoveryReports,
+          integration,
+          unavailableBindings: [...profile.unavailableBindings].sort(),
+        };
+      },
+    ),
   );
 
   return {

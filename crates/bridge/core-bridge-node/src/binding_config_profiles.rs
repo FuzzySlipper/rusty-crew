@@ -3,6 +3,20 @@ use super::*;
 #[napi_derive::napi]
 impl NativeBridgeBinding {
     #[napi]
+    pub fn validate_tool_metadata_policy_json(&self, input_json: String) -> napi::Result<String> {
+        let input: ToolMetadataPolicyValidationInput =
+            serde_json::from_str(&input_json).map_err(|error| {
+                napi::Error::new(
+                    napi::Status::InvalidArg,
+                    format!("invalid tool metadata policy input JSON: {error}"),
+                )
+            })?;
+        let result = validate_tool_metadata_policy(&input);
+        serde_json::to_string(&result)
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
     pub fn validate_local_tool_profile_policy_json(
         &self,
         input_json: String,

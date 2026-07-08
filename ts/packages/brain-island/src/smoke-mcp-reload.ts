@@ -10,8 +10,15 @@ import type {
   ProfileId,
   SessionId,
 } from "@rusty-crew/contracts";
-import { reloadMcpSurface } from "./index.js";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import {
+  createBridgeToolMetadataPolicyValidator,
+  reloadMcpSurface,
+} from "./index.js";
 
+const metadataPolicyValidator = createBridgeToolMetadataPolicyValidator(
+  await loadNativeBridge(),
+);
 const adapterId = "mcp-ts-main" as AdapterId;
 const alphaBinding: McpBindingRecord = {
   bindingId: "mcp-alpha",
@@ -58,6 +65,7 @@ const reloadReport = await reloadMcpSurface({
   binding: alphaBinding,
   manager,
   catalogId: "mcp:prime-mcp",
+  metadataPolicyValidator,
   previousToolNames: ["den_old_tool", "den_stable"],
   inventoryRequest: {
     requestedToolsets: ["mcp:prime-mcp"],
@@ -102,6 +110,7 @@ const degradedReport = await reloadMcpSurface({
   binding: optionalBrokenBinding,
   manager,
   catalogId: "mcp:optional",
+  metadataPolicyValidator,
   previousToolNames: ["optional_tool"],
   requestedBy: "operator",
   reason: "optional surface retry",

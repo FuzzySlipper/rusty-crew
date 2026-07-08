@@ -16,6 +16,7 @@ import {
   handleAdminControlRequest,
   type AdminControlResponse,
   type AdminRouteResult,
+  type PortableToolMetadataPolicyValidator,
 } from "./index.js";
 import {
   createMemoryAdminControlAuditSink,
@@ -38,6 +39,10 @@ const manager = new McpSurfaceManager({
 });
 await manager.connect(alphaBinding);
 await manager.connect(betaBinding);
+const metadataPolicyValidator: PortableToolMetadataPolicyValidator = () => ({
+  ok: true,
+  issues: [],
+});
 
 const lifecycleAudit = createMemoryReloadMcpLifecycleAuditSink();
 const adminAudit = createMemoryAdminControlAuditSink();
@@ -68,6 +73,7 @@ const reloadMcp = createReloadMcpControlExecutor({
       },
     ],
   },
+  metadataPolicyValidator,
   catalogId: (currentBinding) => `mcp:${currentBinding.toolProfileKey}`,
   previousToolNames: () => ["den_old_tool", "den_stable"],
   inventoryRequest: (currentBinding) => ({
@@ -148,6 +154,7 @@ const mismatch = await createReloadMcpControlExecutor({
   resolveBinding: () => betaBinding,
   manager,
   discoveryClient: { listTools: () => [] },
+  metadataPolicyValidator,
   catalogId: () => "mcp:review",
 })({
   name: "reload_mcp",

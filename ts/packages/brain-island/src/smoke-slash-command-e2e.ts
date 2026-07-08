@@ -23,6 +23,7 @@ import {
   routeSlashCommand,
   type AdminControlResponse,
   type AdminRouteResult,
+  type PortableToolMetadataPolicyValidator,
   type RuntimeCounterSummary,
   type SlashCommandRouteResult,
   type SlashCommandSession,
@@ -40,6 +41,10 @@ let currentSessionId = "session-alpha";
 let currentMcpBinding = mcpBinding("mcp-alpha", currentSessionId);
 let tick = 0;
 let reloadBrainRebuilds = 0;
+const metadataPolicyValidator: PortableToolMetadataPolicyValidator = () => ({
+  ok: true,
+  issues: [],
+});
 const mcpManager = new McpSurfaceManager({
   transports: [createSimulatedMcpTransportFactory("stdio")],
   now: () => `2026-06-20T19:00:${String(tick++).padStart(2, "0")}.000Z`,
@@ -121,6 +126,7 @@ const reloadMcpExecutor = createReloadMcpControlExecutor({
       },
     ],
   },
+  metadataPolicyValidator,
   catalogId: (binding) => `mcp:${binding.toolProfileKey}`,
   previousToolNames: () => ["den_old_tool", "den_stable"],
   inventoryRequest: (binding) => ({

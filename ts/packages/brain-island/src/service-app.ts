@@ -88,6 +88,7 @@ import {
 } from "./admin-control-api.js";
 import { createNewSessionLifecycleExecutor } from "./new-session-lifecycle.js";
 import { createReloadMcpControlExecutor } from "./reload-mcp-control.js";
+import { createBridgeToolMetadataPolicyValidator } from "./mcp-tool-registry-integration.js";
 import { createDefaultMcpDiscoveryClient } from "./service-mcp-tools.js";
 import {
   createLocalToolProfileStore,
@@ -2160,7 +2161,9 @@ async function modelProviderRefreshAfterWrite(input: {
   };
 }
 
-function modelProviderRefreshCommandName(value: string): AdminControlCommandName {
+function modelProviderRefreshCommandName(
+  value: string,
+): AdminControlCommandName {
   if (value === "plan_runtime_rebuild" || value === "apply_runtime_rebuild") {
     return value;
   }
@@ -6501,6 +6504,9 @@ function createServiceReloadMcpExecutor(
     },
     discoveryClientForBinding: (binding) =>
       createDefaultMcpDiscoveryClient(binding, state.config.mcp),
+    metadataPolicyValidator: createBridgeToolMetadataPolicyValidator(
+      state.bridge,
+    ),
     catalogId: (binding) => `mcp:${binding.toolProfileKey}`,
     previousToolNames: () => [],
     inventoryRequest: (binding) => ({

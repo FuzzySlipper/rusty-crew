@@ -218,6 +218,15 @@ errors = "core_protocol::CoreError"
 summary = "Register a TS platform adapter such as Den, Telegram, MCP, TUI, or CLI."
 
 [[operation]]
+name = "validate_tool_metadata_policy"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_tool_registry::ToolMetadataPolicyValidationInput"
+output = "core_tool_registry::ToolMetadataPolicyValidationResult"
+errors = "core_protocol::CoreError"
+summary = "Validate portable public tool metadata before exposing dynamic tool catalogs to model sessions."
+
+[[operation]]
 name = "validate_local_tool_profile_policy"
 surface = "stable"
 direction = "ts_to_rust"

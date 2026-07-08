@@ -288,6 +288,7 @@ interface NativeBridgeBinding {
     kind: string;
     displayName: string;
   }): number;
+  validateToolMetadataPolicyJson(inputJson: string): string;
   validateLocalToolProfilePolicyJson(inputJson: string): string;
   validateRuntimeConfigDraftJson(inputJson: string): string;
   planRuntimeConfigJson(inputJson: string): string;
@@ -1447,6 +1448,45 @@ export interface NativeRuntimeConfigValidationResult {
   diagnostics: NativeRuntimeConfigDiagnostic[];
 }
 
+export interface NativeToolMetadataPolicyValidationInput {
+  tools: NativeToolMetadataPolicyTool[];
+}
+
+export interface NativeToolMetadataPolicyTool {
+  name: string;
+  description: string;
+  aliases?: string[];
+  category: string;
+  toolsets: string[];
+  surfaces: string[];
+  safety: string[];
+  output_shape: string;
+  version: string;
+  deprecated?: {
+    reason: string;
+    since: string;
+    replacement?: string;
+    sunset?: string;
+  };
+  replacement?: string;
+  coexistence_note?: string;
+  collision_notes?: string;
+}
+
+export interface NativeToolMetadataPolicyDiagnostic {
+  severity: "error" | "warning" | "info";
+  code: string;
+  tool_name?: string;
+  other_tool_name?: string;
+  path?: string;
+  message: string;
+}
+
+export interface NativeToolMetadataPolicyValidationResult {
+  ok: boolean;
+  diagnostics: NativeToolMetadataPolicyDiagnostic[];
+}
+
 export interface NativeLocalToolProfilePolicyValidationInput {
   profile: {
     id: string;
@@ -1816,6 +1856,9 @@ export interface NativeBridgeModule {
   registerPlatformAdapter(
     registration: PlatformAdapterRegistration,
   ): Promise<PlatformAdapterHandle>;
+  validateToolMetadataPolicy(
+    input: NativeToolMetadataPolicyValidationInput,
+  ): Promise<NativeToolMetadataPolicyValidationResult>;
   validateLocalToolProfilePolicy(
     input: NativeLocalToolProfilePolicyValidationInput,
   ): Promise<NativeLocalToolProfilePolicyValidationResult>;
@@ -2314,6 +2357,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     submitBrainEvent: unavailable("submit_brain_event"),
     submitBrainActions: unavailable("submit_brain_actions"),
     registerPlatformAdapter: unavailable("register_platform_adapter"),
+    validateToolMetadataPolicy: unavailable("validate_tool_metadata_policy"),
     validateLocalToolProfilePolicy: unavailable(
       "validate_local_tool_profile_policy",
     ),
@@ -3007,6 +3051,10 @@ function createNativeBridgeModule(
         kind: registration.kind,
         displayName: registration.displayName,
       }) as PlatformAdapterHandle,
+    validateToolMetadataPolicy: async (input) =>
+      JSON.parse(
+        binding.validateToolMetadataPolicyJson(JSON.stringify(input)),
+      ) as NativeToolMetadataPolicyValidationResult,
     validateLocalToolProfilePolicy: async (input) =>
       JSON.parse(
         binding.validateLocalToolProfilePolicyJson(JSON.stringify(input)),

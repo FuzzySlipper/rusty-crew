@@ -1,4 +1,5 @@
 export {
+  createBridgeToolMetadataPolicyValidator,
   integrateMcpToolsWithRegistry,
   mcpCandidateToRegistryEntry,
 } from "../mcp-tool-registry-integration.js";
@@ -7,6 +8,7 @@ export type {
   McpRegistryIntegrationInput,
   McpRegistryIntegrationReport,
   McpToolRegistryEntry,
+  PortableToolMetadataPolicyValidator,
 } from "../mcp-tool-registry-integration.js";
 export { reloadMcpSurface } from "../mcp-surface-reload.js";
 export type {
