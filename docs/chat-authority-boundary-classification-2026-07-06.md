@@ -61,7 +61,9 @@ the chat message mutation and wake submission path.
   port once event schemas stabilize.
 - Move slash-command lifecycle/session effects behind explicit control-plane
   command ports; keep command text parsing and autocomplete in TS.
-- Decide whether attachment and data-bank mutations should become Rust-owned
-  domain repos or remain TS glue around native persistence.
+- Attachment and data-bank route authority is now classified in
+  `attachment-data-bank-route-authority-2026-07-08`: list routes remain TS
+  envelope glue over Rust read operations; create/update/remove mutations need
+  session-aware Rust chat-domain operations tracked by Den #4921 and #4922.
 - Generate the TypeScript `ChatEvent` kind union from the OpenAPI contract once
   bridge/codegen ownership for API contracts is settled.
