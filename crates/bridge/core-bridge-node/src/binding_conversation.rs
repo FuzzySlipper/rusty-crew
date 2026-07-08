@@ -20,6 +20,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn create_chat_message_slot_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let request = parse_json::<CreateChatMessageSlotRequest>(
+            &input_json,
+            "create chat message slot request",
+        )?;
+        let result = bridge
+            .create_chat_message_slot(&request)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "create chat message slot result")
+    }
+
+    #[napi]
     pub fn query_message_slots_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<MessageSlotQuery>(&input_json, "message slot query")?;

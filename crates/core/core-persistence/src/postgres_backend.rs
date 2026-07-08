@@ -51,24 +51,25 @@ use crate::{
     ConversationJumpRequest, ConversationJumpResult, ConversationJumpTarget,
     ConversationSnapshotId, ConversationSnapshotQuery, ConversationSnapshotRecord,
     ConversationSnapshotSource, ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreEvent,
-    CoreEventKind, CoreResult, DataBankScopeId, DataBankScopeQuery, DataBankScopeRecord,
-    DataBankScopeStatus, DataBankScopeWrite, DelegatedCompletion, DenRuntimeReference,
-    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord,
-    DurableMessageStatus, DurableMessageWrite, ExternalBindingStatus, IsoTimestamp,
-    LoreRecallEntry, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
-    LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockRecord, MessageId,
-    MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId,
-    MessageVariantQuery, MessageVariantRecord, MessageVariantSource, MessageVariantStatus,
-    MessageVariantWrite, ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery,
-    ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite,
-    PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
-    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
-    ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
-    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
-    ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
-    ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage, QueuedMessageFilter,
-    QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    CoreEventKind, CoreResult, CreateChatMessageSlotRequest, CreateChatMessageSlotResult,
+    DataBankScopeId, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus,
+    DataBankScopeWrite, DelegatedCompletion, DenRuntimeReference, DurableAgentKind,
+    DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord, DurableMessageStatus,
+    DurableMessageWrite, ExternalBindingStatus, IsoTimestamp, LoreRecallEntry, LoreRecallQuery,
+    LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord, McpBindingQuery,
+    McpBindingRecord, MessageBlockRecord, MessageId, MessageSlotId, MessageSlotQuery,
+    MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
+    MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
+    ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
+    ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
+    ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
+    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
+    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
+    ProviderWireStateRecord, ProviderWireStateWakeLookup, ProviderWireStateWakeResult,
+    ProviderWireStateWrite, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
     RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
     RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
     RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
@@ -4704,6 +4705,91 @@ fn save_message_variant_in_tx(
         ],
     )
     .map_err(|error| postgres_error("save PostgreSQL message variant", error))?;
+    Ok(())
+}
+
+fn save_message_slot_in_tx(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    slot: &MessageSlotWrite,
+) -> CoreResult<()> {
+    let metadata_json = to_json_text(&slot.metadata_json)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.message_slots (
+                slot_id,
+                session_id,
+                primary_variant_id,
+                active_variant_id,
+                metadata_json,
+                created_at,
+                updated_at,
+                version
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
+             ON CONFLICT(slot_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                primary_variant_id = EXCLUDED.primary_variant_id,
+                active_variant_id = EXCLUDED.active_variant_id,
+                metadata_json = EXCLUDED.metadata_json,
+                updated_at = EXCLUDED.updated_at,
+                version = message_slots.version + 1"
+        ),
+        &[
+            &slot.slot_id.0,
+            &slot.session_id.0,
+            &slot.primary_variant_id.0,
+            &slot
+                .active_variant_id
+                .as_ref()
+                .map(|value| value.0.as_str()),
+            &metadata_json,
+            &slot.created_at,
+            &slot.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("save PostgreSQL message slot", error))?;
+    Ok(())
+}
+
+fn validate_create_chat_message_slot_request(
+    request: &CreateChatMessageSlotRequest,
+) -> CoreResult<()> {
+    if request.slot.slot_id != request.primary_variant.slot_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot and primary variant slot_id must match",
+        ));
+    }
+    if request.slot.primary_variant_id != request.primary_variant.variant_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot primary_variant_id must match primary variant variant_id",
+        ));
+    }
+    if request.slot.session_id != request.primary_variant.message.session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot and primary variant message session_id must match",
+        ));
+    }
+    if request.primary_variant.source != MessageVariantSource::Primary {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message slot requires a primary variant",
+        ));
+    }
+    if request.primary_variant.ordinal != 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message slot primary variant ordinal must be 0",
+        ));
+    }
+    if request.primary_variant.message.branch_id.as_ref() != Some(&request.branch_id) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message slot primary message branch_id must match target branch_id",
+        ));
+    }
     Ok(())
 }
 

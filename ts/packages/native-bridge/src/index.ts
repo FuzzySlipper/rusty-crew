@@ -240,6 +240,7 @@ interface NativeBridgeBinding {
   roleplayNarratorReviewRequestsRevision(feedback: string): boolean;
   saveMessageSlotJson(inputJson: string): void;
   saveMessageVariantJson(inputJson: string): string;
+  createChatMessageSlotJson(inputJson: string): string;
   queryMessageSlotsJson(inputJson: string): string;
   queryMessageVariantsJson(inputJson: string): string;
   chatReadModelPageJson(inputJson: string): string;
@@ -2166,6 +2167,7 @@ export interface NativeBridgeModule {
   roleplayNarratorReviewRequestsRevision(feedback: string): Promise<boolean>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
+  createChatMessageSlot(input: unknown): Promise<unknown>;
   chatReadModelPage(input: unknown): Promise<NativeChatReadModelPage>;
   appendChatEvent(input: unknown): Promise<NativeChatEventLogEvent>;
   queryChatEvents(input: unknown): Promise<NativeChatEventLogPage>;
@@ -2518,6 +2520,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     ),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
+    createChatMessageSlot: unavailable("create_chat_message_slot"),
     chatReadModelPage: unavailable("chat_read_model_page"),
     appendChatEvent: unavailable("append_chat_event"),
     queryChatEvents: unavailable("query_chat_events"),
@@ -3743,6 +3746,10 @@ function createNativeBridgeModule(
     saveMessageVariant: async (input) =>
       JSON.parse(
         binding.saveMessageVariantJson(JSON.stringify(input)),
+      ) as unknown,
+    createChatMessageSlot: async (input) =>
+      JSON.parse(
+        binding.createChatMessageSlotJson(JSON.stringify(input)),
       ) as unknown,
     chatReadModelPage: async (input) =>
       validateBridgeValue<NativeChatReadModelPage>({

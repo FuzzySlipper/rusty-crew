@@ -9057,22 +9057,23 @@ async function createRustyViewMessageSlot(
       ? {}
       : { speaker_identity: speakerIdentity }),
   };
-  await state.bridge.saveMessageSlot({
-    slot_id: slotId,
-    session_id: input.session.sessionId,
-    primary_variant_id: variantId,
-    active_variant_id: null,
-    metadata_json: slotMetadata,
-    created_at: now,
-    updated_at: now,
-  });
-  await state.bridge.saveMessageVariant(
-    messageVariantWrite({
+  const messageId =
+    input.request.message_id ?? stableChatRecordId("message", variantId);
+  const result = (await state.bridge.createChatMessageSlot({
+    slot: {
+      slot_id: slotId,
+      session_id: input.session.sessionId,
+      primary_variant_id: variantId,
+      active_variant_id: null,
+      metadata_json: slotMetadata,
+      created_at: now,
+      updated_at: now,
+    },
+    primary_variant: messageVariantWrite({
       sessionId: input.session.sessionId,
       slotId,
       variantId,
-      messageId:
-        input.request.message_id ?? stableChatRecordId("message", variantId),
+      messageId,
       source: "primary",
       ordinal: 0,
       actor: input.request.actor,
@@ -9084,20 +9085,22 @@ async function createRustyViewMessageSlot(
       blocks: input.request.blocks,
       now,
     }),
-  );
-  await state.bridge.updateConversationBranchHead({
     branch_id: branch.branch_id,
-    head_message_id:
-      input.request.message_id ?? stableChatRecordId("message", variantId),
-    expected: { type: "any" },
+    expected_branch_head: { type: "any" },
     updated_at: state.now(),
-  });
-  const slot = await requireMessageSlotForSession(
-    state,
-    input.session.sessionId,
-    slotId,
-    true,
-  );
+  })) as {
+    slot?: MessageSlotRecord | null;
+    branch: ConversationBranchRecord;
+    conflict?: { expected?: string | null; actual?: string | null } | null;
+  };
+  if (result.conflict || !result.slot) {
+    return {
+      status: "conflict",
+      branch: result.branch,
+      conflict: result.conflict ?? { expected: null, actual: null },
+    };
+  }
+  const slot = result.slot;
   const event = await appendChatEvent(state, input.session.sessionId, {
     kind: "message_slot_created",
     payload: { slot },

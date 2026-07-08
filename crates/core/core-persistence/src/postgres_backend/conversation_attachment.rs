@@ -161,6 +161,70 @@ impl PostgresBackendStore {
         Ok(record)
     }
 
+    pub fn create_chat_message_slot(
+        &self,
+        request: &CreateChatMessageSlotRequest,
+    ) -> CoreResult<CreateChatMessageSlotResult> {
+        validate_create_chat_message_slot_request(request)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start create PostgreSQL chat message slot", error))?;
+        ensure_branch_belongs_to_session_in_tx(
+            &mut tx,
+            &schema,
+            &request.slot.session_id,
+            &request.branch_id,
+        )?;
+        let current = current_branch_head_in_tx(&mut tx, &schema, &request.branch_id)?;
+        let expected = match &request.expected_branch_head {
+            BranchHeadExpectation::Any => current.clone(),
+            BranchHeadExpectation::None => None,
+            BranchHeadExpectation::Message(message_id) => Some(message_id.clone()),
+        };
+        if request.expected_branch_head != BranchHeadExpectation::Any && current != expected {
+            let branch = load_conversation_branch_in_tx(&mut tx, &schema, &request.branch_id)?;
+            tx.commit().map_err(|error| {
+                postgres_error("commit PostgreSQL create chat slot conflict", error)
+            })?;
+            return Ok(CreateChatMessageSlotResult {
+                slot: None,
+                branch,
+                conflict: Some(BranchHeadConflict {
+                    expected,
+                    actual: current,
+                }),
+            });
+        }
+        save_message_slot_in_tx(&mut tx, &schema, &request.slot)?;
+        save_message_variant_in_tx(&mut tx, &schema, &request.primary_variant)?;
+        tx.execute(
+            &format!(
+                "UPDATE {schema}.conversation_branches
+                 SET head_message_id = $2,
+                     updated_at = $3,
+                     version = version + 1
+                 WHERE branch_id = $1"
+            ),
+            &[
+                &request.branch_id.0,
+                &request.primary_variant.message.message_id.0,
+                &request.updated_at,
+            ],
+        )
+        .map_err(|error| postgres_error("update PostgreSQL create chat slot branch head", error))?;
+        let slot = load_message_slot_in_tx(&mut tx, &schema, &request.slot.slot_id, true)?;
+        let branch = load_conversation_branch_in_tx(&mut tx, &schema, &request.branch_id)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit create PostgreSQL chat message slot", error))?;
+        Ok(CreateChatMessageSlotResult {
+            slot: Some(slot),
+            branch,
+            conflict: None,
+        })
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,

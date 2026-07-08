@@ -789,6 +789,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn create_chat_message_slot(
+        &self,
+        request: &CreateChatMessageSlotRequest,
+    ) -> CoreResult<CreateChatMessageSlotResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.create_chat_message_slot(request),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.create_chat_message_slot(request),
+        }
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,
@@ -1692,6 +1703,13 @@ impl ConversationRepositorySet<'_> {
         variant: &MessageVariantWrite,
     ) -> CoreResult<MessageVariantRecord> {
         self.store.save_message_variant(variant)
+    }
+
+    pub fn create_chat_message_slot(
+        &self,
+        request: &CreateChatMessageSlotRequest,
+    ) -> CoreResult<CreateChatMessageSlotResult> {
+        self.store.create_chat_message_slot(request)
     }
 
     pub fn query_message_slots(

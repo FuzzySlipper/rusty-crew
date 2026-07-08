@@ -20,6 +20,7 @@ export declare class NativeBridgeBinding {
   planModelProviderRefreshJson(requestJson: string): string
   saveMessageSlotJson(inputJson: string): void
   saveMessageVariantJson(inputJson: string): string
+  createChatMessageSlotJson(inputJson: string): string
   queryMessageSlotsJson(inputJson: string): string
   queryMessageVariantsJson(inputJson: string): string
   chatReadModelPageJson(inputJson: string): string

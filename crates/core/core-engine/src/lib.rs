@@ -20,12 +20,13 @@ use rusty_crew_core_persistence::{
     ChatReadModelQuery, ConversationBranchQuery, ConversationBranchRecord,
     ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
     ConversationJumpResult, ConversationSnapshotQuery, ConversationSnapshotRecord,
-    ConversationSnapshotWrite, CoreCoordinationStore, DataBankScopeQuery, DataBankScopeRecord,
-    DataBankScopeWrite, DurableMessageRecord, LoreRecallQuery, LoreRecallResult,
-    LoreRecallTraceQuery, LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord,
-    MessageSlotWrite, MessageVariantQuery, MessageVariantRecord, MessageVariantWrite,
-    ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
+    ConversationSnapshotWrite, CoreCoordinationStore, CreateChatMessageSlotRequest,
+    CreateChatMessageSlotResult, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
+    DurableMessageRecord, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
     ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
     ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord,
     RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
@@ -1024,6 +1025,13 @@ impl CoreEngine {
         variant: &MessageVariantWrite,
     ) -> CoreResult<MessageVariantRecord> {
         self.store.conversation().save_message_variant(variant)
+    }
+
+    pub fn create_chat_message_slot(
+        &self,
+        request: &CreateChatMessageSlotRequest,
+    ) -> CoreResult<CreateChatMessageSlotResult> {
+        self.store.conversation().create_chat_message_slot(request)
     }
 
     pub fn query_message_slots(
@@ -2704,11 +2712,12 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 mod tests {
     use super::*;
     use rusty_crew_core_persistence::{
-        ActiveVariantConflict, AgentMessageQuery, CompletionPacketQuery, CoordinationStore,
-        DurableMessageStatus, DurableMessageWrite, MessageVariantSource, MessageVariantStatus,
-        QueryPage, QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState,
-        RuntimeCounterScope, RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType,
-        ScheduledRunQuery, ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
+        ActiveVariantConflict, AgentMessageQuery, BranchHeadConflict, CompletionPacketQuery,
+        CoordinationStore, DurableMessageStatus, DurableMessageWrite, MessageVariantSource,
+        MessageVariantStatus, QueryPage, QueuedMessageFilter, QueuedMessageRecord,
+        QueuedMessageState, RuntimeCounterScope, RuntimeMaintenancePolicy, RuntimeSearchFilter,
+        RuntimeSearchRowType, ScheduledRunQuery, ScheduledRunStatus, SessionQuery, ToolCallPhase,
+        WorkerRunQuery,
     };
     #[cfg(feature = "postgres")]
     use rusty_crew_core_protocol::EngineStorageConfig;
@@ -6203,6 +6212,144 @@ mod tests {
             })
         );
         assert_eq!(result.slot.active_variant_id, None);
+    }
+
+    #[test]
+    fn create_chat_message_slot_updates_branch_head_atomically() {
+        let engine = test_engine();
+        engine
+            .save_conversation_branch(&ConversationBranchWrite {
+                branch_id: ConversationBranchId::new("create-slot-branch"),
+                session_id: SessionId::new("create-slot-session"),
+                parent_branch_id: None,
+                parent_message_id: None,
+                origin_message_id: None,
+                head_message_id: None,
+                label: Some("Main".to_string()),
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:00:00Z".to_string(),
+                updated_at: "2026-06-19T00:00:00Z".to_string(),
+            })
+            .unwrap();
+        let mut message = test_message_write("create-slot-session", 1, "user", "user", "hello");
+        message.branch_id = Some(ConversationBranchId::new("create-slot-branch"));
+
+        let result = engine
+            .create_chat_message_slot(&CreateChatMessageSlotRequest {
+                slot: MessageSlotWrite {
+                    slot_id: MessageSlotId::new("create-slot-session-slot-1"),
+                    session_id: SessionId::new("create-slot-session"),
+                    primary_variant_id: MessageVariantId::new("create-slot-session-primary-1"),
+                    active_variant_id: None,
+                    metadata_json: json!({ "source": "test" }),
+                    created_at: "2026-06-19T00:01:00Z".to_string(),
+                    updated_at: "2026-06-19T00:01:00Z".to_string(),
+                },
+                primary_variant: MessageVariantWrite {
+                    variant_id: MessageVariantId::new("create-slot-session-primary-1"),
+                    slot_id: MessageSlotId::new("create-slot-session-slot-1"),
+                    source: MessageVariantSource::Primary,
+                    ordinal: 0,
+                    status: MessageVariantStatus::Active,
+                    message,
+                    metadata_json: json!({}),
+                    created_at: "2026-06-19T00:01:00Z".to_string(),
+                    updated_at: "2026-06-19T00:01:00Z".to_string(),
+                },
+                branch_id: ConversationBranchId::new("create-slot-branch"),
+                expected_branch_head: BranchHeadExpectation::None,
+                updated_at: "2026-06-19T00:01:30Z".to_string(),
+            })
+            .unwrap();
+
+        assert!(result.conflict.is_none());
+        assert_eq!(
+            result
+                .slot
+                .as_ref()
+                .map(|slot| slot.primary.message.message_id.clone()),
+            Some(MessageId::new("create-slot-session-message-1"))
+        );
+        assert_eq!(
+            result.branch.head_message_id,
+            Some(MessageId::new("create-slot-session-message-1"))
+        );
+    }
+
+    #[test]
+    fn create_chat_message_slot_conflict_does_not_create_slot() {
+        let engine = test_engine();
+        save_test_message_slot(
+            &engine,
+            "create-conflict-session",
+            1,
+            "user",
+            "user",
+            "existing",
+        );
+        engine
+            .save_conversation_branch(&ConversationBranchWrite {
+                branch_id: ConversationBranchId::new("create-conflict-branch"),
+                session_id: SessionId::new("create-conflict-session"),
+                parent_branch_id: None,
+                parent_message_id: None,
+                origin_message_id: None,
+                head_message_id: Some(MessageId::new("create-conflict-session-message-1")),
+                label: Some("Main".to_string()),
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:00:00Z".to_string(),
+                updated_at: "2026-06-19T00:00:00Z".to_string(),
+            })
+            .unwrap();
+        let mut message = test_message_write("create-conflict-session", 2, "user", "user", "new");
+        message.branch_id = Some(ConversationBranchId::new("create-conflict-branch"));
+
+        let result = engine
+            .create_chat_message_slot(&CreateChatMessageSlotRequest {
+                slot: MessageSlotWrite {
+                    slot_id: MessageSlotId::new("create-conflict-session-slot-2"),
+                    session_id: SessionId::new("create-conflict-session"),
+                    primary_variant_id: MessageVariantId::new("create-conflict-session-primary-2"),
+                    active_variant_id: None,
+                    metadata_json: json!({}),
+                    created_at: "2026-06-19T00:02:00Z".to_string(),
+                    updated_at: "2026-06-19T00:02:00Z".to_string(),
+                },
+                primary_variant: MessageVariantWrite {
+                    variant_id: MessageVariantId::new("create-conflict-session-primary-2"),
+                    slot_id: MessageSlotId::new("create-conflict-session-slot-2"),
+                    source: MessageVariantSource::Primary,
+                    ordinal: 0,
+                    status: MessageVariantStatus::Active,
+                    message,
+                    metadata_json: json!({}),
+                    created_at: "2026-06-19T00:02:00Z".to_string(),
+                    updated_at: "2026-06-19T00:02:00Z".to_string(),
+                },
+                branch_id: ConversationBranchId::new("create-conflict-branch"),
+                expected_branch_head: BranchHeadExpectation::None,
+                updated_at: "2026-06-19T00:02:30Z".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            result.conflict,
+            Some(BranchHeadConflict {
+                expected: None,
+                actual: Some(MessageId::new("create-conflict-session-message-1")),
+            })
+        );
+        assert!(result.slot.is_none());
+        let slots = engine
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(SessionId::new("create-conflict-session")),
+                include_alternates: true,
+                page: None,
+            })
+            .unwrap();
+        assert!(slots
+            .iter()
+            .all(|slot| slot.slot_id != MessageSlotId::new("create-conflict-session-slot-2")));
     }
 
     fn save_test_message_slot(

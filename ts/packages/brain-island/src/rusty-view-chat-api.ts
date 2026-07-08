@@ -550,11 +550,21 @@ export interface MessageBlockDraft {
   metadata_json?: unknown;
 }
 
-export interface MessageSlotMutationResult {
-  status: "created" | "deleted";
-  slot: MessageSlotRecord;
-  latest_cursor: string;
-}
+export type MessageSlotMutationResult =
+  | {
+      status: "created" | "deleted";
+      slot: MessageSlotRecord;
+      latest_cursor: string;
+    }
+  | {
+      status: "conflict";
+      branch: ConversationBranchRecord;
+      conflict: {
+        expected?: string | null;
+        actual?: string | null;
+      };
+      latest_cursor?: string;
+    };
 
 export interface MessageVariantMutationResult {
   status: "created";
@@ -1688,15 +1698,12 @@ async function handleCreateMessageSlot(
   if (!session.ok) return session.result;
   const parsed = parseCreateMessageSlotRequest(request.body);
   if (!parsed.ok) return invalidChatRequest(requestId, parsed);
-  return success(
+  const result = await context.createMessageSlot({
+    session: session.session,
+    request: parsed.value,
     requestId,
-    await context.createMessageSlot({
-      session: session.session,
-      request: parsed.value,
-      requestId,
-    }),
-    201,
-  );
+  });
+  return success(requestId, result, result.status === "conflict" ? 409 : 201);
 }
 
 async function handleCreateMessageVariant(

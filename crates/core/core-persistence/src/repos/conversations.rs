@@ -27,6 +27,61 @@ impl CoordinationStore {
         Ok(record)
     }
 
+    pub fn create_chat_message_slot(
+        &self,
+        request: &CreateChatMessageSlotRequest,
+    ) -> CoreResult<CreateChatMessageSlotResult> {
+        validate_create_chat_message_slot_request(request)?;
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin create chat message slot", error))?;
+        ensure_branch_belongs_to_session_in_tx(&tx, &request.slot.session_id, &request.branch_id)?;
+        let current = current_branch_head_in_tx(&tx, &request.branch_id)?;
+        let expected = match &request.expected_branch_head {
+            BranchHeadExpectation::Any => current.clone(),
+            BranchHeadExpectation::None => None,
+            BranchHeadExpectation::Message(message_id) => Some(message_id.clone()),
+        };
+        if request.expected_branch_head != BranchHeadExpectation::Any && current != expected {
+            let branch = load_conversation_branch_in_tx(&tx, &request.branch_id)?;
+            tx.commit()
+                .map_err(|error| persistence_error("commit create chat slot conflict", error))?;
+            return Ok(CreateChatMessageSlotResult {
+                slot: None,
+                branch,
+                conflict: Some(BranchHeadConflict {
+                    expected,
+                    actual: current,
+                }),
+            });
+        }
+        save_message_slot_in_tx(&tx, &request.slot)?;
+        save_message_variant_in_tx(&tx, &request.primary_variant)?;
+        tx.execute(
+            "UPDATE conversation_branches
+             SET head_message_id = ?2,
+                 updated_at = ?3,
+                 version = version + 1
+             WHERE branch_id = ?1",
+            params![
+                request.branch_id.0,
+                request.primary_variant.message.message_id.0,
+                request.updated_at,
+            ],
+        )
+        .map_err(|error| persistence_error("update create chat slot branch head", error))?;
+        let slot = load_message_slot_in_tx(&tx, &request.slot.slot_id, true)?;
+        let branch = load_conversation_branch_in_tx(&tx, &request.branch_id)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit create chat message slot", error))?;
+        Ok(CreateChatMessageSlotResult {
+            slot: Some(slot),
+            branch,
+            conflict: None,
+        })
+    }
+
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,
@@ -464,6 +519,48 @@ fn save_message_variant_in_tx(
         ],
     )
     .map_err(|error| persistence_error("save message variant", error))?;
+    Ok(())
+}
+
+fn validate_create_chat_message_slot_request(
+    request: &CreateChatMessageSlotRequest,
+) -> CoreResult<()> {
+    if request.slot.slot_id != request.primary_variant.slot_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot and primary variant slot_id must match",
+        ));
+    }
+    if request.slot.primary_variant_id != request.primary_variant.variant_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot primary_variant_id must match primary variant variant_id",
+        ));
+    }
+    if request.slot.session_id != request.primary_variant.message.session_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat message slot and primary variant message session_id must match",
+        ));
+    }
+    if request.primary_variant.source != MessageVariantSource::Primary {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message slot requires a primary variant",
+        ));
+    }
+    if request.primary_variant.ordinal != 0 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message slot primary variant ordinal must be 0",
+        ));
+    }
+    if request.primary_variant.message.branch_id.as_ref() != Some(&request.branch_id) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "create chat message slot primary message branch_id must match target branch_id",
+        ));
+    }
     Ok(())
 }
 
