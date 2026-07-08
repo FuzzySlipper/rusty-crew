@@ -25,9 +25,6 @@ import {
   piAgentBrainRunInputSchema,
   providerStateDiagnosticArraySchema,
   rawBodyStateSchema,
-  rawContextCompactionArtifactArraySchema,
-  rawContextCompactionArtifactQuerySchema,
-  rawContextCompactionArtifactSchema,
   rawModelProviderRefreshImpactSchema,
   rawModelProviderRefreshPlanSchema,
   rawModelProviderRecordArraySchema,
@@ -37,15 +34,13 @@ import {
   rawProfilePurgeReportSchema,
   rawProfileRegistryRecordArraySchema,
   rawProfileRegistryRecordSchema,
-  rawSessionActivityDigestArraySchema,
-  rawSessionActivityDigestQuerySchema,
-  rawSessionActivityDigestSchema,
   rawSessionStateArraySchema,
 } from "./bridge-validation-schemas.js";
 import {
   toCoreConfigWireCreateProfilePlanInput,
   toCoreConfigWireRuntimeConfigValidationInput,
 } from "./generated/core-config-facade.js";
+import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 
 export { coreConfigFacadeArtifact } from "./generated/core-config-facade.js";
 
@@ -3948,111 +3943,7 @@ function createNativeBridgeModule(
         binding.getRecallTraceJson(traceId),
       ) as NativeLoreRecallTraceRecord | null) ?? undefined,
     runMaintenance: async (policy) => binding.runMaintenance(policy),
-    listMemorySpaceDescriptors: async () =>
-      JSON.parse(
-        binding.listMemorySpaceDescriptorsJson(),
-      ) as MemorySpaceDescriptor[],
-    querySessionMemoryRecords: async (query) =>
-      JSON.parse(
-        binding.querySessionMemoryRecordsJson(JSON.stringify(query)),
-      ) as NativeSessionMemoryRecord[],
-    buildSessionMemoryPromptContext: async (query) =>
-      JSON.parse(
-        binding.buildSessionMemoryPromptContextJson(JSON.stringify(query)),
-      ) as NativeSessionMemoryPromptContext,
-    saveMemoryProposal: async (proposal) =>
-      JSON.parse(
-        binding.saveMemoryProposalJson(JSON.stringify(proposal)),
-      ) as MemoryProposalRecord,
-    planCaptureMemoryProposals: async (input) =>
-      JSON.parse(
-        binding.planCaptureMemoryProposalsJson(JSON.stringify(input)),
-      ) as unknown,
-    planCuratorGovernanceTransition: async (input) =>
-      JSON.parse(
-        binding.planCuratorGovernanceTransitionJson(JSON.stringify(input)),
-      ) as unknown,
-    listMemoryProposals: async (query) =>
-      JSON.parse(
-        binding.listMemoryProposalsJson(JSON.stringify(query)),
-      ) as MemoryProposalRecord[],
-    saveSessionActivityDigest: async (digest) => {
-      const validatedDigest = validateBridgeValue<SessionActivityDigest>({
-        operation: "save_session_activity_digest",
-        direction: "ts_to_rust",
-        schema: rawSessionActivityDigestSchema,
-        value: digest,
-      });
-      return validateBridgeValue<SessionActivityDigest>({
-        operation: "save_session_activity_digest",
-        direction: "rust_to_ts",
-        schema: rawSessionActivityDigestSchema,
-        value: JSON.parse(
-          binding.saveSessionActivityDigestJson(
-            JSON.stringify(validatedDigest),
-          ),
-        ),
-      });
-    },
-    listSessionActivityDigests: async (query) => {
-      const validatedQuery = validateBridgeValue<SessionActivityDigestQuery>({
-        operation: "list_session_activity_digests",
-        direction: "ts_to_rust",
-        schema: rawSessionActivityDigestQuerySchema,
-        value: query,
-      });
-      return validateBridgeValue<SessionActivityDigest[]>({
-        operation: "list_session_activity_digests",
-        direction: "rust_to_ts",
-        schema: rawSessionActivityDigestArraySchema,
-        value: JSON.parse(
-          binding.listSessionActivityDigestsJson(
-            JSON.stringify(validatedQuery),
-          ),
-        ),
-      });
-    },
-    saveContextCompactionArtifact: async (artifact) => {
-      const validatedArtifact = validateBridgeValue<ContextCompactionArtifact>({
-        operation: "save_context_compaction_artifact",
-        direction: "ts_to_rust",
-        schema: rawContextCompactionArtifactSchema,
-        value: artifact,
-      });
-      return validateBridgeValue<ContextCompactionArtifact>({
-        operation: "save_context_compaction_artifact",
-        direction: "rust_to_ts",
-        schema: rawContextCompactionArtifactSchema,
-        value: JSON.parse(
-          binding.saveContextCompactionArtifactJson(
-            JSON.stringify(validatedArtifact),
-          ),
-        ),
-      });
-    },
-    listContextCompactionArtifacts: async (query) => {
-      const validatedQuery =
-        validateBridgeValue<ContextCompactionArtifactQuery>({
-          operation: "list_context_compaction_artifacts",
-          direction: "ts_to_rust",
-          schema: rawContextCompactionArtifactQuerySchema,
-          value: query,
-        });
-      return validateBridgeValue<ContextCompactionArtifact[]>({
-        operation: "list_context_compaction_artifacts",
-        direction: "rust_to_ts",
-        schema: rawContextCompactionArtifactArraySchema,
-        value: JSON.parse(
-          binding.listContextCompactionArtifactsJson(
-            JSON.stringify(validatedQuery),
-          ),
-        ),
-      });
-    },
-    recordMemoryGovernanceDecision: async (decision) =>
-      JSON.parse(
-        binding.recordMemoryGovernanceDecisionJson(JSON.stringify(decision)),
-      ) as MemoryGovernanceDecisionRecord,
+    ...createNativeBridgeMemoryMethods(binding),
     planRoleplayAssistantAlternative: async (input) =>
       JSON.parse(
         binding.planRoleplayAssistantAlternativeJson(JSON.stringify(input)),
