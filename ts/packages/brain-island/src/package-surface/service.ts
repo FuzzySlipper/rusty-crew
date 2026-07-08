@@ -26,4 +26,14 @@ export type {
   ServiceBackgroundLoopIntervals,
   ServiceBackgroundLoopPort,
 } from "../service-background-loops.js";
+export {
+  SERVICE_API_ROUTE_TABLE,
+  isBrowserCorsRoute,
+  matchServiceApiRoute,
+} from "../service-route-table.js";
+export type {
+  ServiceApiRouteAuthPhase,
+  ServiceApiRouteDescriptor,
+  ServiceApiRouteId,
+} from "../service-route-table.js";
 export type { ServiceAdapterFactories } from "../service-adapter-ports.js";

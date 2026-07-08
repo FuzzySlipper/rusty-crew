@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import {
   ADMIN_CONTROL_CAPABILITIES,
   API_CAPABILITIES,
+  SERVICE_API_ROUTE_TABLE,
   SLASH_COMMAND_REGISTRY,
   apiCapabilityRegistry,
   buildRuntimeDiagnosticsProjection,
@@ -11,6 +12,7 @@ import {
   chatCommandAutocomplete,
   chatCommandRegistry,
   handleAdminDiagnosticsRequest,
+  matchServiceApiRoute,
   routeSlashCommand,
   slashCommandNames,
   type RuntimeCounterSummary,
@@ -97,6 +99,27 @@ assertUnique(
   ),
   "API capability route",
 );
+assertUnique(
+  SERVICE_API_ROUTE_TABLE.map((route) => route.id),
+  "service route id",
+);
+assert.deepEqual(
+  SERVICE_API_ROUTE_TABLE.map((route) => route.order),
+  [...SERVICE_API_ROUTE_TABLE.map((route) => route.order)].sort(
+    (left, right) => left - right,
+  ),
+  "service route table must stay in dispatch order",
+);
+for (const capability of API_CAPABILITIES.filter(
+  (candidate) => candidate.public,
+)) {
+  const samplePath = samplePathTemplate(capability.path_template);
+  assert.ok(
+    matchServiceApiRoute(samplePath),
+    `missing service route table match for API capability ${capability.id}: ${samplePath}`,
+  );
+}
+assert.equal(matchServiceApiRoute("/v1/unknown-route"), undefined);
 assert.ok(
   API_CAPABILITIES.some(
     (capability) =>
@@ -244,6 +267,10 @@ function assertUnique(values: readonly (string | undefined)[], label: string) {
     assert.equal(seen.has(value), false, `duplicate ${label}: ${value}`);
     seen.add(value);
   }
+}
+
+function samplePathTemplate(pathTemplate: string): string {
+  return pathTemplate.replace(/\{[^}]+\}/g, "sample");
 }
 
 function emptyRuntimeCounters(): RuntimeCounterSummary {

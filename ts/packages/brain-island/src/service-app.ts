@@ -258,6 +258,10 @@ import {
   isChatRoute,
   type ChatStreamSubscriber,
 } from "./service-chat-stream-routes.js";
+import {
+  isBrowserCorsRoute,
+  matchServiceApiRoute,
+} from "./service-route-table.js";
 import { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
 import {
   routeSlashCommand,
@@ -524,7 +528,6 @@ interface RuntimePauseRecord {
   inFlightWakeCount: number;
 }
 
-const CONTROL_ROUTE_PREFIX = "/v1/admin/control/";
 const DEV_NO_AUTH_CONTROL_TOKEN = "__rusty_crew_dev_no_auth__";
 
 export async function createRustyCrewServiceApp(
@@ -755,7 +758,8 @@ async function handleHttpRequest(
   state: ServiceState,
 ): Promise<ServiceRouteResult> {
   const url = new URL(request.url ?? "/", "http://rusty-crew.local");
-  if (url.pathname === "/v1/admin/healthz") {
+  const beforeAuthRoute = matchServiceApiRoute(url.pathname, "before_auth");
+  if (beforeAuthRoute?.id === "admin.healthz") {
     return handleAdminDiagnosticsRequest(
       {
         method: request.method ?? "GET",
@@ -768,8 +772,9 @@ async function handleHttpRequest(
     );
   }
 
+  const corsRoute = matchServiceApiRoute(url.pathname, "cors_preflight");
   if (
-    isBrowserCorsRoute(url.pathname) &&
+    corsRoute?.id === "browser.cors" &&
     (request.method ?? "GET").toUpperCase() === "OPTIONS"
   ) {
     return chatCorsPreflightResponse(request);
@@ -789,7 +794,9 @@ async function handleHttpRequest(
         : unauthorized;
   }
 
-  if (url.pathname.startsWith(CONTROL_ROUTE_PREFIX)) {
+  const route = matchServiceApiRoute(url.pathname, "after_auth");
+
+  if (route?.id === "admin.control") {
     const body = await readJsonBody(request);
     const result = await handleAdminControlRequest(
       {
@@ -812,7 +819,7 @@ async function handleHttpRequest(
     return result;
   }
 
-  if (isChatRoute(url.pathname)) {
+  if (route?.id === "chat") {
     let chatEffectiveDefaults:
       | Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>>
       | undefined;
@@ -894,11 +901,11 @@ async function handleHttpRequest(
     });
   }
 
-  if (url.pathname.startsWith("/v1/debug/")) {
+  if (route?.id === "debug") {
     return handleDirectDebugRequest(request, url, state);
   }
 
-  if (url.pathname.startsWith("/v1/admin/scheduler/")) {
+  if (route?.id === "admin.scheduler") {
     return handleSchedulerReadRequest(
       {
         method: request.method ?? "GET",
@@ -912,41 +919,32 @@ async function handleHttpRequest(
     );
   }
 
-  if (url.pathname === "/v1/admin/mcp/catalog") {
+  if (route?.id === "admin.mcp.catalog") {
     return handleAdminMcpCatalogRequest(
       { method: request.method ?? "GET", requestId: requestId(request) },
       { config: state.config, runtimeConfig: state.runtimeConfig },
     );
   }
 
-  if (
-    url.pathname === "/v1/admin/mcp/servers" ||
-    url.pathname.startsWith("/v1/admin/mcp/servers/")
-  ) {
+  if (route?.id === "admin.mcp.servers") {
     return handleAdminMcpServerRegistryRequest(request, state, url);
   }
 
-  if (
-    url.pathname === "/v1/admin/tools/catalog" ||
-    url.pathname === "/v1/admin/tool-policy/catalog"
-  ) {
+  if (route?.id === "admin.tools.catalog") {
     return handleAdminToolsCatalogRequest({
       method: request.method ?? "GET",
       requestId: requestId(request),
     });
   }
 
-  if (url.pathname === "/v1/admin/context-strategies") {
+  if (route?.id === "admin.context_strategies") {
     return handleAdminContextStrategiesRequest({
       method: request.method ?? "GET",
       requestId: requestId(request),
     });
   }
 
-  if (
-    url.pathname === "/v1/admin/local-tool-profiles" ||
-    url.pathname.startsWith("/v1/admin/local-tool-profiles/")
-  ) {
+  if (route?.id === "admin.local_tool_profiles") {
     return handleAdminLocalToolProfilesRequest(
       {
         method: request.method ?? "GET",
@@ -963,7 +961,7 @@ async function handleHttpRequest(
     );
   }
 
-  if (isRoleplayBrowserRoute(url.pathname)) {
+  if (route?.id === "roleplay") {
     return withChatCors(
       await handleAdminRoleplayRequest(
         request,
@@ -974,7 +972,7 @@ async function handleHttpRequest(
     );
   }
 
-  if (url.pathname.startsWith("/v1/admin/storage/")) {
+  if (route?.id === "admin.storage") {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST"
         ? await readJsonBody(request)
@@ -990,7 +988,7 @@ async function handleHttpRequest(
     );
   }
 
-  if (url.pathname.startsWith("/v1/admin/model-providers")) {
+  if (route?.id === "admin.model_providers") {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST" ||
       (request.method ?? "GET").toUpperCase() === "PATCH"
@@ -1023,7 +1021,7 @@ async function handleHttpRequest(
     );
   }
 
-  if (isProfileRegistryWriteRoute(url.pathname)) {
+  if (route?.id === "admin.profile_registry.write") {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST" ||
       (request.method ?? "GET").toUpperCase() === "PATCH"
@@ -1059,7 +1057,7 @@ async function handleHttpRequest(
     );
   }
 
-  if (url.pathname.startsWith("/v1/admin/memory/")) {
+  if (route?.id === "admin.memory") {
     const body =
       (request.method ?? "GET").toUpperCase() === "POST"
         ? await readJsonBody(request)
@@ -1075,7 +1073,7 @@ async function handleHttpRequest(
     );
   }
 
-  if (url.pathname.startsWith("/v1/admin/")) {
+  if (route?.id === "admin.diagnostics") {
     return handleAdminDiagnosticsRequest(
       {
         method: request.method ?? "GET",
@@ -11321,10 +11319,6 @@ function writeJsonResponse(
   response.end(
     typeof result.body === "string" ? result.body : JSON.stringify(result.body),
   );
-}
-
-function isBrowserCorsRoute(pathname: string): boolean {
-  return isChatRoute(pathname) || isRoleplayBrowserRoute(pathname);
 }
 
 function chatCorsPreflightResponse(
