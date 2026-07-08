@@ -106,17 +106,18 @@ use crate::{
 };
 use postgres::{types::ToSql, Client, GenericClient, Row, Transaction};
 use rusty_crew_core_protocol::{
-    session_memory_space_descriptor, BrainEvent, CompletionPacket, CompletionStatus,
-    FanOutFailurePolicy, MemoryConflictPolicy, MemoryDiagnosticsPolicy, MemoryEvidenceKind,
-    MemoryEvidenceRef, MemoryExportImportPolicy, MemoryFieldType, MemoryGovernanceDecisionInput,
-    MemoryGovernanceDecisionKind, MemoryGovernanceDecisionRecord, MemoryGovernanceMode,
-    MemoryIndexingPolicy, MemoryOperation, MemoryOperationPolicy, MemoryPromptPolicy,
-    MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemoryProposalReviewStatus,
-    MemoryProvenancePolicy, MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor,
-    MemoryRecordShapeId, MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy,
-    MemoryScope, MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor, MemorySpaceId,
-    MemoryVisibilityModel, MemoryWritePolicy, ParentConsumptionPolicy, SessionActivityDigest,
-    SessionActivityDigestQuery,
+    select_memory_governance_mode, session_memory_space_descriptor,
+    validate_memory_governance_decision_policy, validate_memory_governance_transition_policy,
+    BrainEvent, CompletionPacket, CompletionStatus, FanOutFailurePolicy, MemoryConflictPolicy,
+    MemoryDiagnosticsPolicy, MemoryEvidenceKind, MemoryEvidenceRef, MemoryExportImportPolicy,
+    MemoryFieldType, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionKind,
+    MemoryGovernanceDecisionRecord, MemoryGovernanceMode, MemoryIndexingPolicy, MemoryOperation,
+    MemoryOperationPolicy, MemoryPromptPolicy, MemoryProposalEnvelope, MemoryProposalQuery,
+    MemoryProposalRecord, MemoryProposalReviewStatus, MemoryProposalSource, MemoryProvenancePolicy,
+    MemoryRecordFieldDescriptor, MemoryRecordShapeDescriptor, MemoryRecordShapeId,
+    MemoryRecordShapeRef, MemoryRetentionPolicy, MemoryRetrievalStrategy, MemoryScope,
+    MemoryScopeModel, MemoryScopeType, MemorySpaceDescriptor, MemorySpaceId, MemoryVisibilityModel,
+    MemoryWritePolicy, ParentConsumptionPolicy, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use std::collections::BTreeSet;
 
@@ -7161,22 +7162,7 @@ fn session_id_for_session_memory_proposal(
 fn validate_postgres_memory_governance_decision(
     decision: &MemoryGovernanceDecisionInput,
 ) -> CoreResult<()> {
-    validate_postgres_identifier("memory governance decision id", &decision.decision_id)?;
-    validate_postgres_identifier("memory governance proposal id", &decision.proposal_id)?;
-    if decision.actor.trim().is_empty() {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "memory governance actor must not be empty",
-        ));
-    }
-    if let Some(confidence) = decision.confidence {
-        if !(0.0..=1.0).contains(&confidence) || confidence.is_nan() {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "memory governance confidence must be between 0 and 1",
-            ));
-        }
-    }
+    validate_memory_governance_decision_policy(decision)?;
     Ok(())
 }
 
@@ -7184,24 +7170,8 @@ fn validate_postgres_memory_governance_transition(
     current: MemoryProposalReviewStatus,
     decision: MemoryGovernanceDecisionKind,
 ) -> CoreResult<()> {
-    let allowed = match (current, decision) {
-        (_, MemoryGovernanceDecisionKind::RoutedToReview) => false,
-        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Approved) => true,
-        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Rejected) => true,
-        (MemoryProposalReviewStatus::Approved, MemoryGovernanceDecisionKind::Applied) => true,
-        _ => false,
-    };
-    if allowed {
-        Ok(())
-    } else {
-        Err(CoreError::new(
-            CoreErrorKind::ActionRejected,
-            format!(
-                "memory governance decision {:?} is not allowed from {:?}",
-                decision, current
-            ),
-        ))
-    }
+    validate_memory_governance_transition_policy(current, decision)?;
+    Ok(())
 }
 
 fn session_memory_proposal_record_id(proposal: &MemoryProposalEnvelope) -> CoreResult<String> {
@@ -7274,8 +7244,11 @@ fn session_memory_proposal_rationale(proposal: &MemoryProposalEnvelope) -> CoreR
         })
 }
 
-fn selected_governance_mode(requested: MemoryGovernanceMode) -> MemoryGovernanceMode {
-    requested
+fn selected_governance_mode(
+    requested: MemoryGovernanceMode,
+    source: MemoryProposalSource,
+) -> MemoryGovernanceMode {
+    select_memory_governance_mode(requested, source)
 }
 
 fn memory_proposal_status_as_str(status: MemoryProposalReviewStatus) -> &'static str {

@@ -223,51 +223,6 @@ pub(crate) fn parse_session_memory_status(raw: &str) -> CoreResult<SessionMemory
     }
 }
 
-pub(crate) fn validate_identifier(label: &str, value: &str) -> CoreResult<()> {
-    if value.is_empty() {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            format!("{label} must not be empty"),
-        ));
-    }
-    if value.len() > 64 {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            format!("{label} must be at most 64 characters"),
-        ));
-    }
-    let mut previous_underscore = false;
-    for (index, ch) in value.chars().enumerate() {
-        let valid = ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_';
-        if !valid {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                format!("{label} must use lowercase snake_case ASCII identifiers"),
-            ));
-        }
-        if index == 0 && !ch.is_ascii_lowercase() {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                format!("{label} must start with a lowercase letter"),
-            ));
-        }
-        if ch == '_' && (index == 0 || previous_underscore) {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                format!("{label} must not contain leading or repeated underscores"),
-            ));
-        }
-        previous_underscore = ch == '_';
-    }
-    if value.ends_with('_') {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            format!("{label} must not end with an underscore"),
-        ));
-    }
-    Ok(())
-}
-
 pub(crate) fn to_sql_core_error(error: CoreError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }

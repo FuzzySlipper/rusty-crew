@@ -46,8 +46,7 @@ pub(crate) use crate::sqlite_memory_support::{
     memory_scope_type_as_str, parse_memory_governance_mode, parse_memory_proposal_source,
     parse_memory_proposal_status, parse_memory_scope_type, parse_session_memory_status,
     session_exists_in_tx, session_id_for_conversation_branch_in_tx, session_memory_status_as_str,
-    to_sql_core_error, validate_identifier, validate_memory_confidence,
-    validate_non_negative_finite,
+    to_sql_core_error, validate_memory_confidence, validate_non_negative_finite,
 };
 pub(crate) use crate::sqlite_provider_wire_state::expire_provider_wire_states_in_tx;
 pub(crate) use crate::sqlite_runtime_search::{
@@ -67,7 +66,9 @@ use crate::module_schema::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use rusty_crew_core_protocol::{
-    session_memory_space_descriptor, AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord,
+    select_memory_governance_mode, session_memory_space_descriptor,
+    validate_memory_governance_decision_policy, validate_memory_governance_transition_policy,
+    validate_memory_proposal_policy, AdapterId, AgentId, AgentInstanceId, AgentInstanceRecord,
     AgentMessage, AttachmentId, AttachmentLinkId, BrainEvent, CompletionPacket,
     ContextCompactionArtifact, ContextCompactionArtifactQuery, ConversationBranchId,
     ConversationSnapshotId, CoreError, CoreErrorKind, CoreEvent, CoreEventKind, CoreResult,

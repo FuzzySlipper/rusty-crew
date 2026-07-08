@@ -611,6 +611,51 @@ pub struct MemoryProposalEnvelope {
     pub created_at: Option<IsoTimestamp>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryPolicyDiagnostic {
+    pub reason_code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryPolicyReport {
+    pub accepted: bool,
+    pub diagnostics: Vec<MemoryPolicyDiagnostic>,
+}
+
+impl MemoryPolicyReport {
+    pub fn accepted() -> Self {
+        Self {
+            accepted: true,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    pub fn first_reason_code(&self) -> Option<&str> {
+        self.diagnostics
+            .first()
+            .map(|diagnostic| diagnostic.reason_code.as_str())
+    }
+
+    fn reject(reason_code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            accepted: false,
+            diagnostics: vec![MemoryPolicyDiagnostic {
+                reason_code: reason_code.into(),
+                message: message.into(),
+            }],
+        }
+    }
+
+    fn push_rejection(&mut self, reason_code: impl Into<String>, message: impl Into<String>) {
+        self.accepted = false;
+        self.diagnostics.push(MemoryPolicyDiagnostic {
+            reason_code: reason_code.into(),
+            message: message.into(),
+        });
+    }
+}
+
 impl MemoryProposalEnvelope {
     pub fn validate_for_descriptor(&self, descriptor: &MemorySpaceDescriptor) -> CoreResult<()> {
         descriptor.validate()?;
@@ -663,6 +708,197 @@ impl MemoryProposalEnvelope {
             return invalid("memory proposal durability_rationale is required");
         }
         Ok(())
+    }
+}
+
+pub fn select_memory_governance_mode(
+    requested: MemoryGovernanceMode,
+    source: MemoryProposalSource,
+) -> MemoryGovernanceMode {
+    match (source, requested) {
+        (
+            MemoryProposalSource::InWakeTool | MemoryProposalSource::CaptureProducer,
+            MemoryGovernanceMode::DirectWrite | MemoryGovernanceMode::AutoApplyThreshold,
+        ) => MemoryGovernanceMode::CuratorRoute,
+        _ => requested,
+    }
+}
+
+pub fn evaluate_memory_proposal_policy(
+    proposal: &MemoryProposalEnvelope,
+    descriptor: &MemorySpaceDescriptor,
+) -> MemoryPolicyReport {
+    let mut report = MemoryPolicyReport::accepted();
+    if let Err(error) = descriptor.validate() {
+        report.push_rejection(
+            "memory_policy_descriptor_invalid",
+            format!("memory descriptor is invalid: {error}"),
+        );
+        return report;
+    }
+    if validate_identifier("memory proposal id", &proposal.proposal_id).is_err() {
+        report.push_rejection(
+            "memory_policy_proposal_id_invalid",
+            "memory proposal id must be a lowercase snake_case identifier",
+        );
+    }
+    if proposal.space_id != descriptor.space_id {
+        report.push_rejection(
+            "memory_policy_space_mismatch",
+            "memory proposal space_id does not match descriptor",
+        );
+    }
+    if !proposal.operation.is_proposal_operation() {
+        report.push_rejection(
+            "memory_policy_read_operation_rejected",
+            "memory proposal operation must mutate memory",
+        );
+    }
+    let operation_policy = descriptor
+        .write_policy
+        .operation_policies
+        .iter()
+        .find(|policy| policy.operation == proposal.operation);
+    if !descriptor.supports_operation(proposal.operation) || operation_policy.is_none() {
+        report.push_rejection(
+            "memory_policy_operation_unsupported",
+            format!(
+                "memory operation {:?} is not supported by space {}",
+                proposal.operation, descriptor.space_id
+            ),
+        );
+    }
+    if let Err(error) = proposal.scope.validate() {
+        report.push_rejection(
+            "memory_policy_scope_invalid",
+            format!("memory proposal scope is invalid: {error}"),
+        );
+    }
+    if !descriptor.supports_scope(proposal.scope.scope_type) {
+        report.push_rejection(
+            "memory_policy_scope_unsupported",
+            format!(
+                "memory scope {:?} is not supported by space {}",
+                proposal.scope.scope_type, descriptor.space_id
+            ),
+        );
+    }
+    if proposal.shape.shape_id.validate().is_err() || proposal.shape.version == 0 {
+        report.push_rejection(
+            "memory_policy_shape_invalid",
+            "memory proposal shape id and version must be valid",
+        );
+    } else if !descriptor.has_shape(&proposal.shape) {
+        report.push_rejection(
+            "memory_policy_shape_unsupported",
+            format!(
+                "memory shape {}@{} is not declared by space {}",
+                proposal.shape.shape_id, proposal.shape.version, descriptor.space_id
+            ),
+        );
+    }
+    if let Err(error) = validate_confidence(proposal.confidence) {
+        report.push_rejection(
+            "memory_policy_confidence_invalid",
+            format!("memory proposal confidence is invalid: {error}"),
+        );
+    }
+    if let Some(policy) = operation_policy {
+        if let Some(min_confidence) = policy.min_confidence {
+            if proposal.confidence < min_confidence {
+                report.push_rejection(
+                    "memory_policy_confidence_below_minimum",
+                    format!(
+                        "memory proposal confidence {} is below required minimum {}",
+                        proposal.confidence, min_confidence
+                    ),
+                );
+            }
+        }
+        if policy.requires_expected_revision
+            && !proposal
+                .content
+                .get("expected_revision")
+                .and_then(Value::as_u64)
+                .is_some_and(|revision| revision > 0)
+        {
+            report.push_rejection(
+                "memory_policy_expected_revision_required",
+                "memory proposal operation requires content.expected_revision greater than zero",
+            );
+        }
+    }
+    for evidence in &proposal.evidence_refs {
+        if evidence.ref_id.trim().is_empty() {
+            report.push_rejection(
+                "memory_policy_evidence_ref_invalid",
+                "memory proposal evidence ref_id must not be empty",
+            );
+        }
+    }
+    for required in &descriptor.provenance_policy.required_evidence {
+        if !proposal
+            .evidence_refs
+            .iter()
+            .any(|evidence| evidence.evidence_type == *required)
+        {
+            report.push_rejection(
+                "memory_policy_required_evidence_missing",
+                format!("memory proposal missing required evidence {required:?}"),
+            );
+        }
+    }
+    if descriptor.provenance_policy.source_required
+        && proposal.source == MemoryProposalSource::DenMemoryImport
+        && !proposal
+            .evidence_refs
+            .iter()
+            .any(|evidence| evidence.evidence_type == MemoryEvidenceKind::DenMemory)
+    {
+        report.push_rejection(
+            "memory_policy_den_import_evidence_required",
+            "Den memory imports must cite Den memory as external evidence",
+        );
+    }
+    if descriptor.provenance_policy.rationale_required
+        && proposal
+            .durability_rationale
+            .as_ref()
+            .map(|value| value.trim().is_empty())
+            .unwrap_or(true)
+    {
+        report.push_rejection(
+            "memory_policy_rationale_required",
+            "memory proposal durability_rationale is required",
+        );
+    }
+    if matches!(descriptor.retention_policy, MemoryRetentionPolicy::Expire)
+        && proposal.content.get("expires_at").is_none()
+    {
+        report.push_rejection(
+            "memory_policy_retention_metadata_required",
+            "expiring memory proposals must include content.expires_at",
+        );
+    }
+    report
+}
+
+pub fn validate_memory_proposal_policy(
+    proposal: &MemoryProposalEnvelope,
+    descriptor: &MemorySpaceDescriptor,
+) -> CoreResult<MemoryPolicyReport> {
+    let report = evaluate_memory_proposal_policy(proposal, descriptor);
+    if report.accepted {
+        Ok(report)
+    } else {
+        let first = report
+            .diagnostics
+            .first()
+            .expect("rejected policy report has diagnostic");
+        Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{}: {}", first.reason_code, first.message),
+        ))
     }
 }
 
@@ -837,6 +1073,105 @@ pub struct MemoryGovernanceDecisionRecord {
     pub message: Option<String>,
     pub resulting_revision: Option<u64>,
     pub decided_at: IsoTimestamp,
+}
+
+pub fn evaluate_memory_governance_decision_policy(
+    decision: &MemoryGovernanceDecisionInput,
+) -> MemoryPolicyReport {
+    let mut report = MemoryPolicyReport::accepted();
+    if validate_identifier("memory governance decision id", &decision.decision_id).is_err() {
+        report.push_rejection(
+            "memory_policy_decision_id_invalid",
+            "memory governance decision id must be a lowercase snake_case identifier",
+        );
+    }
+    if validate_identifier("memory governance proposal id", &decision.proposal_id).is_err() {
+        report.push_rejection(
+            "memory_policy_decision_proposal_id_invalid",
+            "memory governance proposal id must be a lowercase snake_case identifier",
+        );
+    }
+    if decision.actor.trim().is_empty() {
+        report.push_rejection(
+            "memory_policy_decision_actor_required",
+            "memory governance actor must not be empty",
+        );
+    }
+    if let Some(confidence) = decision.confidence {
+        if let Err(error) = validate_confidence(confidence) {
+            report.push_rejection(
+                "memory_policy_decision_confidence_invalid",
+                format!("memory governance confidence is invalid: {error}"),
+            );
+        }
+    }
+    for evidence in &decision.evidence_refs {
+        if evidence.ref_id.trim().is_empty() {
+            report.push_rejection(
+                "memory_policy_decision_evidence_ref_invalid",
+                "memory governance evidence ref_id must not be empty",
+            );
+        }
+    }
+    report
+}
+
+pub fn validate_memory_governance_decision_policy(
+    decision: &MemoryGovernanceDecisionInput,
+) -> CoreResult<MemoryPolicyReport> {
+    let report = evaluate_memory_governance_decision_policy(decision);
+    if report.accepted {
+        Ok(report)
+    } else {
+        let first = report
+            .diagnostics
+            .first()
+            .expect("rejected policy report has diagnostic");
+        Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{}: {}", first.reason_code, first.message),
+        ))
+    }
+}
+
+pub fn evaluate_memory_governance_transition_policy(
+    current: MemoryProposalReviewStatus,
+    decision: MemoryGovernanceDecisionKind,
+) -> MemoryPolicyReport {
+    let allowed = match (current, decision) {
+        (_, MemoryGovernanceDecisionKind::RoutedToReview) => false,
+        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Approved) => true,
+        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Rejected) => true,
+        (MemoryProposalReviewStatus::Approved, MemoryGovernanceDecisionKind::Applied) => true,
+        _ => false,
+    };
+    if allowed {
+        MemoryPolicyReport::accepted()
+    } else {
+        MemoryPolicyReport::reject(
+            "memory_policy_transition_rejected",
+            format!("memory governance decision {decision:?} is not allowed from {current:?}"),
+        )
+    }
+}
+
+pub fn validate_memory_governance_transition_policy(
+    current: MemoryProposalReviewStatus,
+    decision: MemoryGovernanceDecisionKind,
+) -> CoreResult<MemoryPolicyReport> {
+    let report = evaluate_memory_governance_transition_policy(current, decision);
+    if report.accepted {
+        Ok(report)
+    } else {
+        let first = report
+            .diagnostics
+            .first()
+            .expect("rejected policy report has diagnostic");
+        Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!("{}: {}", first.reason_code, first.message),
+        ))
+    }
 }
 
 fn validate_identifier(label: &str, value: &str) -> CoreResult<()> {
@@ -1157,6 +1492,122 @@ mod tests {
         branch_summary
             .validate_for_descriptor(&descriptor)
             .expect("branch summary proposal matches descriptor");
+    }
+
+    #[test]
+    fn memory_policy_port_emits_stable_proposal_diagnostics() {
+        let descriptor = session_memory_descriptor();
+        let mut proposal = valid_session_memory_proposal(
+            MemoryOperation::Replace,
+            MemoryScopeType::Session,
+            "session_fact",
+        );
+        proposal
+            .content
+            .as_object_mut()
+            .unwrap()
+            .remove("expected_revision");
+
+        let report = evaluate_memory_proposal_policy(&proposal, &descriptor);
+        assert!(!report.accepted);
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.reason_code == "memory_policy_expected_revision_required"
+        }));
+
+        let error = validate_memory_proposal_policy(&proposal, &descriptor)
+            .expect_err("policy rejects missing revision");
+        assert!(error
+            .to_string()
+            .contains("memory_policy_expected_revision_required"));
+    }
+
+    #[test]
+    fn memory_policy_port_keeps_den_memory_as_external_import_evidence() {
+        let descriptor = session_memory_descriptor();
+        let mut proposal = valid_session_memory_proposal(
+            MemoryOperation::Add,
+            MemoryScopeType::Session,
+            "session_fact",
+        );
+        proposal.source = MemoryProposalSource::DenMemoryImport;
+
+        let report = evaluate_memory_proposal_policy(&proposal, &descriptor);
+        assert!(!report.accepted);
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.reason_code == "memory_policy_den_import_evidence_required"
+        }));
+
+        proposal.evidence_refs.push(MemoryEvidenceRef {
+            evidence_type: MemoryEvidenceKind::DenMemory,
+            ref_id: "den-memory-1".to_string(),
+            label: Some("external Den memory evidence".to_string()),
+        });
+        validate_memory_proposal_policy(&proposal, &descriptor)
+            .expect("Den memory import is accepted only as evidenced Crew proposal");
+    }
+
+    #[test]
+    fn memory_policy_port_validates_decisions_and_transitions() {
+        let mut decision = MemoryGovernanceDecisionInput {
+            decision_id: "decision_one".to_string(),
+            proposal_id: "proposal_one".to_string(),
+            decision: MemoryGovernanceDecisionKind::Approved,
+            actor: "curator".to_string(),
+            source: MemoryProposalSource::Human,
+            evidence_refs: vec![MemoryEvidenceRef {
+                evidence_type: MemoryEvidenceKind::Ui,
+                ref_id: "review-1".to_string(),
+                label: None,
+            }],
+            policy_mode: MemoryGovernanceMode::ManualReview,
+            confidence: Some(0.8),
+            message: Some("Looks stable.".to_string()),
+            resulting_revision: None,
+            decided_at: Some("2026-07-08T00:00:00Z".to_string()),
+        };
+        validate_memory_governance_decision_policy(&decision)
+            .expect("decision policy accepts valid decision");
+
+        decision.actor.clear();
+        let report = evaluate_memory_governance_decision_policy(&decision);
+        assert!(!report.accepted);
+        assert_eq!(
+            report.first_reason_code(),
+            Some("memory_policy_decision_actor_required")
+        );
+
+        validate_memory_governance_transition_policy(
+            MemoryProposalReviewStatus::PendingReview,
+            MemoryGovernanceDecisionKind::Approved,
+        )
+        .expect("pending proposals can be approved");
+
+        let rejected = validate_memory_governance_transition_policy(
+            MemoryProposalReviewStatus::Rejected,
+            MemoryGovernanceDecisionKind::Applied,
+        )
+        .expect_err("rejected proposals cannot be applied");
+        assert!(rejected
+            .to_string()
+            .contains("memory_policy_transition_rejected"));
+    }
+
+    #[test]
+    fn memory_policy_selection_is_source_aware() {
+        assert_eq!(
+            select_memory_governance_mode(
+                MemoryGovernanceMode::DirectWrite,
+                MemoryProposalSource::CaptureProducer
+            ),
+            MemoryGovernanceMode::CuratorRoute
+        );
+        assert_eq!(
+            select_memory_governance_mode(
+                MemoryGovernanceMode::DirectWrite,
+                MemoryProposalSource::Human
+            ),
+            MemoryGovernanceMode::DirectWrite
+        );
     }
 
     #[test]

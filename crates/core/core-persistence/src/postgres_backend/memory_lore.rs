@@ -416,7 +416,10 @@ impl PostgresBackendStore {
         let record = MemoryProposalRecord {
             proposal: proposal.clone(),
             status: MemoryProposalReviewStatus::PendingReview,
-            selected_governance_mode: selected_governance_mode(proposal.governance_mode),
+            selected_governance_mode: selected_governance_mode(
+                proposal.governance_mode,
+                proposal.source,
+            ),
             created_at: now.clone(),
             updated_at: now.clone(),
             decided_at: None,

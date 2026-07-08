@@ -1816,7 +1816,7 @@ pub(crate) fn validate_memory_proposal(
     proposal: &MemoryProposalEnvelope,
     descriptor: &MemorySpaceDescriptor,
 ) -> CoreResult<()> {
-    proposal.validate_for_descriptor(descriptor)?;
+    validate_memory_proposal_policy(proposal, descriptor)?;
     if proposal.space_id.as_str() == "profile_dense" {
         validate_profile_dense_memory_proposal(proposal)?;
     }
@@ -2183,22 +2183,7 @@ fn row_to_memory_proposal(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryPro
 }
 
 fn validate_memory_governance_decision(decision: &MemoryGovernanceDecisionInput) -> CoreResult<()> {
-    validate_identifier("memory governance decision id", &decision.decision_id)?;
-    validate_identifier("memory governance proposal id", &decision.proposal_id)?;
-    if decision.actor.trim().is_empty() {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            "memory governance actor must not be empty",
-        ));
-    }
-    if let Some(confidence) = decision.confidence {
-        if !(0.0..=1.0).contains(&confidence) || confidence.is_nan() {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "memory governance confidence must be between 0 and 1",
-            ));
-        }
-    }
+    validate_memory_governance_decision_policy(decision)?;
     Ok(())
 }
 
@@ -2206,24 +2191,8 @@ fn validate_memory_governance_transition(
     current: MemoryProposalReviewStatus,
     decision: MemoryGovernanceDecisionKind,
 ) -> CoreResult<()> {
-    let allowed = match (current, decision) {
-        (_, MemoryGovernanceDecisionKind::RoutedToReview) => false,
-        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Approved) => true,
-        (MemoryProposalReviewStatus::PendingReview, MemoryGovernanceDecisionKind::Rejected) => true,
-        (MemoryProposalReviewStatus::Approved, MemoryGovernanceDecisionKind::Applied) => true,
-        _ => false,
-    };
-    if allowed {
-        Ok(())
-    } else {
-        Err(CoreError::new(
-            CoreErrorKind::ActionRejected,
-            format!(
-                "memory governance decision {:?} is not allowed from {:?}",
-                decision, current
-            ),
-        ))
-    }
+    validate_memory_governance_transition_policy(current, decision)?;
+    Ok(())
 }
 
 fn insert_memory_governance_decision_in_tx(
@@ -2603,13 +2572,7 @@ fn selected_governance_mode(
     requested: MemoryGovernanceMode,
     source: MemoryProposalSource,
 ) -> MemoryGovernanceMode {
-    match (source, requested) {
-        (
-            MemoryProposalSource::InWakeTool | MemoryProposalSource::CaptureProducer,
-            MemoryGovernanceMode::DirectWrite | MemoryGovernanceMode::AutoApplyThreshold,
-        ) => MemoryGovernanceMode::CuratorRoute,
-        _ => requested,
-    }
+    select_memory_governance_mode(requested, source)
 }
 
 #[cfg(test)]
