@@ -485,17 +485,9 @@ export class TelegramChannelConnector {
   async #handleUpdate(update: TelegramUpdate): Promise<void> {
     const updateOffset = update.update_id + 1;
     try {
-      const binding = this.#resolveBinding(update);
-      if (binding.status === "unbound") {
-        this.#inbound.unbound += 1;
-        return;
-      }
-      if (binding.status === "ambiguous") {
-        this.#inbound.ambiguous += 1;
-        return;
-      }
+      const binding = this.#normalizationBinding(update);
       const message = this.#adapter.normalizeUpdate(update, {
-        binding: binding.binding,
+        binding,
         ttlMs: this.#ttlMs,
         visibility: this.#visibility,
       });
@@ -513,30 +505,39 @@ export class TelegramChannelConnector {
     }
   }
 
-  #resolveBinding(
-    update: TelegramUpdate,
-  ):
-    | { status: "routed"; binding: ChannelBindingRecord }
-    | { status: "unbound" }
-    | { status: "ambiguous" } {
+  #normalizationBinding(update: TelegramUpdate): ChannelBindingRecord {
     const refs = telegramUpdateRefs(update);
-    if (refs === undefined) return { status: "unbound" };
-    const matches = this.#activeTelegramBindings().filter((binding) => {
+    if (refs === undefined) {
+      return syntheticTelegramBinding(this.#adapterId, {
+        externalChannelId: "unknown",
+      });
+    }
+    const candidates = this.#telegramBindingsForRefs(refs);
+    if (candidates.length === 1) return candidates[0]!;
+    return syntheticTelegramBinding(this.#adapterId, refs);
+  }
+
+  #telegramBindingsForRefs(refs: {
+    externalChannelId: string;
+    externalThreadId?: string;
+  }): ChannelBindingRecord[] {
+    return this.#telegramBindings().filter((binding) => {
       if (binding.externalChannelId !== refs.externalChannelId) return false;
-      if (binding.externalThreadId === undefined) {
-        return refs.externalThreadId === undefined;
-      }
+      if (refs.externalThreadId === undefined) return true;
+      if (binding.externalThreadId === undefined) return true;
       return binding.externalThreadId === refs.externalThreadId;
     });
-    if (matches.length === 0) return { status: "unbound" };
-    if (matches.length > 1) return { status: "ambiguous" };
-    return { status: "routed", binding: matches[0]! };
   }
 
   #activeTelegramBindings(): ChannelBindingRecord[] {
+    return this.#telegramBindings().filter(
+      (binding) => binding.status === "active",
+    );
+  }
+
+  #telegramBindings(): ChannelBindingRecord[] {
     return this.#bindings().filter(
       (binding) =>
-        binding.status === "active" &&
         binding.provider === "telegram" &&
         binding.adapterId === this.#adapterId,
     );
@@ -594,6 +595,33 @@ export function telegramBindingFromChat(
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
   };
+}
+
+function syntheticTelegramBinding(
+  adapterId: AdapterId,
+  refs: { externalChannelId: string; externalThreadId?: string },
+): ChannelBindingRecord {
+  return {
+    bindingId: [
+      "telegram",
+      sanitizeTelegramBindingIdPart(refs.externalChannelId),
+      sanitizeTelegramBindingIdPart(refs.externalThreadId ?? "main"),
+    ].join(":"),
+    adapterId,
+    provider: "telegram",
+    agentId: "telegram:unbound" as AgentId,
+    profileId: "telegram:unbound" as ProfileId,
+    externalChannelId: refs.externalChannelId,
+    ...(refs.externalThreadId === undefined
+      ? {}
+      : { externalThreadId: refs.externalThreadId }),
+    status: "active",
+  };
+}
+
+function sanitizeTelegramBindingIdPart(value: string): string {
+  const sanitized = value.replace(/[^A-Za-z0-9._:-]/g, "_");
+  return sanitized.length === 0 ? "unknown" : sanitized;
 }
 
 export function normalizeTelegramUpdate(

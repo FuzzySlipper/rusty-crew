@@ -206,6 +206,7 @@ const bot = {
 };
 
 const routedBodies: string[] = [];
+const unboundBodies: string[] = [];
 const offsetStore = new MemoryTelegramUpdateOffsetStore();
 const connector = new TelegramChannelConnector({
   adapterId,
@@ -215,6 +216,10 @@ const connector = new TelegramChannelConnector({
   ttlMs: 60_000,
   pollTimeoutSeconds: 0,
   ingest(message) {
+    if (message.providerRefs.externalChannelId === "-999") {
+      unboundBodies.push(message.body);
+      return { status: "no_binding", reason: "simulated planner no-binding" };
+    }
     routedBodies.push(message.body);
     return { status: "routed" };
   },
@@ -225,6 +230,7 @@ assert.deepEqual(routedBodies, [
   "first live connector message",
   "second live connector message",
 ]);
+assert.deepEqual(unboundBodies, ["unbound should not route"]);
 assert.equal(await offsetStore.read(), 13);
 assert.equal(connector.diagnostics().inbound.routed, 2);
 assert.equal(connector.diagnostics().inbound.unbound, 1);
