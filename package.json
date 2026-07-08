@@ -84,7 +84,7 @@
     "smoke:curator-review-e2e": "npm run smoke:curator-review-e2e -w @rusty-crew/brain-island",
     "smoke:memory-space-contracts": "npm run smoke:memory-space-contracts -w @rusty-crew/contracts",
     "smoke:delegated-resource-cleanup": "npm run smoke:delegated-resource-cleanup -w @rusty-crew/brain-island",
-    "smoke:service-background-loops": "npm run smoke:service-background-loops -w @rusty-crew/brain-island",
+    "smoke:service-background-loops": "npm run smoke:service-background-loops -w @rusty-crew/service-host",
     "smoke:background-governance-observation": "npm run smoke:background-governance-observation -w @rusty-crew/brain-island",
     "smoke:runtime-activity-observer": "npm run smoke:runtime-activity-observer -w @rusty-crew/brain-island",
     "smoke:observation-activity-e2e": "npm run smoke:observation-activity-e2e -w @rusty-crew/brain-island",

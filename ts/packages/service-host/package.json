@@ -17,6 +17,7 @@
     "smoke:den-successor-service": "tsx ../brain-island/src/smoke-den-successor-service.ts",
     "smoke:mcp-reload": "tsx ../brain-island/src/smoke-mcp-reload.ts",
     "smoke:rusty-view-chat-read-api": "tsx ../brain-island/src/smoke-rusty-view-chat-read-api.ts",
+    "smoke:service-background-loops": "node --import tsx --test test/background-loop-timers.test.ts",
     "smoke:service-host": "tsx smokes/service-host.ts",
     "smoke:service-postgres-startup": "tsx ../brain-island/src/smoke-service-postgres-startup.ts",
     "smoke:telegram-service-connector": "tsx ../brain-island/src/smoke-telegram-service-connector.ts"

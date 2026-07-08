@@ -20,4 +20,10 @@ export type {
   RustyCrewServiceApp,
   RustyCrewServiceAppOptions,
 } from "../service-app.js";
+export type {
+  ServiceBackgroundLoopCallbacks,
+  ServiceBackgroundLoopFailure,
+  ServiceBackgroundLoopIntervals,
+  ServiceBackgroundLoopPort,
+} from "../service-background-loops.js";
 export type { ServiceAdapterFactories } from "../service-adapter-ports.js";

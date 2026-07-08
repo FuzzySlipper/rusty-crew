@@ -114,7 +114,7 @@ import {
 import { handleSchedulerReadRequest } from "./service-scheduler-routes.js";
 import { handleAdminToolsCatalogRequest } from "./service-tool-catalog-routes.js";
 import { handleAdminLocalToolProfilesRequest } from "./service-local-tool-profile-routes.js";
-import { startServiceBackgroundLoopTimers } from "./service-background-loops.js";
+import type { ServiceBackgroundLoopPort } from "./service-background-loops.js";
 import { handleMemorySpaceAdminRequest } from "./memory-space-api.js";
 import {
   handleAdminRoleplayRequest,
@@ -366,6 +366,7 @@ export interface RustyCrewServiceApp {
   readonly config: RustyCrewServiceConfig;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
+  readonly backgroundLoops: ServiceBackgroundLoopPort;
   readonly adminHost: string;
   readonly adminPort: number;
   readonly url: string;
@@ -648,8 +649,7 @@ export async function createRustyCrewServiceApp(
     await startDenObservationProjection(state);
     await ensureDenConversationChannels(state);
     await startTelegramConnector(state);
-    startServiceBackgroundLoopTimers({
-      timers: state.timers,
+    const backgroundLoops: ServiceBackgroundLoopPort = {
       intervals: {
         schedulerTickIntervalMs:
           state.config.background.schedulerTickIntervalMs,
@@ -675,12 +675,13 @@ export async function createRustyCrewServiceApp(
           recordServiceEvent(state, failureRecord),
         errorMessage,
       },
-    });
+    };
 
     return {
       config,
       bridge,
       engine,
+      backgroundLoops,
       adminHost: config.admin.host,
       adminPort: config.admin.port,
       url: `http://${config.admin.host}:${config.admin.port}`,

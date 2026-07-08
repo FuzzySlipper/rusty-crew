@@ -35,6 +35,10 @@ import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import { handleHostShellRequest, requestId } from "./host-shell-routes.js";
 import { hostFailure, writeHostRouteResult } from "./host-route-results.js";
 import {
+  startServiceHostBackgroundLoopTimers,
+  type ServiceHostBackgroundLoopController,
+} from "./background-loop-timers.js";
+import {
   assertServiceHostStorageBootReady,
   preflightServiceHostStorageBoot,
 } from "./storage-preflight.js";
@@ -46,6 +50,10 @@ export {
   type SystemdNotifier,
   type SystemdNotifierOptions,
 } from "./systemd-notify.js";
+export {
+  startServiceHostBackgroundLoopTimers,
+  type ServiceHostBackgroundLoopController,
+} from "./background-loop-timers.js";
 export {
   assertServiceHostStorageBootReady,
   preflightServiceHostStorageBoot,
@@ -96,9 +104,14 @@ export async function startRustyCrewServiceHost(
     void handleHostHttpRequest(request, response, app);
   });
 
+  let backgroundLoopController: ServiceHostBackgroundLoopController | undefined;
   try {
     await listen(server, app.adminPort, app.adminHost);
+    backgroundLoopController = startServiceHostBackgroundLoopTimers(
+      app.backgroundLoops,
+    );
   } catch (error) {
+    backgroundLoopController?.stop();
     await closeServer(server).catch(() => undefined);
     await app.stop().catch(() => undefined);
     throw error;
@@ -112,6 +125,7 @@ export async function startRustyCrewServiceHost(
     server,
     url: app.url,
     stop: async () => {
+      backgroundLoopController?.stop();
       const closePromise = closeServer(server);
       await app.stop();
       await closePromise;
