@@ -179,9 +179,11 @@ Crate / package roles:
   brain.
 - `ts/packages/service-host` — service process composition root, concrete
   adapter injection, startup entrypoint, host-level CORS, browser shell/static
-  site mounting, and service-host smoke entrypoints. Some admin/API route
-  wiring and background drain loops are still transitional inside
-  `brain-island` behind explicit ports.
+  site mounting, storage boot preflight, configured background-loop timer
+  lifecycle, and service-host smoke entrypoints. Some admin/API route handlers
+  remain transitional inside `brain-island`, but service route ordering is now
+  represented by an explicit route table and process-owned wiring reaches
+  `brain-island` through ports.
 - `ts/packages/adapter-den`, `adapter-mcp`, `adapter-telegram`, `adapter-tui`
   — platform adapter boundaries.
 

@@ -298,6 +298,30 @@ boundary or a service-host composition boundary, not both at once:
 6. Ratchet service-host boundaries so brain-island cannot import service-host
    or add new whole-service orchestration without a task note.
 
+Task 4579 moved several boundaries from recommendation to checked structure:
+
+- `service-host` now owns storage boot preflight before service app startup.
+- `brain-island` exposes configured background-loop executor ports, while
+  `service-host` constructs and stops those process timers.
+- Den Conversation channel resolution and membership readback are behind an
+  adapter factory port; the concrete Gateway mechanics live in `adapter-den`.
+- top-level service API route ordering is represented by
+  `service-route-table.ts`, and the API capability smoke samples all public
+  capability paths against that table.
+- `smoke:architecture-boundaries` now ratchets the direction: production
+  `brain-island` cannot import `service-host` or adapters, cannot create HTTP
+  servers, cannot add new process timers outside the documented temporary
+  files, and must keep `service-app.ts` dispatching through the route table.
+
+The remaining transitional exceptions are deliberate and should shrink in
+future decomposition work:
+
+- `service-app.ts` still hosts many admin/API route handlers and a Den
+  Observation projection drain timer because those handlers still need
+  explicit port extraction.
+- `service-chat-stream-routes.ts` owns request-scoped SSE heartbeat timers;
+  those are not process background loops.
+
 ## Validation Pattern
 
 Every route-family extraction should add or extend a unit test in the owning

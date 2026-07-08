@@ -41,9 +41,11 @@ field-test configuration under `/home/system/rusty-crew`.
   ports consumed by the service.
 - `ts/packages/service-host` is the service composition root. It owns service
   startup scripts, concrete adapter injection, the HTTP listener, host-level
-  CORS, browser shell/static-site mounting, and service-host smoke entrypoints.
-  Some admin/API route wiring and background drain loops are still transitional
-  inside `brain-island` behind explicit ports while decomposition continues.
+  CORS, browser shell/static-site mounting, configured background-loop timers,
+  storage boot preflight, and service-host smoke entrypoints.
+  `brain-island` still hosts many admin/API route handlers while decomposition
+  continues, but top-level service route ordering now goes through an explicit
+  route table and host-owned process wiring reaches brain-island through ports.
 - `crates/brains/*` contains direct Rust brain modules that implement provider
   loops behind the neutral wake/stream/action/provider-state contract. These
   crates may not reach into Rust coordination internals.

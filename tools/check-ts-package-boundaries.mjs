@@ -197,6 +197,7 @@ expectNoSourceImports("@rusty-crew/brain-island", [
   "@rusty-crew/service-host",
   ...adapterPackages,
 ]);
+expectBrainIslandCompositionRatchets();
 expectNoNewSrcSmokes(
   "@rusty-crew/brain-island",
   legacyBrainIslandSrcSmokeCount,
@@ -302,6 +303,64 @@ function expectNoSourceImports(packageName, forbidden) {
       }
     }
   }
+}
+
+function expectBrainIslandCompositionRatchets() {
+  const pkg = packagesByName.get("@rusty-crew/brain-island");
+  if (!pkg) return;
+  const allowedTimerFiles = new Set([
+    normalizePath("ts/packages/brain-island/src/service-app.ts"),
+    normalizePath("ts/packages/brain-island/src/service-chat-stream-routes.ts"),
+  ]);
+  const routeTablePath = join(pkg.dir, "src", "service-route-table.ts");
+  if (!existsSync(routeTablePath)) {
+    violations.push(
+      "@rusty-crew/brain-island must keep service route composition in service-route-table.ts",
+    );
+  }
+  const serviceAppPath = join(pkg.dir, "src", "service-app.ts");
+  if (existsSync(serviceAppPath)) {
+    const serviceAppSource = readFileSync(serviceAppPath, "utf8");
+    if (!serviceAppSource.includes("matchServiceApiRoute")) {
+      violations.push(
+        "brain-island service-app.ts must dispatch through matchServiceApiRoute rather than growing ad hoc route composition",
+      );
+    }
+  }
+  for (const sourceFile of productionSourceFiles(pkg)) {
+    const relativePath = normalizePath(relative(root, sourceFile));
+    const source = readFileSync(sourceFile, "utf8");
+    if (/\bcreateServer\s*\(/.test(source)) {
+      violations.push(
+        `brain-island production file ${relativePath} must not create HTTP servers; service-host owns process HTTP composition`,
+      );
+    }
+    if (
+      /\bsetInterval\s*\(/.test(source) &&
+      !allowedTimerFiles.has(relativePath)
+    ) {
+      violations.push(
+        `brain-island production file ${relativePath} must not own process timers; expose a host port or document a boundary ratchet exception`,
+      );
+    }
+    if (/\bstartServiceHostBackgroundLoopTimers\b/.test(source)) {
+      violations.push(
+        `brain-island production file ${relativePath} must not start service-host background loop timers`,
+      );
+    }
+  }
+}
+
+function productionSourceFiles(pkg) {
+  const sourceDir = join(pkg.dir, "src");
+  if (!existsSync(sourceDir)) return [];
+  return findTsFiles(sourceDir).filter((sourceFile) => {
+    const relativePath = normalizePath(relative(root, sourceFile));
+    return (
+      !relativePath.includes("/smoke-") &&
+      !relativePath.endsWith("/test-support.ts")
+    );
+  });
 }
 
 function sourceAndSmokeFiles(pkg) {
