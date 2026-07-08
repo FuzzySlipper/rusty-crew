@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { manifestOperationNames } from "@rusty-crew/contracts";
 import {
   ADMIN_CONTROL_CAPABILITIES,
   API_CAPABILITIES,
@@ -16,6 +17,7 @@ import {
   routeSlashCommand,
   slashCommandNames,
   type RuntimeCounterSummary,
+  type ServiceApiRouteId,
   type SlashCommandRouteResult,
   type SlashCommandSession,
 } from "./index.js";
@@ -61,6 +63,7 @@ for (const command of chatCommands) {
 const newCommand = chatCommands.find((command) => command.name === "new");
 assert.ok(newCommand, "missing /new command");
 assert.equal(newCommand.source, "backend-control");
+assert.equal(newCommand.rust_plan_operation, "plan_new_session_control");
 assert.deepEqual(newCommand.positional_args[0], {
   name: "reason",
   description: "Optional operator-facing reason text.",
@@ -103,6 +106,7 @@ assertUnique(
   SERVICE_API_ROUTE_TABLE.map((route) => route.id),
   "service route id",
 );
+assertServiceRouteFamilyCoverage();
 assert.deepEqual(
   SERVICE_API_ROUTE_TABLE.map((route) => route.order),
   [...SERVICE_API_ROUTE_TABLE.map((route) => route.order)].sort(
@@ -174,6 +178,12 @@ for (const command of SLASH_COMMAND_REGISTRY) {
     assert.equal(routed.controlRequest, undefined);
   }
 }
+assertRustPlanOperationsInManifest(
+  chatCommands
+    .map((command) => command.rust_plan_operation)
+    .filter(isPresentString),
+  "slash command rust_plan_operation",
+);
 
 const adminCommandNames = ADMIN_CONTROL_CAPABILITIES.map(
   (capability) => capability.command_name,
@@ -202,6 +212,19 @@ assert.ok(
       capability.path_template === "/v1/admin/control/config/wake-timeout",
   ),
   "wake-timeout patch capability must advertise the safe config write path",
+);
+const newSessionCapability = ADMIN_CONTROL_CAPABILITIES.find(
+  (capability) => capability.id === "admin.control.sessions.new",
+);
+assert.equal(
+  newSessionCapability?.rust_plan_operation,
+  "plan_new_session_control",
+);
+assertRustPlanOperationsInManifest(
+  API_CAPABILITIES.map((capability) => rustPlanOperation(capability)).filter(
+    isPresentString,
+  ),
+  "API capability rust_plan_operation",
 );
 
 const contractPath = resolve(
@@ -269,6 +292,70 @@ function assertUnique(values: readonly (string | undefined)[], label: string) {
   }
 }
 
+function assertServiceRouteFamilyCoverage(): void {
+  const coveredOrExemptIds = new Set<ServiceApiRouteId>([
+    ...serviceRouteFamilyCoverage().map((item) => item.routeId),
+    ...serviceRouteCatalogExemptions().map((item) => item.routeId),
+  ]);
+  for (const route of SERVICE_API_ROUTE_TABLE) {
+    assert.equal(
+      coveredOrExemptIds.has(route.id),
+      true,
+      `service route family ${route.id} must have catalog coverage or an explicit exemption`,
+    );
+  }
+  for (const requirement of serviceRouteFamilyCoverage()) {
+    const capability = API_CAPABILITIES.find(
+      (candidate) =>
+        candidate.method === requirement.method &&
+        candidate.path_template === requirement.pathTemplate,
+    );
+    assert.ok(
+      capability,
+      `missing API capability for service route family ${requirement.routeId}: ${requirement.method} ${requirement.pathTemplate}`,
+    );
+    assert.equal(
+      matchServiceApiRoute(
+        samplePathTemplate(requirement.pathTemplate),
+        requirement.authPhase,
+      )?.id,
+      requirement.routeId,
+      `service route family ${requirement.routeId} does not own representative catalog path ${requirement.pathTemplate}`,
+    );
+  }
+}
+
+function assertRustPlanOperationsInManifest(
+  operations: readonly string[],
+  label: string,
+): void {
+  const manifestOperations = new Set<string>(manifestOperationNames);
+  for (const operation of operations) {
+    assert.equal(
+      manifestOperations.has(operation),
+      true,
+      `${label} ${operation} is not present in bridge manifest operation names`,
+    );
+  }
+}
+
+function isPresentString(value: string | undefined): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function rustPlanOperation(capability: unknown): string | undefined {
+  if (
+    typeof capability !== "object" ||
+    capability === null ||
+    !("rust_plan_operation" in capability)
+  ) {
+    return undefined;
+  }
+  const operation = (capability as { rust_plan_operation?: unknown })
+    .rust_plan_operation;
+  return typeof operation === "string" ? operation : undefined;
+}
+
 function samplePathTemplate(pathTemplate: string): string {
   return pathTemplate.replace(/\{[^}]+\}/g, "sample");
 }
@@ -288,4 +375,119 @@ function emptyRuntimeCounters(): RuntimeCounterSummary {
     completions: 0,
     queueExpirations: 0,
   };
+}
+
+function serviceRouteFamilyCoverage(): readonly {
+  routeId: ServiceApiRouteId;
+  authPhase: "before_auth" | "after_auth";
+  method: "DELETE" | "GET" | "PATCH" | "POST";
+  pathTemplate: string;
+}[] {
+  return [
+    {
+      routeId: "admin.healthz",
+      authPhase: "before_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/healthz",
+    },
+    {
+      routeId: "admin.control",
+      authPhase: "after_auth",
+      method: "POST",
+      pathTemplate: "/v1/admin/control/sessions/{session_id}/new",
+    },
+    {
+      routeId: "chat",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/chat/sessions",
+    },
+    {
+      routeId: "admin.scheduler",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/scheduler/jobs",
+    },
+    {
+      routeId: "admin.mcp.servers",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/mcp/servers",
+    },
+    {
+      routeId: "admin.tools.catalog",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/tools/catalog",
+    },
+    {
+      routeId: "admin.context_strategies",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/context-strategies",
+    },
+    {
+      routeId: "admin.local_tool_profiles",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/local-tool-profiles",
+    },
+    {
+      routeId: "admin.storage",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/storage/schema",
+    },
+    {
+      routeId: "admin.profile_registry.write",
+      authPhase: "after_auth",
+      method: "POST",
+      pathTemplate: "/v1/admin/profiles/registry/{profile_id}/update/plan",
+    },
+    {
+      routeId: "admin.memory",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/memory/spaces",
+    },
+    {
+      routeId: "admin.diagnostics",
+      authPhase: "after_auth",
+      method: "GET",
+      pathTemplate: "/v1/admin/diagnostics",
+    },
+  ];
+}
+
+function serviceRouteCatalogExemptions(): readonly {
+  routeId: ServiceApiRouteId;
+  reason: string;
+}[] {
+  return [
+    {
+      routeId: "browser.cors",
+      reason:
+        "preflight route only; cataloging each CORS path would duplicate browser routes",
+    },
+    {
+      routeId: "debug",
+      reason:
+        "debug routes are intentionally omitted from public capability discovery",
+    },
+    {
+      routeId: "admin.mcp.catalog",
+      reason:
+        "legacy MCP catalog route is route-table visible but not a Rusty View capability surface",
+    },
+    {
+      routeId: "roleplay",
+      reason:
+        "roleplay browser/admin API catalog is being tracked separately while roleplay is migrated toward Rust crates",
+    },
+    {
+      routeId: "admin.model_providers",
+      reason:
+        "model provider admin API still needs a dedicated catalog follow-up; keep the exemption visible until that lands",
+    },
+  ];
 }

@@ -65,6 +65,7 @@ export interface SlashCommandDescriptor {
     commandName: AdminControlCommandName;
     pathTemplate: string;
     reasonCode: string;
+    rustPlanOperation?: string;
   };
 }
 
@@ -87,6 +88,7 @@ export interface ChatCommandDescriptor {
   allowed_session_kinds: Array<"full" | "worker" | "delegated">;
   requires_control_auth: boolean;
   backing_control_command?: AdminControlCommandName;
+  rust_plan_operation?: string;
 }
 
 export interface ChatCommandArgumentDescriptor {
@@ -126,6 +128,7 @@ export interface ApiCapabilityDescriptor {
   tags: ApiCapabilityScope[];
   public: boolean;
   command_name?: AdminControlCommandName;
+  rust_plan_operation?: string;
 }
 
 export interface ApiCapabilityRegistry {
@@ -179,6 +182,7 @@ export const SLASH_COMMAND_REGISTRY = [
       commandName: "new_session",
       pathTemplate: "/v1/admin/control/sessions/{session_id}/new",
       reasonCode: "slash_new_session",
+      rustPlanOperation: "plan_new_session_control",
     },
   }),
   slashCommand({
@@ -265,6 +269,7 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     "Archive a session and create a fresh replacement.",
     "new_session",
     ["session"],
+    { rustPlanOperation: "plan_new_session_control" },
   ),
   controlCapability(
     "admin.control.sessions.runtime.pause",
@@ -1452,6 +1457,9 @@ function chatCommandDescriptor(
     allowed_session_kinds: [...command.allowedSessionKinds],
     requires_control_auth: command.requiresControlAuth,
     backing_control_command: command.control?.commandName,
+    ...(command.control?.rustPlanOperation === undefined
+      ? {}
+      : { rust_plan_operation: command.control.rustPlanOperation }),
   };
 }
 
@@ -1514,6 +1522,7 @@ function controlCapability(
   description: string,
   commandName: AdminControlCommandName,
   tags: ApiCapabilityScope[],
+  options: { rustPlanOperation?: string } = {},
 ): ApiCapabilityDescriptor {
   return {
     id,
@@ -1526,5 +1535,8 @@ function controlCapability(
     tags,
     public: true,
     command_name: commandName,
+    ...(options.rustPlanOperation === undefined
+      ? {}
+      : { rust_plan_operation: options.rustPlanOperation }),
   };
 }
