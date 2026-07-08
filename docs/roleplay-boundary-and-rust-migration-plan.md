@@ -175,6 +175,55 @@ a browser/API or tool smoke proving the TS route/tool still behaves the same.
 Larger behavior changes should be live-certified through the debug Rusty Crew
 service and Rusty View, especially narrator and alternative-generation flows.
 
+## Task 4584 Certification Matrix
+
+The task 4584 follow-up series is the first concrete ratchet for this
+boundary. Future roleplay work should keep this shape: Rust unit coverage proves
+the deterministic invariant without Node, and a TS smoke proves the route/tool
+adapter still presents the expected service behavior.
+
+| Slice | Rust-owned invariant | Rust coverage | Adapter/behavior smoke |
+| --- | --- | --- | --- |
+| #4686 session lifecycle | create/fork/archive/restore validation, defaulting, metadata copy shape, status transitions | `cargo test -p rusty-crew-roleplay-core` tests for `plans_roleplay_session_create_defaults_and_references`, `plans_roleplay_session_fork_metadata_branch_and_layers`, `plans_roleplay_session_archive_and_restore_transitions`, and invalid lifecycle inputs | `npm run smoke:roleplay-browser-api -w @rusty-crew/brain-island` |
+| #4687 chat layer binding | lore-layer write metadata plus active session layer patch planning | `cargo test -p rusty-crew-roleplay-core` tests for `plans_chat_layer_binding_metadata_and_write_side_effects`, no-op planning, and invalid inputs | `npm run smoke:roleplay-browser-api -w @rusty-crew/brain-island` |
+| #4688 alternatives and variants | terminal assistant slot, alternate variant ids, active selection, branch-head updates, and no normal chat append side effect | `cargo test -p rusty-crew-roleplay-core` tests for `plans_assistant_alternative_explicit_variant_ids`, `plans_assistant_alternative_variant_write_ids_and_lineage`, conflict rejection, current branch-head planning, and stale/user-slot rejection | `npm run smoke:roleplay-browser-api -w @rusty-crew/brain-island` |
+| #4689 lore controls | search layer filters, scoped/unscoped paging controls, and invalid query reason codes | `cargo test -p rusty-crew-roleplay-core` tests for `normalizes_lore_search_controls` and invalid pagination/default behavior | `npm run smoke:roleplay-browser-api -w @rusty-crew/brain-island` |
+| #4690 scene state tool | state read defaults, persisted record normalization, update merge rules, tag/value cleanup, and invalid tool input reason codes | `cargo test -p rusty-crew-roleplay-core` tests for scene-state read defaults, update merge/normalization, and invalid updates | `npm run smoke:scene-state-tool -w @rusty-crew/brain-island` |
+
+Run bridge checks whenever a roleplay slice adds or changes a bridge operation:
+
+```sh
+npm run build:native
+npm run smoke:bridge-contract-parity
+npm run smoke:bridge-native-surface
+npm run smoke:bridge-validation
+cargo test -p rusty-crew-core-bridge-node
+```
+
+Run the full roleplay deterministic handoff set before claiming a roleplay Rust
+migration milestone:
+
+```sh
+cargo fmt --all --check
+cargo test -p rusty-crew-roleplay-core
+npm run typecheck
+npm run smoke:roleplay-browser-api -w @rusty-crew/brain-island
+npm run smoke:scene-state-tool -w @rusty-crew/brain-island
+npm run smoke:roleplay-narrator-fsm-bridge -w @rusty-crew/brain-island
+```
+
+Live certification through Rusty View is mandatory when the change affects
+provider text generation, streamed roleplay chat projection, narrator phase
+sequencing as observed by a user, or generated-alternative selection/swipe
+behavior. Use the debug service rather than the durable live service unless the
+task is explicitly about production deployment state, and record evidence using
+`docs/live-deliverable-certification.md`.
+
+The #4687-#4690 slices moved deterministic planners and tool/domain
+normalization only. They should not require live provider evidence by
+themselves unless a reviewer finds that the visible generated-alternative or
+narrator behavior changed.
+
 ## Non-Goals
 
 - Do not create a separate service for roleplay.

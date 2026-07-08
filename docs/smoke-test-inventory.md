@@ -130,6 +130,38 @@ testing noise; the live service at `/home/system/rusty-crew` is for durable
 agents and should not be used for broad smoke churn unless the task is
 explicitly about the live deployment.
 
+## Roleplay Rust-Migration Ratchet
+
+Roleplay migration work has an additional boundary rule: deterministic
+roleplay behavior belongs in Rust, and TypeScript smokes should prove only that
+the route/tool adapter still projects the Rust-owned result correctly. The
+current matrix of moved invariants and required checks lives in
+`docs/roleplay-boundary-and-rust-migration-plan.md`.
+
+For roleplay Rust-authority slices, include these checks unless the task is
+clearly narrower:
+
+```sh
+cargo test -p rusty-crew-roleplay-core
+npm run smoke:roleplay-browser-api -w @rusty-crew/brain-island
+npm run smoke:scene-state-tool -w @rusty-crew/brain-island
+```
+
+If the slice adds or changes a bridge operation, also run the native bridge
+parity checks:
+
+```sh
+npm run build:native
+npm run smoke:bridge-contract-parity
+npm run smoke:bridge-native-surface
+npm run smoke:bridge-validation
+```
+
+If the slice changes narrator execution, generated-alternative presentation,
+or any roleplay behavior whose success is visible only in a rendered chat
+transcript, run Rusty View live certification on the debug service and attach
+the evidence packet described in `docs/live-deliverable-certification.md`.
+
 ## External Cassettes
 
 Use external cassettes when an integration shape is learned from live Den,
