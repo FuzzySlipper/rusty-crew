@@ -45,8 +45,18 @@ export interface StorageQueryModuleMetadata {
   moduleId: string;
   schemaVersion: number;
   logicalStore: string;
+  logicalStoreDescription: string;
   ownerCrate: string;
   ownerModule: string;
+  rustQueryId: string;
+  parameterSchemaId?: string;
+  backendCapabilities: readonly string[];
+  capabilityStatus: readonly {
+    capability: string;
+    required: boolean;
+    supported: boolean;
+    backendVariant?: string;
+  }[];
 }
 
 export interface StorageQueryCatalog {
@@ -98,42 +108,7 @@ export type StorageQueryExecuteToolDetails =
 
 const MAX_LIMIT = 100;
 
-const STORAGE_QUERY_DESCRIPTORS = [
-  {
-    id: "simple_kv.entries",
-    title: "Simple KV entries",
-    description:
-      "List simple_kv module entries by scope, key prefix, and expiry status through the Rust repository.",
-    owner: "rust_coordination",
-    readOnly: true,
-    backendAgnostic: true,
-    resultShape: "module.simple_kv.entry.v1",
-    module: {
-      moduleId: "simple_kv",
-      schemaVersion: 1,
-      logicalStore: "entries",
-      ownerCrate: "core_persistence",
-      ownerModule: "simple_kv",
-    },
-    parameters: [
-      parameter("scopeType", "string", true, "Simple KV scope type."),
-      parameter("scopeId", "string", true, "Simple KV scope id."),
-      parameter("keyPrefix", "string", false, "Optional key prefix filter."),
-      enumParameter("expiryStatus", false, "Expiry filter.", [
-        "active",
-        "expired",
-        "all",
-      ]),
-      parameter(
-        "now",
-        "string",
-        false,
-        "ISO timestamp used for expiry checks.",
-      ),
-      parameter("limit", "integer", false, "Maximum rows to return.", 25),
-      parameter("offset", "integer", false, "Rows to skip.", 0),
-    ],
-  },
+const STORAGE_SYSTEM_QUERY_DESCRIPTORS = [
   {
     id: "storage.schema",
     title: "Storage module schema registry",
@@ -249,16 +224,129 @@ const STORAGE_QUERY_DESCRIPTORS = [
   },
 ] as const satisfies readonly StorageQueryDescriptor[];
 
-export function storageQueryCatalog(): StorageQueryCatalog {
+const ALL_STORAGE_QUERY_IDS = new Set<StorageQueryId>([
+  "simple_kv.entries",
+  ...STORAGE_SYSTEM_QUERY_DESCRIPTORS.map((descriptor) => descriptor.id),
+]);
+
+type NativeRuntimeModuleSchemaDiagnostic =
+  NativeRuntimeModuleSchemaRegistryDiagnostics["modules"][number];
+type NativeRuntimeModuleQueryCatalogDiagnostic =
+  NativeRuntimeModuleSchemaDiagnostic["queryCatalogEntries"][number];
+type NativeRuntimeModuleLogicalStoreDiagnostic =
+  NativeRuntimeModuleSchemaDiagnostic["logicalStores"][number];
+
+type RustModuleQueryMappingKey = "simple_kv.list_entries_by_scope";
+
+const RUST_MODULE_QUERY_MAPPINGS: Record<
+  RustModuleQueryMappingKey,
+  (
+    module: NativeRuntimeModuleSchemaDiagnostic,
+    entry: NativeRuntimeModuleQueryCatalogDiagnostic,
+    logicalStore: NativeRuntimeModuleLogicalStoreDiagnostic,
+    backendCapabilities: readonly string[],
+  ) => StorageQueryDescriptor
+> = {
+  "simple_kv.list_entries_by_scope": (
+    module,
+    entry,
+    logicalStore,
+    backendCapabilities,
+  ) => ({
+    id: "simple_kv.entries",
+    title: "Simple KV entries",
+    description: entry.description,
+    owner: "rust_coordination",
+    readOnly: true,
+    backendAgnostic: true,
+    resultShape: "module.simple_kv.entry.v1",
+    module: {
+      moduleId: module.moduleId,
+      schemaVersion: module.descriptorVersion,
+      logicalStore: entry.storeName,
+      logicalStoreDescription: logicalStore.description,
+      ownerCrate: module.ownerCrate,
+      ownerModule: module.ownerModule,
+      rustQueryId: entry.queryId,
+      ...(entry.parameterSchemaId === undefined
+        ? {}
+        : { parameterSchemaId: entry.parameterSchemaId }),
+      backendCapabilities: [...backendCapabilities],
+      capabilityStatus: module.capabilityStatus.map((status) => ({
+        capability: status.capability,
+        required: status.required,
+        supported: status.supported,
+        ...(status.backendVariant === undefined
+          ? {}
+          : { backendVariant: status.backendVariant }),
+      })),
+    },
+    parameters: [
+      parameter("scopeType", "string", true, "Simple KV scope type."),
+      parameter("scopeId", "string", true, "Simple KV scope id."),
+      parameter("keyPrefix", "string", false, "Optional key prefix filter."),
+      enumParameter("expiryStatus", false, "Expiry filter.", [
+        "active",
+        "expired",
+        "all",
+      ]),
+      parameter(
+        "now",
+        "string",
+        false,
+        "ISO timestamp used for expiry checks.",
+      ),
+      parameter("limit", "integer", false, "Maximum rows to return.", 25),
+      parameter("offset", "integer", false, "Rows to skip.", 0),
+    ],
+  }),
+};
+
+export function storageQueryCatalog(
+  schema: NativeRuntimeModuleSchemaRegistryDiagnostics,
+): StorageQueryCatalog {
+  const items = [
+    ...moduleQueryDescriptors(schema),
+    ...STORAGE_SYSTEM_QUERY_DESCRIPTORS,
+  ];
   return {
     schema_version: 1,
     source: "rust_bridge_read_model",
-    items: STORAGE_QUERY_DESCRIPTORS.map((descriptor) => ({
+    items: items.map((descriptor) => ({
       ...descriptor,
       parameters: descriptor.parameters.map((item) => ({ ...item })),
     })),
-    total: STORAGE_QUERY_DESCRIPTORS.length,
+    total: items.length,
   };
+}
+
+function moduleQueryDescriptors(
+  schema: NativeRuntimeModuleSchemaRegistryDiagnostics,
+): StorageQueryDescriptor[] {
+  return schema.modules.flatMap((module) =>
+    module.queryCatalogEntries.map((entry) => {
+      const logicalStore = module.logicalStores.find(
+        (store) => store.storeName === entry.storeName,
+      );
+      if (!logicalStore) {
+        throw new StorageQueryCatalogError(
+          "rust_module_query_missing_logical_store",
+          `Rust module query ${module.moduleId}.${entry.queryId} references missing logical store ${entry.storeName}`,
+        );
+      }
+      const mapping =
+        RUST_MODULE_QUERY_MAPPINGS[
+          `${module.moduleId}.${entry.queryId}` as RustModuleQueryMappingKey
+        ];
+      if (!mapping) {
+        throw new StorageQueryCatalogError(
+          "unmapped_rust_module_query",
+          `Rust module query ${module.moduleId}.${entry.queryId} has no TS execution mapping`,
+        );
+      }
+      return mapping(module, entry, logicalStore, schema.backendCapabilities);
+    }),
+  );
 }
 
 export async function handleStorageQueryRequest(
@@ -276,7 +364,23 @@ export async function handleStorageQueryRequest(
         message: "storage query catalog only supports GET",
       });
     }
-    return routeSuccess(requestId, storageQueryCatalog());
+    try {
+      return routeSuccess(
+        requestId,
+        storageQueryCatalog(await context.bridge.storageSchema()),
+      );
+    } catch (error) {
+      return routeFailure(500, requestId, {
+        reason_code:
+          error instanceof StorageQueryCatalogError
+            ? error.reasonCode
+            : "storage_query_catalog_unavailable",
+        message:
+          error instanceof Error
+            ? error.message
+            : "storage query catalog unavailable",
+      });
+    }
   }
 
   if (url.pathname === "/v1/admin/storage/schema") {
@@ -350,10 +454,9 @@ export async function executeStorageQuery(
 const catalogToolParameters = Type.Object({});
 type CatalogToolParams = Static<typeof catalogToolParameters>;
 
-export function storageQueryCatalogTool(): BrainTool<
-  typeof catalogToolParameters,
-  StorageQueryCatalog
-> {
+export function storageQueryCatalogTool(
+  context: StorageQueryContext,
+): BrainTool<typeof catalogToolParameters, StorageQueryCatalog> {
   return {
     name: "storage_query_catalog",
     label: "Storage query catalog",
@@ -361,7 +464,7 @@ export function storageQueryCatalogTool(): BrainTool<
       "List curated read-only Rusty Crew storage queries. This tool never accepts raw SQL.",
     parameters: catalogToolParameters,
     execute: async (_toolCallId, _params: CatalogToolParams) =>
-      toolResult(storageQueryCatalog()),
+      toolResult(storageQueryCatalog(await context.bridge.storageSchema())),
   };
 }
 
@@ -647,7 +750,7 @@ function decodeStorageQueryId(pathname: string): StorageQueryId | undefined {
 }
 
 function parseStorageQueryId(value: string): StorageQueryId | undefined {
-  return STORAGE_QUERY_DESCRIPTORS.some((descriptor) => descriptor.id === value)
+  return ALL_STORAGE_QUERY_IDS.has(value as StorageQueryId)
     ? (value as StorageQueryId)
     : undefined;
 }
@@ -711,7 +814,9 @@ function routeFailure(
             ? "not_found"
             : status === 405
               ? "method_not_allowed"
-              : "invalid_input",
+              : status >= 500
+                ? "internal_error"
+                : "invalid_input",
         reason_code: input.reason_code,
         message: input.message,
         retryable: false,
@@ -868,5 +973,15 @@ class StorageQueryInputError extends Error {
   ) {
     super(message);
     this.name = "StorageQueryInputError";
+  }
+}
+
+class StorageQueryCatalogError extends Error {
+  constructor(
+    readonly reasonCode: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "StorageQueryCatalogError";
   }
 }

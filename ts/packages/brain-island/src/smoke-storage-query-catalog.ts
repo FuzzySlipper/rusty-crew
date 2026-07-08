@@ -24,7 +24,20 @@ const moduleRegistryFixture = {
       installedDescriptorFingerprint: "fnv1a64:1234",
       installedAt: "2026-06-26T00:00:00Z",
       updatedAt: "2026-06-26T00:00:00Z",
-      capabilityStatus: [],
+      capabilityStatus: [
+        {
+          capability: "transactions",
+          required: true,
+          supported: true,
+          backendVariant: "sqlite",
+        },
+        {
+          capability: "json_documents",
+          required: false,
+          supported: true,
+          backendVariant: "sqlite",
+        },
+      ],
       logicalStores: [{ storeName: "entries", description: "Simple entries" }],
       physicalTables: [
         {
@@ -37,7 +50,14 @@ const moduleRegistryFixture = {
       physicalIndexes: [],
       retention: [],
       repositoryContracts: [],
-      queryCatalogEntries: [],
+      queryCatalogEntries: [
+        {
+          queryId: "list_entries_by_scope",
+          storeName: "entries",
+          description: "List simple key/value entries for a scope",
+          parameterSchemaId: "simple_kv_scope_query",
+        },
+      ],
       exportHooks: [],
       importHooks: [],
       migrationNotes: [],
@@ -46,6 +66,30 @@ const moduleRegistryFixture = {
     },
   ],
   orphanInstalledModules: [],
+} satisfies Awaited<ReturnType<StorageQueryContext["bridge"]["storageSchema"]>>;
+
+const postgresModuleRegistryFixture = {
+  ...moduleRegistryFixture,
+  backendCapabilities: ["transactions", "json_documents", "full_text_search"],
+  modules: [
+    {
+      ...moduleRegistryFixture.modules[0],
+      capabilityStatus: [
+        {
+          capability: "transactions",
+          required: true,
+          supported: true,
+          backendVariant: "postgres",
+        },
+        {
+          capability: "json_documents",
+          required: false,
+          supported: true,
+          backendVariant: "postgres",
+        },
+      ],
+    },
+  ],
 } satisfies Awaited<ReturnType<StorageQueryContext["bridge"]["storageSchema"]>>;
 
 const bridge = {
@@ -202,6 +246,54 @@ const simpleKvDescriptor = catalogData.items.find(
   (item) => item.id === "simple_kv.entries",
 );
 assert.equal(simpleKvDescriptor?.module?.moduleId, "simple_kv");
+assert.equal(
+  simpleKvDescriptor?.description,
+  "List simple key/value entries for a scope",
+);
+assert.equal(simpleKvDescriptor?.module?.rustQueryId, "list_entries_by_scope");
+assert.equal(
+  simpleKvDescriptor?.module?.parameterSchemaId,
+  "simple_kv_scope_query",
+);
+assert.deepEqual(simpleKvDescriptor?.module?.backendCapabilities, [
+  "transactions",
+  "json_documents",
+]);
+assert.equal(
+  simpleKvDescriptor?.module?.capabilityStatus.find(
+    (status) => status.capability === "transactions",
+  )?.supported,
+  true,
+);
+const postgresCatalog = await handleStorageQueryRequest(
+  {
+    method: "GET",
+    url: "/v1/admin/storage/query-catalog",
+    requestId: "req-catalog-postgres",
+  },
+  {
+    bridge: {
+      ...bridge,
+      async storageSchema() {
+        return postgresModuleRegistryFixture;
+      },
+    },
+  },
+);
+const postgresSimpleKv = okData<StorageQueryCatalog>(
+  postgresCatalog,
+).items.find((item) => item.id === "simple_kv.entries");
+assert.deepEqual(postgresSimpleKv?.module?.backendCapabilities, [
+  "transactions",
+  "json_documents",
+  "full_text_search",
+]);
+assert.equal(
+  postgresSimpleKv?.module?.capabilityStatus.find(
+    (status) => status.capability === "json_documents",
+  )?.backendVariant,
+  "postgres",
+);
 
 const storageSchema = await handleStorageQueryRequest(
   {
@@ -266,8 +358,46 @@ assert.ok(!("ok" in memory.details));
 assert.equal(memory.details.query_id, "profile.memory");
 assert.equal(memory.details.items?.length, 1);
 
-const catalogTool = await storageQueryCatalogTool().execute("call-catalog", {});
+const catalogTool = await storageQueryCatalogTool(context).execute(
+  "call-catalog",
+  {},
+);
 assert.equal(catalogTool.details.total, 7);
+
+const unmappedCatalog = await handleStorageQueryRequest(
+  {
+    method: "GET",
+    url: "/v1/admin/storage/query-catalog",
+    requestId: "req-unmapped-catalog",
+  },
+  {
+    bridge: {
+      ...bridge,
+      async storageSchema() {
+        return {
+          ...moduleRegistryFixture,
+          modules: [
+            {
+              ...moduleRegistryFixture.modules[0],
+              queryCatalogEntries: [
+                {
+                  queryId: "new_rust_query_without_ts_mapping",
+                  storeName: "entries",
+                  description: "New Rust query",
+                },
+              ],
+            },
+          ],
+        };
+      },
+    },
+  },
+);
+assert.equal(unmappedCatalog.status, 500);
+assert.equal(
+  unmappedCatalog.body.ok ? undefined : unmappedCatalog.body.error.reason_code,
+  "unmapped_rust_module_query",
+);
 
 const invalid = await handleStorageQueryRequest(
   {
