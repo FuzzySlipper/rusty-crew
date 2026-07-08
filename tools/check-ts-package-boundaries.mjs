@@ -56,7 +56,7 @@ const adapterAuthorityForbiddenCalls = [
   "submitBrainTextDelta",
   "wakeBrainFromBridgeRequest",
 ];
-const legacyBrainIslandSrcSmokeCount = 134;
+const legacyBrainIslandSrcSmokeCount = 131;
 const legacySrcSmokeAllowedImports = new Map([
   [
     normalizePath("ts/packages/brain-island/src/smoke-adapter-diagnostics.ts"),

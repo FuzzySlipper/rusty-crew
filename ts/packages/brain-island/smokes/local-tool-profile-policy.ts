@@ -12,7 +12,7 @@ import type {
 import {
   createLocalToolProfileStore,
   LocalToolProfileError,
-} from "./local-tool-profiles.js";
+} from "../src/local-tool-profiles.js";
 
 const nativeBridge = await loadNativeBridge();
 const bridge = inMemoryLocalToolProfileBridge(nativeBridge);

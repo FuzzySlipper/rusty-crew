@@ -5,14 +5,14 @@ import {
   buildToolRegistryMetadataArtifact,
   stableToolRegistryArtifactJson,
   type ToolRegistryMetadataArtifact,
-} from "./tool-registry-artifact.js";
+} from "../src/tool-registry-artifact.js";
 import {
   buildToolInventory,
   defaultToolExecutableBindings,
   defaultToolRegistry,
   defaultToolRegistryMetadata,
   validateToolRegistry,
-} from "./tool-registry.js";
+} from "../src/tool-registry.js";
 
 const artifactPath = fileURLToPath(
   new URL(

@@ -3,8 +3,8 @@ import {
   buildToolRegistryDiagnostics,
   defaultToolRegistry,
   formatToolRegistryDiagnosticsMarkdown,
-} from "./index.js";
-import type { ToolRegistryEntry } from "./index.js";
+} from "../src/index.js";
+import type { ToolRegistryEntry } from "../src/index.js";
 
 const report = buildToolRegistryDiagnostics({
   inventoryRequest: {
