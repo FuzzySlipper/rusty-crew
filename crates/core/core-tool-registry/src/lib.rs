@@ -409,6 +409,83 @@ fn omission(
     }
 }
 
+struct LocalCodeToolPolicy {
+    category: ToolCategory,
+    output_shape: &'static str,
+    required_toolsets: &'static [&'static str],
+    required_safety: &'static [ToolSafetyFlag],
+    workdir_scoped: bool,
+}
+
+fn local_code_tool_policy(tool_name: &str) -> Option<LocalCodeToolPolicy> {
+    match tool_name {
+        "read_file" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Local,
+            output_shape: "local.file_text.v1",
+            required_toolsets: &["local_code_read"],
+            required_safety: &[ToolSafetyFlag::ReadOnly],
+            workdir_scoped: false,
+        }),
+        "write_file" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Local,
+            output_shape: "local.file_write_result.v1",
+            required_toolsets: &["local_code_write"],
+            required_safety: &[ToolSafetyFlag::WritesFiles],
+            workdir_scoped: false,
+        }),
+        "search_files" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Local,
+            output_shape: "local.file_search_result.v1",
+            required_toolsets: &["local_code_read"],
+            required_safety: &[ToolSafetyFlag::ReadOnly],
+            workdir_scoped: false,
+        }),
+        "terminal" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Local,
+            output_shape: "local.terminal_result.v1",
+            required_toolsets: &["local_code_write"],
+            required_safety: &[ToolSafetyFlag::ExecutesProcess, ToolSafetyFlag::WritesFiles],
+            workdir_scoped: false,
+        }),
+        "git_status" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Git,
+            output_shape: "git.status_result.v1",
+            required_toolsets: &["local_code_read"],
+            required_safety: &[ToolSafetyFlag::ReadOnly],
+            workdir_scoped: false,
+        }),
+        "git_diff" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Git,
+            output_shape: "git.diff_result.v1",
+            required_toolsets: &["local_code_read"],
+            required_safety: &[ToolSafetyFlag::ReadOnly],
+            workdir_scoped: false,
+        }),
+        "patch" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Patch,
+            output_shape: "patch.apply_result.v1",
+            required_toolsets: &["local_code_write"],
+            required_safety: &[ToolSafetyFlag::WritesFiles],
+            workdir_scoped: false,
+        }),
+        "worker_write" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Local,
+            output_shape: "local.worker_file_write_result.v1",
+            required_toolsets: &["worker_code_write"],
+            required_safety: &[ToolSafetyFlag::WritesFiles, ToolSafetyFlag::WorkdirScoped],
+            workdir_scoped: true,
+        }),
+        "worker_patch" => Some(LocalCodeToolPolicy {
+            category: ToolCategory::Patch,
+            output_shape: "patch.worker_apply_result.v1",
+            required_toolsets: &["worker_code_write"],
+            required_safety: &[ToolSafetyFlag::WritesFiles, ToolSafetyFlag::WorkdirScoped],
+            workdir_scoped: true,
+        }),
+        _ => None,
+    }
+}
+
 struct ToolMetadataValidator<'a> {
     entries: &'a [ToolMetadata],
     diagnostics: Vec<ToolMetadataDiagnostic>,
@@ -591,6 +668,90 @@ impl<'a> ToolMetadataValidator<'a> {
                     ),
                 );
             }
+        }
+        self.validate_local_code_tool_policy(index, entry);
+    }
+
+    fn validate_local_code_tool_policy(&mut self, index: usize, entry: &ToolMetadata) {
+        let Some(policy) = local_code_tool_policy(entry.name.as_str()) else {
+            return;
+        };
+        if entry.category != policy.category {
+            self.error(
+                "invalid_local_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].category"),
+                format!(
+                    "{} must stay in {:?} category for Rust-validated local tool policy",
+                    entry.name, policy.category
+                ),
+            );
+        }
+        if entry.output_shape != policy.output_shape {
+            self.error(
+                "invalid_local_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].outputShape"),
+                format!(
+                    "{} must use durable output shape {}",
+                    entry.name, policy.output_shape
+                ),
+            );
+        }
+        for required in policy.required_toolsets {
+            if !entry.toolsets.iter().any(|toolset| toolset == required) {
+                self.error(
+                    "invalid_local_tool_policy",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].toolsets"),
+                    format!("{} must include toolset {required}", entry.name),
+                );
+            }
+        }
+        for required in policy.required_safety {
+            if !entry.safety.iter().any(|flag| flag == required) {
+                self.error(
+                    "invalid_local_tool_policy",
+                    Some(entry.name.as_str()),
+                    None,
+                    format!("tools[{index}].safety"),
+                    format!("{} must include safety flag {:?}", entry.name, required),
+                );
+            }
+        }
+        if policy.workdir_scoped
+            && !entry
+                .safety
+                .iter()
+                .any(|flag| flag == &ToolSafetyFlag::WorkdirScoped)
+        {
+            self.error(
+                "invalid_local_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].safety"),
+                format!("{} must be explicitly workdir-scoped", entry.name),
+            );
+        }
+        if !policy.workdir_scoped
+            && entry
+                .safety
+                .iter()
+                .any(|flag| flag == &ToolSafetyFlag::WorkdirScoped)
+        {
+            self.error(
+                "invalid_local_tool_policy",
+                Some(entry.name.as_str()),
+                None,
+                format!("tools[{index}].safety"),
+                format!(
+                    "{} is a full-agent local tool and must not be implicitly workdir-scoped",
+                    entry.name
+                ),
+            );
         }
     }
 
@@ -990,9 +1151,31 @@ mod tests {
     }
 
     #[test]
+    fn rejects_local_code_tool_policy_drift() {
+        let mut read_file = tool("read_file", ToolCategory::Local, "local.file_text.v1");
+        read_file.toolsets = vec!["local_code_read".to_string()];
+        read_file.safety = vec![ToolSafetyFlag::ReadOnly, ToolSafetyFlag::WorkdirScoped];
+
+        let mut worker_patch = tool(
+            "worker_patch",
+            ToolCategory::Patch,
+            "patch.worker_apply_result.v1",
+        );
+        worker_patch.toolsets = vec!["worker_code_write".to_string()];
+        worker_patch.safety = vec![ToolSafetyFlag::WritesFiles];
+
+        let result = validate_tool_metadata_list(&[read_file, worker_patch]);
+
+        assert_codes(
+            &result,
+            &["invalid_local_tool_policy", "invalid_local_tool_policy"],
+        );
+    }
+
+    #[test]
     fn validates_portable_metadata_without_executor_binding() {
         let result = validate_tool_metadata_list(&[
-            tool("read_file", ToolCategory::Local, "local.file_text.v1"),
+            local_read_file_tool(),
             tool("web_extract", ToolCategory::Web, "web.extract_result.v1"),
         ]);
 
@@ -1013,7 +1196,7 @@ mod tests {
     fn validates_tool_metadata_policy_with_ok_flag() {
         let result = validate_tool_metadata_policy(&ToolMetadataPolicyValidationInput {
             tools: vec![
-                tool("read_file", ToolCategory::Local, "local.file_text.v1"),
+                local_read_file_tool(),
                 tool(
                     "read_file",
                     ToolCategory::Mcp,
@@ -1023,7 +1206,10 @@ mod tests {
         });
 
         assert!(!result.ok);
-        assert_eq!(result.diagnostics[0].code, "duplicate_name");
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "duplicate_name"));
     }
 
     #[test]
@@ -1083,7 +1269,7 @@ mod tests {
 
     #[test]
     fn allows_capability_collision_with_valid_coexistence_note() {
-        let a = tool("read_file", ToolCategory::Local, "local.file_text.v1");
+        let a = tool("file_reader", ToolCategory::Local, "local.file_text.v1");
         let mut b = tool("preview_file", ToolCategory::Local, "local.file_text.v1");
         b.coexistence_note = Some("preview_file returns truncated display text".to_string());
 
@@ -1405,6 +1591,13 @@ mod tests {
             coexistence_note: None,
             collision_notes: None,
         }
+    }
+
+    fn local_read_file_tool() -> ToolMetadata {
+        let mut tool = tool("read_file", ToolCategory::Local, "local.file_text.v1");
+        tool.toolsets = vec!["local_code_read".to_string()];
+        tool.safety = vec![ToolSafetyFlag::ReadOnly];
+        tool
     }
 
     fn assert_codes(result: &ToolMetadataValidationResult, expected: &[&str]) {
