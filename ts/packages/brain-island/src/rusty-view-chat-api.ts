@@ -47,6 +47,9 @@ export interface RustyViewChatContext {
     cursor: string | undefined,
     limit: number,
   ): readonly ChatEvent[];
+  chatReadModelPage?(
+    input: ChatReadModelPageInput,
+  ): Promise<ChatReadModelEventPage>;
   executeCommand?(
     input: ExecuteChatCommandInput,
   ): Promise<ExecuteChatCommandResult>;
@@ -197,6 +200,19 @@ export interface ChatEvent {
     | "stream_error"
     | "unknown";
   payload: Record<string, unknown>;
+}
+
+export interface ChatReadModelPageInput {
+  session: SessionState;
+  cursor?: string | null;
+  limit: number;
+  requestId: string;
+}
+
+export interface ChatReadModelEventPage {
+  items: ChatEvent[];
+  latest_cursor: string;
+  has_more: boolean;
 }
 
 export interface ChatActor {
@@ -2163,6 +2179,21 @@ async function openSessionResult(
     eventLimit === 0
       ? []
       : (context.listChatEvents?.(session, cursor, eventLimit) ?? []);
+  const durableReadModelPage =
+    loggedEvents.length > 0 || eventLimit === 0
+      ? undefined
+      : await context
+          .chatReadModelPage?.({
+            session,
+            cursor,
+            limit: eventLimit,
+            requestId: "open-session-read-model",
+          })
+          .catch(() => undefined);
+  const durableEvents =
+    durableReadModelPage !== undefined && durableReadModelPage.items.length > 0
+      ? durableReadModelPage
+      : undefined;
   const messageSlots = await context
     .listMessageSlots?.({
       session,
@@ -2197,11 +2228,13 @@ async function openSessionResult(
     snapshot,
     ...(loggedEvents.length > 0
       ? loggedEvents
-      : messageSlots !== undefined && messageSlots.length > 0
-        ? messageSlotEvents(session, messageSlots, cursor)
-        : pendingMessages.map((message, index) =>
-            messageCreatedEvent(session, message, index + 1, now),
-          )),
+      : durableEvents !== undefined
+        ? durableEvents.items
+        : messageSlots !== undefined && messageSlots.length > 0
+          ? messageSlotEvents(session, messageSlots, cursor)
+          : pendingMessages.map((message, index) =>
+              messageCreatedEvent(session, message, index + 1, now),
+            )),
   ].slice(0, limit);
   const latestSequence = events.at(-1)?.sequence_id ?? 0;
   const hasMoreBefore =
@@ -2231,38 +2264,53 @@ async function eventPageResult(
   const pageProbeLimit = limit + 1;
   const loggedEvents =
     context.listChatEvents?.(session, cursor, pageProbeLimit) ?? [];
+  const durableEvents =
+    loggedEvents.length > 0
+      ? undefined
+      : await context
+          .chatReadModelPage?.({
+            session,
+            cursor,
+            limit,
+            requestId: "event-page-read-model",
+          })
+          .catch(() => undefined);
   const rawEvents =
     loggedEvents.length > 0
       ? loggedEvents
-      : context.listMessageSlots !== undefined
-        ? messageSlotEvents(
-            session,
-            (
-              await context.listMessageSlots({
-                session,
-                includeAlternates: false,
-                limit: pageProbeLimit,
-                offset: 0,
-              })
-            ).items,
-            cursor,
-          )
-        : (await pendingMessagesForSession(session, context)).map(
-            (message, index) =>
-              messageCreatedEvent(
-                session,
-                message,
-                cursorSequence(cursor, session.sessionId) + index + 1,
-                context.now?.() ?? new Date().toISOString(),
-              ),
-          );
+      : durableEvents !== undefined
+        ? durableEvents.items
+        : context.listMessageSlots !== undefined
+          ? messageSlotEvents(
+              session,
+              (
+                await context.listMessageSlots({
+                  session,
+                  includeAlternates: false,
+                  limit: pageProbeLimit,
+                  offset: 0,
+                })
+              ).items,
+              cursor,
+            )
+          : (await pendingMessagesForSession(session, context)).map(
+              (message, index) =>
+                messageCreatedEvent(
+                  session,
+                  message,
+                  cursorSequence(cursor, session.sessionId) + index + 1,
+                  context.now?.() ?? new Date().toISOString(),
+                ),
+            );
   const events = rawEvents.slice(0, limit);
   const latestSequence =
     events.at(-1)?.sequence_id ?? cursorSequence(cursor, session.sessionId);
   return {
     items: [...events],
-    latest_cursor: cursorFor(session.sessionId, latestSequence),
-    has_more: rawEvents.length > limit,
+    latest_cursor:
+      durableEvents?.latest_cursor ??
+      cursorFor(session.sessionId, latestSequence),
+    has_more: durableEvents?.has_more ?? rawEvents.length > limit,
   };
 }
 

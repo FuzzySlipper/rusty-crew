@@ -19,13 +19,14 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 144;
-const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 27;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 145;
+const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 28;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 24;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 25;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 120;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
+  "chat_read_model_page",
   "create_profile_registry_record",
   "get_model_provider",
   "get_profile_registry_record",

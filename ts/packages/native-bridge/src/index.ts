@@ -17,6 +17,7 @@ import {
   brainEventEnvelopeSchema,
   brainWakeAcceptedSchema,
   brainWakeRequestSchema,
+  chatReadModelPageSchema,
   eventReceiptSchema,
   openAiResponsesBrainRunInputSchema,
   piAgentBrainRunInputSchema,
@@ -239,6 +240,7 @@ interface NativeBridgeBinding {
   saveMessageVariantJson(inputJson: string): string;
   queryMessageSlotsJson(inputJson: string): string;
   queryMessageVariantsJson(inputJson: string): string;
+  chatReadModelPageJson(inputJson: string): string;
   selectActiveMessageVariantJson(inputJson: string): string;
   deleteMessageVariantJson(inputJson: string): string;
   reorderMessageVariantsJson(inputJson: string): string;
@@ -1819,6 +1821,21 @@ export interface NativeProviderStateDiagnostic {
   invalidationReason?: string;
 }
 
+export interface NativeChatReadModelEvent {
+  event_id: string;
+  session_id: string;
+  sequence_id: number;
+  created_at: string;
+  kind: "message_created";
+  payload: Record<string, unknown>;
+}
+
+export interface NativeChatReadModelPage {
+  items: NativeChatReadModelEvent[];
+  latest_cursor: string;
+  has_more: boolean;
+}
+
 export interface NativeBridgeModule {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
@@ -2129,6 +2146,7 @@ export interface NativeBridgeModule {
   roleplayNarratorReviewRequestsRevision(feedback: string): Promise<boolean>;
   saveMessageSlot(input: unknown): Promise<void>;
   saveMessageVariant(input: unknown): Promise<unknown>;
+  chatReadModelPage(input: unknown): Promise<NativeChatReadModelPage>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
   queryMessageVariants(query: unknown): Promise<unknown[]>;
   selectActiveMessageVariant(input: unknown): Promise<unknown>;
@@ -2477,6 +2495,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     ),
     saveMessageSlot: unavailable("save_message_slot"),
     saveMessageVariant: unavailable("save_message_variant"),
+    chatReadModelPage: unavailable("chat_read_model_page"),
     queryMessageSlots: unavailable("query_message_slots"),
     queryMessageVariants: unavailable("query_message_variants"),
     selectActiveMessageVariant: unavailable("select_active_message_variant"),
@@ -3697,6 +3716,15 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.saveMessageVariantJson(JSON.stringify(input)),
       ) as unknown,
+    chatReadModelPage: async (input) =>
+      validateBridgeValue<NativeChatReadModelPage>({
+        operation: "chat_read_model_page",
+        direction: "rust_to_ts",
+        schema: chatReadModelPageSchema,
+        value: JSON.parse(
+          binding.chatReadModelPageJson(JSON.stringify(input)),
+        ) as unknown,
+      }),
     queryMessageSlots: async (query) =>
       JSON.parse(
         binding.queryMessageSlotsJson(JSON.stringify(query)),

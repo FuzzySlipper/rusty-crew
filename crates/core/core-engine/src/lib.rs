@@ -15,31 +15,33 @@ use rusty_crew_core_body::{
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
 use rusty_crew_core_persistence::{
     AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
+    ChatReadModelEvent, ChatReadModelEventKind, ChatReadModelPage, ChatReadModelQuery,
     ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
     ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
     ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
     CoreCoordinationStore, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite,
-    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProfileRegistryQuery, ProviderWireStateInvalidationReason,
-    ProviderWireStateKey, ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord,
-    QueuedMessageState, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
-    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
-    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
-    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
-    RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord,
-    RoleplayLoreReplace, RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite,
-    RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize,
-    RuntimeMaintenancePolicy, RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics,
-    RuntimeSearchFilter, RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics,
-    SelectActiveBranchRequest, SelectActiveBranchResult, SelectActiveVariantRequest,
-    SelectActiveVariantResult, SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord,
-    SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest,
-    UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
-    WorkerPoolCompletionRequest, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
-    WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunRecord, WorkerRunStatus,
+    DurableMessageRecord, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantQuery, MessageVariantRecord, MessageVariantWrite, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
+    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
+    ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState, RoleplayChatLayerRecord,
+    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
+    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
+    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
+    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
+    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
+    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
+    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
+    SelectActiveBranchResult, SelectActiveVariantRequest, SelectActiveVariantResult,
+    SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
+    SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
+    WorkerPoolClaimRecord, WorkerPoolClaimRequest, WorkerPoolCompletionRequest,
+    WorkerPoolMemberStatus, WorkerPoolNoCapacityReason, WorkerPoolWorkItemRecord,
+    WorkerPoolWorkStatus, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     session_memory_space_descriptor, ActionBatchReceipt, ActionRejection, AgentId, AgentMessage,
@@ -63,6 +65,7 @@ use rusty_crew_core_protocol::{
     WorkerPoolCapacityFallbackPolicy, WorkerPoolCapacityRequest,
 };
 use rusty_crew_core_session::SessionRegistry;
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
@@ -76,6 +79,8 @@ static NEXT_QUEUED_MESSAGE: AtomicU64 = AtomicU64::new(1);
 
 const DEFAULT_PROVIDER_WIRE_STATE_TTL_MS: u64 = 24 * 60 * 60 * 1_000;
 const MAX_PROVIDER_WIRE_STATE_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+const DEFAULT_CHAT_READ_MODEL_LIMIT: u32 = 100;
+const MAX_CHAT_READ_MODEL_LIMIT: u32 = 500;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderStateHydration {
@@ -1031,6 +1036,56 @@ impl CoreEngine {
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         self.store.conversation().query_message_variants(query)
+    }
+
+    pub fn chat_read_model_page(
+        &self,
+        query: &ChatReadModelQuery,
+    ) -> CoreResult<ChatReadModelPage> {
+        let after = chat_cursor_sequence(query.cursor.as_deref(), &query.session_id);
+        let limit = normalize_chat_read_model_limit(query.limit);
+        if limit == 0 {
+            return Ok(ChatReadModelPage {
+                items: Vec::new(),
+                latest_cursor: chat_cursor_for(&query.session_id, after),
+                has_more: false,
+            });
+        }
+
+        let offset = after.min(u32::MAX as u64) as u32;
+        let probe_limit = limit.saturating_add(1).min(MAX_CHAT_READ_MODEL_LIMIT + 1);
+        let slots = self
+            .store
+            .conversation()
+            .query_message_slots(&MessageSlotQuery {
+                session_id: Some(query.session_id.clone()),
+                include_alternates: true,
+                page: Some(rusty_crew_core_persistence::QueryPage {
+                    limit: Some(probe_limit),
+                    offset: Some(offset),
+                }),
+            })?;
+
+        let has_more = slots.len() > limit as usize;
+        let items = slots
+            .into_iter()
+            .take(limit as usize)
+            .enumerate()
+            .map(|(index, slot)| {
+                chat_read_model_event_from_slot(
+                    &query.session_id,
+                    &query.agent_id,
+                    after + index as u64 + 1,
+                    &slot,
+                )
+            })
+            .collect::<Vec<_>>();
+        let latest_sequence = items.last().map(|event| event.sequence_id).unwrap_or(after);
+        Ok(ChatReadModelPage {
+            items,
+            latest_cursor: chat_cursor_for(&query.session_id, latest_sequence),
+            has_more,
+        })
     }
 
     pub fn save_conversation_branch(
@@ -2284,6 +2339,82 @@ impl CoreEngine {
     }
 }
 
+fn normalize_chat_read_model_limit(limit: Option<u32>) -> u32 {
+    limit
+        .unwrap_or(DEFAULT_CHAT_READ_MODEL_LIMIT)
+        .min(MAX_CHAT_READ_MODEL_LIMIT)
+}
+
+fn chat_cursor_for(session_id: &SessionId, sequence: u64) -> String {
+    format!("{session_id}:{sequence}")
+}
+
+fn chat_cursor_sequence(cursor: Option<&str>, session_id: &SessionId) -> u64 {
+    let Some(cursor) = cursor else {
+        return 0;
+    };
+    let Some(sequence) = cursor.strip_prefix(&format!("{session_id}:")) else {
+        return 0;
+    };
+    sequence.parse::<u64>().unwrap_or(0)
+}
+
+fn chat_read_model_event_from_slot(
+    session_id: &SessionId,
+    agent_id: &str,
+    sequence: u64,
+    slot: &MessageSlotRecord,
+) -> ChatReadModelEvent {
+    let variant = slot
+        .active_variant_id
+        .as_ref()
+        .and_then(|active_variant_id| {
+            slot.alternates
+                .iter()
+                .find(|candidate| &candidate.variant_id == active_variant_id)
+        })
+        .unwrap_or(&slot.primary);
+    durable_message_event(session_id, agent_id, sequence, &variant.message)
+}
+
+fn durable_message_event(
+    session_id: &SessionId,
+    agent_id: &str,
+    sequence: u64,
+    message: &DurableMessageRecord,
+) -> ChatReadModelEvent {
+    let role = if message.author_role == "assistant" || message.author_id == agent_id {
+        "assistant"
+    } else {
+        "user"
+    };
+    let mut payload = json!({
+        "message_id": message.message_id.0.as_str(),
+        "role": role,
+        "body": message.body.as_str(),
+        "source": "durable_message_slot",
+        "slot_status": message.status,
+    });
+    if let Some(correlation_id) = message
+        .metadata_json
+        .get("correlation_id")
+        .and_then(|value| value.as_str())
+    {
+        if let Some(payload) = payload.as_object_mut() {
+            payload.insert("correlation_id".to_string(), json!(correlation_id));
+        }
+    }
+
+    ChatReadModelEvent {
+        event_id: chat_cursor_for(session_id, sequence),
+        session_id: session_id.clone(),
+        sequence_id: sequence,
+        created_at: message.created_at.clone(),
+        kind: ChatReadModelEventKind::MessageCreated,
+        payload_json: payload,
+    }
+}
+
 pub fn delegated_session_id(
     parent_session_id: &SessionId,
     wake_id: &str,
@@ -2512,7 +2643,8 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 mod tests {
     use super::*;
     use rusty_crew_core_persistence::{
-        AgentMessageQuery, CompletionPacketQuery, CoordinationStore, QueryPage,
+        AgentMessageQuery, CompletionPacketQuery, CoordinationStore, DurableMessageStatus,
+        DurableMessageWrite, MessageVariantSource, MessageVariantStatus, QueryPage,
         QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RuntimeCounterScope,
         RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
         ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
@@ -2523,9 +2655,9 @@ mod tests {
     use rusty_crew_core_protocol::{
         AdapterId, AgentId, AgentMessage, BrainAction, BrainEvent, ClockConfig, CompletionPacket,
         CompletionStatus, CoreErrorKind, CoreEventKind, DelegatedRunStatus,
-        DelegationLifecyclePhase, ExternalEventPayload, ProfileId, ProjectId, ResourceLimits,
-        SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource, ToolDescriptor,
-        ToolProfile,
+        DelegationLifecyclePhase, ExternalEventPayload, MessageId, ProfileId, ProjectId,
+        ResourceLimits, SessionKind, ToolCallMetadata, ToolCallPolicyMetadata, ToolCallSource,
+        ToolDescriptor, ToolProfile,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -5720,6 +5852,166 @@ mod tests {
             "runtime rebuild blocked for profile planner-profile"
         );
         assert_eq!(action.failure_reason_code, "model_provider_refresh_failed");
+    }
+
+    #[test]
+    fn chat_read_model_projects_slots_with_cursor_and_has_more() {
+        let engine = test_engine();
+        engine
+            .create_session(session_config(
+                "chat-session",
+                "prime-agent",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        save_test_message_slot(&engine, "chat-session", 1, "operator", "user", "hello");
+        save_test_message_slot(&engine, "chat-session", 2, "prime-agent", "assistant", "hi");
+        save_test_message_slot(&engine, "chat-session", 3, "operator", "user", "again");
+
+        let page = engine
+            .chat_read_model_page(&ChatReadModelQuery {
+                session_id: SessionId::new("chat-session"),
+                agent_id: "prime-agent".to_string(),
+                cursor: Some("chat-session:1".to_string()),
+                limit: Some(1),
+            })
+            .unwrap();
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].event_id, "chat-session:2");
+        assert_eq!(page.items[0].sequence_id, 2);
+        assert_eq!(page.items[0].kind, ChatReadModelEventKind::MessageCreated);
+        assert_eq!(page.items[0].payload_json["role"], "assistant");
+        assert_eq!(page.items[0].payload_json["body"], "hi");
+        assert_eq!(page.items[0].payload_json["source"], "durable_message_slot");
+        assert_eq!(page.latest_cursor, "chat-session:2");
+        assert!(page.has_more);
+    }
+
+    #[test]
+    fn chat_read_model_uses_active_alternate_and_forgives_bad_cursors() {
+        let engine = test_engine();
+        engine
+            .create_session(session_config(
+                "variant-session",
+                "prime-agent",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        save_test_message_slot(
+            &engine,
+            "variant-session",
+            1,
+            "prime-agent",
+            "assistant",
+            "primary",
+        );
+        engine
+            .save_message_variant(&MessageVariantWrite {
+                variant_id: MessageVariantId::new("variant-session-variant-1-alt"),
+                slot_id: MessageSlotId::new("variant-session-slot-1"),
+                source: MessageVariantSource::Alternate,
+                ordinal: 1,
+                status: MessageVariantStatus::Active,
+                message: test_message_write(
+                    "variant-session",
+                    10,
+                    "prime-agent",
+                    "assistant",
+                    "alternate",
+                ),
+                metadata_json: json!({}),
+                created_at: "2026-06-19T00:10:00Z".to_string(),
+                updated_at: "2026-06-19T00:10:00Z".to_string(),
+            })
+            .unwrap();
+        engine
+            .select_active_message_variant(&SelectActiveVariantRequest {
+                slot_id: MessageSlotId::new("variant-session-slot-1"),
+                active_variant_id: Some(MessageVariantId::new("variant-session-variant-1-alt")),
+                expected: rusty_crew_core_persistence::ActiveVariantExpectation::Any,
+                updated_at: "2026-06-19T00:11:00Z".to_string(),
+            })
+            .unwrap();
+
+        let page = engine
+            .chat_read_model_page(&ChatReadModelQuery {
+                session_id: SessionId::new("variant-session"),
+                agent_id: "prime-agent".to_string(),
+                cursor: Some("other-session:not-a-number".to_string()),
+                limit: Some(10),
+            })
+            .unwrap();
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].event_id, "variant-session:1");
+        assert_eq!(page.items[0].payload_json["body"], "alternate");
+        assert_eq!(page.latest_cursor, "variant-session:1");
+        assert!(!page.has_more);
+    }
+
+    fn save_test_message_slot(
+        engine: &CoreEngine,
+        session_id: &str,
+        ordinal: u32,
+        author_id: &str,
+        author_role: &str,
+        body: &str,
+    ) {
+        let timestamp = format!("2026-06-19T00:{ordinal:02}:00Z");
+        engine
+            .save_message_slot(&MessageSlotWrite {
+                slot_id: MessageSlotId::new(format!("{session_id}-slot-{ordinal}")),
+                session_id: SessionId::new(session_id),
+                primary_variant_id: MessageVariantId::new(format!(
+                    "{session_id}-variant-{ordinal}-primary"
+                )),
+                active_variant_id: None,
+                metadata_json: json!({}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp.clone(),
+            })
+            .unwrap();
+        engine
+            .save_message_variant(&MessageVariantWrite {
+                variant_id: MessageVariantId::new(format!(
+                    "{session_id}-variant-{ordinal}-primary"
+                )),
+                slot_id: MessageSlotId::new(format!("{session_id}-slot-{ordinal}")),
+                source: MessageVariantSource::Primary,
+                ordinal: 0,
+                status: MessageVariantStatus::Active,
+                message: test_message_write(session_id, ordinal, author_id, author_role, body),
+                metadata_json: json!({}),
+                created_at: timestamp.clone(),
+                updated_at: timestamp,
+            })
+            .unwrap();
+    }
+
+    fn test_message_write(
+        session_id: &str,
+        ordinal: u32,
+        author_id: &str,
+        author_role: &str,
+        body: &str,
+    ) -> DurableMessageWrite {
+        DurableMessageWrite {
+            message_id: MessageId::new(format!("{session_id}-message-{ordinal}")),
+            session_id: SessionId::new(session_id),
+            branch_id: None,
+            parent_message_id: None,
+            previous_message_id: None,
+            author_id: author_id.to_string(),
+            author_role: author_role.to_string(),
+            status: DurableMessageStatus::Completed,
+            body: body.to_string(),
+            metadata_json: json!({ "correlation_id": format!("correlation-{ordinal}") }),
+            created_at: format!("2026-06-19T00:{ordinal:02}:00Z"),
+            blocks: Vec::new(),
+        }
     }
 
     fn test_engine() -> CoreEngine {

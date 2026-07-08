@@ -38,6 +38,14 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn chat_read_model_page_json(&self, input_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<ChatReadModelQuery>(&input_json, "chat read-model query")?;
+        let page = bridge.chat_read_model_page(&query).map_err(to_napi_error)?;
+        serialize_json(&page, "chat read-model page")
+    }
+
+    #[napi]
     pub fn save_conversation_branch_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let branch =

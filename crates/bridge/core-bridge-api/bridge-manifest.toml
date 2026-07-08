@@ -516,6 +516,15 @@ errors = "core_protocol::CoreError"
 summary = "Persist a durable message variant with its message and block records."
 
 [[operation]]
+name = "chat_read_model_page"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ChatReadModelQuery"
+output = "core_persistence::ChatReadModelPage"
+errors = "core_protocol::CoreError"
+summary = "Project durable message slots into a Rusty View chat read-model page."
+
+[[operation]]
 name = "query_message_slots"
 surface = "stable"
 direction = "ts_to_rust"

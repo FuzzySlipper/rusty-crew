@@ -154,6 +154,40 @@ export const rawSessionStateSchema = Type.Object(
 
 export const rawSessionStateArraySchema = Type.Array(rawSessionStateSchema);
 
+export const chatReadModelPageSchema = Type.Object(
+  {
+    items: Type.Array(
+      Type.Object(
+        {
+          event_id: Type.String(),
+          session_id: Type.String(),
+          sequence_id: Type.Number(),
+          created_at: Type.String(),
+          kind: Type.Literal("message_created"),
+          payload: Type.Object(
+            {
+              message_id: Type.String(),
+              role: Type.Union([
+                Type.Literal("assistant"),
+                Type.Literal("user"),
+              ]),
+              body: Type.String(),
+              correlation_id: Type.Optional(nullableString),
+              source: Type.Literal("durable_message_slot"),
+              slot_status: Type.String(),
+            },
+            { additionalProperties: true },
+          ),
+        },
+        { additionalProperties: true },
+      ),
+    ),
+    latest_cursor: Type.String(),
+    has_more: Type.Boolean(),
+  },
+  { additionalProperties: true },
+);
+
 export const rawBodyStateSchema = Type.Object(
   {
     session: rawSessionStateSchema,

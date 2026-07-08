@@ -71,6 +71,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "provider_state_diagnostics",
     "save_message_slot",
     "save_message_variant",
+    "chat_read_model_page",
     "query_message_slots",
     "query_message_variants",
     "select_active_message_variant",

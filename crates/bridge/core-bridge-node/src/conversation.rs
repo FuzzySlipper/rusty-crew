@@ -26,6 +26,13 @@ impl NativeBridge {
         self.engine()?.query_message_variants(query)
     }
 
+    pub fn chat_read_model_page(
+        &self,
+        query: &ChatReadModelQuery,
+    ) -> CoreResult<ChatReadModelPage> {
+        self.engine()?.chat_read_model_page(query)
+    }
+
     pub fn save_conversation_branch(
         &self,
         branch: &ConversationBranchWrite,

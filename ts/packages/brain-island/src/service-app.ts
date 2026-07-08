@@ -199,6 +199,8 @@ import {
   type AttachmentPage,
   type AttachmentRecord,
   type ChatEvent,
+  type ChatReadModelEventPage,
+  type ChatReadModelPageInput,
   type ChatSendMessageInput,
   type ConversationBranchMutationResult,
   type ConversationBranchRecord,
@@ -857,6 +859,7 @@ async function handleHttpRequest(
         effectiveSessionDefaults: effectiveDefaultsForChatSession,
         listChatEvents: (session, cursor, limit) =>
           listChatEventsAfterCursor(state, session, cursor, limit),
+        chatReadModelPage: (input) => rustyViewChatReadModelPage(state, input),
         getToolCallDebugDetail: (input) =>
           rustyViewToolCallDebugDetail(state, input),
         getProviderRequestDebugDetail: (input) =>
@@ -8477,6 +8480,18 @@ async function listRustyViewMessageSlots(
       ? { nextOffset: input.offset + items.length }
       : {}),
   };
+}
+
+async function rustyViewChatReadModelPage(
+  state: ServiceState,
+  input: ChatReadModelPageInput,
+): Promise<ChatReadModelEventPage> {
+  return state.bridge.chatReadModelPage({
+    session_id: input.session.sessionId,
+    agent_id: input.session.agentId,
+    cursor: input.cursor ?? undefined,
+    limit: input.limit,
+  }) as Promise<ChatReadModelEventPage>;
 }
 
 async function searchRustyViewTranscript(
