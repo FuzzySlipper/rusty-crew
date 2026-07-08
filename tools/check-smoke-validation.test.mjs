@@ -78,7 +78,7 @@ test("rejects live or infrastructure smokes in verify:ts", () => {
 });
 
 test("rejects new root smoke aliases above the frozen ceiling", () => {
-  const catalog = Array.from({ length: 131 }, (_, index) => ({
+  const catalog = Array.from({ length: 132 }, (_, index) => ({
     name: `root-${index}`,
     scope: "root-alias",
     lane: "offline",
@@ -96,5 +96,5 @@ test("rejects new root smoke aliases above the frozen ceiling", () => {
   });
 
   assert.equal(audit.violations.length, 1);
-  assert.match(audit.violations[0]?.reason ?? "", /root package exposes 131/);
+  assert.match(audit.violations[0]?.reason ?? "", /root package exposes 132/);
 });

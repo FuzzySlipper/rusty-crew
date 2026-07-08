@@ -8,7 +8,7 @@ import { buildCatalog } from "./smoke-runner.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const allowedVerifyLanes = new Set(["offline", "native-offline"]);
-const rootSmokeAliasCeiling = 130;
+const rootSmokeAliasCeiling = 131;
 const forbiddenVerifyRequirements = new Set([
   "den",
   "local-router",

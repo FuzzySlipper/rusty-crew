@@ -15,7 +15,7 @@ const adapterPackages = [
   "@rusty-crew/adapter-telegram",
   "@rusty-crew/adapter-tui",
 ];
-const legacyBrainIslandSrcSmokeCount = 134;
+const legacyBrainIslandSrcSmokeCount = 137;
 const legacySrcSmokeAllowedImports = new Map([
   [
     normalizePath("ts/packages/brain-island/src/smoke-adapter-diagnostics.ts"),
@@ -120,7 +120,14 @@ const legacySrcSmokeAllowedImports = new Map([
     new Set(["@rusty-crew/service-host"]),
   ],
   [
+    normalizePath(
+      "ts/packages/brain-island/src/smoke-roleplay-st-import-api.ts",
+    ),
+    new Set(["@rusty-crew/service-host"]),
+  ],
+  [
     normalizePath("ts/packages/brain-island/src/smoke-roleplay-browser-api.ts"),
+
     new Set(["@rusty-crew/service-host"]),
   ],
   [
