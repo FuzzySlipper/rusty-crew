@@ -225,6 +225,7 @@ interface NativeBridgeBinding {
   cancelPiAgentBrainJson(inputJson: string): string;
   providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
   planRoleplayAssistantAlternativeJson(inputJson: string): string;
+  planRoleplaySessionLifecycleJson(inputJson: string): string;
   buildRoleplayPromptContextJson(inputJson: string): string;
   roleplaySpeakerIdentityJson(inputJson: string): string;
   writeRoleplayCharacterJson(inputJson: string): string;
@@ -2209,6 +2210,7 @@ export interface NativeBridgeModule {
     decision: MemoryGovernanceDecisionInput,
   ): Promise<MemoryGovernanceDecisionRecord>;
   planRoleplayAssistantAlternative(input: unknown): Promise<unknown>;
+  planRoleplaySessionLifecycle(input: unknown): Promise<unknown>;
   buildRoleplayPromptContext(input: unknown): Promise<unknown>;
   roleplaySpeakerIdentity(input: unknown): Promise<unknown>;
   writeRoleplayCharacter(input: unknown): Promise<unknown>;
@@ -2563,6 +2565,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     recordMemoryGovernanceDecision: unavailable("initialize_engine"),
     planRoleplayAssistantAlternative: unavailable(
       "plan_roleplay_assistant_alternative",
+    ),
+    planRoleplaySessionLifecycle: unavailable(
+      "plan_roleplay_session_lifecycle",
     ),
     buildRoleplayPromptContext: unavailable("build_roleplay_prompt_context"),
     roleplaySpeakerIdentity: unavailable("roleplay_speaker_identity"),
@@ -3783,6 +3788,10 @@ function createNativeBridgeModule(
     planRoleplayAssistantAlternative: async (input) =>
       JSON.parse(
         binding.planRoleplayAssistantAlternativeJson(JSON.stringify(input)),
+      ) as unknown,
+    planRoleplaySessionLifecycle: async (input) =>
+      JSON.parse(
+        binding.planRoleplaySessionLifecycleJson(JSON.stringify(input)),
       ) as unknown,
     buildRoleplayPromptContext: async (input) =>
       JSON.parse(

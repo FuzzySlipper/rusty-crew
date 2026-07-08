@@ -316,6 +316,86 @@ pub struct RoleplaySessionMetadataPatchOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionLifecyclePlanInput {
+    pub action: String,
+    pub now: String,
+    #[serde(default)]
+    pub body: JsonValue,
+    #[serde(default)]
+    pub fallback_session_id: Option<String>,
+    #[serde(default)]
+    pub registry_agent_id: Option<String>,
+    #[serde(default)]
+    pub source_session: Option<RoleplaySessionLifecycleSession>,
+    #[serde(default)]
+    pub current_metadata: Option<RoleplaySessionMetadata>,
+    #[serde(default)]
+    pub player_persona: Option<RoleplayPlayerPersona>,
+    #[serde(default)]
+    pub character: Option<RoleplayCharacter>,
+    #[serde(default)]
+    pub available_layer_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub source_chat_layers: Vec<RoleplayChatLayerBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionLifecycleSession {
+    pub session_id: String,
+    pub agent_id: String,
+    pub profile_id: String,
+    pub kind: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayChatLayerBinding {
+    pub layer_id: String,
+    pub priority: i64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayChatLayerUpdatePlan {
+    pub chat_id: String,
+    pub layers: Vec<RoleplayChatLayerBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplayRuntimeSessionPlan {
+    pub create_session: bool,
+    pub archive_session: bool,
+    pub ensure_configured_session: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionForkPlan {
+    pub source_session_id: String,
+    pub source_message_id: String,
+    pub target_session_id: String,
+    pub branch_id: String,
+    pub branch_label: String,
+    pub branch_metadata_json: JsonValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleplaySessionLifecyclePlan {
+    pub action: String,
+    pub session_id: String,
+    pub agent_id: String,
+    pub profile_id: String,
+    pub kind: String,
+    pub metadata: RoleplaySessionMetadata,
+    pub runtime: RoleplayRuntimeSessionPlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_layer_update: Option<RoleplayChatLayerUpdatePlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<RoleplaySessionForkPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorConfig {
     pub tone: String,
@@ -1153,6 +1233,242 @@ pub fn patch_session_metadata(
     Ok(RoleplaySessionMetadataPatchOutput {
         metadata: next,
         active_layer_ids_changed,
+    })
+}
+
+pub fn plan_session_lifecycle(
+    input: RoleplaySessionLifecyclePlanInput,
+) -> RoleplayDomainResult<RoleplaySessionLifecyclePlan> {
+    match input.action.as_str() {
+        "create" => plan_session_create(input),
+        "archive" => plan_session_archive(input),
+        "restore" => plan_session_restore(input),
+        "fork" => plan_session_fork(input),
+        action => Err(RoleplayDomainError::invalid(
+            "roleplay_session_lifecycle_action_invalid",
+            format!("roleplay session lifecycle action {action} is not supported"),
+        )),
+    }
+}
+
+fn plan_session_create(
+    input: RoleplaySessionLifecyclePlanInput,
+) -> RoleplayDomainResult<RoleplaySessionLifecyclePlan> {
+    let body = json_object(&input.body, "roleplay session create body")?;
+    let profile_id = required_json_string(body, &["profileId", "profile_id"], "profileId")?;
+    let display_name_was_supplied = has_any(body, &["displayName", "display_name"]);
+    let agent_id = first_string(body, &["agentId", "agent_id"])
+        .or(input.registry_agent_id)
+        .unwrap_or_else(|| profile_id.clone());
+    let session_id = first_string(body, &["sessionId", "session_id"])
+        .or(input.fallback_session_id)
+        .ok_or_else(|| {
+            RoleplayDomainError::invalid(
+                "roleplay_session_id_required",
+                "sessionId or fallbackSessionId is required",
+            )
+        })?;
+    let base = RoleplaySessionMetadata {
+        session_id: session_id.clone(),
+        profile_id: profile_id.clone(),
+        display_name: None,
+        player_persona_id: None,
+        character_id: None,
+        active_layer_ids: Vec::new(),
+        archived: false,
+        created_at: input.now.clone(),
+        updated_at: input.now.clone(),
+    };
+    let mut patched = patch_session_metadata(RoleplaySessionMetadataPatchInput {
+        current: base,
+        session_id: session_id.clone(),
+        profile_id: profile_id.clone(),
+        now: input.now.clone(),
+        body: input.body,
+        player_persona: input.player_persona,
+        character: input.character,
+        available_layer_ids: input.available_layer_ids,
+    })?
+    .metadata;
+    if !display_name_was_supplied && patched.display_name.is_none() {
+        patched.display_name = Some("Roleplay Session".to_string());
+    }
+    let chat_layer_update = chat_layer_update_from_active_layers(
+        &session_id,
+        patched.active_layer_ids.as_slice(),
+        !patched.active_layer_ids.is_empty(),
+    );
+    Ok(RoleplaySessionLifecyclePlan {
+        action: "create".to_string(),
+        session_id,
+        agent_id,
+        profile_id,
+        kind: "full".to_string(),
+        metadata: patched,
+        runtime: RoleplayRuntimeSessionPlan {
+            create_session: true,
+            archive_session: false,
+            ensure_configured_session: false,
+        },
+        chat_layer_update,
+        fork: None,
+    })
+}
+
+fn plan_session_archive(
+    input: RoleplaySessionLifecyclePlanInput,
+) -> RoleplayDomainResult<RoleplaySessionLifecyclePlan> {
+    let source = required_lifecycle_source(input.source_session)?;
+    let mut metadata = required_lifecycle_metadata(input.current_metadata)?;
+    metadata.session_id = source.session_id.clone();
+    metadata.profile_id = source.profile_id.clone();
+    metadata.archived = true;
+    metadata.updated_at = input.now;
+    Ok(RoleplaySessionLifecyclePlan {
+        action: "archive".to_string(),
+        session_id: source.session_id,
+        agent_id: source.agent_id,
+        profile_id: source.profile_id,
+        kind: source.kind,
+        metadata,
+        runtime: RoleplayRuntimeSessionPlan {
+            create_session: false,
+            archive_session: source.status != "archived",
+            ensure_configured_session: false,
+        },
+        chat_layer_update: None,
+        fork: None,
+    })
+}
+
+fn plan_session_restore(
+    input: RoleplaySessionLifecyclePlanInput,
+) -> RoleplayDomainResult<RoleplaySessionLifecyclePlan> {
+    let source = required_lifecycle_source(input.source_session)?;
+    let mut metadata = required_lifecycle_metadata(input.current_metadata)?;
+    metadata.session_id = source.session_id.clone();
+    metadata.profile_id = source.profile_id.clone();
+    metadata.archived = false;
+    metadata.updated_at = input.now;
+    Ok(RoleplaySessionLifecyclePlan {
+        action: "restore".to_string(),
+        session_id: source.session_id,
+        agent_id: source.agent_id,
+        profile_id: source.profile_id,
+        kind: source.kind,
+        metadata,
+        runtime: RoleplayRuntimeSessionPlan {
+            create_session: false,
+            archive_session: false,
+            ensure_configured_session: source.status == "archived",
+        },
+        chat_layer_update: None,
+        fork: None,
+    })
+}
+
+fn plan_session_fork(
+    input: RoleplaySessionLifecyclePlanInput,
+) -> RoleplayDomainResult<RoleplaySessionLifecyclePlan> {
+    let source = required_lifecycle_source(input.source_session)?;
+    if source.status == "archived" {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_session_fork_source_archived",
+            format!("roleplay session {} is archived", source.session_id),
+        ));
+    }
+    let body = json_object(&input.body, "roleplay session fork body")?;
+    let target_message_id = required_json_string(body, &["messageId", "message_id"], "messageId")?;
+    let target_session_id = first_string(
+        body,
+        &["sessionId", "session_id", "newSessionId", "new_session_id"],
+    )
+    .or(input.fallback_session_id)
+    .ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_session_id_required",
+            "sessionId or fallbackSessionId is required",
+        )
+    })?;
+    if target_session_id == source.session_id {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_session_fork_target_conflict",
+            "fork target session id must differ from the source session id",
+        ));
+    }
+    let source_metadata = required_lifecycle_metadata(input.current_metadata)?;
+    validate_selected_persona(
+        &source.profile_id,
+        source_metadata.player_persona_id.clone(),
+        input.player_persona.as_ref(),
+    )?;
+    validate_selected_character(
+        &source.profile_id,
+        source_metadata.character_id.clone(),
+        input.character.as_ref(),
+    )?;
+    if let Some(available_layer_ids) = input.available_layer_ids.as_ref() {
+        validate_layer_refs(&source_metadata.active_layer_ids, available_layer_ids)?;
+    }
+    let display_name = first_string(body, &["displayName", "display_name"]).unwrap_or_else(|| {
+        format!(
+            "{} fork",
+            source_metadata
+                .display_name
+                .as_deref()
+                .unwrap_or(source.session_id.as_str())
+        )
+    });
+    let metadata = RoleplaySessionMetadata {
+        session_id: target_session_id.clone(),
+        profile_id: source.profile_id.clone(),
+        display_name: Some(display_name),
+        player_persona_id: source_metadata.player_persona_id,
+        character_id: source_metadata.character_id,
+        active_layer_ids: source_metadata.active_layer_ids,
+        archived: false,
+        created_at: input.now.clone(),
+        updated_at: input.now.clone(),
+    };
+    let branch_label = first_string(body, &["label", "branchLabel", "branch_label"])
+        .unwrap_or_else(|| "Fork".to_string());
+    let branch_id = stable_roleplay_record_id(
+        "branch",
+        format!("{target_session_id}:fork:{target_message_id}").as_str(),
+    );
+    let chat_layer_update = if input.source_chat_layers.is_empty() {
+        None
+    } else {
+        Some(RoleplayChatLayerUpdatePlan {
+            chat_id: target_session_id.clone(),
+            layers: input.source_chat_layers,
+        })
+    };
+    Ok(RoleplaySessionLifecyclePlan {
+        action: "fork".to_string(),
+        session_id: target_session_id.clone(),
+        agent_id: source.agent_id,
+        profile_id: source.profile_id,
+        kind: source.kind,
+        metadata,
+        runtime: RoleplayRuntimeSessionPlan {
+            create_session: true,
+            archive_session: false,
+            ensure_configured_session: false,
+        },
+        chat_layer_update,
+        fork: Some(RoleplaySessionForkPlan {
+            source_session_id: source.session_id.clone(),
+            source_message_id: target_message_id.clone(),
+            target_session_id,
+            branch_id,
+            branch_label,
+            branch_metadata_json: serde_json::json!({
+                "source": "roleplay_session_fork",
+                "source_session_id": source.session_id,
+                "source_message_id": target_message_id,
+            }),
+        }),
     })
 }
 
@@ -2246,6 +2562,65 @@ fn validate_layer_refs(selected: &[String], available: &[String]) -> RoleplayDom
     Ok(())
 }
 
+fn required_lifecycle_source(
+    source: Option<RoleplaySessionLifecycleSession>,
+) -> RoleplayDomainResult<RoleplaySessionLifecycleSession> {
+    source.ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_session_lifecycle_source_required",
+            "source session is required for this roleplay session lifecycle action",
+        )
+    })
+}
+
+fn required_lifecycle_metadata(
+    metadata: Option<RoleplaySessionMetadata>,
+) -> RoleplayDomainResult<RoleplaySessionMetadata> {
+    metadata.ok_or_else(|| {
+        RoleplayDomainError::invalid(
+            "roleplay_session_lifecycle_metadata_required",
+            "current roleplay session metadata is required for this lifecycle action",
+        )
+    })
+}
+
+fn chat_layer_update_from_active_layers(
+    chat_id: &str,
+    active_layer_ids: &[String],
+    enabled: bool,
+) -> Option<RoleplayChatLayerUpdatePlan> {
+    if active_layer_ids.is_empty() {
+        return None;
+    }
+    Some(RoleplayChatLayerUpdatePlan {
+        chat_id: chat_id.to_string(),
+        layers: active_layer_ids
+            .iter()
+            .enumerate()
+            .map(|(index, layer_id)| RoleplayChatLayerBinding {
+                layer_id: layer_id.clone(),
+                priority: i64::try_from(index).unwrap_or(i64::MAX),
+                enabled,
+            })
+            .collect(),
+    })
+}
+
+fn stable_roleplay_record_id(prefix: &str, raw: &str) -> String {
+    let sanitized = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | ':' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .take(160)
+        .collect::<String>();
+    format!("{prefix}:{sanitized}")
+}
+
 struct PromptSectionDraft<'a> {
     id: &'static str,
     title: &'static str,
@@ -2768,6 +3143,175 @@ mod tests {
     }
 
     #[test]
+    fn plans_roleplay_session_create_defaults_and_references() {
+        let plan = plan_session_lifecycle(RoleplaySessionLifecyclePlanInput {
+            action: "create".to_string(),
+            now: "2026-07-07T03:00:00Z".to_string(),
+            body: serde_json::json!({
+                "profileId": "profile-rp",
+                "playerPersonaId": "persona-1",
+                "characterId": "character-1",
+                "activeLayerIds": ["world"]
+            }),
+            fallback_session_id: Some("session-created".to_string()),
+            registry_agent_id: Some("agent-rp".to_string()),
+            source_session: None,
+            current_metadata: None,
+            player_persona: Some(persona("Player", "", "")),
+            character: Some(character("Guide", "")),
+            available_layer_ids: Some(vec!["world".to_string()]),
+            source_chat_layers: vec![],
+        })
+        .expect("create plan");
+
+        assert_eq!(plan.session_id, "session-created");
+        assert_eq!(plan.agent_id, "agent-rp");
+        assert!(plan.runtime.create_session);
+        assert_eq!(
+            plan.metadata.display_name.as_deref(),
+            Some("Roleplay Session")
+        );
+        assert_eq!(plan.metadata.active_layer_ids, vec!["world".to_string()]);
+        assert_eq!(
+            plan.chat_layer_update
+                .as_ref()
+                .expect("chat layer update")
+                .layers[0]
+                .layer_id,
+            "world"
+        );
+    }
+
+    #[test]
+    fn plans_roleplay_session_archive_and_restore_transitions() {
+        let archive = plan_session_lifecycle(RoleplaySessionLifecyclePlanInput {
+            action: "archive".to_string(),
+            now: "2026-07-07T03:00:00Z".to_string(),
+            body: serde_json::json!({}),
+            fallback_session_id: None,
+            registry_agent_id: None,
+            source_session: Some(lifecycle_session("active")),
+            current_metadata: Some(metadata(vec![])),
+            player_persona: None,
+            character: None,
+            available_layer_ids: None,
+            source_chat_layers: vec![],
+        })
+        .expect("archive plan");
+        assert!(archive.metadata.archived);
+        assert!(archive.runtime.archive_session);
+        assert!(!archive.runtime.ensure_configured_session);
+
+        let mut archived_session = lifecycle_session("archived");
+        archived_session.updated_at = "2026-07-07T03:00:00Z".to_string();
+        let mut archived_metadata = metadata(vec![]);
+        archived_metadata.archived = true;
+        let restore = plan_session_lifecycle(RoleplaySessionLifecyclePlanInput {
+            action: "restore".to_string(),
+            now: "2026-07-07T04:00:00Z".to_string(),
+            body: serde_json::json!({}),
+            fallback_session_id: None,
+            registry_agent_id: None,
+            source_session: Some(archived_session),
+            current_metadata: Some(archived_metadata),
+            player_persona: None,
+            character: None,
+            available_layer_ids: None,
+            source_chat_layers: vec![],
+        })
+        .expect("restore plan");
+        assert!(!restore.metadata.archived);
+        assert!(restore.runtime.ensure_configured_session);
+        assert!(!restore.runtime.archive_session);
+    }
+
+    #[test]
+    fn plans_roleplay_session_fork_metadata_branch_and_layers() {
+        let plan = plan_session_lifecycle(RoleplaySessionLifecyclePlanInput {
+            action: "fork".to_string(),
+            now: "2026-07-07T05:00:00Z".to_string(),
+            body: serde_json::json!({
+                "messageId": "message-1",
+                "sessionId": "session-forked",
+                "displayName": "Forked Session",
+                "branchLabel": "Fork point"
+            }),
+            fallback_session_id: None,
+            registry_agent_id: None,
+            source_session: Some(lifecycle_session("active")),
+            current_metadata: Some(metadata(vec!["world".to_string()])),
+            player_persona: Some(persona("Player", "", "")),
+            character: Some(character("Guide", "")),
+            available_layer_ids: Some(vec!["world".to_string()]),
+            source_chat_layers: vec![RoleplayChatLayerBinding {
+                layer_id: "world".to_string(),
+                priority: 7,
+                enabled: true,
+            }],
+        })
+        .expect("fork plan");
+
+        assert!(plan.runtime.create_session);
+        assert_eq!(plan.session_id, "session-forked");
+        assert_eq!(plan.metadata.session_id, "session-forked");
+        assert_eq!(
+            plan.metadata.display_name.as_deref(),
+            Some("Forked Session")
+        );
+        assert!(!plan.metadata.archived);
+        let fork = plan.fork.expect("fork plan details");
+        assert_eq!(fork.source_session_id, "session-rp");
+        assert_eq!(fork.source_message_id, "message-1");
+        assert_eq!(fork.branch_id, "branch:session-forked:fork:message-1");
+        assert_eq!(fork.branch_label, "Fork point");
+        assert_eq!(
+            plan.chat_layer_update.expect("layer copy").layers[0].priority,
+            7
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_roleplay_session_lifecycle_inputs() {
+        let missing_layer = plan_session_lifecycle(RoleplaySessionLifecyclePlanInput {
+            action: "fork".to_string(),
+            now: "2026-07-07T05:00:00Z".to_string(),
+            body: serde_json::json!({"messageId": "message-1"}),
+            fallback_session_id: Some("session-forked".to_string()),
+            registry_agent_id: None,
+            source_session: Some(lifecycle_session("active")),
+            current_metadata: Some(metadata(vec!["missing".to_string()])),
+            player_persona: Some(persona("Player", "", "")),
+            character: Some(character("Guide", "")),
+            available_layer_ids: Some(vec!["world".to_string()]),
+            source_chat_layers: vec![],
+        })
+        .expect_err("missing layer rejected");
+        assert_eq!(
+            missing_layer.reason_code,
+            "roleplay_lore_layer_reference_invalid"
+        );
+
+        let source_archived = plan_session_lifecycle(RoleplaySessionLifecyclePlanInput {
+            action: "fork".to_string(),
+            now: "2026-07-07T05:00:00Z".to_string(),
+            body: serde_json::json!({"messageId": "message-1"}),
+            fallback_session_id: Some("session-forked".to_string()),
+            registry_agent_id: None,
+            source_session: Some(lifecycle_session("archived")),
+            current_metadata: Some(metadata(vec![])),
+            player_persona: Some(persona("Player", "", "")),
+            character: Some(character("Guide", "")),
+            available_layer_ids: None,
+            source_chat_layers: vec![],
+        })
+        .expect_err("archived source rejected");
+        assert_eq!(
+            source_archived.reason_code,
+            "roleplay_session_fork_source_archived"
+        );
+    }
+
+    #[test]
     fn normalizes_narrator_config_defaults_and_long_text() {
         let long_style = "a".repeat(12_000);
         let config = normalize_narrator_config(serde_json::json!({
@@ -3140,6 +3684,18 @@ mod tests {
             character_id: Some("character-1".to_string()),
             active_layer_ids,
             archived: false,
+            created_at: "2026-07-07T00:00:00Z".to_string(),
+            updated_at: "2026-07-07T00:00:00Z".to_string(),
+        }
+    }
+
+    fn lifecycle_session(status: &str) -> RoleplaySessionLifecycleSession {
+        RoleplaySessionLifecycleSession {
+            session_id: "session-rp".to_string(),
+            agent_id: "agent-rp".to_string(),
+            profile_id: "profile-rp".to_string(),
+            kind: "full".to_string(),
+            status: status.to_string(),
             created_at: "2026-07-07T00:00:00Z".to_string(),
             updated_at: "2026-07-07T00:00:00Z".to_string(),
         }

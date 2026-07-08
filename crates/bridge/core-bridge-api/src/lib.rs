@@ -121,6 +121,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "model_provider_refresh_impact",
     "plan_model_provider_refresh",
     "plan_roleplay_assistant_alternative",
+    "plan_roleplay_session_lifecycle",
     "build_roleplay_prompt_context",
     "roleplay_speaker_identity",
     "write_roleplay_character",

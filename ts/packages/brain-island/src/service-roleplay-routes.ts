@@ -133,6 +133,54 @@ interface RoleplayAssistantAlternativePlan {
   append_chat_message: boolean;
 }
 
+interface RoleplaySessionLifecycleSession {
+  session_id: string;
+  agent_id: string;
+  profile_id: string;
+  kind: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RoleplayChatLayerBinding {
+  layer_id: string;
+  priority: number;
+  enabled: boolean;
+}
+
+interface RoleplayChatLayerUpdatePlan {
+  chat_id: string;
+  layers: RoleplayChatLayerBinding[];
+}
+
+interface RoleplayRuntimeSessionPlan {
+  create_session: boolean;
+  archive_session: boolean;
+  ensure_configured_session: boolean;
+}
+
+interface RoleplaySessionForkPlan {
+  source_session_id: string;
+  source_message_id: string;
+  target_session_id: string;
+  branch_id: string;
+  branch_label: string;
+  branch_metadata_json: unknown;
+}
+
+interface RoleplaySessionLifecyclePlan {
+  action: string;
+  session_id: string;
+  agent_id: string;
+  profile_id: string;
+  kind: string;
+  metadata: RoleplaySessionMetadata;
+  runtime: RoleplayRuntimeSessionPlan;
+  chat_layer_update?: RoleplayChatLayerUpdatePlan;
+  fork?: RoleplaySessionForkPlan;
+}
+
 export interface RoleplaySpeakerIdentitySnapshot {
   speaker_kind:
     | "player_persona"
@@ -1052,6 +1100,124 @@ async function roleplaySessionMetadataPatchFromBody(
   })) as RoleplaySessionMetadataPatchOutput;
 }
 
+function roleplaySessionLifecycleSession(
+  session: Pick<
+    SessionState,
+    | "sessionId"
+    | "agentId"
+    | "profileId"
+    | "kind"
+    | "status"
+    | "createdAt"
+    | "lastActiveAt"
+  >,
+): RoleplaySessionLifecycleSession {
+  return {
+    session_id: session.sessionId,
+    agent_id: session.agentId,
+    profile_id: session.profileId,
+    kind: session.kind,
+    status: session.status,
+    created_at: session.createdAt,
+    updated_at: session.lastActiveAt,
+  };
+}
+
+async function roleplayLifecycleReferencesFromBody(
+  state: RoleplayRouteContext,
+  profileId: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const requestedPersonaId =
+    Object.hasOwn(body, "playerPersonaId") ||
+    Object.hasOwn(body, "player_persona_id")
+      ? (optionalString(body.playerPersonaId) ??
+        optionalString(body.player_persona_id))
+      : undefined;
+  const requestedCharacterId =
+    Object.hasOwn(body, "characterId") || Object.hasOwn(body, "character_id")
+      ? (optionalString(body.characterId) ?? optionalString(body.character_id))
+      : undefined;
+  const activeLayerIdsChanged =
+    Object.hasOwn(body, "activeLayerIds") ||
+    Object.hasOwn(body, "active_layer_ids");
+  const [playerPersona, character, availableLayerIds] = await Promise.all([
+    requestedPersonaId === undefined
+      ? Promise.resolve(undefined)
+      : getRoleplayPlayerPersona(state, profileId, requestedPersonaId),
+    requestedCharacterId === undefined
+      ? Promise.resolve(undefined)
+      : getRoleplayCharacter(state, profileId, requestedCharacterId),
+    activeLayerIdsChanged
+      ? state.bridge
+          .listLoreLayers(profileId)
+          .then((layers) => layers.map((layer) => String(layer.layer_id)))
+      : Promise.resolve(undefined),
+  ]);
+  return compactRecord({
+    player_persona: playerPersona,
+    character,
+    available_layer_ids: availableLayerIds,
+  });
+}
+
+async function roleplayLifecycleReferencesFromMetadata(
+  state: RoleplayRouteContext,
+  metadata: RoleplaySessionMetadata,
+): Promise<Record<string, unknown>> {
+  const [playerPersona, character, availableLayerIds] = await Promise.all([
+    metadata.playerPersonaId === undefined
+      ? Promise.resolve(undefined)
+      : getRoleplayPlayerPersona(
+          state,
+          metadata.profileId,
+          metadata.playerPersonaId,
+        ),
+    metadata.characterId === undefined
+      ? Promise.resolve(undefined)
+      : getRoleplayCharacter(state, metadata.profileId, metadata.characterId),
+    metadata.activeLayerIds.length === 0
+      ? Promise.resolve(undefined)
+      : state.bridge
+          .listLoreLayers(metadata.profileId)
+          .then((layers) => layers.map((layer) => String(layer.layer_id))),
+  ]);
+  return compactRecord({
+    player_persona: playerPersona,
+    character,
+    available_layer_ids: availableLayerIds,
+  });
+}
+
+function roleplayLifecycleChatLayerBindings(
+  layers: readonly Record<string, unknown>[],
+): RoleplayChatLayerBinding[] {
+  return layers.map((layer) => ({
+    layer_id: String(layer.layer_id ?? layer.layerId),
+    priority: numberValue(layer.priority),
+    enabled: layer.enabled !== false,
+  }));
+}
+
+async function applyRoleplayLifecycleChatLayers(
+  state: RoleplayRouteContext,
+  plan: Pick<RoleplaySessionLifecyclePlan, "chat_layer_update">,
+): Promise<void> {
+  if (plan.chat_layer_update === undefined) return;
+  await state.bridge.setChatLayers({
+    chat_id: plan.chat_layer_update.chat_id,
+    layers: plan.chat_layer_update.layers,
+    now: state.now(),
+  });
+}
+
+function roleplayLifecycleSessionKind(
+  kind: string,
+): "full" | "worker" | "delegated" {
+  if (kind === "worker" || kind === "delegated") return kind;
+  return "full";
+}
+
 async function roleplaySessionSummary(
   state: RoleplayRouteContext,
   session: SessionState,
@@ -1621,60 +1787,46 @@ async function createRoleplaySession(
     "profileId",
   );
   const registry = await state.bridge.getProfileRegistryRecord(profileId);
-  const agentId =
+  const now = state.now();
+  const fallbackAgentId =
     optionalString(body.agentId) ??
     optionalString(body.agent_id) ??
     registry?.agentId ??
     profileId;
-  const sessionId =
-    optionalString(body.sessionId) ??
-    optionalString(body.session_id) ??
-    `${agentId}-rp-${state
-      .now()
-      .replace(/[^0-9A-Za-z]/g, "")
-      .slice(0, 17)}-${randomBytes(3).toString("hex")}`;
-  const session = await state.bridge.createSession({
-    sessionId,
-    agentId,
+  const fallbackSessionId = `${fallbackAgentId}-rp-${now
+    .replace(/[^0-9A-Za-z]/g, "")
+    .slice(0, 17)}-${randomBytes(3).toString("hex")}`;
+  const references = await roleplayLifecycleReferencesFromBody(
+    state,
     profileId,
-    kind: "full",
+    body,
+  );
+  const plan = (await state.bridge.planRoleplaySessionLifecycle(
+    compactRecord({
+      action: "create",
+      now,
+      body,
+      fallback_session_id: fallbackSessionId,
+      registry_agent_id: registry?.agentId,
+      ...references,
+    }),
+  )) as RoleplaySessionLifecyclePlan;
+  if (!plan.runtime.create_session) {
+    throw new Error("roleplay session lifecycle plan did not create a session");
+  }
+  const session = await state.bridge.createSession({
+    sessionId: plan.session_id,
+    agentId: plan.agent_id,
+    profileId: plan.profile_id,
+    kind: roleplayLifecycleSessionKind(plan.kind),
     resourceLimits: {},
     toolProfile: { tools: [] },
   });
-  const now = state.now();
-  const baseMetadata: RoleplaySessionMetadata = {
-    sessionId: session.sessionId,
-    profileId: session.profileId,
-    activeLayerIds: [],
-    archived: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const patch = await roleplaySessionMetadataPatchFromBody(
-    state,
-    baseMetadata,
-    session.sessionId,
-    session.profileId,
-    body,
-  );
   await putRoleplayJson(state, roleplaySessionScope(session.sessionId), {
     key: roleplaySessionMetadataKey(),
-    value: patch.metadata,
+    value: plan.metadata,
   });
-  if (
-    patch.active_layer_ids_changed &&
-    patch.metadata.activeLayerIds.length > 0
-  ) {
-    await state.bridge.setChatLayers({
-      chat_id: session.sessionId,
-      layers: patch.metadata.activeLayerIds.map((layerId, index) => ({
-        layer_id: layerId,
-        priority: index,
-        enabled: true,
-      })),
-      now: state.now(),
-    });
-  }
+  await applyRoleplayLifecycleChatLayers(state, plan);
   return (
     (await getRoleplaySessionSummary(state, session.sessionId)) ?? {
       session_id: session.sessionId,
@@ -1724,8 +1876,22 @@ async function archiveRoleplaySession(
   state: RoleplayRouteContext,
   sessionId: string,
 ): Promise<Record<string, unknown>> {
-  await state.bridge.archiveSession(sessionId as SessionId);
-  await upsertRoleplaySessionMetadata(state, sessionId, { archived: true });
+  const session = await state.serviceSessionById(sessionId);
+  const current = await roleplaySessionMetadata(state, session);
+  const plan = (await state.bridge.planRoleplaySessionLifecycle({
+    action: "archive",
+    now: state.now(),
+    body: {},
+    source_session: roleplaySessionLifecycleSession(session),
+    current_metadata: current,
+  })) as RoleplaySessionLifecyclePlan;
+  if (plan.runtime.archive_session) {
+    await state.bridge.archiveSession(sessionId as SessionId);
+  }
+  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
+    key: roleplaySessionMetadataKey(),
+    value: plan.metadata,
+  });
   const summary = await getRoleplaySessionSummary(state, sessionId);
   if (summary === undefined)
     throw new Error(`roleplay session ${sessionId} missing`);
@@ -1737,18 +1903,31 @@ async function restoreRoleplaySession(
   sessionId: string,
 ): Promise<Record<string, unknown>> {
   const existing = await state.serviceSessionById(sessionId);
-  await state.bridge.ensureConfiguredSession({
-    sessionId,
-    agentId: existing.agentId,
-    profileId: existing.profileId,
-    kind: existing.kind as "full" | "worker" | "delegated",
-    resourceLimits: compactRecord(
-      existing.resourceLimits as unknown as Record<string, unknown>,
-    ),
-    toolProfile: existing.toolProfile,
-    historyWindow: existing.historyWindow,
+  const current = await roleplaySessionMetadata(state, existing);
+  const plan = (await state.bridge.planRoleplaySessionLifecycle({
+    action: "restore",
+    now: state.now(),
+    body: {},
+    source_session: roleplaySessionLifecycleSession(existing),
+    current_metadata: current,
+  })) as RoleplaySessionLifecyclePlan;
+  if (plan.runtime.ensure_configured_session) {
+    await state.bridge.ensureConfiguredSession({
+      sessionId: plan.session_id,
+      agentId: plan.agent_id,
+      profileId: plan.profile_id,
+      kind: roleplayLifecycleSessionKind(plan.kind),
+      resourceLimits: compactRecord(
+        existing.resourceLimits as unknown as Record<string, unknown>,
+      ),
+      toolProfile: existing.toolProfile,
+      historyWindow: existing.historyWindow,
+    });
+  }
+  await putRoleplayJson(state, roleplaySessionScope(sessionId), {
+    key: roleplaySessionMetadataKey(),
+    value: plan.metadata,
   });
-  await upsertRoleplaySessionMetadata(state, sessionId, { archived: false });
   const summary = await getRoleplaySessionSummary(state, sessionId);
   if (summary === undefined)
     throw new Error(`roleplay session ${sessionId} missing`);
@@ -1761,82 +1940,64 @@ async function forkRoleplaySessionAtMessage(
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const sourceSession = await state.serviceSessionById(sourceSessionId);
-  const targetMessageId = requiredRouteString(
-    optionalString(body.messageId) ?? optionalString(body.message_id),
-    "messageId",
-  );
-  const targetSessionId =
-    optionalString(body.sessionId) ??
-    optionalString(body.session_id) ??
-    optionalString(body.newSessionId) ??
-    optionalString(body.new_session_id) ??
-    `${sourceSession.agentId}-fork-${state
-      .now()
-      .replace(/[^0-9A-Za-z]/g, "")
-      .slice(0, 17)}-${randomBytes(3).toString("hex")}`;
+  const sourceMetadata = await roleplaySessionMetadata(state, sourceSession);
+  const now = state.now();
+  const fallbackTargetSessionId = `${sourceSession.agentId}-fork-${now
+    .replace(/[^0-9A-Za-z]/g, "")
+    .slice(0, 17)}-${randomBytes(3).toString("hex")}`;
+  const [references, sourceLayers] = await Promise.all([
+    roleplayLifecycleReferencesFromMetadata(state, sourceMetadata),
+    state.bridge.getChatLayers(sourceSessionId),
+  ]);
+  const plan = (await state.bridge.planRoleplaySessionLifecycle(
+    compactRecord({
+      action: "fork",
+      now,
+      body,
+      fallback_session_id: fallbackTargetSessionId,
+      source_session: roleplaySessionLifecycleSession(sourceSession),
+      current_metadata: sourceMetadata,
+      source_chat_layers: roleplayLifecycleChatLayerBindings(sourceLayers),
+      ...references,
+    }),
+  )) as RoleplaySessionLifecyclePlan;
+  const fork = plan.fork;
+  if (fork === undefined) {
+    throw new Error("roleplay session lifecycle fork plan is missing");
+  }
+  if (!plan.runtime.create_session) {
+    throw new Error("roleplay session fork plan did not create a session");
+  }
   const sourceSlots = await canonicalRoleplaySlotsThroughMessage(
     state,
     sourceSessionId,
-    targetMessageId,
+    fork.source_message_id,
   );
   const targetSession = await state.bridge.createSession({
-    sessionId: targetSessionId,
-    agentId: sourceSession.agentId,
-    profileId: sourceSession.profileId,
-    kind: sourceSession.kind as "full" | "worker" | "delegated",
+    sessionId: plan.session_id,
+    agentId: plan.agent_id,
+    profileId: plan.profile_id,
+    kind: roleplayLifecycleSessionKind(plan.kind),
     resourceLimits: compactRecord(
       sourceSession.resourceLimits as unknown as Record<string, unknown>,
     ),
     toolProfile: sourceSession.toolProfile,
     historyWindow: sourceSession.historyWindow,
   });
-  const sourceMetadata = await roleplaySessionMetadata(state, sourceSession);
-  await upsertRoleplaySessionMetadata(state, targetSession.sessionId, {
-    ...sourceMetadata,
-    sessionId: targetSession.sessionId,
-    profileId: targetSession.profileId,
-    displayName:
-      optionalString(body.displayName) ??
-      optionalString(body.display_name) ??
-      `${sourceMetadata.displayName ?? sourceSession.sessionId} fork`,
-    archived: false,
-    createdAt: state.now(),
-    updatedAt: state.now(),
+  await putRoleplayJson(state, roleplaySessionScope(targetSession.sessionId), {
+    key: roleplaySessionMetadataKey(),
+    value: plan.metadata,
   });
-  const sourceLayers = await state.bridge.getChatLayers(sourceSessionId);
-  if (sourceLayers.length > 0) {
-    await state.bridge.setChatLayers({
-      chat_id: targetSession.sessionId,
-      layers: sourceLayers.map((layer) => ({
-        layer_id: String(layer.layer_id),
-        priority: numberValue(layer.priority),
-        enabled: layer.enabled !== false,
-      })),
-      now: state.now(),
-    });
-  }
-  const now = state.now();
-  const branchId = stableRoleplayRecordId(
-    "branch",
-    `${targetSession.sessionId}:fork:${targetMessageId}`,
-  );
+  await applyRoleplayLifecycleChatLayers(state, plan);
   const branch = (await state.bridge.saveConversationBranch({
-    branch_id: branchId,
+    branch_id: fork.branch_id,
     session_id: targetSession.sessionId,
     parent_branch_id: null,
     parent_message_id: null,
     origin_message_id: null,
     head_message_id: null,
-    label:
-      optionalString(body.label) ??
-      optionalString(body.branchLabel) ??
-      optionalString(body.branch_label) ??
-      "Fork",
-    metadata_json: {
-      source: "roleplay_session_fork",
-      source_session_id: sourceSessionId,
-      source_message_id: targetMessageId,
-    },
+    label: fork.branch_label,
+    metadata_json: fork.branch_metadata_json,
     created_at: now,
     updated_at: now,
   })) as ConversationBranchRecord;
@@ -1852,7 +2013,7 @@ async function forkRoleplaySessionAtMessage(
       `${targetSession.sessionId}:${sourceMessage.message_id}`,
     );
     copiedMessages.set(sourceMessage.message_id, copiedMessageId);
-    if (sourceMessage.message_id === targetMessageId) {
+    if (sourceMessage.message_id === fork.source_message_id) {
       targetCopiedMessageId = copiedMessageId;
     }
     const slotId = stableRoleplayRecordId(
@@ -1883,7 +2044,7 @@ async function forkRoleplaySessionAtMessage(
         ordinal: 0,
         actor: actorForVariant(sourceVariant),
         body: sourceMessage.body,
-        branchId,
+        branchId: fork.branch_id,
         parentMessageId:
           sourceMessage.parent_message_id === null ||
           sourceMessage.parent_message_id === undefined
@@ -1906,7 +2067,7 @@ async function forkRoleplaySessionAtMessage(
     copiedCount += 1;
   }
   await state.bridge.updateConversationBranchHead({
-    branch_id: branchId,
+    branch_id: fork.branch_id,
     head_message_id:
       targetCopiedMessageId ?? [...copiedMessages.values()].at(-1),
     expected: { type: "any" },
@@ -1914,7 +2075,7 @@ async function forkRoleplaySessionAtMessage(
   });
   await state.bridge.selectActiveConversationBranch({
     session_id: targetSession.sessionId,
-    active_branch_id: branchId,
+    active_branch_id: fork.branch_id,
     expected: { type: "any" },
     updated_at: state.now(),
   });
@@ -1925,7 +2086,7 @@ async function forkRoleplaySessionAtMessage(
   return {
     status: "forked",
     source_session_id: sourceSessionId,
-    source_message_id: targetMessageId,
+    source_message_id: fork.source_message_id,
     session: summary,
     branch: {
       ...branch,

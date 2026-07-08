@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 161;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 162;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 30;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 9;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 27;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 134;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 135;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -226,6 +226,7 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "Roleplay/narrator bridge operations are being decomposed separately; exact exemptions keep future shape changes visible until Rust-owned roleplay fixtures land.",
     operations: [
       "plan_roleplay_assistant_alternative",
+      "plan_roleplay_session_lifecycle",
       "build_roleplay_prompt_context",
       "roleplay_speaker_identity",
       "write_roleplay_character",

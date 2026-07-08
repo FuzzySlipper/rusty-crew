@@ -21,6 +21,16 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_roleplay_session_lifecycle_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<RoleplaySessionLifecyclePlanInput>(
+            &input_json,
+            "roleplay session lifecycle plan input",
+        )?;
+        let plan = plan_session_lifecycle(input).map_err(roleplay_domain_error_to_napi)?;
+        serialize_json(&plan, "roleplay session lifecycle plan")
+    }
+
+    #[napi]
     pub fn build_roleplay_prompt_context_json(&self, input_json: String) -> napi::Result<String> {
         let input =
             parse_json::<RoleplayPromptContextInput>(&input_json, "roleplay prompt context input")?;
