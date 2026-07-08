@@ -28,10 +28,13 @@ import type {
 import type {
   BrainWakeExecutor,
   NativeBridgeModule,
+  NativeBrainConfigDraft,
   NativeRuntimeConfigDiagnostic,
   NativeRuntimeConfigDraft,
   NativeRuntimeConfigPlan,
   NativeModelProviderRecord,
+  NativeScheduledJobConfigDraft,
+  NativeSessionConfigDraft,
   NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
@@ -126,21 +129,22 @@ import {
   type DenObservationEventFilter,
 } from "./runtime-core-event-observation.js";
 
-export interface RustyCrewConfiguredBrain {
+export interface RustyCrewConfiguredBrain extends Omit<
+  NativeBrainConfigDraft,
+  "implementationId" | "profileId"
+> {
   implementationId: BrainImplementationId;
   profileId: ProfileId;
 }
 
-export interface RustyCrewConfiguredSession {
+export interface RustyCrewConfiguredSession extends Omit<
+  NativeSessionConfigDraft,
+  "agentId" | "profileId" | "sessionId"
+> {
   sessionId: SessionId;
   agentId: AgentId;
   profileId: ProfileId;
-  kind: SessionKind;
-  resourceLimits?: ResourceLimits;
   toolProfile?: ToolProfile;
-  ownerId?: string;
-  maxHistoryMessages?: number;
-  turnTimeoutMs?: number;
   sessionMemoryPrompt?: SessionMemoryPromptConfig;
   contextPolicy?: ContextStrategyPolicy;
 }
@@ -156,36 +160,37 @@ export interface RustyCrewWakeTimeoutConfig {
   defaultMs?: number;
 }
 
-export type RustyCrewScheduledJobShape =
-  | "host_job"
-  | "session_wake"
-  | "script_only"
-  | "data_collection";
+export type RustyCrewScheduledJobShape = NativeScheduledJobConfigDraft["shape"];
 
-export interface RustyCrewScheduledJob {
-  id: string;
-  schedule: string;
-  shape: RustyCrewScheduledJobShape;
-  jobKind?: string;
+export interface RustyCrewScheduledJob extends Omit<
+  NativeScheduledJobConfigDraft,
+  "targetSessionId"
+> {
   targetSessionId?: SessionId;
   payload?: unknown;
-  script?: string;
-  deliveryChannelId?: string;
 }
 
-export interface RustyCrewRuntimeConfig {
-  profilesDir: string;
-  skillsDir?: string;
+export interface ServiceRuntimeEnvelope {
+  // TS/service-host owned loader fields. These configure process storage,
+  // adapters, and service observation, not the Rust-owned runtime graph draft.
   storage?: RustyCrewStorageConfig;
   denObservation?: RustyCrewDenObservationConfig;
   wakeTimeout?: RustyCrewWakeTimeoutConfig;
+  mcpServers?: RustyCrewMcpServerConfig[];
+}
+
+export interface RustyCrewRuntimeGraphDraft {
+  profilesDir: string;
+  skillsDir?: string;
   brains: RustyCrewConfiguredBrain[];
   sessions: RustyCrewConfiguredSession[];
   scheduledJobs: RustyCrewScheduledJob[];
   channelBindings: ChannelBindingRecord[];
-  mcpServers?: RustyCrewMcpServerConfig[];
   mcpBindings: McpBindingRecord[];
 }
+
+export interface RustyCrewRuntimeConfig
+  extends ServiceRuntimeEnvelope, RustyCrewRuntimeGraphDraft {}
 
 export interface RustyCrewDenObservationConfig {
   eventFilters: DenObservationEventFilter[];

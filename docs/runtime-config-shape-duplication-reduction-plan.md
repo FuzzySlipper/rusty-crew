@@ -124,3 +124,24 @@ cargo test -p rusty-crew-core-config
 
 Run broader `npm run verify:offline` for the slice that deletes hand-authored
 native-bridge config mappings.
+
+## Current Loader/Envelope Boundary
+
+Task 4667 split the brain-island runtime config type into two explicit pieces:
+
+- `RustyCrewRuntimeGraphDraft` is the Rust-owned graph-facing shape:
+  `profilesDir`, `skillsDir`, `brains`, `sessions`, `scheduledJobs`,
+  `channelBindings`, and `mcpBindings`.
+- `ServiceRuntimeEnvelope` is the TS/service-host loader envelope:
+  `storage`, `denObservation`, `wakeTimeout`, and `mcpServers`.
+
+`RustyCrewRuntimeConfig` remains the composed type that existing callers use,
+but new runtime-affecting graph fields should land in the graph draft and be
+reviewed against `core-config` / generated native bridge coverage. New
+process, adapter, or loader-only fields should land in the envelope with a
+clear reason they are not part of the Rust runtime graph.
+
+Profile-file projection into `NativeProfileRuntimeMetadata` now lives in
+`ts/packages/brain-island/src/profile-runtime-metadata.ts`; the
+`smoke:runtime-config-parity` fixture covers that projection through the
+validation input fixture.

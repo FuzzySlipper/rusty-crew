@@ -5,9 +5,9 @@ import type {
   NativeRuntimeConfigPlan,
   NativeRuntimeConfigValidationInput,
   NativeRuntimeConfigValidationResult,
-  NativeProfileRuntimeMetadata,
 } from "@rusty-crew/native-bridge";
 import type { ProfileConfig } from "./profile-loading.js";
+import { profileRuntimeMetadataList } from "./profile-runtime-metadata.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 
 export function runtimeConfigValidationInput(
@@ -71,7 +71,7 @@ export function runtimeConfigValidationInput(
         status: binding.status,
       })),
     },
-    profiles: profiles.map(profileRuntimeMetadata),
+    profiles: profileRuntimeMetadataList(profiles),
   };
 }
 
@@ -113,43 +113,4 @@ export async function planCreateProfileWithRust(input: {
     profileRegistry: input.profileRegistry,
     request: input.request,
   });
-}
-
-function profileRuntimeMetadata(
-  profile: ProfileConfig,
-): NativeProfileRuntimeMetadata {
-  return {
-    profileId: profile.profileId,
-    brain: profile.brain
-      ? {
-          module: profile.brain.module,
-          strategy: profile.brain.strategy,
-        }
-      : undefined,
-    runtime: profile.runtime
-      ? {
-          defaultResourceLimits: profile.runtime.defaultResourceLimits,
-          maxTurnDurationMs: profile.runtime.maxTurnDurationMs,
-          maxTokensPerTurn: profile.runtime.maxTokensPerTurn,
-        }
-      : undefined,
-    sessionDefaults: profile.sessionDefaults,
-    mcpConfig: profile.mcpConfig
-      ? {
-          bindingId: profile.mcpConfig.bindingId,
-          endpointRef: profile.mcpConfig.endpointRef,
-          serverNames: profile.mcpConfig.serverNames ?? [],
-          transport: profile.mcpConfig.transport,
-          toolProfile: profile.mcpConfig.toolProfile,
-        }
-      : undefined,
-    backgroundReview: profile.backgroundReview
-      ? {
-          enabled: profile.backgroundReview.enabled,
-          reviewType: profile.backgroundReview.reviewType,
-          schedule: profile.backgroundReview.schedule,
-        }
-      : undefined,
-    channelDefaults: profile.channelDefaults,
-  };
 }
