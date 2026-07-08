@@ -1,4 +1,5 @@
 import { buildRuntimeHealthProjection } from "./runtime-health.js";
+import { slashCommandNames } from "./api-command-registry.js";
 import type { SessionContextUsageResult } from "./rusty-view-chat-api.js";
 import type { RuntimeDiagnosticsProjection } from "./runtime-diagnostics.js";
 import type {
@@ -37,9 +38,7 @@ export function buildReadOnlySlashCommandResponse(
 function helpResponse(
   options: SlashCommandRouterOptions | undefined,
 ): SlashCommandResponse {
-  const commands = (
-    ["help", "status", "session", "model", "new", "reload-mcp"] as const
-  )
+  const commands = slashCommandNames()
     .filter(
       (command) =>
         options?.allowedCommands === undefined ||

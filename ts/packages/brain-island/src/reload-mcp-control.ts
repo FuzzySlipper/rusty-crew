@@ -1,4 +1,8 @@
 import type { McpBindingRecord } from "@rusty-crew/contracts";
+import type {
+  NativeReloadMcpControlPlan,
+  NativeReloadMcpControlPlanInput,
+} from "@rusty-crew/native-bridge";
 import type { ToolInventoryRequest } from "./tool-registry.js";
 import type {
   McpSurfaceManagerPort,
@@ -46,6 +50,9 @@ export interface ReloadMcpControlOptions {
     sessionId: string,
     command: AdminControlCommand,
   ): Promise<McpBindingRecord | undefined> | McpBindingRecord | undefined;
+  planReloadMcpControl(
+    input: NativeReloadMcpControlPlanInput,
+  ): Promise<NativeReloadMcpControlPlan> | NativeReloadMcpControlPlan;
   manager: McpSurfaceManagerPort;
   discoveryClient: McpToolDiscoveryClient;
   discoveryClientForBinding?(
@@ -98,16 +105,48 @@ export function createReloadMcpControlExecutor(
     }
 
     const binding = await options.resolveBinding(sessionId, command);
-    if (!binding) {
+    const plan = await options.planReloadMcpControl({
+      command: {
+        commandKind: command.name,
+        targetSessionId: sessionId,
+        requestId: command.requestId,
+        idempotencyKey: command.idempotencyKey,
+        operatorReason: reason,
+        operatorReasonCode: command.reasonCode,
+      },
+      binding: binding ? reloadPlanBinding(binding) : undefined,
+      reloadHandlerAvailable: true,
+    });
+    if (!plan.accepted) {
       return failed(
-        "mcp_binding_not_found",
-        `No MCP binding found for ${sessionId}.`,
+        plan.denial?.reasonCode ?? "reload_mcp_plan_denied",
+        plan.denial?.summary ?? "Rust reload-MCP planner denied the control.",
       );
     }
-    if (binding.sessionId !== sessionId) {
+    if (
+      !plan.actions.some((action) => action.action === "reload_mcp_surface")
+    ) {
       return failed(
-        "mcp_binding_session_mismatch",
-        "Resolved MCP binding does not belong to the requested session.",
+        "reload_mcp_plan_missing_action",
+        "Rust reload-MCP planner accepted without a reload action.",
+      );
+    }
+    if (!binding) {
+      return failed(
+        "reload_mcp_plan_missing_binding",
+        "Rust reload-MCP planner accepted without an executable binding.",
+      );
+    }
+    if (binding.sessionId !== plan.target.sessionId) {
+      return failed(
+        "reload_mcp_plan_session_mismatch",
+        "Rust reload-MCP planner target does not match the executable binding.",
+      );
+    }
+    if (binding.bindingId !== plan.target.bindingId) {
+      return failed(
+        "reload_mcp_plan_binding_mismatch",
+        "Rust reload-MCP planner binding target does not match the executable binding.",
       );
     }
 
@@ -189,6 +228,23 @@ export function createReloadMcpControlExecutor(
       return followUp ?? outcome;
     }
     return outcome;
+  };
+}
+
+function reloadPlanBinding(
+  binding: McpBindingRecord,
+): NativeReloadMcpControlPlanInput["binding"] | undefined {
+  if (!binding.sessionId) {
+    return undefined;
+  }
+  return {
+    bindingId: binding.bindingId,
+    sessionId: binding.sessionId,
+    profileId: binding.profileId,
+    ...(binding.toolProfileKey
+      ? { toolProfileKey: binding.toolProfileKey }
+      : {}),
+    ...(binding.endpointRef ? { endpointRef: binding.endpointRef } : {}),
   };
 }
 

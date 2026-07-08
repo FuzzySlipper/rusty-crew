@@ -65,6 +65,14 @@ pub struct NewSessionControlPlanInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReloadMcpControlPlanInput {
+    pub command: AdminControlPlanCommand,
+    pub binding: Option<ReloadMcpControlBinding>,
+    #[serde(default)]
+    pub reload_handler_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminControlPlanCommand {
     pub command_kind: String,
     pub target_session_id: Option<String>,
@@ -72,6 +80,15 @@ pub struct AdminControlPlanCommand {
     pub idempotency_key: Option<String>,
     pub operator_reason: Option<String>,
     pub operator_reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReloadMcpControlBinding {
+    pub binding_id: String,
+    pub session_id: String,
+    pub profile_id: ProfileId,
+    pub tool_profile_key: Option<String>,
+    pub endpoint_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +117,21 @@ pub struct NewSessionControlPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReloadMcpControlPlan {
+    pub accepted: bool,
+    pub command_kind: String,
+    pub target: ReloadMcpControlTarget,
+    pub idempotency_key: Option<String>,
+    pub operator_reason: String,
+    pub reason_code: String,
+    pub denial: Option<AdminControlPlanDenial>,
+    #[serde(default)]
+    pub preconditions: Vec<AdminControlPlanPrecondition>,
+    #[serde(default)]
+    pub actions: Vec<ReloadMcpControlAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewSessionControlTarget {
     pub old_session_id: Option<String>,
     pub new_session_id: Option<String>,
@@ -108,6 +140,15 @@ pub struct NewSessionControlTarget {
     pub channel_binding_id: Option<String>,
     pub channel_id: Option<String>,
     pub tool_profile_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReloadMcpControlTarget {
+    pub session_id: Option<String>,
+    pub binding_id: Option<String>,
+    pub profile_id: Option<ProfileId>,
+    pub tool_profile_key: Option<String>,
+    pub endpoint_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +186,20 @@ pub enum NewSessionControlActionKind {
     ArchiveSession,
     CreateSession,
     RebindChannel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReloadMcpControlAction {
+    pub action: ReloadMcpControlActionKind,
+    pub session_id: String,
+    pub binding_id: String,
+    pub reason_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReloadMcpControlActionKind {
+    ReloadMcpSurface,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1485,6 +1540,179 @@ pub fn plan_new_session_control(input: &NewSessionControlPlanInput) -> NewSessio
     }
 }
 
+pub fn plan_reload_mcp_control(input: &ReloadMcpControlPlanInput) -> ReloadMcpControlPlan {
+    let command_kind = input.command.command_kind.trim().to_string();
+    let session_id = input
+        .command
+        .target_session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let operator_reason = input
+        .command
+        .operator_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("slash command /reload-mcp")
+        .to_string();
+    let reason_code = input
+        .command
+        .operator_reason_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("slash_reload_mcp")
+        .to_string();
+    let target = ReloadMcpControlTarget {
+        session_id: session_id.clone(),
+        binding_id: input
+            .binding
+            .as_ref()
+            .map(|binding| binding.binding_id.clone()),
+        profile_id: input
+            .binding
+            .as_ref()
+            .map(|binding| binding.profile_id.clone()),
+        tool_profile_key: input
+            .binding
+            .as_ref()
+            .and_then(|binding| binding.tool_profile_key.clone()),
+        endpoint_ref: input
+            .binding
+            .as_ref()
+            .and_then(|binding| binding.endpoint_ref.clone()),
+    };
+    let mut preconditions = Vec::new();
+    let denied_context = |preconditions| DeniedReloadMcpPlanInput {
+        command_kind: command_kind.clone(),
+        target: target.clone(),
+        idempotency_key: input.command.idempotency_key.clone(),
+        operator_reason: operator_reason.clone(),
+        reason_code: reason_code.clone(),
+        preconditions,
+    };
+
+    if command_kind != "reload_mcp" {
+        preconditions.push(failed_precondition(
+            "unsupported_control_command",
+            format!("control command {command_kind} is not supported by the /reload-mcp planner"),
+        ));
+        return denied_reload_mcp_plan(
+            denied_context(preconditions),
+            "unsupported_control_command",
+            "Only reload_mcp controls can use the reload-MCP planner.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "command_kind_supported",
+        "reload_mcp command is supported by the Rust planner",
+    ));
+
+    let Some(session_id) = session_id else {
+        preconditions.push(failed_precondition(
+            "target_session_required",
+            "reload_mcp requires the current session id",
+        ));
+        return denied_reload_mcp_plan(
+            denied_context(preconditions),
+            "missing_session_id",
+            "Cannot reload MCP without a current session.",
+        );
+    };
+    if !is_valid_component_id(&session_id) {
+        preconditions.push(failed_precondition(
+            "target_session_valid",
+            format!("target session id {ID_PATTERN_DESCRIPTION}"),
+        ));
+        return denied_reload_mcp_plan(
+            denied_context(preconditions),
+            "invalid_session_id",
+            "Current session id is invalid.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "target_session_valid",
+        "current session id is present and valid",
+    ));
+
+    let Some(binding) = input.binding.as_ref() else {
+        preconditions.push(failed_precondition(
+            "mcp_binding_resolved",
+            "reload_mcp requires a resolved MCP binding for the current session",
+        ));
+        return denied_reload_mcp_plan(
+            denied_context(preconditions),
+            "mcp_binding_not_found",
+            "No MCP binding is available for the current session.",
+        );
+    };
+    if binding.binding_id.trim().is_empty() || !is_valid_component_id(&binding.binding_id) {
+        preconditions.push(failed_precondition(
+            "mcp_binding_valid",
+            format!("MCP binding id {ID_PATTERN_DESCRIPTION}"),
+        ));
+        return denied_reload_mcp_plan(
+            denied_context(preconditions),
+            "invalid_mcp_binding",
+            "Resolved MCP binding id is invalid.",
+        );
+    }
+    if binding.session_id != session_id {
+        preconditions.push(failed_precondition(
+            "mcp_binding_matches_session",
+            "resolved MCP binding belongs to a different session",
+        ));
+        return denied_reload_mcp_plan(
+            denied_context(preconditions),
+            "mcp_binding_session_mismatch",
+            "Resolved MCP binding does not belong to the requested session.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "mcp_binding_resolved",
+        "MCP binding is resolved for the current session",
+    ));
+    preconditions.push(satisfied_precondition(
+        "mcp_binding_matches_session",
+        "MCP binding belongs to the current session",
+    ));
+
+    if !input.reload_handler_available {
+        preconditions.push(failed_precondition(
+            "mcp_reload_handler_available",
+            "reload_mcp requires an explicit reload handler",
+        ));
+        return denied_reload_mcp_plan(
+            denied_context(preconditions),
+            "missing_mcp_reload_handler",
+            "MCP reload requires an explicit reload handler.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "mcp_reload_handler_available",
+        "MCP reload handler is available",
+    ));
+
+    ReloadMcpControlPlan {
+        accepted: true,
+        command_kind,
+        target,
+        idempotency_key: input.command.idempotency_key.clone(),
+        operator_reason,
+        reason_code: reason_code.clone(),
+        denial: None,
+        preconditions,
+        actions: vec![ReloadMcpControlAction {
+            action: ReloadMcpControlActionKind::ReloadMcpSurface,
+            session_id,
+            binding_id: binding.binding_id.clone(),
+            reason_code,
+        }],
+    }
+}
+
 pub fn plan_profile_registry_mutation(
     input: &ProfileRegistryMutationRequest,
 ) -> Result<ProfileRegistryMutationPlan, String> {
@@ -2458,9 +2686,39 @@ fn denied_new_session_plan(
     }
 }
 
+fn denied_reload_mcp_plan(
+    input: DeniedReloadMcpPlanInput,
+    denial_reason_code: &str,
+    summary: &str,
+) -> ReloadMcpControlPlan {
+    ReloadMcpControlPlan {
+        accepted: false,
+        command_kind: input.command_kind,
+        target: input.target,
+        idempotency_key: input.idempotency_key,
+        operator_reason: input.operator_reason,
+        reason_code: input.reason_code,
+        denial: Some(AdminControlPlanDenial {
+            reason_code: denial_reason_code.to_string(),
+            summary: summary.to_string(),
+        }),
+        preconditions: input.preconditions,
+        actions: Vec::new(),
+    }
+}
+
 struct DeniedNewSessionPlanInput {
     command_kind: String,
     target: NewSessionControlTarget,
+    idempotency_key: Option<String>,
+    operator_reason: String,
+    reason_code: String,
+    preconditions: Vec<AdminControlPlanPrecondition>,
+}
+
+struct DeniedReloadMcpPlanInput {
+    command_kind: String,
+    target: ReloadMcpControlTarget,
     idempotency_key: Option<String>,
     operator_reason: String,
     reason_code: String,
@@ -2623,6 +2881,132 @@ mod tests {
             precondition.code == "channel_rebind_available"
                 && precondition.status == AdminControlPlanPreconditionStatus::Failed
         }));
+    }
+
+    #[test]
+    fn plans_reload_mcp_surface_in_rust() {
+        let plan = plan_reload_mcp_control(&ReloadMcpControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "reload_mcp".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-reload".to_string()),
+                idempotency_key: Some("idem-reload".to_string()),
+                operator_reason: Some("refresh tool catalog".to_string()),
+                operator_reason_code: Some("slash_reload_mcp".to_string()),
+            },
+            binding: Some(ReloadMcpControlBinding {
+                binding_id: "mcp-alpha".to_string(),
+                session_id: "session-alpha".to_string(),
+                profile_id: ProfileId::new("prime"),
+                tool_profile_key: Some("prime-mcp".to_string()),
+                endpoint_ref: Some("config://mcp/den".to_string()),
+            }),
+            reload_handler_available: true,
+        });
+
+        assert!(plan.accepted, "{:?}", plan.denial);
+        assert_eq!(plan.denial, None);
+        assert_eq!(plan.target.binding_id.as_deref(), Some("mcp-alpha"));
+        assert_eq!(plan.target.profile_id, Some(ProfileId::new("prime")));
+        assert_eq!(plan.reason_code, "slash_reload_mcp");
+        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(
+            plan.actions[0].action,
+            ReloadMcpControlActionKind::ReloadMcpSurface,
+        );
+        assert!(plan.preconditions.iter().all(|precondition| {
+            precondition.status == AdminControlPlanPreconditionStatus::Satisfied
+        }));
+    }
+
+    #[test]
+    fn denies_reload_mcp_without_binding() {
+        let plan = plan_reload_mcp_control(&ReloadMcpControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "reload_mcp".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-reload".to_string()),
+                idempotency_key: None,
+                operator_reason: None,
+                operator_reason_code: None,
+            },
+            binding: None,
+            reload_handler_available: true,
+        });
+
+        assert!(!plan.accepted);
+        assert_eq!(
+            plan.denial
+                .as_ref()
+                .map(|denial| denial.reason_code.as_str()),
+            Some("mcp_binding_not_found"),
+        );
+        assert!(plan.actions.is_empty());
+    }
+
+    #[test]
+    fn denies_reload_mcp_binding_session_mismatch() {
+        let plan = plan_reload_mcp_control(&ReloadMcpControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "reload_mcp".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-reload".to_string()),
+                idempotency_key: None,
+                operator_reason: None,
+                operator_reason_code: None,
+            },
+            binding: Some(ReloadMcpControlBinding {
+                binding_id: "mcp-beta".to_string(),
+                session_id: "session-beta".to_string(),
+                profile_id: ProfileId::new("review"),
+                tool_profile_key: Some("review-mcp".to_string()),
+                endpoint_ref: None,
+            }),
+            reload_handler_available: true,
+        });
+
+        assert!(!plan.accepted);
+        assert_eq!(
+            plan.denial
+                .as_ref()
+                .map(|denial| denial.reason_code.as_str()),
+            Some("mcp_binding_session_mismatch"),
+        );
+        assert!(plan.preconditions.iter().any(|precondition| {
+            precondition.code == "mcp_binding_matches_session"
+                && precondition.status == AdminControlPlanPreconditionStatus::Failed
+        }));
+    }
+
+    #[test]
+    fn denies_reload_mcp_without_handler() {
+        let plan = plan_reload_mcp_control(&ReloadMcpControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "reload_mcp".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-reload".to_string()),
+                idempotency_key: None,
+                operator_reason: None,
+                operator_reason_code: None,
+            },
+            binding: Some(ReloadMcpControlBinding {
+                binding_id: "mcp-alpha".to_string(),
+                session_id: "session-alpha".to_string(),
+                profile_id: ProfileId::new("prime"),
+                tool_profile_key: Some("prime-mcp".to_string()),
+                endpoint_ref: None,
+            }),
+            reload_handler_available: false,
+        });
+
+        assert!(!plan.accepted);
+        assert_eq!(
+            plan.denial
+                .as_ref()
+                .map(|denial| denial.reason_code.as_str()),
+            Some("missing_mcp_reload_handler"),
+        );
+        assert!(plan.actions.is_empty());
     }
 
     #[test]

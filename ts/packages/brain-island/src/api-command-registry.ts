@@ -193,6 +193,7 @@ export const SLASH_COMMAND_REGISTRY = [
       commandName: "reload_mcp",
       pathTemplate: "/v1/admin/control/mcp/{session_id}/reload",
       reasonCode: "slash_reload_mcp",
+      rustPlanOperation: "plan_reload_mcp_control",
     },
   }),
 ] as const satisfies readonly SlashCommandDescriptor[];
@@ -406,6 +407,7 @@ export const ADMIN_CONTROL_CAPABILITIES = [
     "Reload MCP surfaces for a session.",
     "reload_mcp",
     ["mcp", "session"],
+    { rustPlanOperation: "plan_reload_mcp_control" },
   ),
   controlCapability(
     "admin.control.maintenance.run",

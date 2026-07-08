@@ -20,8 +20,8 @@ use rusty_crew_core_bridge_api::{
 use rusty_crew_core_config::{
     plan_create_profile, plan_runtime_config, validate_runtime_config_input, CreateProfilePlan,
     CreateProfilePlanInput, NewSessionControlPlan, NewSessionControlPlanInput,
-    ProfileRegistryMutationPlan, ProfileRegistryMutationRequest, RuntimeConfigPlan,
-    RuntimeConfigValidationInput,
+    ProfileRegistryMutationPlan, ProfileRegistryMutationRequest, ReloadMcpControlPlan,
+    ReloadMcpControlPlanInput, RuntimeConfigPlan, RuntimeConfigValidationInput,
 };
 use rusty_crew_core_engine::CoreEngine;
 use rusty_crew_core_persistence::{

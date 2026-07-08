@@ -118,6 +118,7 @@ const reloadMcpExecutor = createReloadMcpControlExecutor({
   resolveBinding(sessionId) {
     return sessionId === currentSessionId ? currentMcpBinding : undefined;
   },
+  planReloadMcpControl: (input) => native.planReloadMcpControl(input),
   manager: mcpManager,
   discoveryClient: {
     listTools: () => [

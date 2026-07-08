@@ -319,6 +319,7 @@ interface NativeBridgeBinding {
   planCreateProfileJson(inputJson: string): string;
   planProfileRegistryMutationJson(inputJson: string): string;
   planNewSessionControlJson(inputJson: string): string;
+  planReloadMcpControlJson(inputJson: string): string;
   shutdownEngine(
     engine: number,
     drainTimeoutMs: number,
@@ -1789,6 +1790,55 @@ export interface NativeNewSessionControlPlan {
   }>;
 }
 
+export interface NativeReloadMcpControlPlanInput {
+  command: {
+    commandKind: string;
+    targetSessionId?: string;
+    requestId?: string;
+    idempotencyKey?: string;
+    operatorReason?: string;
+    operatorReasonCode?: string;
+  };
+  binding?: {
+    bindingId: string;
+    sessionId: string;
+    profileId: string;
+    toolProfileKey?: string;
+    endpointRef?: string;
+  };
+  reloadHandlerAvailable?: boolean;
+}
+
+export interface NativeReloadMcpControlPlan {
+  accepted: boolean;
+  commandKind: string;
+  target: {
+    sessionId?: string;
+    bindingId?: string;
+    profileId?: string;
+    toolProfileKey?: string;
+    endpointRef?: string;
+  };
+  idempotencyKey?: string;
+  operatorReason: string;
+  reasonCode: string;
+  denial?: {
+    reasonCode: string;
+    summary: string;
+  };
+  preconditions: Array<{
+    code: string;
+    status: "satisfied" | "failed";
+    summary: string;
+  }>;
+  actions: Array<{
+    action: "reload_mcp_surface";
+    sessionId: string;
+    bindingId: string;
+    reasonCode: string;
+  }>;
+}
+
 export interface NativeCreateProfileRequest {
   profileId: string;
   displayName?: string;
@@ -2066,6 +2116,9 @@ export interface NativeBridgeModule {
   planNewSessionControl(
     input: NativeNewSessionControlPlanInput,
   ): Promise<NativeNewSessionControlPlan>;
+  planReloadMcpControl(
+    input: NativeReloadMcpControlPlanInput,
+  ): Promise<NativeReloadMcpControlPlan>;
   injectDenDataUpdate(update: DenDataUpdate): Promise<EventReceipt>;
   injectExternalEvent(event: ExternalEvent): Promise<EventReceipt>;
   cancelDelegatedSession(
@@ -2586,6 +2639,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     planCreateProfile: unavailable("plan_create_profile"),
     planProfileRegistryMutation: unavailable("plan_profile_registry_mutation"),
     planNewSessionControl: unavailable("plan_new_session_control"),
+    planReloadMcpControl: unavailable("plan_reload_mcp_control"),
     injectExternalEvent: unavailable("inject_external_event"),
     injectDenDataUpdate: unavailable("inject_den_data_update"),
     enqueueBodyFollowUpMessage: unavailable("enqueue_body_follow_up_message"),
@@ -3361,6 +3415,14 @@ function createNativeBridgeModule(
             JSON.stringify(toRawNewSessionControlPlanInput(input)),
           ),
         ) as RawNewSessionControlPlan,
+      ),
+    planReloadMcpControl: async (input) =>
+      toNativeReloadMcpControlPlan(
+        JSON.parse(
+          binding.planReloadMcpControlJson(
+            JSON.stringify(toRawReloadMcpControlPlanInput(input)),
+          ),
+        ) as RawReloadMcpControlPlan,
       ),
     injectExternalEvent: async (event) =>
       binding.injectExternalEvent(encodeJson(toNativeExternalEvent(event))),
@@ -4969,6 +5031,31 @@ function toRawNewSessionControlPlanInput(
   };
 }
 
+function toRawReloadMcpControlPlanInput(
+  input: NativeReloadMcpControlPlanInput,
+): unknown {
+  return {
+    command: {
+      command_kind: input.command.commandKind,
+      target_session_id: input.command.targetSessionId,
+      request_id: input.command.requestId,
+      idempotency_key: input.command.idempotencyKey,
+      operator_reason: input.command.operatorReason,
+      operator_reason_code: input.command.operatorReasonCode,
+    },
+    binding: input.binding
+      ? {
+          binding_id: input.binding.bindingId,
+          session_id: input.binding.sessionId,
+          profile_id: input.binding.profileId,
+          tool_profile_key: input.binding.toolProfileKey,
+          endpoint_ref: input.binding.endpointRef,
+        }
+      : undefined,
+    reload_handler_available: input.reloadHandlerAvailable ?? false,
+  };
+}
+
 function toNativeNewSessionControlPlan(
   plan: RawNewSessionControlPlan,
 ): NativeNewSessionControlPlan {
@@ -5003,6 +5090,42 @@ function toNativeNewSessionControlPlan(
       sessionId: action.session_id ?? undefined,
       oldSessionId: action.old_session_id ?? undefined,
       newSessionId: action.new_session_id ?? undefined,
+      reasonCode: action.reason_code,
+    })),
+  };
+}
+
+function toNativeReloadMcpControlPlan(
+  plan: RawReloadMcpControlPlan,
+): NativeReloadMcpControlPlan {
+  return {
+    accepted: plan.accepted,
+    commandKind: plan.command_kind,
+    target: {
+      sessionId: plan.target.session_id ?? undefined,
+      bindingId: plan.target.binding_id ?? undefined,
+      profileId: plan.target.profile_id ?? undefined,
+      toolProfileKey: plan.target.tool_profile_key ?? undefined,
+      endpointRef: plan.target.endpoint_ref ?? undefined,
+    },
+    idempotencyKey: plan.idempotency_key ?? undefined,
+    operatorReason: plan.operator_reason,
+    reasonCode: plan.reason_code,
+    denial: plan.denial
+      ? {
+          reasonCode: plan.denial.reason_code,
+          summary: plan.denial.summary,
+        }
+      : undefined,
+    preconditions: (plan.preconditions ?? []).map((precondition) => ({
+      code: precondition.code,
+      status: precondition.status,
+      summary: precondition.summary,
+    })),
+    actions: (plan.actions ?? []).map((action) => ({
+      action: action.action,
+      sessionId: action.session_id,
+      bindingId: action.binding_id,
       reasonCode: action.reason_code,
     })),
   };
@@ -6329,6 +6452,36 @@ interface RawNewSessionControlPlan {
     session_id?: string | null;
     old_session_id?: string | null;
     new_session_id?: string | null;
+    reason_code: string;
+  }>;
+}
+
+interface RawReloadMcpControlPlan {
+  accepted: boolean;
+  command_kind: string;
+  target: {
+    session_id?: string | null;
+    binding_id?: string | null;
+    profile_id?: string | null;
+    tool_profile_key?: string | null;
+    endpoint_ref?: string | null;
+  };
+  idempotency_key?: string | null;
+  operator_reason: string;
+  reason_code: string;
+  denial?: {
+    reason_code: string;
+    summary: string;
+  } | null;
+  preconditions?: Array<{
+    code: string;
+    status: "satisfied" | "failed";
+    summary: string;
+  }>;
+  actions?: Array<{
+    action: "reload_mcp_surface";
+    session_id: string;
+    binding_id: string;
     reason_code: string;
   }>;
 }

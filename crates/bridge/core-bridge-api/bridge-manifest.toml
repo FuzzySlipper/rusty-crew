@@ -308,6 +308,15 @@ errors = "core_protocol::CoreError"
 summary = "Plan /new archive-and-create lifecycle controls with Rust-owned preconditions, stable denial codes, and ordered actions before TypeScript mutates runtime state."
 
 [[operation]]
+name = "plan_reload_mcp_control"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::ReloadMcpControlPlanInput"
+output = "core_config::ReloadMcpControlPlan"
+errors = "core_protocol::CoreError"
+summary = "Plan /reload-mcp lifecycle controls with Rust-owned preconditions, stable denial codes, and ordered actions before TypeScript refreshes MCP surfaces."
+
+[[operation]]
 name = "inject_external_event"
 surface = "stable"
 direction = "ts_to_rust"

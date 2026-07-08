@@ -26,6 +26,13 @@ impl NativeBridge {
         rusty_crew_core_config::plan_new_session_control(&input)
     }
 
+    pub fn plan_reload_mcp_control(
+        &self,
+        input: ReloadMcpControlPlanInput,
+    ) -> ReloadMcpControlPlan {
+        rusty_crew_core_config::plan_reload_mcp_control(&input)
+    }
+
     pub fn plan_runtime_config(&self, input: RuntimeConfigValidationInput) -> RuntimeConfigPlan {
         plan_runtime_config(&input)
     }

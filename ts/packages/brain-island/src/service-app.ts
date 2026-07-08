@@ -6338,6 +6338,7 @@ function createServiceReloadMcpExecutor(
 ): NonNullable<AdminControlExecutor["reloadMcp"]> {
   return createReloadMcpControlExecutor({
     resolveBinding: (sessionId) => mcpBindingForSession(state, sessionId),
+    planReloadMcpControl: (input) => state.bridge.planReloadMcpControl(input),
     manager: state.mcpManager,
     discoveryClient: {
       listTools: () => [],

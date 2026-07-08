@@ -10,6 +10,7 @@ import type {
   ProfileId,
   SessionId,
 } from "@rusty-crew/contracts";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   AgentActivityObservationProducer,
   createReloadMcpControlExecutor,
@@ -24,6 +25,7 @@ import {
   createMemoryReloadMcpLifecycleAuditSink,
 } from "./test-support.js";
 
+const native = await loadNativeBridge();
 const adapterId = "mcp-main" as AdapterId;
 const alphaBinding = binding(
   "mcp-alpha",
@@ -55,6 +57,7 @@ const reloadMcp = createReloadMcpControlExecutor({
   resolveBinding(sessionId) {
     return sessionId === "session-alpha" ? alphaBinding : undefined;
   },
+  planReloadMcpControl: (input) => native.planReloadMcpControl(input),
   manager,
   discoveryClient: {
     listTools: () => [
@@ -152,6 +155,7 @@ assert.equal(missingBinding.reasonCode, "mcp_binding_not_found");
 
 const mismatch = await createReloadMcpControlExecutor({
   resolveBinding: () => betaBinding,
+  planReloadMcpControl: (input) => native.planReloadMcpControl(input),
   manager,
   discoveryClient: { listTools: () => [] },
   metadataPolicyValidator,
