@@ -71,6 +71,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_curator_governance_transition_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<CuratorGovernancePlanInput>(
+            &input_json,
+            "curator governance transition plan",
+        )?;
+        let plan = plan_curator_governance_transition(input);
+        serialize_json(&plan, "curator governance transition plan")
+    }
+
+    #[napi]
     pub fn list_memory_proposals_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<MemoryProposalQuery>(&input_json, "memory proposal query")?;

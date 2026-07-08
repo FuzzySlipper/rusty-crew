@@ -100,6 +100,7 @@ export interface CuratorGovernanceExecutorOptions {
   store: MemoryCuratorGovernanceStore;
   snapshotDir?: string;
   now?: () => Date;
+  planner?: CuratorGovernancePlanner;
   scan?: (
     request: CuratorExecuteRequest,
   ) => Promise<CuratorCandidateBatch> | CuratorCandidateBatch;
@@ -135,6 +136,60 @@ export interface CuratorGovernanceStoreSnapshot {
   batches: readonly CuratorCandidateBatch[];
   candidates: readonly CuratorStoredCandidate[];
   mutations: readonly CuratorMutationRecord[];
+}
+
+export type RustCuratorGovernanceAction =
+  | "preview_candidate"
+  | "approve_candidate"
+  | "apply_candidate";
+
+export type RustCuratorStoredCandidateStatus =
+  | "proposed"
+  | "previewed"
+  | "approved"
+  | "applied";
+
+export type RustCuratorLifecycleState = "active" | "stale" | "archived";
+
+export interface RustCuratorGovernancePlanInput {
+  action: RustCuratorGovernanceAction;
+  candidate: {
+    candidate_id: string;
+    fingerprint: string;
+    status: RustCuratorStoredCandidateStatus;
+    lifecycle_state?: RustCuratorLifecycleState;
+    lifecycle_reason_code?: string;
+    expires_at?: string;
+    approval_fingerprint?: string;
+    source_current: boolean;
+    source_current_reason_code?: string;
+  };
+  now: string;
+  actor?: string;
+  reason?: string;
+  dry_run: boolean;
+}
+
+export interface RustCuratorGovernancePlan {
+  accepted: boolean;
+  action: RustCuratorGovernanceAction;
+  candidate_id: string;
+  audit_ref?: string;
+  receipt_id: string;
+  resulting_status?: RustCuratorStoredCandidateStatus;
+  diagnostics: readonly {
+    reason_code: string;
+    message: string;
+  }[];
+}
+
+export type CuratorGovernancePlanner = (
+  input: RustCuratorGovernancePlanInput,
+) => Promise<RustCuratorGovernancePlan>;
+
+interface CandidateCurrentness {
+  sourceCurrent: boolean;
+  reasonCode?: string;
 }
 
 export class MemoryCuratorGovernanceStore {
@@ -350,8 +405,18 @@ export async function executeCuratorGovernanceRequest(
     }
     case "preview_candidate": {
       const stored = requiredCandidate(options.store, request.candidateId);
-      assertCandidateNotArchived(stored);
-      await assertCandidateCurrent(options.skillsDir, stored.candidate);
+      const currentness = await candidateSourcesCurrent(
+        options.skillsDir,
+        stored.candidate,
+      );
+      const plan = await planCuratorGovernanceTransition(
+        options,
+        request,
+        stored,
+        "preview_candidate",
+        now,
+        currentness,
+      );
       const management = await runSkillMutation(
         options,
         stored.candidate,
@@ -359,15 +424,25 @@ export async function executeCuratorGovernanceRequest(
       );
       options.store.recordPreview(stored.candidate.candidateId, now);
       return receipt(request, "previewed", {
-        auditRef: `curator-preview:${stored.candidate.candidateId}`,
+        receiptId: plan.receipt_id,
+        auditRef: plan.audit_ref,
         summary: summarizeManagement("preview", management),
       });
     }
     case "approve_candidate": {
       const stored = requiredCandidate(options.store, request.candidateId);
-      assertCandidateNotArchived(stored);
-      assertNotExpired(stored.candidate, now);
-      await assertCandidateCurrent(options.skillsDir, stored.candidate);
+      const currentness = await candidateSourcesCurrent(
+        options.skillsDir,
+        stored.candidate,
+      );
+      const plan = await planCuratorGovernanceTransition(
+        options,
+        request,
+        stored,
+        "approve_candidate",
+        now,
+        currentness,
+      );
       options.store.approve(stored.candidate.candidateId, {
         candidateId: stored.candidate.candidateId,
         actorId: request.actorId,
@@ -376,15 +451,25 @@ export async function executeCuratorGovernanceRequest(
         fingerprint: stored.candidate.fingerprint,
       });
       return receipt(request, "approved", {
-        auditRef: `curator-approval:${stored.candidate.candidateId}`,
+        receiptId: plan.receipt_id,
+        auditRef: plan.audit_ref,
         summary: `approved ${stored.candidate.summary}`,
       });
     }
     case "apply_candidate": {
       const stored = requiredCandidate(options.store, request.candidateId);
-      assertCandidateNotArchived(stored);
-      assertNotExpired(stored.candidate, now);
-      await assertCandidateCurrent(options.skillsDir, stored.candidate);
+      const currentness = await candidateSourcesCurrent(
+        options.skillsDir,
+        stored.candidate,
+      );
+      const plan = await planCuratorGovernanceTransition(
+        options,
+        request,
+        stored,
+        "apply_candidate",
+        now,
+        currentness,
+      );
       if (request.dryRun) {
         const management = await runSkillMutation(
           options,
@@ -392,15 +477,10 @@ export async function executeCuratorGovernanceRequest(
           true,
         );
         return receipt(request, "previewed", {
-          auditRef: `curator-preview:${stored.candidate.candidateId}`,
+          receiptId: plan.receipt_id,
+          auditRef: plan.audit_ref,
           summary: summarizeManagement("dry-run apply", management),
         });
-      }
-      if (!stored.approval) {
-        throw new CuratorExecuteError("curator_candidate_not_approved");
-      }
-      if (stored.approval.fingerprint !== stored.candidate.fingerprint) {
-        throw new CuratorExecuteError("curator_approval_stale");
       }
       const snapshot = await snapshotBeforeMutation(options, stored.candidate);
       const management = await runSkillMutation(
@@ -419,7 +499,7 @@ export async function executeCuratorGovernanceRequest(
         candidateId: stored.candidate.candidateId,
         action: stored.candidate.mutation.type,
         actorId: request.actorId,
-        reason: request.reason ?? stored.approval.reason,
+        reason: request.reason ?? stored.approval?.reason ?? "curator apply",
         appliedAt: now,
         status: "applied",
         snapshot,
@@ -429,7 +509,8 @@ export async function executeCuratorGovernanceRequest(
       };
       options.store.recordApplied(record);
       return receipt(request, "applied", {
-        auditRef: mutationId,
+        receiptId: plan.receipt_id,
+        auditRef: plan.audit_ref ?? mutationId,
         summary: `applied ${stored.candidate.summary}`,
       });
     }
@@ -618,26 +699,82 @@ async function restoreSnapshot(snapshot: CuratorSnapshotRef): Promise<void> {
   }
 }
 
-async function assertCandidateCurrent(
+async function planCuratorGovernanceTransition(
+  options: CuratorGovernanceExecutorOptions,
+  request: CuratorExecuteRequest,
+  stored: CuratorStoredCandidate,
+  action: RustCuratorGovernanceAction,
+  now: string,
+  currentness: CandidateCurrentness,
+): Promise<RustCuratorGovernancePlan> {
+  if (!options.planner) {
+    throw new CuratorExecuteError("curator_governance_planner_unavailable");
+  }
+  const plan = await options.planner({
+    action,
+    candidate: curatorGovernanceCandidateSnapshot(stored, currentness),
+    now,
+    ...(request.actorId ? { actor: request.actorId } : {}),
+    ...(request.reason ? { reason: request.reason } : {}),
+    dry_run: Boolean(request.dryRun),
+  });
+  if (!plan.accepted) {
+    throw new CuratorExecuteError(
+      plan.diagnostics[0]?.reason_code ?? "curator_governance_rejected",
+    );
+  }
+  return plan;
+}
+
+function curatorGovernanceCandidateSnapshot(
+  stored: CuratorStoredCandidate,
+  currentness: CandidateCurrentness,
+): RustCuratorGovernancePlanInput["candidate"] {
+  return {
+    candidate_id: stored.candidate.candidateId,
+    fingerprint: stored.candidate.fingerprint,
+    status: curatorStoredStatus(stored.status),
+    ...(stored.lifecycle?.state
+      ? { lifecycle_state: stored.lifecycle.state }
+      : {}),
+    ...(stored.lifecycle?.reasonCode
+      ? { lifecycle_reason_code: stored.lifecycle.reasonCode }
+      : {}),
+    ...(stored.candidate.expiresAt
+      ? { expires_at: stored.candidate.expiresAt }
+      : {}),
+    ...(stored.approval?.fingerprint
+      ? { approval_fingerprint: stored.approval.fingerprint }
+      : {}),
+    source_current: currentness.sourceCurrent,
+    ...(currentness.reasonCode
+      ? { source_current_reason_code: currentness.reasonCode }
+      : {}),
+  };
+}
+
+function curatorStoredStatus(
+  status: CuratorStoredCandidateStatus,
+): RustCuratorStoredCandidateStatus {
+  if (status === "proposed") return "proposed";
+  if (status === "previewed") return "previewed";
+  if (status === "approved") return "approved";
+  if (status === "applied") return "applied";
+  return "proposed";
+}
+
+async function candidateSourcesCurrent(
   skillsDir: string,
   candidate: CuratorMutationCandidate,
-): Promise<void> {
+): Promise<CandidateCurrentness> {
   for (const ref of candidate.sourceRefs) {
     if (ref.kind !== "skill" || !ref.hash) continue;
     const current = await curatorSkillSourceRef(skillsDir, ref.ref);
     if (current.hash !== ref.hash) {
-      throw new CuratorExecuteError("curator_candidate_stale");
+      return { sourceCurrent: false, reasonCode: "curator_candidate_stale" };
     }
   }
-}
-
-function assertNotExpired(
-  candidate: CuratorMutationCandidate,
-  now: string,
-): void {
-  if (candidate.expiresAt && candidate.expiresAt <= now) {
-    throw new CuratorExecuteError("curator_candidate_expired");
-  }
+  return { sourceCurrent: true };
 }
 
 function requiredCandidate(
@@ -649,12 +786,6 @@ function requiredCandidate(
   const stored = store.getCandidate(candidateId);
   if (!stored) throw new CuratorExecuteError("curator_candidate_not_found");
   return stored;
-}
-
-function assertCandidateNotArchived(stored: CuratorStoredCandidate): void {
-  if (stored.lifecycle?.state === "archived") {
-    throw new CuratorExecuteError("curator_candidate_archived");
-  }
 }
 
 function loadGovernanceSnapshot(
@@ -681,18 +812,21 @@ function receipt(
   request: CuratorExecuteRequest,
   status: CuratorExecuteReceipt["status"],
   details: {
+    receiptId?: string;
     summary: string;
     auditRef?: string;
     observationRef?: string;
   },
 ): CuratorExecuteReceipt {
   return {
-    receiptId: `curator-receipt:${request.action}:${fingerprint(
-      request.candidateId ?? "",
-      request.scopeType ?? "",
-      request.scopeId ?? "",
-      details.summary,
-    ).slice(0, 12)}`,
+    receiptId:
+      details.receiptId ??
+      `curator-receipt:${request.action}:${fingerprint(
+        request.candidateId ?? "",
+        request.scopeType ?? "",
+        request.scopeId ?? "",
+        details.summary,
+      ).slice(0, 12)}`,
     status,
     candidateId: request.candidateId,
     auditRef: details.auditRef,

@@ -68,6 +68,7 @@ export type {
   CuratorApprovalRecord,
   CuratorCandidateLifecycle,
   CuratorCandidateLifecycleState,
+  CuratorGovernancePlanner,
   CuratorGovernanceStoreSnapshot,
   CuratorGovernanceExecutorOptions,
   CuratorMutationCandidate,

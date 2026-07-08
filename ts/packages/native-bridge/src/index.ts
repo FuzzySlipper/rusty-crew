@@ -522,6 +522,7 @@ interface NativeBridgeBinding {
   buildSessionMemoryPromptContextJson(inputJson: string): string;
   saveMemoryProposalJson(inputJson: string): string;
   planCaptureMemoryProposalsJson(inputJson: string): string;
+  planCuratorGovernanceTransitionJson(inputJson: string): string;
   listMemoryProposalsJson(inputJson: string): string;
   saveSessionActivityDigestJson(inputJson: string): string;
   listSessionActivityDigestsJson(inputJson: string): string;
@@ -2197,6 +2198,7 @@ export interface NativeBridgeModule {
     proposal: MemoryProposalEnvelope,
   ): Promise<MemoryProposalRecord>;
   planCaptureMemoryProposals(input: unknown): Promise<unknown>;
+  planCuratorGovernanceTransition(input: unknown): Promise<unknown>;
   listMemoryProposals(
     query: MemoryProposalQuery,
   ): Promise<MemoryProposalRecord[]>;
@@ -2568,6 +2570,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     buildSessionMemoryPromptContext: unavailable("initialize_engine"),
     saveMemoryProposal: unavailable("initialize_engine"),
     planCaptureMemoryProposals: unavailable("initialize_engine"),
+    planCuratorGovernanceTransition: unavailable("initialize_engine"),
     listMemoryProposals: unavailable("initialize_engine"),
     saveSessionActivityDigest: unavailable("initialize_engine"),
     listSessionActivityDigests: unavailable("initialize_engine"),
@@ -3785,6 +3788,10 @@ function createNativeBridgeModule(
     planCaptureMemoryProposals: async (input) =>
       JSON.parse(
         binding.planCaptureMemoryProposalsJson(JSON.stringify(input)),
+      ) as unknown,
+    planCuratorGovernanceTransition: async (input) =>
+      JSON.parse(
+        binding.planCuratorGovernanceTransitionJson(JSON.stringify(input)),
       ) as unknown,
     listMemoryProposals: async (query) =>
       JSON.parse(

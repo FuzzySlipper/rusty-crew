@@ -2,16 +2,29 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   createCuratorGovernanceExecutor,
   curatorSkillSourceRef,
   MemoryCuratorGovernanceStore,
   runCuratorLifecycleTransitions,
   type CuratorCandidateBatch,
+  type CuratorGovernancePlanner,
   type CuratorMutationCandidate,
 } from "./index.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-curator-lifecycle-"));
+const bridge = await loadNativeBridge();
+const engine = await bridge.initializeEngine({
+  engineDataDir: join(root, "engine"),
+  clock: { fixed: "2026-06-22T00:00:00.000Z" },
+  defaultTurnBudget: 4,
+  defaultIdleTimeoutMs: 1_000,
+});
+const planner: CuratorGovernancePlanner = (input) =>
+  bridge.planCuratorGovernanceTransition(
+    input,
+  ) as ReturnType<CuratorGovernancePlanner>;
 const skillsDir = join(root, "skills");
 mkdirSync(skillsDir, { recursive: true });
 writeSkill("archive-me", "Archive Me", "Archive body.");
@@ -64,6 +77,7 @@ const executor = createCuratorGovernanceExecutor({
   skillsDir,
   store,
   now: () => new Date("2026-06-22T00:01:00.000Z"),
+  planner,
 });
 const reactivePreview = await executor({
   action: "preview_candidate",
@@ -111,6 +125,8 @@ await assert.rejects(
     }),
   /curator_candidate_archived/,
 );
+
+await bridge.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
 
 console.log(
   JSON.stringify(

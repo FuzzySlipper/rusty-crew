@@ -307,6 +307,7 @@ import {
   FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
   rollbackCuratorMutation,
+  type CuratorGovernancePlanner,
   type CuratorMutationCandidate,
 } from "./curator-mutations.js";
 import type {
@@ -3307,6 +3308,10 @@ function createServiceCuratorRuntime(input: {
     store,
     snapshotDir: join(input.config.paths.backupDir, "curator-snapshots"),
     now: () => new Date(input.now()),
+    planner: (request) =>
+      input.bridge.planCuratorGovernanceTransition(
+        request,
+      ) as ReturnType<CuratorGovernancePlanner>,
     scan: async (request) => {
       try {
         const batch = await scanServiceCuratorCandidates(

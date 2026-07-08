@@ -66,14 +66,14 @@ use rusty_crew_core_persistence::{
     SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
-    plan_capture_memory_proposals, AttachmentId, BodyState, BrainWakeProviderStateInput,
-    BrainWakeStreamItem, CaptureMemoryProposalPlanInput, ContextCompactionArtifact,
-    ContextCompactionArtifactQuery, DataBankScopeId, MemoryGovernanceDecisionInput,
-    MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
-    MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
-    ModelProviderQuery, ModelProviderRefreshImpactRequest, ModelProviderRefreshPlanRequest,
-    ModelProviderWrite, ProfileRegistryLifecycleStatus, ProfileRegistryUpdate,
-    ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
+    plan_capture_memory_proposals, plan_curator_governance_transition, AttachmentId, BodyState,
+    BrainWakeProviderStateInput, BrainWakeStreamItem, CaptureMemoryProposalPlanInput,
+    ContextCompactionArtifact, ContextCompactionArtifactQuery, CuratorGovernancePlanInput,
+    DataBankScopeId, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord,
+    MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor,
+    MessageSlotId, MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest,
+    ModelProviderRefreshPlanRequest, ModelProviderWrite, ProfileRegistryLifecycleStatus,
+    ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_core_tool_registry::{
     validate_local_tool_profile_policy, validate_tool_metadata_policy,

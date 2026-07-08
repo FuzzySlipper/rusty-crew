@@ -1704,6 +1704,7 @@ export const manifestOperationNames = [
   "build_session_memory_prompt_context",
   "save_memory_proposal",
   "plan_capture_memory_proposals",
+  "plan_curator_governance_transition",
   "list_memory_proposals",
   "save_session_activity_digest",
   "list_session_activity_digests",
@@ -1717,6 +1718,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "16b348064a10ffee8ed4ced24866ba05f185e0e1a0d792ec769f869ab4f1f9a7";
+  "e6f58e49fca01d0e0db16837de3fd610a8f0b46b3e31c114c9b45276dcb24589";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];

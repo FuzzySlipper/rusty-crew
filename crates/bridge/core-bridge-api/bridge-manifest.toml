@@ -1463,6 +1463,15 @@ errors = "core_protocol::CoreError"
 summary = "Normalize near-raw capture candidates into governed Crew memory proposal envelopes with diagnostics."
 
 [[operation]]
+name = "plan_curator_governance_transition"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::CuratorGovernancePlanInput"
+output = "core_protocol::CuratorGovernancePlan"
+errors = "core_protocol::CoreError"
+summary = "Validate curator candidate preview, approval, and apply transitions before TS performs file mutations."
+
+[[operation]]
 name = "list_memory_proposals"
 surface = "stable"
 direction = "ts_to_rust"

@@ -8,16 +8,29 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   createCuratorGovernanceExecutor,
   curatorSkillSourceRef,
   FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
   rollbackCuratorMutation,
+  type CuratorGovernancePlanner,
   type CuratorMutationCandidate,
 } from "./index.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-curator-mutations-"));
+const bridge = await loadNativeBridge();
+const engine = await bridge.initializeEngine({
+  engineDataDir: join(root, "engine"),
+  clock: { fixed: "2026-06-21T12:00:00.000Z" },
+  defaultTurnBudget: 4,
+  defaultIdleTimeoutMs: 1_000,
+});
+const planner: CuratorGovernancePlanner = (input) =>
+  bridge.planCuratorGovernanceTransition(
+    input,
+  ) as ReturnType<CuratorGovernancePlanner>;
 const skillsDir = join(root, "skills");
 mkdirSync(skillsDir, { recursive: true });
 writeFileSync(
@@ -62,6 +75,7 @@ const executor = createCuratorGovernanceExecutor({
   skillsDir,
   store,
   now: () => new Date("2026-06-21T12:00:00.000Z"),
+  planner,
 });
 
 const preview = await executor({
@@ -152,6 +166,7 @@ const firstFileExecutor = createCuratorGovernanceExecutor({
   skillsDir,
   store: firstFileStore,
   now: () => new Date("2026-06-21T13:00:00.000Z"),
+  planner,
 });
 const persistedPreview = await firstFileExecutor({
   action: "preview_candidate",
@@ -177,6 +192,7 @@ const reloadedExecutor = createCuratorGovernanceExecutor({
   skillsDir,
   store: reloadedFileStore,
   now: () => new Date("2026-06-21T13:01:00.000Z"),
+  planner,
 });
 const persistedApplied = await reloadedExecutor({
   action: "apply_candidate",
@@ -188,4 +204,5 @@ assert.equal(persistedApplied.status, "applied");
 assert.match(readFileSync(join(skillsDir, "managed.md"), "utf8"), /Persisted/);
 assert.equal(reloadedFileStore.mutations.size, 1);
 
+await bridge.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
 console.log("curator mutation smoke passed");

@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   AgentActivityObservationProducer,
   buildBackgroundServiceDiagnosticsProjection,
@@ -25,6 +26,7 @@ import {
   runBackgroundMemorySkillReview,
   type AdminRouteResult,
   type BackgroundServiceDiagnosticsProjection,
+  type CuratorGovernancePlanner,
   type CuratorMutationCandidate,
   type CuratorObservedBehaviorEvidence,
 } from "./index.js";
@@ -33,6 +35,17 @@ import { createMemoryAgentActivityObservationSink } from "./test-support.js";
 
 const now = "2026-06-21T16:00:00.000Z";
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-curator-review-e2e-"));
+const bridge = await loadNativeBridge();
+const engine = await bridge.initializeEngine({
+  engineDataDir: join(root, "engine"),
+  clock: { fixed: now },
+  defaultTurnBudget: 4,
+  defaultIdleTimeoutMs: 1_000,
+});
+const planner: CuratorGovernancePlanner = (input) =>
+  bridge.planCuratorGovernanceTransition(
+    input,
+  ) as ReturnType<CuratorGovernancePlanner>;
 const skillsDir = join(root, "skills");
 mkdirSync(skillsDir, { recursive: true });
 writeFileSync(
@@ -210,6 +223,7 @@ const curatorExecutor = createCuratorGovernanceExecutor({
   skillsDir,
   store,
   now: () => new Date(now),
+  planner,
 });
 const preview = await curatorExecutor({
   action: "apply_candidate",
@@ -342,7 +356,7 @@ const review = await runBackgroundMemorySkillReview({
 });
 assert.equal(review.findingCount > 0, true);
 assert.equal(
-  review.skippedReasons.includes("llm_review_requires_provider_path"),
+  review.skippedReasons.includes("llm_review_no_session_activity_digests"),
   true,
 );
 
@@ -421,6 +435,8 @@ assert.deepEqual(
   observationSink.events.map((event) => event.event_type),
   ["work_checkpoint", "work_completed"],
 );
+
+await bridge.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
 
 console.log(
   JSON.stringify(

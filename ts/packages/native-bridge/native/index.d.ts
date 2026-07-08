@@ -76,6 +76,7 @@ export declare class NativeBridgeBinding {
   buildSessionMemoryPromptContextJson(inputJson: string): string
   saveMemoryProposalJson(inputJson: string): string
   planCaptureMemoryProposalsJson(inputJson: string): string
+  planCuratorGovernanceTransitionJson(inputJson: string): string
   listMemoryProposalsJson(inputJson: string): string
   saveSessionActivityDigestJson(inputJson: string): string
   listSessionActivityDigestsJson(inputJson: string): string

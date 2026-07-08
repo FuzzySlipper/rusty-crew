@@ -1174,6 +1174,168 @@ pub fn validate_memory_governance_transition_policy(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CuratorGovernanceAction {
+    PreviewCandidate,
+    ApproveCandidate,
+    ApplyCandidate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CuratorStoredCandidateStatus {
+    Proposed,
+    Previewed,
+    Approved,
+    Applied,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CuratorCandidateLifecycleState {
+    Active,
+    Stale,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuratorGovernanceCandidateSnapshot {
+    pub candidate_id: String,
+    pub fingerprint: String,
+    pub status: CuratorStoredCandidateStatus,
+    pub lifecycle_state: Option<CuratorCandidateLifecycleState>,
+    pub lifecycle_reason_code: Option<String>,
+    pub expires_at: Option<IsoTimestamp>,
+    pub approval_fingerprint: Option<String>,
+    pub source_current: bool,
+    pub source_current_reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuratorGovernancePlanInput {
+    pub action: CuratorGovernanceAction,
+    pub candidate: CuratorGovernanceCandidateSnapshot,
+    pub now: IsoTimestamp,
+    pub actor: Option<String>,
+    pub reason: Option<String>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuratorGovernancePlan {
+    pub accepted: bool,
+    pub action: CuratorGovernanceAction,
+    pub candidate_id: String,
+    pub audit_ref: Option<String>,
+    pub receipt_id: String,
+    pub resulting_status: Option<CuratorStoredCandidateStatus>,
+    pub diagnostics: Vec<MemoryPolicyDiagnostic>,
+}
+
+pub fn plan_curator_governance_transition(
+    input: CuratorGovernancePlanInput,
+) -> CuratorGovernancePlan {
+    let mut report = MemoryPolicyReport::accepted();
+    let candidate = &input.candidate;
+    if candidate.candidate_id.trim().is_empty() {
+        report.push_rejection(
+            "curator_candidate_id_required",
+            "curator candidate id must not be empty",
+        );
+    }
+    if candidate.fingerprint.trim().is_empty() {
+        report.push_rejection(
+            "curator_candidate_fingerprint_required",
+            "curator candidate fingerprint must not be empty",
+        );
+    }
+    if candidate.lifecycle_state == Some(CuratorCandidateLifecycleState::Archived) {
+        report.push_rejection(
+            "curator_candidate_archived",
+            "archived curator candidates cannot be previewed, approved, or applied",
+        );
+    }
+    if !candidate.source_current {
+        report.push_rejection(
+            candidate
+                .source_current_reason_code
+                .clone()
+                .unwrap_or_else(|| "curator_candidate_stale".to_string()),
+            "curator candidate source refs are no longer current",
+        );
+    }
+    if matches!(
+        input.action,
+        CuratorGovernanceAction::ApproveCandidate | CuratorGovernanceAction::ApplyCandidate
+    ) {
+        if let Some(expires_at) = &candidate.expires_at {
+            if expires_at <= &input.now {
+                report.push_rejection(
+                    "curator_candidate_expired",
+                    "expired curator candidates cannot be approved or applied",
+                );
+            }
+        }
+    }
+    if input.action == CuratorGovernanceAction::ApplyCandidate && !input.dry_run {
+        if candidate.status != CuratorStoredCandidateStatus::Approved {
+            report.push_rejection(
+                "curator_candidate_not_approved",
+                "curator candidate must be approved before apply",
+            );
+        }
+        match &candidate.approval_fingerprint {
+            Some(approval_fingerprint) if approval_fingerprint == &candidate.fingerprint => {}
+            Some(_) => report.push_rejection(
+                "curator_approval_stale",
+                "curator approval fingerprint no longer matches the candidate",
+            ),
+            None => report.push_rejection(
+                "curator_candidate_not_approved",
+                "curator candidate must be approved before apply",
+            ),
+        }
+    }
+    let resulting_status = if report.accepted {
+        Some(match input.action {
+            CuratorGovernanceAction::PreviewCandidate => CuratorStoredCandidateStatus::Previewed,
+            CuratorGovernanceAction::ApproveCandidate => CuratorStoredCandidateStatus::Approved,
+            CuratorGovernanceAction::ApplyCandidate if input.dry_run => {
+                CuratorStoredCandidateStatus::Previewed
+            }
+            CuratorGovernanceAction::ApplyCandidate => CuratorStoredCandidateStatus::Applied,
+        })
+    } else {
+        None
+    };
+    let audit_kind = match input.action {
+        CuratorGovernanceAction::PreviewCandidate => "curator-preview",
+        CuratorGovernanceAction::ApproveCandidate => "curator-approval",
+        CuratorGovernanceAction::ApplyCandidate if input.dry_run => "curator-preview",
+        CuratorGovernanceAction::ApplyCandidate => "curator-apply",
+    };
+    let receipt_hash = stable_hash64(&format!(
+        "{:?}:{}:{}:{}:{}",
+        input.action,
+        candidate.candidate_id,
+        candidate.fingerprint,
+        input.actor.as_deref().unwrap_or(""),
+        input.reason.as_deref().unwrap_or("")
+    ));
+    CuratorGovernancePlan {
+        accepted: report.accepted,
+        action: input.action,
+        candidate_id: candidate.candidate_id.clone(),
+        audit_ref: report
+            .accepted
+            .then(|| format!("{audit_kind}:{}", candidate.candidate_id)),
+        receipt_id: format!("curator-receipt:{audit_kind}:{receipt_hash:016x}"),
+        resulting_status,
+        diagnostics: report.diagnostics,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CaptureMemoryProposalPlanInput {
     pub run_id: String,
@@ -2161,6 +2323,89 @@ mod tests {
                 MemoryProposalSource::Human
             ),
             MemoryGovernanceMode::DirectWrite
+        );
+    }
+
+    #[test]
+    fn curator_governance_planner_enforces_state_before_mutation() {
+        let candidate = CuratorGovernanceCandidateSnapshot {
+            candidate_id: "curator:batch-1:patch-managed".to_string(),
+            fingerprint: "candidate-fingerprint".to_string(),
+            status: CuratorStoredCandidateStatus::Proposed,
+            lifecycle_state: Some(CuratorCandidateLifecycleState::Active),
+            lifecycle_reason_code: None,
+            expires_at: Some("2026-07-09T00:00:00Z".to_string()),
+            approval_fingerprint: None,
+            source_current: true,
+            source_current_reason_code: None,
+        };
+
+        let denied = plan_curator_governance_transition(CuratorGovernancePlanInput {
+            action: CuratorGovernanceAction::ApplyCandidate,
+            candidate: candidate.clone(),
+            now: "2026-07-08T00:00:00Z".to_string(),
+            actor: Some("curator".to_string()),
+            reason: Some("apply".to_string()),
+            dry_run: false,
+        });
+        assert!(!denied.accepted);
+        assert_eq!(
+            denied
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.reason_code.as_str()),
+            Some("curator_candidate_not_approved")
+        );
+
+        let mut approved = candidate;
+        approved.status = CuratorStoredCandidateStatus::Approved;
+        approved.approval_fingerprint = Some(approved.fingerprint.clone());
+        let accepted = plan_curator_governance_transition(CuratorGovernancePlanInput {
+            action: CuratorGovernanceAction::ApplyCandidate,
+            candidate: approved,
+            now: "2026-07-08T00:00:00Z".to_string(),
+            actor: Some("curator".to_string()),
+            reason: Some("apply".to_string()),
+            dry_run: false,
+        });
+        assert!(accepted.accepted);
+        assert_eq!(
+            accepted.resulting_status,
+            Some(CuratorStoredCandidateStatus::Applied)
+        );
+        assert_eq!(
+            accepted.audit_ref.as_deref(),
+            Some("curator-apply:curator:batch-1:patch-managed")
+        );
+
+        let stale = plan_curator_governance_transition(CuratorGovernancePlanInput {
+            action: CuratorGovernanceAction::ApproveCandidate,
+            candidate: CuratorGovernanceCandidateSnapshot {
+                source_current: false,
+                source_current_reason_code: Some("curator_candidate_stale".to_string()),
+                ..CuratorGovernanceCandidateSnapshot {
+                    candidate_id: "curator:batch-1:stale".to_string(),
+                    fingerprint: "candidate-fingerprint".to_string(),
+                    status: CuratorStoredCandidateStatus::Proposed,
+                    lifecycle_state: Some(CuratorCandidateLifecycleState::Active),
+                    lifecycle_reason_code: None,
+                    expires_at: None,
+                    approval_fingerprint: None,
+                    source_current: true,
+                    source_current_reason_code: None,
+                }
+            },
+            now: "2026-07-08T00:00:00Z".to_string(),
+            actor: Some("curator".to_string()),
+            reason: Some("approve".to_string()),
+            dry_run: false,
+        });
+        assert_eq!(
+            stale
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.reason_code.as_str()),
+            Some("curator_candidate_stale")
         );
     }
 
