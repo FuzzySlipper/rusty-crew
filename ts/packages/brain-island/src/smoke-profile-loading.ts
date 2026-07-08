@@ -3,9 +3,14 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProfileId } from "@rusty-crew/contracts";
-import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import {
+  coreConfigFacadeArtifact,
+  loadNativeBridge,
+} from "@rusty-crew/native-bridge";
 import {
   loadProfileContext,
+  profilePromptAssetConfigPaths,
+  profileRuntimeGraphWireFieldPaths,
   ProfileLoadError,
   resolveBrainModuleSelection,
 } from "./index.js";
@@ -24,6 +29,26 @@ mkdirSync(profilesDir, { recursive: true });
 mkdirSync(skillsDir, { recursive: true });
 
 try {
+  const runtimeValidationFields: ReadonlySet<string> = new Set(
+    coreConfigFacadeArtifact.wire_field_inventory.RuntimeConfigValidationInput,
+  );
+  const profilePlanFields: ReadonlySet<string> = new Set(
+    coreConfigFacadeArtifact.wire_field_inventory.CreateProfilePlanInput,
+  );
+  const missingRuntimeValidationFields =
+    profileRuntimeGraphWireFieldPaths.filter(
+      (field) => !runtimeValidationFields.has(field),
+    );
+  const missingProfilePlanFields = profileRuntimeGraphWireFieldPaths.filter(
+    (field) => !profilePlanFields.has(field),
+  );
+  assert.deepEqual(missingRuntimeValidationFields, []);
+  assert.deepEqual(missingProfilePlanFields, []);
+  for (const assetField of profilePromptAssetConfigPaths) {
+    assert.equal(runtimeValidationFields.has(assetField), false);
+    assert.equal(profilePlanFields.has(assetField), false);
+  }
+
   writeFileSync(
     join(profilesDir, "prime-coder.json"),
     JSON.stringify(
@@ -470,6 +495,32 @@ Use the profile-local skill source.
     (error) =>
       error instanceof ProfileLoadError &&
       error.code === "invalid_profile_config",
+  );
+
+  writeFileSync(
+    join(profilesDir, "bad-wake-policy.json"),
+    JSON.stringify({
+      profileId: "bad-wake-policy",
+      modelConfig: {
+        provider: "den-router",
+        modelName: "local-deterministic",
+      },
+      channelDefaults: {
+        wakePolicy: "sometimes",
+      },
+    }),
+  );
+  await assert.rejects(
+    () =>
+      loadProfileContext({
+        profilesDir,
+        skillsDir,
+        profileId: "bad-wake-policy" as ProfileId,
+      }),
+    (error) =>
+      error instanceof ProfileLoadError &&
+      error.code === "invalid_profile_config" &&
+      /channelDefaults\.wakePolicy/.test(error.message),
   );
 
   console.log(

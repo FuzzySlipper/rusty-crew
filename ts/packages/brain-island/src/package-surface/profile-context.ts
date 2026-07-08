@@ -3,6 +3,8 @@ export {
   loadProfileConfigWithSource,
   loadProfileContext,
   loadSkill,
+  profilePromptAssetConfigPaths,
+  profileRuntimeGraphWireFieldPaths,
   ProfileLoadError,
 } from "../profile-loading.js";
 export type {

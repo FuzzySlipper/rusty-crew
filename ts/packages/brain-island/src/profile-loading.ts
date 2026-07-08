@@ -166,6 +166,47 @@ export interface ProfileConfig {
   channelDefaults?: ProfileChannelDefaultsConfig;
 }
 
+export const profileRuntimeGraphWireFieldPaths = [
+  "profiles[].background_review",
+  "profiles[].background_review.enabled",
+  "profiles[].background_review.review_type",
+  "profiles[].background_review.schedule",
+  "profiles[].brain",
+  "profiles[].brain.module",
+  "profiles[].brain.strategy",
+  "profiles[].channel_defaults",
+  "profiles[].channel_defaults.wake_policy",
+  "profiles[].mcp_config",
+  "profiles[].mcp_config.binding_id",
+  "profiles[].mcp_config.endpoint_ref",
+  "profiles[].mcp_config.server_names",
+  "profiles[].mcp_config.tool_profile",
+  "profiles[].mcp_config.transport",
+  "profiles[].profile_id",
+  "profiles[].runtime",
+  "profiles[].runtime.default_resource_limits",
+  "profiles[].runtime.default_resource_limits.max_delegation_depth",
+  "profiles[].runtime.default_resource_limits.max_duration_ms",
+  "profiles[].runtime.default_resource_limits.workdir",
+  "profiles[].runtime.max_tokens_per_turn",
+  "profiles[].runtime.max_turn_duration_ms",
+  "profiles[].session_defaults",
+  "profiles[].session_defaults.max_history_messages",
+  "profiles[].session_defaults.owner_id",
+  "profiles[].session_defaults.turn_timeout_ms",
+] as const;
+
+export const profilePromptAssetConfigPaths = [
+  "profiles[].prompt",
+  "profiles[].prompt.system",
+  "profiles[].prompt.instructions",
+  "profiles[].prompt.soul_markdown",
+  "profiles[].prompt.memory_markdown",
+  "profiles[].skills",
+  "profiles[].skills_mode",
+  "profiles[].profile_skills_dir",
+] as const;
+
 export type ProfileConfigSourceFormat = "flat_json" | "directory_yaml";
 
 export interface LoadedProfileConfigSource {
@@ -784,7 +825,11 @@ function validateProfileConfig(
       : undefined,
     channelDefaults: isRecord(parsed.channelDefaults)
       ? {
-          wakePolicy: wakePolicy(parsed.channelDefaults.wakePolicy),
+          wakePolicy: profileWakePolicy(
+            parsed.channelDefaults.wakePolicy,
+            profileId,
+            profilePath,
+          ),
         }
       : undefined,
   };
@@ -979,13 +1024,20 @@ function narratorMemoryDepth(
     : undefined;
 }
 
-function wakePolicy(
+function profileWakePolicy(
   value: unknown,
+  profileId: ProfileId,
+  profilePath: string,
 ): ProfileChannelDefaultsConfig["wakePolicy"] {
+  if (value === undefined) return undefined;
   if (value === "subscription" || value === "manual" || value === "disabled") {
     return value;
   }
-  return undefined;
+  throw invalidProfile(
+    profileId,
+    profilePath,
+    "channelDefaults.wakePolicy must be subscription, manual, or disabled",
+  );
 }
 
 function allDefaultToolsets(): string[] {
