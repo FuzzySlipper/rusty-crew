@@ -11,6 +11,7 @@ postgres = ["rusty-crew-core-persistence/postgres"]
 [dependencies]
 rusty-crew-core-body = { path = "../core-body" }
 rusty-crew-core-bus = { path = "../core-bus" }
+rusty-crew-core-config = { path = "../core-config" }
 rusty-crew-core-persistence = { path = "../core-persistence" }
 rusty-crew-core-protocol = { path = "../core-protocol" }
 rusty-crew-core-session = { path = "../core-session" }

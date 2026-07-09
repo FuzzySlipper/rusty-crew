@@ -5,7 +5,7 @@
 //! render prompts, discover tools, call providers, or mutate runtime state.
 
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ProfileId,
+    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, IsoTimestamp, ProfileId,
     ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
     ProfileRegistryLifecycleStatus, ProfileRegistryRecord, ProfileRegistrySourceAssetRef,
     ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind, TaskId,
@@ -18,6 +18,7 @@ const MAX_HISTORY_MESSAGES: u32 = 10_000;
 const MAX_DURATION_MS: u32 = 30 * 24 * 60 * 60 * 1_000;
 const MAX_DELEGATION_DEPTH: u32 = 64;
 const MAX_TURN_TIMEOUT_MS: u32 = 24 * 60 * 60 * 1_000;
+pub const DEFAULT_POSTGRES_SCHEMA: &str = "rusty_crew";
 const ID_PATTERN_DESCRIPTION: &str =
     "must start with a letter or digit and contain only letters, digits, '.', '_', ':' or '-'";
 const RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND: &str = "runtime.review.memory_skills";
@@ -27,6 +28,53 @@ const CONTEXT_STRATEGY_IDS: &[&str] = &[
     "rolling_summary_compaction",
 ];
 const CONTEXT_DEBUG_VISIBILITY_VALUES: &[&str] = &["off", "status", "verbose"];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClockConfig {
+    System,
+    Fixed { at: IsoTimestamp },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineConfig {
+    pub engine_data_dir: String,
+    pub clock: ClockConfig,
+    pub default_turn_budget: u32,
+    pub default_idle_timeout_ms: u32,
+    pub storage: Option<EngineStorageConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "backend", rename_all = "snake_case")]
+pub enum EngineStorageConfig {
+    Sqlite,
+    Postgres {
+        database_url: String,
+        schema: String,
+        max_connections: Option<u32>,
+        statement_timeout_ms: Option<u32>,
+    },
+}
+
+impl EngineStorageConfig {
+    pub fn postgres_with_defaults(
+        database_url: impl Into<String>,
+        schema: Option<String>,
+        max_connections: Option<u32>,
+        statement_timeout_ms: Option<u32>,
+    ) -> Self {
+        let schema = schema
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_POSTGRES_SCHEMA.to_string());
+        Self::Postgres {
+            database_url: database_url.into(),
+            schema,
+            max_connections,
+            statement_timeout_ms,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeConfigDraft {
@@ -726,6 +774,88 @@ impl RuntimeConfigValidationResult {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error)
+    }
+}
+
+pub fn validate_engine_config(config: &EngineConfig) -> RuntimeConfigValidationResult {
+    let mut diagnostics = Vec::new();
+    if config.engine_data_dir.trim().is_empty() {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "engine_data_dir_required",
+            "engineDataDir",
+            "engineDataDir must not be empty",
+        ));
+    }
+    if let ClockConfig::Fixed { at } = &config.clock {
+        if at.trim().is_empty() {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "fixed_clock_required",
+                "clock.fixed",
+                "fixed clock timestamp must not be empty",
+            ));
+        }
+    }
+    if config.default_turn_budget == 0 {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "default_turn_budget_required",
+            "defaultTurnBudget",
+            "defaultTurnBudget must be greater than zero",
+        ));
+    }
+    if config.default_idle_timeout_ms == 0 {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "default_idle_timeout_required",
+            "defaultIdleTimeoutMs",
+            "defaultIdleTimeoutMs must be greater than zero",
+        ));
+    }
+    if let Some(storage) = &config.storage {
+        validate_engine_storage_config(storage, &mut diagnostics);
+    }
+    RuntimeConfigValidationResult { diagnostics }
+}
+
+fn validate_engine_storage_config(
+    storage: &EngineStorageConfig,
+    diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
+) {
+    match storage {
+        EngineStorageConfig::Sqlite => {}
+        EngineStorageConfig::Postgres {
+            database_url,
+            schema,
+            max_connections,
+            statement_timeout_ms,
+        } => {
+            if database_url.trim().is_empty() {
+                diagnostics.push(RuntimeConfigDiagnostic::error(
+                    "postgres_database_url_required",
+                    "storage.databaseUrl",
+                    "Postgres storage requires a non-empty databaseUrl",
+                ));
+            }
+            if schema.trim().is_empty() {
+                diagnostics.push(RuntimeConfigDiagnostic::error(
+                    "postgres_schema_required",
+                    "storage.schema",
+                    "Postgres storage schema must not be empty",
+                ));
+            }
+            if matches!(max_connections, Some(0)) {
+                diagnostics.push(RuntimeConfigDiagnostic::error(
+                    "postgres_max_connections_invalid",
+                    "storage.maxConnections",
+                    "Postgres maxConnections must be greater than zero when provided",
+                ));
+            }
+            if matches!(statement_timeout_ms, Some(0)) {
+                diagnostics.push(RuntimeConfigDiagnostic::error(
+                    "postgres_statement_timeout_invalid",
+                    "storage.statementTimeoutMs",
+                    "Postgres statementTimeoutMs must be greater than zero when provided",
+                ));
+            }
+        }
     }
 }
 
@@ -3399,6 +3529,66 @@ fn looks_like_cron(schedule: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validates_engine_config_and_defaults_postgres_schema() {
+        let storage = EngineStorageConfig::postgres_with_defaults(
+            "postgres://crew/db",
+            None,
+            Some(4),
+            Some(30_000),
+        );
+        assert_eq!(
+            storage,
+            EngineStorageConfig::Postgres {
+                database_url: "postgres://crew/db".to_string(),
+                schema: DEFAULT_POSTGRES_SCHEMA.to_string(),
+                max_connections: Some(4),
+                statement_timeout_ms: Some(30_000),
+            },
+        );
+
+        let result = validate_engine_config(&EngineConfig {
+            engine_data_dir: "/tmp/rusty-crew".to_string(),
+            clock: ClockConfig::Fixed {
+                at: "2026-07-08T00:00:00Z".to_string(),
+            },
+            default_turn_budget: 3,
+            default_idle_timeout_ms: 1_000,
+            storage: Some(storage),
+        });
+        assert!(result.ok(), "{:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_invalid_engine_config_values() {
+        let result = validate_engine_config(&EngineConfig {
+            engine_data_dir: " ".to_string(),
+            clock: ClockConfig::Fixed { at: String::new() },
+            default_turn_budget: 0,
+            default_idle_timeout_ms: 0,
+            storage: Some(EngineStorageConfig::Postgres {
+                database_url: String::new(),
+                schema: String::new(),
+                max_connections: Some(0),
+                statement_timeout_ms: Some(0),
+            }),
+        });
+
+        assert_codes(
+            &result,
+            &[
+                "engine_data_dir_required",
+                "fixed_clock_required",
+                "default_turn_budget_required",
+                "default_idle_timeout_required",
+                "postgres_database_url_required",
+                "postgres_schema_required",
+                "postgres_max_connections_invalid",
+                "postgres_statement_timeout_invalid",
+            ],
+        );
+    }
 
     #[test]
     fn plans_new_session_archive_create_and_rebind_in_rust() {

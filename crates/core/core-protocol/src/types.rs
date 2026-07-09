@@ -74,34 +74,6 @@ pub type IsoTimestamp = String;
 pub struct Unit;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ClockConfig {
-    System,
-    Fixed { at: IsoTimestamp },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EngineConfig {
-    pub engine_data_dir: String,
-    pub clock: ClockConfig,
-    pub default_turn_budget: u32,
-    pub default_idle_timeout_ms: u32,
-    pub storage: Option<EngineStorageConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "backend", rename_all = "snake_case")]
-pub enum EngineStorageConfig {
-    Sqlite,
-    Postgres {
-        database_url: String,
-        schema: String,
-        max_connections: Option<u32>,
-        statement_timeout_ms: Option<u32>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShutdownRequest {
     pub engine: EngineHandle,
     pub drain_timeout_ms: u32,

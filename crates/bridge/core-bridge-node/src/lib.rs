@@ -301,16 +301,12 @@ fn js_engine_storage_config(config: &JsEngineConfig) -> napi::Result<Option<Engi
                     "postgresDatabaseUrl must not be empty",
                 ));
             }
-            let schema = config
-                .postgres_schema
-                .clone()
-                .unwrap_or_else(|| "rusty_crew".to_string());
-            Ok(Some(EngineStorageConfig::Postgres {
+            Ok(Some(EngineStorageConfig::postgres_with_defaults(
                 database_url,
-                schema,
-                max_connections: config.postgres_max_connections,
-                statement_timeout_ms: config.postgres_statement_timeout_ms,
-            }))
+                config.postgres_schema.clone(),
+                config.postgres_max_connections,
+                config.postgres_statement_timeout_ms,
+            )))
         }
         other => Err(napi::Error::new(
             napi::Status::InvalidArg,

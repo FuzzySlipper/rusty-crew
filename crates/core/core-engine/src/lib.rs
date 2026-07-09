@@ -13,6 +13,7 @@ use rusty_crew_core_body::{
     session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
 };
 use rusty_crew_core_bus::{CoreBus, SequencedEvent};
+use rusty_crew_core_config::{validate_engine_config, ClockConfig, EngineConfig};
 use rusty_crew_core_persistence::{
     AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
     BranchHeadExpectation, ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage,
@@ -56,12 +57,12 @@ use rusty_crew_core_protocol::{
     session_memory_space_descriptor, ActionBatchReceipt, ActionRejection, AgentId, AgentMessage,
     AttachmentId, BodyState, BrainAction, BrainActionBatch, BrainEvent, BrainEventEnvelope,
     BrainImplementationRegistration, BrainProviderStateScope, BrainWakeProviderStateInput,
-    BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, ClockConfig, CompletionStatus,
+    BrainWakeProviderStateOutput, BrainWakeProviderStateUpdate, CompletionStatus,
     ContextCompactionArtifact, ContextCompactionArtifactQuery, CoreError, CoreErrorKind, CoreEvent,
     CoreResult, DataBankScopeId, DelegatedResourceCleanupReport, DelegatedRunStatus,
     DelegatedSessionRuntimeStatus, DelegationLifecycleEvent, DelegationLifecyclePhase,
-    DelegationLineage, DenDataUpdate, EngineConfig, EngineHandle, EventReceipt, EventSubscription,
-    ExternalEvent, FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
+    DelegationLineage, DenDataUpdate, EngineHandle, EventReceipt, EventSubscription, ExternalEvent,
+    FanOutFailurePolicy, IsoTimestamp, MemoryGovernanceDecisionInput,
     MemoryGovernanceDecisionRecord, MemoryProposalEnvelope, MemoryProposalQuery,
     MemoryProposalRecord, MemorySpaceDescriptor, MessageSlotId, MessageVariantId,
     ModelProviderQuery, ModelProviderRecord, ModelProviderRefreshImpact,
@@ -119,6 +120,22 @@ struct FanOutValidationGroup {
 
 impl CoreEngine {
     pub fn initialize(config: EngineConfig) -> CoreResult<Self> {
+        let validation = validate_engine_config(&config);
+        if let Some(diagnostic) = validation.diagnostics.into_iter().next() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "{}{}: {}",
+                    diagnostic.code,
+                    diagnostic
+                        .path
+                        .as_deref()
+                        .map(|path| format!(" at {path}"))
+                        .unwrap_or_default(),
+                    diagnostic.message
+                ),
+            ));
+        }
         let store =
             CoreCoordinationStore::open_storage(&config.engine_data_dir, config.storage.as_ref())?;
         let persisted_sessions = store.load_sessions()?;
@@ -2803,6 +2820,9 @@ fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusty_crew_core_config::ClockConfig;
+    #[cfg(feature = "postgres")]
+    use rusty_crew_core_config::EngineStorageConfig;
     use rusty_crew_core_persistence::{
         ActiveVariantConflict, AgentMessageQuery, AttachmentLinkWrite, AttachmentStatus,
         BranchHeadConflict, ChatAttachmentMutationStatus, ChatConversationSnapshotMutationStatus,
@@ -2813,11 +2833,9 @@ mod tests {
         RuntimeMaintenancePolicy, RuntimeSearchFilter, RuntimeSearchRowType, ScheduledRunQuery,
         ScheduledRunStatus, SessionQuery, ToolCallPhase, WorkerRunQuery,
     };
-    #[cfg(feature = "postgres")]
-    use rusty_crew_core_protocol::EngineStorageConfig;
     use rusty_crew_core_protocol::SessionHistoryWindow;
     use rusty_crew_core_protocol::{
-        AdapterId, AgentId, AgentMessage, AttachmentLinkId, BrainAction, BrainEvent, ClockConfig,
+        AdapterId, AgentId, AgentMessage, AttachmentLinkId, BrainAction, BrainEvent,
         CompletionPacket, CompletionStatus, ConversationBranchId, ConversationSnapshotId,
         CoreErrorKind, CoreEventKind, DelegatedRunStatus, DelegationLifecyclePhase,
         ExternalEventPayload, MessageId, ProfileId, ProjectId, ResourceLimits, SessionKind,

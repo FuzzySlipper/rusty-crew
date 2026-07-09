@@ -13,6 +13,7 @@ pub use buffers::{
     BrainWakeBufferInput, BufferedBrainWakeRequest, RuntimeBufferLease, RuntimeBufferStore,
     APPLICATION_JSON, TEXT_PLAIN,
 };
+pub use rusty_crew_core_config::{ClockConfig, EngineConfig, EngineStorageConfig};
 pub use rusty_crew_core_protocol::*;
 
 pub const MANIFEST_VERSION: u32 = 1;

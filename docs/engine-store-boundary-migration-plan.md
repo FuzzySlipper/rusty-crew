@@ -72,26 +72,16 @@ SQLite-backed fixtures to fake stores.
 
 ## Config Ownership
 
-`ClockConfig`, `EngineConfig`, and `EngineStorageConfig` currently live in
-`core-protocol` because they cross the bridge API. Moving them directly into
-`core-config` would create an awkward dependency direction: `core-config`
-already depends on `core-protocol` for protocol IDs and config payload types,
-while `core-bridge-api` currently re-exports `core-protocol` as the stable
-bridge-facing surface.
+`ClockConfig`, `EngineConfig`, and `EngineStorageConfig` are config-domain
+types owned by `core-config`. `core-bridge-api` re-exports those selected
+config types for the stable bridge-facing surface, while the bridge manifest
+names `core_config::EngineConfig` as the `initialize_engine` input.
 
-The staged path is:
-
-1. Add config-domain equivalents in `core-config` once bridge codegen can export
-   more than `core-protocol`.
-2. Keep wire-compatible protocol aliases or conversion types during the same
-   breaking-change window as the bridge manifest/codegen cleanup.
-3. Move validation and defaults into `core-config`; leave transport-free IDs and
-   event/action payloads in `core-protocol`.
-4. Remove the protocol-owned engine config types after TypeScript and bridge
-   callers consume the config crate surface.
-
-Until then, treating engine config types as protocol-owned is accepted debt, not
-an invitation to add more service config into `core-protocol`.
+`core-protocol` should not regain runtime engine config policy types. It should
+continue to own transport-free IDs, events, actions, and payload records. Engine
+config validation and defaults, including the Postgres default schema, belong in
+`core-config`; bridge and native layers may translate JS/wire inputs but should
+not become the policy owner.
 
 ## Clock Policy
 
@@ -103,4 +93,3 @@ or diagnostics where the value is not part of engine behavior.
 The 2026-07-07 cleanup moved queued follow-up message IDs and scheduler run IDs
 off `SystemTime::now()` and onto the injected engine clock plus atomic sequence
 suffixes.
-
