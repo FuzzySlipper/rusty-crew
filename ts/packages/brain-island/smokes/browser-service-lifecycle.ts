@@ -57,6 +57,45 @@ const launcher: BrowserLauncher = {
 
 const manager = new BrowserSessionManager({ launcher });
 const resources = createServiceBrowserResources({ manager });
+const plannedResources = createServiceBrowserResources({
+  resourcePolicy: {
+    web: {
+      searchDefaultLimit: 3,
+      searchMaxResults: 6,
+      maxExtractUrls: 2,
+      maxExtractChars: 12_000,
+      maxExtractBytes: 64 * 1024,
+      maxRedirects: 2,
+      allowPrivateNet: true,
+      allowedNonstandardPorts: [8080],
+    },
+    browser: {
+      maxServiceSessions: 3,
+      maxSessionsPerAgent: 1,
+      maxSessionsPerProfile: 2,
+      idleTimeoutMs: 5_000,
+      hardLifetimeMs: 60_000,
+      startupTimeoutMs: 2_000,
+      cdpCallTimeoutMs: 3_000,
+      pageLoadTimeoutMs: 4_000,
+      maxRefs: 12,
+      consoleRingSize: 4,
+      maxScreenshotBytes: 256 * 1024,
+      allowPrivateNet: true,
+    },
+    denialReasonCodes: ["private_network", "browser_session_service_limit"],
+  },
+});
+assert.equal(plannedResources.resourcePolicy.web.maxExtractUrls, 2);
+assert.equal(plannedResources.resourcePolicy.browser.pageLoadTimeoutMs, 4_000);
+assert.equal(
+  plannedResources.manager.diagnostics().limits.maxSessionsPerAgent,
+  1,
+);
+assert.equal(
+  plannedResources.manager.diagnostics().limits.maxSessionsPerProfile,
+  2,
+);
 
 await manager.open(openInput("alpha", "agent-a", "profile-a"));
 await manager.open(openInput("beta", "agent-b", "profile-b"));

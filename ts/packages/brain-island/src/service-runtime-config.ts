@@ -731,7 +731,10 @@ export async function applyRustyCrewRuntimeConfig(input: {
     input.runtimeConfig,
   );
   const browserResources =
-    input.browserResources ?? createServiceBrowserResources();
+    input.browserResources ??
+    createServiceBrowserResources({
+      resourcePolicy: await input.bridge.planWebBrowserResourcePolicy({}),
+    });
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
     bridge: input.bridge,
@@ -1001,7 +1004,10 @@ export async function rebuildConfiguredBrainRuntime(input: {
     input.runtimeConfig,
   );
   const browserResources =
-    input.browserResources ?? createServiceBrowserResources();
+    input.browserResources ??
+    createServiceBrowserResources({
+      resourcePolicy: await input.bridge.planWebBrowserResourcePolicy({}),
+    });
   const brain = runtimeConfig.brains.find(
     (candidate) => candidate.profileId === input.profileId,
   );
@@ -1417,10 +1423,32 @@ function createServiceToolResolver(
   const todoStore = createServiceTodoStore(options.serviceConfig);
   return combineResolvers(
     resolveLocalCodeTools,
-    createWebToolResolver({}),
+    createWebToolResolver({
+      searchDefaultLimit:
+        options.browserResources.resourcePolicy.web.searchDefaultLimit,
+      searchMaxResults:
+        options.browserResources.resourcePolicy.web.searchMaxResults,
+      maxExtractUrls:
+        options.browserResources.resourcePolicy.web.maxExtractUrls,
+      maxExtractChars:
+        options.browserResources.resourcePolicy.web.maxExtractChars,
+      maxExtractBytes:
+        options.browserResources.resourcePolicy.web.maxExtractBytes,
+      maxRedirects: options.browserResources.resourcePolicy.web.maxRedirects,
+      allowPrivateNet:
+        options.browserResources.resourcePolicy.web.allowPrivateNet,
+      allowedNonstandardPorts:
+        options.browserResources.resourcePolicy.web.allowedNonstandardPorts,
+    }),
     createBrowserToolResolver({
       manager: options.browserResources.manager,
+      pageLoadTimeoutMs:
+        options.browserResources.resourcePolicy.browser.pageLoadTimeoutMs,
+      allowPrivateNet:
+        options.browserResources.resourcePolicy.browser.allowPrivateNet,
       screenshotStore: options.browserResources.screenshotStore,
+      maxScreenshotBytes:
+        options.browserResources.resourcePolicy.browser.maxScreenshotBytes,
     }),
     createMemoryToolResolver(profile, options),
     options.mcpToolCatalog

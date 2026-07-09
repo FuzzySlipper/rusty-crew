@@ -4,6 +4,7 @@ export declare class NativeBridgeBinding {
   validateToolMetadataPolicyJson(inputJson: string): string
   validateLocalToolProfilePolicyJson(inputJson: string): string
   planToolAvailabilityJson(inputJson: string): string
+  planWebBrowserResourcePolicyJson(inputJson: string): string
   validateRuntimeConfigDraftJson(inputJson: string): string
   planCreateProfileJson(inputJson: string): string
   planProfileRegistryMutationJson(inputJson: string): string

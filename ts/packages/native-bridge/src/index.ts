@@ -320,6 +320,7 @@ interface NativeBridgeBinding {
   validateToolMetadataPolicyJson(inputJson: string): string;
   validateLocalToolProfilePolicyJson(inputJson: string): string;
   planToolAvailabilityJson(inputJson: string): string;
+  planWebBrowserResourcePolicyJson(inputJson: string): string;
   validateRuntimeConfigDraftJson(inputJson: string): string;
   planRuntimeConfigJson(inputJson: string): string;
   planCreateProfileJson(inputJson: string): string;
@@ -1627,6 +1628,45 @@ export interface NativeToolAvailabilityPlan {
   diagnostics: NativeToolAvailabilityOmission[];
 }
 
+export interface NativeWebBrowserResourcePolicyInput {
+  web?: Partial<NativeWebResourcePolicyPlan> & {
+    allowedNonstandardPorts?: number[];
+  };
+  browser?: Partial<NativeBrowserResourcePolicyPlan>;
+}
+
+export interface NativeWebBrowserResourcePolicyPlan {
+  web: NativeWebResourcePolicyPlan;
+  browser: NativeBrowserResourcePolicyPlan;
+  denialReasonCodes: string[];
+}
+
+export interface NativeWebResourcePolicyPlan {
+  searchDefaultLimit: number;
+  searchMaxResults: number;
+  maxExtractUrls: number;
+  maxExtractChars: number;
+  maxExtractBytes: number;
+  maxRedirects: number;
+  allowPrivateNet: boolean;
+  allowedNonstandardPorts: number[];
+}
+
+export interface NativeBrowserResourcePolicyPlan {
+  maxServiceSessions: number;
+  maxSessionsPerAgent: number;
+  maxSessionsPerProfile?: number;
+  idleTimeoutMs: number;
+  hardLifetimeMs: number;
+  startupTimeoutMs: number;
+  cdpCallTimeoutMs: number;
+  pageLoadTimeoutMs: number;
+  maxRefs: number;
+  consoleRingSize: number;
+  maxScreenshotBytes: number;
+  allowPrivateNet: boolean;
+}
+
 export interface NativeRuntimeConfigPlan {
   runtimeConfig: NativeRuntimeConfigDraft;
   diagnostics: NativeRuntimeConfigDiagnostic[];
@@ -2227,6 +2267,9 @@ export interface NativeBridgeModule {
   planToolAvailability(
     input: NativeToolAvailabilityPlanInput,
   ): Promise<NativeToolAvailabilityPlan>;
+  planWebBrowserResourcePolicy(
+    input: NativeWebBrowserResourcePolicyInput,
+  ): Promise<NativeWebBrowserResourcePolicyPlan>;
   validateRuntimeConfigDraft(
     input: NativeRuntimeConfigValidationInput,
   ): Promise<NativeRuntimeConfigValidationResult>;
@@ -2773,6 +2816,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
       "validate_local_tool_profile_policy",
     ),
     planToolAvailability: unavailable("plan_tool_availability"),
+    planWebBrowserResourcePolicy: unavailable(
+      "plan_web_browser_resource_policy",
+    ),
     validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
     planRuntimeConfig: unavailable("plan_runtime_config"),
     planCreateProfile: unavailable("plan_create_profile"),
@@ -3522,6 +3568,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.planToolAvailabilityJson(JSON.stringify(input)),
       ) as NativeToolAvailabilityPlan,
+    planWebBrowserResourcePolicy: async (input) =>
+      JSON.parse(
+        binding.planWebBrowserResourcePolicyJson(JSON.stringify(input)),
+      ) as NativeWebBrowserResourcePolicyPlan,
     validateRuntimeConfigDraft: async (input) =>
       JSON.parse(
         binding.validateRuntimeConfigDraftJson(

@@ -898,7 +898,10 @@ export async function createRustyCrewServiceApp(
       now: options.now,
     });
     const browserResources =
-      options.browserResources ?? createServiceBrowserResources();
+      options.browserResources ??
+      createServiceBrowserResources({
+        resourcePolicy: await bridge.planWebBrowserResourcePolicy({}),
+      });
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,

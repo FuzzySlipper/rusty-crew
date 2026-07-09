@@ -26,10 +26,7 @@ export interface AdminMcpServerRegistryRouteContext {
       servers: RustyCrewMcpServerConfig[];
     };
   };
-  runtimeConfig(): Pick<
-    RustyCrewRuntimeConfig,
-    "mcpServers" | "mcpBindings"
-  >;
+  runtimeConfig(): Pick<RustyCrewRuntimeConfig, "mcpServers" | "mcpBindings">;
   readRuntimeConfigFile(): Promise<RuntimeConfigFileForMcpServerMutation>;
   writeRuntimeConfigFile(value: Record<string, unknown>): Promise<void>;
   applyRuntimeConfigFromDisk(input: {

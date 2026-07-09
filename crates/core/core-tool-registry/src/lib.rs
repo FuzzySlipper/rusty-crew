@@ -330,6 +330,84 @@ pub struct ToolAvailabilityPlan {
     pub diagnostics: Vec<ToolAvailabilityOmission>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebBrowserResourcePolicyInput {
+    #[serde(default)]
+    pub web: WebResourcePolicyOverrides,
+    #[serde(default)]
+    pub browser: BrowserResourcePolicyOverrides,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebResourcePolicyOverrides {
+    pub search_default_limit: Option<u32>,
+    pub search_max_results: Option<u32>,
+    pub max_extract_urls: Option<u32>,
+    pub max_extract_chars: Option<u32>,
+    pub max_extract_bytes: Option<u32>,
+    pub max_redirects: Option<u32>,
+    pub allow_private_net: Option<bool>,
+    #[serde(default)]
+    pub allowed_nonstandard_ports: Vec<u16>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserResourcePolicyOverrides {
+    pub max_service_sessions: Option<u32>,
+    pub max_sessions_per_agent: Option<u32>,
+    pub max_sessions_per_profile: Option<u32>,
+    pub idle_timeout_ms: Option<u32>,
+    pub hard_lifetime_ms: Option<u32>,
+    pub startup_timeout_ms: Option<u32>,
+    pub cdp_call_timeout_ms: Option<u32>,
+    pub page_load_timeout_ms: Option<u32>,
+    pub max_refs: Option<u32>,
+    pub console_ring_size: Option<u32>,
+    pub max_screenshot_bytes: Option<u32>,
+    pub allow_private_net: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebBrowserResourcePolicyPlan {
+    pub web: WebResourcePolicyPlan,
+    pub browser: BrowserResourcePolicyPlan,
+    pub denial_reason_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebResourcePolicyPlan {
+    pub search_default_limit: u32,
+    pub search_max_results: u32,
+    pub max_extract_urls: u32,
+    pub max_extract_chars: u32,
+    pub max_extract_bytes: u32,
+    pub max_redirects: u32,
+    pub allow_private_net: bool,
+    pub allowed_nonstandard_ports: Vec<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserResourcePolicyPlan {
+    pub max_service_sessions: u32,
+    pub max_sessions_per_agent: u32,
+    pub max_sessions_per_profile: Option<u32>,
+    pub idle_timeout_ms: u32,
+    pub hard_lifetime_ms: u32,
+    pub startup_timeout_ms: u32,
+    pub cdp_call_timeout_ms: u32,
+    pub page_load_timeout_ms: u32,
+    pub max_refs: u32,
+    pub console_ring_size: u32,
+    pub max_screenshot_bytes: u32,
+    pub allow_private_net: bool,
+}
+
 pub fn plan_tool_availability(input: &ToolAvailabilityPlanInput) -> ToolAvailabilityPlan {
     let mut selected_tools = Vec::new();
     let mut omitted_tools = Vec::new();
@@ -345,6 +423,106 @@ pub fn plan_tool_availability(input: &ToolAvailabilityPlanInput) -> ToolAvailabi
         diagnostics: omitted_tools.clone(),
         omitted_tools,
     }
+}
+
+pub fn plan_web_browser_resource_policy(
+    input: &WebBrowserResourcePolicyInput,
+) -> WebBrowserResourcePolicyPlan {
+    let mut allowed_nonstandard_ports = input.web.allowed_nonstandard_ports.clone();
+    allowed_nonstandard_ports.sort_unstable();
+    allowed_nonstandard_ports.dedup();
+
+    let web_search_max_results = clamp_u32(input.web.search_max_results, 1, 10, 10);
+    WebBrowserResourcePolicyPlan {
+        web: WebResourcePolicyPlan {
+            search_default_limit: clamp_u32(
+                input.web.search_default_limit,
+                1,
+                web_search_max_results,
+                5,
+            ),
+            search_max_results: web_search_max_results,
+            max_extract_urls: clamp_u32(input.web.max_extract_urls, 1, 5, 5),
+            max_extract_chars: clamp_u32(input.web.max_extract_chars, 1, 24_000, 24_000),
+            max_extract_bytes: clamp_u32(
+                input.web.max_extract_bytes,
+                1_024,
+                512 * 1_024,
+                512 * 1_024,
+            ),
+            max_redirects: clamp_u32(input.web.max_redirects, 0, 5, 5),
+            allow_private_net: input.web.allow_private_net.unwrap_or(false),
+            allowed_nonstandard_ports,
+        },
+        browser: BrowserResourcePolicyPlan {
+            max_service_sessions: clamp_u32(input.browser.max_service_sessions, 1, 64, 8),
+            max_sessions_per_agent: clamp_u32(input.browser.max_sessions_per_agent, 1, 16, 2),
+            max_sessions_per_profile: input
+                .browser
+                .max_sessions_per_profile
+                .map(|value| clamp_value(value, 1, 64)),
+            idle_timeout_ms: clamp_u32(
+                input.browser.idle_timeout_ms,
+                1_000,
+                24 * 60 * 60 * 1_000,
+                10 * 60 * 1_000,
+            ),
+            hard_lifetime_ms: clamp_u32(
+                input.browser.hard_lifetime_ms,
+                1_000,
+                24 * 60 * 60 * 1_000,
+                60 * 60 * 1_000,
+            ),
+            startup_timeout_ms: clamp_u32(input.browser.startup_timeout_ms, 1_000, 120_000, 15_000),
+            cdp_call_timeout_ms: clamp_u32(
+                input.browser.cdp_call_timeout_ms,
+                1_000,
+                120_000,
+                15_000,
+            ),
+            page_load_timeout_ms: clamp_u32(
+                input.browser.page_load_timeout_ms,
+                1_000,
+                120_000,
+                8_000,
+            ),
+            max_refs: clamp_u32(input.browser.max_refs, 1, 500, 80),
+            console_ring_size: clamp_u32(input.browser.console_ring_size, 0, 1_000, 100),
+            max_screenshot_bytes: clamp_u32(
+                input.browser.max_screenshot_bytes,
+                1_024,
+                16 * 1_024 * 1_024,
+                2 * 1_024 * 1_024,
+            ),
+            allow_private_net: input.browser.allow_private_net.unwrap_or(false),
+        },
+        denial_reason_codes: vec![
+            "invalid_url".to_string(),
+            "unsupported_scheme".to_string(),
+            "credentialed_url".to_string(),
+            "nonstandard_port".to_string(),
+            "private_network".to_string(),
+            "dns_resolution_failed".to_string(),
+            "too_many_redirects".to_string(),
+            "http_error".to_string(),
+            "unsupported_content_type".to_string(),
+            "fetch_failed".to_string(),
+            "browser_session_service_limit".to_string(),
+            "browser_session_agent_limit".to_string(),
+            "browser_session_profile_limit".to_string(),
+            "browser_session_not_ready".to_string(),
+            "browser_screenshot_too_large".to_string(),
+            "browser_screenshot_store_unavailable".to_string(),
+        ],
+    }
+}
+
+fn clamp_u32(value: Option<u32>, min: u32, max: u32, default: u32) -> u32 {
+    clamp_value(value.unwrap_or(default), min, max)
+}
+
+fn clamp_value(value: u32, min: u32, max: u32) -> u32 {
+    value.max(min).min(max)
 }
 
 fn external_memory_tool_omission(
@@ -1923,6 +2101,89 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["memory_store", "memory_propose"]
         );
+    }
+
+    #[test]
+    fn plans_default_web_browser_resource_policy() {
+        let plan = plan_web_browser_resource_policy(&WebBrowserResourcePolicyInput {
+            web: WebResourcePolicyOverrides::default(),
+            browser: BrowserResourcePolicyOverrides::default(),
+        });
+
+        assert_eq!(plan.web.search_default_limit, 5);
+        assert_eq!(plan.web.search_max_results, 10);
+        assert_eq!(plan.web.max_extract_urls, 5);
+        assert_eq!(plan.web.max_extract_chars, 24_000);
+        assert_eq!(plan.web.max_extract_bytes, 512 * 1_024);
+        assert_eq!(plan.web.max_redirects, 5);
+        assert!(!plan.web.allow_private_net);
+        assert_eq!(plan.browser.max_service_sessions, 8);
+        assert_eq!(plan.browser.max_sessions_per_agent, 2);
+        assert_eq!(plan.browser.idle_timeout_ms, 10 * 60 * 1_000);
+        assert_eq!(plan.browser.hard_lifetime_ms, 60 * 60 * 1_000);
+        assert_eq!(plan.browser.startup_timeout_ms, 15_000);
+        assert_eq!(plan.browser.cdp_call_timeout_ms, 15_000);
+        assert_eq!(plan.browser.page_load_timeout_ms, 8_000);
+        assert_eq!(plan.browser.max_refs, 80);
+        assert_eq!(plan.browser.console_ring_size, 100);
+        assert_eq!(plan.browser.max_screenshot_bytes, 2 * 1_024 * 1_024);
+        assert!(plan
+            .denial_reason_codes
+            .contains(&"private_network".to_string()));
+        assert!(plan
+            .denial_reason_codes
+            .contains(&"browser_session_service_limit".to_string()));
+    }
+
+    #[test]
+    fn clamps_and_deduplicates_web_browser_resource_policy() {
+        let plan = plan_web_browser_resource_policy(&WebBrowserResourcePolicyInput {
+            web: WebResourcePolicyOverrides {
+                search_default_limit: Some(500),
+                search_max_results: Some(2),
+                max_extract_urls: Some(0),
+                max_extract_chars: Some(100_000),
+                max_extract_bytes: Some(1),
+                max_redirects: Some(100),
+                allow_private_net: Some(true),
+                allowed_nonstandard_ports: vec![8080, 3000, 8080],
+            },
+            browser: BrowserResourcePolicyOverrides {
+                max_service_sessions: Some(0),
+                max_sessions_per_agent: Some(100),
+                max_sessions_per_profile: Some(0),
+                idle_timeout_ms: Some(1),
+                hard_lifetime_ms: Some(100_000_000),
+                startup_timeout_ms: Some(500),
+                cdp_call_timeout_ms: Some(500_000),
+                page_load_timeout_ms: Some(500),
+                max_refs: Some(5_000),
+                console_ring_size: Some(5_000),
+                max_screenshot_bytes: Some(1),
+                allow_private_net: Some(true),
+            },
+        });
+
+        assert_eq!(plan.web.search_max_results, 2);
+        assert_eq!(plan.web.search_default_limit, 2);
+        assert_eq!(plan.web.max_extract_urls, 1);
+        assert_eq!(plan.web.max_extract_chars, 24_000);
+        assert_eq!(plan.web.max_extract_bytes, 1_024);
+        assert_eq!(plan.web.max_redirects, 5);
+        assert!(plan.web.allow_private_net);
+        assert_eq!(plan.web.allowed_nonstandard_ports, vec![3000, 8080]);
+        assert_eq!(plan.browser.max_service_sessions, 1);
+        assert_eq!(plan.browser.max_sessions_per_agent, 16);
+        assert_eq!(plan.browser.max_sessions_per_profile, Some(1));
+        assert_eq!(plan.browser.idle_timeout_ms, 1_000);
+        assert_eq!(plan.browser.hard_lifetime_ms, 24 * 60 * 60 * 1_000);
+        assert_eq!(plan.browser.startup_timeout_ms, 1_000);
+        assert_eq!(plan.browser.cdp_call_timeout_ms, 120_000);
+        assert_eq!(plan.browser.page_load_timeout_ms, 1_000);
+        assert_eq!(plan.browser.max_refs, 500);
+        assert_eq!(plan.browser.console_ring_size, 1_000);
+        assert_eq!(plan.browser.max_screenshot_bytes, 1_024);
+        assert!(plan.browser.allow_private_net);
     }
 
     fn tool(name: &str, category: ToolCategory, output_shape: &str) -> ToolMetadata {
