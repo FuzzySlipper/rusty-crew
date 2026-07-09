@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type {
   AdapterId,
   BrainEvent,
-  BrainImplementationId,
   BrainModelConfig,
   AgentId,
   AgentInstanceId,
@@ -149,16 +148,25 @@ import {
   planServiceRuntimeConfigDraft as planServiceRuntimeConfigDraftFromModule,
   readRuntimeConfigFileForMutation as readRuntimeConfigFileForMutationFromModule,
   readServiceProfileConfig as readServiceProfileConfigFromModule,
-  runtimeEntryString as runtimeEntryStringFromModule,
   unregisterServiceProfileBrain as unregisterServiceProfileBrainFromModule,
   writeJsonFileAtomic as writeJsonFileAtomicFromModule,
-  assertRuntimeConfigDraftPlanOk,
   planRuntimeConfigFileValue,
   type DecommissionedServiceProfile,
-  type RuntimeConfigDraftPlan,
-  type RuntimeConfigFileForMutation,
   type ServiceProfileAdminMutationContext,
 } from "./service-profile-admin-mutations.js";
+import {
+  applyServiceRuntimeRebuild as applyServiceRuntimeRebuildFromModule,
+  commitRuntimeSessionReplacementInConfig as commitRuntimeSessionReplacementInConfigFromModule,
+  planRuntimeSessionReplacementInConfig as planRuntimeSessionReplacementInConfigFromModule,
+  planServiceRuntimeRebuild as planServiceRuntimeRebuildFromModule,
+  replaceRuntimeSessionInConfig as replaceRuntimeSessionInConfigFromModule,
+  runtimeRebuildAffectedIds,
+  type ServiceRuntimeRebuildApplyResult,
+  type ServiceRuntimeRebuildMcpRefreshResult,
+  type ServiceRuntimeRebuildPlan,
+  type ServiceRuntimeReplacementConfigPlan,
+  type ServiceRuntimeReplacementSessionResult,
+} from "./service-runtime-rebuild.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
 import {
@@ -563,6 +571,82 @@ function profileAdminMutationContext(
         state.suppressedWakeEvents.delete(sessionId as SessionId);
       }
     },
+  };
+}
+
+function runtimeRebuildContext(state: ServiceState) {
+  return {
+    bridge: state.bridge,
+    get runtimeConfig() {
+      return state.runtimeConfig;
+    },
+    get runtimeConfigApplyResult() {
+      return state.runtimeConfigApplyResult;
+    },
+    inFlightWakes: state.inFlightWakes,
+    now: state.now,
+    nextReplacementSessionId: (
+      session: Pick<SessionState, "agentId" | "sessionId">,
+    ) => {
+      state.nextWakeSequence += 1;
+      return [
+        session.agentId,
+        "session",
+        state
+          .now()
+          .replace(/[^0-9A-Za-z]/g, "")
+          .slice(0, 17),
+        state.nextWakeSequence,
+      ].join("-");
+    },
+    readRuntimeConfigFile: () =>
+      readRuntimeConfigFileForMutationFromModule(
+        profileAdminMutationContext(state),
+      ),
+    validateRuntimeConfigFile: (value: unknown) =>
+      planRuntimeConfigFileValue(
+        profileAdminMutationContext(state),
+        isRecord(value) ? value : {},
+      ),
+    writeRuntimeConfigFile: (value: unknown) =>
+      writeJsonFileAtomicFromModule(
+        state.config.paths.serviceConfigFile,
+        value,
+      ),
+    serviceSessionById: (sessionId: string) =>
+      serviceSessionById(state, sessionId),
+    archiveSession: (sessionId: SessionId) =>
+      archiveServiceSession(state, sessionId),
+    applyRuntimeConfigFromDisk: (options: {
+      createMissingSessions: boolean;
+      eventType: string;
+      summaryPrefix: string;
+    }) => applyServiceRuntimeConfigFromDisk(state, options),
+    rebuildBrainRuntime: (profileId: ProfileId) =>
+      rebuildConfiguredBrainRuntime({
+        serviceConfig: state.config,
+        runtimeConfig: state.runtimeConfig,
+        profileId,
+        bridge: state.bridge,
+        curatorExecutor: state.curator.executor,
+        mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
+        coordinationRuntime: createServiceCoordinationRuntime(() => state),
+        toolCallDebugStore: state.toolCallDebugStore,
+        providerRequestDebugStore: state.providerRequestDebugStore,
+        browserResources: state.browserResources,
+        onBrainWakeResult: (observation) =>
+          recordResponsesWakeMetrics(state, observation),
+      }),
+    refreshMcpBindingsAfterRuntimeRebuild: (
+      bindingIds: readonly string[],
+      command: AdminControlCommand,
+    ) => refreshMcpBindingsAfterRuntimeRebuild(state, bindingIds, command),
+    recordEvent: (event: {
+      source: string;
+      eventType: string;
+      summary: string;
+      severity?: "info" | "warning" | "error";
+    }) => recordServiceEvent(state, event),
   };
 }
 
@@ -3871,565 +3955,24 @@ async function refreshMcpBindingsAfterRuntimeRebuild(
   };
 }
 
-interface ServiceRuntimeRebuildMcpRefreshResult {
-  action: "refresh_after_rebuild";
-  bindingIds: string[];
-  refreshedBindingIds: string[];
-  degradedBindingIds: string[];
-  missingBindingIds: string[];
-  results: Array<{
-    bindingId: string;
-    sessionId?: string;
-    status: "refreshed" | "degraded" | "missing";
-    reasonCode?: string;
-    summary: string;
-  }>;
-}
-
-interface ServiceRuntimeRebuildPlan {
-  scope: "session" | "profile";
-  profileId: string;
-  sessionIds: string[];
-  applySupported: true;
-  requiredAction: "brain_hot_swap_required";
-  preservesSessionId: boolean;
-  preservesHistory: boolean;
-  replacementSession?: {
-    mode: "derive_from_prior_session";
-    explicitApplyRequired: true;
-    oldSessionId: string;
-    requestedNewSessionId?: string;
-  };
-  configReload: {
-    implicit: false;
-    requiredBeforeApply: boolean;
-  };
-  providerState: {
-    action: "discard" | "migrate" | "unsupported";
-    reason: string;
-    migrationId?: string;
-    clearedSessions?: number;
-  };
-  queuedMessages: {
-    action:
-      | "preserve_existing_queue_without_redelivery"
-      | "start_replacement_session_with_empty_queue";
-    ttlPolicy: "unchanged";
-  };
-  channelBindings: {
-    action: "unchanged" | "move_to_replacement_session";
-    bindingIds: string[];
-  };
-  mcp: {
-    action: "refresh_after_rebuild";
-    bindingIds: string[];
-    refreshedBindingIds?: string[];
-    degradedBindingIds?: string[];
-    missingBindingIds?: string[];
-    results?: ServiceRuntimeRebuildMcpRefreshResult["results"];
-  };
-  diagnostics: {
-    brainModule?: string;
-    profileConfigured: boolean;
-    sessionsConfigured: number;
-    sessionsActive: number;
-  };
-}
-
-interface ServiceRuntimeRebuildApplyResult extends ServiceRuntimeRebuildPlan {
-  profileRegistry?: ServiceRuntimeReplacementSessionResult["profileRegistry"];
-  apply:
-    | {
-        status: "completed";
-        handle: BrainImplementationHandle;
-        implementationId: BrainImplementationId;
-        audited: true;
-        replacementSession?: ServiceRuntimeReplacementSessionResult;
-      }
-    | {
-        status: "blocked";
-        reasonCode:
-          | "runtime_rebuild_in_flight"
-          | "provider_state_rebuild_unsupported"
-          | "provider_state_migration_not_implemented";
-        blockedSessionIds: string[];
-      };
-}
-
-interface ServiceRuntimeReplacementSessionResult {
-  oldSessionId: string;
-  newSessionId: string;
-  profileRegistry: {
-    action: "update_session_refs" | "record_missing" | "unchanged";
-    updatedProfileId?: string;
-    updatedRefIds: string[];
-  };
-  channelBindings: {
-    action: "unchanged" | "move_to_replacement_session";
-    bindingIds: string[];
-  };
-  mcpBindings: {
-    action: "move_to_replacement_session";
-    bindingIds: string[];
-  };
-  scheduledJobs: {
-    action: "move_to_replacement_session";
-    jobIds: string[];
-  };
-  queuedMessages: {
-    action: "start_replacement_session_with_empty_queue";
-    oldSessionQueuePreserved: true;
-    expiredQueuedMessagesCopied: false;
-  };
-}
-
-interface ServiceRuntimeReplacementConfigPlan {
-  oldSessionId: string;
-  newSessionId: string;
-  runtimeConfigFile: RuntimeConfigFileForMutation;
-  validation: RuntimeConfigDraftPlan;
-  channelBindings: ServiceRuntimeReplacementSessionResult["channelBindings"];
-  mcpBindings: ServiceRuntimeReplacementSessionResult["mcpBindings"];
-  scheduledJobs: ServiceRuntimeReplacementSessionResult["scheduledJobs"];
-}
-
 async function planServiceRuntimeRebuild(
   state: ServiceState,
   command: AdminControlCommand,
 ): Promise<ServiceRuntimeRebuildPlan> {
-  const scope = command.target.scope;
-  if (scope !== "session" && scope !== "profile") {
-    throw new Error("runtime rebuild target scope must be session or profile");
-  }
-
-  const activeSessions = await state.bridge.listSessions();
-  const configuredSessions = state.runtimeConfig.sessions;
-  const replaceSessionIdentity = runtimeRebuildReplacesSessionIdentity(command);
-  const configuredProfileIds = new Set(
-    state.runtimeConfig.brains.map((brain) => String(brain.profileId)),
+  return planServiceRuntimeRebuildFromModule(
+    runtimeRebuildContext(state),
+    command,
   );
-
-  let profileId: string;
-  let sessionIds: string[];
-  if (scope === "session") {
-    const sessionId = command.target.sessionId;
-    if (!sessionId) throw new Error("runtime rebuild session id is required");
-    const activeSession = activeSessions.find(
-      (session) => session.sessionId === sessionId,
-    );
-    const configuredSession = configuredSessions.find(
-      (session) => session.sessionId === sessionId,
-    );
-    profileId = activeSession?.profileId ?? configuredSession?.profileId ?? "";
-    if (!profileId) throw new Error(`session ${sessionId} was not found`);
-    sessionIds = [sessionId];
-  } else {
-    if (replaceSessionIdentity) {
-      throw new Error(
-        "replacement session rebuild is only supported for a single session target",
-      );
-    }
-    profileId = command.target.profileId ?? "";
-    if (!profileId) throw new Error("runtime rebuild profile id is required");
-    if (!configuredProfileIds.has(profileId)) {
-      throw new Error(`profile ${profileId} is not configured for a brain`);
-    }
-    sessionIds = [
-      ...new Set(
-        [
-          ...activeSessions
-            .filter((session) => session.profileId === profileId)
-            .map((session) => session.sessionId),
-          ...configuredSessions
-            .filter((session) => session.profileId === profileId)
-            .map((session) => session.sessionId),
-        ].filter(Boolean),
-      ),
-    ];
-  }
-
-  const channelBindingIds = state.runtimeConfig.channelBindings
-    .filter(
-      (binding) =>
-        binding.sessionId !== undefined &&
-        sessionIds.includes(binding.sessionId),
-    )
-    .map((binding) => binding.bindingId);
-  const mcpBindingIds = state.runtimeConfig.mcpBindings
-    .filter(
-      (binding) =>
-        binding.sessionId !== undefined &&
-        sessionIds.includes(binding.sessionId),
-    )
-    .map((binding) => binding.bindingId);
-  const brainModule =
-    state.runtimeConfigApplyResult.brainModulesByProfileId[profileId]?.moduleId;
-  const brainDiagnostics =
-    state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[profileId];
-  const providerStateRebuild = brainDiagnostics?.providerStateRebuild ?? {
-    action: "unsupported" as const,
-    reason:
-      "brain module did not declare provider-state rebuild handling; fail closed",
-  };
-
-  return {
-    scope,
-    profileId,
-    sessionIds,
-    applySupported: true,
-    requiredAction: "brain_hot_swap_required",
-    preservesSessionId: !replaceSessionIdentity,
-    preservesHistory: !replaceSessionIdentity,
-    ...(replaceSessionIdentity
-      ? {
-          replacementSession: {
-            mode: "derive_from_prior_session",
-            explicitApplyRequired: true,
-            oldSessionId: sessionIds[0] ?? "",
-            requestedNewSessionId: optionalBodyString(command, "newSessionId"),
-          },
-        }
-      : {}),
-    configReload: {
-      implicit: false,
-      requiredBeforeApply: false,
-    },
-    providerState: {
-      action: providerStateRebuild.action,
-      reason: providerStateRebuild.reason,
-      ...(providerStateRebuild.migrationId === undefined
-        ? {}
-        : { migrationId: providerStateRebuild.migrationId }),
-    },
-    queuedMessages: {
-      action: replaceSessionIdentity
-        ? "start_replacement_session_with_empty_queue"
-        : "preserve_existing_queue_without_redelivery",
-      ttlPolicy: "unchanged",
-    },
-    channelBindings: {
-      action:
-        replaceSessionIdentity &&
-        replacementChannelBindingAction(command) === "move"
-          ? "move_to_replacement_session"
-          : "unchanged",
-      bindingIds: channelBindingIds,
-    },
-    mcp: {
-      action: "refresh_after_rebuild",
-      bindingIds: mcpBindingIds,
-    },
-    diagnostics: {
-      brainModule,
-      profileConfigured: configuredProfileIds.has(profileId),
-      sessionsConfigured: configuredSessions.filter(
-        (session) => session.profileId === profileId,
-      ).length,
-      sessionsActive: activeSessions.filter(
-        (session) => session.profileId === profileId,
-      ).length,
-    },
-  };
 }
 
 async function applyServiceRuntimeRebuild(
   state: ServiceState,
   command: AdminControlCommand,
 ): Promise<ServiceRuntimeRebuildApplyResult> {
-  const plan = await planServiceRuntimeRebuild(state, command);
-  const activeProfileSessionIds = (await state.bridge.listSessions())
-    .filter((session) => session.profileId === plan.profileId)
-    .map((session) => session.sessionId);
-  const blockedSessionIds = activeProfileSessionIds.filter((sessionId) =>
-    state.inFlightWakes.has(sessionId),
-  );
-  if (plan.providerState.action === "unsupported") {
-    recordServiceEvent(state, {
-      source: "service-host",
-      eventType: "runtime_rebuild_blocked",
-      severity: "warning",
-      summary: `Runtime rebuild for profile ${plan.profileId} blocked because provider-state handling is unsupported: ${plan.providerState.reason}.`,
-    });
-    return {
-      ...plan,
-      apply: {
-        status: "blocked",
-        reasonCode: "provider_state_rebuild_unsupported",
-        blockedSessionIds: [],
-      },
-    };
-  }
-  if (plan.providerState.action === "migrate") {
-    recordServiceEvent(state, {
-      source: "service-host",
-      eventType: "runtime_rebuild_blocked",
-      severity: "warning",
-      summary: `Runtime rebuild for profile ${plan.profileId} blocked because provider-state migration is not implemented: ${plan.providerState.reason}.`,
-    });
-    return {
-      ...plan,
-      apply: {
-        status: "blocked",
-        reasonCode: "provider_state_migration_not_implemented",
-        blockedSessionIds: [],
-      },
-    };
-  }
-  if (blockedSessionIds.length > 0) {
-    recordServiceEvent(state, {
-      source: "service-host",
-      eventType: "runtime_rebuild_blocked",
-      severity: "warning",
-      summary: `Runtime rebuild for profile ${plan.profileId} blocked by in-flight wake(s): ${blockedSessionIds.join(", ")}.`,
-    });
-    return {
-      ...plan,
-      apply: {
-        status: "blocked",
-        reasonCode: "runtime_rebuild_in_flight",
-        blockedSessionIds,
-      },
-    };
-  }
-
-  if (runtimeRebuildReplacesSessionIdentity(command)) {
-    return applyServiceRuntimeRebuildWithReplacementSession(
-      state,
-      command,
-      plan,
-    );
-  }
-
-  const previousBrain =
-    state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId];
-  let clearedSessions = 0;
-  const providerStateMode =
-    state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[plan.profileId]
-      ?.providerStateMode;
-  if (
-    previousBrain !== undefined &&
-    plan.providerState.action === "discard" &&
-    providerStateMode !== undefined &&
-    providerStateMode !== "unused"
-  ) {
-    for (const sessionId of plan.sessionIds) {
-      await state.bridge.clearBrainProviderState({
-        brain: previousBrain,
-        sessionId: sessionId as SessionId,
-        wakeId: `runtime-rebuild-${Date.now()}-${sessionId}`,
-      });
-      clearedSessions += 1;
-    }
-  }
-
-  const rebuild = await rebuildConfiguredBrainRuntime({
-    serviceConfig: state.config,
-    runtimeConfig: state.runtimeConfig,
-    profileId: plan.profileId as ProfileId,
-    bridge: state.bridge,
-    curatorExecutor: state.curator.executor,
-    mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
-    coordinationRuntime: createServiceCoordinationRuntime(() => state),
-    toolCallDebugStore: state.toolCallDebugStore,
-    providerRequestDebugStore: state.providerRequestDebugStore,
-    browserResources: state.browserResources,
-    onBrainWakeResult: (observation) =>
-      recordResponsesWakeMetrics(state, observation),
-  });
-  state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId] =
-    rebuild.handle;
-  state.runtimeConfigApplyResult.brainModulesByProfileId[plan.profileId] =
-    rebuild.module;
-  state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[plan.profileId] =
-    rebuild.diagnostics;
-  recordServiceEvent(state, {
-    source: "service-host",
-    eventType: "runtime_rebuild_applied",
-    summary: `Runtime rebuild applied for profile ${plan.profileId} with brain handle ${rebuild.handle}.`,
-  });
-  const mcpRefresh = await refreshMcpBindingsAfterRuntimeRebuild(
-    state,
-    plan.mcp.bindingIds,
+  return applyServiceRuntimeRebuildFromModule(
+    runtimeRebuildContext(state),
     command,
   );
-
-  return {
-    ...plan,
-    providerState: {
-      ...plan.providerState,
-      clearedSessions,
-    },
-    mcp: mcpRefresh,
-    apply: {
-      status: "completed",
-      handle: rebuild.handle,
-      implementationId: rebuild.implementationId,
-      audited: true,
-    },
-  };
-}
-
-async function applyServiceRuntimeRebuildWithReplacementSession(
-  state: ServiceState,
-  command: AdminControlCommand,
-  plan: ServiceRuntimeRebuildPlan,
-): Promise<ServiceRuntimeRebuildApplyResult> {
-  if (plan.scope !== "session") {
-    throw new Error(
-      "replacement session rebuild requires a session-scoped target",
-    );
-  }
-  const oldSessionId = plan.sessionIds[0];
-  if (!oldSessionId)
-    throw new Error("replacement session rebuild requires a session id");
-  const oldSession = await serviceSessionById(state, oldSessionId);
-  if (oldSession.status === "archived") {
-    throw new Error(`session ${oldSessionId} is already archived`);
-  }
-  const newSessionId =
-    optionalBodyString(command, "newSessionId") ??
-    replacementRuntimeSessionId(state, oldSession);
-  if (newSessionId === oldSessionId) {
-    throw new Error(
-      "replacement session id must differ from the old session id",
-    );
-  }
-  const existingSession = (await state.bridge.listSessions()).find(
-    (session) => session.sessionId === newSessionId,
-  );
-  if (existingSession !== undefined) {
-    throw new Error(`replacement session ${newSessionId} already exists`);
-  }
-
-  const previousBrain =
-    state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId];
-  const providerStateMode =
-    state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[plan.profileId]
-      ?.providerStateMode;
-  let clearedSessions = 0;
-  if (
-    previousBrain !== undefined &&
-    plan.providerState.action === "discard" &&
-    providerStateMode !== undefined &&
-    providerStateMode !== "unused"
-  ) {
-    await state.bridge.clearBrainProviderState({
-      brain: previousBrain,
-      sessionId: oldSessionId as SessionId,
-      wakeId: `runtime-rebuild-replace-${Date.now()}-${oldSessionId}`,
-    });
-    clearedSessions = 1;
-  }
-
-  const replacement = await replaceRuntimeSessionInConfig(
-    state,
-    oldSession,
-    newSessionId,
-    replacementChannelBindingAction(command),
-  );
-  await archiveServiceSession(state, oldSessionId as SessionId);
-  await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: true,
-    eventType: "runtime_rebuild_replacement_session_created",
-    summaryPrefix: `Runtime rebuild replaced session ${oldSessionId}`,
-  });
-  const rebuild = await rebuildConfiguredBrainRuntime({
-    serviceConfig: state.config,
-    runtimeConfig: state.runtimeConfig,
-    profileId: plan.profileId as ProfileId,
-    bridge: state.bridge,
-    curatorExecutor: state.curator.executor,
-    mcpSurfaceDiagnostics: state.mcpManager.diagnostics(),
-    coordinationRuntime: createServiceCoordinationRuntime(() => state),
-    toolCallDebugStore: state.toolCallDebugStore,
-    providerRequestDebugStore: state.providerRequestDebugStore,
-    browserResources: state.browserResources,
-    onBrainWakeResult: (observation) =>
-      recordResponsesWakeMetrics(state, observation),
-  });
-  state.runtimeConfigApplyResult.brainHandlesByProfileId[plan.profileId] =
-    rebuild.handle;
-  state.runtimeConfigApplyResult.brainModulesByProfileId[plan.profileId] =
-    rebuild.module;
-  state.runtimeConfigApplyResult.brainDiagnosticsByProfileId[plan.profileId] =
-    rebuild.diagnostics;
-  recordServiceEvent(state, {
-    source: "service-host",
-    eventType: "runtime_rebuild_replacement_session_applied",
-    summary: `Runtime rebuild archived ${oldSessionId} and created replacement session ${newSessionId}.`,
-  });
-  const mcpRefresh = await refreshMcpBindingsAfterRuntimeRebuild(
-    state,
-    replacement.mcpBindings.bindingIds,
-    command,
-  );
-
-  return {
-    ...plan,
-    sessionIds: [newSessionId],
-    providerState: {
-      ...plan.providerState,
-      clearedSessions,
-    },
-    queuedMessages: {
-      action: "start_replacement_session_with_empty_queue",
-      ttlPolicy: "unchanged",
-    },
-    channelBindings: replacement.channelBindings,
-    profileRegistry: replacement.profileRegistry,
-    mcp: mcpRefresh,
-    apply: {
-      status: "completed",
-      handle: rebuild.handle,
-      implementationId: rebuild.implementationId,
-      audited: true,
-      replacementSession: {
-        ...replacement,
-        queuedMessages: {
-          action: "start_replacement_session_with_empty_queue",
-          oldSessionQueuePreserved: true,
-          expiredQueuedMessagesCopied: false,
-        },
-      },
-    },
-    diagnostics: plan.diagnostics,
-  };
-}
-
-function runtimeRebuildReplacesSessionIdentity(
-  command: AdminControlCommand,
-): boolean {
-  const mode =
-    optionalBodyString(command, "sessionIdentity") ??
-    optionalBodyString(command, "sessionIdentityMode");
-  if (mode === undefined || mode === "preserve") return false;
-  if (mode === "replace") return true;
-  throw new Error("sessionIdentity must be preserve or replace");
-}
-
-function replacementChannelBindingAction(
-  command: AdminControlCommand,
-): "move" | "unchanged" {
-  const action =
-    optionalBodyString(command, "channelBindingAction") ?? "unchanged";
-  if (action === "move" || action === "unchanged") return action;
-  throw new Error("channelBindingAction must be move or unchanged");
-}
-
-function replacementRuntimeSessionId(
-  state: ServiceState,
-  session: Pick<SessionState, "agentId" | "sessionId">,
-): string {
-  state.nextWakeSequence += 1;
-  return [
-    session.agentId,
-    "session",
-    state
-      .now()
-      .replace(/[^0-9A-Za-z]/g, "")
-      .slice(0, 17),
-    state.nextWakeSequence,
-  ].join("-");
 }
 
 async function replaceRuntimeSessionInConfig(
@@ -4438,13 +3981,12 @@ async function replaceRuntimeSessionInConfig(
   newSessionId: string,
   channelBindingAction: "move" | "unchanged",
 ): Promise<ServiceRuntimeReplacementSessionResult> {
-  const plan = await planRuntimeSessionReplacementInConfig(
-    state,
+  return replaceRuntimeSessionInConfigFromModule(
+    runtimeRebuildContext(state),
     oldSession,
     newSessionId,
     channelBindingAction,
   );
-  return commitRuntimeSessionReplacementInConfig(state, oldSession, plan);
 }
 
 async function planRuntimeSessionReplacementInConfig(
@@ -4453,86 +3995,12 @@ async function planRuntimeSessionReplacementInConfig(
   newSessionId: string,
   channelBindingAction: "move" | "unchanged",
 ): Promise<ServiceRuntimeReplacementConfigPlan> {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(newSessionId)) {
-    throw new Error("replacement session id contains unsupported characters");
-  }
-  const runtimeConfigFile = await readRuntimeConfigFileForMutationFromModule(
-    profileAdminMutationContext(state),
-  );
-  const sessions = runtimeConfigFile.array("sessions");
-  const sessionEntry = sessions.find(
-    (entry): entry is Record<string, unknown> =>
-      isRecord(entry) &&
-      runtimeEntryStringFromModule(entry, "sessionId", "session_id") ===
-        oldSession.sessionId,
-  );
-  if (sessionEntry === undefined) {
-    sessions.push(runtimeConfigSessionEntryFromState(oldSession, newSessionId));
-  } else {
-    sessionEntry.sessionId = newSessionId;
-    delete sessionEntry.session_id;
-  }
-
-  const channelBindingIds =
-    channelBindingAction === "move"
-      ? replaceRuntimeConfigSessionRefs(
-          runtimeConfigFile.array("channelBindings"),
-          oldSession.sessionId,
-          newSessionId,
-          "sessionId",
-          "session_id",
-          "bindingId",
-          "binding_id",
-        )
-      : state.runtimeConfig.channelBindings
-          .filter((binding) => binding.sessionId === oldSession.sessionId)
-          .map((binding) => binding.bindingId);
-  const mcpBindingIds = replaceRuntimeConfigSessionRefs(
-    runtimeConfigFile.array("mcpBindings"),
-    oldSession.sessionId,
+  return planRuntimeSessionReplacementInConfigFromModule(
+    runtimeRebuildContext(state),
+    oldSession,
     newSessionId,
-    "sessionId",
-    "session_id",
-    "bindingId",
-    "binding_id",
+    channelBindingAction,
   );
-  const scheduledJobIds = replaceRuntimeConfigSessionRefs(
-    runtimeConfigFile.array("scheduledJobs"),
-    oldSession.sessionId,
-    newSessionId,
-    "targetSessionId",
-    "target_session_id",
-    "id",
-    "id",
-  );
-
-  const validation = await planRuntimeConfigFileValue(
-    profileAdminMutationContext(state),
-    runtimeConfigFile.value,
-  );
-  assertRuntimeConfigDraftPlanOk(validation);
-
-  return {
-    oldSessionId: oldSession.sessionId,
-    newSessionId,
-    runtimeConfigFile,
-    validation,
-    channelBindings: {
-      action:
-        channelBindingAction === "move"
-          ? "move_to_replacement_session"
-          : "unchanged",
-      bindingIds: channelBindingIds,
-    },
-    mcpBindings: {
-      action: "move_to_replacement_session",
-      bindingIds: mcpBindingIds,
-    },
-    scheduledJobs: {
-      action: "move_to_replacement_session",
-      jobIds: scheduledJobIds,
-    },
-  };
 }
 
 async function commitRuntimeSessionReplacementInConfig(
@@ -4540,153 +4008,11 @@ async function commitRuntimeSessionReplacementInConfig(
   oldSession: SessionState,
   plan: ServiceRuntimeReplacementConfigPlan,
 ): Promise<ServiceRuntimeReplacementSessionResult> {
-  await writeJsonFileAtomicFromModule(
-    state.config.paths.serviceConfigFile,
-    plan.runtimeConfigFile.value,
-  );
-  const profileRegistry = await replaceProfileRegistrySessionRefs(
-    state,
+  return commitRuntimeSessionReplacementInConfigFromModule(
+    runtimeRebuildContext(state),
     oldSession,
-    plan.newSessionId,
+    plan,
   );
-  return {
-    oldSessionId: oldSession.sessionId,
-    newSessionId: plan.newSessionId,
-    profileRegistry,
-    channelBindings: plan.channelBindings,
-    mcpBindings: plan.mcpBindings,
-    scheduledJobs: plan.scheduledJobs,
-    queuedMessages: {
-      action: "start_replacement_session_with_empty_queue",
-      oldSessionQueuePreserved: true,
-      expiredQueuedMessagesCopied: false,
-    },
-  };
-}
-
-async function replaceProfileRegistrySessionRefs(
-  state: ServiceState,
-  oldSession: SessionState,
-  newSessionId: string,
-): Promise<ServiceRuntimeReplacementSessionResult["profileRegistry"]> {
-  const record = await state.bridge.getProfileRegistryRecord(
-    oldSession.profileId,
-  );
-  if (record === undefined) {
-    return { action: "record_missing", updatedRefIds: [] };
-  }
-
-  const now = state.now();
-  const updatedRefIds: string[] = [];
-  const derivedRuntimeRefs = record.derivedRuntimeRefs.map((ref) => {
-    if (ref.refKind !== "session" || ref.refId !== oldSession.sessionId) {
-      return ref;
-    }
-    updatedRefIds.push(ref.refId);
-    return {
-      ...ref,
-      refId: newSessionId,
-      updatedAt: now,
-      metadataJson: replaceRuntimeRefSessionMetadata(
-        ref.metadataJson,
-        newSessionId,
-      ),
-    };
-  });
-
-  if (updatedRefIds.length === 0) {
-    return {
-      action: "unchanged",
-      updatedProfileId: record.profileId,
-      updatedRefIds: [],
-    };
-  }
-
-  await state.bridge.updateProfileRegistryRecord({
-    write: profileRegistryRecordToWrite(
-      {
-        ...record,
-        derivedRuntimeRefs,
-        updatedAt: now,
-      },
-      now,
-    ),
-    expectedRevision: record.revision,
-  });
-
-  return {
-    action: "update_session_refs",
-    updatedProfileId: record.profileId,
-    updatedRefIds,
-  };
-}
-
-function replaceRuntimeRefSessionMetadata(
-  metadata: unknown,
-  newSessionId: string,
-): unknown {
-  if (!isRecord(metadata)) return metadata;
-  const next = { ...metadata };
-  if (next.session_id !== undefined) next.session_id = newSessionId;
-  if (next.sessionId !== undefined) next.sessionId = newSessionId;
-  return next;
-}
-
-function runtimeConfigSessionEntryFromState(
-  session: SessionState,
-  newSessionId: string,
-): Record<string, unknown> {
-  return compactRecord({
-    sessionId: newSessionId,
-    agentId: session.agentId,
-    profileId: session.profileId,
-    kind: session.kind,
-    resourceLimits: compactRecord({
-      workdir: session.resourceLimits.workdir,
-      maxDurationMs: session.resourceLimits.maxDurationMs,
-      maxDelegationDepth: session.resourceLimits.maxDelegationDepth,
-    }),
-    maxHistoryMessages: session.historyWindow?.maxMessages,
-  });
-}
-
-function replaceRuntimeConfigSessionRefs(
-  entries: unknown[],
-  oldSessionId: string,
-  newSessionId: string,
-  sessionCamelKey: string,
-  sessionSnakeKey: string,
-  idCamelKey: string,
-  idSnakeKey: string,
-): string[] {
-  const changedIds: string[] = [];
-  for (const entry of entries) {
-    if (!isRecord(entry)) continue;
-    if (
-      runtimeEntryStringFromModule(entry, sessionCamelKey, sessionSnakeKey) !==
-      oldSessionId
-    ) {
-      continue;
-    }
-    entry[sessionCamelKey] = newSessionId;
-    if (sessionSnakeKey !== sessionCamelKey) delete entry[sessionSnakeKey];
-    const id = runtimeEntryStringFromModule(entry, idCamelKey, idSnakeKey);
-    if (id !== undefined) changedIds.push(id);
-  }
-  return changedIds;
-}
-
-function runtimeRebuildAffectedIds(
-  plan: ServiceRuntimeRebuildPlan,
-): Record<string, string | number> {
-  const affected: Record<string, string | number> = {
-    profileId: plan.profileId,
-    sessionCount: plan.sessionIds.length,
-  };
-  if (plan.sessionIds.length === 1) {
-    affected.sessionId = plan.sessionIds[0] ?? "";
-  }
-  return affected;
 }
 
 async function collectTableCounts(
