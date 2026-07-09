@@ -107,9 +107,7 @@ import {
   type AdminRouteResult,
 } from "./admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
-import {
-  handleAdminMcpCatalogRequest,
-} from "./service-mcp-catalog-routes.js";
+import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
 import {
   handleAdminMcpServerRegistryRequest,
   mcpServerWriteFromBody,
@@ -145,6 +143,12 @@ import {
   isProfileRegistryWriteRoute,
   type ProfileRegistryWriteRoute,
 } from "./service-profile-registry-routes.js";
+import {
+  applyProfileRegistryRuntimeConfigEffects as applyProfileRegistryRuntimeConfigEffectsFromModule,
+  planProfileRegistryRuntimeConfigWrite as planProfileRegistryRuntimeConfigWriteFromModule,
+  planProfileRegistryWrite as planProfileRegistryWriteFromModule,
+  type ProfileRegistryRuntimeConfigPlan as ExtractedProfileRegistryRuntimeConfigPlan,
+} from "./service-profile-runtime-mutations.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
 import {
@@ -489,6 +493,20 @@ function roleplayRouteContext(state: ServiceState): RoleplayRouteContext {
       listChatEventsAfterCursor(state, session, afterCursor, limit),
     generateRoleplayAssistantAlternative: (input) =>
       generateRoleplayAssistantAlternativeViaWake(state, input),
+  };
+}
+
+function profileRuntimeMutationContext(state: ServiceState) {
+  return {
+    bridge: state.bridge,
+    runtimeConfig: state.runtimeConfig,
+    serviceConfigFile: state.config.paths.serviceConfigFile,
+    now: state.now,
+    applyRuntimeConfigFromDisk: (options: {
+      createMissingSessions: boolean;
+      eventType: string;
+      summaryPrefix: string;
+    }) => applyServiceRuntimeConfigFromDisk(state, options),
   };
 }
 
@@ -1084,9 +1102,17 @@ async function handleHttpRequest(
       },
       {
         planRegistryWrite: (route, bodyValue) =>
-          planProfileRegistryWrite(state, route, bodyValue),
+          planProfileRegistryWriteFromModule(
+            profileRuntimeMutationContext(state),
+            route,
+            bodyValue,
+          ),
         planRuntimeConfigWrite: (route, bodyValue) =>
-          planProfileRegistryRuntimeConfigWrite(state, route, bodyValue),
+          planProfileRegistryRuntimeConfigWriteFromModule(
+            profileRuntimeMutationContext(state),
+            route,
+            bodyValue,
+          ),
         updateProfileRegistryRecord: (input) =>
           state.bridge.updateProfileRegistryRecord(input),
         applyLifecycleEffects: (record) =>
@@ -1095,10 +1121,10 @@ async function handleHttpRequest(
           ),
         applyRuntimeConfigEffects: (record, plan) =>
           withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
-            applyProfileRegistryRuntimeConfigEffects(
-              state,
+            applyProfileRegistryRuntimeConfigEffectsFromModule(
+              profileRuntimeMutationContext(state),
               record,
-              plan as ProfileRegistryRuntimeConfigPlan,
+              plan as ExtractedProfileRegistryRuntimeConfigPlan,
             ),
           ),
       },
@@ -1142,178 +1168,6 @@ async function handleHttpRequest(
   });
 }
 
-type ProfileRegistryWritePlan = NativeProfileRegistryMutationPlan;
-
-interface ProfileRegistryRuntimeConfigPlan {
-  ok: boolean;
-  profileId: string;
-  mode: "plan" | "apply";
-  expectedRevision: number;
-  current: NativeProfileRegistryRecord;
-  next: NativeProfileRegistryRecord;
-  nextWrite: NativeProfileRegistryWrite;
-  runtimeConfig: EditableProfileRuntimeConfig;
-  diagnostics: ProfileRegistryWritePlan["diagnostics"];
-  implications: {
-    registryRevisionWillIncrement: true;
-    profileFileWillChange: boolean;
-    serviceConfigWillChange: boolean;
-    configReloadRequired: true;
-    runtimeRebuildRecommended: boolean;
-    mcpRefreshRecommended: boolean;
-  };
-}
-
-interface EditableProfileRuntimeConfig {
-  providerAlias: string;
-  brain?: { module?: string; strategy?: string };
-  localToolProfileId?: string;
-  toolPolicy?: {
-    requestedToolsets?: string[];
-    requestedTools?: string[];
-    deniedTools?: string[];
-    includeDeprecated?: boolean;
-  };
-  contextPolicy: ContextStrategyPolicy;
-  mcpBindings: Array<{
-    serverId: string;
-    bindingId?: string;
-    adapterId?: string;
-    serverNames?: string[];
-    transport?: string;
-    toolProfileKey?: string;
-  }>;
-}
-
-async function planProfileRegistryWrite(
-  state: ServiceState,
-  route: ProfileRegistryWriteRoute,
-  body: unknown,
-): Promise<ProfileRegistryWritePlan> {
-  if (!isRecord(body)) {
-    throw new Error("profile registry write body must be an object");
-  }
-  const current = await state.bridge.getProfileRegistryRecord(route.profileId);
-  if (current === undefined) {
-    throw new Error(
-      `profile registry record ${route.profileId} was not found; create or import a DB-backed profile before registry mutation`,
-    );
-  }
-  if (route.kind === "runtime-config") {
-    throw new Error("runtime-config writes use the runtime-config planner");
-  }
-  return state.bridge.planProfileRegistryMutation({
-    profileId: route.profileId,
-    kind: route.kind,
-    mode: route.mode,
-    current,
-    bodyJson: body,
-    now: state.now(),
-  });
-}
-
-async function planProfileRegistryRuntimeConfigWrite(
-  state: ServiceState,
-  route: ProfileRegistryWriteRoute,
-  body: unknown,
-): Promise<ProfileRegistryRuntimeConfigPlan> {
-  if (!isRecord(body)) {
-    throw new Error("profile registry runtime-config body must be an object");
-  }
-  const current = await state.bridge.getProfileRegistryRecord(route.profileId);
-  if (current === undefined) {
-    throw new Error(
-      `profile registry record ${route.profileId} was not found; create or import a DB-backed profile before registry mutation`,
-    );
-  }
-  const expectedRevision = requiredRevision(body);
-  const diagnostics: ProfileRegistryRuntimeConfigPlan["diagnostics"] = [];
-  if (expectedRevision !== current.revision) {
-    diagnostics.push({
-      severity: "error",
-      code: "profile_registry_revision_mismatch",
-      path: "expectedRevision",
-      message: `expected revision ${expectedRevision}, found ${current.revision}`,
-    });
-  }
-
-  const existing = await editableRuntimeConfigForProfile(state, current);
-  const runtimeConfig = await editableRuntimeConfigFromBody(
-    state,
-    current,
-    existing,
-    body,
-    diagnostics,
-  );
-  const next = nextProfileRegistryRuntimeConfigRecord(
-    current,
-    runtimeConfig,
-    state.now(),
-  );
-  const nextWrite = profileRegistryRecordToWrite(next, state.now());
-  return {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
-    profileId: route.profileId,
-    mode: route.mode,
-    expectedRevision,
-    current,
-    next,
-    nextWrite,
-    runtimeConfig,
-    diagnostics,
-    implications: {
-      registryRevisionWillIncrement: true,
-      profileFileWillChange:
-        JSON.stringify(existing.profileFileRuntimeConfig) !==
-        JSON.stringify(profileFileRuntimeConfig(runtimeConfig)),
-      serviceConfigWillChange:
-        JSON.stringify(existing.mcpBindings) !==
-        JSON.stringify(runtimeConfig.mcpBindings),
-      configReloadRequired: true,
-      runtimeRebuildRecommended:
-        existing.runtimeConfig.providerAlias !== runtimeConfig.providerAlias ||
-        JSON.stringify(existing.runtimeConfig.brain ?? {}) !==
-          JSON.stringify(runtimeConfig.brain ?? {}) ||
-        JSON.stringify(existing.runtimeConfig.contextPolicy) !==
-          JSON.stringify(runtimeConfig.contextPolicy),
-      mcpRefreshRecommended:
-        JSON.stringify(existing.mcpBindings) !==
-        JSON.stringify(runtimeConfig.mcpBindings),
-    },
-  };
-}
-
-function nextProfileRegistryRuntimeConfigRecord(
-  current: NativeProfileRegistryRecord,
-  runtimeConfig: EditableProfileRuntimeConfig,
-  now: string,
-): NativeProfileRegistryRecord {
-  return {
-    ...current,
-    activeRuntimeSettingsJson: profileRuntimeSettingsJson(runtimeConfig),
-    derivedRuntimeRefs: [
-      ...current.derivedRuntimeRefs.filter(
-        (ref) => ref.refKind !== "mcp_binding",
-      ),
-      ...runtimeConfig.mcpBindings.map((binding) => ({
-        refKind: "mcp_binding",
-        refId:
-          binding.bindingId ??
-          `${current.agentId ?? current.profileId}-mcp-${binding.serverId}`,
-        status: "planned",
-        updatedAt: now,
-        metadataJson: {
-          server_id: binding.serverId,
-          server_names: binding.serverNames ?? [binding.serverId],
-          endpoint_ref: `config://mcp/${binding.serverId}`,
-          tool_profile_key: binding.toolProfileKey ?? current.profileId,
-        },
-      })),
-    ],
-    updatedAt: now,
-  };
-}
-
 function profileRegistryRecordToWrite(
   record: NativeProfileRegistryRecord,
   now: string,
@@ -1336,323 +1190,16 @@ function profileRegistryRecordToWrite(
   };
 }
 
-async function editableRuntimeConfigForProfile(
-  state: ServiceState,
-  record: NativeProfileRegistryRecord,
-): Promise<{
-  runtimeConfig: EditableProfileRuntimeConfig;
-  profileFileRuntimeConfig: ReturnType<typeof profileFileRuntimeConfig>;
-  mcpBindings: EditableProfileRuntimeConfig["mcpBindings"];
-}> {
-  const profile = await loadProfileConfig(
-    state.runtimeConfig.profilesDir,
-    record.profileId as ProfileId,
-  ).catch(() => undefined);
-  const settings = optionalRecord(record.activeRuntimeSettingsJson) ?? {};
-  const providerAlias =
-    optionalString(settings.providerAlias) ??
-    optionalString(settings.provider_alias) ??
-    profile?.providerAlias ??
-    "default";
-  const mcpBindings = state.runtimeConfig.mcpBindings
-    .filter((binding) => String(binding.profileId) === record.profileId)
-    .map(editableMcpBindingFromRuntime);
-  const runtimeConfig: EditableProfileRuntimeConfig = {
-    providerAlias,
-    brain:
-      profile?.brain ??
-      brainMetadataFromUnknown(settings.brain) ??
-      defaultProfileBrainForModelProvider(
-        (await state.bridge.getModelProvider(providerAlias)) ??
-          ({
-            providerKind: "local",
-            protocol: "chat_completions",
-          } as NativeModelProviderRecord),
-      ),
-    localToolProfileId:
-      profile?.localToolProfileId ??
-      optionalString(settings.localToolProfileId) ??
-      optionalString(settings.local_tool_profile_id),
-    toolPolicy:
-      editableToolPolicy(profile?.toolPolicy) ??
-      profileToolPolicyFromUnknown(settings.toolPolicy ?? settings.tool_policy),
-    contextPolicy:
-      profile?.contextPolicy ??
-      contextStrategyPolicyFromUnknown(
-        settings.contextPolicy ?? settings.context_policy,
-      ),
-    mcpBindings,
-  };
-  return {
-    runtimeConfig,
-    profileFileRuntimeConfig: profileFileRuntimeConfig(runtimeConfig),
-    mcpBindings,
-  };
-}
-
-async function editableRuntimeConfigFromBody(
-  state: ServiceState,
-  record: NativeProfileRegistryRecord,
-  existing: Awaited<ReturnType<typeof editableRuntimeConfigForProfile>>,
-  body: Record<string, unknown>,
-  diagnostics: ProfileRegistryRuntimeConfigPlan["diagnostics"],
-): Promise<EditableProfileRuntimeConfig> {
-  const providerAlias = Object.hasOwn(body, "providerAlias")
-    ? requiredString(body.providerAlias, "providerAlias")
-    : existing.runtimeConfig.providerAlias;
-  const modelProvider = await state.bridge.getModelProvider(providerAlias);
-  if (modelProvider === undefined) {
-    diagnostics.push({
-      severity: "error",
-      code: "model_provider_not_found",
-      path: "providerAlias",
-      message: `model provider alias ${providerAlias} was not found`,
-    });
-  } else if (modelProvider.status !== "active") {
-    diagnostics.push({
-      severity: "error",
-      code: "model_provider_not_active",
-      path: "providerAlias",
-      message: `model provider alias ${providerAlias} is ${modelProvider.status}; active provider required`,
-    });
-  }
-
-  const brain = Object.hasOwn(body, "brain")
-    ? profileBrainFromBody(body.brain)
-    : Object.hasOwn(body, "providerAlias") && modelProvider !== undefined
-      ? defaultProfileBrainForModelProvider(modelProvider)
-      : existing.runtimeConfig.brain;
-
-  const localToolProfileId = Object.hasOwn(body, "localToolProfileId")
-    ? optionalString(body.localToolProfileId)
-    : existing.runtimeConfig.localToolProfileId;
-  let toolPolicy = Object.hasOwn(body, "toolPolicy")
-    ? (profileToolPolicyFromUnknown(body.toolPolicy) ?? {})
-    : existing.runtimeConfig.toolPolicy;
-  if (localToolProfileId !== undefined) {
-    try {
-      const localToolProfile = await createLocalToolProfileStore({
-        bridge: state.bridge,
-        now: state.now,
-      }).resolve(localToolProfileId);
-      toolPolicy = localToolProfile.toolPolicy;
-    } catch (error) {
-      diagnostics.push({
-        severity: "error",
-        code:
-          error instanceof LocalToolProfileError
-            ? error.reasonCode
-            : "local_tool_profile_invalid",
-        path: "localToolProfileId",
-        message: errorMessage(
-          error,
-          `local tool profile ${localToolProfileId} is invalid`,
-        ),
-      });
-    }
-  } else {
-    validateInlineToolPolicy(toolPolicy, diagnostics);
-  }
-
-  const mcpBindings = Object.hasOwn(body, "mcpBindings")
-    ? editableMcpBindingsFromBody(body.mcpBindings)
-    : existing.runtimeConfig.mcpBindings;
-  const contextPolicy = Object.hasOwn(body, "contextPolicy")
-    ? contextStrategyPolicyFromPatch(
-        body.contextPolicy,
-        existing.runtimeConfig.contextPolicy,
-      )
-    : {
-        policy: existing.runtimeConfig.contextPolicy,
-        diagnostics: [],
-      };
-  diagnostics.push(...contextPolicy.diagnostics);
-
-  return {
-    providerAlias,
-    brain,
-    localToolProfileId,
-    toolPolicy,
-    contextPolicy: contextPolicy.policy,
-    mcpBindings: mcpBindings.map((binding, index) =>
-      normalizedEditableMcpBinding(record, binding, index),
-    ),
-  };
-}
-
-function profileRuntimeSettingsJson(
-  runtimeConfig: EditableProfileRuntimeConfig,
-): Record<string, unknown> {
-  return compactRecord({
-    provider_alias: runtimeConfig.providerAlias,
-    providerAlias: runtimeConfig.providerAlias,
-    brain: runtimeConfig.brain,
-    skills_mode: "all",
-    localToolProfileId: runtimeConfig.localToolProfileId,
-    toolPolicy: runtimeConfig.toolPolicy,
-    contextPolicy: runtimeConfig.contextPolicy,
-    mcp_bindings: runtimeConfig.mcpBindings.map((binding) => ({
-      server_id: binding.serverId,
-      binding_id: binding.bindingId,
-      adapter_id: binding.adapterId,
-      server_names: binding.serverNames ?? [binding.serverId],
-      transport: binding.transport ?? "streamable_http",
-      tool_profile_key: binding.toolProfileKey,
-      endpoint_ref: `config://mcp/${binding.serverId}`,
-    })),
-    mcpBindings: runtimeConfig.mcpBindings,
-    profile: profileFileRuntimeConfig(runtimeConfig),
-  });
-}
-
-function profileFileRuntimeConfig(
-  runtimeConfig: EditableProfileRuntimeConfig,
-): Record<string, unknown> {
-  return compactRecord({
-    providerAlias: runtimeConfig.providerAlias,
-    brain: runtimeConfig.brain,
-    localToolProfileId: runtimeConfig.localToolProfileId,
-    toolPolicy: runtimeConfig.toolPolicy,
-    contextPolicy: runtimeConfig.contextPolicy,
-  });
-}
-
-function applyEditableRuntimeConfigToProfileJson(
-  profileConfig: Record<string, unknown>,
-  runtimeConfig: EditableProfileRuntimeConfig,
-): void {
-  profileConfig.providerAlias = runtimeConfig.providerAlias;
-  delete profileConfig.modelConfig;
-  if (runtimeConfig.brain === undefined) {
-    delete profileConfig.brain;
-  } else {
-    profileConfig.brain = runtimeConfig.brain;
-  }
-  if (runtimeConfig.localToolProfileId === undefined) {
-    delete profileConfig.localToolProfileId;
-  } else {
-    profileConfig.localToolProfileId = runtimeConfig.localToolProfileId;
-  }
-  if (runtimeConfig.toolPolicy === undefined) {
-    delete profileConfig.toolPolicy;
-  } else {
-    profileConfig.toolPolicy = runtimeConfig.toolPolicy;
-  }
-  profileConfig.contextPolicy = runtimeConfig.contextPolicy;
-}
-
-async function readProfileConfigJsonForMutation(
-  profilePath: string,
-  profileId: string,
-): Promise<Record<string, unknown>> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(await readFile(profilePath, "utf8"));
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      parsed = { profileId };
-    } else {
-      throw error;
-    }
-  }
-  if (!isRecord(parsed)) {
-    throw new Error(`profile ${profileId} config root must be an object`);
-  }
-  parsed.profileId = profileId;
-  return parsed;
-}
-
-function runtimeMcpBindingsForProfile(
-  state: ServiceState,
-  record: NativeProfileRegistryRecord,
-  runtimeConfig: EditableProfileRuntimeConfig,
-): Record<string, unknown>[] {
-  const session = state.runtimeConfig.sessions.find(
-    (candidate) => String(candidate.profileId) === record.profileId,
-  );
-  const agentId = String(
-    record.agentId ?? session?.agentId ?? record.profileId,
-  );
-  return runtimeConfig.mcpBindings.map((binding, index) => ({
-    bindingId: binding.bindingId ?? `${agentId}-mcp-${index + 1}`,
-    adapterId: binding.adapterId ?? "mcp-ts-main",
-    agentId,
-    sessionId: String(session?.sessionId ?? `${record.profileId}-session`),
-    profileId: record.profileId,
-    serverNames: binding.serverNames ?? [binding.serverId],
-    endpointRef: `config://mcp/${binding.serverId}`,
-    transport: binding.transport ?? "streamable_http",
-    toolProfileKey: binding.toolProfileKey ?? record.profileId,
-    status: "active",
-    diagnostics: {},
-  }));
-}
-
-function editableMcpBindingFromRuntime(
-  binding: McpBindingRecord,
-): EditableProfileRuntimeConfig["mcpBindings"][number] {
-  return {
-    serverId:
-      serverIdFromEndpointRef(binding.endpointRef) ??
-      binding.serverNames[0] ??
-      binding.bindingId,
-    bindingId: binding.bindingId,
-    adapterId: String(binding.adapterId),
-    serverNames: binding.serverNames,
-    transport: binding.transport,
-    toolProfileKey: binding.toolProfileKey,
-  };
-}
-
-function editableMcpBindingsFromBody(
-  value: unknown,
-): EditableProfileRuntimeConfig["mcpBindings"] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) {
-    throw new Error("mcpBindings must be an array when provided");
-  }
-  return value.map((item, index) => {
-    if (!isRecord(item)) {
-      throw new Error(`mcpBindings[${index}] must be an object`);
-    }
-    const serverId = optionalString(item.serverId);
-    if (serverId === undefined) {
-      throw new Error(`mcpBindings[${index}].serverId is required`);
-    }
-    return {
-      serverId,
-      bindingId: optionalString(item.bindingId),
-      adapterId: optionalString(item.adapterId),
-      serverNames:
-        item.serverNames === undefined
-          ? undefined
-          : stringArray(item.serverNames, `mcpBindings[${index}].serverNames`),
-      transport: optionalString(item.transport),
-      toolProfileKey:
-        optionalString(item.toolProfileKey) ?? optionalString(item.toolProfile),
-    };
-  });
-}
-
-function normalizedEditableMcpBinding(
-  record: NativeProfileRegistryRecord,
-  binding: EditableProfileRuntimeConfig["mcpBindings"][number],
-  index: number,
-): EditableProfileRuntimeConfig["mcpBindings"][number] {
-  const agentId = String(record.agentId ?? record.profileId);
-  return {
-    ...binding,
-    bindingId: binding.bindingId ?? `${agentId}-mcp-${index + 1}`,
-    adapterId: binding.adapterId ?? "mcp-ts-main",
-    serverNames: binding.serverNames ?? [binding.serverId],
-    transport: binding.transport ?? "streamable_http",
-    toolProfileKey: binding.toolProfileKey ?? record.profileId,
-  };
-}
+type ProfileRuntimeToolPolicy = {
+  requestedToolsets?: string[];
+  requestedTools?: string[];
+  deniedTools?: string[];
+  includeDeprecated?: boolean;
+};
 
 function profileToolPolicyFromUnknown(
   value: unknown,
-): EditableProfileRuntimeConfig["toolPolicy"] | undefined {
+): ProfileRuntimeToolPolicy | undefined {
   const policy = optionalRecord(value);
   if (policy === undefined) return undefined;
   return {
@@ -1675,77 +1222,17 @@ function profileToolPolicyFromUnknown(
   };
 }
 
-function editableToolPolicy(
-  policy: ProfileConfig["toolPolicy"],
-): EditableProfileRuntimeConfig["toolPolicy"] | undefined {
-  if (policy === undefined) return undefined;
-  return {
-    requestedToolsets:
-      policy.requestedToolsets === undefined
-        ? undefined
-        : [...policy.requestedToolsets],
-    requestedTools:
-      policy.requestedTools === undefined
-        ? undefined
-        : [...policy.requestedTools],
-    deniedTools:
-      policy.deniedTools === undefined ? undefined : [...policy.deniedTools],
-    includeDeprecated: policy.includeDeprecated,
-  };
-}
-
-function validateInlineToolPolicy(
-  policy: EditableProfileRuntimeConfig["toolPolicy"],
-  diagnostics: ProfileRegistryRuntimeConfigPlan["diagnostics"],
-): void {
-  const catalog = buildBuiltInToolCatalog();
-  const validToolsets = new Set(catalog.toolsets.map((toolset) => toolset.id));
-  const validTools = new Set(catalog.tools.map((tool) => tool.name));
-  for (const toolset of policy?.requestedToolsets ?? []) {
-    if (toolset.startsWith("mcp:")) {
-      diagnostics.push({
-        severity: "error",
-        code: "inline_tool_policy_rejects_mcp_toolset",
-        path: "toolPolicy.requestedToolsets",
-        message: `inline tool policy cannot reference dynamic MCP toolset ${toolset}`,
-      });
-    } else if (!validToolsets.has(toolset)) {
-      diagnostics.push({
-        severity: "error",
-        code: "inline_tool_policy_unknown_toolset",
-        path: "toolPolicy.requestedToolsets",
-        message: `inline tool policy references unknown built-in toolset ${toolset}`,
-      });
-    }
-  }
-  for (const tool of policy?.requestedTools ?? []) {
-    if (!validTools.has(tool)) {
-      diagnostics.push({
-        severity: "error",
-        code: "inline_tool_policy_unknown_tool",
-        path: "toolPolicy.requestedTools",
-        message: `inline tool policy references unknown built-in tool ${tool}`,
-      });
-    }
-  }
-}
+type ProfileRuntimeBrainMetadata = { module?: string; strategy?: string };
 
 function brainMetadataFromUnknown(
   value: unknown,
-): EditableProfileRuntimeConfig["brain"] | undefined {
+): ProfileRuntimeBrainMetadata | undefined {
   const brain = optionalRecord(value);
   if (brain === undefined) return undefined;
   return compactRecord({
     module: optionalString(brain.module),
     strategy: optionalString(brain.strategy),
-  }) as EditableProfileRuntimeConfig["brain"];
-}
-
-function serverIdFromEndpointRef(
-  value: string | undefined,
-): string | undefined {
-  const prefix = "config://mcp/";
-  return value?.startsWith(prefix) ? value.slice(prefix.length) : undefined;
+  }) as ProfileRuntimeBrainMetadata;
 }
 
 async function applyProfileRegistryLifecycleEffects(
@@ -1782,73 +1269,6 @@ async function applyProfileRegistryLifecycleEffects(
     record.profileId,
   );
   return { sessionsArchived, brainHandle };
-}
-
-async function applyProfileRegistryRuntimeConfigEffects(
-  state: ServiceState,
-  record: NativeProfileRegistryRecord,
-  plan: ProfileRegistryRuntimeConfigPlan,
-): Promise<{
-  profilePath: string;
-  runtimeConfigPath: string;
-  mcpBindings: { removed: number; added: number };
-  applyResult: RustyCrewRuntimeConfigApplyResult;
-}> {
-  const profilePath = safeProfileConfigPath(
-    state.runtimeConfig.profilesDir,
-    record.profileId,
-  );
-  if (profilePath === undefined) {
-    throw new Error(
-      `profile id ${record.profileId} is not a valid file profile id`,
-    );
-  }
-  const profileConfig = await readProfileConfigJsonForMutation(
-    profilePath,
-    record.profileId,
-  );
-  applyEditableRuntimeConfigToProfileJson(profileConfig, plan.runtimeConfig);
-  await writeJsonFileAtomic(profilePath, profileConfig);
-
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const mcpBindings = runtimeConfigFile.array("mcpBindings");
-  const removed = removeRuntimeConfigEntries(
-    mcpBindings,
-    (entry) =>
-      runtimeEntryString(entry, "profileId", "profile_id") === record.profileId,
-  );
-  const runtimeMcpBindings = runtimeMcpBindingsForProfile(
-    state,
-    record,
-    plan.runtimeConfig,
-  );
-  mcpBindings.push(...runtimeMcpBindings);
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfigFile.value,
-  );
-
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "profile_runtime_config_updated",
-    summaryPrefix: `Profile ${record.profileId} runtime config updated`,
-  });
-  return {
-    profilePath,
-    runtimeConfigPath: state.config.paths.serviceConfigFile,
-    mcpBindings: { removed, added: runtimeMcpBindings.length },
-    applyResult,
-  };
-}
-
-function requiredRevision(body: Record<string, unknown>): number {
-  const value = body.expectedRevision ?? body.expected_revision;
-  if (!Number.isSafeInteger(value) || Number(value) < 1) {
-    throw new Error(
-      "expectedRevision is required and must be a positive integer",
-    );
-  }
-  return Number(value);
 }
 
 async function modelProviderRefreshAfterWrite(input: {
