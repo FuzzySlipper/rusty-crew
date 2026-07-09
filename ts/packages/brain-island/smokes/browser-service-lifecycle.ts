@@ -5,14 +5,14 @@ import {
   closeAllServiceBrowserSessionsForLifecycle,
   closeServiceBrowserSessionForLifecycle,
   createServiceBrowserResources,
-} from "./index.js";
+} from "../src/index.js";
 import type {
   BrowserLaunchInput,
   BrowserLaunchResult,
   BrowserLauncher,
   BrowserProcessHandle,
   CdpConnection,
-} from "./index.js";
+} from "../src/index.js";
 
 class FakeProcess implements BrowserProcessHandle {
   killed = false;
