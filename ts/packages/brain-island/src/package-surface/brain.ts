@@ -57,9 +57,11 @@ export {
 export type { DrainResult, QueuedMidTurnMessage } from "../mid-turn-delta.js";
 export {
   buildDelegatedRoleAssembly,
+  buildDelegatedRoleAssemblyFromLifecyclePlan,
   normalizeDelegatedRole,
 } from "../delegated-role-assembly.js";
 export type {
+  BuildDelegatedRoleAssemblyFromPlanInput,
   BuildDelegatedRoleAssemblyInput,
   DelegatedProfileData,
   DelegatedRole,

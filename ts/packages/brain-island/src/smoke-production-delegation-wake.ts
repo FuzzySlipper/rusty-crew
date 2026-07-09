@@ -14,7 +14,7 @@ import type {
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
-  buildDelegatedRoleAssembly,
+  buildDelegatedRoleAssemblyFromLifecyclePlan,
   createLocalBrain,
   registerBrainImplementationRuntime,
 } from "./index.js";
@@ -182,39 +182,53 @@ try {
       assert.equal(event.type, "brain_wake_requested");
       const sessionId = event.sessionId;
       const brain = brainBySession.get(sessionId) ?? coderBrain;
-      const roleAssembly =
-        sessionId === plannerSessionId
-          ? { instructions: "Use the deterministic local brain." }
-          : buildDelegatedRoleAssembly({
-              role: "coder",
-              profile: {
-                profileId: coderProfileId,
-                displayName: "Delegated Coder",
-                systemPrompt: "Use a focused implementation posture.",
-                toolNames: ["read_file", "patch", "terminal"],
-              },
-              context: {
-                sessionId,
-                agentId: `agent:${sessionId}` as AgentId,
-                parentSessionId: plannerSessionId,
-                parentAgentId: plannerAgentId,
-                sourceWakeId: "production-wake-1",
-                sourceActionIndex: 0,
-                taskId: "2844" as TaskId,
-                prompt: "Complete the delegated production wake proof.",
-                expectedOutput: "completion packet",
-                correlationId: "production-delegation-correlation",
-                resourceLimits: {
-                  workdir: "/home/dev/rusty-crew",
-                  maxDurationMs: 30_000,
-                  maxDelegationDepth: 0,
-                },
-                acceptanceCriteria: [
-                  "Wake through the registered bridge path.",
-                  "Return a completion packet.",
-                ],
-              },
-            });
+      let roleAssembly;
+      if (sessionId === plannerSessionId) {
+        roleAssembly = { instructions: "Use the deterministic local brain." };
+      } else {
+        const lifecyclePlan = await native.planDelegatedRoleLifecycle({
+          parentSession: {
+            sessionId: plannerSessionId,
+            agentId: plannerAgentId,
+            kind: "full",
+            resourceLimits: {
+              workdir: "/home/dev/rusty-crew",
+              maxDurationMs: 30_000,
+              maxDelegationDepth: 1,
+            },
+          },
+          delegatedSessionId: sessionId,
+          delegatedAgentId: `agent:${sessionId}`,
+          profileId: coderProfileId,
+          toolProfileKey: "coder-profile",
+          requestedResourceLimits: {
+            workdir: "/home/dev/rusty-crew",
+            maxDurationMs: 30_000,
+            maxDelegationDepth: 0,
+          },
+          sourceWakeId: "production-wake-1",
+          sourceActionIndex: 0,
+          taskId: "2844" as TaskId,
+          correlationId: "production-delegation-correlation",
+        });
+        assert.equal(lifecyclePlan.accepted, true);
+        roleAssembly = buildDelegatedRoleAssemblyFromLifecyclePlan({
+          role: "coder",
+          profile: {
+            profileId: coderProfileId,
+            displayName: "Delegated Coder",
+            systemPrompt: "Use a focused implementation posture.",
+            toolNames: ["read_file", "patch", "terminal"],
+          },
+          plan: lifecyclePlan,
+          prompt: "Complete the delegated production wake proof.",
+          expectedOutput: "completion packet",
+          acceptanceCriteria: [
+            "Wake through the registered bridge path.",
+            "Return a completion packet.",
+          ],
+        });
+      }
       const request = await native.buildBrainWakeRequestForSession({
         brain,
         sessionId,

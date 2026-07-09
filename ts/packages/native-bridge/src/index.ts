@@ -326,6 +326,7 @@ interface NativeBridgeBinding {
   planProfileRegistryMutationJson(inputJson: string): string;
   planNewSessionControlJson(inputJson: string): string;
   planReloadMcpControlJson(inputJson: string): string;
+  planDelegatedRoleLifecycleJson(inputJson: string): string;
   planChannelIngressRouteJson(inputJson: string): string;
   planDenProductIngressPolicyJson(inputJson: string): string;
   shutdownEngine(
@@ -1769,6 +1770,42 @@ export interface NativeNewSessionControlPlanInput {
   rebindHandlerAvailable?: boolean;
 }
 
+export interface NativeDelegatedRoleLifecyclePlanInput {
+  parentSession: {
+    sessionId: string;
+    agentId: string;
+    kind: "full" | "worker" | "delegated";
+    resourceLimits?: ResourceLimits;
+  };
+  delegatedSessionId: string;
+  delegatedAgentId: string;
+  profileId: string;
+  toolProfileKey?: string;
+  requestedResourceLimits?: ResourceLimits;
+  sourceWakeId: string;
+  sourceActionIndex: number;
+  taskId?: string;
+  correlationId?: string;
+}
+
+export interface NativeDelegatedRoleLifecyclePlan {
+  accepted: boolean;
+  reasonCode: string;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+  sessionId: string;
+  agentId: string;
+  parentSessionId: string;
+  parentAgentId: string;
+  profileId: string;
+  kind: "delegated";
+  resourceLimits: ResourceLimits;
+  toolProfileKey?: string;
+  sourceWakeId: string;
+  sourceActionIndex: number;
+  taskId?: string;
+  correlationId: string;
+}
+
 export interface NativeNewSessionControlTemplate {
   agentId: string;
   profileId: string;
@@ -2206,6 +2243,9 @@ export interface NativeBridgeModule {
   planReloadMcpControl(
     input: NativeReloadMcpControlPlanInput,
   ): Promise<NativeReloadMcpControlPlan>;
+  planDelegatedRoleLifecycle(
+    input: NativeDelegatedRoleLifecyclePlanInput,
+  ): Promise<NativeDelegatedRoleLifecyclePlan>;
   planChannelIngressRoute(
     input: NativeChannelIngressRoutePlanInput,
   ): Promise<NativeChannelIngressRoutePlan>;
@@ -2735,6 +2775,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     planProfileRegistryMutation: unavailable("plan_profile_registry_mutation"),
     planNewSessionControl: unavailable("plan_new_session_control"),
     planReloadMcpControl: unavailable("plan_reload_mcp_control"),
+    planDelegatedRoleLifecycle: unavailable(
+      "plan_delegated_role_lifecycle",
+    ),
     planChannelIngressRoute: unavailable("plan_channel_ingress_route"),
     planDenProductIngressPolicy: unavailable("plan_den_product_ingress_policy"),
     injectExternalEvent: unavailable("inject_external_event"),
@@ -3520,6 +3563,14 @@ function createNativeBridgeModule(
             JSON.stringify(toRawReloadMcpControlPlanInput(input)),
           ),
         ) as RawReloadMcpControlPlan,
+      ),
+    planDelegatedRoleLifecycle: async (input) =>
+      toNativeDelegatedRoleLifecyclePlan(
+        JSON.parse(
+          binding.planDelegatedRoleLifecycleJson(
+            JSON.stringify(toRawDelegatedRoleLifecyclePlanInput(input)),
+          ),
+        ) as Record<string, unknown>,
       ),
     planChannelIngressRoute: async (input) => {
       const inputJson = JSON.stringify(
@@ -5142,6 +5193,58 @@ function toRawReloadMcpControlPlanInput(
   };
 }
 
+function toRawDelegatedRoleLifecyclePlanInput(
+  input: NativeDelegatedRoleLifecyclePlanInput,
+): unknown {
+  return {
+    parent_session: {
+      session_id: input.parentSession.sessionId,
+      agent_id: input.parentSession.agentId,
+      kind: input.parentSession.kind,
+      resource_limits: input.parentSession.resourceLimits
+        ? toRawResourceLimits(input.parentSession.resourceLimits)
+        : undefined,
+    },
+    delegated_session_id: input.delegatedSessionId,
+    delegated_agent_id: input.delegatedAgentId,
+    profile_id: input.profileId,
+    tool_profile_key: input.toolProfileKey,
+    requested_resource_limits: input.requestedResourceLimits
+      ? toRawResourceLimits(input.requestedResourceLimits)
+      : undefined,
+    source_wake_id: input.sourceWakeId,
+    source_action_index: input.sourceActionIndex,
+    task_id: input.taskId,
+    correlation_id: input.correlationId,
+  };
+}
+
+function toNativeDelegatedRoleLifecyclePlan(
+  raw: Record<string, unknown>,
+): NativeDelegatedRoleLifecyclePlan {
+  return {
+    accepted: raw["accepted"] as boolean,
+    reasonCode: raw["reason_code"] as string,
+    diagnostics: raw["diagnostics"] as NativeRuntimeConfigDiagnostic[],
+    sessionId: raw["session_id"] as string,
+    agentId: raw["agent_id"] as string,
+    parentSessionId: raw["parent_session_id"] as string,
+    parentAgentId: raw["parent_agent_id"] as string,
+    profileId: raw["profile_id"] as string,
+    kind: "delegated",
+    resourceLimits:
+      toResourceLimits(raw["resource_limits"] as RawResourceLimits) ?? {},
+    toolProfileKey:
+      typeof raw["tool_profile_key"] === "string"
+        ? raw["tool_profile_key"]
+        : undefined,
+    sourceWakeId: raw["source_wake_id"] as string,
+    sourceActionIndex: raw["source_action_index"] as number,
+    taskId: typeof raw["task_id"] === "string" ? raw["task_id"] : undefined,
+    correlationId: raw["correlation_id"] as string,
+  };
+}
+
 function toRawChannelIngressRoutePlanInput(
   input: NativeChannelIngressRoutePlanInput,
 ): RawChannelIngressRoutePlanInput {
@@ -5922,6 +6025,14 @@ function toResourceLimits(
     workdir: limits.workdir ?? undefined,
     maxDurationMs: limits.max_duration_ms ?? undefined,
     maxDelegationDepth: limits.max_delegation_depth ?? undefined,
+  };
+}
+
+function toRawResourceLimits(limits: ResourceLimits): RawResourceLimits {
+  return {
+    workdir: limits.workdir,
+    max_duration_ms: limits.maxDurationMs,
+    max_delegation_depth: limits.maxDelegationDepth,
   };
 }
 

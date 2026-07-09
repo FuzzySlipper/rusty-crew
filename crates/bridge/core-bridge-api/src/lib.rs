@@ -68,6 +68,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "request_scheduled_job_run",
     "pause_scheduled_job",
     "resume_scheduled_job",
+    "plan_delegated_role_lifecycle",
     "cancel_delegated_session",
     "request_delegated_checkpoint",
     "drain_delegated_sessions",

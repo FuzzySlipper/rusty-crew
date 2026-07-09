@@ -487,6 +487,15 @@ summary = "Resume a Rust-owned scheduled job with an explicit next due time."
 # coordination state.
 
 [[operation]]
+name = "plan_delegated_role_lifecycle"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::DelegatedRoleLifecyclePlanInput"
+output = "core_config::DelegatedRoleLifecyclePlan"
+errors = "none"
+summary = "Validate delegated role lifecycle/resource context before TypeScript renders the delegated prompt."
+
+[[operation]]
 name = "cancel_delegated_session"
 surface = "stable"
 direction = "ts_to_rust"

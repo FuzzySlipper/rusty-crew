@@ -6,6 +6,7 @@ import type {
   SessionId,
   TaskId,
 } from "@rusty-crew/contracts";
+import type { NativeDelegatedRoleLifecyclePlan } from "@rusty-crew/native-bridge";
 import type { BrainRoleAssembly } from "./index.js";
 
 export type DelegatedRole = "coder" | "reviewer" | "packet_auditor";
@@ -41,10 +42,51 @@ export interface BuildDelegatedRoleAssemblyInput {
   context: DelegationRoleContext;
 }
 
+export interface BuildDelegatedRoleAssemblyFromPlanInput {
+  role: DelegatedRoleInput;
+  profile: DelegatedProfileData;
+  plan: NativeDelegatedRoleLifecyclePlan;
+  prompt: string;
+  expectedOutput?: string;
+  taskContext?: string;
+  acceptanceCriteria?: string[];
+  parentInstructions?: string;
+}
+
 export function normalizeDelegatedRole(
   role: DelegatedRoleInput,
 ): DelegatedRole {
   return role === "packet-auditor" ? "packet_auditor" : role;
+}
+
+export function buildDelegatedRoleAssemblyFromLifecyclePlan(
+  input: BuildDelegatedRoleAssemblyFromPlanInput,
+): BrainRoleAssembly {
+  if (!input.plan.accepted) {
+    throw new Error(
+      `delegated lifecycle plan rejected: ${input.plan.reasonCode}`,
+    );
+  }
+  return buildDelegatedRoleAssembly({
+    role: input.role,
+    profile: input.profile,
+    context: {
+      sessionId: input.plan.sessionId as SessionId,
+      agentId: input.plan.agentId as AgentId,
+      parentSessionId: input.plan.parentSessionId as SessionId,
+      parentAgentId: input.plan.parentAgentId as AgentId,
+      sourceWakeId: input.plan.sourceWakeId,
+      sourceActionIndex: input.plan.sourceActionIndex,
+      taskId: input.plan.taskId as TaskId | undefined,
+      prompt: input.prompt,
+      expectedOutput: input.expectedOutput,
+      correlationId: input.plan.correlationId,
+      resourceLimits: input.plan.resourceLimits,
+      taskContext: input.taskContext,
+      acceptanceCriteria: input.acceptanceCriteria,
+      parentInstructions: input.parentInstructions,
+    },
+  });
 }
 
 export function buildDelegatedRoleAssembly(

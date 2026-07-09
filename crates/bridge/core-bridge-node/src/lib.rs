@@ -18,9 +18,10 @@ use rusty_crew_core_bridge_api::{
     ShutdownSummary, SubscriptionHandle, Unit, MANIFEST_VERSION, OPERATION_NAMES,
 };
 use rusty_crew_core_config::{
-    plan_channel_ingress_route, plan_create_profile, plan_den_product_ingress_policy,
-    plan_runtime_config, validate_runtime_config_input, ChannelIngressRoutePlan,
-    ChannelIngressRoutePlanInput, CreateProfilePlan, CreateProfilePlanInput,
+    plan_channel_ingress_route, plan_create_profile, plan_delegated_role_lifecycle,
+    plan_den_product_ingress_policy, plan_runtime_config, validate_runtime_config_input,
+    ChannelIngressRoutePlan, ChannelIngressRoutePlanInput, CreateProfilePlan,
+    CreateProfilePlanInput, DelegatedRoleLifecyclePlan, DelegatedRoleLifecyclePlanInput,
     DenProductIngressPolicyInput, DenProductIngressPolicyPlan, NewSessionControlPlan,
     NewSessionControlPlanInput, ProfileRegistryMutationPlan, ProfileRegistryMutationRequest,
     ReloadMcpControlPlan, ReloadMcpControlPlanInput, RuntimeConfigPlan,

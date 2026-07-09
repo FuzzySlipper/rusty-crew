@@ -5,11 +5,14 @@ import type {
   SessionId,
   TaskId,
 } from "@rusty-crew/contracts";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   buildDelegatedRoleAssembly,
+  buildDelegatedRoleAssemblyFromLifecyclePlan,
   normalizeDelegatedRole,
 } from "./delegated-role-assembly.js";
 
+const native = await loadNativeBridge();
 const baseContext = {
   sessionId: "child-session" as SessionId,
   agentId: "agent:child-session" as AgentId,
@@ -33,7 +36,32 @@ const baseContext = {
   ],
 };
 
-const coder = buildDelegatedRoleAssembly({
+const coderLifecyclePlan = await native.planDelegatedRoleLifecycle({
+  parentSession: {
+    sessionId: baseContext.parentSessionId,
+    agentId: baseContext.parentAgentId,
+    kind: "full",
+    resourceLimits: {
+      workdir: "/home/dev/rusty-crew",
+      maxDurationMs: 60_000,
+      maxDelegationDepth: 1,
+    },
+  },
+  delegatedSessionId: baseContext.sessionId,
+  delegatedAgentId: baseContext.agentId,
+  profileId: "coder-profile",
+  toolProfileKey: "coder-profile",
+  requestedResourceLimits: baseContext.resourceLimits,
+  sourceWakeId: baseContext.sourceWakeId,
+  sourceActionIndex: baseContext.sourceActionIndex,
+  taskId: baseContext.taskId,
+  correlationId: baseContext.correlationId,
+});
+assert.equal(coderLifecyclePlan.accepted, true);
+assert.equal(coderLifecyclePlan.kind, "delegated");
+assert.equal(coderLifecyclePlan.resourceLimits.maxDelegationDepth, 0);
+
+const coder = buildDelegatedRoleAssemblyFromLifecyclePlan({
   role: "coder",
   profile: {
     profileId: "coder-profile" as ProfileId,
@@ -41,7 +69,11 @@ const coder = buildDelegatedRoleAssembly({
     systemPrompt: "Profile-specific coder posture.",
     toolNames: ["read_file", "patch", "terminal"],
   },
-  context: baseContext,
+  plan: coderLifecyclePlan,
+  prompt: baseContext.prompt,
+  expectedOutput: baseContext.expectedOutput,
+  taskContext: baseContext.taskContext,
+  acceptanceCriteria: baseContext.acceptanceCriteria,
 });
 
 assert.match(coder.instructions ?? "", /bounded delegated coder/);
@@ -54,6 +86,47 @@ assert.match(
 assert.equal(
   coder.initialMessages?.[0]?.correlationId,
   "delegation-correlation",
+);
+
+const rejectedLifecyclePlan = await native.planDelegatedRoleLifecycle({
+  parentSession: {
+    sessionId: "parent-session",
+    agentId: "prime-agent",
+    kind: "delegated",
+    resourceLimits: {
+      workdir: "/home/dev/rusty-crew",
+      maxDurationMs: 30_000,
+      maxDelegationDepth: 0,
+    },
+  },
+  delegatedSessionId: "parent-session",
+  delegatedAgentId: "prime-agent",
+  profileId: "coder-profile",
+  toolProfileKey: "coder-profile",
+  requestedResourceLimits: {
+    maxDurationMs: 60_000,
+    maxDelegationDepth: 4,
+  },
+  sourceWakeId: "parent-wake-1",
+  sourceActionIndex: 1,
+});
+assert.equal(rejectedLifecyclePlan.accepted, false);
+assert(
+  rejectedLifecyclePlan.diagnostics.some(
+    (diagnostic) => diagnostic.code === "delegation_depth_exhausted",
+  ),
+);
+assert.throws(
+  () =>
+    buildDelegatedRoleAssemblyFromLifecyclePlan({
+      role: "coder",
+      profile: {
+        profileId: "coder-profile" as ProfileId,
+      },
+      plan: rejectedLifecyclePlan,
+      prompt: "Should not render.",
+    }),
+  /delegated lifecycle plan rejected/,
 );
 
 const reviewer = buildDelegatedRoleAssembly({

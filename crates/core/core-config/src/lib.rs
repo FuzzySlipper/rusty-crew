@@ -8,7 +8,7 @@ use rusty_crew_core_protocol::{
     AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ProfileId,
     ProfileRegistryDerivedRuntimeRef, ProfileRegistryImportExportMetadata,
     ProfileRegistryLifecycleStatus, ProfileRegistryRecord, ProfileRegistrySourceAssetRef,
-    ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind,
+    ProfileRegistryWrite, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind, TaskId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -76,6 +76,47 @@ pub struct ReloadMcpControlPlanInput {
     pub binding: Option<ReloadMcpControlBinding>,
     #[serde(default)]
     pub reload_handler_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedRoleLifecyclePlanInput {
+    pub parent_session: DelegatedRoleParentSession,
+    pub delegated_session_id: String,
+    pub delegated_agent_id: String,
+    pub profile_id: ProfileId,
+    pub tool_profile_key: Option<String>,
+    pub requested_resource_limits: Option<ResourceLimits>,
+    pub source_wake_id: String,
+    pub source_action_index: u32,
+    pub task_id: Option<TaskId>,
+    pub correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedRoleParentSession {
+    pub session_id: SessionId,
+    pub agent_id: AgentId,
+    pub kind: SessionKind,
+    pub resource_limits: Option<ResourceLimits>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedRoleLifecyclePlan {
+    pub accepted: bool,
+    pub reason_code: String,
+    pub diagnostics: Vec<RuntimeConfigDiagnostic>,
+    pub session_id: SessionId,
+    pub agent_id: AgentId,
+    pub parent_session_id: SessionId,
+    pub parent_agent_id: AgentId,
+    pub profile_id: ProfileId,
+    pub kind: SessionKind,
+    pub resource_limits: ResourceLimits,
+    pub tool_profile_key: Option<String>,
+    pub source_wake_id: String,
+    pub source_action_index: u32,
+    pub task_id: Option<TaskId>,
+    pub correlation_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -767,6 +808,171 @@ pub fn plan_runtime_config(input: &RuntimeConfigValidationInput) -> RuntimeConfi
         diagnostics,
         derived_scheduled_jobs,
         derived_mcp_bindings,
+    }
+}
+
+pub fn plan_delegated_role_lifecycle(
+    input: &DelegatedRoleLifecyclePlanInput,
+) -> DelegatedRoleLifecyclePlan {
+    let mut diagnostics = Vec::new();
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_delegated_session_id",
+        "delegatedSessionId",
+        &input.delegated_session_id,
+    );
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_delegated_agent_id",
+        "delegatedAgentId",
+        &input.delegated_agent_id,
+    );
+    collect_id_diagnostic(
+        &mut diagnostics,
+        "invalid_profile_id",
+        "profileId",
+        &input.profile_id.0,
+    );
+    collect_non_empty_diagnostic(
+        &mut diagnostics,
+        "invalid_source_wake_id",
+        "sourceWakeId",
+        &input.source_wake_id,
+    );
+    if let Some(tool_profile_key) = &input.tool_profile_key {
+        collect_non_empty_diagnostic(
+            &mut diagnostics,
+            "invalid_tool_profile_key",
+            "toolProfileKey",
+            tool_profile_key,
+        );
+    }
+    if let Some(correlation_id) = &input.correlation_id {
+        collect_non_empty_diagnostic(
+            &mut diagnostics,
+            "invalid_correlation_id",
+            "correlationId",
+            correlation_id,
+        );
+    }
+    if input.delegated_session_id == input.parent_session.session_id.0 {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "delegated_session_matches_parent",
+            "delegatedSessionId",
+            "delegated session id must differ from parent session id",
+        ));
+    }
+    if input.delegated_agent_id == input.parent_session.agent_id.0 {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "delegated_agent_matches_parent",
+            "delegatedAgentId",
+            "delegated agent id must differ from parent agent id",
+        ));
+    }
+    if !matches!(
+        input.parent_session.kind,
+        SessionKind::Full | SessionKind::Worker | SessionKind::Delegated
+    ) {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "delegation_parent_kind_invalid",
+            "parentSession.kind",
+            "parent session kind cannot delegate",
+        ));
+    }
+
+    let parent_limits = input
+        .parent_session
+        .resource_limits
+        .clone()
+        .unwrap_or(ResourceLimits {
+            workdir: None,
+            max_duration_ms: None,
+            max_delegation_depth: None,
+        });
+    let inherited_depth = parent_limits
+        .max_delegation_depth
+        .map(|depth| depth.saturating_sub(1));
+    if parent_limits.max_delegation_depth == Some(0) {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "delegation_depth_exhausted",
+            "parentSession.resourceLimits.maxDelegationDepth",
+            "parent session has no remaining delegation depth",
+        ));
+    }
+    let requested_limits = input.requested_resource_limits.as_ref();
+    let requested_depth = requested_limits.and_then(|limits| limits.max_delegation_depth);
+    if let (Some(requested), Some(max_child_depth)) = (requested_depth, inherited_depth) {
+        if requested > max_child_depth {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "delegation_depth_escalation",
+                "requestedResourceLimits.maxDelegationDepth",
+                format!(
+                    "requested child delegation depth {requested} exceeds inherited maximum {max_child_depth}"
+                ),
+            ));
+        }
+    }
+    let requested_duration = requested_limits.and_then(|limits| limits.max_duration_ms);
+    if let (Some(requested), Some(parent)) = (requested_duration, parent_limits.max_duration_ms) {
+        if requested > parent {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "delegation_duration_escalation",
+                "requestedResourceLimits.maxDurationMs",
+                format!("requested child duration {requested} exceeds parent maximum {parent}"),
+            ));
+        }
+    }
+    if requested_limits
+        .and_then(|limits| limits.workdir.as_deref())
+        .is_some_and(|workdir| workdir.trim().is_empty())
+    {
+        diagnostics.push(RuntimeConfigDiagnostic::error(
+            "invalid_resource_limits",
+            "requestedResourceLimits.workdir",
+            "workdir must not be empty when provided",
+        ));
+    }
+
+    let effective_limits = ResourceLimits {
+        workdir: requested_limits
+            .and_then(|limits| limits.workdir.clone())
+            .or(parent_limits.workdir),
+        max_duration_ms: requested_duration.or(parent_limits.max_duration_ms),
+        max_delegation_depth: requested_depth.or(inherited_depth),
+    };
+    let accepted = !diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error);
+    let reason_code = if accepted {
+        "delegated_role_lifecycle_planned".to_string()
+    } else {
+        diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == RuntimeConfigDiagnosticSeverity::Error)
+            .map(|diagnostic| diagnostic.code.clone())
+            .unwrap_or_else(|| "delegated_role_lifecycle_rejected".to_string())
+    };
+    DelegatedRoleLifecyclePlan {
+        accepted,
+        reason_code,
+        diagnostics,
+        session_id: SessionId::new(input.delegated_session_id.clone()),
+        agent_id: AgentId::new(input.delegated_agent_id.clone()),
+        parent_session_id: input.parent_session.session_id.clone(),
+        parent_agent_id: input.parent_session.agent_id.clone(),
+        profile_id: input.profile_id.clone(),
+        kind: SessionKind::Delegated,
+        resource_limits: effective_limits,
+        tool_profile_key: input.tool_profile_key.clone(),
+        source_wake_id: input.source_wake_id.clone(),
+        source_action_index: input.source_action_index,
+        task_id: input.task_id.clone(),
+        correlation_id: input.correlation_id.clone().unwrap_or_else(|| {
+            format!(
+                "delegation:{}:{}",
+                input.source_wake_id, input.source_action_index
+            )
+        }),
     }
 }
 
@@ -3882,6 +4088,96 @@ mod tests {
                 "context_policy_percent_out_of_range",
                 "context_policy_trigger_above_wake_guard",
                 "context_policy_debug_visibility_invalid",
+            ],
+        );
+    }
+
+    #[test]
+    fn plans_delegated_role_lifecycle_with_inherited_limits() {
+        let plan = plan_delegated_role_lifecycle(&DelegatedRoleLifecyclePlanInput {
+            parent_session: DelegatedRoleParentSession {
+                session_id: SessionId::new("parent-session"),
+                agent_id: AgentId::new("parent-agent"),
+                kind: SessionKind::Full,
+                resource_limits: Some(ResourceLimits {
+                    workdir: Some("/home/dev/rusty-crew".to_string()),
+                    max_duration_ms: Some(60_000),
+                    max_delegation_depth: Some(2),
+                }),
+            },
+            delegated_session_id: "parent-session:delegated:wake-1:0".to_string(),
+            delegated_agent_id: "agent:parent-session:delegated:wake-1:0".to_string(),
+            profile_id: ProfileId::new("coder-profile"),
+            tool_profile_key: Some("bounded-coder".to_string()),
+            requested_resource_limits: Some(ResourceLimits {
+                workdir: None,
+                max_duration_ms: Some(30_000),
+                max_delegation_depth: None,
+            }),
+            source_wake_id: "wake-1".to_string(),
+            source_action_index: 0,
+            task_id: Some(TaskId::new("4737")),
+            correlation_id: None,
+        });
+
+        assert!(plan.accepted, "{:?}", plan.diagnostics);
+        assert_eq!(plan.reason_code, "delegated_role_lifecycle_planned");
+        assert_eq!(plan.kind, SessionKind::Delegated);
+        assert_eq!(
+            plan.resource_limits,
+            ResourceLimits {
+                workdir: Some("/home/dev/rusty-crew".to_string()),
+                max_duration_ms: Some(30_000),
+                max_delegation_depth: Some(1),
+            }
+        );
+        assert_eq!(plan.tool_profile_key.as_deref(), Some("bounded-coder"));
+        assert_eq!(plan.correlation_id, "delegation:wake-1:0");
+    }
+
+    #[test]
+    fn rejects_delegated_role_lifecycle_escalation() {
+        let plan = plan_delegated_role_lifecycle(&DelegatedRoleLifecyclePlanInput {
+            parent_session: DelegatedRoleParentSession {
+                session_id: SessionId::new("parent-session"),
+                agent_id: AgentId::new("parent-agent"),
+                kind: SessionKind::Delegated,
+                resource_limits: Some(ResourceLimits {
+                    workdir: Some("/home/dev/rusty-crew".to_string()),
+                    max_duration_ms: Some(30_000),
+                    max_delegation_depth: Some(0),
+                }),
+            },
+            delegated_session_id: "parent-session".to_string(),
+            delegated_agent_id: "parent-agent".to_string(),
+            profile_id: ProfileId::new("coder-profile"),
+            tool_profile_key: Some(" ".to_string()),
+            requested_resource_limits: Some(ResourceLimits {
+                workdir: Some(" ".to_string()),
+                max_duration_ms: Some(60_000),
+                max_delegation_depth: Some(2),
+            }),
+            source_wake_id: " ".to_string(),
+            source_action_index: 4,
+            task_id: None,
+            correlation_id: Some(" ".to_string()),
+        });
+
+        assert!(!plan.accepted);
+        assert_codes(
+            &RuntimeConfigValidationResult {
+                diagnostics: plan.diagnostics.clone(),
+            },
+            &[
+                "invalid_tool_profile_key",
+                "invalid_source_wake_id",
+                "invalid_correlation_id",
+                "delegated_session_matches_parent",
+                "delegated_agent_matches_parent",
+                "delegation_depth_exhausted",
+                "delegation_depth_escalation",
+                "delegation_duration_escalation",
+                "invalid_resource_limits",
             ],
         );
     }

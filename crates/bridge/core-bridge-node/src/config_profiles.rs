@@ -33,6 +33,13 @@ impl NativeBridge {
         rusty_crew_core_config::plan_reload_mcp_control(&input)
     }
 
+    pub fn plan_delegated_role_lifecycle(
+        &self,
+        input: DelegatedRoleLifecyclePlanInput,
+    ) -> DelegatedRoleLifecyclePlan {
+        plan_delegated_role_lifecycle(&input)
+    }
+
     pub fn plan_channel_ingress_route(
         &self,
         input: ChannelIngressRoutePlanInput,

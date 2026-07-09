@@ -1596,6 +1596,7 @@ export const manifestOperationNames = [
   "request_scheduled_job_run",
   "pause_scheduled_job",
   "resume_scheduled_job",
+  "plan_delegated_role_lifecycle",
   "cancel_delegated_session",
   "request_delegated_checkpoint",
   "drain_delegated_sessions",
@@ -1723,6 +1724,6 @@ export const manifestOperationNames = [
 ] as const;
 
 export const bridgeWireShapeFingerprint =
-  "66305dcbf6f7a72e8dc9270f7e8b5b3ea09454ce6a7eb96767988bc56397e989";
+  "17fe25de30f86d387131607f5a9e4f6cb1a30f9aad890f620e1e872139d334fd";
 
 export type ManifestOperationName = (typeof manifestOperationNames)[number];
