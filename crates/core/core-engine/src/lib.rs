@@ -1,6 +1,7 @@
 //! Coordination engine composition.
 
 mod body_queue;
+mod delegation_store;
 mod memory_spaces;
 mod scheduler;
 mod session_store;
@@ -9,6 +10,13 @@ pub use scheduler::SchedulerTickReport;
 
 use body_queue::{
     drain_follow_up_queue_for_wake, enforce_follow_up_queue_cap, save_body_follow_up_message,
+};
+use delegation_store::{
+    claim_next_worker_pool_work_item, complete_worker_pool_work_item, create_worker_pool_work_item,
+    delegated_completions_for_parent, delegated_fan_out_groups_for_parent,
+    load_delegated_worker_run, load_delegated_worker_run_by_session, load_worker_pool_member,
+    save_delegated_worker_run_requested, update_delegated_worker_run_status,
+    update_delegated_worker_run_status_by_session,
 };
 use rusty_crew_core_body::{
     session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
@@ -244,13 +252,12 @@ impl CoreEngine {
             session_id: session_id.clone(),
         })?;
         if state.kind == SessionKind::Delegated {
-            if !self
-                .store
-                .load_worker_run_by_delegated_session(session_id)?
+            if !load_delegated_worker_run_by_session(&self.store, session_id)?
                 .as_ref()
                 .is_some_and(|run| run.status.is_terminal())
             {
-                self.store.update_worker_run_status_by_delegated_session(
+                update_delegated_worker_run_status_by_session(
+                    &self.store,
                     session_id,
                     WorkerRunStatus::Cancelled,
                     self.now(),
@@ -264,8 +271,8 @@ impl CoreEngine {
 
     pub fn project_body_state(&self, session_id: &SessionId) -> CoreResult<BodyState> {
         let mut state = self.body_projector.project(session_id)?;
-        state.child_completions = self.store.delegated_completions_for_parent(session_id)?;
-        state.fan_out_groups = self.store.fan_out_groups_for_parent(session_id)?;
+        state.child_completions = delegated_completions_for_parent(&self.store, session_id)?;
+        state.fan_out_groups = delegated_fan_out_groups_for_parent(&self.store, session_id)?;
         Ok(state)
     }
 
@@ -589,7 +596,8 @@ impl CoreEngine {
 
     pub fn submit_brain_event(&self, envelope: BrainEventEnvelope) -> CoreResult<EventReceipt> {
         if matches!(envelope.event, BrainEvent::Started) {
-            self.store.update_worker_run_status_by_delegated_session(
+            update_delegated_worker_run_status_by_session(
+                &self.store,
                 &envelope.session_id,
                 WorkerRunStatus::Running,
                 self.now(),
@@ -1594,7 +1602,8 @@ impl CoreEngine {
             correlation_id: Some(format!("checkpoint:{}", delegated.session_id)),
             projection: None,
         })?;
-        self.store.update_worker_run_status_by_delegated_session(
+        update_delegated_worker_run_status_by_session(
+            &self.store,
             &delegated.session_id,
             WorkerRunStatus::CheckpointWaiting,
             self.now(),
@@ -1667,9 +1676,7 @@ impl CoreEngine {
                 format!("session {} is not delegated", session.session_id),
             ));
         }
-        let run = self
-            .store
-            .load_worker_run_by_delegated_session(delegated_session_id)?;
+        let run = load_delegated_worker_run_by_session(&self.store, delegated_session_id)?;
         Ok(DelegatedSessionRuntimeStatus {
             parent_session_id: session
                 .delegation
@@ -1732,7 +1739,7 @@ impl CoreEngine {
     }
 
     pub fn delegated_session_for_run(&self, run_id: &RunId) -> CoreResult<Option<SessionState>> {
-        let Some(run) = self.store.load_worker_run(run_id)? else {
+        let Some(run) = load_delegated_worker_run(&self.store, run_id)? else {
             return Ok(None);
         };
         if let Some(session_id) = run.delegated_session_id {
@@ -1842,7 +1849,7 @@ impl CoreEngine {
             };
 
             let run_id = RunId::new(format!("{}:{index}", batch.wake_id));
-            if self.store.load_worker_run(&run_id)?.is_some() {
+            if load_delegated_worker_run(&self.store, &run_id)?.is_some() {
                 continue;
             }
 
@@ -1896,42 +1903,46 @@ impl CoreEngine {
                 history_window: parent.history_window.clone(),
             };
             let state = self.sessions.create_session(config.clone(), self.now())?;
-            self.store.save_worker_run_requested(&WorkerRunRecord {
-                run_id,
-                parent_session_id: parent.session_id.clone(),
-                delegated_session_id: Some(state.session_id.clone()),
-                parent_agent_id: Some(parent.agent_id.clone()),
-                profile_id: profile_id.clone(),
-                task_id: task_id.clone(),
-                status: WorkerRunStatus::Requested,
-                created_at: state.created_at.clone(),
-                last_updated_at: state.created_at.clone(),
-                source_wake_id: batch.wake_id.clone(),
-                source_action_index: index as u32,
-                delegation_correlation_id: Some(correlation_id.clone()),
-                parent_consumption: parent_consumption
-                    .clone()
-                    .unwrap_or(ParentConsumptionPolicy::AwaitCompletion),
-                fan_out_group_id: fan_out_group_id.clone(),
-                fan_out_max_concurrency: *fan_out_max_concurrency,
-                fan_out_failure_policy: fan_out_failure_policy
-                    .clone()
-                    .unwrap_or(FanOutFailurePolicy::FailSoft),
-                worker_pool_work_item_id: pooled_claim
-                    .as_ref()
-                    .map(|claim| claim.work_item.work_item_id.clone()),
-                worker_pool_lease_id: pooled_claim
-                    .as_ref()
-                    .map(|claim| claim.lease.lease_id.clone()),
-                worker_pool_member_id: pooled_claim
-                    .as_ref()
-                    .map(|claim| claim.member.member_id.clone()),
-                worker_pool_claim_token: pooled_claim
-                    .as_ref()
-                    .map(|claim| claim.lease.claim_token.clone()),
-            })?;
+            save_delegated_worker_run_requested(
+                &self.store,
+                &WorkerRunRecord {
+                    run_id,
+                    parent_session_id: parent.session_id.clone(),
+                    delegated_session_id: Some(state.session_id.clone()),
+                    parent_agent_id: Some(parent.agent_id.clone()),
+                    profile_id: profile_id.clone(),
+                    task_id: task_id.clone(),
+                    status: WorkerRunStatus::Requested,
+                    created_at: state.created_at.clone(),
+                    last_updated_at: state.created_at.clone(),
+                    source_wake_id: batch.wake_id.clone(),
+                    source_action_index: index as u32,
+                    delegation_correlation_id: Some(correlation_id.clone()),
+                    parent_consumption: parent_consumption
+                        .clone()
+                        .unwrap_or(ParentConsumptionPolicy::AwaitCompletion),
+                    fan_out_group_id: fan_out_group_id.clone(),
+                    fan_out_max_concurrency: *fan_out_max_concurrency,
+                    fan_out_failure_policy: fan_out_failure_policy
+                        .clone()
+                        .unwrap_or(FanOutFailurePolicy::FailSoft),
+                    worker_pool_work_item_id: pooled_claim
+                        .as_ref()
+                        .map(|claim| claim.work_item.work_item_id.clone()),
+                    worker_pool_lease_id: pooled_claim
+                        .as_ref()
+                        .map(|claim| claim.lease.lease_id.clone()),
+                    worker_pool_member_id: pooled_claim
+                        .as_ref()
+                        .map(|claim| claim.member.member_id.clone()),
+                    worker_pool_claim_token: pooled_claim
+                        .as_ref()
+                        .map(|claim| claim.lease.claim_token.clone()),
+                },
+            )?;
             save_engine_session_with_config(&self.store, &state, &config)?;
-            self.store.update_worker_run_status_by_delegated_session(
+            update_delegated_worker_run_status_by_session(
+                &self.store,
                 &state.session_id,
                 WorkerRunStatus::SessionCreated,
                 self.now(),
@@ -1959,7 +1970,8 @@ impl CoreEngine {
                 self.bus.publish(CoreEvent::BrainWakeRequested {
                     session_id: state.session_id.clone(),
                 })?;
-                self.store.update_worker_run_status_by_delegated_session(
+                update_delegated_worker_run_status_by_session(
+                    &self.store,
                     &state.session_id,
                     WorkerRunStatus::WakeRequested,
                     self.now(),
@@ -1990,7 +2002,7 @@ impl CoreEngine {
             ));
         }
         let now = self.now();
-        let Some(member) = self.store.load_worker_pool_member(&request.member_id)? else {
+        let Some(member) = load_worker_pool_member(&self.store, &request.member_id)? else {
             return Ok(self.worker_pool_no_capacity_plan(
                 request,
                 WorkerPoolNoCapacityReason::MemberUnavailable,
@@ -2050,17 +2062,18 @@ impl CoreEngine {
             terminal_at: None,
             terminal_summary: None,
         };
-        self.store.create_worker_pool_work_item(&work_item)?;
-        let claim = self
-            .store
-            .claim_next_worker_pool_work_item(&WorkerPoolClaimRequest {
+        create_worker_pool_work_item(&self.store, &work_item)?;
+        let claim = claim_next_worker_pool_work_item(
+            &self.store,
+            &WorkerPoolClaimRequest {
                 member_id: request.member_id.clone(),
                 lease_id: format!("lease:{}", input.run_id.0),
                 claim_token: format!("claim:{}:{}", input.wake_id, input.action_index),
                 now,
                 claim_deadline_at,
                 min_heartbeat_at: member.last_heartbeat_at,
-            })?;
+            },
+        )?;
         Ok(match claim {
             Ok(claim) => WorkerPoolDelegationPlan::Claimed(Box::new(claim)),
             Err(reason) => self.worker_pool_no_capacity_plan(request, reason),
@@ -2138,9 +2151,7 @@ impl CoreEngine {
             if session.kind != SessionKind::Delegated || session.status == SessionStatus::Archived {
                 continue;
             }
-            let Some(run) = self
-                .store
-                .load_worker_run_by_delegated_session(&session.session_id)?
+            let Some(run) = load_delegated_worker_run_by_session(&self.store, &session.session_id)?
             else {
                 continue;
             };
@@ -2174,9 +2185,7 @@ impl CoreEngine {
         if session.kind != SessionKind::Delegated {
             return Ok(None);
         }
-        let run = self
-            .store
-            .load_worker_run_by_delegated_session(&session.session_id)?;
+        let run = load_delegated_worker_run_by_session(&self.store, &session.session_id)?;
         if run.as_ref().is_some_and(|run| run.status.is_terminal()) {
             return Ok(None);
         }
@@ -2185,8 +2194,7 @@ impl CoreEngine {
             .archive_session(&session.session_id, self.now())?;
         save_engine_session(&self.store, &archived)?;
         if let Some(run) = &run {
-            self.store
-                .update_worker_run_status(&run.run_id, status, self.now())?;
+            update_delegated_worker_run_status(&self.store, &run.run_id, status, self.now())?;
         }
         self.bus.publish(CoreEvent::SessionArchived {
             session_id: archived.session_id.clone(),
@@ -2234,10 +2242,7 @@ impl CoreEngine {
                     }
                 }
                 BrainAction::DeliverCompletion { packet } => {
-                    match self
-                        .store
-                        .load_worker_run_by_delegated_session(&packet.session_id)
-                    {
+                    match load_delegated_worker_run_by_session(&self.store, &packet.session_id) {
                         Ok(Some(run)) if run.status.is_terminal() => {
                             rejections.push(ActionRejection {
                                 index: index as u32,
@@ -2337,21 +2342,22 @@ impl CoreEngine {
                 CompletionStatus::Blocked => WorkerRunStatus::Blocked,
                 CompletionStatus::Exhausted => WorkerRunStatus::Exhausted,
             };
-            self.store.update_worker_run_status_by_delegated_session(
+            update_delegated_worker_run_status_by_session(
+                &self.store,
                 &packet.session_id,
                 status,
                 self.now(),
             )?;
-            if let Some(run) = self
-                .store
-                .load_worker_run_by_delegated_session(&packet.session_id)?
+            if let Some(run) =
+                load_delegated_worker_run_by_session(&self.store, &packet.session_id)?
             {
                 if let (Some(lease_id), Some(claim_token)) = (
                     run.worker_pool_lease_id.as_ref(),
                     run.worker_pool_claim_token.as_ref(),
                 ) {
                     let pool_status = worker_pool_status_for_completion(&packet.status);
-                    let _ = self.store.complete_worker_pool_work_item(
+                    let _ = complete_worker_pool_work_item(
+                        &self.store,
                         &WorkerPoolCompletionRequest {
                             lease_id: lease_id.clone(),
                             claim_token: claim_token.clone(),
