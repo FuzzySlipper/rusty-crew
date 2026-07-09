@@ -1260,6 +1260,7 @@ dependencies = [
  "anyhow",
  "rusty-crew-core-bridge-api",
  "rusty-crew-core-config",
+ "rusty-crew-core-persistence",
  "rusty-crew-core-protocol",
  "serde",
  "serde_json",

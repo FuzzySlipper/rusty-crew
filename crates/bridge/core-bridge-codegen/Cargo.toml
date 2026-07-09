@@ -8,6 +8,7 @@ version.workspace = true
 anyhow.workspace = true
 rusty-crew-core-bridge-api = { path = "../core-bridge-api" }
 rusty-crew-core-config = { path = "../../core/core-config" }
+rusty-crew-core-persistence = { path = "../../core/core-persistence" }
 rusty-crew-core-protocol = { path = "../../core/core-protocol" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

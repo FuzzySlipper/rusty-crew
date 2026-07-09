@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use anyhow::{bail, Context, Result};
 use rusty_crew_core_bridge_api::*;
 use rusty_crew_core_config::{
@@ -11,9 +13,12 @@ use rusty_crew_core_config::{
     ProfileSessionDefaults, RuntimeConfigDraft, RuntimeConfigValidationInput,
     ScheduledJobConfigDraft, ScheduledJobShape, SessionConfigDraft,
 };
+use rusty_crew_core_persistence as persistence;
 use rusty_crew_core_protocol::{
-    AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ProfileId,
-    ProfileRegistryLifecycleStatus, ResourceLimits, SessionHistoryWindow, SessionId, SessionKind,
+    AdapterId, AgentId, AgentInstanceId, AttachmentId, AttachmentLinkId, BrainImplementationId,
+    ConversationBranchId, ConversationSnapshotId, DataBankScopeId, MessageBlockId, MessageId,
+    MessageSlotId, MessageVariantId, ProfileId, ProfileRegistryLifecycleStatus, ResourceLimits,
+    SessionHistoryWindow, SessionId, SessionKind,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -418,6 +423,44 @@ export const nativeMappingInventory = {artifact_json} as const;
 }
 
 fn native_mapping_inventory_artifact() -> Result<Value> {
+    let conversation_operations = vec![
+        "save_message_slot",
+        "save_message_variant",
+        "create_chat_message_slot",
+        "create_chat_message_variant",
+        "chat_read_model_page",
+        "append_chat_event",
+        "query_chat_events",
+        "query_message_slots",
+        "query_message_variants",
+        "select_active_message_variant",
+        "select_active_chat_message_variant",
+        "delete_chat_message_variant",
+        "reorder_chat_message_variants",
+        "delete_message_variant",
+        "reorder_message_variants",
+        "save_conversation_branch",
+        "create_chat_conversation_branch",
+        "ensure_active_chat_conversation_branch",
+        "query_conversation_branches",
+        "get_conversation_branch_state",
+        "select_active_conversation_branch",
+        "update_conversation_branch_head",
+        "save_conversation_snapshot",
+        "create_chat_conversation_snapshot",
+        "query_conversation_snapshots",
+        "resolve_conversation_jump",
+        "save_attachment",
+        "create_chat_attachment",
+        "query_attachments",
+        "remove_attachment",
+        "remove_chat_attachment",
+        "save_data_bank_scope",
+        "create_chat_data_bank_scope",
+        "query_data_bank_scopes",
+        "remove_data_bank_scope",
+        "remove_chat_data_bank_scope",
+    ];
     let profile_registry_operations = vec![
         "plan_profile_registry_mutation",
         "create_profile_registry_record",
@@ -434,9 +477,51 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "model_provider_refresh_impact",
         "plan_model_provider_refresh",
     ];
+    ensure_family_operations_exist("conversation", &conversation_operations)?;
     ensure_family_operations_exist("profile_registry", &profile_registry_operations)?;
     ensure_family_operations_exist("model_provider", &model_provider_operations)?;
 
+    let message_slot_record = serde_json::to_value(sample_message_slot_record())?;
+    let message_slot_write = serde_json::to_value(sample_message_slot_write())?;
+    let message_variant_record = serde_json::to_value(sample_message_variant_record())?;
+    let message_variant_write = serde_json::to_value(sample_message_variant_write())?;
+    let durable_message_record = serde_json::to_value(sample_durable_message_record())?;
+    let durable_message_write = serde_json::to_value(sample_durable_message_write())?;
+    let message_block_record = serde_json::to_value(sample_message_block_record())?;
+    let message_block_write = serde_json::to_value(sample_message_block_write())?;
+    let message_slot_query = serde_json::to_value(sample_message_slot_query())?;
+    let message_variant_query = serde_json::to_value(sample_message_variant_query())?;
+    let create_chat_message_slot_request =
+        serde_json::to_value(sample_create_chat_message_slot_request())?;
+    let create_chat_message_slot_result =
+        serde_json::to_value(sample_create_chat_message_slot_result())?;
+    let create_chat_message_variant_request =
+        serde_json::to_value(sample_create_chat_message_variant_request())?;
+    let create_chat_message_variant_result =
+        serde_json::to_value(sample_create_chat_message_variant_result())?;
+    let chat_read_model_query = serde_json::to_value(sample_chat_read_model_query())?;
+    let chat_read_model_page = serde_json::to_value(sample_chat_read_model_page())?;
+    let chat_event_log_append = serde_json::to_value(sample_chat_event_log_append())?;
+    let chat_event_log_query = serde_json::to_value(sample_chat_event_log_query())?;
+    let chat_event_log_page = serde_json::to_value(sample_chat_event_log_page())?;
+    let conversation_branch_record = serde_json::to_value(sample_conversation_branch_record())?;
+    let conversation_branch_write = serde_json::to_value(sample_conversation_branch_write())?;
+    let conversation_branch_query = serde_json::to_value(sample_conversation_branch_query())?;
+    let conversation_branch_state =
+        serde_json::to_value(sample_conversation_branch_state_record())?;
+    let conversation_snapshot_record = serde_json::to_value(sample_conversation_snapshot_record())?;
+    let conversation_snapshot_write = serde_json::to_value(sample_conversation_snapshot_write())?;
+    let conversation_snapshot_query = serde_json::to_value(sample_conversation_snapshot_query())?;
+    let conversation_jump_request = serde_json::to_value(sample_conversation_jump_request())?;
+    let conversation_jump_result = serde_json::to_value(sample_conversation_jump_result())?;
+    let attachment_record = serde_json::to_value(sample_attachment_record())?;
+    let attachment_write = serde_json::to_value(sample_attachment_write())?;
+    let attachment_link_record = serde_json::to_value(sample_attachment_link_record())?;
+    let attachment_link_write = serde_json::to_value(sample_attachment_link_write())?;
+    let attachment_query = serde_json::to_value(sample_attachment_query())?;
+    let data_bank_scope_record = serde_json::to_value(sample_data_bank_scope_record())?;
+    let data_bank_scope_write = serde_json::to_value(sample_data_bank_scope_write())?;
+    let data_bank_scope_query = serde_json::to_value(sample_data_bank_scope_query())?;
     let profile_registry_record = serde_json::to_value(sample_profile_registry_record())?;
     let profile_registry_write = serde_json::to_value(sample_profile_registry_write())?;
     let profile_registry_update = serde_json::to_value(sample_profile_registry_update())?;
@@ -453,6 +538,63 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "formatVersion": 1,
         "source": "rusty-crew-core-bridge-codegen",
         "families": {
+            "conversation": {
+                "operationNames": conversation_operations,
+                "rawMethods": conversation_operations
+                    .iter()
+                    .map(|operation| operation_name_to_camel_json_method(operation))
+                    .collect::<Vec<_>>(),
+                "passthroughWrappers": conversation_operations
+                    .iter()
+                    .map(|operation| operation_name_to_camel_wrapper(operation))
+                    .collect::<Vec<_>>(),
+                "namedTypeScriptInterfaces": [
+                    "NativeChatReadModelEvent",
+                    "NativeChatReadModelPage",
+                    "NativeChatEventLogEvent",
+                    "NativeChatEventLogPage"
+                ],
+                "dtoFields": {
+                    "MessageSlotRecord": object_keys(&message_slot_record)?,
+                    "MessageSlotWrite": object_keys(&message_slot_write)?,
+                    "MessageVariantRecord": object_keys(&message_variant_record)?,
+                    "MessageVariantWrite": object_keys(&message_variant_write)?,
+                    "DurableMessageRecord": object_keys(&durable_message_record)?,
+                    "DurableMessageWrite": object_keys(&durable_message_write)?,
+                    "MessageBlockRecord": object_keys(&message_block_record)?,
+                    "MessageBlockWrite": object_keys(&message_block_write)?,
+                    "MessageSlotQuery": object_keys(&message_slot_query)?,
+                    "MessageVariantQuery": object_keys(&message_variant_query)?,
+                    "CreateChatMessageSlotRequest": object_keys(&create_chat_message_slot_request)?,
+                    "CreateChatMessageSlotResult": object_keys(&create_chat_message_slot_result)?,
+                    "CreateChatMessageVariantRequest": object_keys(&create_chat_message_variant_request)?,
+                    "CreateChatMessageVariantResult": object_keys(&create_chat_message_variant_result)?,
+                    "ChatReadModelQuery": object_keys(&chat_read_model_query)?,
+                    "ChatReadModelPage": object_keys(&chat_read_model_page)?,
+                    "ChatReadModelEvent": object_keys(first_array_item(&chat_read_model_page, "items")?)?,
+                    "ChatEventLogAppend": object_keys(&chat_event_log_append)?,
+                    "ChatEventLogQuery": object_keys(&chat_event_log_query)?,
+                    "ChatEventLogPage": object_keys(&chat_event_log_page)?,
+                    "ChatEventLogEvent": object_keys(first_array_item(&chat_event_log_page, "items")?)?,
+                    "ConversationBranchRecord": object_keys(&conversation_branch_record)?,
+                    "ConversationBranchWrite": object_keys(&conversation_branch_write)?,
+                    "ConversationBranchQuery": object_keys(&conversation_branch_query)?,
+                    "ConversationBranchStateRecord": object_keys(&conversation_branch_state)?,
+                    "ConversationSnapshotRecord": object_keys(&conversation_snapshot_record)?,
+                    "ConversationSnapshotWrite": object_keys(&conversation_snapshot_write)?,
+                    "ConversationSnapshotQuery": object_keys(&conversation_snapshot_query)?,
+                    "ConversationJumpRequest": object_keys(&conversation_jump_request)?,
+                    "ConversationJumpResult": object_keys(&conversation_jump_result)?,
+                    "AttachmentRecord": object_keys(&attachment_record)?,
+                    "AttachmentWrite": object_keys(&attachment_write)?,
+                    "AttachmentLinkRecord": object_keys(&attachment_link_record)?,
+                    "AttachmentLinkWrite": object_keys(&attachment_link_write)?,
+                    "AttachmentQuery": object_keys(&attachment_query)?,
+                    "DataBankScopeRecord": object_keys(&data_bank_scope_record)?,
+                    "DataBankScopeWrite": object_keys(&data_bank_scope_write)?,
+                    "DataBankScopeQuery": object_keys(&data_bank_scope_query)?,
+                }
+            },
             "profileRegistry": {
                 "operationNames": profile_registry_operations,
                 "rawMethods": profile_registry_operations
@@ -1066,6 +1208,24 @@ fn operation_name_to_camel_json_method(operation_name: &str) -> String {
     output
 }
 
+fn operation_name_to_camel_wrapper(operation_name: &str) -> String {
+    let mut output = String::new();
+    let mut uppercase_next = false;
+    for ch in operation_name.chars() {
+        if ch == '_' {
+            uppercase_next = true;
+            continue;
+        }
+        if uppercase_next {
+            output.push(ch.to_ascii_uppercase());
+            uppercase_next = false;
+        } else {
+            output.push(ch);
+        }
+    }
+    output
+}
+
 fn camel_json_method_to_operation_name(method_name: &str) -> Result<String> {
     let stem = method_name
         .strip_suffix("Json")
@@ -1258,6 +1418,468 @@ fn sample_agent_message() -> AgentMessage {
         body: "Bridge validation fixture message.".to_owned(),
         correlation_id: Some("validation-correlation".to_owned()),
         projection: None,
+    }
+}
+
+fn sample_query_page() -> persistence::QueryPage {
+    persistence::QueryPage {
+        limit: Some(25),
+        offset: Some(5),
+    }
+}
+
+fn sample_message_block_record() -> persistence::MessageBlockRecord {
+    persistence::MessageBlockRecord {
+        block_id: sample_message_block_id(),
+        message_id: sample_message_id(),
+        ordinal: 0,
+        kind: "text".to_owned(),
+        content_json: json!({"text": "Bridge validation block."}),
+        render_policy_json: Some(json!({"mode": "plain"})),
+        metadata_json: json!({"fixture": true}),
+    }
+}
+
+fn sample_message_block_write() -> persistence::MessageBlockWrite {
+    persistence::MessageBlockWrite {
+        block_id: sample_message_block_id(),
+        ordinal: 0,
+        kind: "text".to_owned(),
+        content_json: json!({"text": "Bridge validation block."}),
+        render_policy_json: Some(json!({"mode": "plain"})),
+        metadata_json: json!({"fixture": true}),
+    }
+}
+
+fn sample_durable_message_record() -> persistence::DurableMessageRecord {
+    persistence::DurableMessageRecord {
+        message_id: sample_message_id(),
+        session_id: sample_session_id(),
+        branch_id: Some(sample_conversation_branch_id()),
+        parent_message_id: Some(MessageId::new("validation-parent-message")),
+        previous_message_id: Some(MessageId::new("validation-previous-message")),
+        author_id: "validation-author".to_owned(),
+        author_role: "assistant".to_owned(),
+        status: persistence::DurableMessageStatus::Completed,
+        body: "Bridge validation durable message.".to_owned(),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        blocks: vec![sample_message_block_record()],
+    }
+}
+
+fn sample_durable_message_write() -> persistence::DurableMessageWrite {
+    persistence::DurableMessageWrite {
+        message_id: sample_message_id(),
+        session_id: sample_session_id(),
+        branch_id: Some(sample_conversation_branch_id()),
+        parent_message_id: Some(MessageId::new("validation-parent-message")),
+        previous_message_id: Some(MessageId::new("validation-previous-message")),
+        author_id: "validation-author".to_owned(),
+        author_role: "assistant".to_owned(),
+        status: persistence::DurableMessageStatus::Completed,
+        body: "Bridge validation durable message.".to_owned(),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        blocks: vec![sample_message_block_write()],
+    }
+}
+
+fn sample_message_variant_record() -> persistence::MessageVariantRecord {
+    persistence::MessageVariantRecord {
+        variant_id: sample_message_variant_id(),
+        slot_id: sample_message_slot_id(),
+        source: persistence::MessageVariantSource::Primary,
+        ordinal: 0,
+        status: persistence::MessageVariantStatus::Active,
+        message: sample_durable_message_record(),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_message_variant_write() -> persistence::MessageVariantWrite {
+    persistence::MessageVariantWrite {
+        variant_id: sample_message_variant_id(),
+        slot_id: sample_message_slot_id(),
+        source: persistence::MessageVariantSource::Primary,
+        ordinal: 0,
+        status: persistence::MessageVariantStatus::Active,
+        message: sample_durable_message_write(),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_message_slot_record() -> persistence::MessageSlotRecord {
+    persistence::MessageSlotRecord {
+        slot_id: sample_message_slot_id(),
+        session_id: sample_session_id(),
+        primary_variant_id: sample_message_variant_id(),
+        active_variant_id: Some(sample_message_variant_id()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+        version: 7,
+        primary: sample_message_variant_record(),
+        alternates: vec![persistence::MessageVariantRecord {
+            variant_id: MessageVariantId::new("validation-alternate-variant"),
+            source: persistence::MessageVariantSource::Alternate,
+            ordinal: 1,
+            ..sample_message_variant_record()
+        }],
+    }
+}
+
+fn sample_message_slot_write() -> persistence::MessageSlotWrite {
+    persistence::MessageSlotWrite {
+        slot_id: sample_message_slot_id(),
+        session_id: sample_session_id(),
+        primary_variant_id: sample_message_variant_id(),
+        active_variant_id: Some(sample_message_variant_id()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_message_slot_query() -> persistence::MessageSlotQuery {
+    persistence::MessageSlotQuery {
+        session_id: Some(sample_session_id()),
+        include_alternates: true,
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_message_variant_query() -> persistence::MessageVariantQuery {
+    persistence::MessageVariantQuery {
+        slot_id: Some(sample_message_slot_id()),
+        include_deleted: false,
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_create_chat_message_slot_request() -> persistence::CreateChatMessageSlotRequest {
+    persistence::CreateChatMessageSlotRequest {
+        slot: sample_message_slot_write(),
+        primary_variant: sample_message_variant_write(),
+        branch_id: sample_conversation_branch_id(),
+        expected_branch_head: persistence::BranchHeadExpectation::Message(sample_message_id()),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_create_chat_message_slot_result() -> persistence::CreateChatMessageSlotResult {
+    persistence::CreateChatMessageSlotResult {
+        slot: Some(sample_message_slot_record()),
+        branch: sample_conversation_branch_record(),
+        conflict: Some(persistence::BranchHeadConflict {
+            expected: Some(sample_message_id()),
+            actual: Some(MessageId::new("validation-actual-head-message")),
+        }),
+    }
+}
+
+fn sample_create_chat_message_variant_request() -> persistence::CreateChatMessageVariantRequest {
+    persistence::CreateChatMessageVariantRequest {
+        session_id: sample_session_id(),
+        slot_id: sample_message_slot_id(),
+        variant: sample_message_variant_write(),
+    }
+}
+
+fn sample_create_chat_message_variant_result() -> persistence::CreateChatMessageVariantResult {
+    persistence::CreateChatMessageVariantResult {
+        variant: sample_message_variant_record(),
+    }
+}
+
+fn sample_chat_read_model_query() -> persistence::ChatReadModelQuery {
+    persistence::ChatReadModelQuery {
+        session_id: sample_session_id(),
+        agent_id: sample_agent_id().to_string(),
+        cursor: Some("validation-cursor".to_owned()),
+        limit: Some(25),
+    }
+}
+
+fn sample_chat_read_model_page() -> persistence::ChatReadModelPage {
+    persistence::ChatReadModelPage {
+        items: vec![persistence::ChatReadModelEvent {
+            event_id: "validation-read-event".to_owned(),
+            session_id: sample_session_id(),
+            sequence_id: 1,
+            created_at: sample_timestamp(),
+            kind: persistence::ChatReadModelEventKind::MessageCreated,
+            payload_json: json!({"slot_id": sample_message_slot_id()}),
+        }],
+        latest_cursor: "validation-read-cursor".to_owned(),
+        has_more: true,
+    }
+}
+
+fn sample_chat_event_log_append() -> persistence::ChatEventLogAppend {
+    persistence::ChatEventLogAppend {
+        session_id: sample_session_id(),
+        created_at: sample_timestamp(),
+        kind: "message_created".to_owned(),
+        payload_json: json!({"slot_id": sample_message_slot_id()}),
+    }
+}
+
+fn sample_chat_event_log_query() -> persistence::ChatEventLogQuery {
+    persistence::ChatEventLogQuery {
+        session_id: sample_session_id(),
+        cursor: Some("validation-event-cursor".to_owned()),
+        limit: Some(25),
+    }
+}
+
+fn sample_chat_event_log_page() -> persistence::ChatEventLogPage {
+    persistence::ChatEventLogPage {
+        items: vec![persistence::ChatEventLogEvent {
+            event_id: "validation-log-event".to_owned(),
+            session_id: sample_session_id(),
+            sequence_id: 2,
+            created_at: sample_timestamp(),
+            kind: "message_created".to_owned(),
+            payload_json: json!({"slot_id": sample_message_slot_id()}),
+        }],
+        latest_cursor: "validation-log-cursor".to_owned(),
+        has_more: true,
+    }
+}
+
+fn sample_conversation_branch_record() -> persistence::ConversationBranchRecord {
+    persistence::ConversationBranchRecord {
+        branch_id: sample_conversation_branch_id(),
+        session_id: sample_session_id(),
+        parent_branch_id: Some(ConversationBranchId::new("validation-parent-branch")),
+        parent_message_id: Some(MessageId::new("validation-parent-message")),
+        origin_message_id: Some(MessageId::new("validation-origin-message")),
+        head_message_id: Some(sample_message_id()),
+        label: Some("Validation Branch".to_owned()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+        version: 5,
+    }
+}
+
+fn sample_conversation_branch_write() -> persistence::ConversationBranchWrite {
+    persistence::ConversationBranchWrite {
+        branch_id: sample_conversation_branch_id(),
+        session_id: sample_session_id(),
+        parent_branch_id: Some(ConversationBranchId::new("validation-parent-branch")),
+        parent_message_id: Some(MessageId::new("validation-parent-message")),
+        origin_message_id: Some(MessageId::new("validation-origin-message")),
+        head_message_id: Some(sample_message_id()),
+        label: Some("Validation Branch".to_owned()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_conversation_branch_query() -> persistence::ConversationBranchQuery {
+    persistence::ConversationBranchQuery {
+        session_id: Some(sample_session_id()),
+        parent_branch_id: Some(ConversationBranchId::new("validation-parent-branch")),
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_conversation_branch_state_record() -> persistence::ConversationBranchStateRecord {
+    persistence::ConversationBranchStateRecord {
+        session_id: sample_session_id(),
+        active_branch_id: Some(sample_conversation_branch_id()),
+        updated_at: sample_timestamp(),
+        version: 6,
+    }
+}
+
+fn sample_conversation_snapshot_record() -> persistence::ConversationSnapshotRecord {
+    persistence::ConversationSnapshotRecord {
+        snapshot_id: sample_conversation_snapshot_id(),
+        session_id: sample_session_id(),
+        branch_id: Some(sample_conversation_branch_id()),
+        message_id: Some(sample_message_id()),
+        cursor: Some("validation-snapshot-cursor".to_owned()),
+        label: Some("Validation Snapshot".to_owned()),
+        summary: Some("Validation snapshot summary.".to_owned()),
+        source: persistence::ConversationSnapshotSource::User,
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_conversation_snapshot_write() -> persistence::ConversationSnapshotWrite {
+    persistence::ConversationSnapshotWrite {
+        snapshot_id: sample_conversation_snapshot_id(),
+        session_id: sample_session_id(),
+        branch_id: Some(sample_conversation_branch_id()),
+        message_id: Some(sample_message_id()),
+        cursor: Some("validation-snapshot-cursor".to_owned()),
+        label: Some("Validation Snapshot".to_owned()),
+        summary: Some("Validation snapshot summary.".to_owned()),
+        source: persistence::ConversationSnapshotSource::User,
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_conversation_snapshot_query() -> persistence::ConversationSnapshotQuery {
+    persistence::ConversationSnapshotQuery {
+        session_id: Some(sample_session_id()),
+        branch_id: Some(sample_conversation_branch_id()),
+        message_id: Some(sample_message_id()),
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_conversation_jump_target() -> persistence::ConversationJumpTarget {
+    persistence::ConversationJumpTarget::Snapshot {
+        snapshot_id: sample_conversation_snapshot_id(),
+    }
+}
+
+fn sample_conversation_jump_request() -> persistence::ConversationJumpRequest {
+    persistence::ConversationJumpRequest {
+        session_id: sample_session_id(),
+        target: sample_conversation_jump_target(),
+    }
+}
+
+fn sample_conversation_jump_result() -> persistence::ConversationJumpResult {
+    persistence::ConversationJumpResult {
+        session_id: sample_session_id(),
+        target: sample_conversation_jump_target(),
+        branch_id: Some(sample_conversation_branch_id()),
+        message_id: Some(sample_message_id()),
+        cursor: Some("validation-jump-cursor".to_owned()),
+        snapshot_id: Some(sample_conversation_snapshot_id()),
+    }
+}
+
+fn sample_attachment_link_record() -> persistence::AttachmentLinkRecord {
+    persistence::AttachmentLinkRecord {
+        link_id: sample_attachment_link_id(),
+        attachment_id: sample_attachment_id(),
+        session_id: sample_session_id(),
+        message_id: Some(sample_message_id()),
+        block_id: Some(sample_message_block_id()),
+        scope_id: Some(sample_data_bank_scope_id()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+    }
+}
+
+fn sample_attachment_link_write() -> persistence::AttachmentLinkWrite {
+    persistence::AttachmentLinkWrite {
+        link_id: sample_attachment_link_id(),
+        attachment_id: sample_attachment_id(),
+        session_id: sample_session_id(),
+        message_id: Some(sample_message_id()),
+        block_id: Some(sample_message_block_id()),
+        scope_id: Some(sample_data_bank_scope_id()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+    }
+}
+
+fn sample_attachment_record() -> persistence::AttachmentRecord {
+    persistence::AttachmentRecord {
+        attachment_id: sample_attachment_id(),
+        session_id: sample_session_id(),
+        status: persistence::AttachmentStatus::Active,
+        filename: "validation.txt".to_owned(),
+        mime_type: "text/plain".to_owned(),
+        byte_size: 42,
+        storage_url: Some("file:///validation.txt".to_owned()),
+        download_url: Some("http://example.invalid/validation.txt".to_owned()),
+        thumbnail_url: Some("http://example.invalid/validation-thumb.png".to_owned()),
+        extracted_text: Some("Validation attachment text.".to_owned()),
+        extracted_text_truncated: false,
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+        expires_at: Some(sample_timestamp()),
+        links: vec![sample_attachment_link_record()],
+    }
+}
+
+fn sample_attachment_write() -> persistence::AttachmentWrite {
+    persistence::AttachmentWrite {
+        attachment_id: sample_attachment_id(),
+        session_id: sample_session_id(),
+        status: persistence::AttachmentStatus::Active,
+        filename: "validation.txt".to_owned(),
+        mime_type: "text/plain".to_owned(),
+        byte_size: 42,
+        storage_url: Some("file:///validation.txt".to_owned()),
+        download_url: Some("http://example.invalid/validation.txt".to_owned()),
+        thumbnail_url: Some("http://example.invalid/validation-thumb.png".to_owned()),
+        extracted_text: Some("Validation attachment text.".to_owned()),
+        extracted_text_truncated: false,
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+        expires_at: Some(sample_timestamp()),
+        link: Some(sample_attachment_link_write()),
+    }
+}
+
+fn sample_attachment_query() -> persistence::AttachmentQuery {
+    persistence::AttachmentQuery {
+        session_id: Some(sample_session_id()),
+        message_id: Some(sample_message_id()),
+        block_id: Some(sample_message_block_id()),
+        scope_id: Some(sample_data_bank_scope_id()),
+        status: Some(persistence::AttachmentStatus::Active),
+        include_removed: false,
+        include_expired: true,
+        expired_only: false,
+        now: Some(sample_timestamp()),
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_data_bank_scope_record() -> persistence::DataBankScopeRecord {
+    persistence::DataBankScopeRecord {
+        scope_id: sample_data_bank_scope_id(),
+        session_id: sample_session_id(),
+        status: persistence::DataBankScopeStatus::Active,
+        label: Some("Validation Scope".to_owned()),
+        description: Some("Validation data-bank scope.".to_owned()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_data_bank_scope_write() -> persistence::DataBankScopeWrite {
+    persistence::DataBankScopeWrite {
+        scope_id: sample_data_bank_scope_id(),
+        session_id: sample_session_id(),
+        status: persistence::DataBankScopeStatus::Active,
+        label: Some("Validation Scope".to_owned()),
+        description: Some("Validation data-bank scope.".to_owned()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_data_bank_scope_query() -> persistence::DataBankScopeQuery {
+    persistence::DataBankScopeQuery {
+        session_id: Some(sample_session_id()),
+        status: Some(persistence::DataBankScopeStatus::Active),
+        include_removed: false,
+        page: Some(sample_query_page()),
     }
 }
 
@@ -1585,6 +2207,42 @@ fn sample_context_compaction_artifact() -> ContextCompactionArtifact {
 
 fn sample_session_id() -> SessionId {
     SessionId::new("validation-session")
+}
+
+fn sample_message_slot_id() -> MessageSlotId {
+    MessageSlotId::new("validation-message-slot")
+}
+
+fn sample_message_variant_id() -> MessageVariantId {
+    MessageVariantId::new("validation-message-variant")
+}
+
+fn sample_message_id() -> MessageId {
+    MessageId::new("validation-message")
+}
+
+fn sample_message_block_id() -> MessageBlockId {
+    MessageBlockId::new("validation-message-block")
+}
+
+fn sample_conversation_branch_id() -> ConversationBranchId {
+    ConversationBranchId::new("validation-branch")
+}
+
+fn sample_conversation_snapshot_id() -> ConversationSnapshotId {
+    ConversationSnapshotId::new("validation-snapshot")
+}
+
+fn sample_attachment_id() -> AttachmentId {
+    AttachmentId::new("validation-attachment")
+}
+
+fn sample_attachment_link_id() -> AttachmentLinkId {
+    AttachmentLinkId::new("validation-attachment-link")
+}
+
+fn sample_data_bank_scope_id() -> DataBankScopeId {
+    DataBankScopeId::new("validation-data-bank-scope")
 }
 
 fn sample_agent_id() -> AgentId {

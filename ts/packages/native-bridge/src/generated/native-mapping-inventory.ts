@@ -2,6 +2,465 @@
 
 export const nativeMappingInventory = {
   "families": {
+    "conversation": {
+      "dtoFields": {
+        "AttachmentLinkRecord": [
+          "attachment_id",
+          "block_id",
+          "created_at",
+          "link_id",
+          "message_id",
+          "metadata_json",
+          "scope_id",
+          "session_id"
+        ],
+        "AttachmentLinkWrite": [
+          "attachment_id",
+          "block_id",
+          "created_at",
+          "link_id",
+          "message_id",
+          "metadata_json",
+          "scope_id",
+          "session_id"
+        ],
+        "AttachmentQuery": [
+          "block_id",
+          "expired_only",
+          "include_expired",
+          "include_removed",
+          "message_id",
+          "now",
+          "page",
+          "scope_id",
+          "session_id",
+          "status"
+        ],
+        "AttachmentRecord": [
+          "attachment_id",
+          "byte_size",
+          "created_at",
+          "download_url",
+          "expires_at",
+          "extracted_text",
+          "extracted_text_truncated",
+          "filename",
+          "links",
+          "metadata_json",
+          "mime_type",
+          "session_id",
+          "status",
+          "storage_url",
+          "thumbnail_url",
+          "updated_at"
+        ],
+        "AttachmentWrite": [
+          "attachment_id",
+          "byte_size",
+          "created_at",
+          "download_url",
+          "expires_at",
+          "extracted_text",
+          "extracted_text_truncated",
+          "filename",
+          "link",
+          "metadata_json",
+          "mime_type",
+          "session_id",
+          "status",
+          "storage_url",
+          "thumbnail_url",
+          "updated_at"
+        ],
+        "ChatEventLogAppend": [
+          "created_at",
+          "kind",
+          "payload",
+          "session_id"
+        ],
+        "ChatEventLogEvent": [
+          "created_at",
+          "event_id",
+          "kind",
+          "payload",
+          "sequence_id",
+          "session_id"
+        ],
+        "ChatEventLogPage": [
+          "has_more",
+          "items",
+          "latest_cursor"
+        ],
+        "ChatEventLogQuery": [
+          "cursor",
+          "limit",
+          "session_id"
+        ],
+        "ChatReadModelEvent": [
+          "created_at",
+          "event_id",
+          "kind",
+          "payload",
+          "sequence_id",
+          "session_id"
+        ],
+        "ChatReadModelPage": [
+          "has_more",
+          "items",
+          "latest_cursor"
+        ],
+        "ChatReadModelQuery": [
+          "agent_id",
+          "cursor",
+          "limit",
+          "session_id"
+        ],
+        "ConversationBranchQuery": [
+          "page",
+          "parent_branch_id",
+          "session_id"
+        ],
+        "ConversationBranchRecord": [
+          "branch_id",
+          "created_at",
+          "head_message_id",
+          "label",
+          "metadata_json",
+          "origin_message_id",
+          "parent_branch_id",
+          "parent_message_id",
+          "session_id",
+          "updated_at",
+          "version"
+        ],
+        "ConversationBranchStateRecord": [
+          "active_branch_id",
+          "session_id",
+          "updated_at",
+          "version"
+        ],
+        "ConversationBranchWrite": [
+          "branch_id",
+          "created_at",
+          "head_message_id",
+          "label",
+          "metadata_json",
+          "origin_message_id",
+          "parent_branch_id",
+          "parent_message_id",
+          "session_id",
+          "updated_at"
+        ],
+        "ConversationJumpRequest": [
+          "session_id",
+          "target"
+        ],
+        "ConversationJumpResult": [
+          "branch_id",
+          "cursor",
+          "message_id",
+          "session_id",
+          "snapshot_id",
+          "target"
+        ],
+        "ConversationSnapshotQuery": [
+          "branch_id",
+          "message_id",
+          "page",
+          "session_id"
+        ],
+        "ConversationSnapshotRecord": [
+          "branch_id",
+          "created_at",
+          "cursor",
+          "label",
+          "message_id",
+          "metadata_json",
+          "session_id",
+          "snapshot_id",
+          "source",
+          "summary",
+          "updated_at"
+        ],
+        "ConversationSnapshotWrite": [
+          "branch_id",
+          "created_at",
+          "cursor",
+          "label",
+          "message_id",
+          "metadata_json",
+          "session_id",
+          "snapshot_id",
+          "source",
+          "summary",
+          "updated_at"
+        ],
+        "CreateChatMessageSlotRequest": [
+          "branch_id",
+          "expected_branch_head",
+          "primary_variant",
+          "slot",
+          "updated_at"
+        ],
+        "CreateChatMessageSlotResult": [
+          "branch",
+          "conflict",
+          "slot"
+        ],
+        "CreateChatMessageVariantRequest": [
+          "session_id",
+          "slot_id",
+          "variant"
+        ],
+        "CreateChatMessageVariantResult": [
+          "variant"
+        ],
+        "DataBankScopeQuery": [
+          "include_removed",
+          "page",
+          "session_id",
+          "status"
+        ],
+        "DataBankScopeRecord": [
+          "created_at",
+          "description",
+          "label",
+          "metadata_json",
+          "scope_id",
+          "session_id",
+          "status",
+          "updated_at"
+        ],
+        "DataBankScopeWrite": [
+          "created_at",
+          "description",
+          "label",
+          "metadata_json",
+          "scope_id",
+          "session_id",
+          "status",
+          "updated_at"
+        ],
+        "DurableMessageRecord": [
+          "author_id",
+          "author_role",
+          "blocks",
+          "body",
+          "branch_id",
+          "created_at",
+          "message_id",
+          "metadata_json",
+          "parent_message_id",
+          "previous_message_id",
+          "session_id",
+          "status"
+        ],
+        "DurableMessageWrite": [
+          "author_id",
+          "author_role",
+          "blocks",
+          "body",
+          "branch_id",
+          "created_at",
+          "message_id",
+          "metadata_json",
+          "parent_message_id",
+          "previous_message_id",
+          "session_id",
+          "status"
+        ],
+        "MessageBlockRecord": [
+          "block_id",
+          "content_json",
+          "kind",
+          "message_id",
+          "metadata_json",
+          "ordinal",
+          "render_policy_json"
+        ],
+        "MessageBlockWrite": [
+          "block_id",
+          "content_json",
+          "kind",
+          "metadata_json",
+          "ordinal",
+          "render_policy_json"
+        ],
+        "MessageSlotQuery": [
+          "include_alternates",
+          "page",
+          "session_id"
+        ],
+        "MessageSlotRecord": [
+          "active_variant_id",
+          "alternates",
+          "created_at",
+          "metadata_json",
+          "primary",
+          "primary_variant_id",
+          "session_id",
+          "slot_id",
+          "updated_at",
+          "version"
+        ],
+        "MessageSlotWrite": [
+          "active_variant_id",
+          "created_at",
+          "metadata_json",
+          "primary_variant_id",
+          "session_id",
+          "slot_id",
+          "updated_at"
+        ],
+        "MessageVariantQuery": [
+          "include_deleted",
+          "page",
+          "slot_id"
+        ],
+        "MessageVariantRecord": [
+          "created_at",
+          "message",
+          "metadata_json",
+          "ordinal",
+          "slot_id",
+          "source",
+          "status",
+          "updated_at",
+          "variant_id"
+        ],
+        "MessageVariantWrite": [
+          "created_at",
+          "message",
+          "metadata_json",
+          "ordinal",
+          "slot_id",
+          "source",
+          "status",
+          "updated_at",
+          "variant_id"
+        ]
+      },
+      "namedTypeScriptInterfaces": [
+        "NativeChatReadModelEvent",
+        "NativeChatReadModelPage",
+        "NativeChatEventLogEvent",
+        "NativeChatEventLogPage"
+      ],
+      "operationNames": [
+        "save_message_slot",
+        "save_message_variant",
+        "create_chat_message_slot",
+        "create_chat_message_variant",
+        "chat_read_model_page",
+        "append_chat_event",
+        "query_chat_events",
+        "query_message_slots",
+        "query_message_variants",
+        "select_active_message_variant",
+        "select_active_chat_message_variant",
+        "delete_chat_message_variant",
+        "reorder_chat_message_variants",
+        "delete_message_variant",
+        "reorder_message_variants",
+        "save_conversation_branch",
+        "create_chat_conversation_branch",
+        "ensure_active_chat_conversation_branch",
+        "query_conversation_branches",
+        "get_conversation_branch_state",
+        "select_active_conversation_branch",
+        "update_conversation_branch_head",
+        "save_conversation_snapshot",
+        "create_chat_conversation_snapshot",
+        "query_conversation_snapshots",
+        "resolve_conversation_jump",
+        "save_attachment",
+        "create_chat_attachment",
+        "query_attachments",
+        "remove_attachment",
+        "remove_chat_attachment",
+        "save_data_bank_scope",
+        "create_chat_data_bank_scope",
+        "query_data_bank_scopes",
+        "remove_data_bank_scope",
+        "remove_chat_data_bank_scope"
+      ],
+      "passthroughWrappers": [
+        "saveMessageSlot",
+        "saveMessageVariant",
+        "createChatMessageSlot",
+        "createChatMessageVariant",
+        "chatReadModelPage",
+        "appendChatEvent",
+        "queryChatEvents",
+        "queryMessageSlots",
+        "queryMessageVariants",
+        "selectActiveMessageVariant",
+        "selectActiveChatMessageVariant",
+        "deleteChatMessageVariant",
+        "reorderChatMessageVariants",
+        "deleteMessageVariant",
+        "reorderMessageVariants",
+        "saveConversationBranch",
+        "createChatConversationBranch",
+        "ensureActiveChatConversationBranch",
+        "queryConversationBranches",
+        "getConversationBranchState",
+        "selectActiveConversationBranch",
+        "updateConversationBranchHead",
+        "saveConversationSnapshot",
+        "createChatConversationSnapshot",
+        "queryConversationSnapshots",
+        "resolveConversationJump",
+        "saveAttachment",
+        "createChatAttachment",
+        "queryAttachments",
+        "removeAttachment",
+        "removeChatAttachment",
+        "saveDataBankScope",
+        "createChatDataBankScope",
+        "queryDataBankScopes",
+        "removeDataBankScope",
+        "removeChatDataBankScope"
+      ],
+      "rawMethods": [
+        "saveMessageSlotJson",
+        "saveMessageVariantJson",
+        "createChatMessageSlotJson",
+        "createChatMessageVariantJson",
+        "chatReadModelPageJson",
+        "appendChatEventJson",
+        "queryChatEventsJson",
+        "queryMessageSlotsJson",
+        "queryMessageVariantsJson",
+        "selectActiveMessageVariantJson",
+        "selectActiveChatMessageVariantJson",
+        "deleteChatMessageVariantJson",
+        "reorderChatMessageVariantsJson",
+        "deleteMessageVariantJson",
+        "reorderMessageVariantsJson",
+        "saveConversationBranchJson",
+        "createChatConversationBranchJson",
+        "ensureActiveChatConversationBranchJson",
+        "queryConversationBranchesJson",
+        "getConversationBranchStateJson",
+        "selectActiveConversationBranchJson",
+        "updateConversationBranchHeadJson",
+        "saveConversationSnapshotJson",
+        "createChatConversationSnapshotJson",
+        "queryConversationSnapshotsJson",
+        "resolveConversationJumpJson",
+        "saveAttachmentJson",
+        "createChatAttachmentJson",
+        "queryAttachmentsJson",
+        "removeAttachmentJson",
+        "removeChatAttachmentJson",
+        "saveDataBankScopeJson",
+        "createChatDataBankScopeJson",
+        "queryDataBankScopesJson",
+        "removeDataBankScopeJson",
+        "removeChatDataBankScopeJson"
+      ]
+    },
     "modelProvider": {
       "dtoFields": {
         "RawModelProviderAffectedProfile": [

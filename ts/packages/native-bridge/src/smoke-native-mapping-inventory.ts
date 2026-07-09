@@ -5,13 +5,22 @@ import { nativeMappingInventory } from "./generated/native-mapping-inventory.js"
 
 const sourcePath = fileURLToPath(new URL("./index.ts", import.meta.url));
 const source = readFileSync(sourcePath, "utf8");
+const conversation = nativeMappingInventory.families.conversation;
 const profileRegistry = nativeMappingInventory.families.profileRegistry;
 const modelProvider = nativeMappingInventory.families.modelProvider;
 
 const nativeBridgeBinding = extractInterface("NativeBridgeBinding");
+assertRawMethods("conversation", conversation.rawMethods);
 assertRawMethods("profile registry", profileRegistry.rawMethods);
 assertRawMethods("model provider", modelProvider.rawMethods);
 
+assertGeneratedDtoFieldsNonEmpty("conversation", conversation.dtoFields);
+assertNamedConversationInterfaces();
+assertPassthroughWrappers(
+  "conversation",
+  conversation.passthroughWrappers,
+  conversation.rawMethods,
+);
 assertDtoFields(profileRegistry.dtoFields);
 assertDtoFields(modelProvider.dtoFields);
 
@@ -163,11 +172,67 @@ assertRawReads("toNativeModelProviderRefreshPlan", "plan", [
 
 console.log("native mapping inventory smoke passed");
 
+function assertGeneratedDtoFieldsNonEmpty(
+  label: string,
+  dtoFields: Record<string, readonly string[]>,
+) {
+  for (const [dtoName, fields] of Object.entries(dtoFields)) {
+    assert(
+      fields.length > 0,
+      `${label} generated DTO ${dtoName} has no fields`,
+    );
+  }
+}
+
+function assertNamedConversationInterfaces() {
+  const interfaceFieldMap: Record<string, readonly string[]> = {
+    NativeChatReadModelEvent: conversation.dtoFields.ChatReadModelEvent,
+    NativeChatReadModelPage: conversation.dtoFields.ChatReadModelPage,
+    NativeChatEventLogEvent: conversation.dtoFields.ChatEventLogEvent,
+    NativeChatEventLogPage: conversation.dtoFields.ChatEventLogPage,
+  };
+  for (const interfaceName of conversation.namedTypeScriptInterfaces) {
+    const fields = interfaceFieldMap[interfaceName];
+    assert(fields, `missing generated field map for ${interfaceName}`);
+    const block = extractInterface(interfaceName);
+    for (const field of fields) {
+      assert(
+        new RegExp(`\\b${escapeRegExp(field)}[?:]?`).test(block),
+        `${interfaceName} is missing generated-checked conversation field ${field}`,
+      );
+    }
+  }
+}
+
 function assertRawMethods(label: string, methods: readonly string[]) {
   for (const method of methods) {
     assert(
       nativeBridgeBinding.includes(`${method}(`),
       `NativeBridgeBinding is missing generated-checked ${label} raw method ${method}`,
+    );
+  }
+}
+
+function assertPassthroughWrappers(
+  label: string,
+  wrappers: readonly string[],
+  rawMethods: readonly string[],
+) {
+  assert.equal(
+    wrappers.length,
+    rawMethods.length,
+    `${label} wrapper/raw method inventory length mismatch`,
+  );
+  const moduleInterface = extractInterface("NativeBridgeModule");
+  for (const [index, wrapper] of wrappers.entries()) {
+    const rawMethod = rawMethods[index];
+    assert(
+      moduleInterface.includes(`${wrapper}(`),
+      `NativeBridgeModule is missing generated-checked ${label} wrapper ${wrapper}`,
+    );
+    assert(
+      source.includes(`binding.${rawMethod}(JSON.stringify(`),
+      `${label} wrapper ${wrapper} must pass input through ${rawMethod} with JSON.stringify`,
     );
   }
 }

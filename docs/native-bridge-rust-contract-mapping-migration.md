@@ -124,7 +124,8 @@ Current implementation:
   parameter counts, method names, and return-kind shape.
 - Task #5302 added `codegen:native-mapping-inventory` and
   `check:native-mapping-inventory` for generated-check mapper coverage. The
-  first covered families are model providers and profile registry.
+  first covered families are model providers, profile registry, and
+  conversation/chat read models.
 
 ### 1a. Generated-Check Model Provider Mapper Inventory
 
@@ -142,12 +143,23 @@ The artifact currently covers these bridge families:
   `plan_profile_registry_mutation`, `create_profile_registry_record`,
   `update_profile_registry_record`, `list_profile_registry_records`,
   `get_profile_registry_record`, and `purge_profile`;
+- conversation/chat manifest operations for message slots, message variants,
+  chat read-model pages, chat event logs, conversation branches, branch state,
+  snapshots, jumps, attachments, and data-bank scopes;
 - raw method names derived from those operations;
+- passthrough wrapper names for conversation operations that intentionally keep
+  Rust's persistence-contract JSON as the bridge authority instead of adding
+  TypeScript mapper code;
+- named TypeScript interface inventories for Rusty View chat read-model and
+  event-log DTOs;
 - raw DTO field inventories for model provider records, credentials, refresh
   impacts, affected profiles, refresh plans, and refresh actions;
 - raw DTO field inventories for profile registry records, writes, updates,
   mutation requests/plans, mutation implications, source asset refs, derived
   runtime refs, import/export metadata, purge reports, and purge table counts.
+- Rust persistence-contract DTO field inventories for conversation branches,
+  snapshots, message slots, variants, durable messages, read-model pages, chat
+  events, attachments, attachment links, and data-bank scopes.
 
 All DTO field inventories are derived from Rust-authored sample serialization.
 
@@ -156,7 +168,10 @@ All DTO field inventories are derived from Rust-authored sample serialization.
 1. The generated artifact has not drifted from Rust codegen output.
 2. `@rusty-crew/native-bridge` smoke coverage verifies that
    `native-bridge/src/index.ts` still declares the raw methods/interfaces and
-   that covered converter functions read the generated-checked fields.
+   that covered converter functions read the generated-checked fields. For
+   conversation/chat operations, the same smoke verifies the intentionally raw
+   passthrough wrappers call their matching JSON bridge methods with
+   `JSON.stringify`.
 
 This is not a full client generator. It is a generated-check inventory that
 keeps the handwritten ergonomic wrapper reviewable while making field omissions
