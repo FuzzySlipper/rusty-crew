@@ -286,6 +286,13 @@ import {
   type ChatStreamSubscriber,
 } from "./service-chat-stream-routes.js";
 import {
+  appendChatEvent as appendChatEventFromModule,
+  chatSubscribers as chatSubscribersFromModule,
+  listChatEventsAfterCursor as listChatEventsAfterCursorFromModule,
+  nativeChatEventToChatEvent,
+  type ChatEventLogContext,
+} from "./service-chat-event-log.js";
+import {
   isBrowserCorsRoute,
   matchServiceApiRoute,
 } from "./service-route-table.js";
@@ -499,7 +506,12 @@ function roleplayRouteContext(state: ServiceState): RoleplayRouteContext {
       applyServiceRuntimeConfigFromDisk(state, options),
     serviceSessionById: (sessionId) => serviceSessionById(state, sessionId),
     listChatEventsAfterCursor: (session, afterCursor, limit) =>
-      listChatEventsAfterCursor(state, session, afterCursor, limit),
+      listChatEventsAfterCursorFromModule(
+        chatEventLogContext(state),
+        session,
+        afterCursor,
+        limit,
+      ),
     generateRoleplayAssistantAlternative: (input) =>
       generateRoleplayAssistantAlternativeViaWake(state, input),
   };
@@ -597,6 +609,14 @@ function adapterLifecycleContext(
       }),
     channelWakePolicyForSession: (session) =>
       channelWakePolicyForSession(state, session),
+  };
+}
+
+function chatEventLogContext(state: ServiceState): ChatEventLogContext {
+  return {
+    bridge: state.bridge,
+    chatSubscribersBySession: state.chatSubscribersBySession,
+    now: state.now,
   };
 }
 
@@ -977,7 +997,8 @@ async function handleHttpRequest(
         listSessions: () => state.bridge.listSessions(),
         streamReplayEvents: (session, cursor, streamUrl) =>
           streamReplayEvents(state, session, cursor, streamUrl),
-        subscribersForSession: (sessionId) => chatSubscribers(state, sessionId),
+        subscribersForSession: (sessionId) =>
+          chatSubscribersFromModule(chatEventLogContext(state), sessionId),
         deleteSubscribersForSession: (sessionId) =>
           state.chatSubscribersBySession.delete(sessionId),
         timers: state.timers,
@@ -989,7 +1010,12 @@ async function handleHttpRequest(
           state.bridge.projectBodyStateJson(sessionId),
         effectiveSessionDefaults: effectiveDefaultsForChatSession,
         listChatEvents: (session, cursor, limit) =>
-          listChatEventsAfterCursor(state, session, cursor, limit),
+          listChatEventsAfterCursorFromModule(
+            chatEventLogContext(state),
+            session,
+            cursor,
+            limit,
+          ),
         chatReadModelPage: (input) => rustyViewChatReadModelPage(state, input),
         getToolCallDebugDetail: (input) =>
           rustyViewToolCallDebugDetail(state, input),
@@ -5158,25 +5184,29 @@ async function submitRustyViewChatMessage(
       now,
     }),
   );
-  const inbound = await appendChatEvent(state, input.session.sessionId, {
-    kind: "message_created",
-    payload: {
-      message_id: messageId,
-      slot_id: slotId,
-      primary_variant_id: primaryVariantId,
-      branch_id: branch.branch_id,
-      parent_message_id: branch.head_message_id,
-      previous_message_id: branch.head_message_id,
-      role: input.actor.kind === "agent" ? "assistant" : "user",
-      actor: input.actor,
-      body: input.body,
-      ...(speakerIdentity === undefined
-        ? {}
-        : { speaker_identity: speakerIdentity }),
-      correlation_id: correlationId,
-      reason: input.reason,
+  const inbound = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "message_created",
+      payload: {
+        message_id: messageId,
+        slot_id: slotId,
+        primary_variant_id: primaryVariantId,
+        branch_id: branch.branch_id,
+        parent_message_id: branch.head_message_id,
+        previous_message_id: branch.head_message_id,
+        role: input.actor.kind === "agent" ? "assistant" : "user",
+        actor: input.actor,
+        body: input.body,
+        ...(speakerIdentity === undefined
+          ? {}
+          : { speaker_identity: speakerIdentity }),
+        correlation_id: correlationId,
+        reason: input.reason,
+      },
     },
-  });
+  );
   const wakeReport = await submitServiceTurn(state, {
     sessionId: input.session.sessionId,
     from: input.actor.id,
@@ -5331,8 +5361,8 @@ async function rustyViewSessionContextUsage(
   const activeMcpBindings = mcpBindings.filter(
     (binding) => binding.status === undefined || binding.status === "active",
   );
-  const sampledEvents = await listChatEventsAfterCursor(
-    state,
+  const sampledEvents = await listChatEventsAfterCursorFromModule(
+    chatEventLogContext(state),
     input.session,
     undefined,
     1_000,
@@ -5827,10 +5857,14 @@ async function createRustyViewConversationBranch(
       updated_at: now,
     },
   })) as ConversationBranchRecord;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "conversation_branch_created",
-    payload: { branch },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "conversation_branch_created",
+      payload: { branch },
+    },
+  );
   return { status: "created", branch, latest_cursor: event.event_id };
 }
 
@@ -5848,14 +5882,18 @@ async function selectRustyViewActiveConversationBranch(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "selected";
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "conversation_active_branch_selected",
-    payload: {
-      active_branch_id: result.state.active_branch_id,
-      conflict: result.conflict,
-      state: result.state,
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "conversation_active_branch_selected",
+      payload: {
+        active_branch_id: result.state.active_branch_id,
+        conflict: result.conflict,
+        state: result.state,
+      },
     },
-  });
+  );
   return {
     status,
     state: result.state,
@@ -5878,15 +5916,19 @@ async function updateRustyViewConversationBranchHead(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "updated";
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "conversation_branch_head_updated",
-    payload: {
-      branch_id: input.branchId,
-      head_message_id: result.branch.head_message_id,
-      conflict: result.conflict,
-      branch: result.branch,
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "conversation_branch_head_updated",
+      payload: {
+        branch_id: input.branchId,
+        head_message_id: result.branch.head_message_id,
+        conflict: result.conflict,
+        branch: result.branch,
+      },
     },
-  });
+  );
   return {
     status,
     branch: result.branch,
@@ -5922,10 +5964,14 @@ async function createRustyViewConversationSnapshot(
     },
   })) as { snapshot: ConversationSnapshotRecord };
   const snapshot = result.snapshot;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "conversation_snapshot_created",
-    payload: { snapshot },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "conversation_snapshot_created",
+      payload: { snapshot },
+    },
+  );
   return { status: "created", snapshot, latest_cursor: event.event_id };
 }
 
@@ -5983,18 +6029,26 @@ async function createRustyViewAttachment(
     attachment: AttachmentRecord;
   };
   const attachment = result.attachment;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind:
-      result.status === "updated"
-        ? "attachment_updated"
-        : "attachment_uploaded",
-    payload: { attachment },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind:
+        result.status === "updated"
+          ? "attachment_updated"
+          : "attachment_uploaded",
+      payload: { attachment },
+    },
+  );
   if (link.message_id || link.block_id || link.scope_id) {
-    await appendChatEvent(state, input.session.sessionId, {
-      kind: "attachment_linked",
-      payload: { attachment_id: attachmentId, link, attachment },
-    });
+    await appendChatEventFromModule(
+      chatEventLogContext(state),
+      input.session.sessionId,
+      {
+        kind: "attachment_linked",
+        payload: { attachment_id: attachmentId, link, attachment },
+      },
+    );
   }
   return {
     status: result.status,
@@ -6036,10 +6090,14 @@ async function removeRustyViewAttachment(
     attachment_id: input.attachmentId,
     updated_at: state.now(),
   })) as AttachmentRecord;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "attachment_removed",
-    payload: { attachment_id: input.attachmentId, attachment: removed },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "attachment_removed",
+      payload: { attachment_id: input.attachmentId, attachment: removed },
+    },
+  );
   return {
     status: "removed",
     attachment: removed,
@@ -6074,10 +6132,14 @@ async function createRustyViewDataBankScope(
     scope: DataBankScopeRecord;
   };
   const scope = result.scope;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "data_bank_scope_created",
-    payload: { scope },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "data_bank_scope_created",
+      payload: { scope },
+    },
+  );
   return {
     status: result.status,
     scope,
@@ -6114,10 +6176,14 @@ async function removeRustyViewDataBankScope(
     scope_id: input.scopeId,
     updated_at: state.now(),
   })) as DataBankScopeRecord;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "data_bank_scope_removed",
-    payload: { scope_id: input.scopeId, scope: removed },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "data_bank_scope_removed",
+      payload: { scope_id: input.scopeId, scope: removed },
+    },
+  );
   return { status: "removed", scope: removed, latest_cursor: event.event_id };
 }
 
@@ -6241,10 +6307,14 @@ async function createRustyViewMessageSlot(
     };
   }
   const slot = result.slot;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "message_slot_created",
-    payload: { slot },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "message_slot_created",
+      payload: { slot },
+    },
+  );
   return { status: "created", slot, latest_cursor: event.event_id };
 }
 
@@ -6295,10 +6365,14 @@ async function createRustyViewMessageVariant(
     }),
   })) as { variant: MessageVariantRecord };
   const variant = result.variant;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "message_variant_created",
-    payload: { slot_id: input.slotId, variant },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "message_variant_created",
+      payload: { slot_id: input.slotId, variant },
+    },
+  );
   return { status: "created", variant, latest_cursor: event.event_id };
 }
 
@@ -6312,10 +6386,14 @@ async function deleteRustyViewMessageVariant(
     variant_id: input.variantId,
     updated_at: state.now(),
   })) as MessageSlotRecord;
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "message_variant_deleted",
-    payload: { slot_id: input.slotId, variant_id: input.variantId, slot },
-  });
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "message_variant_deleted",
+      payload: { slot_id: input.slotId, variant_id: input.variantId, slot },
+    },
+  );
   return { status: "deleted", slot, latest_cursor: event.event_id };
 }
 
@@ -6329,14 +6407,18 @@ async function reorderRustyViewMessageVariants(
     ordered_variant_ids: input.orderedVariantIds,
     updated_at: state.now(),
   })) as MessageVariantRecord[];
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "message_variants_reordered",
-    payload: {
-      slot_id: input.slotId,
-      ordered_variant_ids: input.orderedVariantIds,
-      variants,
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "message_variants_reordered",
+      payload: {
+        slot_id: input.slotId,
+        ordered_variant_ids: input.orderedVariantIds,
+        variants,
+      },
     },
-  });
+  );
   return { status: "reordered", variants, latest_cursor: event.event_id };
 }
 
@@ -6360,15 +6442,19 @@ async function selectRustyViewActiveMessageVariant(
     conflict?: { expected?: string | null; actual?: string | null } | null;
   };
   const status = result.conflict ? "conflict" : "selected";
-  const event = await appendChatEvent(state, input.session.sessionId, {
-    kind: "message_active_variant_selected",
-    payload: {
-      slot_id: input.slotId,
-      active_variant_id: result.slot.active_variant_id,
-      conflict: result.conflict,
-      slot: result.slot,
+  const event = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "message_active_variant_selected",
+      payload: {
+        slot_id: input.slotId,
+        active_variant_id: result.slot.active_variant_id,
+        conflict: result.conflict,
+        slot: result.slot,
+      },
     },
-  });
+  );
   return {
     status,
     slot: result.slot,
@@ -6532,14 +6618,18 @@ async function executeRustyViewChatCommand(
   state: ServiceState,
   input: ExecuteChatCommandInput,
 ): Promise<ExecuteChatCommandResult> {
-  const started = await appendChatEvent(state, input.session.sessionId, {
-    kind: "command_started",
-    payload: {
-      command: input.command,
-      actor: input.actor,
-      request_id: input.requestId,
+  const started = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    input.session.sessionId,
+    {
+      kind: "command_started",
+      payload: {
+        command: input.command,
+        actor: input.actor,
+        request_id: input.requestId,
+      },
     },
-  });
+  );
   const routed = routeSlashCommand({
     text: input.command,
     session: slashCommandSession(input.session),
@@ -6669,11 +6759,15 @@ async function completeChatCommand(
   sessionId: SessionId,
   result: ExecuteChatCommandResult,
 ): Promise<ExecuteChatCommandResult> {
-  const completed = await appendChatEvent(state, sessionId, {
-    kind:
-      result.status === "completed" ? "command_completed" : "command_failed",
-    payload: { ...result },
-  });
+  const completed = await appendChatEventFromModule(
+    chatEventLogContext(state),
+    sessionId,
+    {
+      kind:
+        result.status === "completed" ? "command_completed" : "command_failed",
+      payload: { ...result },
+    },
+  );
   return {
     ...result,
     latest_cursor: completed.event_id,
@@ -6744,25 +6838,33 @@ async function appendCoreEventsToChatLog(
       event.type === "completion_packet_delivered" &&
       event.packet.sessionId === session.sessionId
     ) {
-      await appendChatEvent(state, session.sessionId, {
-        kind: "assistant_message_completed",
-        payload: {
-          status: event.packet.status,
-          summary: event.packet.summary,
-          wake_id: wakeId,
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "assistant_message_completed",
+          payload: {
+            status: event.packet.status,
+            summary: event.packet.summary,
+            wake_id: wakeId,
+          },
         },
-      });
+      );
     } else if (
       event.type === "brain_actions_accepted" &&
       event.sessionId === session.sessionId
     ) {
-      await appendChatEvent(state, session.sessionId, {
-        kind: "unknown",
-        payload: {
-          source_event_type: event.type,
-          accepted_action_count: event.count,
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "unknown",
+          payload: {
+            source_event_type: event.type,
+            accepted_action_count: event.count,
+          },
         },
-      });
+      );
     }
   }
 }
@@ -6775,81 +6877,121 @@ async function appendBrainEventToChatLog(
 ): Promise<void> {
   switch (event.type) {
     case "started":
-      await appendChatEvent(state, session.sessionId, {
-        kind: "assistant_turn_started",
-        payload: { wake_id: wakeId },
-      });
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "assistant_turn_started",
+          payload: { wake_id: wakeId },
+        },
+      );
       return;
     case "text_delta":
-      await appendChatEvent(state, session.sessionId, {
-        kind: "assistant_text_delta",
-        payload: { wake_id: wakeId, text: event.text },
-      });
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "assistant_text_delta",
+          payload: { wake_id: wakeId, text: event.text },
+        },
+      );
       return;
     case "reasoning_delta":
-      await appendChatEvent(state, session.sessionId, {
-        kind: "assistant_reasoning_delta",
-        payload: {
-          wake_id: wakeId,
-          text: event.text,
-          visibility: "reasoning",
-          ...(event.format === undefined ? {} : { format: event.format }),
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "assistant_reasoning_delta",
+          payload: {
+            wake_id: wakeId,
+            text: event.text,
+            visibility: "reasoning",
+            ...(event.format === undefined ? {} : { format: event.format }),
+          },
         },
-      });
+      );
       return;
     case "phase_change":
-      await appendChatEvent(state, session.sessionId, {
-        kind: "phase_change",
-        payload: {
-          wake_id: wakeId,
-          phase: event.phase,
-          ...(event.message === undefined ? {} : { message: event.message }),
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "phase_change",
+          payload: {
+            wake_id: wakeId,
+            phase: event.phase,
+            ...(event.message === undefined ? {} : { message: event.message }),
+          },
         },
-      });
+      );
       return;
     case "provider_status":
-      await appendChatEvent(state, session.sessionId, {
-        kind: "provider_status",
-        payload: {
-          wake_id: wakeId,
-          level: event.level,
-          message: event.message,
-          ...(event.metadataJson === undefined
-            ? {}
-            : { metadata_json: event.metadataJson }),
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "provider_status",
+          payload: {
+            wake_id: wakeId,
+            level: event.level,
+            message: event.message,
+            ...(event.metadataJson === undefined
+              ? {}
+              : { metadata_json: event.metadataJson }),
+          },
         },
-      });
+      );
       return;
     case "tool_call_started":
-      await appendChatEvent(state, session.sessionId, {
-        kind: "tool_call_started",
-        payload: {
-          wake_id: wakeId,
-          tool_call_id: chatToolCallId(wakeId, event.toolName, event.metadata),
-          tool_name: event.toolName,
-          debug_detail_id: event.metadata?.debugDetailId,
-          metadata: event.metadata,
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "tool_call_started",
+          payload: {
+            wake_id: wakeId,
+            tool_call_id: chatToolCallId(
+              wakeId,
+              event.toolName,
+              event.metadata,
+            ),
+            tool_name: event.toolName,
+            debug_detail_id: event.metadata?.debugDetailId,
+            metadata: event.metadata,
+          },
         },
-      });
+      );
       return;
     case "tool_call_finished":
-      await appendChatEvent(state, session.sessionId, {
-        kind: event.isError ? "tool_call_failed" : "tool_call_completed",
-        payload: {
-          wake_id: wakeId,
-          tool_call_id: chatToolCallId(wakeId, event.toolName, event.metadata),
-          tool_name: event.toolName,
-          is_error: event.isError,
-          debug_detail_id: event.metadata?.debugDetailId,
-          metadata: event.metadata,
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: event.isError ? "tool_call_failed" : "tool_call_completed",
+          payload: {
+            wake_id: wakeId,
+            tool_call_id: chatToolCallId(
+              wakeId,
+              event.toolName,
+              event.metadata,
+            ),
+            tool_name: event.toolName,
+            is_error: event.isError,
+            debug_detail_id: event.metadata?.debugDetailId,
+            metadata: event.metadata,
+          },
         },
-      });
+      );
       return;
     case "finished":
-      await appendChatEvent(state, session.sessionId, {
-        kind: "assistant_turn_finished",
-        payload: { wake_id: wakeId },
-      });
+      await appendChatEventFromModule(
+        chatEventLogContext(state),
+        session.sessionId,
+        {
+          kind: "assistant_turn_finished",
+          payload: { wake_id: wakeId },
+        },
+      );
       return;
   }
 }
@@ -6927,8 +7069,8 @@ async function ensureChatWakeTerminalEventsFromChatLog(
     allowWithoutAssistantTurn?: boolean;
   },
 ): Promise<void> {
-  const events = await listChatEventsAfterCursor(
-    state,
+  const events = await listChatEventsAfterCursorFromModule(
+    chatEventLogContext(state),
     session,
     undefined,
     1_000,
@@ -6957,31 +7099,39 @@ async function ensureChatWakeTerminalEventsFromChatLog(
     !wakeEvents.some((event) => event.kind === "assistant_turn_finished");
   const summary = input.summary?.trim();
   if (needsCompletion && summary) {
-    await appendChatEvent(state, session.sessionId, {
-      kind: "assistant_message_completed",
-      payload: {
-        status: input.status,
-        summary,
-        wake_id: wakeId,
-        source: input.source,
-        ...(input.reasonCode === undefined
-          ? {}
-          : { reason_code: input.reasonCode }),
+    await appendChatEventFromModule(
+      chatEventLogContext(state),
+      session.sessionId,
+      {
+        kind: "assistant_message_completed",
+        payload: {
+          status: input.status,
+          summary,
+          wake_id: wakeId,
+          source: input.source,
+          ...(input.reasonCode === undefined
+            ? {}
+            : { reason_code: input.reasonCode }),
+        },
       },
-    });
+    );
   }
   if (needsFinished) {
-    await appendChatEvent(state, session.sessionId, {
-      kind: "assistant_turn_finished",
-      payload: {
-        wake_id: wakeId,
-        source: input.source,
-        status: input.status,
-        ...(input.reasonCode === undefined
-          ? {}
-          : { reason_code: input.reasonCode }),
+    await appendChatEventFromModule(
+      chatEventLogContext(state),
+      session.sessionId,
+      {
+        kind: "assistant_turn_finished",
+        payload: {
+          wake_id: wakeId,
+          source: input.source,
+          status: input.status,
+          ...(input.reasonCode === undefined
+            ? {}
+            : { reason_code: input.reasonCode }),
+        },
       },
-    });
+    );
   }
 }
 
@@ -6995,7 +7145,12 @@ async function buildChatWakeFailureSummary(
   if (!session || !wakeId) return base;
 
   const events = (
-    await listChatEventsAfterCursor(state, session, undefined, 1_000)
+    await listChatEventsAfterCursorFromModule(
+      chatEventLogContext(state),
+      session,
+      undefined,
+      1_000,
+    )
   ).filter((event) => {
     const payload = event.payload;
     return isRecord(payload) && payload.wake_id === wakeId;
@@ -7008,42 +7163,6 @@ async function buildChatWakeFailureSummary(
     sessionId: session.sessionId,
     toolDebugLookup: state.toolCallDebugStore,
   });
-}
-
-async function appendChatEvent(
-  state: ServiceState,
-  sessionId: SessionId,
-  event: Pick<ChatEvent, "kind" | "payload">,
-): Promise<ChatEvent> {
-  const chatEvent = nativeChatEventToChatEvent(
-    await state.bridge.appendChatEvent({
-      session_id: sessionId,
-      created_at: state.now(),
-      kind: event.kind,
-      payload: event.payload,
-    }),
-  );
-  const subscribers = state.chatSubscribersBySession.get(sessionId);
-  if (subscribers !== undefined) {
-    for (const subscriber of subscribers) {
-      subscriber.write(chatEvent);
-    }
-  }
-  return chatEvent;
-}
-
-function nativeChatEventToChatEvent(value: unknown): ChatEvent {
-  const record = value as ChatEvent;
-  return {
-    event_id: String(record.event_id),
-    session_id: String(record.session_id),
-    sequence_id: Number(record.sequence_id),
-    created_at: String(record.created_at),
-    kind: (typeof record.kind === "string"
-      ? record.kind
-      : "unknown") as ChatEvent["kind"],
-    payload: isRecord(record.payload) ? record.payload : {},
-  };
 }
 
 interface ContextCompactionDebugEventInput {
@@ -7065,34 +7184,46 @@ async function emitContextCompactionDebugEvents(
 ): Promise<{ events: ChatEvent[]; latest_cursor: string }> {
   const basePayload = contextDebugPayload(session.sessionId, input);
   const events = [
-    await appendChatEvent(state, session.sessionId, {
-      kind: "context_status",
-      payload: {
-        ...basePayload,
-        status: input.fail ? "will_fail" : "ready",
+    await appendChatEventFromModule(
+      chatEventLogContext(state),
+      session.sessionId,
+      {
+        kind: "context_status",
+        payload: {
+          ...basePayload,
+          status: input.fail ? "will_fail" : "ready",
+        },
       },
-    }),
-    await appendChatEvent(state, session.sessionId, {
-      kind: "context_compaction_started",
-      payload: {
-        ...basePayload,
-        status: "started",
+    ),
+    await appendChatEventFromModule(
+      chatEventLogContext(state),
+      session.sessionId,
+      {
+        kind: "context_compaction_started",
+        payload: {
+          ...basePayload,
+          status: "started",
+        },
       },
-    }),
+    ),
   ];
   events.push(
-    await appendChatEvent(state, session.sessionId, {
-      kind: input.fail
-        ? "context_compaction_failed"
-        : "context_compaction_completed",
-      payload: {
-        ...basePayload,
-        status: input.fail ? "failed" : "completed",
-        reason_code: input.fail
-          ? (input.reasonCode ?? "debug_context_compaction_failed")
-          : input.reasonCode,
+    await appendChatEventFromModule(
+      chatEventLogContext(state),
+      session.sessionId,
+      {
+        kind: input.fail
+          ? "context_compaction_failed"
+          : "context_compaction_completed",
+        payload: {
+          ...basePayload,
+          status: input.fail ? "failed" : "completed",
+          reason_code: input.fail
+            ? (input.reasonCode ?? "debug_context_compaction_failed")
+            : input.reasonCode,
+        },
       },
-    }),
+    ),
   );
   return {
     events,
@@ -7131,23 +7262,6 @@ function boundedPercent(value: number | undefined): number | undefined {
   return Math.max(0, Math.min(100, Math.trunc(value)));
 }
 
-async function listChatEventsAfterCursor(
-  state: ServiceState,
-  session: SessionState,
-  cursor: string | undefined,
-  limit: number,
-): Promise<readonly ChatEvent[]> {
-  if (limit <= 0) return [];
-  const page = await state.bridge.queryChatEvents({
-    session_id: session.sessionId,
-    cursor: cursor ?? null,
-    limit,
-  });
-  return ((page as { items?: unknown[] }).items ?? []).map(
-    nativeChatEventToChatEvent,
-  );
-}
-
 async function streamReplayEvents(
   state: ServiceState,
   session: SessionState,
@@ -7156,8 +7270,8 @@ async function streamReplayEvents(
 ): Promise<readonly ChatEvent[]> {
   const limit = optionalInteger(url.searchParams.get("limit")) ?? 500;
   const after = chatCursorSequence(cursor, session.sessionId);
-  const events = await listChatEventsAfterCursor(
-    state,
+  const events = await listChatEventsAfterCursorFromModule(
+    chatEventLogContext(state),
     session,
     cursor,
     Math.min(Math.max(limit, 1), 1_000),
@@ -7190,17 +7304,6 @@ function chatCursorSequence(
   if (!cursor.startsWith(prefix)) return 0;
   const sequence = Number(cursor.slice(prefix.length));
   return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : 0;
-}
-
-function chatSubscribers(
-  state: ServiceState,
-  sessionId: SessionId,
-): Set<ChatStreamSubscriber> {
-  const existing = state.chatSubscribersBySession.get(sessionId);
-  if (existing !== undefined) return existing;
-  const subscribers = new Set<ChatStreamSubscriber>();
-  state.chatSubscribersBySession.set(sessionId, subscribers);
-  return subscribers;
 }
 
 async function submitServiceTurn(
