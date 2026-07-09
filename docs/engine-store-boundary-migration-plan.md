@@ -70,6 +70,54 @@ The first extraction should be `BodyQueueStore` or `SchedulerStore`; both have
 small method sets and already have engine behavior tests that can move from
 SQLite-backed fixtures to fake stores.
 
+## Landed Slices
+
+### Body queue store port
+
+Task #5300's initial slice extracted the body follow-up queue behavior behind
+`BodyQueueStore` in `crates/core/core-engine/src/body_queue.rs`.
+
+The port is intentionally narrow:
+
+- save a body follow-up message;
+- expire pending follow-up messages at the current engine time;
+- load follow-up messages by queue filter.
+
+`CoreCoordinationStore` implements the port, while the body-queue unit tests use
+a fake in-memory implementation. That proves the first engine behavior slice can
+be tested without constructing a SQLite or Postgres coordination store.
+
+This is a migrated slice for body follow-up queue behavior only. `CoreEngine`
+still stores `CoreCoordinationStore` directly and still reaches the concrete
+store for the other domains listed above.
+
+## Remaining Extraction Tasks
+
+Continue in domain-sized patches rather than one monolithic trait:
+
+1. Extract bootstrap and session lifecycle ports for session/config hydration,
+   event replay/recording, save/reactivate/archive behavior, and startup
+   cleanup.
+2. Extract scheduler store ports for job/run query, claim, completion,
+   pause/resume, and stale-run expiration.
+3. Extract delegation and worker-pool store ports for worker runs, fan-out
+   groups, completions, pool members, and work-item lifecycle.
+4. Extract provider-state store ports for wake lookup, persistence,
+   invalidation, diagnostics, and cleanup.
+5. Extract chat store ports for conversation branches, snapshots, slots,
+   variants, attachments, data-bank scopes, read models, and event logs.
+6. Extract roleplay lore store ports for lore layers, entries, recall,
+   capture, promotion, provenance, and recall traces.
+7. Extract memory store ports for profile/session memory, proposals,
+   governance, activity digests, compaction artifacts, and prompt context.
+8. Extract runtime admin store ports for profile/model admin, runtime counters,
+   diagnostics, maintenance, service/module data, runtime search, and simple
+   key/value state.
+
+Each extraction should leave behind a fake-backed engine unit test for at least
+one behavior in the extracted domain, not just a trait wrapper over the concrete
+store.
+
 ## Config Ownership
 
 `ClockConfig`, `EngineConfig`, and `EngineStorageConfig` are config-domain
