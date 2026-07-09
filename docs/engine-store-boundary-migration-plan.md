@@ -112,23 +112,39 @@ only the delegated session state saves now route through the session lifecycle
 port. The worker-specific store calls are left for the delegation/worker-pool
 extraction.
 
+### Scheduler store port
+
+Task #5311 records the existing scheduler extraction in
+`crates/core/core-engine/src/scheduler.rs`.
+
+The scheduler slice uses a domain-sized `SchedulerStore` for:
+
+- scheduled job upsert, load, query, pause, and resume;
+- scheduled run query, stale-run expiration, claim, and terminal completion.
+
+`CoreCoordinationStore` implements the port as direct delegates to the
+scheduled-job/run persistence methods. Scheduler engine behavior calls the port
+from the scheduler module rather than reaching into unrelated runtime/admin
+storage. The fake-backed
+`claim_scheduled_run_uses_fake_store_and_engine_clock` test proves claim
+behavior without SQLite/Postgres and also guards that scheduler run IDs use the
+engine clock plus the engine-local run sequence.
+
 ## Remaining Extraction Tasks
 
 Continue in domain-sized patches rather than one monolithic trait:
 
-1. Extract scheduler store ports for job/run query, claim, completion,
-   pause/resume, and stale-run expiration.
-2. Extract delegation and worker-pool store ports for worker runs, fan-out
+1. Extract delegation and worker-pool store ports for worker runs, fan-out
    groups, completions, pool members, and work-item lifecycle.
-3. Extract provider-state store ports for wake lookup, persistence,
+2. Extract provider-state store ports for wake lookup, persistence,
    invalidation, diagnostics, and cleanup.
-4. Extract chat store ports for conversation branches, snapshots, slots,
+3. Extract chat store ports for conversation branches, snapshots, slots,
    variants, attachments, data-bank scopes, read models, and event logs.
-5. Extract roleplay lore store ports for lore layers, entries, recall,
+4. Extract roleplay lore store ports for lore layers, entries, recall,
    capture, promotion, provenance, and recall traces.
-6. Extract memory store ports for profile/session memory, proposals,
+5. Extract memory store ports for profile/session memory, proposals,
    governance, activity digests, compaction artifacts, and prompt context.
-7. Extract runtime admin store ports for profile/model admin, runtime counters,
+6. Extract runtime admin store ports for profile/model admin, runtime counters,
    diagnostics, maintenance, service/module data, runtime search, and simple
    key/value state.
 
