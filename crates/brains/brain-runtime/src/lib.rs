@@ -1,3 +1,7 @@
+mod coordinator;
+
+pub use coordinator::*;
+
 use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
