@@ -109,8 +109,11 @@ import {
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
 import {
   handleAdminMcpCatalogRequest,
-  mcpServerCatalogEntries,
 } from "./service-mcp-catalog-routes.js";
+import {
+  handleAdminMcpServerRegistryRequest,
+  mcpServerWriteFromBody,
+} from "./service-mcp-server-registry-routes.js";
 import {
   failure,
   isRawServiceRouteResult,
@@ -950,7 +953,29 @@ async function handleHttpRequest(
   }
 
   if (route?.id === "admin.mcp.servers") {
-    return handleAdminMcpServerRegistryRequest(request, state, url);
+    const method = request.method ?? "GET";
+    const normalizedMethod = method.toUpperCase();
+    return handleAdminMcpServerRegistryRequest(
+      {
+        method,
+        url,
+        requestId: requestId(request),
+        body: ["POST", "PUT", "PATCH"].includes(normalizedMethod)
+          ? await readJsonBody(request)
+          : undefined,
+      },
+      {
+        config: () => state.config,
+        runtimeConfig: () => state.runtimeConfig,
+        readRuntimeConfigFile: () => readRuntimeConfigFileForMutation(state),
+        writeRuntimeConfigFile: (value) =>
+          writeJsonFileAtomic(state.config.paths.serviceConfigFile, value),
+        applyRuntimeConfigFromDisk: (input) =>
+          applyServiceRuntimeConfigFromDisk(state, input),
+        withRuntimeConfigMutation: (mutation) =>
+          withAsyncMutationQueue(state.runtimeConfigMutationQueue, mutation),
+      },
+    );
   }
 
   if (route?.id === "admin.tools.catalog") {
@@ -1115,275 +1140,6 @@ async function handleHttpRequest(
     message: `unknown service route ${url.pathname}`,
     retryable: false,
   });
-}
-
-async function handleAdminMcpServerRegistryRequest(
-  request: IncomingMessage,
-  state: ServiceState,
-  url: URL,
-): Promise<AdminRouteResult> {
-  const requestIdValue = requestId(request);
-  const method = (request.method ?? "GET").toUpperCase();
-  const serverId = mcpServerIdFromPath(url.pathname);
-  try {
-    if (url.pathname === "/v1/admin/mcp/servers") {
-      if (method === "GET") {
-        return handleAdminMcpCatalogRequest(
-          { method, requestId: requestIdValue },
-          { config: state.config, runtimeConfig: state.runtimeConfig },
-        );
-      }
-      if (method === "POST") {
-        const body = recordBody(await readJsonBody(request));
-        return upsertAdminMcpServer(state, requestIdValue, body, undefined);
-      }
-      return failure(405, requestIdValue, {
-        code: "method_not_allowed",
-        reason_code: "mcp_server_collection_method_not_allowed",
-        message: "MCP server collection supports GET and POST",
-        retryable: false,
-      });
-    }
-
-    if (serverId === undefined) {
-      return failure(404, requestIdValue, {
-        code: "not_found",
-        reason_code: "unknown_mcp_server_route",
-        message: `unknown MCP server route ${url.pathname}`,
-        retryable: false,
-      });
-    }
-
-    if (method === "PUT" || method === "PATCH") {
-      const body = recordBody(await readJsonBody(request));
-      return upsertAdminMcpServer(state, requestIdValue, body, serverId);
-    }
-
-    if (method === "DELETE") {
-      return deleteAdminMcpServer(state, requestIdValue, serverId);
-    }
-
-    return failure(405, requestIdValue, {
-      code: "method_not_allowed",
-      reason_code: "mcp_server_item_method_not_allowed",
-      message: "MCP server item routes support PUT, PATCH, and DELETE",
-      retryable: false,
-    });
-  } catch (error) {
-    return failure(400, requestIdValue, {
-      code: "invalid_input",
-      reason_code: "invalid_mcp_server_write",
-      message: errorMessage(error, "invalid MCP server registry write"),
-      retryable: false,
-    });
-  }
-}
-
-async function upsertAdminMcpServer(
-  state: ServiceState,
-  requestIdValue: string,
-  body: Record<string, unknown>,
-  pathServerId: string | undefined,
-): Promise<AdminRouteResult> {
-  return withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
-    upsertAdminMcpServerLocked(state, requestIdValue, body, pathServerId),
-  );
-}
-
-async function upsertAdminMcpServerLocked(
-  state: ServiceState,
-  requestIdValue: string,
-  body: Record<string, unknown>,
-  pathServerId: string | undefined,
-): Promise<AdminRouteResult> {
-  const server = mcpServerWriteFromBody(body, pathServerId);
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const servers = runtimeConfigFile.array("mcpServers");
-  const existingIndex = servers.findIndex(
-    (entry) => isRecord(entry) && optionalString(entry.id) === server.id,
-  );
-  const status = existingIndex >= 0 ? "updated" : "created";
-  if (existingIndex >= 0) {
-    servers[existingIndex] = server;
-  } else {
-    servers.push(server);
-  }
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfigFile.value,
-  );
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "mcp_server_registry_updated",
-    summaryPrefix: `MCP server ${server.id} ${status}`,
-  });
-  return successRoute(requestIdValue, {
-    status,
-    server,
-    applyResult,
-    catalog: mcpServerRegistryCatalog(state),
-  });
-}
-
-async function deleteAdminMcpServer(
-  state: ServiceState,
-  requestIdValue: string,
-  serverId: string,
-): Promise<AdminRouteResult> {
-  return withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
-    deleteAdminMcpServerLocked(state, requestIdValue, serverId),
-  );
-}
-
-async function deleteAdminMcpServerLocked(
-  state: ServiceState,
-  requestIdValue: string,
-  serverId: string,
-): Promise<AdminRouteResult> {
-  assertMcpServerId(serverId, "server id");
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const servers = runtimeConfigFile.array("mcpServers");
-  const existingIndex = servers.findIndex(
-    (entry) => isRecord(entry) && optionalString(entry.id) === serverId,
-  );
-  if (existingIndex < 0) {
-    const envServer = state.config.mcp.servers.find(
-      (server) => server.id === serverId,
-    );
-    return failure(envServer ? 409 : 404, requestIdValue, {
-      code: envServer ? "failed_precondition" : "not_found",
-      reason_code: envServer
-        ? "mcp_server_env_seeded_not_runtime_managed"
-        : "mcp_server_not_found",
-      message: envServer
-        ? `MCP server ${serverId} is seeded from service environment; create a runtime override to edit it or change service environment to remove it`
-        : `MCP server ${serverId} was not found in runtime registry`,
-      retryable: false,
-    });
-  }
-
-  const envServer = state.config.mcp.servers.find(
-    (server) => server.id === serverId,
-  );
-  const activeBindingCount = state.runtimeConfig.mcpBindings.filter(
-    (binding) =>
-      binding.status === "active" &&
-      (binding.serverNames.includes(serverId) ||
-        binding.endpointRef === `config://mcp/${serverId}`),
-  ).length;
-  if (activeBindingCount > 0 && envServer === undefined) {
-    return failure(409, requestIdValue, {
-      code: "failed_precondition",
-      reason_code: "mcp_server_has_active_bindings",
-      message: `MCP server ${serverId} has ${activeBindingCount} active binding(s); remove profile bindings before deleting it`,
-      retryable: false,
-    });
-  }
-
-  const [removed] = servers.splice(existingIndex, 1);
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfigFile.value,
-  );
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "mcp_server_registry_deleted",
-    summaryPrefix: `MCP server ${serverId} deleted`,
-  });
-  return successRoute(requestIdValue, {
-    status: "deleted",
-    serverId,
-    removed,
-    applyResult,
-    catalog: mcpServerRegistryCatalog(state),
-  });
-}
-
-function mcpServerRegistryCatalog(state: ServiceState) {
-  return mcpServerCatalogEntries({
-    config: state.config,
-    runtimeConfig: state.runtimeConfig,
-  }).map((server) => ({
-    id: server.id,
-    label: server.label,
-    baseUrl: server.baseUrl,
-    transport: server.transport,
-    requestTimeoutMs: server.requestTimeoutMs,
-    source: server.source,
-  }));
-}
-
-function mcpServerIdFromPath(pathname: string): string | undefined {
-  const prefix = "/v1/admin/mcp/servers/";
-  if (!pathname.startsWith(prefix)) return undefined;
-  const rest = pathname.slice(prefix.length);
-  if (!rest || rest.includes("/")) return undefined;
-  return decodeURIComponent(rest);
-}
-
-function mcpServerWriteFromBody(
-  body: Record<string, unknown>,
-  pathServerId: string | undefined,
-): RustyCrewMcpServerConfig {
-  const id = pathServerId ?? optionalString(body.id ?? body.serverId);
-  if (id === undefined) {
-    throw new Error("MCP server id is required");
-  }
-  assertMcpServerId(id, "MCP server id");
-  if (
-    pathServerId !== undefined &&
-    optionalString(body.id ?? body.serverId) !== undefined &&
-    optionalString(body.id ?? body.serverId) !== pathServerId
-  ) {
-    throw new Error("MCP server body id must match path id");
-  }
-
-  const baseUrl = requiredString(body.baseUrl ?? body.base_url, "baseUrl");
-  assertHttpUrl(baseUrl, "baseUrl");
-  const requestTimeoutMs =
-    body.requestTimeoutMs === undefined && body.request_timeout_ms === undefined
-      ? undefined
-      : positiveInteger(
-          body.requestTimeoutMs ?? body.request_timeout_ms,
-          "requestTimeoutMs",
-        );
-  return {
-    id,
-    label: optionalString(body.label),
-    baseUrl,
-    transport:
-      optionalString(body.transport ?? body.transportKind) ?? "streamable_http",
-    requestTimeoutMs,
-    source: "runtime",
-  };
-}
-
-function assertMcpServerId(value: string, fieldName: string): void {
-  if (!/^[A-Za-z0-9_.:-]+$/.test(value)) {
-    throw new Error(
-      `${fieldName} may only contain letters, numbers, dot, underscore, colon, or dash`,
-    );
-  }
-}
-
-function assertHttpUrl(value: string, fieldName: string): void {
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new Error("protocol must be http or https");
-    }
-  } catch (error) {
-    throw new Error(`${fieldName} must be a valid HTTP(S) URL`, {
-      cause: error,
-    });
-  }
-}
-
-function positiveInteger(value: unknown, fieldName: string): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${fieldName} must be a positive integer`);
-  }
-  return value;
 }
 
 type ProfileRegistryWritePlan = NativeProfileRegistryMutationPlan;
