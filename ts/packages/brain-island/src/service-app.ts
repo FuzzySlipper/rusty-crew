@@ -231,8 +231,6 @@ import {
 import {
   type ChatEvent,
   type ConversationBranchStateRecord,
-  type ExecuteChatCommandInput,
-  type ExecuteChatCommandResult,
   type SendChatMessageResult,
 } from "./rusty-view-chat-api.js";
 import {
@@ -281,11 +279,11 @@ import {
   isBrowserCorsRoute,
   matchServiceApiRoute,
 } from "./service-route-table.js";
-import { buildReadOnlySlashCommandResponse } from "./slash-command-responses.js";
 import {
-  routeSlashCommand,
-  type SlashCommandSession,
-} from "./slash-command-router.js";
+  controlUrlForSlashCommand,
+  executeRustyViewChatCommand,
+  type RustyViewSlashCommandContext,
+} from "./service-rusty-view-chat-commands.js";
 import type { RuntimeHealthProjection } from "./runtime-health.js";
 import {
   heartbeatConfiguredSessionsToDenRuntime,
@@ -720,6 +718,56 @@ function rustyViewChatOperationsContext(
     submitServiceTurn: (input) => submitServiceTurn(state, input),
     resolveModelProviderForBrain: (alias) =>
       resolveModelProviderForBrain(state.bridge, alias),
+  };
+}
+
+function rustyViewSlashCommandContext(
+  state: ServiceState,
+): RustyViewSlashCommandContext {
+  return {
+    appendChatEvent: (sessionId, event) =>
+      appendChatEventFromModule(chatEventLogContext(state), sessionId, event),
+    buildDiagnosticsContext: () => buildDiagnosticsContext(state),
+    sessionContextUsage: (input) =>
+      rustyViewSessionContextUsage(
+        rustyViewChatOperationsContext(state),
+        input,
+      ),
+    executeControlCommand: async (input) => {
+      const control = await handleAdminControlRequest(
+        {
+          method: "POST",
+          url: controlUrlForSlashCommand(input.commandName, input.sessionId),
+          headers: {
+            authorization: `Bearer ${controlBearerToken(state.config)}`,
+            "x-rusty-crew-operator": input.actorId,
+          },
+          body: input.body,
+          requestId: input.requestId,
+        },
+        {
+          auth: {
+            bearerToken: controlBearerToken(state.config),
+            operatorId: input.actorId,
+          },
+          auditSink: state.auditSink,
+          executor: createServiceControlExecutor(state),
+          now: state.now,
+        },
+      );
+      if (control.body.ok) {
+        const data = control.body.data as AdminControlResponse;
+        return { controlStatus: control.status, outcome: data.outcome };
+      }
+      return {
+        controlStatus: control.status,
+        outcome: {
+          status: "failed",
+          summary: control.body.error.message,
+          reasonCode: control.body.error.reason_code,
+        },
+      };
+    },
   };
 }
 
@@ -1165,7 +1213,11 @@ async function handleHttpRequest(
           rustyViewToolCallDebugDetail(chatOperations, input),
         getProviderRequestDebugDetail: (input) =>
           rustyViewProviderRequestDebugDetail(chatOperations, input),
-        executeCommand: (input) => executeRustyViewChatCommand(state, input),
+        executeCommand: (input) =>
+          executeRustyViewChatCommand(
+            rustyViewSlashCommandContext(state),
+            input,
+          ),
         contextUsage: (input) =>
           rustyViewSessionContextUsage(chatOperations, input),
         sendMessage: (input) =>
@@ -4528,199 +4580,6 @@ async function rejectPausedDenDeliveryIntent(
     severity: "warning",
     summary: `Rejected Den Delivery intent ${intent.id} for ${session.agentId}: ${summary}.`,
   });
-}
-
-async function executeRustyViewChatCommand(
-  state: ServiceState,
-  input: ExecuteChatCommandInput,
-): Promise<ExecuteChatCommandResult> {
-  const started = await appendChatEventFromModule(
-    chatEventLogContext(state),
-    input.session.sessionId,
-    {
-      kind: "command_started",
-      payload: {
-        command: input.command,
-        actor: input.actor,
-        request_id: input.requestId,
-      },
-    },
-  );
-  const routed = routeSlashCommand({
-    text: input.command,
-    session: slashCommandSession(input.session),
-    actor: {
-      id: input.actor.id,
-      displayName: input.actor.display_name,
-    },
-    options: {
-      primeProfiles: [input.session.profileId],
-      allowNonPrimeReadCommands: true,
-    },
-  });
-  if (routed.kind === "pass_through") {
-    return completeChatCommand(state, input.session.sessionId, {
-      status: "rejected",
-      command_name: "unknown",
-      summary:
-        "Only slash commands can be executed through the chat command API.",
-      latest_cursor: started.event_id,
-      reason_code: "not_a_slash_command",
-    });
-  }
-  if (routed.status !== "ok") {
-    return completeChatCommand(state, input.session.sessionId, {
-      status: "rejected",
-      command_name: routed.commandName,
-      summary: routed.response.summary,
-      latest_cursor: started.event_id,
-      reason_code:
-        routed.status === "denied" ? "slash_command_denied" : "unknown_command",
-      response: routed.response,
-    });
-  }
-  if (
-    routed.commandName === "help" ||
-    routed.commandName === "status" ||
-    routed.commandName === "session" ||
-    routed.commandName === "model"
-  ) {
-    const diagnosticsContext = await buildDiagnosticsContext(state);
-    const modelContext =
-      routed.commandName === "model"
-        ? await rustyViewSessionContextUsage(
-            rustyViewChatOperationsContext(state),
-            {
-              session: input.session,
-              requestId: input.requestId,
-            },
-          )
-        : undefined;
-    const response = buildReadOnlySlashCommandResponse(routed.commandName, {
-      diagnostics: diagnosticsContext.diagnostics,
-      session: slashCommandSession(input.session),
-      modelContext,
-      options: {
-        primeProfiles: [input.session.profileId],
-        allowNonPrimeReadCommands: true,
-      },
-    });
-    return completeChatCommand(state, input.session.sessionId, {
-      status: "completed",
-      command_name: routed.commandName,
-      summary: response.summary,
-      latest_cursor: started.event_id,
-      response,
-    });
-  }
-  if (routed.controlRequest) {
-    const control = await handleAdminControlRequest(
-      {
-        method: "POST",
-        url: controlUrlForSlashCommand(
-          routed.controlRequest.commandName,
-          input.session.sessionId,
-        ),
-        headers: {
-          authorization: `Bearer ${controlBearerToken(state.config)}`,
-          "x-rusty-crew-operator": input.actor.id,
-        },
-        body: {
-          ...routed.controlRequest.body,
-          reason: routed.controlRequest.reason,
-          reasonCode: routed.controlRequest.reasonCode,
-        },
-        requestId: input.requestId,
-      },
-      {
-        auth: {
-          bearerToken: controlBearerToken(state.config),
-          operatorId: input.actor.id,
-        },
-        auditSink: state.auditSink,
-        executor: createServiceControlExecutor(state),
-        now: state.now,
-      },
-    );
-    const result: Pick<AdminControlResponse, "outcome"> = control.body.ok
-      ? (control.body.data as AdminControlResponse)
-      : {
-          outcome: {
-            status: "failed" as const,
-            summary: control.body.error.message,
-            reasonCode: control.body.error.reason_code,
-          },
-        };
-    const outcome = result.outcome;
-    const affected = outcome.affectedIds ?? {};
-    return completeChatCommand(state, input.session.sessionId, {
-      status: outcome.status === "completed" ? "completed" : "failed",
-      command_name: routed.commandName,
-      summary: outcome.summary,
-      latest_cursor: started.event_id,
-      old_session_id: stringRecordValue(affected, "oldSessionId"),
-      new_session_id: stringRecordValue(affected, "newSessionId"),
-      reason_code: outcome.reasonCode,
-      response: { outcome, control_status: control.status },
-    });
-  }
-  return completeChatCommand(state, input.session.sessionId, {
-    status: "failed",
-    command_name: routed.commandName,
-    summary: "Slash command did not produce an executable action.",
-    latest_cursor: started.event_id,
-    reason_code: "missing_command_action",
-  });
-}
-
-async function completeChatCommand(
-  state: ServiceState,
-  sessionId: SessionId,
-  result: ExecuteChatCommandResult,
-): Promise<ExecuteChatCommandResult> {
-  const completed = await appendChatEventFromModule(
-    chatEventLogContext(state),
-    sessionId,
-    {
-      kind:
-        result.status === "completed" ? "command_completed" : "command_failed",
-      payload: { ...result },
-    },
-  );
-  return {
-    ...result,
-    latest_cursor: completed.event_id,
-  };
-}
-
-function slashCommandSession(session: SessionState): SlashCommandSession {
-  return {
-    sessionId: session.sessionId,
-    agentId: session.agentId,
-    profileId: session.profileId,
-    kind: session.kind,
-  };
-}
-
-function controlUrlForSlashCommand(
-  commandName: string,
-  sessionId: SessionId,
-): string {
-  if (commandName === "new_session") {
-    return `/v1/admin/control/sessions/${sessionId}/new`;
-  }
-  if (commandName === "reload_mcp") {
-    return `/v1/admin/control/mcp/${sessionId}/reload`;
-  }
-  return `/v1/admin/control/unsupported/${commandName}`;
-}
-
-function stringRecordValue(
-  record: Record<string, string | number>,
-  key: string,
-): string | undefined {
-  const value = record[key];
-  return typeof value === "string" ? value : undefined;
 }
 
 async function appendCoreEventsToChatLog(
