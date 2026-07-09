@@ -120,7 +120,7 @@
     "smoke:profile-registry-write-routes": "tsx src/smoke-profile-registry-write-routes.ts",
     "smoke:profile-registry-export": "tsx src/smoke-profile-registry-export.ts",
     "smoke:profile-role-assembly": "tsx src/smoke-profile-role-assembly.ts",
-    "smoke:tool-profile-prompt-authority": "tsx src/smoke-tool-profile-prompt-authority.ts",
+    "smoke:tool-profile-prompt-authority": "tsx smokes/tool-profile-prompt-authority.ts",
     "smoke:tool-session-selection": "tsx src/smoke-tool-session-selection.ts",
     "smoke:brain-tool-pi-adapter": "tsx src/smoke-brain-tool-pi-adapter.ts",
     "smoke:brain-module-registry": "tsx src/smoke-brain-module-registry.ts",

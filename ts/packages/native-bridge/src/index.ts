@@ -2775,9 +2775,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     planProfileRegistryMutation: unavailable("plan_profile_registry_mutation"),
     planNewSessionControl: unavailable("plan_new_session_control"),
     planReloadMcpControl: unavailable("plan_reload_mcp_control"),
-    planDelegatedRoleLifecycle: unavailable(
-      "plan_delegated_role_lifecycle",
-    ),
+    planDelegatedRoleLifecycle: unavailable("plan_delegated_role_lifecycle"),
     planChannelIngressRoute: unavailable("plan_channel_ingress_route"),
     planDenProductIngressPolicy: unavailable("plan_den_product_ingress_policy"),
     injectExternalEvent: unavailable("inject_external_event"),

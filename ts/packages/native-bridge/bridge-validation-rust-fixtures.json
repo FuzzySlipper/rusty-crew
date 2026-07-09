@@ -233,12 +233,8 @@
       "value": {
         "affected_profiles": [
           {
-            "active_session_ids": [
-              "validation-active-session"
-            ],
-            "configured_session_ids": [
-              "validation-configured-session"
-            ],
+            "active_session_ids": ["validation-active-session"],
+            "configured_session_ids": ["validation-configured-session"],
             "profile_id": "validation-profile",
             "session_ids": [
               "validation-active-session",
@@ -268,13 +264,8 @@
           "import_supported": true
         },
         "indexing": {
-          "optional_capabilities": [
-            "branch_aware_lookup",
-            "query_search"
-          ],
-          "required_capabilities": [
-            "session_scope_lookup"
-          ]
+          "optional_capabilities": ["branch_aware_lookup", "query_search"],
+          "required_capabilities": ["session_scope_lookup"]
         },
         "module_id": "runtime_memory",
         "operations": [
@@ -289,9 +280,7 @@
         "prompt_policy": "summary_context",
         "provenance_policy": {
           "rationale_required": true,
-          "required_evidence": [
-            "wake"
-          ],
+          "required_evidence": ["wake"],
           "source_required": true
         },
         "record_shapes": [
@@ -615,10 +604,7 @@
         ],
         "schema_version": 1,
         "scope_model": {
-          "allowed_scopes": [
-            "session",
-            "conversation_branch"
-          ],
+          "allowed_scopes": ["session", "conversation_branch"],
           "primary_scope": "session"
         },
         "space_id": "session_memory",
@@ -682,10 +668,7 @@
             },
             "record_id": "session-fact-one",
             "source_summary": "Captured from validation fixture.",
-            "tags": [
-              "bridge",
-              "validation"
-            ],
+            "tags": ["bridge", "validation"],
             "updated_at": "2026-07-02T00:00:00.000Z"
           },
           "created_at": "2026-07-02T00:00:00.000Z",
@@ -749,9 +732,7 @@
       "direction": "rust_to_ts",
       "rust_type": "rusty_crew_core_protocol::SessionActivityDigest",
       "value": {
-        "allowed_capture_spaces": [
-          "profile_dense"
-        ],
+        "allowed_capture_spaces": ["profile_dense"],
         "completion_summary": "Bridge fixture expansion completed.",
         "created_at": "2026-07-02T00:00:00.000Z",
         "digest_id": "digest_one",

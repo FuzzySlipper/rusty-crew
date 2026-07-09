@@ -45,7 +45,8 @@ export function profileRuntimeMetadata(
           compactAtPercent: profile.contextPolicy.compactAtPercent,
           targetPercentAfterCompaction:
             profile.contextPolicy.targetPercentAfterCompaction,
-          maxContextPercentForWake: profile.contextPolicy.maxContextPercentForWake,
+          maxContextPercentForWake:
+            profile.contextPolicy.maxContextPercentForWake,
           debugVisibility: profile.contextPolicy.debugVisibility,
           includeDebugEventsInModelContext:
             profile.contextPolicy.includeDebugEventsInModelContext,

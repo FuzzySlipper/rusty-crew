@@ -7,10 +7,11 @@ import {
   requiredToolProfilePromptSurfacePaths,
   toolProfilePromptSurfaceClassifications,
   type ToolProfilePromptSurfaceClassification,
-} from "./tool-profile-prompt-authority.js";
+} from "../src/tool-profile-prompt-authority.js";
 
-const srcDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(srcDir, "../../../..");
+const smokeDir = dirname(fileURLToPath(import.meta.url));
+const srcDir = join(smokeDir, "../src");
+const repoRoot = join(smokeDir, "../../../..");
 const docsPath = join(
   repoRoot,
   "docs/typescript-tool-profile-prompt-surface-inventory-2026-07-08.md",
@@ -116,4 +117,3 @@ console.log(
     2,
   ),
 );
-

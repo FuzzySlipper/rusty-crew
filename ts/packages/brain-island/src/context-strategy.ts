@@ -168,7 +168,8 @@ export function contextStrategyPolicyFromUnknown(
   value: unknown,
   fallback: ContextStrategyPolicy = defaultContextStrategyPolicy(),
 ): ContextStrategyPolicy {
-  return contextStrategyPolicyFromUnknownWithDiagnostics(value, fallback).policy;
+  return contextStrategyPolicyFromUnknownWithDiagnostics(value, fallback)
+    .policy;
 }
 
 export function contextStrategyPolicyFromUnknownWithDiagnostics(
