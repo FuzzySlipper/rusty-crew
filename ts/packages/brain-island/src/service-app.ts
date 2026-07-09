@@ -384,6 +384,11 @@ import {
   withWakeTimeout,
 } from "./wake-timeout.js";
 import {
+  drainAndDispatchWakes as drainAndDispatchWakesFromModule,
+  suppressNextWakeEvent as suppressNextWakeEventFromModule,
+  type WakeEventDrainContext,
+} from "./service-wake-event-drain.js";
+import {
   buildBuiltInToolCatalog,
   defaultToolRegistry,
 } from "./tool-registry.js";
@@ -620,6 +625,20 @@ function chatEventLogContext(state: ServiceState): ChatEventLogContext {
   };
 }
 
+function wakeEventDrainContext(
+  state: ServiceState,
+  source: ServiceWakeSource,
+  observationContext?: ServiceWakeObservationContext,
+): WakeEventDrainContext<ServiceWakeDispatchReport> {
+  return {
+    bridge: state.bridge,
+    wakeSubscription: state.wakeSubscription,
+    suppressedWakeEvents: state.suppressedWakeEvents,
+    dispatchWake: (event) =>
+      dispatchWake(state, event, source, observationContext),
+  };
+}
+
 interface ServiceBackgroundReviewRuntime {
   enabled: boolean;
   recentFindings: number;
@@ -821,7 +840,10 @@ export async function createRustyCrewServiceApp(
         runSchedulerHeartbeat: () => runSchedulerHeartbeat(state),
         recordSchedulerHeartbeatFailure: (error) =>
           recordSchedulerHeartbeatFailure(state, error),
-        drainAndDispatchWakes: () => drainAndDispatchWakes(state, "background"),
+        drainAndDispatchWakes: () =>
+          drainAndDispatchWakesFromModule(
+            wakeEventDrainContext(state, "background"),
+          ),
         heartbeatDenRuntimeInstances: () => heartbeatDenRuntimeInstances(state),
         pollDenDeliveryIntents: () => pollDenDeliveryIntents(state),
         drainTelegramOutboundMessages: () =>
@@ -2823,8 +2845,13 @@ async function buildDirectDebugContext(
             },
             "direct_debug",
           );
-          suppressNextWakeEvent(state, input.session.sessionId);
-          await drainAndDispatchWakes(state, "direct_debug");
+          suppressNextWakeEventFromModule(
+            wakeEventDrainContext(state, "direct_debug"),
+            input.session.sessionId,
+          );
+          await drainAndDispatchWakesFromModule(
+            wakeEventDrainContext(state, "direct_debug"),
+          );
           return {
             status: "accepted",
             summary: wakeReport
@@ -7344,8 +7371,13 @@ async function submitServiceTurn(
       input.observationContext,
       { appendChatEvents: input.appendChatEvents },
     );
-    suppressNextWakeEvent(state, input.sessionId);
-    await drainAndDispatchWakes(state, input.source);
+    suppressNextWakeEventFromModule(
+      wakeEventDrainContext(state, input.source, input.observationContext),
+      input.sessionId,
+    );
+    await drainAndDispatchWakesFromModule(
+      wakeEventDrainContext(state, input.source, input.observationContext),
+    );
     return wakeReport;
   } finally {
     state.directDispatchSessions.delete(input.sessionId);
@@ -7410,8 +7442,13 @@ function createServiceCoordinationRuntime(
           },
           "direct_debug",
         );
-        suppressNextWakeEvent(state, targetSession.sessionId);
-        await drainAndDispatchWakes(state, "direct_debug");
+        suppressNextWakeEventFromModule(
+          wakeEventDrainContext(state, "direct_debug"),
+          targetSession.sessionId,
+        );
+        await drainAndDispatchWakesFromModule(
+          wakeEventDrainContext(state, "direct_debug"),
+        );
         return {
           accepted: receipt.accepted,
           sequence: receipt.sequence,
@@ -7452,7 +7489,9 @@ function createServiceCoordinationRuntime(
               reply: replyFromEvent(replyEvent),
             };
           }
-          await drainAndDispatchWakes(state, "direct_debug");
+          await drainAndDispatchWakesFromModule(
+            wakeEventDrainContext(state, "direct_debug"),
+          );
           await delay(25);
         }
         return {
@@ -8089,56 +8128,6 @@ async function closeBrowserSessionForServiceLifecycle(
       reason: cleanup.reason,
     },
   });
-}
-
-async function drainAndDispatchWakes(
-  state: ServiceState,
-  source: ServiceWakeSource,
-  observationContext?: ServiceWakeObservationContext,
-): Promise<ServiceWakeDispatchReport[]> {
-  if (state.stopping) return [];
-  const events = await state.bridge.drainSubscriptionEvents(
-    state.wakeSubscription,
-    32,
-  );
-  const reports: ServiceWakeDispatchReport[] = [];
-  for (const event of events) {
-    if (event.type === "session_archived") {
-      await closeBrowserSessionForServiceLifecycle(state, event.sessionId);
-      continue;
-    }
-    if (event.type !== "brain_wake_requested") continue;
-    if (consumeSuppressedWakeEvent(state, event.sessionId)) continue;
-    if (
-      source === "background" &&
-      state.directDispatchSessions.has(event.sessionId)
-    ) {
-      continue;
-    }
-    reports.push(await dispatchWake(state, event, source, observationContext));
-  }
-  return reports;
-}
-
-function suppressNextWakeEvent(
-  state: ServiceState,
-  sessionId: SessionId,
-): void {
-  state.suppressedWakeEvents.set(
-    sessionId,
-    (state.suppressedWakeEvents.get(sessionId) ?? 0) + 1,
-  );
-}
-
-function consumeSuppressedWakeEvent(
-  state: ServiceState,
-  sessionId: SessionId,
-): boolean {
-  const count = state.suppressedWakeEvents.get(sessionId) ?? 0;
-  if (count <= 0) return false;
-  if (count === 1) state.suppressedWakeEvents.delete(sessionId);
-  else state.suppressedWakeEvents.set(sessionId, count - 1);
-  return true;
 }
 
 async function dispatchWake(
