@@ -222,13 +222,30 @@ rather than an alternate Crew storage path. The fake-backed
 `session_activity_digests_use_fake_memory_store` test proves a Crew memory
 operation without SQLite/Postgres.
 
+### Runtime admin store ports
+
+Task #5317 extracted runtime/admin storage behind split ports in
+`crates/core/core-engine/src/runtime_admin_store.rs`.
+
+The slice uses three ports:
+
+- `RuntimeStorageAdminStore` for row counts, database size, storage
+  diagnostics/schema, maintenance, runtime search, counters, summaries, and
+  counter resets.
+- `RuntimeServiceDataStore` for profile registry records, profile purge, and
+  model-provider records/secrets.
+- `RuntimeModuleDataStore` for module-owned simple key/value state.
+
+These ports keep diagnostics and read models explicit instead of turning them
+into hidden coordination authority. The fake-backed
+`simple_kv_uses_fake_runtime_module_store` test proves runtime module data
+behavior without SQLite/Postgres.
+
 ## Remaining Extraction Tasks
 
-Continue in domain-sized patches rather than one monolithic trait:
-
-1. Extract runtime admin store ports for profile/model admin, runtime counters,
-   diagnostics, maintenance, service/module data, runtime search, and simple
-   key/value state.
+The initial domain-sized extraction series is complete. Future cleanup should
+focus on whether any individual port has grown too broad in practice and should
+be split further based on real fake/test pressure.
 
 Each extraction should leave behind a fake-backed engine unit test for at least
 one behavior in the extracted domain, not just a trait wrapper over the concrete

@@ -7,6 +7,7 @@ mod memory_spaces;
 mod memory_store;
 mod provider_state_store;
 mod roleplay_lore_store;
+mod runtime_admin_store;
 mod scheduler;
 mod session_store;
 
@@ -30,6 +31,9 @@ use provider_state_store::{
     load_provider_state_for_wake, save_provider_state as save_provider_state_store,
 };
 use roleplay_lore_store::RoleplayLoreStore;
+use runtime_admin_store::{
+    RuntimeModuleDataStore, RuntimeServiceDataStore, RuntimeStorageAdminStore,
+};
 use rusty_crew_core_body::{
     session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
 };
@@ -650,55 +654,47 @@ impl CoreEngine {
     }
 
     pub fn count_rows(&self, table: &str) -> CoreResult<u64> {
-        self.store.admin().count_rows(table)
+        RuntimeStorageAdminStore::count_rows(&self.store, table)
     }
 
     pub fn database_size(&self) -> CoreResult<RuntimeDatabaseSize> {
-        self.store.admin().database_size()
+        RuntimeStorageAdminStore::database_size(&self.store)
     }
 
     pub fn storage_diagnostics(&self) -> CoreResult<RuntimeStorageDiagnostics> {
-        self.store.admin().storage_diagnostics()
+        RuntimeStorageAdminStore::storage_diagnostics(&self.store)
     }
 
     pub fn storage_schema(&self) -> CoreResult<RuntimeModuleSchemaRegistryDiagnostics> {
-        self.store.admin().storage_schema()
+        RuntimeStorageAdminStore::storage_schema(&self.store)
     }
 
     pub fn list_profile_registry_records(
         &self,
         query: &ProfileRegistryQuery,
     ) -> CoreResult<Vec<ProfileRegistryRecord>> {
-        self.store
-            .service_data()
-            .list_profile_registry_records(query)
+        RuntimeServiceDataStore::list_profile_registry_records(&self.store, query)
     }
 
     pub fn create_profile_registry_record(
         &self,
         write: &ProfileRegistryWrite,
     ) -> CoreResult<ProfileRegistryRecord> {
-        self.store
-            .service_data()
-            .create_profile_registry_record(write)
+        RuntimeServiceDataStore::create_profile_registry_record(&self.store, write)
     }
 
     pub fn update_profile_registry_record(
         &self,
         update: &rusty_crew_core_protocol::ProfileRegistryUpdate,
     ) -> CoreResult<ProfileRegistryRecord> {
-        self.store
-            .service_data()
-            .update_profile_registry_record(update)
+        RuntimeServiceDataStore::update_profile_registry_record(&self.store, update)
     }
 
     pub fn get_profile_registry_record(
         &self,
         profile_id: &ProfileId,
     ) -> CoreResult<Option<ProfileRegistryRecord>> {
-        self.store
-            .service_data()
-            .get_profile_registry_record(profile_id)
+        RuntimeServiceDataStore::get_profile_registry_record(&self.store, profile_id)
     }
 
     pub fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
@@ -712,7 +708,7 @@ impl CoreEngine {
                 )
             })?
             .remove(profile_id);
-        let mut report = self.store.service_data().purge_profile(profile_id)?;
+        let mut report = RuntimeServiceDataStore::purge_profile(&self.store, profile_id)?;
         for state in removed_sessions {
             if !report
                 .session_ids
@@ -736,22 +732,22 @@ impl CoreEngine {
         &self,
         write: &ModelProviderWrite,
     ) -> CoreResult<ModelProviderRecord> {
-        self.store.service_data().upsert_model_provider(write)
+        RuntimeServiceDataStore::upsert_model_provider(&self.store, write)
     }
 
     pub fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>> {
-        self.store.service_data().get_model_provider(alias)
+        RuntimeServiceDataStore::get_model_provider(&self.store, alias)
     }
 
     pub fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>> {
-        self.store.service_data().get_model_provider_secret(alias)
+        RuntimeServiceDataStore::get_model_provider_secret(&self.store, alias)
     }
 
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,
     ) -> CoreResult<Vec<ModelProviderRecord>> {
-        self.store.service_data().list_model_providers(query)
+        RuntimeServiceDataStore::list_model_providers(&self.store, query)
     }
 
     pub fn model_provider_refresh_impact(
@@ -1039,22 +1035,22 @@ impl CoreEngine {
     }
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
-        self.store.module_data().list_simple_kv(query)
+        RuntimeModuleDataStore::list_simple_kv(&self.store, query)
     }
 
     pub fn put_simple_kv(&self, write: &SimpleKvWrite) -> CoreResult<SimpleKvRecord> {
-        self.store.module_data().put_simple_kv(write)
+        RuntimeModuleDataStore::put_simple_kv(&self.store, write)
     }
 
     pub fn delete_simple_kv(&self, delete: &SimpleKvDelete) -> CoreResult<SimpleKvRecord> {
-        self.store.module_data().delete_simple_kv(delete)
+        RuntimeModuleDataStore::delete_simple_kv(&self.store, delete)
     }
 
     pub fn run_maintenance(
         &self,
         policy: &RuntimeMaintenancePolicy,
     ) -> CoreResult<RuntimeMaintenanceReport> {
-        self.store.admin().run_maintenance(policy)
+        RuntimeStorageAdminStore::run_maintenance(&self.store, policy)
     }
 
     pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
@@ -1518,22 +1514,22 @@ impl CoreEngine {
         &self,
         filter: &RuntimeSearchFilter,
     ) -> CoreResult<Vec<RuntimeSearchResult>> {
-        self.store.admin().search_runtime(filter)
+        RuntimeStorageAdminStore::search_runtime(&self.store, filter)
     }
 
     pub fn query_runtime_counters(
         &self,
         query: &RuntimeCounterQuery,
     ) -> CoreResult<Vec<RuntimeCounterRecord>> {
-        self.store.admin().query_runtime_counters(query)
+        RuntimeStorageAdminStore::query_runtime_counters(&self.store, query)
     }
 
     pub fn runtime_summary(&self, scope: &RuntimeCounterScope) -> CoreResult<RuntimeStateSummary> {
-        self.store.admin().runtime_summary(scope)
+        RuntimeStorageAdminStore::runtime_summary(&self.store, scope)
     }
 
     pub fn reset_runtime_counters(&self, query: &RuntimeCounterQuery) -> CoreResult<u64> {
-        self.store.admin().reset_runtime_counters(query, self.now())
+        RuntimeStorageAdminStore::reset_runtime_counters(&self.store, query, self.now())
     }
 
     pub fn request_delegated_checkpoint(
