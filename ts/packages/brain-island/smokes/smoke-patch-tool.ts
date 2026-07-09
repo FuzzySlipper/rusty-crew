@@ -16,6 +16,7 @@ import type {
 } from "@rusty-crew/contracts";
 import {
   defaultBodyDeltaPolicy,
+  defaultLocalCodeResourcePolicy,
   patchTool,
   resolveLocalCodeTools,
   selectToolProfile,
@@ -123,7 +124,15 @@ try {
   assert.match(textResult(patchResult), /\+hello patch/);
 
   writeFileSync(join(workdir, "a.txt"), "line1\nold_line\nline3\n", "utf8");
-  const directPatch = patchTool({ workdir, maxDurationMs: 5_000 });
+  const directPatch = patchTool({
+    workdir,
+    maxReadBytes: defaultLocalCodeResourcePolicy.maxReadBytes,
+    maxSearchFileBytes: defaultLocalCodeResourcePolicy.maxSearchFileBytes,
+    maxCommandOutputBytes: defaultLocalCodeResourcePolicy.maxCommandOutputBytes,
+    commandTimeoutMs: 5_000,
+    maxDurationMs: 5_000,
+    resourcePolicy: defaultLocalCodeResourcePolicy,
+  });
   const v4aResult = await directPatch.execute("patch-v4a", {
     mode: "patch",
     patch: [
@@ -163,7 +172,16 @@ try {
   assert.equal(readFileSync(outsidePatchPath, "utf8"), "outside new\n");
 
   const workerPatch = patchTool(
-    { workdir, maxDurationMs: 5_000 },
+    {
+      workdir,
+      maxReadBytes: defaultLocalCodeResourcePolicy.maxReadBytes,
+      maxSearchFileBytes: defaultLocalCodeResourcePolicy.maxSearchFileBytes,
+      maxCommandOutputBytes:
+        defaultLocalCodeResourcePolicy.maxCommandOutputBytes,
+      commandTimeoutMs: 5_000,
+      maxDurationMs: 5_000,
+      resourcePolicy: defaultLocalCodeResourcePolicy,
+    },
     { name: "worker_patch", filesystemScope: "workdir" },
   );
   const workerPatchResult = await workerPatch.execute("worker-patch-outside", {

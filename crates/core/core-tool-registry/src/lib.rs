@@ -339,6 +339,58 @@ pub struct WebBrowserResourcePolicyInput {
     pub browser: BrowserResourcePolicyOverrides,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCodeResourcePolicyInput {
+    #[serde(default)]
+    pub resource_limits: LocalCodeResourceLimitsInput,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCodeResourceLimitsInput {
+    pub workdir: Option<String>,
+    pub max_duration_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalCodeFilesystemScope {
+    Unrestricted,
+    Workdir,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalCodeExecutionMode {
+    Parallel,
+    Sequential,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCodeToolResourcePolicy {
+    pub tool_name: String,
+    pub filesystem_scope: LocalCodeFilesystemScope,
+    pub writes_files: bool,
+    pub executes_process: bool,
+    pub execution_mode: LocalCodeExecutionMode,
+    pub output_shape: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCodeResourcePolicyPlan {
+    pub workdir: String,
+    pub max_duration_ms: Option<u32>,
+    pub command_timeout_ms: u32,
+    pub max_read_bytes: u32,
+    pub max_search_file_bytes: u32,
+    pub max_command_output_bytes: u32,
+    pub tools: Vec<LocalCodeToolResourcePolicy>,
+    pub denial_reason_codes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebResourcePolicyOverrides {
@@ -514,6 +566,143 @@ pub fn plan_web_browser_resource_policy(
             "browser_screenshot_too_large".to_string(),
             "browser_screenshot_store_unavailable".to_string(),
         ],
+    }
+}
+
+pub fn plan_local_code_resource_policy(
+    input: &LocalCodeResourcePolicyInput,
+) -> LocalCodeResourcePolicyPlan {
+    let max_duration_ms = input
+        .resource_limits
+        .max_duration_ms
+        .map(|value| clamp_value(value, 1_000, 24 * 60 * 60 * 1_000));
+    let command_timeout_ms = max_duration_ms.unwrap_or(30_000);
+    LocalCodeResourcePolicyPlan {
+        workdir: normalize_local_code_workdir(input.resource_limits.workdir.as_deref()),
+        max_duration_ms,
+        command_timeout_ms,
+        max_read_bytes: 256 * 1_024,
+        max_search_file_bytes: 256 * 1_024,
+        max_command_output_bytes: 128 * 1_024,
+        tools: vec![
+            local_code_resource_tool_policy(
+                "read_file",
+                LocalCodeFilesystemScope::Unrestricted,
+                false,
+                false,
+                LocalCodeExecutionMode::Parallel,
+                "text_with_file_read_details",
+            ),
+            local_code_resource_tool_policy(
+                "write_file",
+                LocalCodeFilesystemScope::Unrestricted,
+                true,
+                false,
+                LocalCodeExecutionMode::Sequential,
+                "json_file_write_details",
+            ),
+            local_code_resource_tool_policy(
+                "search_files",
+                LocalCodeFilesystemScope::Unrestricted,
+                false,
+                false,
+                LocalCodeExecutionMode::Parallel,
+                "json_search_matches_with_skips",
+            ),
+            local_code_resource_tool_policy(
+                "terminal",
+                LocalCodeFilesystemScope::Unrestricted,
+                false,
+                true,
+                LocalCodeExecutionMode::Sequential,
+                "process_result_text_and_details",
+            ),
+            local_code_resource_tool_policy(
+                "git_status",
+                LocalCodeFilesystemScope::Unrestricted,
+                false,
+                true,
+                LocalCodeExecutionMode::Parallel,
+                "process_result_text_and_details",
+            ),
+            local_code_resource_tool_policy(
+                "git_diff",
+                LocalCodeFilesystemScope::Unrestricted,
+                false,
+                true,
+                LocalCodeExecutionMode::Parallel,
+                "process_result_text_and_details",
+            ),
+            local_code_resource_tool_policy(
+                "patch",
+                LocalCodeFilesystemScope::Unrestricted,
+                true,
+                true,
+                LocalCodeExecutionMode::Sequential,
+                "patch_diff_with_apply_details",
+            ),
+            local_code_resource_tool_policy(
+                "worker_write",
+                LocalCodeFilesystemScope::Workdir,
+                true,
+                false,
+                LocalCodeExecutionMode::Sequential,
+                "json_file_write_details",
+            ),
+            local_code_resource_tool_policy(
+                "worker_patch",
+                LocalCodeFilesystemScope::Workdir,
+                true,
+                true,
+                LocalCodeExecutionMode::Sequential,
+                "patch_diff_with_apply_details",
+            ),
+        ],
+        denial_reason_codes: vec![
+            "path_escape".to_string(),
+            "read_dir_failed".to_string(),
+            "read_file_failed".to_string(),
+            "stat_failed".to_string(),
+            "file_too_large".to_string(),
+            "write_failed".to_string(),
+            "command_invalid".to_string(),
+            "command_failed".to_string(),
+            "command_timeout".to_string(),
+            "patch_parse_failed".to_string(),
+            "patch_no_match".to_string(),
+            "patch_non_unique_match".to_string(),
+            "syntax_check_failed".to_string(),
+        ],
+    }
+}
+
+fn normalize_local_code_workdir(workdir: Option<&str>) -> String {
+    let Some(workdir) = workdir else {
+        return "/home".to_string();
+    };
+    let trimmed = workdir.trim();
+    if trimmed.is_empty() {
+        "/home".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn local_code_resource_tool_policy(
+    tool_name: &str,
+    filesystem_scope: LocalCodeFilesystemScope,
+    writes_files: bool,
+    executes_process: bool,
+    execution_mode: LocalCodeExecutionMode,
+    output_shape: &str,
+) -> LocalCodeToolResourcePolicy {
+    LocalCodeToolResourcePolicy {
+        tool_name: tool_name.to_string(),
+        filesystem_scope,
+        writes_files,
+        executes_process,
+        execution_mode,
+        output_shape: output_shape.to_string(),
     }
 }
 
@@ -2101,6 +2290,84 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["memory_store", "memory_propose"]
         );
+    }
+
+    #[test]
+    fn plans_default_local_code_resource_policy() {
+        let plan = plan_local_code_resource_policy(&LocalCodeResourcePolicyInput {
+            resource_limits: LocalCodeResourceLimitsInput::default(),
+        });
+
+        assert_eq!(plan.workdir, "/home");
+        assert_eq!(plan.max_duration_ms, None);
+        assert_eq!(plan.command_timeout_ms, 30_000);
+        assert_eq!(plan.max_read_bytes, 256 * 1_024);
+        assert_eq!(plan.max_search_file_bytes, 256 * 1_024);
+        assert_eq!(plan.max_command_output_bytes, 128 * 1_024);
+        assert_eq!(
+            plan.tools
+                .iter()
+                .map(|tool| tool.tool_name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "read_file",
+                "write_file",
+                "search_files",
+                "terminal",
+                "git_status",
+                "git_diff",
+                "patch",
+                "worker_write",
+                "worker_patch",
+            ]
+        );
+        assert_eq!(
+            plan.tools
+                .iter()
+                .find(|tool| tool.tool_name == "patch")
+                .expect("patch policy")
+                .filesystem_scope,
+            LocalCodeFilesystemScope::Unrestricted
+        );
+        assert_eq!(
+            plan.tools
+                .iter()
+                .find(|tool| tool.tool_name == "worker_patch")
+                .expect("worker patch policy")
+                .filesystem_scope,
+            LocalCodeFilesystemScope::Workdir
+        );
+        assert!(plan
+            .denial_reason_codes
+            .contains(&"path_escape".to_string()));
+        assert!(plan
+            .denial_reason_codes
+            .contains(&"syntax_check_failed".to_string()));
+    }
+
+    #[test]
+    fn plans_local_code_resource_policy_from_session_limits() {
+        let plan = plan_local_code_resource_policy(&LocalCodeResourcePolicyInput {
+            resource_limits: LocalCodeResourceLimitsInput {
+                workdir: Some("  /srv/work ".to_string()),
+                max_duration_ms: Some(500),
+            },
+        });
+
+        assert_eq!(plan.workdir, "/srv/work");
+        assert_eq!(plan.max_duration_ms, Some(1_000));
+        assert_eq!(plan.command_timeout_ms, 1_000);
+
+        let long_plan = plan_local_code_resource_policy(&LocalCodeResourcePolicyInput {
+            resource_limits: LocalCodeResourceLimitsInput {
+                workdir: Some("".to_string()),
+                max_duration_ms: Some(100_000_000),
+            },
+        });
+
+        assert_eq!(long_plan.workdir, "/home");
+        assert_eq!(long_plan.max_duration_ms, Some(24 * 60 * 60 * 1_000));
+        assert_eq!(long_plan.command_timeout_ms, 24 * 60 * 60 * 1_000);
     }
 
     #[test]

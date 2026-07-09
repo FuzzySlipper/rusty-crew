@@ -3,15 +3,110 @@ import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import type { BrainTool } from "./brain-tool.js";
 import type { ResourceLimits } from "@rusty-crew/contracts";
+import type { NativeLocalCodeResourcePolicyPlan } from "@rusty-crew/native-bridge";
 import { Type, type Static } from "typebox";
 import { patchTool } from "./patch-tool.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 
-const defaultMaxReadBytes = 256 * 1024;
-const defaultMaxSearchFileBytes = 256 * 1024;
-const defaultMaxCommandOutputBytes = 128 * 1024;
-const defaultCommandTimeoutMs = 30_000;
 export const defaultLocalToolWorkdir = "/home";
+
+export const defaultLocalCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan =
+  {
+    workdir: defaultLocalToolWorkdir,
+    commandTimeoutMs: 30_000,
+    maxReadBytes: 256 * 1024,
+    maxSearchFileBytes: 256 * 1024,
+    maxCommandOutputBytes: 128 * 1024,
+    tools: [
+      {
+        toolName: "read_file",
+        filesystemScope: "unrestricted",
+        writesFiles: false,
+        executesProcess: false,
+        executionMode: "parallel",
+        outputShape: "text_with_file_read_details",
+      },
+      {
+        toolName: "write_file",
+        filesystemScope: "unrestricted",
+        writesFiles: true,
+        executesProcess: false,
+        executionMode: "sequential",
+        outputShape: "json_file_write_details",
+      },
+      {
+        toolName: "search_files",
+        filesystemScope: "unrestricted",
+        writesFiles: false,
+        executesProcess: false,
+        executionMode: "parallel",
+        outputShape: "json_search_matches_with_skips",
+      },
+      {
+        toolName: "terminal",
+        filesystemScope: "unrestricted",
+        writesFiles: false,
+        executesProcess: true,
+        executionMode: "sequential",
+        outputShape: "process_result_text_and_details",
+      },
+      {
+        toolName: "git_status",
+        filesystemScope: "unrestricted",
+        writesFiles: false,
+        executesProcess: true,
+        executionMode: "parallel",
+        outputShape: "process_result_text_and_details",
+      },
+      {
+        toolName: "git_diff",
+        filesystemScope: "unrestricted",
+        writesFiles: false,
+        executesProcess: true,
+        executionMode: "parallel",
+        outputShape: "process_result_text_and_details",
+      },
+      {
+        toolName: "patch",
+        filesystemScope: "unrestricted",
+        writesFiles: true,
+        executesProcess: true,
+        executionMode: "sequential",
+        outputShape: "patch_diff_with_apply_details",
+      },
+      {
+        toolName: "worker_write",
+        filesystemScope: "workdir",
+        writesFiles: true,
+        executesProcess: false,
+        executionMode: "sequential",
+        outputShape: "json_file_write_details",
+      },
+      {
+        toolName: "worker_patch",
+        filesystemScope: "workdir",
+        writesFiles: true,
+        executesProcess: true,
+        executionMode: "sequential",
+        outputShape: "patch_diff_with_apply_details",
+      },
+    ],
+    denialReasonCodes: [
+      "path_escape",
+      "read_dir_failed",
+      "read_file_failed",
+      "stat_failed",
+      "file_too_large",
+      "write_failed",
+      "command_invalid",
+      "command_failed",
+      "command_timeout",
+      "patch_parse_failed",
+      "patch_no_match",
+      "patch_non_unique_match",
+      "syntax_check_failed",
+    ],
+  };
 
 const readFileParameters = Type.Object({
   path: Type.String({ minLength: 1 }),
@@ -48,7 +143,12 @@ type GitDiffParams = Static<typeof gitDiffParameters>;
 
 export interface LocalToolContext {
   workdir: string;
+  maxReadBytes: number;
+  maxSearchFileBytes: number;
+  maxCommandOutputBytes: number;
+  commandTimeoutMs: number;
   maxDurationMs?: number;
+  resourcePolicy: NativeLocalCodeResourcePolicyPlan;
 }
 
 type FilesystemScope = "unrestricted" | "workdir";
@@ -63,20 +163,33 @@ export interface LocalToolProcessResult {
   timedOut: boolean;
 }
 
-export const resolveLocalCodeTools: BrainToolResolver = ({ wake }) => {
-  const context = localToolContext(wake.state.session.resourceLimits);
-  return [
-    readFileTool(context),
-    writeFileTool(context),
-    searchFilesTool(context),
-    terminalTool(context),
-    gitStatusTool(context),
-    gitDiffTool(context),
-    patchTool(context),
-    workerWriteTool(context),
-    workerPatchTool(context),
-  ];
-};
+export function createLocalCodeToolResolver(
+  input: {
+    resourcePolicy?: NativeLocalCodeResourcePolicyPlan;
+  } = {},
+): BrainToolResolver {
+  return ({ wake }) => {
+    const context = localToolContext(
+      input.resourcePolicy ?? defaultLocalCodeResourcePolicy,
+      wake.state.session.resourceLimits,
+    );
+    return [
+      readFileTool(context),
+      writeFileTool(context),
+      searchFilesTool(context),
+      terminalTool(context),
+      gitStatusTool(context),
+      gitDiffTool(context),
+      patchTool(context, {
+        filesystemScope: localToolFilesystemScope(context, "patch"),
+      }),
+      workerWriteTool(context),
+      workerPatchTool(context),
+    ];
+  };
+}
+
+export const resolveLocalCodeTools = createLocalCodeToolResolver();
 
 export function readFileTool(
   context: LocalToolContext,
@@ -93,7 +206,7 @@ export function readFileTool(
         params.path,
         "unrestricted",
       );
-      const maxBytes = params.maxBytes ?? defaultMaxReadBytes;
+      const maxBytes = params.maxBytes ?? context.maxReadBytes;
       const data = await readFile(target);
       const truncated = data.byteLength > maxBytes;
       const text = data.subarray(0, maxBytes).toString("utf8");
@@ -168,6 +281,7 @@ export function searchFilesTool(
       );
       await searchDirectory(root, root, params.query, matches, maxResults, {
         skipped,
+        maxSearchFileBytes: context.maxSearchFileBytes,
       });
       const details = {
         query: params.query,
@@ -196,13 +310,13 @@ export function terminalTool(
     executionMode: "sequential",
     execute: async (_toolCallId, params: TerminalParams, signal) => {
       const timeoutMs = Math.min(
-        params.timeoutMs ?? context.maxDurationMs ?? defaultCommandTimeoutMs,
-        context.maxDurationMs ?? defaultCommandTimeoutMs,
+        params.timeoutMs ?? context.maxDurationMs ?? context.commandTimeoutMs,
+        context.maxDurationMs ?? context.commandTimeoutMs,
       );
       const result = await runShellCommand(params.command, context.workdir, {
         signal,
         timeoutMs,
-        maxOutputBytes: params.maxOutputBytes ?? defaultMaxCommandOutputBytes,
+        maxOutputBytes: params.maxOutputBytes ?? context.maxCommandOutputBytes,
       });
       return {
         content: [{ type: "text", text: formatProcessResult(result) }],
@@ -228,8 +342,8 @@ export function gitStatusTool(
         context.workdir,
         {
           signal,
-          timeoutMs: context.maxDurationMs ?? defaultCommandTimeoutMs,
-          maxOutputBytes: defaultMaxCommandOutputBytes,
+          timeoutMs: context.maxDurationMs ?? context.commandTimeoutMs,
+          maxOutputBytes: context.maxCommandOutputBytes,
         },
       );
       return {
@@ -258,8 +372,8 @@ export function gitDiffTool(
       const args = ["diff", "--", ...(scopedDiffPath ? [scopedDiffPath] : [])];
       const result = await runProcess("git", args, context.workdir, {
         signal,
-        timeoutMs: context.maxDurationMs ?? defaultCommandTimeoutMs,
-        maxOutputBytes: defaultMaxCommandOutputBytes,
+        timeoutMs: context.maxDurationMs ?? context.commandTimeoutMs,
+        maxOutputBytes: context.maxCommandOutputBytes,
       });
       return {
         content: [{ type: "text", text: formatProcessResult(result) }],
@@ -280,7 +394,11 @@ export function workerWriteTool(
     parameters: writeFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId, params: WriteFileParams) => {
-      const target = resolveToolPath(context.workdir, params.path, "workdir");
+      const target = resolveToolPath(
+        context.workdir,
+        params.path,
+        localToolFilesystemScope(context, "worker_write"),
+      );
       await writeFile(target, params.content, "utf8");
       const details = {
         path: params.path,
@@ -306,15 +424,34 @@ export function workerPatchTool(context: LocalToolContext): BrainTool {
     label: "Worker patch",
     description:
       "Apply bounded find-and-replace edits or V4A multi-file patches inside the delegated worker workdir and return a unified diff.",
-    filesystemScope: "workdir",
+    filesystemScope: localToolFilesystemScope(context, "worker_patch"),
   });
 }
 
-function localToolContext(limits: ResourceLimits): LocalToolContext {
+function localToolContext(
+  policy: NativeLocalCodeResourcePolicyPlan,
+  limits: ResourceLimits,
+): LocalToolContext {
+  const maxDurationMs = limits.maxDurationMs ?? policy.maxDurationMs;
   return {
-    workdir: resolve(limits.workdir ?? defaultLocalToolWorkdir),
-    maxDurationMs: limits.maxDurationMs,
+    workdir: resolve(limits.workdir ?? policy.workdir),
+    maxReadBytes: policy.maxReadBytes,
+    maxSearchFileBytes: policy.maxSearchFileBytes,
+    maxCommandOutputBytes: policy.maxCommandOutputBytes,
+    commandTimeoutMs: maxDurationMs ?? policy.commandTimeoutMs,
+    ...(maxDurationMs === undefined ? {} : { maxDurationMs }),
+    resourcePolicy: policy,
   };
+}
+
+function localToolFilesystemScope(
+  context: LocalToolContext,
+  toolName: string,
+): FilesystemScope {
+  return (
+    context.resourcePolicy.tools.find((tool) => tool.toolName === toolName)
+      ?.filesystemScope ?? "unrestricted"
+  );
 }
 
 export function resolveToolPath(
@@ -403,6 +540,7 @@ interface SearchSkippedPath {
 
 interface SearchState {
   skipped: SearchSkippedPath[];
+  maxSearchFileBytes: number;
 }
 
 async function searchFileContent(
@@ -419,7 +557,7 @@ async function searchFileContent(
     return undefined;
   });
   if (!metadata) return;
-  if (metadata.size > defaultMaxSearchFileBytes) {
+  if (metadata.size > state.maxSearchFileBytes) {
     recordSkippedPath(state, root, absolutePath, "file_too_large");
     return;
   }

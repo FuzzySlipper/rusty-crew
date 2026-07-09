@@ -263,6 +263,15 @@ errors = "core_protocol::CoreError"
 summary = "Filter selected local tools against Rust-owned external dependency availability policy before model wake registration."
 
 [[operation]]
+name = "plan_local_code_resource_policy"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_tool_registry::LocalCodeResourcePolicyInput"
+output = "core_tool_registry::LocalCodeResourcePolicyPlan"
+errors = "core_protocol::CoreError"
+summary = "Normalize Rust-owned local code and patch resource facts before TypeScript executes filesystem, subprocess, and patch mechanics."
+
+[[operation]]
 name = "plan_web_browser_resource_policy"
 surface = "stable"
 direction = "ts_to_rust"

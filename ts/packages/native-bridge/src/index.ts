@@ -320,6 +320,7 @@ interface NativeBridgeBinding {
   validateToolMetadataPolicyJson(inputJson: string): string;
   validateLocalToolProfilePolicyJson(inputJson: string): string;
   planToolAvailabilityJson(inputJson: string): string;
+  planLocalCodeResourcePolicyJson(inputJson: string): string;
   planWebBrowserResourcePolicyJson(inputJson: string): string;
   validateRuntimeConfigDraftJson(inputJson: string): string;
   planRuntimeConfigJson(inputJson: string): string;
@@ -1628,6 +1629,36 @@ export interface NativeToolAvailabilityPlan {
   diagnostics: NativeToolAvailabilityOmission[];
 }
 
+export interface NativeLocalCodeResourcePolicyInput {
+  resourceLimits?: {
+    workdir?: string;
+    maxDurationMs?: number;
+  };
+}
+
+export type NativeLocalCodeFilesystemScope = "unrestricted" | "workdir";
+export type NativeLocalCodeExecutionMode = "parallel" | "sequential";
+
+export interface NativeLocalCodeToolResourcePolicy {
+  toolName: string;
+  filesystemScope: NativeLocalCodeFilesystemScope;
+  writesFiles: boolean;
+  executesProcess: boolean;
+  executionMode: NativeLocalCodeExecutionMode;
+  outputShape: string;
+}
+
+export interface NativeLocalCodeResourcePolicyPlan {
+  workdir: string;
+  maxDurationMs?: number;
+  commandTimeoutMs: number;
+  maxReadBytes: number;
+  maxSearchFileBytes: number;
+  maxCommandOutputBytes: number;
+  tools: NativeLocalCodeToolResourcePolicy[];
+  denialReasonCodes: string[];
+}
+
 export interface NativeWebBrowserResourcePolicyInput {
   web?: Partial<NativeWebResourcePolicyPlan> & {
     allowedNonstandardPorts?: number[];
@@ -2267,6 +2298,9 @@ export interface NativeBridgeModule {
   planToolAvailability(
     input: NativeToolAvailabilityPlanInput,
   ): Promise<NativeToolAvailabilityPlan>;
+  planLocalCodeResourcePolicy(
+    input: NativeLocalCodeResourcePolicyInput,
+  ): Promise<NativeLocalCodeResourcePolicyPlan>;
   planWebBrowserResourcePolicy(
     input: NativeWebBrowserResourcePolicyInput,
   ): Promise<NativeWebBrowserResourcePolicyPlan>;
@@ -2816,6 +2850,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
       "validate_local_tool_profile_policy",
     ),
     planToolAvailability: unavailable("plan_tool_availability"),
+    planLocalCodeResourcePolicy: unavailable("plan_local_code_resource_policy"),
     planWebBrowserResourcePolicy: unavailable(
       "plan_web_browser_resource_policy",
     ),
@@ -3568,6 +3603,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.planToolAvailabilityJson(JSON.stringify(input)),
       ) as NativeToolAvailabilityPlan,
+    planLocalCodeResourcePolicy: async (input) =>
+      JSON.parse(
+        binding.planLocalCodeResourcePolicyJson(JSON.stringify(input)),
+      ) as NativeLocalCodeResourcePolicyPlan,
     planWebBrowserResourcePolicy: async (input) =>
       JSON.parse(
         binding.planWebBrowserResourcePolicyJson(JSON.stringify(input)),

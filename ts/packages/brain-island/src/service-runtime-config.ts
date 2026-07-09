@@ -37,7 +37,10 @@ import type {
   NativeSessionConfigDraft,
   NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
-import { loadNativeBridge } from "@rusty-crew/native-bridge";
+import {
+  loadNativeBridge,
+  type NativeLocalCodeResourcePolicyPlan,
+} from "@rusty-crew/native-bridge";
 import { createBrowserToolResolver } from "./browser-tools.js";
 import {
   createCoordinationToolResolver,
@@ -67,7 +70,7 @@ import { resolveDelegationTools } from "./delegation-tools.js";
 import { resolveLoreMemoryTools } from "./lore-memory-tool.js";
 import { resolveSceneStateTools } from "./scene-state-tool.js";
 import type { BrainImplementation, BrainWakeResult } from "./index.js";
-import { resolveLocalCodeTools } from "./local-code-tools.js";
+import { createLocalCodeToolResolver } from "./local-code-tools.js";
 import { createMemorySpaceToolResolver } from "./memory-space-api.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
@@ -735,6 +738,8 @@ export async function applyRustyCrewRuntimeConfig(input: {
     createServiceBrowserResources({
       resourcePolicy: await input.bridge.planWebBrowserResourcePolicy({}),
     });
+  const localCodeResourcePolicy =
+    await input.bridge.planLocalCodeResourcePolicy({});
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
     bridge: input.bridge,
@@ -834,6 +839,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             toolCallDebugStore: input.toolCallDebugStore,
             providerRequestDebugStore: input.providerRequestDebugStore,
             browserResources,
+            localCodeResourcePolicy,
           }),
           {
             profileId: brain.profileId,
@@ -1008,6 +1014,8 @@ export async function rebuildConfiguredBrainRuntime(input: {
     createServiceBrowserResources({
       resourcePolicy: await input.bridge.planWebBrowserResourcePolicy({}),
     });
+  const localCodeResourcePolicy =
+    await input.bridge.planLocalCodeResourcePolicy({});
   const brain = runtimeConfig.brains.find(
     (candidate) => candidate.profileId === input.profileId,
   );
@@ -1076,6 +1084,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         toolCallDebugStore: input.toolCallDebugStore,
         providerRequestDebugStore: input.providerRequestDebugStore,
         browserResources,
+        localCodeResourcePolicy,
       }),
       {
         profileId: brain.profileId,
@@ -1381,6 +1390,7 @@ async function createConfiguredBrain(
     toolCallDebugStore?: ToolCallDebugStore;
     providerRequestDebugStore?: ProviderRequestDebugStore;
     browserResources: ServiceBrowserResources;
+    localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
 ): Promise<BrainImplementation> {
   return module.createBrain({
@@ -1418,11 +1428,14 @@ function createServiceToolResolver(
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     coordinationRuntime?: CoordinationToolRuntime;
     browserResources: ServiceBrowserResources;
+    localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
 ): BrainToolResolver {
   const todoStore = createServiceTodoStore(options.serviceConfig);
   return combineResolvers(
-    resolveLocalCodeTools,
+    createLocalCodeToolResolver({
+      resourcePolicy: options.localCodeResourcePolicy,
+    }),
     createWebToolResolver({
       searchDefaultLimit:
         options.browserResources.resourcePolicy.web.searchDefaultLimit,

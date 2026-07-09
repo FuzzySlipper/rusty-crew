@@ -45,6 +45,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "validate_tool_metadata_policy",
     "validate_local_tool_profile_policy",
     "plan_tool_availability",
+    "plan_local_code_resource_policy",
     "plan_web_browser_resource_policy",
     "validate_runtime_config_draft",
     "plan_runtime_config",

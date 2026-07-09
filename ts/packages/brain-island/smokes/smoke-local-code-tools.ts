@@ -22,8 +22,9 @@ import type {
   AgentToolResult,
 } from "./support/legacy-pi-agent-test-harness.js";
 import {
+  createLocalCodeToolResolver,
   defaultBodyDeltaPolicy,
-  resolveLocalCodeTools,
+  defaultLocalCodeResourcePolicy,
   selectToolProfile,
 } from "../src/index.js";
 import { createPiAgentBrain } from "./support/legacy-pi-agent-test-harness.js";
@@ -144,9 +145,17 @@ class ToolCallingFakeAgent {
 }
 
 const toolResults: Record<string, AgentToolResult<unknown>> = {};
+const policyBackedResolver = createLocalCodeToolResolver({
+  resourcePolicy: {
+    ...defaultLocalCodeResourcePolicy,
+    maxReadBytes: 64,
+    maxSearchFileBytes: 1_024,
+    maxCommandOutputBytes: 64,
+  },
+});
 const brain = createPiAgentBrain({
   createAgent: (options) => new ToolCallingFakeAgent(options, toolResults),
-  resolveTools: resolveLocalCodeTools,
+  resolveTools: policyBackedResolver,
 });
 
 try {

@@ -1,4 +1,6 @@
 export {
+  createLocalCodeToolResolver,
+  defaultLocalCodeResourcePolicy,
   gitDiffTool,
   gitStatusTool,
   defaultLocalToolWorkdir,

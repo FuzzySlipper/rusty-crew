@@ -83,8 +83,9 @@ use rusty_crew_core_protocol::{
     ProfileRegistryUpdate, ProfileRegistryWrite, SessionActivityDigest, SessionActivityDigestQuery,
 };
 use rusty_crew_core_tool_registry::{
-    plan_tool_availability, plan_web_browser_resource_policy, validate_local_tool_profile_policy,
-    validate_tool_metadata_policy, LocalToolProfileValidationInput, ToolAvailabilityPlanInput,
+    plan_local_code_resource_policy, plan_tool_availability, plan_web_browser_resource_policy,
+    validate_local_tool_profile_policy, validate_tool_metadata_policy,
+    LocalCodeResourcePolicyInput, LocalToolProfileValidationInput, ToolAvailabilityPlanInput,
     ToolMetadataPolicyValidationInput, WebBrowserResourcePolicyInput,
 };
 use rusty_crew_openai_responses_brain::{
