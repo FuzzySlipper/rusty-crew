@@ -1,8 +1,14 @@
 # ADR 0021: First-Class Brain Modules Behind The Neutral Wake Contract
 
-Status: Accepted for task 3906
+Status: Superseded in part by ADR 0023
 
 Date: 2026-07-01
+
+ADR 0023 keeps this ADR's language-neutral wake contract but supersedes the
+decision to retain TypeScript brain modules as a permanent first-class
+production path. The current clean-break direction is a Rust-owned built-in
+brain catalog and provider loops with narrowly scoped TypeScript host
+capabilities for tool and adapter execution.
 
 ## Context
 
@@ -148,4 +154,3 @@ updated or read through this ADR.
 - Do not require all providers to use Rust brains.
 - Do not keep TypeScript and Rust brain implementations behavior-compatible
   through hidden fallbacks when their provider semantics genuinely differ.
-

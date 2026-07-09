@@ -146,6 +146,24 @@ coordination. Rusty Crew uses frozen wake snapshots and body-owned next-wake
 deltas with aggressive TTL/cap behavior. Expired messages are inspectable but
 not redeliverable.
 
+### Production Brain Catalog And Host Capabilities
+
+Outcome: decided by the post-remediation Rust-authority campaign.
+
+References:
+
+- `docs/adr/0023-rust-brain-catalog-and-host-capabilities.md`
+- `docs/adr/0021-first-class-brain-modules.md` (historical neutral-contract
+  decision, superseded in part)
+- Task 5361
+
+Decision: the neutral wake contract remains implementation-language agnostic,
+but Rust owns the production built-in brain catalog, selection policy,
+provider-state policy, buffered turn coordinator, and provider loops.
+TypeScript exposes narrowly scoped host capabilities for concrete tool,
+adapter, and debug projection work. `brain-module.ts` and the deterministic
+local production brain are removed without a compatibility fallback.
+
 ## Implementation Deferrals
 
 The following decisions intentionally defer implementation:
