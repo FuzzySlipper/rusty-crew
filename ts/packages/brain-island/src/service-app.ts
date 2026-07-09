@@ -1,8 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type {
   AdapterId,
   BrainEvent,
@@ -32,12 +29,9 @@ import {
   loadNativeBridge,
   type NativeProfileMemoryRecord,
   type NativeBridgeModule,
-  type NativeCreateProfilePlan,
   type NativeModelProviderRecord,
   type NativeModelProviderWrite,
   type NativeChannelIngressRoutePlan,
-  type NativeProfilePurgeReport,
-  type NativeProfileRegistryMutationPlan,
   type NativeProfileRegistryRecord,
   type NativeProfileRegistryWrite,
   type NativeRoleplayChatLayersWrite,
@@ -96,10 +90,7 @@ import { createNewSessionLifecycleExecutor } from "./new-session-lifecycle.js";
 import { createReloadMcpControlExecutor } from "./reload-mcp-control.js";
 import { createBridgeToolMetadataPolicyValidator } from "./mcp-tool-registry-integration.js";
 import { createDefaultMcpDiscoveryClient } from "./service-mcp-tools.js";
-import {
-  createLocalToolProfileStore,
-  LocalToolProfileError,
-} from "./local-tool-profiles.js";
+import { createLocalToolProfileStore } from "./local-tool-profiles.js";
 import {
   handleAdminDiagnosticsRequest,
   type AdminDiagnosticsContext,
@@ -107,10 +98,7 @@ import {
 } from "./admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
 import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
-import {
-  handleAdminMcpServerRegistryRequest,
-  mcpServerWriteFromBody,
-} from "./service-mcp-server-registry-routes.js";
+import { handleAdminMcpServerRegistryRequest } from "./service-mcp-server-registry-routes.js";
 import {
   failure,
   successRoute,
@@ -160,6 +148,28 @@ import {
   planProfileRegistryWrite as planProfileRegistryWriteFromModule,
   type ProfileRegistryRuntimeConfigPlan as ExtractedProfileRegistryRuntimeConfigPlan,
 } from "./service-profile-runtime-mutations.js";
+import {
+  applyServiceProfileUpdate as applyServiceProfileUpdateFromModule,
+  applyServiceRuntimeConfigDraft as applyServiceRuntimeConfigDraftFromModule,
+  createServiceProfile as createServiceProfileFromModule,
+  defaultProfileBrainForModelProvider,
+  decommissionServiceProfile as decommissionServiceProfileFromModule,
+  deleteServiceProfile as deleteServiceProfileFromModule,
+  patchServiceWakeTimeout as patchServiceWakeTimeoutFromModule,
+  planServiceProfileUpdate as planServiceProfileUpdateFromModule,
+  planServiceRuntimeConfigDraft as planServiceRuntimeConfigDraftFromModule,
+  readRuntimeConfigFileForMutation as readRuntimeConfigFileForMutationFromModule,
+  readServiceProfileConfig as readServiceProfileConfigFromModule,
+  runtimeEntryString as runtimeEntryStringFromModule,
+  unregisterServiceProfileBrain as unregisterServiceProfileBrainFromModule,
+  writeJsonFileAtomic as writeJsonFileAtomicFromModule,
+  assertRuntimeConfigDraftPlanOk,
+  planRuntimeConfigFileValue,
+  type DecommissionedServiceProfile,
+  type RuntimeConfigDraftPlan,
+  type RuntimeConfigFileForMutation,
+  type ServiceProfileAdminMutationContext,
+} from "./service-profile-admin-mutations.js";
 import { handleStorageQueryRequest } from "./storage-query-catalog.js";
 import { buildAdminProfileRegistryDiagnostics } from "./profile-registry-admin.js";
 import {
@@ -179,7 +189,6 @@ import { handleServiceDirectDebugRequest } from "./service-direct-debug-routes.j
 import {
   contextStrategyCatalog,
   contextStrategyDescriptor,
-  contextStrategyPolicyFromPatch,
   contextStrategyPolicyFromUnknown,
   defaultContextStrategyPolicy,
   prepareContextStrategyRoleAssembly,
@@ -193,7 +202,6 @@ import {
 import {
   loadProfileConfig,
   loadProfileContext,
-  parseProfileConfigDraft,
   type ProfileConfig,
   type SessionMemoryPromptConfig,
 } from "./profile-loading.js";
@@ -201,10 +209,6 @@ import {
   buildProfileRoleAssembly,
   renderSessionMemoryContext,
 } from "./profile-role-assembly.js";
-import {
-  planCreateProfileWithRust,
-  planRuntimeConfigWithRust,
-} from "./runtime-config-validation.js";
 import {
   buildRuntimeDiagnosticsProjection,
   type ToolDiagnosticsProjection,
@@ -339,7 +343,6 @@ import {
   acquireRustyCrewServiceLock,
   ensureRustyCrewServiceDirectories,
   loadRustyCrewServiceConfig,
-  type RustyCrewMcpServerConfig,
   type RustyCrewServiceConfig,
   type RustyCrewServiceEnv,
   type RustyCrewServiceLock,
@@ -353,12 +356,10 @@ import {
   preflightRustyCrewRuntimeConfig,
   rebuildConfiguredBrainRuntime,
   registerConfiguredScheduledJobs,
-  runtimeWakeTimeoutConfig,
   ensureConfiguredSessionForChannelBinding,
   type RustyCrewConfiguredSession,
   type RustyCrewRuntimeConfig,
   type RustyCrewRuntimeConfigApplyResult,
-  type RustyCrewWakeTimeoutConfig,
   type ServiceBrainWakeResultObservation,
 } from "./service-runtime-config.js";
 import { createRuntimeActivityObserver } from "./runtime-activity-observer.js";
@@ -506,7 +507,9 @@ function roleplayRouteContext(state: ServiceState): RoleplayRouteContext {
 function profileRuntimeMutationContext(state: ServiceState) {
   return {
     bridge: state.bridge,
-    runtimeConfig: state.runtimeConfig,
+    get runtimeConfig() {
+      return state.runtimeConfig;
+    },
     serviceConfigFile: state.config.paths.serviceConfigFile,
     now: state.now,
     applyRuntimeConfigFromDisk: (options: {
@@ -514,6 +517,28 @@ function profileRuntimeMutationContext(state: ServiceState) {
       eventType: string;
       summaryPrefix: string;
     }) => applyServiceRuntimeConfigFromDisk(state, options),
+  };
+}
+
+function profileAdminMutationContext(
+  state: ServiceState,
+): ServiceProfileAdminMutationContext {
+  return {
+    bridge: state.bridge,
+    runtimeConfig: state.runtimeConfig,
+    serviceConfigFile: state.config.paths.serviceConfigFile,
+    now: state.now,
+    inFlightWakes: state.inFlightWakes,
+    applyRuntimeConfigFromDisk: (options) =>
+      applyServiceRuntimeConfigFromDisk(state, options),
+    archiveSession: (sessionId) => archiveServiceSession(state, sessionId),
+    forgetPurgedSessions: (sessionIds) => {
+      for (const sessionId of sessionIds) {
+        state.directDispatchSessions.delete(sessionId as SessionId);
+        state.chatSubscribersBySession.delete(sessionId as SessionId);
+        state.suppressedWakeEvents.delete(sessionId as SessionId);
+      }
+    },
   };
 }
 
@@ -999,9 +1024,15 @@ async function handleHttpRequest(
       {
         config: () => state.config,
         runtimeConfig: () => state.runtimeConfig,
-        readRuntimeConfigFile: () => readRuntimeConfigFileForMutation(state),
+        readRuntimeConfigFile: () =>
+          readRuntimeConfigFileForMutationFromModule(
+            profileAdminMutationContext(state),
+          ),
         writeRuntimeConfigFile: (value) =>
-          writeJsonFileAtomic(state.config.paths.serviceConfigFile, value),
+          writeJsonFileAtomicFromModule(
+            state.config.paths.serviceConfigFile,
+            value,
+          ),
         applyRuntimeConfigFromDisk: (input) =>
           applyServiceRuntimeConfigFromDisk(state, input),
         withRuntimeConfigMutation: (mutation) =>
@@ -1278,8 +1309,8 @@ async function applyProfileRegistryLifecycleEffects(
     await archiveServiceSession(state, session.sessionId);
     sessionsArchived.push(String(session.sessionId));
   }
-  const brainHandle = await unregisterServiceProfileBrain(
-    state,
+  const brainHandle = await unregisterServiceProfileBrainFromModule(
+    profileAdminMutationContext(state),
     record.profileId,
   );
   return { sessionsArchived, brainHandle };
@@ -3272,1301 +3303,6 @@ async function applyServiceRuntimeConfigFromDisk(
   return nextApplyResult;
 }
 
-interface CreatedServiceProfile {
-  profileId: string;
-  displayName?: string;
-  agentId: string;
-  sessionId: string;
-  implementationId: string;
-  profilePath: string;
-  runtimeConfigPath: string;
-  registryWrite?: NativeCreateProfilePlan["registryWrite"];
-  registryRecord?: Awaited<
-    ReturnType<ServiceState["bridge"]["createProfileRegistryRecord"]>
-  >;
-  localToolProfileId?: string;
-  fileAssetActions: NativeCreateProfilePlan["fileAssetActions"];
-  derivedRuntimeActions: NativeCreateProfilePlan["derivedRuntimeActions"];
-  applyResult: RustyCrewRuntimeConfigApplyResult;
-}
-
-interface DecommissionedServiceProfile {
-  profileId: string;
-  runtimeConfigPath: string;
-  profilePath?: string;
-  profileDirectoryPreserved: true;
-  sessionsArchived: string[];
-  removed: {
-    brains: number;
-    sessions: number;
-    channelBindings: number;
-    mcpBindings: number;
-    scheduledJobs: number;
-  };
-  brainHandle: {
-    action: "removed" | "already_absent";
-    handle?: BrainImplementationHandle;
-  };
-  skipped: {
-    profileDirectory: "preserved";
-  };
-  applyResult: RustyCrewRuntimeConfigApplyResult;
-}
-
-interface DeletedServiceProfile {
-  profileId: string;
-  runtimeConfigPath: string;
-  profilePath?: string;
-  profileDirectoryDeleted: boolean;
-  sessionsDeleted: string[];
-  removed: DecommissionedServiceProfile["removed"];
-  brainHandle: DecommissionedServiceProfile["brainHandle"];
-  storagePurge: NativeProfilePurgeReport;
-  applyResult: RustyCrewRuntimeConfigApplyResult;
-}
-
-interface ProfileUpdatePlan {
-  profileId: string;
-  ok: boolean;
-  profilePath: string;
-  diagnostics: Array<{
-    severity: "error" | "warning" | "info";
-    code: string;
-    path: string;
-    message: string;
-  }>;
-  implications: {
-    configReloadRequired: true;
-    mcpRefreshRecommended: boolean;
-    runtimeRebuildRecommended: boolean;
-    profileDirectoryFiles: "json_profile_only";
-  };
-  runtimePlan?: unknown;
-}
-
-interface RuntimeConfigDraftPlan {
-  ok: boolean;
-  configPath: string;
-  diagnostics: Array<{
-    severity: "error" | "warning" | "info";
-    code: string;
-    path: string;
-    message: string;
-  }>;
-  implications: {
-    configReloadRequired: true;
-    createMissingSessions: false;
-    explicitChannelLifecycle: true;
-    explicitSessionLifecycle: true;
-  };
-  runtimePlan?: unknown;
-}
-
-async function readServiceProfileConfig(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<Record<string, unknown>> {
-  const profileId = command.target.profileId;
-  if (!profileId) throw new Error("profile id is required");
-  const profilePath = safeProfileConfigPath(
-    state.runtimeConfig.profilesDir,
-    profileId,
-  );
-  if (profilePath === undefined) {
-    throw new Error(`profile id ${profileId} is not a valid file profile id`);
-  }
-  const raw = JSON.parse(await readFile(profilePath, "utf8")) as unknown;
-  if (!isRecord(raw)) {
-    throw new Error(`profile ${profileId} config root must be an object`);
-  }
-  const loaded = await loadProfileConfig(
-    state.runtimeConfig.profilesDir,
-    profileId as ProfileId,
-  );
-  return {
-    profileId,
-    profilePath,
-    profileConfig: raw,
-    loaded,
-    editable: {
-      format: "json_profile",
-      supportsSoulMarkdown: true,
-      supportsMemoryMarkdown: true,
-    },
-  };
-}
-
-async function planServiceProfileUpdate(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<ProfileUpdatePlan> {
-  const profileId = command.target.profileId;
-  if (!profileId) throw new Error("profile id is required");
-  const profilePath = safeProfileConfigPath(
-    state.runtimeConfig.profilesDir,
-    profileId,
-  );
-  if (profilePath === undefined) {
-    throw new Error(`profile id ${profileId} is not a valid file profile id`);
-  }
-  const draft = profileConfigDraftFromCommand(command, profileId);
-  const diagnostics: ProfileUpdatePlan["diagnostics"] = [];
-  let parsedDraft: ProfileConfig | undefined;
-  try {
-    parsedDraft = parseProfileConfigDraft({
-      profilesDir: state.runtimeConfig.profilesDir,
-      profileId: profileId as ProfileId,
-      profileConfig: draft,
-      soulMarkdown: optionalBodyString(command, "soulMarkdown"),
-      memoryMarkdown: optionalBodyString(command, "memoryMarkdown"),
-    });
-  } catch (error) {
-    diagnostics.push({
-      severity: "error",
-      code: "invalid_profile_config",
-      path: `profiles.${profileId}`,
-      message: errorMessage(error, "profile draft is invalid"),
-    });
-  }
-
-  const currentProfile = await loadProfileConfig(
-    state.runtimeConfig.profilesDir,
-    profileId as ProfileId,
-  ).catch(() => undefined);
-  let runtimePlan: unknown;
-  if (parsedDraft !== undefined) {
-    const profiles = await loadRuntimeConfigProfilesReplacing(
-      state,
-      profileId,
-      parsedDraft,
-    );
-    const plan = await planRuntimeConfigWithRust({
-      bridge: state.bridge,
-      runtimeConfig: state.runtimeConfig,
-      profiles,
-    });
-    runtimePlan = plan;
-    for (const diagnostic of plan.diagnostics) {
-      diagnostics.push({
-        severity: diagnostic.severity,
-        code: diagnostic.code,
-        path: diagnostic.path ?? "runtimeConfig",
-        message: diagnostic.message,
-      });
-    }
-  }
-
-  return {
-    profileId,
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
-    profilePath,
-    diagnostics,
-    implications: {
-      configReloadRequired: true,
-      mcpRefreshRecommended: profileMcpChanged(currentProfile, parsedDraft),
-      runtimeRebuildRecommended: profileRuntimeBrainChanged(
-        currentProfile,
-        parsedDraft,
-      ),
-      profileDirectoryFiles: "json_profile_only",
-    },
-    runtimePlan,
-  };
-}
-
-async function applyServiceProfileUpdate(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<
-  ProfileUpdatePlan & { applyResult?: RustyCrewRuntimeConfigApplyResult }
-> {
-  const plan = await planServiceProfileUpdate(state, command);
-  if (!plan.ok) return plan;
-  const draft = profileConfigDraftFromCommand(command, plan.profileId);
-  await writeJsonFileAtomic(plan.profilePath, draft);
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "profile_config_updated",
-    summaryPrefix: `Profile ${plan.profileId} updated`,
-  });
-  return { ...plan, applyResult };
-}
-
-async function planServiceRuntimeConfigDraft(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<RuntimeConfigDraftPlan> {
-  const runtimeConfig = runtimeConfigDraftFromCommand(state, command);
-  return planRuntimeConfigValue(state, runtimeConfig);
-}
-
-async function planRuntimeConfigFileValue(
-  state: ServiceState,
-  value: Record<string, unknown>,
-): Promise<RuntimeConfigDraftPlan> {
-  return planRuntimeConfigValue(
-    state,
-    runtimeConfigDraftFromFileValue(state, value),
-  );
-}
-
-async function planRuntimeConfigValue(
-  state: ServiceState,
-  runtimeConfig: RustyCrewRuntimeConfig,
-): Promise<RuntimeConfigDraftPlan> {
-  const loaded = await loadRuntimeConfigProfilesForDraft(runtimeConfig);
-  const diagnostics: RuntimeConfigDraftPlan["diagnostics"] =
-    loaded.diagnostics.map((diagnostic) => ({
-      severity: diagnostic.severity,
-      code: diagnostic.code,
-      path: diagnostic.path,
-      message: diagnostic.message,
-    }));
-  let runtimePlan: unknown;
-  if (!diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
-    const plan = await planRuntimeConfigWithRust({
-      bridge: state.bridge,
-      runtimeConfig,
-      profiles: loaded.profiles,
-    });
-    runtimePlan = plan;
-    for (const diagnostic of plan.diagnostics) {
-      diagnostics.push({
-        severity: diagnostic.severity,
-        code: diagnostic.code,
-        path: diagnostic.path ?? "runtimeConfig",
-        message: diagnostic.message,
-      });
-    }
-  }
-  return {
-    ok: !diagnostics.some((diagnostic) => diagnostic.severity === "error"),
-    configPath: state.config.paths.serviceConfigFile,
-    diagnostics,
-    implications: {
-      configReloadRequired: true,
-      createMissingSessions: false,
-      explicitChannelLifecycle: true,
-      explicitSessionLifecycle: true,
-    },
-    runtimePlan,
-  };
-}
-
-function assertRuntimeConfigDraftPlanOk(plan: RuntimeConfigDraftPlan): void {
-  const errors = plan.diagnostics.filter(
-    (diagnostic) => diagnostic.severity === "error",
-  );
-  if (errors.length === 0) return;
-  const first = errors[0]!;
-  const suffix =
-    errors.length === 1
-      ? ""
-      : ` (${errors.length - 1} additional diagnostic${errors.length === 2 ? "" : "s"})`;
-  throw new Error(
-    `${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`,
-  );
-}
-
-async function applyServiceRuntimeConfigDraft(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<
-  RuntimeConfigDraftPlan & { applyResult?: RustyCrewRuntimeConfigApplyResult }
-> {
-  const plan = await planServiceRuntimeConfigDraft(state, command);
-  if (!plan.ok) return plan;
-  const runtimeConfig = runtimeConfigDraftFromCommand(state, command);
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfig,
-  );
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "runtime_config_draft_applied",
-    summaryPrefix: "Runtime config draft applied",
-  });
-  return { ...plan, applyResult };
-}
-
-async function patchServiceWakeTimeout(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<{
-  ok: true;
-  wakeTimeout: RustyCrewWakeTimeoutConfig;
-  previousWakeTimeout?: RustyCrewWakeTimeoutConfig;
-  preservedSections: Record<string, number | undefined>;
-  safeWritePath: {
-    capabilityId: string;
-    method: "POST";
-    path: "/v1/admin/control/config/wake-timeout";
-    body: "{ wakeTimeout: { mode: 'disabled' } } | { wakeTimeout: { mode: 'default', defaultMs: number } }";
-  };
-  applyResult: RustyCrewRuntimeConfigApplyResult;
-}> {
-  const wakeTimeout = wakeTimeoutFromPatchCommand(command);
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const preservedSections = runtimeConfigSectionCounts(runtimeConfigFile.value);
-  const previousWakeTimeout = state.runtimeConfig.wakeTimeout;
-  runtimeConfigFile.value.wakeTimeout = wakeTimeout;
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfigFile.value,
-  );
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "wake_timeout_config_patched",
-    summaryPrefix: "Wake timeout config patched",
-  });
-  return {
-    ok: true,
-    wakeTimeout: state.runtimeConfig.wakeTimeout ?? wakeTimeout,
-    previousWakeTimeout,
-    preservedSections,
-    safeWritePath: {
-      capabilityId: "admin.control.config.wake_timeout.patch",
-      method: "POST",
-      path: "/v1/admin/control/config/wake-timeout",
-      body: "{ wakeTimeout: { mode: 'disabled' } } | { wakeTimeout: { mode: 'default', defaultMs: number } }",
-    },
-    applyResult,
-  };
-}
-
-function wakeTimeoutFromPatchCommand(
-  command: AdminControlCommand,
-): RustyCrewWakeTimeoutConfig {
-  const input = Object.hasOwn(command.body, "wakeTimeout")
-    ? command.body.wakeTimeout
-    : command.body;
-  if (!isRecord(input) || !Object.hasOwn(input, "mode")) {
-    throw new Error(
-      "wakeTimeout patch requires wakeTimeout.mode or top-level mode",
-    );
-  }
-  return runtimeWakeTimeoutConfig(input);
-}
-
-function runtimeConfigSectionCounts(
-  value: Record<string, unknown>,
-): Record<string, number | undefined> {
-  return {
-    brains: sectionCount(value.brains),
-    sessions: sectionCount(value.sessions),
-    scheduledJobs: sectionCount(value.scheduledJobs),
-    channelBindings: sectionCount(value.channelBindings),
-    mcpServers: sectionCount(value.mcpServers),
-    mcpBindings: sectionCount(value.mcpBindings),
-  };
-}
-
-function sectionCount(value: unknown): number | undefined {
-  return Array.isArray(value) ? value.length : undefined;
-}
-
-async function decommissionServiceProfile(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<DecommissionedServiceProfile> {
-  const profileId = command.target.profileId;
-  if (!profileId) throw new Error("profile id is required");
-  if (optionalBodyBoolean(command, "deleteProfileDirectory") === true) {
-    throw new Error(
-      "deleteProfileDirectory is not supported by profile decommission; profile files are preserved",
-    );
-  }
-
-  const configuredSessionIds = state.runtimeConfig.sessions
-    .filter((session) => String(session.profileId) === profileId)
-    .map((session) => String(session.sessionId));
-  const activeSessions = await state.bridge.listSessions();
-  const activeSessionIds = activeSessions
-    .filter((session) => String(session.profileId) === profileId)
-    .map((session) => String(session.sessionId));
-  const sessionIds = [
-    ...new Set([...configuredSessionIds, ...activeSessionIds]),
-  ];
-  const inFlightSessionIds = sessionIds.filter((sessionId) =>
-    state.inFlightWakes.has(sessionId as SessionId),
-  );
-  if (inFlightSessionIds.length > 0) {
-    throw new Error(
-      `profile ${profileId} decommission blocked by in-flight wake(s): ${inFlightSessionIds.join(", ")}`,
-    );
-  }
-
-  const sessionsArchived: string[] = [];
-  for (const session of activeSessions) {
-    if (
-      String(session.profileId) !== profileId ||
-      session.status === "archived"
-    ) {
-      continue;
-    }
-    await archiveServiceSession(state, session.sessionId);
-    sessionsArchived.push(String(session.sessionId));
-  }
-
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const removed = {
-    brains: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("brains"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
-    ),
-    sessions: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("sessions"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
-    ),
-    channelBindings: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("channelBindings"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
-        sessionIds.includes(
-          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
-        ),
-    ),
-    mcpBindings: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("mcpBindings"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
-        sessionIds.includes(
-          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
-        ),
-    ),
-    scheduledJobs: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("scheduledJobs"),
-      (entry) =>
-        sessionIds.includes(
-          runtimeEntryString(entry, "targetSessionId", "target_session_id") ??
-            "",
-        ),
-    ),
-  };
-
-  const profilePath = safeProfileConfigPath(
-    state.runtimeConfig.profilesDir,
-    profileId,
-  );
-  const matchedRuntimeConfig =
-    removed.brains +
-      removed.sessions +
-      removed.channelBindings +
-      removed.mcpBindings +
-      removed.scheduledJobs >
-    0;
-  if (
-    !matchedRuntimeConfig &&
-    sessionsArchived.length === 0 &&
-    (profilePath === undefined || !existsSync(profilePath))
-  ) {
-    throw new Error(`profile ${profileId} was not found`);
-  }
-
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfigFile.value,
-  );
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "profile_decommissioned",
-    summaryPrefix: `Profile ${profileId} decommissioned`,
-  });
-  const brainHandle = await unregisterServiceProfileBrain(state, profileId);
-  return {
-    profileId,
-    runtimeConfigPath: state.config.paths.serviceConfigFile,
-    ...(profilePath === undefined ? {} : { profilePath }),
-    profileDirectoryPreserved: true,
-    sessionsArchived,
-    removed,
-    brainHandle,
-    skipped: {
-      profileDirectory: "preserved",
-    },
-    applyResult,
-  };
-}
-
-async function deleteServiceProfile(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<DeletedServiceProfile> {
-  const profileId = command.target.profileId;
-  if (!profileId) throw new Error("profile id is required");
-  const confirmProfileId = requiredBodyString(command, "confirmProfileId");
-  if (confirmProfileId !== profileId) {
-    throw new Error(
-      `profile delete confirmation mismatch: expected ${profileId}`,
-    );
-  }
-
-  const configuredSessionIds = state.runtimeConfig.sessions
-    .filter((session) => String(session.profileId) === profileId)
-    .map((session) => String(session.sessionId));
-  const activeSessions = await state.bridge.listSessions();
-  const activeSessionIds = activeSessions
-    .filter((session) => String(session.profileId) === profileId)
-    .map((session) => String(session.sessionId));
-  const sessionIds = [
-    ...new Set([...configuredSessionIds, ...activeSessionIds]),
-  ];
-  const inFlightSessionIds = sessionIds.filter((sessionId) =>
-    state.inFlightWakes.has(sessionId as SessionId),
-  );
-  if (inFlightSessionIds.length > 0) {
-    throw new Error(
-      `profile ${profileId} delete blocked by in-flight wake(s): ${inFlightSessionIds.join(", ")}`,
-    );
-  }
-
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const removed = {
-    brains: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("brains"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
-    ),
-    sessions: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("sessions"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId,
-    ),
-    channelBindings: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("channelBindings"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
-        sessionIds.includes(
-          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
-        ),
-    ),
-    mcpBindings: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("mcpBindings"),
-      (entry) =>
-        runtimeEntryString(entry, "profileId", "profile_id") === profileId ||
-        sessionIds.includes(
-          runtimeEntryString(entry, "sessionId", "session_id") ?? "",
-        ),
-    ),
-    scheduledJobs: removeRuntimeConfigEntries(
-      runtimeConfigFile.array("scheduledJobs"),
-      (entry) =>
-        sessionIds.includes(
-          runtimeEntryString(entry, "targetSessionId", "target_session_id") ??
-            "",
-        ),
-    ),
-  };
-
-  const profilePath = safeProfileConfigPath(
-    state.runtimeConfig.profilesDir,
-    profileId,
-  );
-  const registryRecord = await state.bridge.getProfileRegistryRecord(profileId);
-  const matchedRuntimeConfig =
-    removed.brains +
-      removed.sessions +
-      removed.channelBindings +
-      removed.mcpBindings +
-      removed.scheduledJobs >
-    0;
-  if (
-    !matchedRuntimeConfig &&
-    sessionIds.length === 0 &&
-    registryRecord === undefined &&
-    (profilePath === undefined || !existsSync(profilePath))
-  ) {
-    throw new Error(`profile ${profileId} was not found`);
-  }
-
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfigFile.value,
-  );
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: false,
-    eventType: "profile_deleted",
-    summaryPrefix: `Profile ${profileId} deleted`,
-  });
-  const brainHandle = await unregisterServiceProfileBrain(state, profileId);
-
-  let profileDirectoryDeleted = false;
-  if (profilePath !== undefined && existsSync(profilePath)) {
-    await rm(profilePath, { recursive: true, force: true });
-    profileDirectoryDeleted = true;
-  }
-
-  const storagePurge = await state.bridge.purgeProfile(profileId);
-  const purgedSessionIds = new Set([
-    ...sessionIds,
-    ...storagePurge.sessionIds.map(String),
-  ]);
-  for (const sessionId of purgedSessionIds) {
-    state.directDispatchSessions.delete(sessionId as SessionId);
-    state.chatSubscribersBySession.delete(sessionId as SessionId);
-    state.suppressedWakeEvents.delete(sessionId as SessionId);
-  }
-
-  return {
-    profileId,
-    runtimeConfigPath: state.config.paths.serviceConfigFile,
-    ...(profilePath === undefined ? {} : { profilePath }),
-    profileDirectoryDeleted,
-    sessionsDeleted: [...purgedSessionIds].sort(),
-    removed,
-    brainHandle,
-    storagePurge,
-    applyResult,
-  };
-}
-
-async function unregisterServiceProfileBrain(
-  state: ServiceState,
-  profileId: string,
-): Promise<DecommissionedServiceProfile["brainHandle"]> {
-  try {
-    const handle = await state.bridge.unregisterBrainImplementationForProfile(
-      profileId as ProfileId,
-    );
-    return { action: "removed", handle };
-  } catch (error) {
-    if (isNativeNotFoundError(error)) {
-      return { action: "already_absent" };
-    }
-    throw error;
-  }
-}
-
-function isNativeNotFoundError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  return message.includes("notfound") || message.includes("not found");
-}
-
-async function createServiceProfile(
-  state: ServiceState,
-  command: AdminControlCommand,
-): Promise<CreatedServiceProfile> {
-  const profileId = requiredBodyString(command, "profileId");
-  const displayName = optionalBodyString(command, "displayName");
-  const providerAlias =
-    optionalBodyString(command, "providerAlias") ?? "default";
-  const modelProvider = await state.bridge.getModelProvider(providerAlias);
-  if (modelProvider === undefined) {
-    throw new Error(`model provider alias ${providerAlias} was not found`);
-  }
-  if (modelProvider.status !== "active") {
-    throw new Error(
-      `model provider alias ${providerAlias} is ${modelProvider.status}; active provider required`,
-    );
-  }
-  const profilePath = safeProfileConfigPath(
-    state.runtimeConfig.profilesDir,
-    profileId,
-  );
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
-  const profiles = await loadRuntimeConfigProfiles(state);
-  const plan = await planCreateProfileWithRust({
-    bridge: state.bridge,
-    runtimeConfig: state.runtimeConfig,
-    profiles,
-    request: {
-      profileId,
-      ...(displayName === undefined ? {} : { displayName }),
-      agentId: optionalBodyString(command, "agentId"),
-      sessionId: optionalBodyString(command, "sessionId"),
-      implementationId: optionalBodyString(command, "implementationId"),
-      kind: createProfileKind(command),
-      providerAlias,
-      brain:
-        profileBrainFromBody(
-          command.body.brain ?? command.body.brainSelection,
-        ) ?? defaultProfileBrainForModelProvider(modelProvider),
-      mcpBindings: createProfileMcpBindingsFromBody(command.body.mcpBindings),
-      mcpToolProfile: optionalBodyString(command, "mcpToolProfile"),
-      source: profileCreateSourceFromBody(command.body.source),
-      now: state.now(),
-      profileFileExists:
-        profilePath === undefined ? false : existsSync(profilePath),
-    },
-  });
-  assertCreateProfilePlan(plan);
-
-  const profileSeed = plan.profileSeed;
-  const runtimeBrain = plan.runtimeBrain;
-  const runtimeSession = plan.runtimeSession;
-  const profileMcpConfig = plan.profileMcpConfig;
-  if (!profileSeed || !runtimeBrain || !runtimeSession) {
-    throw new Error(
-      "create-profile plan did not include required profile/runtime entries",
-    );
-  }
-  const profileFileAction = plan.fileAssetActions.find(
-    (action) => action.kind === "write_profile_json",
-  );
-  const plannedProfilePath = join(
-    state.runtimeConfig.profilesDir,
-    profileFileAction?.relativePath ?? `${profileSeed.profileId}.json`,
-  );
-  const localToolProfileId = optionalBodyString(command, "localToolProfileId");
-  const localToolProfile =
-    localToolProfileId === undefined
-      ? undefined
-      : await createLocalToolProfileStore({
-          bridge: state.bridge,
-          now: state.now,
-        }).resolve(localToolProfileId);
-  const registryRuntimeSettings =
-    plan.registryWrite === undefined
-      ? {}
-      : (optionalRecord(plan.registryWrite.activeRuntimeSettingsJson) ?? {});
-  const registryWrite =
-    plan.registryWrite === undefined
-      ? undefined
-      : {
-          ...plan.registryWrite,
-          activeRuntimeSettingsJson: {
-            ...registryRuntimeSettings,
-            ...(localToolProfile === undefined
-              ? {}
-              : {
-                  localToolProfileId: localToolProfile.id,
-                  toolPolicy: localToolProfile.toolPolicy,
-                  profile: {
-                    ...(optionalRecord(registryRuntimeSettings.profile) ?? {}),
-                    localToolProfileId: localToolProfile.id,
-                    toolPolicy: localToolProfile.toolPolicy,
-                  },
-                }),
-          },
-        };
-  const registryRecord = registryWrite
-    ? await state.bridge.createProfileRegistryRecord(registryWrite)
-    : undefined;
-
-  await mkdir(state.runtimeConfig.profilesDir, { recursive: true });
-  await writeJsonFileAtomic(plannedProfilePath, {
-    profileId: profileSeed.profileId,
-    ...(profileSeed.displayName === undefined
-      ? {}
-      : { displayName: profileSeed.displayName }),
-    providerAlias: profileSeed.providerAlias,
-    brain: profileSeed.brain,
-    ...(profileMcpConfig === undefined ? {} : { mcpConfig: profileMcpConfig }),
-    ...(localToolProfile === undefined
-      ? {}
-      : {
-          localToolProfileId: localToolProfile.id,
-          toolPolicy: localToolProfile.toolPolicy,
-        }),
-    skills: profileSeed.skillsMode,
-  });
-
-  runtimeConfigFile.array("brains").push(runtimeBrain);
-  runtimeConfigFile.array("sessions").push(runtimeSession);
-  runtimeConfigFile.array("mcpBindings").push(...plan.runtimeMcpBindings);
-  await writeJsonFileAtomic(
-    state.config.paths.serviceConfigFile,
-    runtimeConfigFile.value,
-  );
-
-  const applyResult = await applyServiceRuntimeConfigFromDisk(state, {
-    createMissingSessions: true,
-    eventType: "profile_created",
-    summaryPrefix: `Profile ${profileId} created`,
-  });
-  return {
-    profileId: profileSeed.profileId,
-    ...(profileSeed.displayName === undefined
-      ? {}
-      : { displayName: profileSeed.displayName }),
-    agentId: runtimeSession.agentId,
-    sessionId: runtimeSession.sessionId,
-    implementationId: runtimeBrain.implementationId,
-    profilePath: plannedProfilePath,
-    runtimeConfigPath: state.config.paths.serviceConfigFile,
-    registryWrite,
-    registryRecord,
-    localToolProfileId: localToolProfile?.id,
-    fileAssetActions: plan.fileAssetActions,
-    derivedRuntimeActions: plan.derivedRuntimeActions,
-    applyResult,
-  };
-}
-
-async function loadRuntimeConfigProfiles(
-  state: ServiceState,
-): Promise<ProfileConfig[]> {
-  const profileIds = new Set<ProfileId>();
-  for (const session of state.runtimeConfig.sessions) {
-    profileIds.add(session.profileId);
-  }
-  const profiles: ProfileConfig[] = [];
-  for (const profileId of profileIds) {
-    profiles.push(await loadProfileConfigWithRegistryPrompt(state, profileId));
-  }
-  return profiles;
-}
-
-async function loadProfileConfigWithRegistryPrompt(
-  state: ServiceState,
-  profileId: ProfileId,
-): Promise<ProfileConfig> {
-  const profile = await loadProfileConfig(
-    state.runtimeConfig.profilesDir,
-    profileId,
-  );
-  const record = await state.bridge
-    .getProfileRegistryRecord(String(profileId))
-    .catch(() => undefined);
-  if (record === undefined) return profile;
-  return {
-    ...profile,
-    prompt: {
-      ...(profile.prompt ?? {}),
-      soulMarkdown: record.promptSoulMarkdown,
-      memoryMarkdown: record.promptMemoryMarkdown,
-    },
-  };
-}
-
-function safeProfileConfigPath(
-  profilesDir: string,
-  profileId: string,
-): string | undefined {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(profileId)) {
-    return undefined;
-  }
-  return join(profilesDir, `${profileId}.json`);
-}
-
-function createProfileKind(
-  command: AdminControlCommand,
-): "full" | "worker" | "delegated" | undefined {
-  const kind = optionalBodyString(command, "kind");
-  if (kind === undefined) {
-    return undefined;
-  }
-  if (kind === "full" || kind === "worker" || kind === "delegated") {
-    return kind;
-  }
-  throw new Error("profile session kind must be full, worker, or delegated");
-}
-
-function profileBrainFromBody(
-  input: unknown,
-): { module?: string; strategy?: string } | undefined {
-  const brain = optionalRecord(input);
-  if (!brain) {
-    return undefined;
-  }
-  return compactRecord({
-    module: optionalString(brain.module),
-    strategy: optionalString(brain.strategy),
-  }) as { module?: string; strategy?: string };
-}
-
-function defaultProfileBrainForModelProvider(
-  provider: NativeModelProviderRecord,
-): { module?: string; strategy?: string } {
-  if (provider.protocol === "responses") {
-    return { module: "openai-responses" };
-  }
-  if (provider.providerKind === "local") {
-    return { module: "local" };
-  }
-  return { module: "pi-agent-core" };
-}
-
-function createProfileMcpBindingsFromBody(input: unknown):
-  | Array<{
-      serverId: string;
-      bindingId?: string;
-      adapterId?: string;
-      serverNames?: string[];
-      transport?: string;
-      toolProfileKey?: string;
-    }>
-  | undefined {
-  if (input === undefined || input === null) return undefined;
-  if (!Array.isArray(input)) {
-    throw new Error("mcpBindings must be an array when provided");
-  }
-  return input.map((item, index) => {
-    if (!isRecord(item)) {
-      throw new Error(`mcpBindings[${index}] must be an object`);
-    }
-    const serverId = optionalString(item.serverId);
-    if (serverId === undefined) {
-      throw new Error(`mcpBindings[${index}].serverId is required`);
-    }
-    return compactRecord({
-      serverId,
-      bindingId: optionalString(item.bindingId),
-      adapterId: optionalString(item.adapterId),
-      serverNames:
-        item.serverNames === undefined
-          ? undefined
-          : stringArray(item.serverNames, `mcpBindings[${index}].serverNames`),
-      transport: optionalString(item.transport),
-      toolProfileKey:
-        optionalString(item.toolProfileKey) ?? optionalString(item.toolProfile),
-    }) as {
-      serverId: string;
-      bindingId?: string;
-      adapterId?: string;
-      serverNames?: string[];
-      transport?: string;
-      toolProfileKey?: string;
-    };
-  });
-}
-
-function profileCreateSourceFromBody(input: unknown):
-  | {
-      templateId?: string;
-      sourceProfileId?: string;
-      sourceBundlePath?: string;
-    }
-  | undefined {
-  const source = optionalRecord(input);
-  if (!source) {
-    return undefined;
-  }
-  const result = compactRecord({
-    templateId: optionalString(source.templateId),
-    sourceProfileId: optionalString(source.sourceProfileId),
-    sourceBundlePath: optionalString(source.sourceBundlePath),
-  }) as {
-    templateId?: string;
-    sourceProfileId?: string;
-    sourceBundlePath?: string;
-  };
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-function assertCreateProfilePlan(plan: NativeCreateProfilePlan): void {
-  const errors = plan.diagnostics.filter(
-    (diagnostic) => diagnostic.severity === "error",
-  );
-  if (errors.length > 0) {
-    const first = errors[0]!;
-    const suffix =
-      errors.length === 1
-        ? ""
-        : ` (${errors.length - 1} additional diagnostic${errors.length === 2 ? "" : "s"})`;
-    throw new Error(
-      `${first.path ? `${first.path}: ` : ""}${first.message}${suffix}`,
-    );
-  }
-}
-
-interface RuntimeConfigFileForMutation {
-  value: Record<string, unknown>;
-  array(key: string): unknown[];
-}
-
-async function readRuntimeConfigFileForMutation(
-  state: ServiceState,
-): Promise<RuntimeConfigFileForMutation> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(
-      await readFile(state.config.paths.serviceConfigFile, "utf8"),
-    );
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      parsed = {};
-    } else {
-      throw error;
-    }
-  }
-  if (!isRecord(parsed)) {
-    throw new Error("service runtime config root must be an object");
-  }
-  if (parsed.profilesDir === undefined) {
-    parsed.profilesDir = state.runtimeConfig.profilesDir;
-  }
-  if (
-    state.runtimeConfig.skillsDir !== undefined &&
-    parsed.skillsDir === undefined
-  ) {
-    parsed.skillsDir = state.runtimeConfig.skillsDir;
-  }
-  return {
-    value: parsed,
-    array(key) {
-      const existing = parsed[key];
-      if (existing === undefined) {
-        const created: unknown[] = [];
-        parsed[key] = created;
-        return created;
-      }
-      if (!Array.isArray(existing)) {
-        throw new Error(`runtime config ${key} must be an array`);
-      }
-      return existing;
-    },
-  };
-}
-
-async function writeJsonFileAtomic(
-  path: string,
-  value: unknown,
-): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tmpPath = `${path}.${process.pid}.${Date.now()}.${randomBytes(8).toString("hex")}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`);
-  await rename(tmpPath, path);
-}
-
-function removeRuntimeConfigEntries(
-  entries: unknown[],
-  shouldRemove: (entry: Record<string, unknown>) => boolean,
-): number {
-  let removed = 0;
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (!isRecord(entry) || !shouldRemove(entry)) continue;
-    entries.splice(index, 1);
-    removed += 1;
-  }
-  return removed;
-}
-
-function runtimeEntryString(
-  entry: Record<string, unknown>,
-  camelKey: string,
-  snakeKey: string,
-): string | undefined {
-  const value = entry[camelKey] ?? entry[snakeKey];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function profileConfigDraftFromCommand(
-  command: AdminControlCommand,
-  profileId: string,
-): Record<string, unknown> {
-  const draft = optionalRecord(command.body.profileConfig);
-  if (draft === undefined) {
-    throw new Error("profileConfig object is required");
-  }
-  const next = structuredCloneRecord(draft);
-  next.profileId = profileId;
-  const soulMarkdown = optionalBodyString(command, "soulMarkdown");
-  const memoryMarkdown = optionalBodyString(command, "memoryMarkdown");
-  if (soulMarkdown !== undefined || memoryMarkdown !== undefined) {
-    const prompt = optionalRecord(next.prompt);
-    next.prompt = {
-      ...(prompt ?? {}),
-      ...(soulMarkdown === undefined ? {} : { soulMarkdown }),
-      ...(memoryMarkdown === undefined ? {} : { memoryMarkdown }),
-    };
-  }
-  return next;
-}
-
-function runtimeConfigDraftFromCommand(
-  state: ServiceState,
-  command: AdminControlCommand,
-): RustyCrewRuntimeConfig {
-  const draft = optionalRecord(command.body.runtimeConfig);
-  if (draft === undefined) {
-    throw new Error("runtimeConfig object is required");
-  }
-  return {
-    profilesDir:
-      optionalString(draft.profilesDir) ?? state.runtimeConfig.profilesDir,
-    ...(optionalString(draft.skillsDir) === undefined
-      ? {}
-      : { skillsDir: optionalString(draft.skillsDir) }),
-    wakeTimeout: Object.hasOwn(draft, "wakeTimeout")
-      ? (draft.wakeTimeout as RustyCrewRuntimeConfig["wakeTimeout"])
-      : state.runtimeConfig.wakeTimeout,
-    brains: arrayValue(draft.brains).map((brain, index) =>
-      runtimeConfigBrainDraft(brain, index),
-    ),
-    sessions: arrayValue(draft.sessions) as RustyCrewRuntimeConfig["sessions"],
-    scheduledJobs: arrayValue(
-      draft.scheduledJobs,
-    ) as RustyCrewRuntimeConfig["scheduledJobs"],
-    channelBindings: arrayValue(
-      draft.channelBindings,
-    ) as RustyCrewRuntimeConfig["channelBindings"],
-    mcpServers: Object.hasOwn(draft, "mcpServers")
-      ? arrayValue(draft.mcpServers).map((server) =>
-          runtimeConfigMcpServerDraft(server),
-        )
-      : state.runtimeConfig.mcpServers,
-    mcpBindings: arrayValue(
-      draft.mcpBindings,
-    ) as RustyCrewRuntimeConfig["mcpBindings"],
-  };
-}
-
-function runtimeConfigDraftFromFileValue(
-  state: ServiceState,
-  draft: Record<string, unknown>,
-): RustyCrewRuntimeConfig {
-  return {
-    profilesDir:
-      optionalString(draft.profilesDir) ?? state.runtimeConfig.profilesDir,
-    ...(optionalString(draft.skillsDir) === undefined
-      ? {}
-      : { skillsDir: optionalString(draft.skillsDir) }),
-    storage: state.runtimeConfig.storage,
-    denObservation: state.runtimeConfig.denObservation,
-    wakeTimeout: Object.hasOwn(draft, "wakeTimeout")
-      ? (draft.wakeTimeout as RustyCrewRuntimeConfig["wakeTimeout"])
-      : state.runtimeConfig.wakeTimeout,
-    brains: arrayValue(draft.brains).map((brain, index) =>
-      runtimeConfigBrainDraft(brain, index),
-    ),
-    sessions: arrayValue(draft.sessions) as RustyCrewRuntimeConfig["sessions"],
-    scheduledJobs: arrayValue(
-      draft.scheduledJobs,
-    ) as RustyCrewRuntimeConfig["scheduledJobs"],
-    channelBindings: arrayValue(
-      draft.channelBindings,
-    ) as RustyCrewRuntimeConfig["channelBindings"],
-    mcpServers: Object.hasOwn(draft, "mcpServers")
-      ? arrayValue(draft.mcpServers).map((server) =>
-          runtimeConfigMcpServerDraft(server),
-        )
-      : state.runtimeConfig.mcpServers,
-    mcpBindings: arrayValue(
-      draft.mcpBindings,
-    ) as RustyCrewRuntimeConfig["mcpBindings"],
-  };
-}
-
-function runtimeConfigMcpServerDraft(value: unknown): RustyCrewMcpServerConfig {
-  if (!isRecord(value)) {
-    throw new Error("runtimeConfig.mcpServers entries must be objects");
-  }
-  return mcpServerWriteFromBody(value, undefined);
-}
-
-function runtimeConfigBrainDraft(
-  value: unknown,
-  index: number,
-): RustyCrewRuntimeConfig["brains"][number] {
-  if (!isRecord(value)) {
-    throw new Error(`runtimeConfig.brains[${index}] must be an object`);
-  }
-  const profileId = optionalString(value.profileId);
-  if (profileId === undefined) {
-    throw new Error(`runtimeConfig.brains[${index}].profileId is required`);
-  }
-  return {
-    profileId: profileId as ProfileId,
-    implementationId: (optionalString(value.implementationId) ??
-      `${profileId}-brain`) as never,
-  };
-}
-
-async function loadRuntimeConfigProfilesReplacing(
-  state: ServiceState,
-  profileId: string,
-  replacement: ProfileConfig,
-): Promise<ProfileConfig[]> {
-  const profileIds = new Set<ProfileId>();
-  for (const brain of state.runtimeConfig.brains) {
-    profileIds.add(brain.profileId);
-  }
-  for (const session of state.runtimeConfig.sessions) {
-    profileIds.add(session.profileId);
-  }
-  profileIds.add(profileId as ProfileId);
-  const profiles: ProfileConfig[] = [];
-  for (const candidateId of profileIds) {
-    if (String(candidateId) === profileId) {
-      profiles.push(replacement);
-      continue;
-    }
-    profiles.push(
-      await loadProfileConfigWithRegistryPrompt(state, candidateId),
-    );
-  }
-  return profiles;
-}
-
-async function loadRuntimeConfigProfilesForDraft(
-  runtimeConfig: RustyCrewRuntimeConfig,
-): Promise<{
-  profiles: ProfileConfig[];
-  diagnostics: Array<{
-    severity: "error";
-    code: string;
-    path: string;
-    message: string;
-  }>;
-}> {
-  const profileIds = new Set<ProfileId>();
-  for (const brain of runtimeConfig.brains) profileIds.add(brain.profileId);
-  for (const session of runtimeConfig.sessions)
-    profileIds.add(session.profileId);
-  const profiles: ProfileConfig[] = [];
-  const diagnostics: Array<{
-    severity: "error";
-    code: string;
-    path: string;
-    message: string;
-  }> = [];
-  for (const profileId of profileIds) {
-    try {
-      profiles.push(
-        await loadProfileConfig(runtimeConfig.profilesDir, profileId),
-      );
-    } catch (error) {
-      diagnostics.push({
-        severity: "error",
-        code: "profile_metadata_load_failed",
-        path: `profiles.${profileId}`,
-        message: errorMessage(
-          error,
-          `profile ${profileId} could not be loaded`,
-        ),
-      });
-    }
-  }
-  return { profiles, diagnostics };
-}
-
-function profileRuntimeBrainChanged(
-  before: ProfileConfig | undefined,
-  after: ProfileConfig | undefined,
-): boolean {
-  if (before === undefined || after === undefined) return false;
-  return (
-    before.providerAlias !== after.providerAlias ||
-    JSON.stringify(before.modelConfig) !== JSON.stringify(after.modelConfig) ||
-    JSON.stringify(before.brain ?? {}) !== JSON.stringify(after.brain ?? {})
-  );
-}
-
-function profileMcpChanged(
-  before: ProfileConfig | undefined,
-  after: ProfileConfig | undefined,
-): boolean {
-  if (before === undefined || after === undefined) return false;
-  return (
-    JSON.stringify(before.mcpConfig ?? {}) !==
-    JSON.stringify(after.mcpConfig ?? {})
-  );
-}
-
-function structuredCloneRecord(
-  record: Record<string, unknown>,
-): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
-}
-
-function arrayValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 async function buildDirectDebugContext(
   state: ServiceState,
 ): Promise<DirectDebugServiceContext> {
@@ -4690,7 +3426,10 @@ function createServiceControlExecutor(
     }),
     createProfile: async (command) => {
       const result = await withRuntimeConfigMutation(() =>
-        createServiceProfile(state, command),
+        createServiceProfileFromModule(
+          profileAdminMutationContext(state),
+          command,
+        ),
       );
       return {
         status: "completed",
@@ -4705,7 +3444,10 @@ function createServiceControlExecutor(
       };
     },
     readProfileConfig: async (command) => {
-      const result = await readServiceProfileConfig(state, command);
+      const result = await readServiceProfileConfigFromModule(
+        profileAdminMutationContext(state),
+        command,
+      );
       return {
         status: "completed",
         summary: `profile ${result.profileId} read`,
@@ -4714,7 +3456,10 @@ function createServiceControlExecutor(
       };
     },
     planProfileUpdate: async (command) => {
-      const result = await planServiceProfileUpdate(state, command);
+      const result = await planServiceProfileUpdateFromModule(
+        profileAdminMutationContext(state),
+        command,
+      );
       return {
         status: result.ok ? "completed" : "failed",
         summary: result.ok
@@ -4727,7 +3472,10 @@ function createServiceControlExecutor(
     },
     applyProfileUpdate: async (command) => {
       const result = await withRuntimeConfigMutation(() =>
-        applyServiceProfileUpdate(state, command),
+        applyServiceProfileUpdateFromModule(
+          profileAdminMutationContext(state),
+          command,
+        ),
       );
       return {
         status: result.ok ? "completed" : "failed",
@@ -4741,7 +3489,10 @@ function createServiceControlExecutor(
     },
     decommissionProfile: async (command) => {
       const result = await withRuntimeConfigMutation(() =>
-        decommissionServiceProfile(state, command),
+        decommissionServiceProfileFromModule(
+          profileAdminMutationContext(state),
+          command,
+        ),
       );
       return {
         status: "completed",
@@ -4761,7 +3512,10 @@ function createServiceControlExecutor(
     },
     deleteProfile: async (command) => {
       const result = await withRuntimeConfigMutation(() =>
-        deleteServiceProfile(state, command),
+        deleteServiceProfileFromModule(
+          profileAdminMutationContext(state),
+          command,
+        ),
       );
       return {
         status: "completed",
@@ -5005,7 +3759,10 @@ function createServiceControlExecutor(
       };
     },
     planRuntimeConfigUpdate: async (command) => {
-      const result = await planServiceRuntimeConfigDraft(state, command);
+      const result = await planServiceRuntimeConfigDraftFromModule(
+        profileAdminMutationContext(state),
+        command,
+      );
       return {
         status: result.ok ? "completed" : "failed",
         summary: result.ok
@@ -5017,7 +3774,10 @@ function createServiceControlExecutor(
     },
     applyRuntimeConfigUpdate: async (command) => {
       const result = await withRuntimeConfigMutation(() =>
-        applyServiceRuntimeConfigDraft(state, command),
+        applyServiceRuntimeConfigDraftFromModule(
+          profileAdminMutationContext(state),
+          command,
+        ),
       );
       return {
         status: result.ok ? "completed" : "failed",
@@ -5030,7 +3790,10 @@ function createServiceControlExecutor(
     },
     patchWakeTimeout: async (command) => {
       const result = await withRuntimeConfigMutation(() =>
-        patchServiceWakeTimeout(state, command),
+        patchServiceWakeTimeoutFromModule(
+          profileAdminMutationContext(state),
+          command,
+        ),
       );
       return {
         status: "completed",
@@ -6188,12 +4951,14 @@ async function planRuntimeSessionReplacementInConfig(
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(newSessionId)) {
     throw new Error("replacement session id contains unsupported characters");
   }
-  const runtimeConfigFile = await readRuntimeConfigFileForMutation(state);
+  const runtimeConfigFile = await readRuntimeConfigFileForMutationFromModule(
+    profileAdminMutationContext(state),
+  );
   const sessions = runtimeConfigFile.array("sessions");
   const sessionEntry = sessions.find(
     (entry): entry is Record<string, unknown> =>
       isRecord(entry) &&
-      runtimeEntryString(entry, "sessionId", "session_id") ===
+      runtimeEntryStringFromModule(entry, "sessionId", "session_id") ===
         oldSession.sessionId,
   );
   if (sessionEntry === undefined) {
@@ -6237,7 +5002,7 @@ async function planRuntimeSessionReplacementInConfig(
   );
 
   const validation = await planRuntimeConfigFileValue(
-    state,
+    profileAdminMutationContext(state),
     runtimeConfigFile.value,
   );
   assertRuntimeConfigDraftPlanOk(validation);
@@ -6270,7 +5035,7 @@ async function commitRuntimeSessionReplacementInConfig(
   oldSession: SessionState,
   plan: ServiceRuntimeReplacementConfigPlan,
 ): Promise<ServiceRuntimeReplacementSessionResult> {
-  await writeJsonFileAtomic(
+  await writeJsonFileAtomicFromModule(
     state.config.paths.serviceConfigFile,
     plan.runtimeConfigFile.value,
   );
@@ -6393,14 +5158,14 @@ function replaceRuntimeConfigSessionRefs(
   for (const entry of entries) {
     if (!isRecord(entry)) continue;
     if (
-      runtimeEntryString(entry, sessionCamelKey, sessionSnakeKey) !==
+      runtimeEntryStringFromModule(entry, sessionCamelKey, sessionSnakeKey) !==
       oldSessionId
     ) {
       continue;
     }
     entry[sessionCamelKey] = newSessionId;
     if (sessionSnakeKey !== sessionCamelKey) delete entry[sessionSnakeKey];
-    const id = runtimeEntryString(entry, idCamelKey, idSnakeKey);
+    const id = runtimeEntryStringFromModule(entry, idCamelKey, idSnakeKey);
     if (id !== undefined) changedIds.push(id);
   }
   return changedIds;
