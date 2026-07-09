@@ -3,6 +3,7 @@
 mod body_queue;
 mod delegation_store;
 mod memory_spaces;
+mod provider_state_store;
 mod scheduler;
 mod session_store;
 
@@ -17,6 +18,11 @@ use delegation_store::{
     load_delegated_worker_run, load_delegated_worker_run_by_session, load_worker_pool_member,
     save_delegated_worker_run_requested, update_delegated_worker_run_status,
     update_delegated_worker_run_status_by_session,
+};
+use provider_state_store::{
+    clear_provider_state as clear_provider_state_store,
+    list_provider_state_diagnostics as list_provider_state_store_diagnostics,
+    load_provider_state_for_wake, save_provider_state as save_provider_state_store,
 };
 use rusty_crew_core_body::{
     session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
@@ -42,18 +48,18 @@ use rusty_crew_core_persistence::{
     MessageSlotWrite, MessageVariantQuery, MessageVariantRecord, MessageVariantWrite,
     ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
     ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfileRegistryQuery,
-    ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateWakeLookup,
-    ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
-    RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, RoleplayChatLayerRecord,
-    RoleplayChatLayersWrite, RoleplayLoreEntryPromotion, RoleplayLoreFactCapture,
-    RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite,
-    RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord,
-    RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite, RoleplayLoreProvenanceEvent,
-    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace, RoleplayLoreSupersede,
-    RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery, RuntimeCounterRecord,
-    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy, RuntimeMaintenanceReport,
-    RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter, RuntimeSearchResult,
-    RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
+    ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason, ProviderWireStateKey,
+    ProviderWireStateWakeLookup, ProviderWireStateWrite, QueuedMessageRecord, QueuedMessageState,
+    RemoveChatAttachmentRequest, RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest,
+    RoleplayChatLayerRecord, RoleplayChatLayersWrite, RoleplayLoreEntryPromotion,
+    RoleplayLoreFactCapture, RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord,
+    RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink,
+    RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite,
+    RoleplayLoreProvenanceEvent, RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreReplace,
+    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RuntimeCounterQuery,
+    RuntimeCounterRecord, RuntimeCounterScope, RuntimeDatabaseSize, RuntimeMaintenancePolicy,
+    RuntimeMaintenanceReport, RuntimeModuleSchemaRegistryDiagnostics, RuntimeSearchFilter,
+    RuntimeSearchResult, RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
     SelectActiveChatMessageVariantResult, SelectActiveVariantRequest, SelectActiveVariantResult,
     SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
@@ -324,7 +330,7 @@ impl CoreEngine {
             provider_fingerprint: scope.provider_fingerprint.clone(),
             now: self.now(),
         };
-        let loaded = match self.store.load_provider_wire_state_for_wake(&lookup) {
+        let loaded = match load_provider_state_for_wake(&self.store, &lookup) {
             Ok(loaded) => loaded,
             Err(error) => {
                 if strategy.provider_state.mode == ProviderStateMode::Optional {
@@ -379,8 +385,8 @@ impl CoreEngine {
     pub fn provider_wire_state_diagnostics(
         &self,
         limit: u32,
-    ) -> CoreResult<Vec<rusty_crew_core_persistence::ProviderWireStateDiagnostic>> {
-        self.store.list_provider_wire_state_diagnostics(limit)
+    ) -> CoreResult<Vec<ProviderWireStateDiagnostic>> {
+        list_provider_state_store_diagnostics(&self.store, limit)
     }
 
     fn provider_state_unavailable_for_mode(
@@ -426,8 +432,9 @@ impl CoreEngine {
             .min(MAX_PROVIDER_WIRE_STATE_TTL_MS);
         let now = self.now();
         let expires_at = add_millis_to_iso(&now, ttl_ms)?;
-        self.store
-            .save_provider_wire_state(&ProviderWireStateWrite {
+        save_provider_state_store(
+            &self.store,
+            &ProviderWireStateWrite {
                 key: provider_wire_state_key(session_id, &module_id, &strategy_id),
                 profile_fingerprint: state.profile_fingerprint,
                 provider_fingerprint: state.provider_fingerprint,
@@ -436,7 +443,8 @@ impl CoreEngine {
                 now,
                 expires_at: Some(expires_at),
                 last_wake_id: Some(wake_id.to_string()),
-            })?;
+            },
+        )?;
         Ok(())
     }
 
@@ -452,7 +460,8 @@ impl CoreEngine {
                 ProviderWireStateInvalidationReason::BrainRequestedClear
             }
         };
-        self.store.clear_provider_wire_state(
+        clear_provider_state_store(
+            &self.store,
             &provider_wire_state_key(session_id, &module_id, &strategy_id),
             &self.now(),
             invalidation_reason,

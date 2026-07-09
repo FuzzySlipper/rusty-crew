@@ -149,19 +149,35 @@ delegate to `core-persistence`, and the fake-backed
 `worker_run_status_update_uses_fake_delegation_store` test proves worker-run
 status behavior without SQLite/Postgres.
 
+### Provider-state store port
+
+Task #5313 extracted provider wire-state persistence behind
+`ProviderStateStore` in `crates/core/core-engine/src/provider_state_store.rs`.
+
+The port owns the narrow provider-state persistence surface:
+
+- load provider wire state for a wake;
+- save replacement provider state;
+- clear current provider state with a typed invalidation reason;
+- list provider-state diagnostics.
+
+The engine still owns provider-state TTL capping, required-vs-optional absence
+handling, and provider-state hydration vocabulary. The concrete adapter remains
+a direct delegate to `core-persistence`, and the fake-backed
+`wake_absence_and_diagnostics_use_fake_provider_state_store` test proves wake
+absence and diagnostics can be exercised without SQLite/Postgres.
+
 ## Remaining Extraction Tasks
 
 Continue in domain-sized patches rather than one monolithic trait:
 
-1. Extract provider-state store ports for wake lookup, persistence,
-   invalidation, diagnostics, and cleanup.
-2. Extract chat store ports for conversation branches, snapshots, slots,
+1. Extract chat store ports for conversation branches, snapshots, slots,
    variants, attachments, data-bank scopes, read models, and event logs.
-3. Extract roleplay lore store ports for lore layers, entries, recall,
+2. Extract roleplay lore store ports for lore layers, entries, recall,
    capture, promotion, provenance, and recall traces.
-4. Extract memory store ports for profile/session memory, proposals,
+3. Extract memory store ports for profile/session memory, proposals,
    governance, activity digests, compaction artifacts, and prompt context.
-5. Extract runtime admin store ports for profile/model admin, runtime counters,
+4. Extract runtime admin store ports for profile/model admin, runtime counters,
    diagnostics, maintenance, service/module data, runtime search, and simple
    key/value state.
 
