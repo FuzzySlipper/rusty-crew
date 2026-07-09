@@ -15,6 +15,7 @@ const roleplay = nativeMappingInventory.families.roleplay;
 const conversation = nativeMappingInventory.families.conversation;
 const profileRegistry = nativeMappingInventory.families.profileRegistry;
 const modelProvider = nativeMappingInventory.families.modelProvider;
+const runtimeScheduler = nativeMappingInventory.families.runtimeScheduler;
 
 const nativeBridgeBinding = extractInterface("NativeBridgeBinding");
 assertRawMethods("memory", memory.rawMethods);
@@ -23,6 +24,7 @@ assertRawMethods("roleplay", roleplay.rawMethods);
 assertRawMethods("conversation", conversation.rawMethods);
 assertRawMethods("profile registry", profileRegistry.rawMethods);
 assertRawMethods("model provider", modelProvider.rawMethods);
+assertRawMethods("runtime/scheduler", runtimeScheduler.rawMethods);
 
 assertGeneratedDtoFieldsNonEmpty("memory", memory.dtoFields);
 assertWrapperCalls("memory", memory.passthroughWrappers, memory.rawMethods);
@@ -121,6 +123,65 @@ assertPassthroughWrappers(
 );
 assertDtoFields(profileRegistry.dtoFields);
 assertDtoFields(modelProvider.dtoFields);
+assertGeneratedDtoFieldsNonEmpty(
+  "runtime/scheduler",
+  runtimeScheduler.dtoFields,
+);
+assertWrapperCalls(
+  "runtime/scheduler",
+  runtimeScheduler.passthroughWrappers,
+  runtimeScheduler.rawMethods,
+);
+assertNamedRuntimeSchedulerInterfaces();
+assertRawReads("toRuntimeConfigDraft", "draft", [
+  "draft.profiles_dir",
+  "draft.skills_dir",
+  "draft.brains",
+  "draft.sessions",
+  "draft.scheduled_jobs",
+  "draft.channel_bindings",
+  "draft.mcp_bindings",
+]);
+assertRawReads("toScheduledJobDraft", "job", [
+  ...runtimeScheduler.dtoFields.ScheduledJobConfigDraft.map(
+    (field) => `job.${field}`,
+  ),
+]);
+assertRawReads("toMcpBindingDraft", "binding", [
+  ...runtimeScheduler.dtoFields.McpBindingConfigDraft.map(
+    (field) => `binding.${field}`,
+  ),
+]);
+assertRawReads("toNativeChannelBindingConfigDraft", "binding", [
+  ...runtimeScheduler.dtoFields.ChannelBindingConfigDraft.map(
+    (field) => `binding.${field}`,
+  ),
+]);
+assertRawReads("toResourceLimits", "limits", [
+  ...runtimeScheduler.dtoFields.ResourceLimits.map(
+    (field) => `limits.${field}`,
+  ),
+]);
+assertRawReads("toNativeRuntimeConfigPlan", "plan", [
+  ...runtimeScheduler.dtoFields.RuntimeConfigPlan.map(
+    (field) => `plan.${field}`,
+  ),
+]);
+assertRawReads("toScheduledJobSummary", "raw", [
+  ...runtimeScheduler.dtoFields.RawScheduledJobSummary.map(
+    (field) => `raw.${field}`,
+  ),
+]);
+assertRawReads("toScheduledRunSummary", "raw", [
+  ...runtimeScheduler.dtoFields.RawScheduledRunSummary.map(
+    (field) => `raw.${field}`,
+  ),
+]);
+assertRawReads("toSchedulerTickReport", "raw", [
+  ...runtimeScheduler.dtoFields.RawSchedulerTickReport.map(
+    (field) => `raw.${field}`,
+  ),
+]);
 
 assertRawReads("toNativeProfileRegistryWrite", "write", [
   ...profileRegistry.dtoFields.RawProfileRegistryWrite.filter(
@@ -308,6 +369,18 @@ function assertNamedBrainProviderInterfaces() {
       source.includes(`interface ${interfaceName}`) ||
         source.includes(`type ${interfaceName}`),
       `brain/provider expected named interface ${interfaceName} in native bridge source`,
+    );
+  }
+}
+
+function assertNamedRuntimeSchedulerInterfaces() {
+  for (const interfaceName of runtimeScheduler.namedTypeScriptInterfaces) {
+    assert(
+      source.includes(`interface ${interfaceName}`) ||
+        source.includes(`export interface ${interfaceName}`) ||
+        source.includes(`type ${interfaceName}`) ||
+        source.includes(`export type ${interfaceName}`),
+      `runtime/scheduler expected named interface ${interfaceName} in native bridge source`,
     );
   }
 }

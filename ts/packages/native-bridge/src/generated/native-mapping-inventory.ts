@@ -1903,6 +1903,281 @@ export const nativeMappingInventory = {
         "listRecallTracesJson",
         "getRecallTraceJson"
       ]
+    },
+    "runtimeScheduler": {
+      "dtoFields": {
+        "BrainConfigDraft": [
+          "implementation_id",
+          "profile_id"
+        ],
+        "ChannelBindingConfigDraft": [
+          "adapter_id",
+          "agent_id",
+          "binding_id",
+          "conversation_channel_id",
+          "conversation_project_id",
+          "external_channel_id",
+          "external_thread_id",
+          "external_user_id",
+          "instance_id",
+          "profile_id",
+          "provider",
+          "provider_subscription_id",
+          "session_id",
+          "status"
+        ],
+        "McpBindingConfigDraft": [
+          "adapter_id",
+          "agent_id",
+          "binding_id",
+          "endpoint_ref",
+          "instance_id",
+          "profile_id",
+          "server_names",
+          "session_id",
+          "status",
+          "tool_profile_key",
+          "transport"
+        ],
+        "NativeRuntimeDatabaseSize": [
+          "databaseBytes",
+          "freelistBytes",
+          "freelistPages",
+          "pageCount",
+          "pageSizeBytes",
+          "walBytes"
+        ],
+        "NativeRuntimeMaintenancePolicy": [
+          "compactSessionMemoryAt",
+          "expireProviderWireStatesAt",
+          "expireQueuedMessagesAt",
+          "purgeTerminalQueuedMessagesBefore",
+          "runOptimize",
+          "runWalCheckpoint",
+          "sessionMemoryArchiveBatchSize",
+          "sessionMemoryMaxActiveRecordsPerScope"
+        ],
+        "NativeRuntimeMaintenanceReport": [
+          "expiredProviderWireStates",
+          "expiredQueueMessages",
+          "optimizeRan",
+          "purgedTerminalQueueMessages",
+          "sessionMemoryCompaction",
+          "sizeAfter",
+          "sizeBefore",
+          "walCheckpointRan"
+        ],
+        "NativeRuntimeStorageCapability": [
+          "detail",
+          "name",
+          "supported"
+        ],
+        "NativeRuntimeStorageDiagnostics": [
+          "backend",
+          "backendLabel",
+          "capabilities",
+          "connectionHealth",
+          "indexChecks",
+          "migrations",
+          "moduleRegistry",
+          "pressure",
+          "pressureSignals",
+          "repositoryGroups",
+          "schemaVersion",
+          "searchHealthy",
+          "size",
+          "supportedSchemaVersion",
+          "tableCounts"
+        ],
+        "NativeRuntimeStorageTableCount": [
+          "rows",
+          "table"
+        ],
+        "NativeSessionMemoryCompactionReport": [
+          "branchSummariesCreated",
+          "enabled",
+          "recordsArchived",
+          "recordsSuperseded",
+          "retentionPressureScopes",
+          "scopesCompacted",
+          "scopesInspected",
+          "sessionSummariesCreated",
+          "skippedScopes"
+        ],
+        "ProfileRuntimeMetadata": [
+          "background_review",
+          "brain",
+          "channel_defaults",
+          "context_policy",
+          "mcp_config",
+          "profile_id",
+          "runtime",
+          "session_defaults"
+        ],
+        "RawScheduledJobSummary": [
+          "created_at",
+          "interval_ms",
+          "job_id",
+          "job_kind",
+          "next_due_at",
+          "paused_at",
+          "status",
+          "target_session_id",
+          "updated_at"
+        ],
+        "RawScheduledRunSummary": [
+          "claim_deadline_at",
+          "claimed_at",
+          "completed_at",
+          "created_at",
+          "error",
+          "job_id",
+          "job_kind",
+          "output",
+          "run_id",
+          "scheduled_for",
+          "status",
+          "target_session_id",
+          "trigger",
+          "updated_at"
+        ],
+        "RawSchedulerTickReport": [
+          "due_runs_claimed",
+          "runs_completed",
+          "runs_failed",
+          "runs_skipped",
+          "stale_runs_expired",
+          "wakes_requested"
+        ],
+        "ResourceLimits": [
+          "max_delegation_depth",
+          "max_duration_ms",
+          "workdir"
+        ],
+        "RuntimeConfigDiagnostic": [
+          "code",
+          "message",
+          "path",
+          "severity"
+        ],
+        "RuntimeConfigDraft": [
+          "brains",
+          "channel_bindings",
+          "mcp_bindings",
+          "profiles_dir",
+          "scheduled_jobs",
+          "sessions",
+          "skills_dir"
+        ],
+        "RuntimeConfigPlan": [
+          "derived_mcp_bindings",
+          "derived_scheduled_jobs",
+          "diagnostics",
+          "runtime_config"
+        ],
+        "RuntimeConfigValidationInput": [
+          "profiles",
+          "runtime_config"
+        ],
+        "RuntimeConfigValidationResult": [
+          "diagnostics"
+        ],
+        "ScheduledJobConfigDraft": [
+          "delivery_channel_id",
+          "id",
+          "job_kind",
+          "schedule",
+          "script",
+          "shape",
+          "target_session_id"
+        ],
+        "SessionConfigDraft": [
+          "agent_id",
+          "history_window",
+          "kind",
+          "max_history_messages",
+          "owner_id",
+          "profile_id",
+          "resource_limits",
+          "session_id",
+          "turn_timeout_ms"
+        ]
+      },
+      "namedTypeScriptInterfaces": [
+        "RawRuntimeConfigDraft",
+        "RawSessionConfigDraft",
+        "RawScheduledJobConfigDraft",
+        "RawChannelBindingConfigDraft",
+        "RawMcpBindingConfigDraft",
+        "RawResourceLimits",
+        "RawScheduledJobSummary",
+        "RawScheduledRunSummary",
+        "RawSchedulerTickReport",
+        "NativeRuntimeConfigValidationInput",
+        "NativeRuntimeConfigValidationResult",
+        "NativeRuntimeConfigPlan",
+        "NativeRuntimeConfigDraft",
+        "NativeRuntimeStorageDiagnostics",
+        "NativeRuntimeMaintenancePolicy",
+        "NativeRuntimeMaintenanceReport"
+      ],
+      "operationNames": [
+        "validate_runtime_config_draft",
+        "plan_runtime_config",
+        "register_scheduled_wake_job",
+        "register_scheduled_host_job",
+        "list_scheduled_jobs",
+        "list_scheduled_runs",
+        "claim_scheduled_host_runs",
+        "request_scheduled_host_job_run",
+        "complete_scheduled_host_run",
+        "run_scheduler_tick",
+        "request_scheduled_job_run",
+        "pause_scheduled_job",
+        "resume_scheduled_job",
+        "database_size",
+        "storage_diagnostics",
+        "storage_schema",
+        "run_maintenance"
+      ],
+      "passthroughWrappers": [
+        "validateRuntimeConfigDraft",
+        "planRuntimeConfig",
+        "registerScheduledWakeJob",
+        "registerScheduledHostJob",
+        "listScheduledJobs",
+        "listScheduledRuns",
+        "claimScheduledHostRuns",
+        "requestScheduledHostJobRun",
+        "completeScheduledHostRun",
+        "runSchedulerTick",
+        "requestScheduledJobRun",
+        "pauseScheduledJob",
+        "resumeScheduledJob",
+        "databaseSize",
+        "storageDiagnostics",
+        "storageSchema",
+        "runMaintenance"
+      ],
+      "rawMethods": [
+        "validateRuntimeConfigDraftJson",
+        "planRuntimeConfigJson",
+        "registerScheduledWakeJobJson",
+        "registerScheduledHostJobJson",
+        "listScheduledJobsJson",
+        "listScheduledRunsJson",
+        "claimScheduledHostRunsJson",
+        "requestScheduledHostJobRunJson",
+        "completeScheduledHostRun",
+        "runSchedulerTickJson",
+        "requestScheduledJobRunJson",
+        "pauseScheduledJob",
+        "resumeScheduledJob",
+        "databaseSize",
+        "storageDiagnostics",
+        "storageSchema",
+        "runMaintenance"
+      ]
     }
   },
   "formatVersion": 1,

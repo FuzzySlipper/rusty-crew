@@ -125,8 +125,8 @@ Current implementation:
 - Task #5302 added `codegen:native-mapping-inventory` and
   `check:native-mapping-inventory` for generated-check mapper coverage. The
   first covered families are model providers, profile registry, and
-  conversation/chat read models, roleplay, memory/compaction, and
-  brain/provider wake runtime DTOs.
+  conversation/chat read models, roleplay, memory/compaction, brain/provider
+  wake runtime DTOs, and runtime/scheduler/admin DTOs.
 
 ### 1a. Generated-Check Model Provider Mapper Inventory
 
@@ -156,6 +156,9 @@ The artifact currently covers these bridge families:
 - brain/provider manifest operations for wake execution, provider-state
   persistence, OpenAI Responses and pi-agent buffered run control, provider
   diagnostics, and buffered run cleanup;
+- runtime/scheduler manifest operations for runtime config validation/planning,
+  scheduled job/run control, scheduler tick reports, storage diagnostics, and
+  maintenance control;
 - raw method names derived from those operations;
 - passthrough wrapper names for conversation operations that intentionally keep
   Rust's persistence-contract JSON as the bridge authority instead of adding
@@ -169,6 +172,9 @@ The artifact currently covers these bridge families:
 - raw/native method names, wrapper names, and direct native helper names for
   brain/provider wake surfaces whose implementation mixes manifest operations,
   native JSON methods, and runtime-buffer helper calls;
+- raw/native method names and wrapper names for runtime/scheduler/admin
+  surfaces, including direct native admin methods that do not use `*Json`
+  suffixes;
 - named TypeScript interface inventories for Rusty View chat read-model and
   event-log DTOs;
 - raw DTO field inventories for model provider records, credentials, refresh
@@ -191,6 +197,10 @@ The artifact currently covers these bridge families:
   and actions, provider-state input/output/diagnostics, tool-call metadata,
   completion packets, runtime-buffer views, and buffered brain run diagnostics
   and cleanup reports.
+- Rust config/native-boundary DTO field inventories for runtime config
+  validation inputs/results, config plans, session/channel/MCP binding drafts,
+  resource limits, scheduled job/run summaries, scheduler tick reports, storage
+  diagnostics, and maintenance policies/reports.
 
 All DTO field inventories are derived from Rust-authored sample serialization.
 

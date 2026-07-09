@@ -10,8 +10,9 @@ use rusty_crew_core_config::{
     ProfileContextPolicy, ProfileMcpConfig, ProfileModelConfigSeed, ProfileRegistryMutationKind,
     ProfileRegistryMutationMode, ProfileRegistryMutationPlan, ProfileRegistryMutationRequest,
     ProfileRegistryRuntimeMetadata, ProfileRuntimeMetadata, ProfileRuntimeOptions,
-    ProfileSessionDefaults, RuntimeConfigDraft, RuntimeConfigValidationInput,
-    ScheduledJobConfigDraft, ScheduledJobShape, SessionConfigDraft,
+    ProfileSessionDefaults, RuntimeConfigDiagnostic, RuntimeConfigDiagnosticSeverity,
+    RuntimeConfigDraft, RuntimeConfigPlan, RuntimeConfigValidationInput,
+    RuntimeConfigValidationResult, ScheduledJobConfigDraft, ScheduledJobShape, SessionConfigDraft,
 };
 use rusty_crew_core_persistence as persistence;
 use rusty_crew_core_protocol::{
@@ -663,12 +664,70 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "model_provider_refresh_impact",
         "plan_model_provider_refresh",
     ];
+    let runtime_scheduler_operations = vec![
+        "validate_runtime_config_draft",
+        "plan_runtime_config",
+        "register_scheduled_wake_job",
+        "register_scheduled_host_job",
+        "list_scheduled_jobs",
+        "list_scheduled_runs",
+        "claim_scheduled_host_runs",
+        "request_scheduled_host_job_run",
+        "complete_scheduled_host_run",
+        "run_scheduler_tick",
+        "request_scheduled_job_run",
+        "pause_scheduled_job",
+        "resume_scheduled_job",
+        "database_size",
+        "storage_diagnostics",
+        "storage_schema",
+        "run_maintenance",
+    ];
+    let runtime_scheduler_raw_methods = vec![
+        "validateRuntimeConfigDraftJson",
+        "planRuntimeConfigJson",
+        "registerScheduledWakeJobJson",
+        "registerScheduledHostJobJson",
+        "listScheduledJobsJson",
+        "listScheduledRunsJson",
+        "claimScheduledHostRunsJson",
+        "requestScheduledHostJobRunJson",
+        "completeScheduledHostRun",
+        "runSchedulerTickJson",
+        "requestScheduledJobRunJson",
+        "pauseScheduledJob",
+        "resumeScheduledJob",
+        "databaseSize",
+        "storageDiagnostics",
+        "storageSchema",
+        "runMaintenance",
+    ];
+    let runtime_scheduler_wrappers = vec![
+        "validateRuntimeConfigDraft",
+        "planRuntimeConfig",
+        "registerScheduledWakeJob",
+        "registerScheduledHostJob",
+        "listScheduledJobs",
+        "listScheduledRuns",
+        "claimScheduledHostRuns",
+        "requestScheduledHostJobRun",
+        "completeScheduledHostRun",
+        "runSchedulerTick",
+        "requestScheduledJobRun",
+        "pauseScheduledJob",
+        "resumeScheduledJob",
+        "databaseSize",
+        "storageDiagnostics",
+        "storageSchema",
+        "runMaintenance",
+    ];
     ensure_family_operations_exist("memory", &memory_operations)?;
     ensure_family_operations_exist("brain_provider", &brain_provider_operations)?;
     ensure_family_operations_exist("roleplay", &roleplay_operations)?;
     ensure_family_operations_exist("conversation", &conversation_operations)?;
     ensure_family_operations_exist("profile_registry", &profile_registry_operations)?;
     ensure_family_operations_exist("model_provider", &model_provider_operations)?;
+    ensure_family_operations_exist("runtime_scheduler", &runtime_scheduler_operations)?;
 
     let message_slot_record = serde_json::to_value(sample_message_slot_record())?;
     let message_slot_write = serde_json::to_value(sample_message_slot_write())?;
@@ -857,6 +916,29 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
     let model_provider_record = serde_json::to_value(sample_model_provider_record())?;
     let refresh_impact = serde_json::to_value(sample_model_provider_refresh_impact())?;
     let refresh_plan = serde_json::to_value(sample_model_provider_refresh_plan())?;
+    let runtime_config_validation_input =
+        serde_json::to_value(sample_runtime_config_validation_input())?;
+    let runtime_config_validation_result =
+        serde_json::to_value(sample_runtime_config_validation_result())?;
+    let runtime_config_diagnostic = serde_json::to_value(sample_runtime_config_diagnostic())?;
+    let runtime_config_plan = serde_json::to_value(sample_runtime_config_plan())?;
+    let runtime_config_draft = serde_json::to_value(sample_runtime_config_draft())?;
+    let runtime_brain_config_draft = serde_json::to_value(sample_brain_config_draft())?;
+    let runtime_session_config_draft = serde_json::to_value(sample_session_config_draft())?;
+    let runtime_scheduled_job_config_draft =
+        serde_json::to_value(sample_scheduled_job_config_draft())?;
+    let runtime_channel_binding_config_draft =
+        serde_json::to_value(sample_channel_binding_config_draft())?;
+    let runtime_mcp_binding_config_draft = serde_json::to_value(sample_mcp_binding_config_draft())?;
+    let runtime_profile_metadata = serde_json::to_value(sample_profile_runtime_metadata())?;
+    let runtime_resource_limits = serde_json::to_value(sample_resource_limits())?;
+    let scheduled_job_summary = sample_scheduled_job_summary_value();
+    let scheduled_run_summary = sample_scheduled_run_summary_value();
+    let scheduler_tick_report = sample_scheduler_tick_report_value();
+    let runtime_database_size = sample_runtime_database_size_value();
+    let runtime_storage_diagnostics = sample_runtime_storage_diagnostics_value();
+    let runtime_maintenance_policy = sample_runtime_maintenance_policy_value();
+    let runtime_maintenance_report = sample_runtime_maintenance_report_value();
 
     Ok(json!({
         "formatVersion": 1,
@@ -1120,6 +1202,53 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
                     "RawModelProviderRefreshPlan": object_keys(&refresh_plan)?,
                     "RawModelProviderRefreshProfileAction": object_keys(first_array_item(&refresh_plan, "actions")?)?,
                 }
+            },
+            "runtimeScheduler": {
+                "operationNames": runtime_scheduler_operations,
+                "rawMethods": runtime_scheduler_raw_methods,
+                "passthroughWrappers": runtime_scheduler_wrappers,
+                "namedTypeScriptInterfaces": [
+                    "RawRuntimeConfigDraft",
+                    "RawSessionConfigDraft",
+                    "RawScheduledJobConfigDraft",
+                    "RawChannelBindingConfigDraft",
+                    "RawMcpBindingConfigDraft",
+                    "RawResourceLimits",
+                    "RawScheduledJobSummary",
+                    "RawScheduledRunSummary",
+                    "RawSchedulerTickReport",
+                    "NativeRuntimeConfigValidationInput",
+                    "NativeRuntimeConfigValidationResult",
+                    "NativeRuntimeConfigPlan",
+                    "NativeRuntimeConfigDraft",
+                    "NativeRuntimeStorageDiagnostics",
+                    "NativeRuntimeMaintenancePolicy",
+                    "NativeRuntimeMaintenanceReport"
+                ],
+                "dtoFields": {
+                    "RuntimeConfigValidationInput": object_keys(&runtime_config_validation_input)?,
+                    "RuntimeConfigValidationResult": object_keys(&runtime_config_validation_result)?,
+                    "RuntimeConfigDiagnostic": object_keys(&runtime_config_diagnostic)?,
+                    "RuntimeConfigPlan": object_keys(&runtime_config_plan)?,
+                    "RuntimeConfigDraft": object_keys(&runtime_config_draft)?,
+                    "BrainConfigDraft": object_keys(&runtime_brain_config_draft)?,
+                    "SessionConfigDraft": object_keys(&runtime_session_config_draft)?,
+                    "ScheduledJobConfigDraft": object_keys(&runtime_scheduled_job_config_draft)?,
+                    "ChannelBindingConfigDraft": object_keys(&runtime_channel_binding_config_draft)?,
+                    "McpBindingConfigDraft": object_keys(&runtime_mcp_binding_config_draft)?,
+                    "ProfileRuntimeMetadata": object_keys(&runtime_profile_metadata)?,
+                    "ResourceLimits": object_keys(&runtime_resource_limits)?,
+                    "RawScheduledJobSummary": object_keys(&scheduled_job_summary)?,
+                    "RawScheduledRunSummary": object_keys(&scheduled_run_summary)?,
+                    "RawSchedulerTickReport": object_keys(&scheduler_tick_report)?,
+                    "NativeRuntimeDatabaseSize": object_keys(&runtime_database_size)?,
+                    "NativeRuntimeStorageDiagnostics": object_keys(&runtime_storage_diagnostics)?,
+                    "NativeRuntimeStorageCapability": object_keys(first_array_item(&runtime_storage_diagnostics, "capabilities")?)?,
+                    "NativeRuntimeStorageTableCount": object_keys(first_array_item(&runtime_storage_diagnostics, "tableCounts")?)?,
+                    "NativeRuntimeMaintenancePolicy": object_keys(&runtime_maintenance_policy)?,
+                    "NativeRuntimeMaintenanceReport": object_keys(&runtime_maintenance_report)?,
+                    "NativeSessionMemoryCompactionReport": object_keys(required_value(&runtime_maintenance_report, "sessionMemoryCompaction")?)?,
+                }
             }
         }
     }))
@@ -1237,62 +1366,145 @@ fn sample_runtime_config_draft() -> RuntimeConfigDraft {
     RuntimeConfigDraft {
         profiles_dir: "/home/system/rusty-crew/config/profiles".to_owned(),
         skills_dir: Some("/home/system/rusty-crew/config/skills".to_owned()),
-        brains: vec![BrainConfigDraft {
-            implementation_id: BrainImplementationId::new("field-sample-brain"),
-            profile_id: ProfileId::new("field-sample-profile"),
-        }],
-        sessions: vec![SessionConfigDraft {
-            session_id: SessionId::new("field-sample-session"),
-            agent_id: AgentId::new("field-sample-agent"),
-            profile_id: ProfileId::new("field-sample-profile"),
-            kind: SessionKind::Full,
-            resource_limits: Some(sample_resource_limits()),
-            owner_id: Some("field-owner".to_owned()),
-            history_window: Some(SessionHistoryWindow {
-                max_messages: Some(128),
-            }),
-            max_history_messages: Some(256),
-            turn_timeout_ms: Some(60_000),
-        }],
-        scheduled_jobs: vec![ScheduledJobConfigDraft {
-            id: "field-sample-job".to_owned(),
-            schedule: "*/5 * * * *".to_owned(),
-            shape: ScheduledJobShape::SessionWake,
-            job_kind: Some("runtime.review.memory_skills".to_owned()),
-            target_session_id: Some(SessionId::new("field-sample-session")),
-            script: Some("field-script".to_owned()),
-            delivery_channel_id: Some("field-delivery-channel".to_owned()),
-        }],
-        channel_bindings: vec![ChannelBindingConfigDraft {
-            binding_id: "field-channel-binding".to_owned(),
-            adapter_id: AdapterId::new("den"),
-            provider: "den".to_owned(),
-            agent_id: AgentId::new("field-sample-agent"),
-            instance_id: Some(AgentInstanceId::new("field-instance")),
-            session_id: Some(SessionId::new("field-sample-session")),
-            profile_id: ProfileId::new("field-sample-profile"),
-            external_channel_id: "40".to_owned(),
-            external_thread_id: Some("field-thread".to_owned()),
-            external_user_id: Some("field-user".to_owned()),
-            conversation_project_id: Some("asha".to_owned()),
-            conversation_channel_id: Some(40),
-            provider_subscription_id: Some("field-subscription".to_owned()),
-            status: ExternalBindingStatusDraft::Active,
-        }],
-        mcp_bindings: vec![McpBindingConfigDraft {
-            binding_id: "field-mcp-binding".to_owned(),
-            adapter_id: AdapterId::new("mcp"),
-            agent_id: AgentId::new("field-sample-agent"),
-            instance_id: Some(AgentInstanceId::new("field-instance")),
-            session_id: Some(SessionId::new("field-sample-session")),
-            profile_id: ProfileId::new("field-sample-profile"),
-            server_names: vec!["den".to_owned(), "project".to_owned()],
-            endpoint_ref: "config://mcp/den".to_owned(),
-            transport: "streamable_http".to_owned(),
-            tool_profile_key: "planner".to_owned(),
-            status: ExternalBindingStatusDraft::Active,
-        }],
+        brains: vec![sample_brain_config_draft()],
+        sessions: vec![sample_session_config_draft()],
+        scheduled_jobs: vec![sample_scheduled_job_config_draft()],
+        channel_bindings: vec![sample_channel_binding_config_draft()],
+        mcp_bindings: vec![sample_mcp_binding_config_draft()],
     }
+}
+
+fn sample_runtime_config_validation_result() -> RuntimeConfigValidationResult {
+    RuntimeConfigValidationResult {
+        diagnostics: vec![sample_runtime_config_diagnostic()],
+    }
+}
+
+fn sample_runtime_config_diagnostic() -> RuntimeConfigDiagnostic {
+    RuntimeConfigDiagnostic {
+        severity: RuntimeConfigDiagnosticSeverity::Info,
+        code: "validation_fixture".to_owned(),
+        path: Some("runtimeConfig.sessions[0]".to_owned()),
+        message: "Validation runtime config diagnostic.".to_owned(),
+    }
+}
+
+fn sample_runtime_config_plan() -> RuntimeConfigPlan {
+    rusty_crew_core_config::plan_runtime_config(&sample_runtime_config_validation_input())
+}
+
+fn sample_brain_config_draft() -> BrainConfigDraft {
+    BrainConfigDraft {
+        implementation_id: BrainImplementationId::new("field-sample-brain"),
+        profile_id: ProfileId::new("field-sample-profile"),
+    }
+}
+
+fn sample_session_config_draft() -> SessionConfigDraft {
+    SessionConfigDraft {
+        session_id: SessionId::new("field-sample-session"),
+        agent_id: AgentId::new("field-sample-agent"),
+        profile_id: ProfileId::new("field-sample-profile"),
+        kind: SessionKind::Full,
+        resource_limits: Some(sample_resource_limits()),
+        owner_id: Some("field-owner".to_owned()),
+        history_window: Some(SessionHistoryWindow {
+            max_messages: Some(128),
+        }),
+        max_history_messages: Some(256),
+        turn_timeout_ms: Some(60_000),
+    }
+}
+
+fn sample_scheduled_job_config_draft() -> ScheduledJobConfigDraft {
+    ScheduledJobConfigDraft {
+        id: "field-sample-job".to_owned(),
+        schedule: "*/5 * * * *".to_owned(),
+        shape: ScheduledJobShape::SessionWake,
+        job_kind: Some("runtime.review.memory_skills".to_owned()),
+        target_session_id: Some(SessionId::new("field-sample-session")),
+        script: Some("field-script".to_owned()),
+        delivery_channel_id: Some("field-delivery-channel".to_owned()),
+    }
+}
+
+fn sample_channel_binding_config_draft() -> ChannelBindingConfigDraft {
+    ChannelBindingConfigDraft {
+        binding_id: "field-channel-binding".to_owned(),
+        adapter_id: AdapterId::new("den"),
+        provider: "den".to_owned(),
+        agent_id: AgentId::new("field-sample-agent"),
+        instance_id: Some(AgentInstanceId::new("field-instance")),
+        session_id: Some(SessionId::new("field-sample-session")),
+        profile_id: ProfileId::new("field-sample-profile"),
+        external_channel_id: "40".to_owned(),
+        external_thread_id: Some("field-thread".to_owned()),
+        external_user_id: Some("field-user".to_owned()),
+        conversation_project_id: Some("asha".to_owned()),
+        conversation_channel_id: Some(40),
+        provider_subscription_id: Some("field-subscription".to_owned()),
+        status: ExternalBindingStatusDraft::Active,
+    }
+}
+
+fn sample_mcp_binding_config_draft() -> McpBindingConfigDraft {
+    McpBindingConfigDraft {
+        binding_id: "field-mcp-binding".to_owned(),
+        adapter_id: AdapterId::new("mcp"),
+        agent_id: AgentId::new("field-sample-agent"),
+        instance_id: Some(AgentInstanceId::new("field-instance")),
+        session_id: Some(SessionId::new("field-sample-session")),
+        profile_id: ProfileId::new("field-sample-profile"),
+        server_names: vec!["den".to_owned(), "project".to_owned()],
+        endpoint_ref: "config://mcp/den".to_owned(),
+        transport: "streamable_http".to_owned(),
+        tool_profile_key: "planner".to_owned(),
+        status: ExternalBindingStatusDraft::Active,
+    }
+}
+
+fn sample_scheduled_job_summary_value() -> Value {
+    json!({
+        "job_id": "scheduled-validation",
+        "job_kind": "wake",
+        "target_session_id": sample_session_id().to_string(),
+        "interval_ms": 300000,
+        "next_due_at": "2026-07-09T12:00:00.000Z",
+        "status": "active",
+        "created_at": sample_timestamp(),
+        "updated_at": sample_timestamp(),
+        "paused_at": null
+    })
+}
+
+fn sample_scheduled_run_summary_value() -> Value {
+    json!({
+        "run_id": "scheduled-validation:1",
+        "job_id": "scheduled-validation",
+        "job_kind": "wake",
+        "target_session_id": sample_session_id().to_string(),
+        "status": "completed",
+        "trigger": "manual",
+        "scheduled_for": "2026-07-09T12:00:00.000Z",
+        "claimed_at": sample_timestamp(),
+        "claim_deadline_at": "2026-07-09T12:05:00.000Z",
+        "completed_at": sample_timestamp(),
+        "error": null,
+        "output": {"requestedWake": true},
+        "created_at": sample_timestamp(),
+        "updated_at": sample_timestamp()
+    })
+}
+
+fn sample_scheduler_tick_report_value() -> Value {
+    json!({
+        "stale_runs_expired": 1,
+        "due_runs_claimed": 2,
+        "wakes_requested": 1,
+        "runs_completed": 1,
+        "runs_skipped": 0,
+        "runs_failed": 0
+    })
 }
 
 fn sample_profile_runtime_metadata() -> ProfileRuntimeMetadata {
@@ -1347,6 +1559,137 @@ fn sample_resource_limits() -> ResourceLimits {
         max_duration_ms: Some(3_600_000),
         max_delegation_depth: Some(4),
     }
+}
+
+fn sample_runtime_database_size_value() -> Value {
+    json!({
+        "databaseBytes": 4096,
+        "pageCount": 4,
+        "pageSizeBytes": 1024,
+        "freelistPages": 0,
+        "freelistBytes": 0,
+        "walBytes": 0
+    })
+}
+
+fn sample_runtime_storage_diagnostics_value() -> Value {
+    json!({
+        "backend": "sqlite",
+        "backendLabel": "SQLite",
+        "schemaVersion": 12,
+        "supportedSchemaVersion": 12,
+        "migrations": [
+            {
+                "version": 12,
+                "description": "validation migration",
+                "appliedAt": sample_timestamp()
+            }
+        ],
+        "size": sample_runtime_database_size_value(),
+        "tableCounts": [
+            {
+                "table": "sessions",
+                "rows": 3
+            }
+        ],
+        "capabilities": [
+            {
+                "name": "json",
+                "supported": true,
+                "detail": "JSON functions available."
+            }
+        ],
+        "repositoryGroups": [
+            {
+                "groupId": "scheduler",
+                "label": "Scheduler",
+                "correctnessSensitive": true,
+                "backendRequirements": [
+                    {
+                        "capability": "transactions",
+                        "required": true,
+                        "detail": "Scheduler claims require transactions."
+                    }
+                ],
+                "notes": ["validation fixture"]
+            }
+        ],
+        "connectionHealth": {
+            "backend": "sqlite",
+            "status": "ready",
+            "maxConnections": 1,
+            "activeConnections": 0,
+            "idleConnections": 1,
+            "totalOpened": 1,
+            "checkoutCount": 3,
+            "checkoutReuseCount": 2,
+            "reconnectAttempts": 0,
+            "reconnectSuccesses": 0,
+            "closedConnectionsDiscarded": 0,
+            "lastError": null
+        },
+        "moduleRegistry": {
+            "source": "validation",
+            "backendCapabilities": ["sqlite"],
+            "modules": [],
+            "orphanInstalledModules": []
+        },
+        "indexChecks": [
+            {
+                "name": "scheduler_due_runs",
+                "usesIndex": true,
+                "detail": "validation query plan"
+            }
+        ],
+        "searchHealthy": true,
+        "pressureSignals": [
+            {
+                "name": "database_size",
+                "active": false,
+                "severity": "info",
+                "observedValue": 4096,
+                "thresholdValue": 1048576,
+                "detail": "below threshold"
+            }
+        ],
+        "pressure": false
+    })
+}
+
+fn sample_runtime_maintenance_policy_value() -> Value {
+    json!({
+        "expireQueuedMessagesAt": sample_timestamp(),
+        "purgeTerminalQueuedMessagesBefore": sample_timestamp(),
+        "expireProviderWireStatesAt": sample_timestamp(),
+        "compactSessionMemoryAt": sample_timestamp(),
+        "sessionMemoryMaxActiveRecordsPerScope": 64,
+        "sessionMemoryArchiveBatchSize": 16,
+        "runWalCheckpoint": true,
+        "runOptimize": true
+    })
+}
+
+fn sample_runtime_maintenance_report_value() -> Value {
+    json!({
+        "sizeBefore": sample_runtime_database_size_value(),
+        "sizeAfter": sample_runtime_database_size_value(),
+        "expiredQueueMessages": 1,
+        "purgedTerminalQueueMessages": 2,
+        "expiredProviderWireStates": 3,
+        "sessionMemoryCompaction": {
+            "enabled": true,
+            "scopesInspected": 4,
+            "retentionPressureScopes": 1,
+            "scopesCompacted": 1,
+            "sessionSummariesCreated": 1,
+            "branchSummariesCreated": 0,
+            "recordsArchived": 2,
+            "recordsSuperseded": 1,
+            "skippedScopes": 0
+        },
+        "walCheckpointRan": true,
+        "optimizeRan": true
+    })
 }
 
 fn bridge_validation_fixture_file() -> Result<BridgeValidationFixtureFile> {
