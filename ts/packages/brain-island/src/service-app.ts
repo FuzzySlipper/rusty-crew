@@ -46,12 +46,6 @@ import type {
   TelegramChannelConnectorPort,
 } from "./service-adapter-ports.js";
 import {
-  AgentActivityObservationProducer,
-  type AgentActivityObservationEvent,
-  type AgentActivityObservationSink,
-  type AgentActivityWorkRef,
-} from "./agent-activity-observation.js";
-import {
   deliveryIntentWakeDecision,
   normalizeChannelWakePolicy,
   type ChannelWakePolicy,
@@ -293,7 +287,6 @@ import {
   discoverCuratorCandidates,
   type CuratorCandidateBatch,
 } from "./curator-candidates.js";
-import { postTurnMaintenanceDecision } from "./post-turn-maintenance.js";
 import {
   runCuratorLifecycleTransitions,
   type CuratorLifecyclePlanner,
@@ -301,7 +294,6 @@ import {
 } from "./curator-lifecycle.js";
 import { runStructuredCaptureProvider } from "./capture-producer-provider.js";
 import type { CaptureMemoryProposalPlan } from "./capture-memory-proposals.js";
-import { buildSessionActivityDigest } from "./session-activity-digest.js";
 import {
   MemoryToolCallDebugStore,
   type ToolCallDebugStore,
@@ -349,7 +341,6 @@ import {
   type RustyCrewRuntimeConfigApplyResult,
   type ServiceBrainWakeResultObservation,
 } from "./service-runtime-config.js";
-import { createRuntimeActivityObserver } from "./runtime-activity-observer.js";
 import {
   executeScheduledHostRun,
   runScheduledHostExecutors,
@@ -390,6 +381,13 @@ import {
   type ServiceWakeSource,
   type WakeProfileContext,
 } from "./service-wake-dispatch.js";
+import {
+  createDenGatewayObservationSink,
+  persistSessionActivityDigest as persistSessionActivityDigestFromModule,
+  publishWakeToolActivity as publishWakeToolActivityFromModule,
+  runPostTurnMaintenance as runPostTurnMaintenanceFromModule,
+  type ServiceWakeMaintenanceContext,
+} from "./service-wake-maintenance.js";
 
 export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
@@ -5263,95 +5261,33 @@ async function persistSessionActivityDigest(input: {
   observedEvents: readonly CoreEvent[];
   completionSummary?: string;
 }): Promise<void> {
-  try {
-    const digest = buildSessionActivityDigest({
-      profileId: input.session.profileId,
-      sessionId: input.session.sessionId,
-      wakeId: input.wakeId,
-      source: input.source,
-      events: input.observedEvents,
-      completionSummary: input.completionSummary,
-      now: input.state.now(),
-    });
-    await input.state.bridge.saveSessionActivityDigest(digest);
-    recordServiceEvent(input.state, {
-      source: "session-activity-digest",
-      eventType: "session_activity_digest_saved",
-      summary: `Saved activity digest ${digest.digest_id} for wake ${input.wakeId}.`,
-    });
-  } catch (error) {
-    recordServiceEvent(input.state, {
-      source: "session-activity-digest",
-      eventType: "session_activity_digest_save_failed",
-      severity: "warning",
-      summary: errorMessage(error, "session activity digest save failed"),
-    });
-  }
+  return persistSessionActivityDigestFromModule({
+    context: wakeMaintenanceContext(input.state),
+    session: input.session,
+    wakeId: input.wakeId,
+    source: input.source,
+    observedEvents: input.observedEvents,
+    completionSummary: input.completionSummary,
+  });
 }
 
 async function runPostTurnMaintenance(input: {
   state: ServiceState;
   session: SessionState;
-  profileContext: Awaited<ReturnType<typeof loadProfileContext>>;
+  profileContext: WakeProfileContext;
   wakeId: string;
   source: ServiceWakeSource;
   observedEvents: readonly CoreEvent[];
   completionSummary?: string;
 }): Promise<void> {
-  const decision = postTurnMaintenanceDecision({
-    profileId: input.session.profileId,
+  return runPostTurnMaintenanceFromModule({
+    context: wakeMaintenanceContext(input.state),
+    session: input.session,
+    profileContext: input.profileContext,
     wakeId: input.wakeId,
     source: input.source,
-    backgroundReviewEnabled:
-      input.profileContext.profile.backgroundReview?.enabled ?? false,
-    events: input.observedEvents,
+    observedEvents: input.observedEvents,
     completionSummary: input.completionSummary,
-  });
-  if (decision.action === "noop") {
-    recordServiceEvent(input.state, {
-      source: "post-turn-maintenance",
-      eventType: "post_turn_auto_maintenance_noop",
-      summary: `${decision.summary} for wake ${input.wakeId}.`,
-    });
-    return;
-  }
-
-  const batch = discoverCuratorCandidates({
-    batchId: [
-      "post-turn",
-      input.session.profileId,
-      input.wakeId.replace(/[^0-9A-Za-z_-]/g, ""),
-    ].join(":"),
-    now: input.state.now(),
-    scopeType: "profile",
-    scopeId: input.session.profileId,
-    profileId: input.session.profileId,
-    skills: input.profileContext.skills,
-    expectedSkillSlugs:
-      input.profileContext.profile.skillsMode === "all"
-        ? []
-        : input.profileContext.profile.skills,
-    observedBehavior: [decision.evidence],
-    maxCandidates: 1,
-    dryRun: true,
-  });
-  input.state.curator.store.upsertBatch(
-    batch,
-    batch.candidates.flatMap((candidate) =>
-      mutationForServiceCuratorCandidate(candidate),
-    ),
-  );
-  input.state.curator.lastRunAt = input.state.now();
-  recordServiceEvent(input.state, {
-    source: "post-turn-maintenance",
-    eventType:
-      batch.candidateCount > 0
-        ? "post_turn_curator_candidate_created"
-        : "post_turn_auto_maintenance_noop",
-    summary:
-      batch.candidateCount > 0
-        ? `Post-turn maintenance proposed ${batch.candidateCount} curator candidate(s) for wake ${input.wakeId}.`
-        : `Post-turn maintenance observed reusable behavior for wake ${input.wakeId}, but no new candidate was needed.`,
   });
 }
 
@@ -5473,6 +5409,28 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
   };
 }
 
+function wakeMaintenanceContext(
+  state: ServiceState,
+): ServiceWakeMaintenanceContext {
+  return {
+    get denGatewayClient() {
+      return state.denGatewayClient;
+    },
+    now: state.now,
+    saveSessionActivityDigest: async (digest) => {
+      await state.bridge.saveSessionActivityDigest(digest);
+    },
+    upsertCuratorBatch: (batch, mutations) =>
+      state.curator.store.upsertBatch(batch, mutations),
+    setCuratorLastRunAt: (value) => {
+      state.curator.lastRunAt = value;
+    },
+    mutationForCuratorCandidate: (candidate) =>
+      mutationForServiceCuratorCandidate(candidate),
+    recordEvent: (event) => recordServiceEvent(state, event),
+  };
+}
+
 async function drainSubscriptionEventsUntilIdle(
   bridge: Pick<NativeBridgeModule, "drainSubscriptionEvents">,
   subscription: SubscriptionHandle,
@@ -5499,141 +5457,13 @@ async function publishWakeToolActivity(input: {
   events: readonly CoreEvent[];
   observationContext?: ServiceWakeObservationContext;
 }): Promise<void> {
-  if (input.state.denGatewayClient === undefined) return;
-  const toolEvents = input.events.filter((event): event is ObservedToolEvent =>
-    isObservedToolEvent(event, input.wakeId),
-  );
-  if (toolEvents.length === 0) return;
-
-  const observer = createRuntimeActivityObserver({
-    producer: new AgentActivityObservationProducer({
-      sink: createDenGatewayObservationSink(input.state.denGatewayClient),
-      required: true,
-    }),
-    identity: observationIdentityForSession(input.session),
-    runtimeInstanceId: runtimeInstanceIdForSession(input.session),
-  });
-  const workRef = toolActivityWorkRef({
-    sessionId: input.session.sessionId,
+  return publishWakeToolActivityFromModule({
+    context: wakeMaintenanceContext(input.state),
+    session: input.session,
     wakeId: input.wakeId,
+    events: input.events,
     observationContext: input.observationContext,
   });
-  let degraded = 0;
-  for (const event of toolEvents) {
-    const toolEvent = event.event;
-    const result = await observer.tool({
-      eventType:
-        toolEvent.type === "tool_call_started"
-          ? "tool_call_started"
-          : toolEvent.isError
-            ? "tool_call_failed"
-            : "tool_call_completed",
-      toolName: toolEvent.toolName,
-      adapter: "rusty-crew",
-      visibility:
-        input.observationContext?.channelId === undefined
-          ? undefined
-          : "channel",
-      summary:
-        toolEvent.type === "tool_call_started"
-          ? `Tool ${toolEvent.toolName} started.`
-          : toolEvent.isError
-            ? `Tool ${toolEvent.toolName} failed.`
-            : `Tool ${toolEvent.toolName} completed.`,
-      longRunningOrRisky: true,
-      workRef,
-      resultRef:
-        toolEvent.type === "tool_call_finished"
-          ? {
-              artifact_path: `runtime://tool/${toolEvent.toolName}/${input.wakeId}`,
-            }
-          : undefined,
-      reasonCode:
-        toolEvent.type === "tool_call_finished" && toolEvent.isError
-          ? "tool_call_failed"
-          : undefined,
-    });
-    if (result.status === "degraded") degraded += 1;
-  }
-  if (degraded > 0) {
-    recordServiceEvent(input.state, {
-      source: "den-successor-gateway",
-      eventType: "den_observation_tool_activity_degraded",
-      severity: "warning",
-      summary: `Publishing ${degraded} tool Observation event(s) degraded for wake ${input.wakeId}.`,
-    });
-  }
-}
-
-type ObservedToolEvent = Extract<
-  CoreEvent,
-  { type: "brain_event_observed" }
-> & {
-  event: Extract<
-    BrainEvent,
-    { type: "tool_call_started" | "tool_call_finished" }
-  >;
-};
-
-function isObservedToolEvent(
-  event: CoreEvent,
-  wakeId: string,
-): event is ObservedToolEvent {
-  return (
-    event.type === "brain_event_observed" &&
-    (event.wakeId === undefined || event.wakeId === wakeId) &&
-    (event.event.type === "tool_call_started" ||
-      event.event.type === "tool_call_finished")
-  );
-}
-
-function createDenGatewayObservationSink(
-  client: DenSuccessorGatewayClient,
-): AgentActivityObservationSink {
-  return {
-    writeAgentActivity(event: AgentActivityObservationEvent): Promise<unknown> {
-      return client.createObservationActivityEvent({
-        source_domain: event.source_domain,
-        event_type: event.event_type,
-        agent_identity: event.agent_identity,
-        runtime_instance_id: event.runtime_instance_id,
-        payload: event.payload as unknown as Record<string, unknown>,
-      });
-    },
-  };
-}
-
-function observationIdentityForSession(
-  session: SessionState,
-): DenSuccessorAgentIdentity {
-  return {
-    profile: session.profileId,
-    instance_id: runtimeInstanceIdForSession(session),
-    session_key: session.sessionId,
-  };
-}
-
-function runtimeInstanceIdForSession(
-  session: Pick<SessionState, "agentId">,
-): string {
-  return `${session.agentId}@rusty-crew`;
-}
-
-function toolActivityWorkRef(input: {
-  sessionId: SessionId;
-  wakeId: string;
-  observationContext?: ServiceWakeObservationContext;
-}): AgentActivityWorkRef {
-  const deliveryIntentId = input.observationContext?.deliveryIntentId;
-  return {
-    session_id: input.sessionId,
-    run_id:
-      deliveryIntentId === undefined
-        ? `wake:${input.wakeId}`
-        : `delivery_intent:${deliveryIntentId};wake:${input.wakeId}`,
-    channel_id: input.observationContext?.channelId,
-    channel_message_id: input.observationContext?.channelMessageId,
-  };
 }
 
 function runtimePauseWakeReport(
