@@ -125,7 +125,7 @@ Current implementation:
 - Task #5302 added `codegen:native-mapping-inventory` and
   `check:native-mapping-inventory` for generated-check mapper coverage. The
   first covered families are model providers, profile registry, and
-  conversation/chat read models, and roleplay.
+  conversation/chat read models, roleplay, and memory/compaction.
 
 ### 1a. Generated-Check Model Provider Mapper Inventory
 
@@ -150,6 +150,8 @@ The artifact currently covers these bridge families:
   planning, prompt-context assembly, speaker identity, character/persona and
   session metadata normalization, narrator phase planning, and assistant
   alternatives;
+- memory manifest operations for session memory, memory proposals, governance
+  decisions, activity digests, and context compaction artifacts;
 - raw method names derived from those operations;
 - passthrough wrapper names for conversation operations that intentionally keep
   Rust's persistence-contract JSON as the bridge authority instead of adding
@@ -157,6 +159,9 @@ The artifact currently covers these bridge families:
 - passthrough wrapper names plus JSON-body wrapper subsets for roleplay
   operations, including the non-JSON scalar
   `roleplayNarratorReviewRequestsRevision` native method exception;
+- passthrough wrapper names plus JSON-body wrapper subsets for memory methods,
+  and direct native method names for the profile-memory napi surface that is
+  not represented as manifest JSON operations;
 - named TypeScript interface inventories for Rusty View chat read-model and
   event-log DTOs;
 - raw DTO field inventories for model provider records, credentials, refresh
@@ -171,6 +176,9 @@ The artifact currently covers these bridge families:
   records/layers/queries/recall traces, scene state, narrator configuration and
   phase plans, prompt context, speaker identity, character/persona/session
   metadata, and assistant alternative planning.
+- Rust persistence/protocol DTO field inventories for profile memory, session
+  memory, memory proposal records and queries, governance decisions, session
+  activity digests, and context compaction artifacts.
 
 All DTO field inventories are derived from Rust-authored sample serialization.
 

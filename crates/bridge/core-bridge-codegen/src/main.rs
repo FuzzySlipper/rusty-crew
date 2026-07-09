@@ -424,6 +424,44 @@ export const nativeMappingInventory = {artifact_json} as const;
 }
 
 fn native_mapping_inventory_artifact() -> Result<Value> {
+    let memory_operations = vec![
+        "list_memory_space_descriptors",
+        "query_session_memory_records",
+        "build_session_memory_prompt_context",
+        "save_memory_proposal",
+        "plan_capture_memory_proposals",
+        "plan_curator_governance_transition",
+        "plan_curator_lifecycle_transition",
+        "plan_background_memory_auto_mutations",
+        "list_memory_proposals",
+        "save_session_activity_digest",
+        "list_session_activity_digests",
+        "save_context_compaction_artifact",
+        "list_context_compaction_artifacts",
+        "record_memory_governance_decision",
+    ];
+    let memory_json_input_operations = vec![
+        "query_session_memory_records",
+        "build_session_memory_prompt_context",
+        "save_memory_proposal",
+        "plan_capture_memory_proposals",
+        "plan_curator_governance_transition",
+        "plan_curator_lifecycle_transition",
+        "plan_background_memory_auto_mutations",
+        "list_memory_proposals",
+        "save_session_activity_digest",
+        "list_session_activity_digests",
+        "save_context_compaction_artifact",
+        "list_context_compaction_artifacts",
+        "record_memory_governance_decision",
+    ];
+    let profile_memory_direct_methods = vec![
+        "listProfileMemory",
+        "getProfileMemory",
+        "addProfileMemory",
+        "replaceProfileMemory",
+        "removeProfileMemory",
+    ];
     let roleplay_operations = vec![
         "plan_roleplay_assistant_alternative",
         "plan_roleplay_session_lifecycle",
@@ -565,6 +603,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "model_provider_refresh_impact",
         "plan_model_provider_refresh",
     ];
+    ensure_family_operations_exist("memory", &memory_operations)?;
     ensure_family_operations_exist("roleplay", &roleplay_operations)?;
     ensure_family_operations_exist("conversation", &conversation_operations)?;
     ensure_family_operations_exist("profile_registry", &profile_registry_operations)?;
@@ -700,6 +739,30 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         serde_json::to_value(sample_roleplay_assistant_alternative_plan_input())?;
     let roleplay_assistant_alternative_plan =
         serde_json::to_value(sample_roleplay_assistant_alternative_plan())?;
+    let profile_memory_record = sample_profile_memory_record_value();
+    let profile_memory_write = sample_profile_memory_write_value();
+    let profile_memory_replace = sample_profile_memory_replace_value();
+    let profile_memory_delete = sample_profile_memory_delete_value();
+    let profile_memory_query = sample_profile_memory_query_value();
+    let session_memory_record = serde_json::to_value(sample_session_memory_record())?;
+    let session_memory_query = serde_json::to_value(sample_session_memory_query())?;
+    let branch_aware_session_memory_query =
+        serde_json::to_value(sample_branch_aware_session_memory_query())?;
+    let session_memory_prompt_context =
+        serde_json::to_value(sample_session_memory_prompt_context())?;
+    let memory_proposal = serde_json::to_value(sample_memory_proposal())?;
+    let memory_proposal_record = serde_json::to_value(sample_memory_proposal_record())?;
+    let memory_proposal_query = serde_json::to_value(sample_memory_proposal_query())?;
+    let memory_governance_decision_input =
+        serde_json::to_value(sample_memory_governance_decision_input())?;
+    let memory_governance_decision_record =
+        serde_json::to_value(sample_memory_governance_decision_record())?;
+    let session_activity_digest = serde_json::to_value(sample_session_activity_digest())?;
+    let session_activity_digest_query =
+        serde_json::to_value(sample_session_activity_digest_query())?;
+    let context_compaction_artifact = serde_json::to_value(sample_context_compaction_artifact())?;
+    let context_compaction_artifact_query =
+        serde_json::to_value(sample_context_compaction_artifact_query())?;
     let profile_registry_record = serde_json::to_value(sample_profile_registry_record())?;
     let profile_registry_write = serde_json::to_value(sample_profile_registry_write())?;
     let profile_registry_update = serde_json::to_value(sample_profile_registry_update())?;
@@ -716,6 +779,47 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "formatVersion": 1,
         "source": "rusty-crew-core-bridge-codegen",
         "families": {
+            "memory": {
+                "operationNames": memory_operations,
+                "rawMethods": memory_operations
+                    .iter()
+                    .map(|operation| operation_name_to_native_method(operation))
+                    .collect::<Vec<_>>(),
+                "passthroughWrappers": memory_operations
+                    .iter()
+                    .map(|operation| operation_name_to_camel_wrapper(operation))
+                    .collect::<Vec<_>>(),
+                "jsonInputWrappers": memory_json_input_operations
+                    .iter()
+                    .map(|operation| operation_name_to_camel_wrapper(operation))
+                    .collect::<Vec<_>>(),
+                "jsonInputRawMethods": memory_json_input_operations
+                    .iter()
+                    .map(|operation| operation_name_to_native_method(operation))
+                    .collect::<Vec<_>>(),
+                "directNativeMethods": profile_memory_direct_methods,
+                "dtoFields": {
+                    "ProfileMemoryRecord": object_keys(&profile_memory_record)?,
+                    "ProfileMemoryWrite": object_keys(&profile_memory_write)?,
+                    "ProfileMemoryReplace": object_keys(&profile_memory_replace)?,
+                    "ProfileMemoryDelete": object_keys(&profile_memory_delete)?,
+                    "ProfileMemoryQuery": object_keys(&profile_memory_query)?,
+                    "SessionMemoryRecord": object_keys(&session_memory_record)?,
+                    "SessionMemoryQuery": object_keys(&session_memory_query)?,
+                    "BranchAwareSessionMemoryQuery": object_keys(&branch_aware_session_memory_query)?,
+                    "SessionMemoryPromptContext": object_keys(&session_memory_prompt_context)?,
+                    "SessionMemoryPromptDiagnostics": object_keys(required_value(&session_memory_prompt_context, "diagnostics")?)?,
+                    "MemoryProposalEnvelope": object_keys(&memory_proposal)?,
+                    "MemoryProposalRecord": object_keys(&memory_proposal_record)?,
+                    "MemoryProposalQuery": object_keys(&memory_proposal_query)?,
+                    "MemoryGovernanceDecisionInput": object_keys(&memory_governance_decision_input)?,
+                    "MemoryGovernanceDecisionRecord": object_keys(&memory_governance_decision_record)?,
+                    "SessionActivityDigest": object_keys(&session_activity_digest)?,
+                    "SessionActivityDigestQuery": object_keys(&session_activity_digest_query)?,
+                    "ContextCompactionArtifact": object_keys(&context_compaction_artifact)?,
+                    "ContextCompactionArtifactQuery": object_keys(&context_compaction_artifact_query)?,
+                }
+            },
             "roleplay": {
                 "operationNames": roleplay_operations,
                 "rawMethods": roleplay_operations
@@ -1691,6 +1795,149 @@ fn sample_query_page() -> persistence::QueryPage {
     persistence::QueryPage {
         limit: Some(25),
         offset: Some(5),
+    }
+}
+
+fn sample_profile_memory_record_value() -> Value {
+    json!({
+        "profileId": sample_profile_id().to_string(),
+        "targetType": "user",
+        "targetId": "validation-user",
+        "key": "validation-memory",
+        "content": "Validation profile memory content.",
+        "metadataJson": "{\"fixture\":true}",
+        "revision": 2,
+        "createdAt": sample_timestamp(),
+        "updatedAt": sample_timestamp()
+    })
+}
+
+fn sample_profile_memory_write_value() -> Value {
+    json!({
+        "profileId": sample_profile_id().to_string(),
+        "targetType": "user",
+        "targetId": "validation-user",
+        "key": "validation-memory",
+        "content": "Validation profile memory content.",
+        "metadataJson": "{\"fixture\":true}",
+        "now": sample_timestamp(),
+        "caps": {
+            "maxRecordsPerProfile": 64,
+            "maxKeyBytes": 128,
+            "maxContentBytes": 8192
+        }
+    })
+}
+
+fn sample_profile_memory_replace_value() -> Value {
+    json!({
+        "write": sample_profile_memory_write_value(),
+        "expectedRevision": 2
+    })
+}
+
+fn sample_profile_memory_delete_value() -> Value {
+    json!({
+        "profileId": sample_profile_id().to_string(),
+        "targetType": "user",
+        "targetId": "validation-user",
+        "key": "validation-memory",
+        "expectedRevision": 2
+    })
+}
+
+fn sample_profile_memory_query_value() -> Value {
+    json!({
+        "profileId": sample_profile_id().to_string(),
+        "targetType": "user",
+        "targetId": "validation-user",
+        "limit": 25,
+        "offset": 5
+    })
+}
+
+fn sample_session_memory_record() -> persistence::SessionMemoryRecord {
+    persistence::SessionMemoryRecord {
+        record_id: "validation-session-memory".to_owned(),
+        session_id: sample_session_id(),
+        scope: MemoryScope {
+            scope_type: MemoryScopeType::Session,
+            scope_id: sample_session_id().to_string(),
+        },
+        branch_id: Some(sample_conversation_branch_id()),
+        shape: MemoryRecordShapeRef {
+            shape_id: MemoryRecordShapeId::unchecked("session_fact"),
+            version: 1,
+        },
+        status: persistence::SessionMemoryRecordStatus::Active,
+        revision: 3,
+        content: json!({"content": "Validation session memory."}),
+        evidence_refs: vec![MemoryEvidenceRef {
+            evidence_type: MemoryEvidenceKind::Wake,
+            ref_id: "wake-validation".to_owned(),
+            label: Some("Validation wake".to_owned()),
+        }],
+        source: MemoryProposalSource::CaptureProducer,
+        confidence: 0.85,
+        durability_rationale: "Validation session memory rationale.".to_owned(),
+        supersedes_record_id: Some("validation-old-session-memory".to_owned()),
+        superseded_by_record_id: None,
+        archived_at: None,
+        archive_reason: None,
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_session_memory_query() -> persistence::SessionMemoryQuery {
+    persistence::SessionMemoryQuery {
+        session_id: Some(sample_session_id()),
+        branch_id: Some(sample_conversation_branch_id()),
+        scope_type: Some(MemoryScopeType::Session),
+        shape_id: Some("session_fact".to_owned()),
+        include_superseded: true,
+        include_archived: false,
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_branch_aware_session_memory_query() -> persistence::BranchAwareSessionMemoryQuery {
+    persistence::BranchAwareSessionMemoryQuery {
+        session_id: sample_session_id(),
+        active_branch_id: Some(sample_conversation_branch_id()),
+        include_ancestors: true,
+        include_siblings: false,
+        shape_id: Some("session_fact".to_owned()),
+        prompt_context_only: true,
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_session_memory_prompt_context() -> persistence::SessionMemoryPromptContext {
+    persistence::SessionMemoryPromptContext {
+        records: vec![sample_session_memory_record()],
+        diagnostics: persistence::SessionMemoryPromptDiagnostics {
+            descriptor_id: "session_memory".to_owned(),
+            descriptor_schema_version: 1,
+            session_id: sample_session_id(),
+            active_branch_id: Some(sample_conversation_branch_id()),
+            selected_records: vec![persistence::SessionMemorySelectedRecordDiagnostic {
+                record_id: "validation-session-memory".to_owned(),
+                shape_id: "session_fact".to_owned(),
+            }],
+            excluded_counts: persistence::SessionMemoryPromptExcludedCounts {
+                wrong_branch: 1,
+                sibling_branch: 0,
+                tool_only: 0,
+                archived: 0,
+                superseded: 1,
+                limit_exceeded: 0,
+                policy_disabled: 0,
+            },
+            character_estimate: 120,
+            token_estimate: 32,
+            context_policy: persistence::SessionMemoryPromptContextPolicy::SummaryContext,
+        },
     }
 }
 
@@ -3273,6 +3520,36 @@ fn sample_memory_proposal_record() -> MemoryProposalRecord {
     }
 }
 
+fn sample_memory_proposal_query() -> MemoryProposalQuery {
+    MemoryProposalQuery {
+        space_id: Some(MemorySpaceId::unchecked("session_memory")),
+        status: Some(MemoryProposalReviewStatus::Approved),
+        dedupe_key: Some("session_fact:validation".to_owned()),
+        limit: Some(25),
+        offset: Some(5),
+    }
+}
+
+fn sample_memory_governance_decision_input() -> MemoryGovernanceDecisionInput {
+    MemoryGovernanceDecisionInput {
+        decision_id: "decision_one".to_owned(),
+        proposal_id: "proposal_one".to_owned(),
+        decision: MemoryGovernanceDecisionKind::Approved,
+        actor: "validation-reviewer".to_owned(),
+        source: MemoryProposalSource::Human,
+        evidence_refs: vec![MemoryEvidenceRef {
+            evidence_type: MemoryEvidenceKind::Ui,
+            ref_id: "review-validation".to_owned(),
+            label: Some("Validation review".to_owned()),
+        }],
+        policy_mode: MemoryGovernanceMode::ManualReview,
+        confidence: Some(0.9),
+        message: Some("Approved by bridge validation fixture.".to_owned()),
+        resulting_revision: Some(7),
+        decided_at: Some(sample_timestamp()),
+    }
+}
+
 fn sample_memory_governance_decision_record() -> MemoryGovernanceDecisionRecord {
     MemoryGovernanceDecisionRecord {
         decision_id: "decision_one".to_owned(),
@@ -3290,6 +3567,17 @@ fn sample_memory_governance_decision_record() -> MemoryGovernanceDecisionRecord 
         message: Some("Approved by bridge validation fixture.".to_owned()),
         resulting_revision: Some(7),
         decided_at: sample_timestamp(),
+    }
+}
+
+fn sample_session_activity_digest_query() -> SessionActivityDigestQuery {
+    SessionActivityDigestQuery {
+        profile_id: Some(sample_profile_id()),
+        session_id: Some(sample_session_id()),
+        wake_id: Some("wake-validation".to_owned()),
+        include_reviewed: true,
+        limit: Some(25),
+        offset: Some(5),
     }
 }
 
@@ -3322,6 +3610,18 @@ fn sample_session_activity_digest() -> SessionActivityDigest {
         created_at: sample_timestamp(),
         retention_until: Some("2026-08-02T00:00:00.000Z".to_owned()),
         reviewed_at: None,
+    }
+}
+
+fn sample_context_compaction_artifact_query() -> ContextCompactionArtifactQuery {
+    ContextCompactionArtifactQuery {
+        session_id: Some(sample_session_id()),
+        branch_id: Some(sample_conversation_branch_id()),
+        strategy_id: Some("rolling_summary".to_owned()),
+        enters_future_context: Some(true),
+        latest_only: true,
+        limit: Some(25),
+        offset: Some(5),
     }
 }
 

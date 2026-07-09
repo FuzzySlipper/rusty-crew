@@ -5,17 +5,31 @@ import { nativeMappingInventory } from "./generated/native-mapping-inventory.js"
 
 const sourcePath = fileURLToPath(new URL("./index.ts", import.meta.url));
 const source = readFileSync(sourcePath, "utf8");
+const memoryWrapperSourcePath = fileURLToPath(
+  new URL("./memory-wrappers.ts", import.meta.url),
+);
+const bridgeSources = `${source}\n${readFileSync(memoryWrapperSourcePath, "utf8")}`;
+const memory = nativeMappingInventory.families.memory;
 const roleplay = nativeMappingInventory.families.roleplay;
 const conversation = nativeMappingInventory.families.conversation;
 const profileRegistry = nativeMappingInventory.families.profileRegistry;
 const modelProvider = nativeMappingInventory.families.modelProvider;
 
 const nativeBridgeBinding = extractInterface("NativeBridgeBinding");
+assertRawMethods("memory", memory.rawMethods);
 assertRawMethods("roleplay", roleplay.rawMethods);
 assertRawMethods("conversation", conversation.rawMethods);
 assertRawMethods("profile registry", profileRegistry.rawMethods);
 assertRawMethods("model provider", modelProvider.rawMethods);
 
+assertGeneratedDtoFieldsNonEmpty("memory", memory.dtoFields);
+assertWrapperCalls("memory", memory.passthroughWrappers, memory.rawMethods);
+assertJsonInputWrappers(
+  "memory",
+  memory.jsonInputWrappers,
+  memory.jsonInputRawMethods,
+);
+assertDirectNativeMethods("memory", memory.directNativeMethods);
 assertGeneratedDtoFieldsNonEmpty("roleplay", roleplay.dtoFields);
 assertWrapperCalls(
   "roleplay",
@@ -226,6 +240,24 @@ function assertRawMethods(label: string, methods: readonly string[]) {
   }
 }
 
+function assertDirectNativeMethods(label: string, methods: readonly string[]) {
+  const moduleInterface = extractInterface("NativeBridgeModule");
+  for (const method of methods) {
+    assert(
+      nativeBridgeBinding.includes(`${method}(`),
+      `NativeBridgeBinding is missing generated-checked ${label} direct method ${method}`,
+    );
+    assert(
+      moduleInterface.includes(`${method}(`),
+      `NativeBridgeModule is missing generated-checked ${label} direct wrapper ${method}`,
+    );
+    assert(
+      bridgeSources.includes(`binding.${method}(`),
+      `${label} direct wrapper ${method} must call the matching native method`,
+    );
+  }
+}
+
 function assertPassthroughWrappers(
   label: string,
   wrappers: readonly string[],
@@ -253,7 +285,7 @@ function assertWrapperCalls(
       `NativeBridgeModule is missing generated-checked ${label} wrapper ${wrapper}`,
     );
     assert(
-      source.includes(`binding.${rawMethod}(`),
+      bridgeSources.includes(`binding.${rawMethod}(`),
       `${label} wrapper ${wrapper} must call generated-checked raw method ${rawMethod}`,
     );
   }
@@ -271,13 +303,13 @@ function assertJsonInputWrappers(
   );
   for (const [index, wrapper] of wrappers.entries()) {
     const rawMethod = rawMethods[index];
-    const callIndex = source.indexOf(`binding.${rawMethod}(`);
+    const callIndex = bridgeSources.indexOf(`binding.${rawMethod}(`);
     assert.notEqual(
       callIndex,
       -1,
       `${label} wrapper ${wrapper} must call generated-checked raw method ${rawMethod}`,
     );
-    const callWindow = source.slice(callIndex, callIndex + 240);
+    const callWindow = bridgeSources.slice(callIndex, callIndex + 240);
     assert(
       callWindow.includes("JSON.stringify("),
       `${label} wrapper ${wrapper} must pass input through ${rawMethod} with JSON.stringify`,

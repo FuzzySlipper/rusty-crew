@@ -461,6 +461,295 @@ export const nativeMappingInventory = {
         "removeChatDataBankScopeJson"
       ]
     },
+    "memory": {
+      "directNativeMethods": [
+        "listProfileMemory",
+        "getProfileMemory",
+        "addProfileMemory",
+        "replaceProfileMemory",
+        "removeProfileMemory"
+      ],
+      "dtoFields": {
+        "BranchAwareSessionMemoryQuery": [
+          "active_branch_id",
+          "include_ancestors",
+          "include_siblings",
+          "page",
+          "prompt_context_only",
+          "session_id",
+          "shape_id"
+        ],
+        "ContextCompactionArtifact": [
+          "artifact_id",
+          "branch_id",
+          "context_policy",
+          "created_at",
+          "enters_future_context",
+          "estimate_after_json",
+          "estimate_before_json",
+          "metadata_json",
+          "provider_metadata_json",
+          "session_id",
+          "source_refs_json",
+          "strategy_id",
+          "summary_text",
+          "updated_at"
+        ],
+        "ContextCompactionArtifactQuery": [
+          "branch_id",
+          "enters_future_context",
+          "latest_only",
+          "limit",
+          "offset",
+          "session_id",
+          "strategy_id"
+        ],
+        "MemoryGovernanceDecisionInput": [
+          "actor",
+          "confidence",
+          "decided_at",
+          "decision",
+          "decision_id",
+          "evidence_refs",
+          "message",
+          "policy_mode",
+          "proposal_id",
+          "resulting_revision",
+          "source"
+        ],
+        "MemoryGovernanceDecisionRecord": [
+          "actor",
+          "confidence",
+          "decided_at",
+          "decision",
+          "decision_id",
+          "evidence_refs",
+          "message",
+          "policy_mode",
+          "proposal_id",
+          "resulting_revision",
+          "source"
+        ],
+        "MemoryProposalEnvelope": [
+          "confidence",
+          "content",
+          "created_at",
+          "dedupe_key",
+          "durability_rationale",
+          "evidence_refs",
+          "governance_mode",
+          "operation",
+          "proposal_id",
+          "scope",
+          "shape",
+          "source",
+          "space_id"
+        ],
+        "MemoryProposalQuery": [
+          "dedupe_key",
+          "limit",
+          "offset",
+          "space_id",
+          "status"
+        ],
+        "MemoryProposalRecord": [
+          "applied_at",
+          "created_at",
+          "decided_at",
+          "duplicate_of",
+          "proposal",
+          "resulting_revision",
+          "selected_governance_mode",
+          "status",
+          "updated_at"
+        ],
+        "ProfileMemoryDelete": [
+          "expectedRevision",
+          "key",
+          "profileId",
+          "targetId",
+          "targetType"
+        ],
+        "ProfileMemoryQuery": [
+          "limit",
+          "offset",
+          "profileId",
+          "targetId",
+          "targetType"
+        ],
+        "ProfileMemoryRecord": [
+          "content",
+          "createdAt",
+          "key",
+          "metadataJson",
+          "profileId",
+          "revision",
+          "targetId",
+          "targetType",
+          "updatedAt"
+        ],
+        "ProfileMemoryReplace": [
+          "expectedRevision",
+          "write"
+        ],
+        "ProfileMemoryWrite": [
+          "caps",
+          "content",
+          "key",
+          "metadataJson",
+          "now",
+          "profileId",
+          "targetId",
+          "targetType"
+        ],
+        "SessionActivityDigest": [
+          "allowed_capture_spaces",
+          "completion_summary",
+          "created_at",
+          "digest_id",
+          "event_counts_json",
+          "profile_id",
+          "retention_until",
+          "reviewed_at",
+          "session_id",
+          "signals_json",
+          "source",
+          "summary_text",
+          "tool_calls_json",
+          "wake_id"
+        ],
+        "SessionActivityDigestQuery": [
+          "include_reviewed",
+          "limit",
+          "offset",
+          "profile_id",
+          "session_id",
+          "wake_id"
+        ],
+        "SessionMemoryPromptContext": [
+          "diagnostics",
+          "records"
+        ],
+        "SessionMemoryPromptDiagnostics": [
+          "active_branch_id",
+          "character_estimate",
+          "context_policy",
+          "descriptor_id",
+          "descriptor_schema_version",
+          "excluded_counts",
+          "selected_records",
+          "session_id",
+          "token_estimate"
+        ],
+        "SessionMemoryQuery": [
+          "branch_id",
+          "include_archived",
+          "include_superseded",
+          "page",
+          "scope_type",
+          "session_id",
+          "shape_id"
+        ],
+        "SessionMemoryRecord": [
+          "archive_reason",
+          "archived_at",
+          "branch_id",
+          "confidence",
+          "content",
+          "created_at",
+          "durability_rationale",
+          "evidence_refs",
+          "record_id",
+          "revision",
+          "scope",
+          "session_id",
+          "shape",
+          "source",
+          "status",
+          "superseded_by_record_id",
+          "supersedes_record_id",
+          "updated_at"
+        ]
+      },
+      "jsonInputRawMethods": [
+        "querySessionMemoryRecordsJson",
+        "buildSessionMemoryPromptContextJson",
+        "saveMemoryProposalJson",
+        "planCaptureMemoryProposalsJson",
+        "planCuratorGovernanceTransitionJson",
+        "planCuratorLifecycleTransitionJson",
+        "planBackgroundMemoryAutoMutationsJson",
+        "listMemoryProposalsJson",
+        "saveSessionActivityDigestJson",
+        "listSessionActivityDigestsJson",
+        "saveContextCompactionArtifactJson",
+        "listContextCompactionArtifactsJson",
+        "recordMemoryGovernanceDecisionJson"
+      ],
+      "jsonInputWrappers": [
+        "querySessionMemoryRecords",
+        "buildSessionMemoryPromptContext",
+        "saveMemoryProposal",
+        "planCaptureMemoryProposals",
+        "planCuratorGovernanceTransition",
+        "planCuratorLifecycleTransition",
+        "planBackgroundMemoryAutoMutations",
+        "listMemoryProposals",
+        "saveSessionActivityDigest",
+        "listSessionActivityDigests",
+        "saveContextCompactionArtifact",
+        "listContextCompactionArtifacts",
+        "recordMemoryGovernanceDecision"
+      ],
+      "operationNames": [
+        "list_memory_space_descriptors",
+        "query_session_memory_records",
+        "build_session_memory_prompt_context",
+        "save_memory_proposal",
+        "plan_capture_memory_proposals",
+        "plan_curator_governance_transition",
+        "plan_curator_lifecycle_transition",
+        "plan_background_memory_auto_mutations",
+        "list_memory_proposals",
+        "save_session_activity_digest",
+        "list_session_activity_digests",
+        "save_context_compaction_artifact",
+        "list_context_compaction_artifacts",
+        "record_memory_governance_decision"
+      ],
+      "passthroughWrappers": [
+        "listMemorySpaceDescriptors",
+        "querySessionMemoryRecords",
+        "buildSessionMemoryPromptContext",
+        "saveMemoryProposal",
+        "planCaptureMemoryProposals",
+        "planCuratorGovernanceTransition",
+        "planCuratorLifecycleTransition",
+        "planBackgroundMemoryAutoMutations",
+        "listMemoryProposals",
+        "saveSessionActivityDigest",
+        "listSessionActivityDigests",
+        "saveContextCompactionArtifact",
+        "listContextCompactionArtifacts",
+        "recordMemoryGovernanceDecision"
+      ],
+      "rawMethods": [
+        "listMemorySpaceDescriptorsJson",
+        "querySessionMemoryRecordsJson",
+        "buildSessionMemoryPromptContextJson",
+        "saveMemoryProposalJson",
+        "planCaptureMemoryProposalsJson",
+        "planCuratorGovernanceTransitionJson",
+        "planCuratorLifecycleTransitionJson",
+        "planBackgroundMemoryAutoMutationsJson",
+        "listMemoryProposalsJson",
+        "saveSessionActivityDigestJson",
+        "listSessionActivityDigestsJson",
+        "saveContextCompactionArtifactJson",
+        "listContextCompactionArtifactsJson",
+        "recordMemoryGovernanceDecisionJson"
+      ]
+    },
     "modelProvider": {
       "dtoFields": {
         "RawModelProviderAffectedProfile": [
