@@ -376,6 +376,12 @@ import {
   runScheduledHostExecutors,
   scheduledHostJobKinds,
 } from "./scheduled-host-executors.js";
+import {
+  recordSchedulerHeartbeatFailure as recordSchedulerHeartbeatFailureFromModule,
+  runSchedulerHeartbeat as runSchedulerHeartbeatFromModule,
+  runServiceCuratorLifecycleTransitions as runServiceCuratorLifecycleTransitionsFromModule,
+  type SchedulerBackgroundContext,
+} from "./service-scheduler-background.js";
 import { buildToolRegistryDiagnostics } from "./tool-registry-diagnostics.js";
 import { buildToolContextDiagnosticsReport } from "./tool-context-diagnostics.js";
 import {
@@ -639,6 +645,24 @@ function wakeEventDrainContext(
   };
 }
 
+function schedulerBackgroundContext(
+  state: ServiceState,
+): SchedulerBackgroundContext {
+  return {
+    bridge: state.bridge,
+    get runtimeConfig() {
+      return state.runtimeConfig;
+    },
+    schedulerHeartbeat: state.schedulerHeartbeat,
+    curator: state.curator,
+    now: state.now,
+    isStopping: () => state.stopping,
+    curatorSkillsDir,
+    scheduledHostExecutorContext: () => scheduledHostExecutorContext(state),
+    recordEvent: (event) => recordServiceEvent(state, event),
+  };
+}
+
 interface ServiceBackgroundReviewRuntime {
   enabled: boolean;
   recentFindings: number;
@@ -837,9 +861,13 @@ export async function createRustyCrewServiceApp(
       denGatewayAvailable: state.denGatewayClient !== undefined,
       telegramConnectorAvailable: state.telegramConnector !== undefined,
       callbacks: {
-        runSchedulerHeartbeat: () => runSchedulerHeartbeat(state),
+        runSchedulerHeartbeat: () =>
+          runSchedulerHeartbeatFromModule(schedulerBackgroundContext(state)),
         recordSchedulerHeartbeatFailure: (error) =>
-          recordSchedulerHeartbeatFailure(state, error),
+          recordSchedulerHeartbeatFailureFromModule(
+            schedulerBackgroundContext(state),
+            error,
+          ),
         drainAndDispatchWakes: () =>
           drainAndDispatchWakesFromModule(
             wakeEventDrainContext(state, "background"),
@@ -3309,7 +3337,9 @@ function createServiceControlExecutor(
     schedulerTick: async () => {
       const report = await state.bridge.runSchedulerTick();
       const curatorLifecycle =
-        await runServiceCuratorLifecycleTransitions(state);
+        await runServiceCuratorLifecycleTransitionsFromModule(
+          schedulerBackgroundContext(state),
+        );
       return {
         status: "completed",
         summary: "scheduler tick completed",
@@ -8007,98 +8037,6 @@ function parseJson(value: string): unknown {
   } catch {
     return {};
   }
-}
-
-async function runSchedulerHeartbeat(state: ServiceState): Promise<void> {
-  if (state.stopping) return;
-  if (state.schedulerHeartbeat.running) {
-    state.schedulerHeartbeat.lastSkippedAt = state.now();
-    state.schedulerHeartbeat.lastSkipReason =
-      "previous scheduler heartbeat is still running";
-    recordServiceEvent(state, {
-      source: "service-host",
-      eventType: "scheduler_heartbeat_skipped",
-      severity: "warning",
-      summary:
-        "Scheduler heartbeat skipped because the previous tick is still running.",
-    });
-    return;
-  }
-  const startedAt = state.now();
-  const startedMonotonic = Date.now();
-  state.schedulerHeartbeat.running = true;
-  state.schedulerHeartbeat.lastStartedAt = startedAt;
-  state.schedulerHeartbeat.lastSkipReason = undefined;
-  try {
-    const tick = await state.bridge.runSchedulerTick();
-    const hostRuns = await runScheduledHostExecutors({
-      ...scheduledHostExecutorContext(state),
-    });
-    const scheduledJobs = await registerConfiguredScheduledJobs({
-      bridge: state.bridge,
-      runtimeConfig: state.runtimeConfig,
-      now: state.now,
-    });
-    const curatorLifecycle = await runServiceCuratorLifecycleTransitions(state);
-    const maintenance = await state.bridge.runMaintenance({
-      expireQueuedMessagesAt: state.now(),
-    });
-    const summary = `Scheduler heartbeat: ${tick.wakesRequested} wakes requested, ${tick.runsCompleted} wake runs completed, ${hostRuns.completed} host runs completed, ${scheduledJobs.registered} configured jobs reconciled, ${curatorLifecycle.transitions.length} curator lifecycle transitions, ${maintenance.expiredQueueMessages} queued messages expired.`;
-    state.schedulerHeartbeat.lastCompletedAt = state.now();
-    state.schedulerHeartbeat.lastDurationMs = Date.now() - startedMonotonic;
-    state.schedulerHeartbeat.lastSummary = summary;
-    state.schedulerHeartbeat.lastError = undefined;
-    if (
-      tick.wakesRequested > 0 ||
-      tick.runsCompleted > 0 ||
-      tick.runsFailed > 0 ||
-      hostRuns.claimed > 0 ||
-      scheduledJobs.registered > 0 ||
-      curatorLifecycle.transitions.length > 0 ||
-      maintenance.expiredQueueMessages > 0
-    ) {
-      recordServiceEvent(state, {
-        source: "service-host",
-        eventType: "scheduler_heartbeat",
-        summary,
-      });
-    }
-  } finally {
-    state.schedulerHeartbeat.running = false;
-  }
-}
-
-function recordSchedulerHeartbeatFailure(
-  state: ServiceState,
-  error: unknown,
-): void {
-  const summary = errorMessage(error, "scheduler heartbeat failed");
-  state.schedulerHeartbeat.lastCompletedAt = state.now();
-  state.schedulerHeartbeat.lastError = summary;
-  state.schedulerHeartbeat.lastSummary = summary;
-  recordServiceEvent(state, {
-    source: "service-host",
-    eventType: "scheduler_heartbeat_failed",
-    severity: "error",
-    summary,
-  });
-}
-
-async function runServiceCuratorLifecycleTransitions(
-  state: ServiceState,
-): Promise<CuratorLifecycleReport> {
-  const report = await runCuratorLifecycleTransitions({
-    store: state.curator.store,
-    skillsDir: curatorSkillsDir(state.curator.runtimeConfig),
-    now: state.now(),
-    planner: (request) =>
-      state.bridge.planCuratorLifecycleTransition(
-        request,
-      ) as ReturnType<CuratorLifecyclePlanner>,
-  });
-  state.curator.lastLifecycleRunAt = report.checkedAt;
-  state.curator.lastLifecycleReport = report;
-  return report;
 }
 
 async function archiveServiceSession(
