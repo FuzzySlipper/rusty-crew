@@ -185,15 +185,31 @@ compaction artifact methods intentionally remain for the memory/compaction
 store slice. The fake-backed `chat_event_port_uses_fake_store_without_database`
 test proves chat event log behavior without SQLite/Postgres.
 
+### Roleplay lore store port
+
+Task #5315 extracted roleplay lore storage behind `RoleplayLoreStore` in
+`crates/core/core-engine/src/roleplay_lore_store.rs`.
+
+The port stays roleplay-specific rather than becoming generic memory:
+
+- lore record add/replace/supersede/tombstone/query/get and provenance;
+- lore layer CRUD, layer config, entry joins, capture, promotion, and
+  constants;
+- chat layer assignment/toggle/reorder;
+- lore recall plus recall trace lookup.
+
+`CoreEngine` now routes roleplay lore engine operations through the port while
+leaving Den memory and generic Crew memory as separate future slices. The
+fake-backed `chat_layer_assignment_uses_fake_roleplay_lore_store` test proves a
+roleplay-lore operation without SQLite/Postgres.
+
 ## Remaining Extraction Tasks
 
 Continue in domain-sized patches rather than one monolithic trait:
 
-1. Extract roleplay lore store ports for lore layers, entries, recall,
-   capture, promotion, provenance, and recall traces.
-2. Extract memory store ports for profile/session memory, proposals,
+1. Extract memory store ports for profile/session memory, proposals,
    governance, activity digests, compaction artifacts, and prompt context.
-3. Extract runtime admin store ports for profile/model admin, runtime counters,
+2. Extract runtime admin store ports for profile/model admin, runtime counters,
    diagnostics, maintenance, service/module data, runtime search, and simple
    key/value state.
 

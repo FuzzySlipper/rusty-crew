@@ -5,6 +5,7 @@ mod chat_store;
 mod delegation_store;
 mod memory_spaces;
 mod provider_state_store;
+mod roleplay_lore_store;
 mod scheduler;
 mod session_store;
 
@@ -26,6 +27,7 @@ use provider_state_store::{
     list_provider_state_diagnostics as list_provider_state_store_diagnostics,
     load_provider_state_for_wake, save_provider_state as save_provider_state_store,
 };
+use roleplay_lore_store::RoleplayLoreStore;
 use rusty_crew_core_body::{
     session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
 };
@@ -869,117 +871,117 @@ impl CoreEngine {
         &self,
         write: &RoleplayLoreWrite,
     ) -> CoreResult<RoleplayLoreRecord> {
-        self.store.memory().add_roleplay_lore_record(write)
+        RoleplayLoreStore::add_lore_record(&self.store, write)
     }
 
     pub fn replace_roleplay_lore_record(
         &self,
         replace: &RoleplayLoreReplace,
     ) -> CoreResult<RoleplayLoreRecord> {
-        self.store.memory().replace_roleplay_lore_record(replace)
+        RoleplayLoreStore::replace_lore_record(&self.store, replace)
     }
 
     pub fn supersede_roleplay_lore_record(
         &self,
         supersede: &RoleplayLoreSupersede,
     ) -> CoreResult<(RoleplayLoreRecord, RoleplayLoreRecord)> {
-        self.store.supersede_roleplay_lore_record(supersede)
+        RoleplayLoreStore::supersede_lore_record(&self.store, supersede)
     }
 
     pub fn tombstone_roleplay_lore_record(
         &self,
         tombstone: &RoleplayLoreTombstone,
     ) -> CoreResult<RoleplayLoreRecord> {
-        self.store.tombstone_roleplay_lore_record(tombstone)
+        RoleplayLoreStore::tombstone_lore_record(&self.store, tombstone)
     }
 
     pub fn query_roleplay_lore_records(
         &self,
         query: &RoleplayLoreQuery,
     ) -> CoreResult<Vec<RoleplayLoreRecord>> {
-        self.store.memory().query_roleplay_lore_records(query)
+        RoleplayLoreStore::query_lore_records(&self.store, query)
     }
 
     pub fn get_roleplay_lore_record(
         &self,
         record_id: &str,
     ) -> CoreResult<Option<RoleplayLoreRecord>> {
-        self.store.memory().get_roleplay_lore_record(record_id)
+        RoleplayLoreStore::get_lore_record(&self.store, record_id)
     }
 
     pub fn roleplay_lore_provenance_events(
         &self,
         record_id: &str,
     ) -> CoreResult<Vec<RoleplayLoreProvenanceEvent>> {
-        self.store.roleplay_lore_provenance_events(record_id)
+        RoleplayLoreStore::lore_provenance_events(&self.store, record_id)
     }
 
     pub fn create_lore_layer(
         &self,
         write: &RoleplayLoreLayerWrite,
     ) -> CoreResult<RoleplayLoreLayerRecord> {
-        self.store.create_lore_layer(write)
+        RoleplayLoreStore::create_lore_layer(&self.store, write)
     }
 
     pub fn get_lore_layer(&self, layer_id: &str) -> CoreResult<Option<RoleplayLoreLayerRecord>> {
-        self.store.get_lore_layer(layer_id)
+        RoleplayLoreStore::get_lore_layer(&self.store, layer_id)
     }
 
     pub fn list_lore_layers_by_profile(
         &self,
         profile_id: &str,
     ) -> CoreResult<Vec<RoleplayLoreLayerRecord>> {
-        self.store.list_lore_layers_by_profile(profile_id)
+        RoleplayLoreStore::list_lore_layers_by_profile(&self.store, profile_id)
     }
 
     pub fn update_lore_layer(
         &self,
         update: &RoleplayLoreLayerUpdate,
     ) -> CoreResult<RoleplayLoreLayerRecord> {
-        self.store.update_lore_layer(update)
+        RoleplayLoreStore::update_lore_layer(&self.store, update)
     }
 
     pub fn archive_lore_layer(
         &self,
         archive: &RoleplayLoreLayerArchive,
     ) -> CoreResult<RoleplayLoreLayerRecord> {
-        self.store.archive_lore_layer(archive)
+        RoleplayLoreStore::archive_lore_layer(&self.store, archive)
     }
 
     pub fn get_lore_layer_config(
         &self,
         layer_id: &str,
     ) -> CoreResult<Option<RoleplayLoreLayerConfigRecord>> {
-        self.store.get_lore_layer_config(layer_id)
+        RoleplayLoreStore::get_lore_layer_config(&self.store, layer_id)
     }
 
     pub fn set_lore_layer_config(
         &self,
         write: &RoleplayLoreLayerConfigWrite,
     ) -> CoreResult<RoleplayLoreLayerConfigRecord> {
-        self.store.set_lore_layer_config(write)
+        RoleplayLoreStore::set_lore_layer_config(&self.store, write)
     }
 
     pub fn add_entry_to_layer(&self, link: &RoleplayLoreLayerEntryLink) -> CoreResult<()> {
-        self.store.add_entry_to_layer(link)
+        RoleplayLoreStore::add_entry_to_layer(&self.store, link)
     }
 
     pub fn capture_lore_fact(
         &self,
         capture: &RoleplayLoreFactCapture,
     ) -> CoreResult<RoleplayLoreLayerEntryJoin> {
-        self.store.capture_lore_fact(capture)
+        RoleplayLoreStore::capture_lore_fact(&self.store, capture)
     }
 
     pub fn promote_lore_entry(
         &self,
         promotion: &RoleplayLoreEntryPromotion,
     ) -> CoreResult<RoleplayLoreLayerEntryJoin> {
-        self.store.promote_lore_entry(promotion)
+        RoleplayLoreStore::promote_lore_entry(&self.store, promotion)
     }
 
     pub fn remove_entry_from_layer(&self, layer_id: &str, record_id: &str) -> CoreResult<()> {
-        self.store.remove_entry_from_layer(layer_id, record_id)
+        RoleplayLoreStore::remove_entry_from_layer(&self.store, layer_id, record_id)
     }
 
     pub fn set_entry_constant(
@@ -988,23 +990,22 @@ impl CoreEngine {
         record_id: &str,
         is_constant: bool,
     ) -> CoreResult<()> {
-        self.store
-            .set_entry_constant(layer_id, record_id, is_constant)
+        RoleplayLoreStore::set_entry_constant(&self.store, layer_id, record_id, is_constant)
     }
 
     pub fn list_entries_by_layer(
         &self,
         layer_id: &str,
     ) -> CoreResult<Vec<RoleplayLoreLayerEntryJoin>> {
-        self.store.list_entries_by_layer(layer_id)
+        RoleplayLoreStore::list_entries_by_layer(&self.store, layer_id)
     }
 
     pub fn set_chat_layers(&self, write: &RoleplayChatLayersWrite) -> CoreResult<()> {
-        self.store.set_chat_layers(write)
+        RoleplayLoreStore::set_chat_layers(&self.store, write)
     }
 
     pub fn get_chat_layers(&self, chat_id: &str) -> CoreResult<Vec<RoleplayChatLayerRecord>> {
-        self.store.get_chat_layers(chat_id)
+        RoleplayLoreStore::get_chat_layers(&self.store, chat_id)
     }
 
     pub fn toggle_chat_layer(
@@ -1013,26 +1014,26 @@ impl CoreEngine {
         layer_id: &str,
         enabled: bool,
     ) -> CoreResult<()> {
-        self.store.toggle_chat_layer(chat_id, layer_id, enabled)
+        RoleplayLoreStore::toggle_chat_layer(&self.store, chat_id, layer_id, enabled)
     }
 
     pub fn reorder_chat_layers(&self, chat_id: &str, layer_ids: &[String]) -> CoreResult<()> {
-        self.store.reorder_chat_layers(chat_id, layer_ids)
+        RoleplayLoreStore::reorder_chat_layers(&self.store, chat_id, layer_ids)
     }
 
     pub fn recall_lore(&self, query: &LoreRecallQuery) -> CoreResult<LoreRecallResult> {
-        self.store.recall_lore(query)
+        RoleplayLoreStore::recall_lore(&self.store, query)
     }
 
     pub fn list_recall_traces(
         &self,
         query: &LoreRecallTraceQuery,
     ) -> CoreResult<Vec<LoreRecallTraceRecord>> {
-        self.store.list_recall_traces(query)
+        RoleplayLoreStore::list_recall_traces(&self.store, query)
     }
 
     pub fn get_recall_trace(&self, trace_id: &str) -> CoreResult<Option<LoreRecallTraceRecord>> {
-        self.store.get_recall_trace(trace_id)
+        RoleplayLoreStore::get_recall_trace(&self.store, trace_id)
     }
 
     pub fn list_simple_kv(&self, query: &SimpleKvQuery) -> CoreResult<Vec<SimpleKvRecord>> {
