@@ -27,7 +27,7 @@ import {
   type AgentEvent,
   type AgentMessage as PiAgentMessage,
   type PiAgentFactory,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const decoder = new TextDecoder();
 const engineDataDir = mkdtempSync(

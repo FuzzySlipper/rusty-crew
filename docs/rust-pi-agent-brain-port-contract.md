@@ -13,9 +13,9 @@ execution, and the existing `BrainWakeStreamItem` vocabulary.
 
 The former TypeScript behavior was in:
 
-- `ts/packages/brain-island/src/legacy-pi-agent-test-harness.ts` (private
-  smoke harness, not a production module export)
-- `ts/packages/brain-island/src/legacy-pi-tool-adapter-test-harness.ts`
+- `ts/packages/brain-island/smokes/support/legacy-pi-agent-test-harness.ts`
+  (private smoke harness, not a production module export)
+- `ts/packages/brain-island/smokes/support/legacy-pi-tool-adapter-test-harness.ts`
   (legacy harness adapter)
 - `ts/packages/brain-island/src/brain-module.ts`
 

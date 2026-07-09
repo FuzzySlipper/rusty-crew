@@ -106,8 +106,6 @@ export type {
 } from "../background-memory-skill-review.js";
 export {
   captureProposalToMemoryProposal,
-  isLegacyDenseMemoryCaptureProposal,
-  legacyDenseCaptureProposalToMemoryProposal,
   planCaptureMemoryProposalsWithRust,
   typedCaptureProposalToMemoryProposal,
 } from "../capture-memory-proposals.js";
@@ -117,8 +115,6 @@ export type {
   CaptureProducerEvidenceRef,
   CaptureProducerOutput,
   CaptureTargetSpaceId,
-  LegacyDenseMemoryCaptureKind,
-  LegacyDenseMemoryCaptureProposal,
   TypedCaptureMemoryProposal,
 } from "../capture-memory-proposals.js";
 export {

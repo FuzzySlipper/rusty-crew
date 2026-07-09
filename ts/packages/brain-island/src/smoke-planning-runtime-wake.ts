@@ -7,7 +7,7 @@ import type {
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
   AgentTool,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   BodyState,
@@ -32,7 +32,7 @@ import {
   todoTool,
 } from "./index.js";
 import type { LoadedProfileContext } from "./index.js";
-import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
+import { createPiAgentBrain } from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;

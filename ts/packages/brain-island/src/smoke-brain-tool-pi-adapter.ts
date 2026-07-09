@@ -8,7 +8,7 @@ import type {
 import { Type } from "typebox";
 import type { BrainTool, BrainWakeInput } from "./index.js";
 import { defaultBodyDeltaPolicy } from "./mid-turn-delta.js";
-import { toPiAgentTool } from "./legacy-pi-tool-adapter-test-harness.js";
+import { toPiAgentTool } from "../smokes/support/legacy-pi-tool-adapter-test-harness.js";
 
 const parameters = Type.Object({
   subject: Type.String(),

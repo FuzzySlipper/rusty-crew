@@ -11,9 +11,11 @@ import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
   captureProposalToMemoryProposal,
   planCaptureMemoryProposalsWithRust,
-  runBackgroundMemorySkillReview,
   type LegacyDenseMemoryCaptureProposal,
   type TypedCaptureMemoryProposal,
+} from "./capture-memory-proposals.js";
+import {
+  runBackgroundMemorySkillReview,
 } from "./index.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-capture-proposals-"));

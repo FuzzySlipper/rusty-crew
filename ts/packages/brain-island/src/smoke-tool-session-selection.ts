@@ -9,13 +9,13 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentTool as PiAgentTool,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 import {
   combineResolvers,
   defaultBodyDeltaPolicy,
   resolveToolSession,
 } from "./index.js";
-import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
+import { createPiAgentBrain } from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const sessionId = "tool-session" as SessionId;
 const agentId = "tool-agent" as AgentId;

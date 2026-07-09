@@ -3,7 +3,7 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   BrainAction,
@@ -16,7 +16,7 @@ import {
   resolveDelegationTools,
   selectToolProfile,
 } from "./index.js";
-import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
+import { createPiAgentBrain } from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const sessionId = "delegation-tools-session" as SessionId;
 const agentId = "delegation-tools-agent" as AgentId;

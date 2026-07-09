@@ -57,6 +57,9 @@ const adapterAuthorityForbiddenCalls = [
   "wakeBrainFromBridgeRequest",
 ];
 const legacyBrainIslandSrcSmokeCount = 131;
+const forbiddenProductionResidueNamePattern =
+  /(?:^|[-_])(legacy|fallback|compat|shim|scaffold|placeholder|deterministic)(?:[-_.]|$)/i;
+const productionResidueFilenameAllowlist = new Set([]);
 const relocatedSmokePathRatchets = [
   {
     oldPath: normalizePath(
@@ -277,6 +280,7 @@ expectNoSourceImports("@rusty-crew/brain-island", [
   ...adapterPackages,
 ]);
 expectBrainIslandCompositionRatchets();
+expectNoProductionResidueFilenames("@rusty-crew/brain-island");
 expectNoNewSrcSmokes(
   "@rusty-crew/brain-island",
   legacyBrainIslandSrcSmokeCount,
@@ -325,6 +329,19 @@ console.log(
         movedFiles: relocatedSmokePathRatchets.length,
         legacySrcSmokeCeiling: legacyBrainIslandSrcSmokeCount,
         legacySrcImportExemptions: legacySrcSmokeAllowedImports.size,
+      },
+      productionResidueFilenameRatchet: {
+        package: "@rusty-crew/brain-island",
+        forbiddenTerms: [
+          "legacy",
+          "fallback",
+          "compat",
+          "shim",
+          "scaffold",
+          "placeholder",
+          "deterministic",
+        ],
+        allowlist: [...productionResidueFilenameAllowlist].sort(),
       },
     },
     null,
@@ -445,6 +462,20 @@ function expectBrainIslandCompositionRatchets() {
         `brain-island production file ${relativePath} must not start service-host background loop timers`,
       );
     }
+  }
+}
+
+function expectNoProductionResidueFilenames(packageName) {
+  const pkg = packagesByName.get(packageName);
+  if (!pkg) return;
+  for (const sourceFile of productionSourceFiles(pkg)) {
+    const relativePath = normalizePath(relative(root, sourceFile));
+    const fileName = relativePath.split("/").at(-1) ?? relativePath;
+    if (!forbiddenProductionResidueNamePattern.test(fileName)) continue;
+    if (productionResidueFilenameAllowlist.has(relativePath)) continue;
+    violations.push(
+      `${packageName} production file ${relativePath} looks like legacy/fallback/scaffold residue; move it to smokes/test support, rename it to its durable role, or add an explicit reviewed allowlist entry with a Den task`,
+    );
   }
 }
 

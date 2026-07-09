@@ -3,7 +3,7 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   BrainEventEnvelope,
@@ -11,7 +11,7 @@ import type {
   SessionHandle,
   SessionId,
 } from "@rusty-crew/contracts";
-import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
+import { createPiAgentBrain } from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const sessionId = "pi-agent-brain-events-session" as SessionId;
 

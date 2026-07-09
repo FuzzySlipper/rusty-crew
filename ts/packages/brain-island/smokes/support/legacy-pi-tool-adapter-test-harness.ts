@@ -4,12 +4,12 @@ import type {
   AgentToolUpdateCallback as PiAgentToolUpdateCallback,
 } from "./legacy-pi-agent-test-harness.js";
 import type { Static, TSchema } from "typebox";
-import type { BrainTool, BrainToolResult } from "./brain-tool.js";
-import type { BrainWakeInput } from "./index.js";
+import type { BrainTool, BrainToolResult } from "../../src/brain-tool.js";
+import type { BrainWakeInput } from "../../src/index.js";
 import {
   localToolCallMetadata,
   type ToolCallDebugStore,
-} from "./tool-call-debug-store.js";
+} from "../../src/tool-call-debug-store.js";
 
 export interface PiToolAdapterContext {
   wake: BrainWakeInput;
@@ -181,21 +181,21 @@ function fromPiToolResult<TDetails>(
 export type LegacyPiAgentToolResolver = (input: {
   wake: BrainWakeInput;
   tools: Parameters<
-    import("./tool-session-selection.js").BrainToolResolver
+    import("../../src/tool-session-selection.js").BrainToolResolver
   >[0]["tools"];
   actions?: Parameters<
-    import("./tool-session-selection.js").BrainToolResolver
+    import("../../src/tool-session-selection.js").BrainToolResolver
   >[0]["actions"];
 }) => PiAgentTool[];
 
 export function adaptLegacyPiAgentToolResolver(
   resolver: LegacyPiAgentToolResolver,
-): import("./tool-session-selection.js").BrainToolResolver {
+): import("../../src/tool-session-selection.js").BrainToolResolver {
   return (input) => fromPiAgentTools(resolver(input));
 }
 
 export function adaptLegacyPiAgentToolResolvers(
   ...resolvers: readonly LegacyPiAgentToolResolver[]
-): import("./tool-session-selection.js").BrainToolResolver[] {
+): import("../../src/tool-session-selection.js").BrainToolResolver[] {
   return resolvers.map((resolver) => adaptLegacyPiAgentToolResolver(resolver));
 }

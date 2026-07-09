@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import type {
   AgentEvent as PiAgentEvent,
   AgentOptions as PiAgentOptions,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 import type { AgentId, BodyState, SessionId } from "@rusty-crew/contracts";
 import { Type } from "typebox";
 import type { BrainTool } from "./brain-tool.js";
 import { handleRustyViewChatRequest } from "./rusty-view-chat-api.js";
 import { MemoryProviderRequestDebugStore } from "./provider-request-debug-store.js";
-import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
+import { createPiAgentBrain } from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const providerRequestDebugStore = new MemoryProviderRequestDebugStore({
   maxJsonChars: 20_000,

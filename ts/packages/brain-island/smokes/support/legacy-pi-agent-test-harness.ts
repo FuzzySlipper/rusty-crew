@@ -8,26 +8,26 @@ import type {
   ToolDescriptor,
   ToolProfile,
 } from "@rusty-crew/contracts";
-import type { BrainToolExecutionMode } from "./brain-tool.js";
+import type { BrainToolExecutionMode } from "../../src/brain-tool.js";
 import type {
   BrainActionPlanner,
   BrainImplementation,
   BrainRoleAssembly,
   BrainWakeInput,
   BrainWakeResult,
-} from "./index.js";
+} from "../../src/index.js";
 import {
   type BrainActionCollector,
   resolveToolSession,
   type BrainToolResolver,
-} from "./tool-session-selection.js";
+} from "../../src/tool-session-selection.js";
 import { toPiAgentTools } from "./legacy-pi-tool-adapter-test-harness.js";
 import {
   localToolCallMetadata,
   type ToolCallDebugStore,
   withToolCallDebugReference,
-} from "./tool-call-debug-store.js";
-import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
+} from "../../src/tool-call-debug-store.js";
+import type { ProviderRequestDebugStore } from "../../src/provider-request-debug-store.js";
 
 // Legacy TS pi-agent test harness only. Production pi-agent module wiring now
 // uses the Rust pi-agent brain through the native bridge.

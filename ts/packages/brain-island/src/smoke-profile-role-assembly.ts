@@ -6,7 +6,7 @@ import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
   AgentOptions as PiAgentOptions,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 import type {
   AgentId,
   ProfileId,
@@ -24,7 +24,7 @@ import {
 import {
   createPiAgentBrain,
   type PiAgentLike,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-profile-role-assembly-"));
 const profilesDir = join(root, "profiles");

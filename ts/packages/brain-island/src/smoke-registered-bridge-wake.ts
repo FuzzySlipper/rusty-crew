@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type {
   AgentEvent as PiAgentEvent,
   AgentMessage as PiAgentMessage,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 import type {
   AdapterId,
   AgentId,
@@ -18,11 +18,11 @@ import type {
 } from "@rusty-crew/contracts";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import { registerBrainImplementationRuntime } from "./index.js";
-import { createPiAgentBrain } from "./legacy-pi-agent-test-harness.js";
+import { createPiAgentBrain } from "../smokes/support/legacy-pi-agent-test-harness.js";
 import type {
   PiAgentFactory,
   PiAgentLike,
-} from "./legacy-pi-agent-test-harness.js";
+} from "../smokes/support/legacy-pi-agent-test-harness.js";
 
 const encoder = new TextEncoder();
 const abortSignal = new AbortController().signal;
