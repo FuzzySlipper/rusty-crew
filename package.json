@@ -14,7 +14,7 @@
     "build:native": "npm run build:native -w @rusty-crew/native-bridge",
     "build": "npm run typecheck",
     "verify:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-    "verify:ts": "npm run typecheck && npm run smoke:validation-audit && npm run test:unit && npm run format && npm run smoke:architecture-boundaries && npm run certify:adapter-boundaries && npm run smoke:runtime-config-parity && npm run tool-registry-authority && npm run smoke:core-config-facade-drift && npm run smoke:external-cassettes && npm run smoke:bridge-contract-parity && npm run smoke:bridge-native-surface && npm run smoke:native-artifact-tracking && npm run smoke:bridge-fixture-drift && npm run smoke:bridge-fingerprint-drift && npm run smoke:bridge-validation",
+    "verify:ts": "npm run typecheck && npm run smoke:validation-audit && npm run test:unit && npm run format && npm run smoke:architecture-boundaries && npm run build:native && npm run certify:adapter-boundaries && npm run smoke:runtime-config-parity && npm run tool-registry-authority && npm run smoke:core-config-facade-drift && npm run smoke:external-cassettes && npm run smoke:bridge-contract-parity && npm run smoke:bridge-native-surface && npm run smoke:native-artifact-tracking && npm run smoke:bridge-fixture-drift && npm run smoke:bridge-fingerprint-drift && npm run smoke:bridge-validation",
     "verify:offline": "npm run verify:rust && npm run verify:ts",
     "test:postgres-backend": "node tools/postgres-backend-conformance.mjs",
     "measure:napi": "npm run measure:napi -w @rusty-crew/native-bridge",
