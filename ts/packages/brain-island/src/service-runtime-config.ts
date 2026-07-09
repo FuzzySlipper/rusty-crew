@@ -38,11 +38,7 @@ import type {
   NativeSessionStateSummary,
 } from "@rusty-crew/native-bridge";
 import { loadNativeBridge } from "@rusty-crew/native-bridge";
-import {
-  createBrowserToolResolver,
-  MemoryBrowserScreenshotStore,
-} from "./browser-tools.js";
-import { BrowserSessionManager } from "./browser-session-manager.js";
+import { createBrowserToolResolver } from "./browser-tools.js";
 import {
   createCoordinationToolResolver,
   type CoordinationToolRuntime,
@@ -106,6 +102,10 @@ import {
   type ServiceMcpToolDiscoveryClientFactory,
   type ServiceMcpToolExecutorFactory,
 } from "./service-mcp-tools.js";
+import {
+  createServiceBrowserResources,
+  type ServiceBrowserResources,
+} from "./service-browser-resources.js";
 import type {
   RustyCrewMcpServerConfig,
   RustyCrewServiceConfig,
@@ -724,11 +724,14 @@ export async function applyRustyCrewRuntimeConfig(input: {
   coordinationRuntime?: CoordinationToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
+  browserResources?: ServiceBrowserResources;
   onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await expandRuntimeConfigFromProfiles(
     input.runtimeConfig,
   );
+  const browserResources =
+    input.browserResources ?? createServiceBrowserResources();
   const createMissingSessions = input.createMissingSessions ?? true;
   const mcpToolCatalog = await buildServiceMcpToolCatalog({
     bridge: input.bridge,
@@ -827,6 +830,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             coordinationRuntime: input.coordinationRuntime,
             toolCallDebugStore: input.toolCallDebugStore,
             providerRequestDebugStore: input.providerRequestDebugStore,
+            browserResources,
           }),
           {
             profileId: brain.profileId,
@@ -990,11 +994,14 @@ export async function rebuildConfiguredBrainRuntime(input: {
   coordinationRuntime?: CoordinationToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
+  browserResources?: ServiceBrowserResources;
   onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
   const runtimeConfig = await expandRuntimeConfigFromProfiles(
     input.runtimeConfig,
   );
+  const browserResources =
+    input.browserResources ?? createServiceBrowserResources();
   const brain = runtimeConfig.brains.find(
     (candidate) => candidate.profileId === input.profileId,
   );
@@ -1062,6 +1069,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         coordinationRuntime: input.coordinationRuntime,
         toolCallDebugStore: input.toolCallDebugStore,
         providerRequestDebugStore: input.providerRequestDebugStore,
+        browserResources,
       }),
       {
         profileId: brain.profileId,
@@ -1366,7 +1374,8 @@ async function createConfiguredBrain(
     coordinationRuntime?: CoordinationToolRuntime;
     toolCallDebugStore?: ToolCallDebugStore;
     providerRequestDebugStore?: ProviderRequestDebugStore;
-  } = {},
+    browserResources: ServiceBrowserResources;
+  },
 ): Promise<BrainImplementation> {
   return module.createBrain({
     profile,
@@ -1402,17 +1411,16 @@ function createServiceToolResolver(
     mcpToolExecutorFactory?: ServiceMcpToolExecutorFactory;
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     coordinationRuntime?: CoordinationToolRuntime;
+    browserResources: ServiceBrowserResources;
   },
 ): BrainToolResolver {
   const todoStore = createServiceTodoStore(options.serviceConfig);
-  const browserManager = new BrowserSessionManager();
-  const browserScreenshotStore = new MemoryBrowserScreenshotStore();
   return combineResolvers(
     resolveLocalCodeTools,
     createWebToolResolver({}),
     createBrowserToolResolver({
-      manager: browserManager,
-      screenshotStore: browserScreenshotStore,
+      manager: options.browserResources.manager,
+      screenshotStore: options.browserResources.screenshotStore,
     }),
     createMemoryToolResolver(profile, options),
     options.mcpToolCatalog

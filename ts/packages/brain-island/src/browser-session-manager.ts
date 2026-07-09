@@ -362,6 +362,21 @@ export class BrowserSessionManager {
     );
   }
 
+  async closeAll(
+    reason: BrowserCloseReason = "service_shutdown",
+  ): Promise<BrowserCleanupSummary> {
+    const sessionIds = [...this.#sessions.values()].map(
+      (record) => record.sessionId,
+    );
+    await Promise.all(
+      sessionIds.map((sessionId) => this.close(sessionId, reason)),
+    );
+    return {
+      closed: sessionIds.length,
+      reasons: sessionIds.length > 0 ? { [reason]: sessionIds.length } : {},
+    };
+  }
+
   async sweep(now: Date = this.#now()): Promise<BrowserCleanupSummary> {
     const reasons: Record<string, number> = {};
     for (const record of [...this.#sessions.values()]) {

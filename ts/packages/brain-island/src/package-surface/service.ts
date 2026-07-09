@@ -20,6 +20,15 @@ export type {
   RustyCrewServiceApp,
   RustyCrewServiceAppOptions,
 } from "../service-app.js";
+export {
+  closeAllServiceBrowserSessionsForLifecycle,
+  closeServiceBrowserSessionForLifecycle,
+  createServiceBrowserResources,
+} from "../service-browser-resources.js";
+export type {
+  ServiceBrowserResources,
+  ServiceBrowserSessionCleanup,
+} from "../service-browser-resources.js";
 export type {
   ServiceBackgroundLoopCallbacks,
   ServiceBackgroundLoopFailure,

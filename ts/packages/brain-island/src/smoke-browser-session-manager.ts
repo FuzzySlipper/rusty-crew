@@ -132,6 +132,13 @@ await manager.open(openInput("epsilon", "agent-d", "profile-d"));
 await manager.closeAllForAgent("agent-d" as AgentId, "agent_closed");
 assert.equal(manager.diagnostics().activeSessions, 0);
 
+await manager.open(openInput("zeta", "agent-z", "profile-z"));
+await manager.open(openInput("eta", "agent-e", "profile-e"));
+const shutdownCleanup = await manager.closeAll("service_shutdown");
+assert.equal(shutdownCleanup.closed, 2);
+assert.equal(shutdownCleanup.reasons.service_shutdown, 2);
+assert.equal(manager.diagnostics().activeSessions, 0);
+
 console.log(
   JSON.stringify(
     {
@@ -139,6 +146,7 @@ console.log(
       killed: processes.filter((process) => process.killed).length,
       closedCdp: cdps.filter((cdp) => cdp.closed).length,
       cleanup,
+      shutdownCleanup,
     },
     null,
     2,

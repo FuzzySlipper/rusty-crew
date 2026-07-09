@@ -38,6 +38,7 @@
     "smoke:web-search-tool": "tsx src/smoke-web-search-tool.ts",
     "smoke:web-extract-tool": "tsx src/smoke-web-extract-tool.ts",
     "smoke:browser-session-manager": "tsx src/smoke-browser-session-manager.ts",
+    "smoke:browser-service-lifecycle": "tsx src/smoke-browser-service-lifecycle.ts",
     "smoke:browser-tools": "tsx src/smoke-browser-tools.ts",
     "smoke:tool-context-diagnostics": "tsx src/smoke-tool-context-diagnostics.ts",
     "smoke:den-memory-tools": "tsx src/smoke-den-memory-tools.ts",

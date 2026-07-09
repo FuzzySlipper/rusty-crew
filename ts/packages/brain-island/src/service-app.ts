@@ -365,6 +365,12 @@ import {
   defaultToolRegistry,
 } from "./tool-registry.js";
 import type { ServiceAdapterFactories } from "./service-adapter-ports.js";
+import {
+  closeAllServiceBrowserSessionsForLifecycle,
+  closeServiceBrowserSessionForLifecycle,
+  createServiceBrowserResources,
+  type ServiceBrowserResources,
+} from "./service-browser-resources.js";
 
 export interface RustyCrewServiceAppOptions {
   env?: RustyCrewServiceEnv;
@@ -372,6 +378,7 @@ export interface RustyCrewServiceAppOptions {
   bridge?: NativeBridgeModule;
   adapterFactories: ServiceAdapterFactories;
   toolCallDebugStore?: ToolCallDebugStore;
+  browserResources?: ServiceBrowserResources;
   now?: () => string;
 }
 
@@ -432,6 +439,7 @@ interface ServiceState {
   readonly chatSubscribersBySession: Map<SessionId, Set<ChatStreamSubscriber>>;
   readonly toolCallDebugStore: ToolCallDebugStore;
   readonly providerRequestDebugStore: ProviderRequestDebugStore;
+  readonly browserResources: ServiceBrowserResources;
   readonly responsesWakeMetrics: RuntimeResponsesWakeMetrics[];
   readonly suppressedWakeEvents: Map<SessionId, number>;
   readonly recentEvents: ServiceRecentEvent[];
@@ -583,6 +591,8 @@ export async function createRustyCrewServiceApp(
     const providerRequestDebugStore = new MemoryProviderRequestDebugStore({
       now: options.now,
     });
+    const browserResources =
+      options.browserResources ?? createServiceBrowserResources();
     const runtimeConfigApplyResult = await applyRustyCrewRuntimeConfig({
       serviceConfig: config,
       runtimeConfig,
@@ -593,6 +603,7 @@ export async function createRustyCrewServiceApp(
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
       toolCallDebugStore,
       providerRequestDebugStore,
+      browserResources,
       onBrainWakeResult: (observation) => {
         const state = liveState;
         if (state === undefined) return;
@@ -600,7 +611,7 @@ export async function createRustyCrewServiceApp(
       },
     });
     const wakeSubscription = await bridge.subscribeEvents({
-      eventKinds: ["brain_wake_requested"],
+      eventKinds: ["brain_wake_requested", "session_archived"],
     });
 
     const state: ServiceState = {
@@ -640,6 +651,7 @@ export async function createRustyCrewServiceApp(
       chatSubscribersBySession: new Map(),
       toolCallDebugStore,
       providerRequestDebugStore,
+      browserResources,
       responsesWakeMetrics: [],
       suppressedWakeEvents: new Map(),
       recentEvents: [],
@@ -2006,7 +2018,7 @@ async function applyProfileRegistryLifecycleEffects(
   }
   const sessionsArchived: string[] = [];
   for (const session of profileSessions) {
-    await state.bridge.archiveSession(session.sessionId);
+    await archiveServiceSession(state, session.sessionId);
     sessionsArchived.push(String(session.sessionId));
   }
   const brainHandle = await unregisterServiceProfileBrain(
@@ -4218,6 +4230,7 @@ async function applyServiceRuntimeConfigFromDisk(
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
+    browserResources: state.browserResources,
   });
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
@@ -4670,7 +4683,7 @@ async function decommissionServiceProfile(
     ) {
       continue;
     }
-    await state.bridge.archiveSession(session.sessionId);
+    await archiveServiceSession(state, session.sessionId);
     sessionsArchived.push(String(session.sessionId));
   }
 
@@ -5844,7 +5857,7 @@ function createServiceControlExecutor(
             oldSession,
             plan,
           });
-          await state.bridge.archiveSession(sessionId as SessionId);
+          await archiveServiceSession(state, sessionId as SessionId);
         },
         createSession: async ({ sessionId, template, command }) => {
           const sessionConfig = optionalRecord(template.sessionConfig) ?? {};
@@ -6953,6 +6966,7 @@ async function applyServiceRuntimeRebuild(
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
+    browserResources: state.browserResources,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -7047,7 +7061,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     newSessionId,
     replacementChannelBindingAction(command),
   );
-  await state.bridge.archiveSession(oldSessionId as SessionId);
+  await archiveServiceSession(state, oldSessionId as SessionId);
   await applyServiceRuntimeConfigFromDisk(state, {
     createMissingSessions: true,
     eventType: "runtime_rebuild_replacement_session_created",
@@ -7063,6 +7077,7 @@ async function applyServiceRuntimeRebuildWithReplacementSession(
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
+    browserResources: state.browserResources,
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -10778,6 +10793,35 @@ async function runServiceCuratorLifecycleTransitions(
   return report;
 }
 
+async function archiveServiceSession(
+  state: ServiceState,
+  sessionId: SessionId,
+): Promise<void> {
+  await state.bridge.archiveSession(sessionId);
+  await closeBrowserSessionForServiceLifecycle(state, sessionId);
+}
+
+async function closeBrowserSessionForServiceLifecycle(
+  state: ServiceState,
+  sessionId: SessionId,
+): Promise<void> {
+  const cleanup = await closeServiceBrowserSessionForLifecycle({
+    resources: state.browserResources,
+    sessionId,
+    reason: "session_archived",
+  });
+  if (!cleanup.closed) return;
+  recordServiceEvent(state, {
+    source: "browser-session-manager",
+    eventType: "browser_session_closed",
+    summary: `Closed browser session for archived runtime session ${sessionId}.`,
+    resultRef: {
+      sessionId,
+      reason: cleanup.reason,
+    },
+  });
+}
+
 async function drainAndDispatchWakes(
   state: ServiceState,
   source: ServiceWakeSource,
@@ -10790,6 +10834,10 @@ async function drainAndDispatchWakes(
   );
   const reports: ServiceWakeDispatchReport[] = [];
   for (const event of events) {
+    if (event.type === "session_archived") {
+      await closeBrowserSessionForServiceLifecycle(state, event.sessionId);
+      continue;
+    }
     if (event.type !== "brain_wake_requested") continue;
     if (consumeSuppressedWakeEvent(state, event.sessionId)) continue;
     if (
@@ -11448,6 +11496,21 @@ async function stopService(state: ServiceState): Promise<void> {
       .unsubscribeEvents(state.wakeSubscription)
       .catch(() => undefined);
     await state.mcpManager.shutdown();
+    const browserCleanup = await closeAllServiceBrowserSessionsForLifecycle({
+      resources: state.browserResources,
+      reason: "service_shutdown",
+    });
+    if (browserCleanup.closed > 0) {
+      recordServiceEvent(state, {
+        source: "browser-session-manager",
+        eventType: "browser_sessions_closed",
+        summary: `Service shutdown closed ${browserCleanup.closed} browser session(s).`,
+        resultRef: {
+          closed: browserCleanup.closed,
+          reasons: browserCleanup.reasons,
+        },
+      });
+    }
     const bufferedCleanup = await state.bridge
       .cleanupBufferedBrainRuns({
         reasonCode: "service_shutdown",
