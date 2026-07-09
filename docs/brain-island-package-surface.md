@@ -46,6 +46,14 @@ Current root entrypoint shape:
   import/export/admin helpers, runtime config validation, role assembly, context
   strategy, context estimate, and context compaction exports.
 
+The tool/profile/prompt cluster has an additional Rust-authority inventory in
+`docs/typescript-tool-profile-prompt-surface-inventory-2026-07-08.md`. That note
+classifies local code, patch, web, browser, skills, MCP, profile loading,
+profile role assembly, context strategy/estimate, and delegated role assembly
+surfaces as execution wrappers, prompt renderers, adapter glue,
+provider/client implementations, diagnostic estimators, or temporary policy
+facades.
+
 Root surface groups:
 
 - Core brain runtime: local brain helpers, pi-agent brain construction, bridge
@@ -82,6 +90,7 @@ Final decomposition validation should include:
 ```bash
 npm run typecheck
 npm run smoke:brain-island-entrypoint-surface -w @rusty-crew/brain-island
+npm run smoke:tool-profile-prompt-authority -w @rusty-crew/brain-island
 npm run smoke:operator-surfaces-e2e
 npm run service:preflight
 ```
