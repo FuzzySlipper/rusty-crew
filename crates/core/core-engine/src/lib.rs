@@ -3,6 +3,7 @@
 mod body_queue;
 mod memory_spaces;
 mod scheduler;
+mod session_store;
 
 pub use scheduler::SchedulerTickReport;
 
@@ -12,7 +13,7 @@ use body_queue::{
 use rusty_crew_core_body::{
     session_kind_can_wake, BodyProjector, BrainActionExecutor, DefaultWakeThreshold, WakeThreshold,
 };
-use rusty_crew_core_bus::{CoreBus, SequencedEvent};
+use rusty_crew_core_bus::CoreBus;
 use rusty_crew_core_config::{validate_engine_config, ClockConfig, EngineConfig};
 use rusty_crew_core_persistence::{
     AttachmentQuery, AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery,
@@ -76,6 +77,9 @@ use rusty_crew_core_protocol::{
 };
 use rusty_crew_core_session::SessionRegistry;
 use serde_json::json;
+use session_store::{
+    load_engine_bootstrap, save_engine_event, save_engine_session, save_engine_session_with_config,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
@@ -138,20 +142,12 @@ impl CoreEngine {
         }
         let store =
             CoreCoordinationStore::open_storage(&config.engine_data_dir, config.storage.as_ref())?;
-        let persisted_sessions = store.load_sessions()?;
-        let persisted_events = store
-            .load_event_history()?
-            .into_iter()
-            .map(|entry| SequencedEvent {
-                sequence: entry.sequence,
-                event: entry.event,
-            })
-            .collect();
+        let (persisted_sessions, persisted_events) = load_engine_bootstrap(&store)?;
         let recorder_store = store.clone();
         let bus = CoreBus::with_history_and_recorder(
             persisted_events,
             Some(Arc::new(move |sequence, event| {
-                recorder_store.save_event(sequence, event)
+                save_engine_event(&recorder_store, sequence, event)
             })),
         );
         let sessions = SessionRegistry::from_states(persisted_sessions);
@@ -193,7 +189,7 @@ impl CoreEngine {
 
     pub fn create_session(&self, config: SessionConfig) -> CoreResult<SessionState> {
         let state = self.sessions.create_session(config.clone(), self.now())?;
-        self.store.save_session_with_config(&state, &config)?;
+        save_engine_session_with_config(&self.store, &state, &config)?;
         self.bus.publish(CoreEvent::SessionCreated {
             state: Box::new(state.clone()),
         })?;
@@ -221,11 +217,11 @@ impl CoreEngine {
                     self.expire_body_follow_up_messages(&now)?;
                     self.sessions.apply_config(&config)?;
                     let state = self.sessions.reactivate_session(&config.session_id, now)?;
-                    self.store.save_session(&state)?;
+                    save_engine_session(&self.store, &state)?;
                     return Ok(state);
                 }
                 let state = self.sessions.apply_config(&config)?;
-                self.store.save_session(&state)?;
+                save_engine_session(&self.store, &state)?;
                 Ok(state)
             }
             Err(error) if error.kind == CoreErrorKind::NotFound => self.create_session(config),
@@ -243,7 +239,7 @@ impl CoreEngine {
 
     pub fn archive_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
         let state = self.sessions.archive_session(session_id, self.now())?;
-        self.store.save_session(&state)?;
+        save_engine_session(&self.store, &state)?;
         self.bus.publish(CoreEvent::SessionArchived {
             session_id: session_id.clone(),
         })?;
@@ -1934,7 +1930,7 @@ impl CoreEngine {
                     .as_ref()
                     .map(|claim| claim.lease.claim_token.clone()),
             })?;
-            self.store.save_session_with_config(&state, &config)?;
+            save_engine_session_with_config(&self.store, &state, &config)?;
             self.store.update_worker_run_status_by_delegated_session(
                 &state.session_id,
                 WorkerRunStatus::SessionCreated,
@@ -2154,7 +2150,7 @@ impl CoreEngine {
             let archived_session = self
                 .sessions
                 .archive_session(&session.session_id, self.now())?;
-            self.store.save_session(&archived_session)?;
+            save_engine_session(&self.store, &archived_session)?;
             self.bus.publish(CoreEvent::SessionArchived {
                 session_id: archived_session.session_id.clone(),
             })?;
@@ -2187,7 +2183,7 @@ impl CoreEngine {
         let archived = self
             .sessions
             .archive_session(&session.session_id, self.now())?;
-        self.store.save_session(&archived)?;
+        save_engine_session(&self.store, &archived)?;
         if let Some(run) = &run {
             self.store
                 .update_worker_run_status(&run.run_id, status, self.now())?;

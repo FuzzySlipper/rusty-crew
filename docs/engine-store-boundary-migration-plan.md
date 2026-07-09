@@ -91,26 +91,44 @@ This is a migrated slice for body follow-up queue behavior only. `CoreEngine`
 still stores `CoreCoordinationStore` directly and still reaches the concrete
 store for the other domains listed above.
 
+### Bootstrap and session lifecycle store ports
+
+Task #5310 extracted startup hydration, event replay/recording, and session
+state/config persistence behind engine-owned ports in
+`crates/core/core-engine/src/session_store.rs`.
+
+The slice is split into two deliberately small traits:
+
+- `EngineBootstrapStore` loads persisted sessions, loads persisted bus history,
+  and records new bus events.
+- `SessionLifecycleStore` saves session state and session state plus config.
+
+`CoreCoordinationStore` implements both ports as thin delegates to
+`core-persistence`. The fake-backed unit test proves bootstrap replay and
+session/config persistence without constructing a concrete database.
+
+Delegated-worker status and worker-pool persistence remain outside this slice;
+only the delegated session state saves now route through the session lifecycle
+port. The worker-specific store calls are left for the delegation/worker-pool
+extraction.
+
 ## Remaining Extraction Tasks
 
 Continue in domain-sized patches rather than one monolithic trait:
 
-1. Extract bootstrap and session lifecycle ports for session/config hydration,
-   event replay/recording, save/reactivate/archive behavior, and startup
-   cleanup.
-2. Extract scheduler store ports for job/run query, claim, completion,
+1. Extract scheduler store ports for job/run query, claim, completion,
    pause/resume, and stale-run expiration.
-3. Extract delegation and worker-pool store ports for worker runs, fan-out
+2. Extract delegation and worker-pool store ports for worker runs, fan-out
    groups, completions, pool members, and work-item lifecycle.
-4. Extract provider-state store ports for wake lookup, persistence,
+3. Extract provider-state store ports for wake lookup, persistence,
    invalidation, diagnostics, and cleanup.
-5. Extract chat store ports for conversation branches, snapshots, slots,
+4. Extract chat store ports for conversation branches, snapshots, slots,
    variants, attachments, data-bank scopes, read models, and event logs.
-6. Extract roleplay lore store ports for lore layers, entries, recall,
+5. Extract roleplay lore store ports for lore layers, entries, recall,
    capture, promotion, provenance, and recall traces.
-7. Extract memory store ports for profile/session memory, proposals,
+6. Extract memory store ports for profile/session memory, proposals,
    governance, activity digests, compaction artifacts, and prompt context.
-8. Extract runtime admin store ports for profile/model admin, runtime counters,
+7. Extract runtime admin store ports for profile/model admin, runtime counters,
    diagnostics, maintenance, service/module data, runtime search, and simple
    key/value state.
 
