@@ -1262,6 +1262,7 @@ dependencies = [
  "rusty-crew-core-config",
  "rusty-crew-core-persistence",
  "rusty-crew-core-protocol",
+ "rusty-crew-roleplay-core",
  "serde",
  "serde_json",
  "sha2 0.10.9",

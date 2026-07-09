@@ -20,6 +20,7 @@ use rusty_crew_core_protocol::{
     MessageSlotId, MessageVariantId, ProfileId, ProfileRegistryLifecycleStatus, ResourceLimits,
     SessionHistoryWindow, SessionId, SessionKind,
 };
+use rusty_crew_roleplay_core as roleplay;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -423,6 +424,93 @@ export const nativeMappingInventory = {artifact_json} as const;
 }
 
 fn native_mapping_inventory_artifact() -> Result<Value> {
+    let roleplay_operations = vec![
+        "plan_roleplay_assistant_alternative",
+        "plan_roleplay_session_lifecycle",
+        "plan_roleplay_chat_layer_binding",
+        "normalize_roleplay_lore_search_controls",
+        "read_roleplay_scene_state",
+        "plan_roleplay_scene_state_update",
+        "build_roleplay_prompt_context",
+        "roleplay_speaker_identity",
+        "write_roleplay_character",
+        "merge_roleplay_character",
+        "write_roleplay_player_persona",
+        "merge_roleplay_player_persona",
+        "patch_roleplay_session_metadata",
+        "normalize_roleplay_narrator_config",
+        "roleplay_narrator_mandatory_explore_requests",
+        "roleplay_narrator_auto_capture_request",
+        "start_roleplay_narrator_turn",
+        "next_roleplay_narrator_phase",
+        "roleplay_narrator_review_requests_revision",
+        "create_lore_layer",
+        "get_lore_layer",
+        "list_lore_layers",
+        "update_lore_layer",
+        "archive_lore_layer",
+        "set_chat_layers",
+        "get_chat_layers",
+        "toggle_chat_layer",
+        "reorder_chat_layers",
+        "add_lore_entry",
+        "replace_lore_entry",
+        "supersede_lore_entry",
+        "tombstone_lore_entry",
+        "query_lore_entries",
+        "get_lore_entry",
+        "lore_entry_provenance_events",
+        "add_entry_to_layer",
+        "remove_entry_from_layer",
+        "set_entry_constant",
+        "list_entries_by_layer",
+        "recall_lore",
+        "capture_lore_fact",
+        "promote_lore_entry",
+        "get_lore_layer_config",
+        "set_lore_layer_config",
+        "list_recall_traces",
+        "get_recall_trace",
+    ];
+    let roleplay_json_input_operations = vec![
+        "plan_roleplay_assistant_alternative",
+        "plan_roleplay_session_lifecycle",
+        "plan_roleplay_chat_layer_binding",
+        "normalize_roleplay_lore_search_controls",
+        "read_roleplay_scene_state",
+        "plan_roleplay_scene_state_update",
+        "build_roleplay_prompt_context",
+        "roleplay_speaker_identity",
+        "write_roleplay_character",
+        "merge_roleplay_character",
+        "write_roleplay_player_persona",
+        "merge_roleplay_player_persona",
+        "patch_roleplay_session_metadata",
+        "normalize_roleplay_narrator_config",
+        "roleplay_narrator_mandatory_explore_requests",
+        "roleplay_narrator_auto_capture_request",
+        "start_roleplay_narrator_turn",
+        "next_roleplay_narrator_phase",
+        "create_lore_layer",
+        "update_lore_layer",
+        "archive_lore_layer",
+        "set_chat_layers",
+        "toggle_chat_layer",
+        "reorder_chat_layers",
+        "add_lore_entry",
+        "replace_lore_entry",
+        "supersede_lore_entry",
+        "tombstone_lore_entry",
+        "query_lore_entries",
+        "add_entry_to_layer",
+        "remove_entry_from_layer",
+        "set_entry_constant",
+        "recall_lore",
+        "capture_lore_fact",
+        "promote_lore_entry",
+        "set_lore_layer_config",
+        "list_recall_traces",
+    ];
     let conversation_operations = vec![
         "save_message_slot",
         "save_message_variant",
@@ -477,6 +565,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "model_provider_refresh_impact",
         "plan_model_provider_refresh",
     ];
+    ensure_family_operations_exist("roleplay", &roleplay_operations)?;
     ensure_family_operations_exist("conversation", &conversation_operations)?;
     ensure_family_operations_exist("profile_registry", &profile_registry_operations)?;
     ensure_family_operations_exist("model_provider", &model_provider_operations)?;
@@ -522,6 +611,95 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
     let data_bank_scope_record = serde_json::to_value(sample_data_bank_scope_record())?;
     let data_bank_scope_write = serde_json::to_value(sample_data_bank_scope_write())?;
     let data_bank_scope_query = serde_json::to_value(sample_data_bank_scope_query())?;
+    let roleplay_lore_record = serde_json::to_value(sample_roleplay_lore_record())?;
+    let roleplay_lore_write = serde_json::to_value(sample_roleplay_lore_write())?;
+    let roleplay_lore_replace = serde_json::to_value(sample_roleplay_lore_replace())?;
+    let roleplay_lore_supersede = serde_json::to_value(sample_roleplay_lore_supersede())?;
+    let roleplay_lore_tombstone = serde_json::to_value(sample_roleplay_lore_tombstone())?;
+    let roleplay_lore_query = serde_json::to_value(sample_roleplay_lore_query())?;
+    let roleplay_lore_provenance = serde_json::to_value(sample_roleplay_lore_provenance_event())?;
+    let roleplay_lore_layer_record = serde_json::to_value(sample_roleplay_lore_layer_record())?;
+    let roleplay_lore_layer_write = serde_json::to_value(sample_roleplay_lore_layer_write())?;
+    let roleplay_lore_layer_update = serde_json::to_value(sample_roleplay_lore_layer_update())?;
+    let roleplay_lore_layer_archive = serde_json::to_value(sample_roleplay_lore_layer_archive())?;
+    let roleplay_lore_layer_config_record =
+        serde_json::to_value(sample_roleplay_lore_layer_config_record())?;
+    let roleplay_lore_layer_config_write =
+        serde_json::to_value(sample_roleplay_lore_layer_config_write())?;
+    let roleplay_lore_layer_entry_link =
+        serde_json::to_value(sample_roleplay_lore_layer_entry_link())?;
+    let roleplay_lore_layer_entry_join =
+        serde_json::to_value(sample_roleplay_lore_layer_entry_join())?;
+    let roleplay_lore_fact_capture = serde_json::to_value(sample_roleplay_lore_fact_capture())?;
+    let roleplay_lore_entry_promotion =
+        serde_json::to_value(sample_roleplay_lore_entry_promotion())?;
+    let roleplay_chat_layers_write = serde_json::to_value(sample_roleplay_chat_layers_write())?;
+    let roleplay_chat_layer_record = serde_json::to_value(sample_roleplay_chat_layer_record())?;
+    let lore_recall_query = serde_json::to_value(sample_lore_recall_query())?;
+    let lore_recall_result = serde_json::to_value(sample_lore_recall_result())?;
+    let lore_recall_trace_record = serde_json::to_value(sample_lore_recall_trace_record())?;
+    let lore_recall_trace_query = serde_json::to_value(sample_lore_recall_trace_query())?;
+    let roleplay_prompt_context_input =
+        serde_json::to_value(sample_roleplay_prompt_context_input())?;
+    let roleplay_prompt_context_output =
+        serde_json::to_value(sample_roleplay_prompt_context_output())?;
+    let roleplay_session_lifecycle_input =
+        serde_json::to_value(sample_roleplay_session_lifecycle_plan_input())?;
+    let roleplay_session_lifecycle_plan =
+        serde_json::to_value(sample_roleplay_session_lifecycle_plan())?;
+    let roleplay_chat_layer_binding_input =
+        serde_json::to_value(sample_roleplay_chat_layer_binding_plan_input())?;
+    let roleplay_chat_layer_binding_plan =
+        serde_json::to_value(sample_roleplay_chat_layer_binding_plan())?;
+    let roleplay_lore_search_controls_input =
+        serde_json::to_value(sample_roleplay_lore_search_controls_input())?;
+    let roleplay_lore_search_controls =
+        serde_json::to_value(sample_roleplay_lore_search_controls())?;
+    let roleplay_speaker_identity_input =
+        serde_json::to_value(sample_roleplay_speaker_identity_input())?;
+    let roleplay_speaker_identity_snapshot =
+        serde_json::to_value(sample_roleplay_speaker_identity_snapshot())?;
+    let roleplay_session_metadata = serde_json::to_value(sample_roleplay_session_metadata())?;
+    let roleplay_player_persona = serde_json::to_value(sample_roleplay_player_persona())?;
+    let roleplay_character = serde_json::to_value(sample_roleplay_character())?;
+    let roleplay_character_write_input =
+        serde_json::to_value(sample_roleplay_character_write_input())?;
+    let roleplay_character_merge_input =
+        serde_json::to_value(sample_roleplay_character_merge_input())?;
+    let roleplay_persona_write_input =
+        serde_json::to_value(sample_roleplay_player_persona_write_input())?;
+    let roleplay_persona_merge_input =
+        serde_json::to_value(sample_roleplay_player_persona_merge_input())?;
+    let roleplay_session_metadata_patch_input =
+        serde_json::to_value(sample_roleplay_session_metadata_patch_input())?;
+    let roleplay_session_metadata_patch_output =
+        serde_json::to_value(sample_roleplay_session_metadata_patch_output())?;
+    let roleplay_scene_state = serde_json::to_value(sample_roleplay_scene_state())?;
+    let roleplay_scene_state_read_input =
+        serde_json::to_value(sample_roleplay_scene_state_read_input())?;
+    let roleplay_scene_state_read_output =
+        serde_json::to_value(sample_roleplay_scene_state_read_output())?;
+    let roleplay_scene_state_update_input =
+        serde_json::to_value(sample_roleplay_scene_state_update_input())?;
+    let roleplay_scene_state_update_plan =
+        serde_json::to_value(sample_roleplay_scene_state_update_plan())?;
+    let roleplay_narrator_config = serde_json::to_value(sample_roleplay_narrator_config())?;
+    let roleplay_narrator_tool_request =
+        serde_json::to_value(sample_roleplay_narrator_tool_request())?;
+    let roleplay_narrator_tool_observation =
+        serde_json::to_value(sample_roleplay_narrator_tool_observation())?;
+    let roleplay_narrator_mandatory_input =
+        serde_json::to_value(sample_roleplay_narrator_mandatory_explore_input())?;
+    let roleplay_narrator_auto_capture_input =
+        serde_json::to_value(sample_roleplay_narrator_auto_capture_input())?;
+    let roleplay_narrator_start_input =
+        serde_json::to_value(sample_roleplay_narrator_start_input())?;
+    let roleplay_narrator_next_input = serde_json::to_value(sample_roleplay_narrator_next_input())?;
+    let roleplay_narrator_phase_plan = serde_json::to_value(sample_roleplay_narrator_phase_plan())?;
+    let roleplay_assistant_alternative_input =
+        serde_json::to_value(sample_roleplay_assistant_alternative_plan_input())?;
+    let roleplay_assistant_alternative_plan =
+        serde_json::to_value(sample_roleplay_assistant_alternative_plan())?;
     let profile_registry_record = serde_json::to_value(sample_profile_registry_record())?;
     let profile_registry_write = serde_json::to_value(sample_profile_registry_write())?;
     let profile_registry_update = serde_json::to_value(sample_profile_registry_update())?;
@@ -538,11 +716,90 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "formatVersion": 1,
         "source": "rusty-crew-core-bridge-codegen",
         "families": {
+            "roleplay": {
+                "operationNames": roleplay_operations,
+                "rawMethods": roleplay_operations
+                    .iter()
+                    .map(|operation| operation_name_to_native_method(operation))
+                    .collect::<Vec<_>>(),
+                "passthroughWrappers": roleplay_operations
+                    .iter()
+                    .map(|operation| operation_name_to_camel_wrapper(operation))
+                    .collect::<Vec<_>>(),
+                "jsonInputWrappers": roleplay_json_input_operations
+                    .iter()
+                    .map(|operation| operation_name_to_camel_wrapper(operation))
+                    .collect::<Vec<_>>(),
+                "jsonInputRawMethods": roleplay_json_input_operations
+                    .iter()
+                    .map(|operation| operation_name_to_native_method(operation))
+                    .collect::<Vec<_>>(),
+                "dtoFields": {
+                    "RoleplayLoreRecord": object_keys(&roleplay_lore_record)?,
+                    "RoleplayLoreWrite": object_keys(&roleplay_lore_write)?,
+                    "RoleplayLoreReplace": object_keys(&roleplay_lore_replace)?,
+                    "RoleplayLoreSupersede": object_keys(&roleplay_lore_supersede)?,
+                    "RoleplayLoreTombstone": object_keys(&roleplay_lore_tombstone)?,
+                    "RoleplayLoreQuery": object_keys(&roleplay_lore_query)?,
+                    "RoleplayLoreProvenanceEvent": object_keys(&roleplay_lore_provenance)?,
+                    "RoleplayLoreLayerRecord": object_keys(&roleplay_lore_layer_record)?,
+                    "RoleplayLoreLayerWrite": object_keys(&roleplay_lore_layer_write)?,
+                    "RoleplayLoreLayerUpdate": object_keys(&roleplay_lore_layer_update)?,
+                    "RoleplayLoreLayerArchive": object_keys(&roleplay_lore_layer_archive)?,
+                    "RoleplayLoreLayerConfigRecord": object_keys(&roleplay_lore_layer_config_record)?,
+                    "RoleplayLoreLayerConfigWrite": object_keys(&roleplay_lore_layer_config_write)?,
+                    "RoleplayLoreLayerEntryLink": object_keys(&roleplay_lore_layer_entry_link)?,
+                    "RoleplayLoreLayerEntryJoin": object_keys(&roleplay_lore_layer_entry_join)?,
+                    "RoleplayLoreFactCapture": object_keys(&roleplay_lore_fact_capture)?,
+                    "RoleplayLoreEntryPromotion": object_keys(&roleplay_lore_entry_promotion)?,
+                    "RoleplayChatLayersWrite": object_keys(&roleplay_chat_layers_write)?,
+                    "RoleplayChatLayerRecord": object_keys(&roleplay_chat_layer_record)?,
+                    "LoreRecallQuery": object_keys(&lore_recall_query)?,
+                    "LoreRecallResult": object_keys(&lore_recall_result)?,
+                    "LoreRecallEntry": object_keys(first_array_item(&lore_recall_result, "entries")?)?,
+                    "LoreRecallTraceRecord": object_keys(&lore_recall_trace_record)?,
+                    "LoreRecallTraceQuery": object_keys(&lore_recall_trace_query)?,
+                    "RoleplayPromptContextInput": object_keys(&roleplay_prompt_context_input)?,
+                    "RoleplayPromptContextOutput": object_keys(&roleplay_prompt_context_output)?,
+                    "RoleplaySessionLifecyclePlanInput": object_keys(&roleplay_session_lifecycle_input)?,
+                    "RoleplaySessionLifecyclePlan": object_keys(&roleplay_session_lifecycle_plan)?,
+                    "RoleplayChatLayerBindingPlanInput": object_keys(&roleplay_chat_layer_binding_input)?,
+                    "RoleplayChatLayerBindingPlan": object_keys(&roleplay_chat_layer_binding_plan)?,
+                    "RoleplayLoreSearchControlsInput": object_keys(&roleplay_lore_search_controls_input)?,
+                    "RoleplayLoreSearchControls": object_keys(&roleplay_lore_search_controls)?,
+                    "RoleplaySpeakerIdentityInput": object_keys(&roleplay_speaker_identity_input)?,
+                    "RoleplaySpeakerIdentitySnapshot": object_keys(&roleplay_speaker_identity_snapshot)?,
+                    "RoleplaySessionMetadata": object_keys(&roleplay_session_metadata)?,
+                    "RoleplayPlayerPersona": object_keys(&roleplay_player_persona)?,
+                    "RoleplayCharacter": object_keys(&roleplay_character)?,
+                    "RoleplayCharacterWriteInput": object_keys(&roleplay_character_write_input)?,
+                    "RoleplayCharacterMergeInput": object_keys(&roleplay_character_merge_input)?,
+                    "RoleplayPlayerPersonaWriteInput": object_keys(&roleplay_persona_write_input)?,
+                    "RoleplayPlayerPersonaMergeInput": object_keys(&roleplay_persona_merge_input)?,
+                    "RoleplaySessionMetadataPatchInput": object_keys(&roleplay_session_metadata_patch_input)?,
+                    "RoleplaySessionMetadataPatchOutput": object_keys(&roleplay_session_metadata_patch_output)?,
+                    "RoleplaySceneState": object_keys(&roleplay_scene_state)?,
+                    "RoleplaySceneStateReadInput": object_keys(&roleplay_scene_state_read_input)?,
+                    "RoleplaySceneStateReadOutput": object_keys(&roleplay_scene_state_read_output)?,
+                    "RoleplaySceneStateUpdateInput": object_keys(&roleplay_scene_state_update_input)?,
+                    "RoleplaySceneStateUpdatePlan": object_keys(&roleplay_scene_state_update_plan)?,
+                    "RoleplayNarratorConfig": object_keys(&roleplay_narrator_config)?,
+                    "RoleplayNarratorToolRequest": object_keys(&roleplay_narrator_tool_request)?,
+                    "RoleplayNarratorToolObservation": object_keys(&roleplay_narrator_tool_observation)?,
+                    "RoleplayNarratorMandatoryExploreInput": object_keys(&roleplay_narrator_mandatory_input)?,
+                    "RoleplayNarratorAutoCaptureInput": object_keys(&roleplay_narrator_auto_capture_input)?,
+                    "RoleplayNarratorStartInput": object_keys(&roleplay_narrator_start_input)?,
+                    "RoleplayNarratorNextInput": object_keys(&roleplay_narrator_next_input)?,
+                    "RoleplayNarratorPhasePlan": object_keys(&roleplay_narrator_phase_plan)?,
+                    "RoleplayAssistantAlternativePlanInput": object_keys(&roleplay_assistant_alternative_input)?,
+                    "RoleplayAssistantAlternativePlan": object_keys(&roleplay_assistant_alternative_plan)?,
+                }
+            },
             "conversation": {
                 "operationNames": conversation_operations,
                 "rawMethods": conversation_operations
                     .iter()
-                    .map(|operation| operation_name_to_camel_json_method(operation))
+                    .map(|operation| operation_name_to_native_method(operation))
                     .collect::<Vec<_>>(),
                 "passthroughWrappers": conversation_operations
                     .iter()
@@ -599,7 +856,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
                 "operationNames": profile_registry_operations,
                 "rawMethods": profile_registry_operations
                     .iter()
-                    .map(|operation| operation_name_to_camel_json_method(operation))
+                    .map(|operation| operation_name_to_native_method(operation))
                     .collect::<Vec<_>>(),
                 "dtoFields": {
                     "RawProfileRegistryRecord": object_keys(&profile_registry_record)?,
@@ -619,7 +876,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
                 "operationNames": model_provider_operations,
                 "rawMethods": model_provider_operations
                     .iter()
-                    .map(|operation| operation_name_to_camel_json_method(operation))
+                    .map(|operation| operation_name_to_native_method(operation))
                     .collect::<Vec<_>>(),
                 "dtoFields": {
                     "RawModelProviderRecord": object_keys(&model_provider_record)?,
@@ -1206,6 +1463,15 @@ fn operation_name_to_camel_json_method(operation_name: &str) -> String {
     }
     output.push_str("Json");
     output
+}
+
+fn operation_name_to_native_method(operation_name: &str) -> String {
+    match operation_name {
+        "roleplay_narrator_review_requests_revision" => {
+            "roleplayNarratorReviewRequestsRevision".to_owned()
+        }
+        _ => operation_name_to_camel_json_method(operation_name),
+    }
 }
 
 fn operation_name_to_camel_wrapper(operation_name: &str) -> String {
@@ -1880,6 +2146,898 @@ fn sample_data_bank_scope_query() -> persistence::DataBankScopeQuery {
         status: Some(persistence::DataBankScopeStatus::Active),
         include_removed: false,
         page: Some(sample_query_page()),
+    }
+}
+
+fn sample_memory_shape_ref() -> rusty_crew_core_protocol::MemoryRecordShapeRef {
+    rusty_crew_core_protocol::MemoryRecordShapeRef {
+        shape_id: rusty_crew_core_protocol::MemoryRecordShapeId::unchecked("world_detail"),
+        version: 1,
+    }
+}
+
+fn sample_memory_evidence_ref() -> rusty_crew_core_protocol::MemoryEvidenceRef {
+    rusty_crew_core_protocol::MemoryEvidenceRef {
+        evidence_type: rusty_crew_core_protocol::MemoryEvidenceKind::Transcript,
+        ref_id: "validation-evidence".to_owned(),
+        label: Some("Validation transcript".to_owned()),
+    }
+}
+
+fn sample_roleplay_lore_record() -> persistence::RoleplayLoreRecord {
+    persistence::RoleplayLoreRecord {
+        record_id: "validation-lore-record".to_owned(),
+        world_id: "validation-world".to_owned(),
+        entity_id: Some("validation-entity".to_owned()),
+        session_id: Some(sample_session_id()),
+        branch_id: Some(sample_conversation_branch_id()),
+        shape: sample_memory_shape_ref(),
+        canon_status: persistence::RoleplayLoreCanonStatus::Canon,
+        visibility: persistence::RoleplayLoreVisibility::Public,
+        status: persistence::RoleplayLoreRecordStatus::Active,
+        revision: 4,
+        title: "Validation Lore".to_owned(),
+        body: "Validation lore body.".to_owned(),
+        content: json!({"summary": "Validation lore body."}),
+        evidence_refs: vec![sample_memory_evidence_ref()],
+        source: rusty_crew_core_protocol::MemoryProposalSource::Ui,
+        confidence: 0.9,
+        durability_rationale: "Useful for bridge validation.".to_owned(),
+        supersedes_record_id: Some("validation-old-lore".to_owned()),
+        superseded_by_record_id: None,
+        tombstoned_at: None,
+        tombstone_reason: None,
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_write() -> persistence::RoleplayLoreWrite {
+    persistence::RoleplayLoreWrite {
+        record_id: "validation-lore-record".to_owned(),
+        world_id: "validation-world".to_owned(),
+        entity_id: Some("validation-entity".to_owned()),
+        session_id: Some(sample_session_id()),
+        branch_id: Some(sample_conversation_branch_id()),
+        shape: sample_memory_shape_ref(),
+        canon_status: persistence::RoleplayLoreCanonStatus::Canon,
+        visibility: persistence::RoleplayLoreVisibility::Public,
+        title: "Validation Lore".to_owned(),
+        body: "Validation lore body.".to_owned(),
+        content: json!({"summary": "Validation lore body."}),
+        evidence_refs: vec![sample_memory_evidence_ref()],
+        source: rusty_crew_core_protocol::MemoryProposalSource::Ui,
+        confidence: 0.9,
+        durability_rationale: "Useful for bridge validation.".to_owned(),
+        supersedes_record_id: Some("validation-old-lore".to_owned()),
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_replace() -> persistence::RoleplayLoreReplace {
+    persistence::RoleplayLoreReplace {
+        write: sample_roleplay_lore_write(),
+        expected_revision: 4,
+    }
+}
+
+fn sample_roleplay_lore_supersede() -> persistence::RoleplayLoreSupersede {
+    persistence::RoleplayLoreSupersede {
+        record_id: "validation-lore-record".to_owned(),
+        expected_revision: 4,
+        replacement: persistence::RoleplayLoreWrite {
+            record_id: "validation-lore-replacement".to_owned(),
+            supersedes_record_id: Some("validation-lore-record".to_owned()),
+            ..sample_roleplay_lore_write()
+        },
+    }
+}
+
+fn sample_roleplay_lore_tombstone() -> persistence::RoleplayLoreTombstone {
+    persistence::RoleplayLoreTombstone {
+        record_id: "validation-lore-record".to_owned(),
+        expected_revision: 4,
+        reason: Some("Validation tombstone.".to_owned()),
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_query() -> persistence::RoleplayLoreQuery {
+    persistence::RoleplayLoreQuery {
+        world_id: Some("validation-world".to_owned()),
+        entity_id: Some("validation-entity".to_owned()),
+        canon_status: Some(persistence::RoleplayLoreCanonStatus::Canon),
+        visibility: Some(persistence::RoleplayLoreVisibility::Public),
+        shape_id: Some("world_detail".to_owned()),
+        provenance_ref_id: Some("validation-evidence".to_owned()),
+        query: Some("validation".to_owned()),
+        include_superseded: true,
+        include_tombstoned: false,
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_roleplay_lore_provenance_event() -> persistence::RoleplayLoreProvenanceEvent {
+    persistence::RoleplayLoreProvenanceEvent {
+        event_id: "validation-lore-event".to_owned(),
+        record_id: "validation-lore-record".to_owned(),
+        world_id: "validation-world".to_owned(),
+        evidence_refs: vec![sample_memory_evidence_ref()],
+        source: rusty_crew_core_protocol::MemoryProposalSource::Ui,
+        actor: "validation-actor".to_owned(),
+        note: Some("Validation provenance.".to_owned()),
+        created_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_record() -> persistence::RoleplayLoreLayerRecord {
+    persistence::RoleplayLoreLayerRecord {
+        layer_id: "validation-layer".to_owned(),
+        profile_id: sample_profile_id().to_string(),
+        name: "Validation Layer".to_owned(),
+        description: Some("Validation lore layer.".to_owned()),
+        purpose: persistence::RoleplayLoreLayerPurpose::World,
+        write_policy: persistence::RoleplayLoreLayerWritePolicy::Manual,
+        is_archived: false,
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_write() -> persistence::RoleplayLoreLayerWrite {
+    persistence::RoleplayLoreLayerWrite {
+        layer_id: "validation-layer".to_owned(),
+        profile_id: sample_profile_id().to_string(),
+        name: "Validation Layer".to_owned(),
+        description: Some("Validation lore layer.".to_owned()),
+        purpose: persistence::RoleplayLoreLayerPurpose::World,
+        write_policy: persistence::RoleplayLoreLayerWritePolicy::Manual,
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_update() -> persistence::RoleplayLoreLayerUpdate {
+    persistence::RoleplayLoreLayerUpdate {
+        layer_id: "validation-layer".to_owned(),
+        name: Some("Updated Validation Layer".to_owned()),
+        description: Some(Some("Updated validation lore layer.".to_owned())),
+        purpose: Some(persistence::RoleplayLoreLayerPurpose::Story),
+        write_policy: Some(persistence::RoleplayLoreLayerWritePolicy::AutoCapture),
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_archive() -> persistence::RoleplayLoreLayerArchive {
+    persistence::RoleplayLoreLayerArchive {
+        layer_id: "validation-layer".to_owned(),
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_config_record() -> persistence::RoleplayLoreLayerConfigRecord {
+    persistence::RoleplayLoreLayerConfigRecord {
+        config_id: "validation-layer-config".to_owned(),
+        layer_id: "validation-layer".to_owned(),
+        fts_weight: 1.0,
+        subject_weight: 1.2,
+        canon_weight: 1.1,
+        tag_boost_weight: 0.5,
+        recency_weight: 0.25,
+        default_token_budget: 1600,
+        constant_token_reserve: 300,
+        min_relevance_score: 0.2,
+        max_constants: 8,
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_config_write() -> persistence::RoleplayLoreLayerConfigWrite {
+    persistence::RoleplayLoreLayerConfigWrite {
+        config_id: "validation-layer-config".to_owned(),
+        layer_id: "validation-layer".to_owned(),
+        fts_weight: 1.0,
+        subject_weight: 1.2,
+        canon_weight: 1.1,
+        tag_boost_weight: 0.5,
+        recency_weight: 0.25,
+        default_token_budget: 1600,
+        constant_token_reserve: 300,
+        min_relevance_score: 0.2,
+        max_constants: 8,
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_entry_link() -> persistence::RoleplayLoreLayerEntryLink {
+    persistence::RoleplayLoreLayerEntryLink {
+        layer_id: "validation-layer".to_owned(),
+        record_id: "validation-lore-record".to_owned(),
+        is_constant: true,
+        priority: 10,
+        added_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_lore_layer_entry_join() -> persistence::RoleplayLoreLayerEntryJoin {
+    persistence::RoleplayLoreLayerEntryJoin {
+        layer_id: "validation-layer".to_owned(),
+        record_id: "validation-lore-record".to_owned(),
+        is_constant: true,
+        priority: 10,
+        added_at: sample_timestamp(),
+        record: sample_roleplay_lore_record(),
+    }
+}
+
+fn sample_roleplay_lore_fact_capture() -> persistence::RoleplayLoreFactCapture {
+    persistence::RoleplayLoreFactCapture {
+        layer_id: "validation-layer".to_owned(),
+        write: sample_roleplay_lore_write(),
+        is_constant: false,
+        priority: 3,
+        capture_reason: Some("Validation capture.".to_owned()),
+    }
+}
+
+fn sample_roleplay_lore_entry_promotion() -> persistence::RoleplayLoreEntryPromotion {
+    persistence::RoleplayLoreEntryPromotion {
+        source_layer_id: "validation-source-layer".to_owned(),
+        source_record_id: "validation-lore-record".to_owned(),
+        target_layer_id: "validation-layer".to_owned(),
+        new_record_id: "validation-promoted-lore".to_owned(),
+        is_constant: true,
+        priority: 12,
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_chat_layers_write() -> persistence::RoleplayChatLayersWrite {
+    persistence::RoleplayChatLayersWrite {
+        chat_id: "validation-chat".to_owned(),
+        layers: vec![persistence::RoleplayChatLayerLink {
+            layer_id: "validation-layer".to_owned(),
+            priority: 10,
+            enabled: true,
+        }],
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_chat_layer_record() -> persistence::RoleplayChatLayerRecord {
+    persistence::RoleplayChatLayerRecord {
+        chat_id: "validation-chat".to_owned(),
+        layer_id: "validation-layer".to_owned(),
+        priority: 10,
+        enabled: true,
+        created_at: sample_timestamp(),
+        layer: sample_roleplay_lore_layer_record(),
+    }
+}
+
+fn sample_lore_recall_query() -> persistence::LoreRecallQuery {
+    persistence::LoreRecallQuery {
+        chat_id: "validation-chat".to_owned(),
+        session_id: Some(sample_session_id()),
+        query_text: Some("validation lore".to_owned()),
+        active_subjects: vec!["validation-entity".to_owned()],
+        excluded_subjects: vec!["validation-excluded".to_owned()],
+        token_budget: Some(1600),
+        trace_id: Some("validation-trace".to_owned()),
+        record_trace: true,
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_lore_recall_trace_record() -> persistence::LoreRecallTraceRecord {
+    persistence::LoreRecallTraceRecord {
+        trace_id: "validation-trace".to_owned(),
+        session_id: Some(sample_session_id()),
+        layer_ids: vec!["validation-layer".to_owned()],
+        query_text: Some("validation lore".to_owned()),
+        active_subjects: vec!["validation-entity".to_owned()],
+        excluded_subjects: vec!["validation-excluded".to_owned()],
+        config_snapshot: json!({"fixture": true}),
+        entries_considered: 3,
+        entries_returned: 1,
+        token_budget: Some(1600),
+        tokens_consumed: 240,
+        created_at: sample_timestamp(),
+    }
+}
+
+fn sample_lore_recall_trace_query() -> persistence::LoreRecallTraceQuery {
+    persistence::LoreRecallTraceQuery {
+        session_id: Some(sample_session_id()),
+        chat_id: Some("validation-chat".to_owned()),
+        page: Some(sample_query_page()),
+    }
+}
+
+fn sample_lore_recall_result() -> persistence::LoreRecallResult {
+    persistence::LoreRecallResult {
+        chat_id: "validation-chat".to_owned(),
+        entries: vec![persistence::LoreRecallEntry {
+            record: sample_roleplay_lore_record(),
+            layer_id: "validation-layer".to_owned(),
+            score: 0.95,
+            token_estimate: 240,
+            is_constant: true,
+        }],
+        entries_considered: 3,
+        tokens_consumed: 240,
+        token_budget: Some(1600),
+        trace: Some(sample_lore_recall_trace_record()),
+    }
+}
+
+fn sample_roleplay_session_metadata() -> roleplay::RoleplaySessionMetadata {
+    roleplay::RoleplaySessionMetadata {
+        session_id: sample_session_id().to_string(),
+        profile_id: sample_profile_id().to_string(),
+        display_name: Some("Validation Roleplay".to_owned()),
+        player_persona_id: Some("validation-persona".to_owned()),
+        character_id: Some("validation-character".to_owned()),
+        active_layer_ids: vec!["validation-layer".to_owned()],
+        archived: false,
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_player_persona() -> roleplay::RoleplayPlayerPersona {
+    roleplay::RoleplayPlayerPersona {
+        id: "validation-persona".to_owned(),
+        profile_id: sample_profile_id().to_string(),
+        display_name: "Validation Player".to_owned(),
+        avatar_url: Some("http://example.invalid/player.png".to_owned()),
+        avatar_asset_ref: Some("asset://player".to_owned()),
+        description: "Validation player persona.".to_owned(),
+        notes: "Validation notes.".to_owned(),
+        status: "active".to_owned(),
+        created_at: sample_timestamp(),
+        updated_at: Some(sample_timestamp()),
+    }
+}
+
+fn sample_roleplay_character() -> roleplay::RoleplayCharacter {
+    roleplay::RoleplayCharacter {
+        id: "validation-character".to_owned(),
+        profile_id: sample_profile_id().to_string(),
+        name: "Validation Character".to_owned(),
+        description: "Validation character description.".to_owned(),
+        personality: "Careful and explicit.".to_owned(),
+        scenario: "Bridge validation scenario.".to_owned(),
+        first_message: "Hello from validation.".to_owned(),
+        alternate_greetings: vec!["Alternate validation greeting.".to_owned()],
+        example_messages: vec!["Example validation message.".to_owned()],
+        tags: vec!["validation".to_owned()],
+        avatar_url: Some("http://example.invalid/character.png".to_owned()),
+        status: "active".to_owned(),
+        created_at: sample_timestamp(),
+        updated_at: Some(sample_timestamp()),
+    }
+}
+
+fn sample_roleplay_prompt_source_text() -> roleplay::RoleplayPromptStackSourceText {
+    roleplay::RoleplayPromptStackSourceText {
+        source_kind: "lore".to_owned(),
+        source_id: "validation-lore-record".to_owned(),
+        title: "Validation Lore".to_owned(),
+        body: "Validation lore body.".to_owned(),
+        editable: true,
+        derived: false,
+    }
+}
+
+fn sample_roleplay_prompt_raw_block() -> roleplay::RoleplayPromptStackRawBlock {
+    roleplay::RoleplayPromptStackRawBlock {
+        source_kind: "import".to_owned(),
+        source_id: "validation-import".to_owned(),
+        title: "Validation Imported Block".to_owned(),
+        body: "Validation imported prompt block.".to_owned(),
+        metadata_json: json!({"fixture": true}),
+    }
+}
+
+fn sample_roleplay_prompt_context_input() -> roleplay::RoleplayPromptContextInput {
+    roleplay::RoleplayPromptContextInput {
+        metadata: sample_roleplay_session_metadata(),
+        player_persona: Some(sample_roleplay_player_persona()),
+        character: Some(sample_roleplay_character()),
+        scene_setup: Some("Validation scene setup.".to_owned()),
+        relevant_lore: vec![sample_roleplay_prompt_source_text()],
+        recent_history: vec![roleplay::RoleplayPromptStackSourceText {
+            source_kind: "history".to_owned(),
+            ..sample_roleplay_prompt_source_text()
+        }],
+        response_guidance: Some("Respond in validation style.".to_owned()),
+        imported_prompt_blocks: vec![sample_roleplay_prompt_raw_block()],
+    }
+}
+
+fn sample_roleplay_prompt_stack_output() -> roleplay::RoleplayPromptStackOutput {
+    roleplay::RoleplayPromptStackOutput {
+        version: 1,
+        compiled_text: "Compiled validation prompt.".to_owned(),
+        messages: vec![roleplay::RoleplayPromptStackMessage {
+            role: "system".to_owned(),
+            content: "Validation prompt message.".to_owned(),
+            section_ids: vec!["validation-section".to_owned()],
+        }],
+        sections: vec![roleplay::RoleplayPromptStackSection {
+            id: "validation-section".to_owned(),
+            title: "Validation Section".to_owned(),
+            body: "Validation section body.".to_owned(),
+            source_kind: "lore".to_owned(),
+            source_id: "validation-lore-record".to_owned(),
+            inclusion_reason: "Relevant validation lore.".to_owned(),
+            token_estimate: 42,
+            editable: true,
+            derived: false,
+        }],
+        trace: vec![roleplay::RoleplayPromptStackTraceEntry {
+            section_id: "validation-section".to_owned(),
+            source_kind: "lore".to_owned(),
+            source_id: "validation-lore-record".to_owned(),
+            inclusion_reason: "Relevant validation lore.".to_owned(),
+            token_estimate: 42,
+            editable: true,
+            derived: false,
+        }],
+        macro_resolutions: vec![roleplay::RoleplayPromptMacroResolution {
+            macro_name: "character".to_owned(),
+            replacement: "Validation Character".to_owned(),
+            occurrences: 1,
+        }],
+        imported_prompt_blocks: vec![sample_roleplay_prompt_raw_block()],
+    }
+}
+
+fn sample_roleplay_prompt_context_output() -> roleplay::RoleplayPromptContextOutput {
+    roleplay::RoleplayPromptContextOutput {
+        prompt_context: Some("Compiled validation prompt.".to_owned()),
+        stack: Some(sample_roleplay_prompt_stack_output()),
+    }
+}
+
+fn sample_roleplay_session_lifecycle_session() -> roleplay::RoleplaySessionLifecycleSession {
+    roleplay::RoleplaySessionLifecycleSession {
+        session_id: sample_session_id().to_string(),
+        agent_id: sample_agent_id().to_string(),
+        profile_id: sample_profile_id().to_string(),
+        kind: "full".to_owned(),
+        status: "active".to_owned(),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_chat_layer_binding() -> roleplay::RoleplayChatLayerBinding {
+    roleplay::RoleplayChatLayerBinding {
+        layer_id: "validation-layer".to_owned(),
+        priority: 10,
+        enabled: true,
+    }
+}
+
+fn sample_roleplay_session_lifecycle_plan_input() -> roleplay::RoleplaySessionLifecyclePlanInput {
+    roleplay::RoleplaySessionLifecyclePlanInput {
+        action: "fork".to_owned(),
+        now: sample_timestamp(),
+        body: json!({
+            "sessionId": sample_session_id().to_string(),
+            "messageId": sample_message_id().to_string()
+        }),
+        fallback_session_id: Some("validation-fallback-session".to_owned()),
+        registry_agent_id: Some(sample_agent_id().to_string()),
+        source_session: Some(sample_roleplay_session_lifecycle_session()),
+        current_metadata: Some(sample_roleplay_session_metadata()),
+        player_persona: Some(sample_roleplay_player_persona()),
+        character: Some(sample_roleplay_character()),
+        available_layer_ids: Some(vec!["validation-layer".to_owned()]),
+        source_chat_layers: vec![sample_roleplay_chat_layer_binding()],
+    }
+}
+
+fn sample_roleplay_session_lifecycle_plan() -> roleplay::RoleplaySessionLifecyclePlan {
+    roleplay::RoleplaySessionLifecyclePlan {
+        action: "fork".to_owned(),
+        session_id: sample_session_id().to_string(),
+        agent_id: sample_agent_id().to_string(),
+        profile_id: sample_profile_id().to_string(),
+        kind: "full".to_owned(),
+        metadata: sample_roleplay_session_metadata(),
+        runtime: roleplay::RoleplayRuntimeSessionPlan {
+            create_session: true,
+            archive_session: false,
+            ensure_configured_session: true,
+        },
+        chat_layer_update: Some(roleplay::RoleplayChatLayerUpdatePlan {
+            chat_id: sample_session_id().to_string(),
+            layers: vec![sample_roleplay_chat_layer_binding()],
+        }),
+        fork: Some(roleplay::RoleplaySessionForkPlan {
+            source_session_id: "validation-source-session".to_owned(),
+            source_message_id: sample_message_id().to_string(),
+            target_session_id: sample_session_id().to_string(),
+            branch_id: sample_conversation_branch_id().to_string(),
+            branch_label: "Validation Fork".to_owned(),
+            branch_metadata_json: json!({"fixture": true}),
+        }),
+    }
+}
+
+fn sample_roleplay_chat_layer_binding_plan_input() -> roleplay::RoleplayChatLayerBindingPlanInput {
+    roleplay::RoleplayChatLayerBindingPlanInput {
+        now: sample_timestamp(),
+        body: json!({"activeLayerIds": ["validation-layer"]}),
+        current_metadata: Some(sample_roleplay_session_metadata()),
+        current_chat_layers: vec![sample_roleplay_chat_layer_binding()],
+        available_layer_ids: Some(vec!["validation-layer".to_owned()]),
+    }
+}
+
+fn sample_roleplay_chat_layer_binding_plan() -> roleplay::RoleplayChatLayerBindingPlan {
+    roleplay::RoleplayChatLayerBindingPlan {
+        chat_layers_write: roleplay::RoleplayChatLayersWritePlan {
+            chat_id: sample_session_id().to_string(),
+            layers: vec![sample_roleplay_chat_layer_binding()],
+            now: sample_timestamp(),
+        },
+        metadata_patch: Some(roleplay::RoleplaySessionActiveLayerPatch {
+            active_layer_ids: vec!["validation-layer".to_owned()],
+        }),
+        active_layer_ids: vec!["validation-layer".to_owned()],
+        chat_layers_changed: true,
+        active_layer_ids_changed: true,
+        no_op: false,
+    }
+}
+
+fn sample_roleplay_lore_search_controls_input() -> roleplay::RoleplayLoreSearchControlsInput {
+    roleplay::RoleplayLoreSearchControlsInput {
+        params: json!({"layerId": "validation-layer", "limit": 20, "offset": 5}),
+    }
+}
+
+fn sample_roleplay_lore_search_controls() -> roleplay::RoleplayLoreSearchControls {
+    roleplay::RoleplayLoreSearchControls {
+        explicit_layer_ids: vec!["validation-layer".to_owned()],
+        page: roleplay::RoleplayLoreSearchPagePlan {
+            limit: 20,
+            offset: 5,
+        },
+    }
+}
+
+fn sample_roleplay_speaker_identity_input() -> roleplay::RoleplaySpeakerIdentityInput {
+    roleplay::RoleplaySpeakerIdentityInput {
+        actor: roleplay::RoleplayChatActor {
+            id: "validation-character".to_owned(),
+            kind: "character".to_owned(),
+            display_name: Some("Validation Character".to_owned()),
+        },
+        now: sample_timestamp(),
+        metadata: Some(sample_roleplay_session_metadata()),
+        player_persona: Some(sample_roleplay_player_persona()),
+        character: Some(sample_roleplay_character()),
+    }
+}
+
+fn sample_roleplay_speaker_identity_snapshot() -> roleplay::RoleplaySpeakerIdentitySnapshot {
+    roleplay::RoleplaySpeakerIdentitySnapshot {
+        speaker_kind: "character".to_owned(),
+        role: "assistant".to_owned(),
+        source_id: "validation-character".to_owned(),
+        display_name: "Validation Character".to_owned(),
+        avatar_url: Some("http://example.invalid/character.png".to_owned()),
+        avatar_asset_ref: Some("asset://character".to_owned()),
+        snapshot_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_scene_state() -> roleplay::RoleplaySceneState {
+    roleplay::RoleplaySceneState {
+        session_id: sample_session_id().to_string(),
+        location: Some("Validation room".to_owned()),
+        characters_present: vec!["Validation Character".to_owned()],
+        active_threads: vec!["Bridge validation".to_owned()],
+        notes: Some("Validation scene notes.".to_owned()),
+        updated_at: Some(sample_timestamp()),
+    }
+}
+
+fn sample_roleplay_character_write_input() -> roleplay::RoleplayCharacterWriteInput {
+    roleplay::RoleplayCharacterWriteInput {
+        profile_id: sample_profile_id().to_string(),
+        now: sample_timestamp(),
+        fallback_id: "validation-character".to_owned(),
+        body: json!({"name": "Validation Character"}),
+    }
+}
+
+fn sample_roleplay_character_merge_input() -> roleplay::RoleplayCharacterMergeInput {
+    roleplay::RoleplayCharacterMergeInput {
+        current: sample_roleplay_character(),
+        now: sample_timestamp(),
+        body: json!({"description": "Updated validation character."}),
+    }
+}
+
+fn sample_roleplay_player_persona_write_input() -> roleplay::RoleplayPlayerPersonaWriteInput {
+    roleplay::RoleplayPlayerPersonaWriteInput {
+        profile_id: sample_profile_id().to_string(),
+        now: sample_timestamp(),
+        fallback_id: "validation-persona".to_owned(),
+        body: json!({"displayName": "Validation Player"}),
+    }
+}
+
+fn sample_roleplay_player_persona_merge_input() -> roleplay::RoleplayPlayerPersonaMergeInput {
+    roleplay::RoleplayPlayerPersonaMergeInput {
+        current: sample_roleplay_player_persona(),
+        now: sample_timestamp(),
+        body: json!({"notes": "Updated validation notes."}),
+    }
+}
+
+fn sample_roleplay_session_metadata_patch_input() -> roleplay::RoleplaySessionMetadataPatchInput {
+    roleplay::RoleplaySessionMetadataPatchInput {
+        current: sample_roleplay_session_metadata(),
+        session_id: sample_session_id().to_string(),
+        profile_id: sample_profile_id().to_string(),
+        now: sample_timestamp(),
+        body: json!({"displayName": "Updated Validation Roleplay"}),
+        player_persona: Some(sample_roleplay_player_persona()),
+        character: Some(sample_roleplay_character()),
+        available_layer_ids: Some(vec!["validation-layer".to_owned()]),
+    }
+}
+
+fn sample_roleplay_session_metadata_patch_output() -> roleplay::RoleplaySessionMetadataPatchOutput {
+    roleplay::RoleplaySessionMetadataPatchOutput {
+        metadata: sample_roleplay_session_metadata(),
+        active_layer_ids_changed: true,
+    }
+}
+
+fn sample_roleplay_scene_state_read_input() -> roleplay::RoleplaySceneStateReadInput {
+    roleplay::RoleplaySceneStateReadInput {
+        session_id: sample_session_id().to_string(),
+        record_value_json: Some(serde_json::to_string(&sample_roleplay_scene_state()).unwrap()),
+        record_updated_at: Some(sample_timestamp()),
+        revision: Some(3),
+    }
+}
+
+fn sample_roleplay_scene_state_read_output() -> roleplay::RoleplaySceneStateReadOutput {
+    roleplay::RoleplaySceneStateReadOutput {
+        state: sample_roleplay_scene_state(),
+        revision: Some(3),
+    }
+}
+
+fn sample_roleplay_scene_state_update_input() -> roleplay::RoleplaySceneStateUpdateInput {
+    roleplay::RoleplaySceneStateUpdateInput {
+        session_id: sample_session_id().to_string(),
+        current: Some(sample_roleplay_scene_state()),
+        now: sample_timestamp(),
+        body: json!({"location": "Updated validation room"}),
+    }
+}
+
+fn sample_roleplay_scene_state_update_plan() -> roleplay::RoleplaySceneStateUpdatePlan {
+    roleplay::RoleplaySceneStateUpdatePlan {
+        state: sample_roleplay_scene_state(),
+        value_json: serde_json::to_string(&sample_roleplay_scene_state()).unwrap(),
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_narrator_config() -> roleplay::RoleplayNarratorConfig {
+    roleplay::RoleplayNarratorConfig {
+        tone: "dramatic".to_owned(),
+        pacing: "steady".to_owned(),
+        explicitness: "safe".to_owned(),
+        memory_depth: "full".to_owned(),
+        style_prompt: Some("Use validation style.".to_owned()),
+        exemplar: Some("Validation exemplar.".to_owned()),
+        review: roleplay::RoleplayNarratorReviewConfig {
+            enabled: true,
+            max_review_cycles: 2,
+        },
+    }
+}
+
+fn sample_roleplay_narrator_tool_request() -> roleplay::RoleplayNarratorToolRequest {
+    roleplay::RoleplayNarratorToolRequest {
+        tool_name: "recall_lore".to_owned(),
+        params_json: json!({"query": "validation"}),
+    }
+}
+
+fn sample_roleplay_narrator_tool_observation() -> roleplay::RoleplayNarratorToolObservation {
+    roleplay::RoleplayNarratorToolObservation {
+        tool_name: "recall_lore".to_owned(),
+        ok: true,
+        summary: "Validation lore recalled.".to_owned(),
+        details_json: Some(json!({"entries": 1})),
+    }
+}
+
+fn sample_roleplay_narrator_mandatory_explore_input(
+) -> roleplay::RoleplayNarratorMandatoryExploreInput {
+    roleplay::RoleplayNarratorMandatoryExploreInput {
+        session_id: sample_session_id().to_string(),
+        profile_id: sample_profile_id().to_string(),
+        pending_text: "Validation pending text.".to_owned(),
+    }
+}
+
+fn sample_roleplay_narrator_auto_capture_input() -> roleplay::RoleplayNarratorAutoCaptureInput {
+    roleplay::RoleplayNarratorAutoCaptureInput {
+        session_id: sample_session_id().to_string(),
+        profile_id: sample_profile_id().to_string(),
+        wake_id: "validation-wake".to_owned(),
+        pending_text: "Validation pending text.".to_owned(),
+        layer_details_json: json!({"layerId": "validation-layer"}),
+    }
+}
+
+fn sample_roleplay_narrator_turn_state() -> roleplay::RoleplayNarratorTurnState {
+    roleplay::RoleplayNarratorTurnState {
+        narrator_config: Some(sample_roleplay_narrator_config()),
+        review_enabled: true,
+        max_review_cycles: 2,
+        review_cycle: 1,
+        relevant_lore: vec![sample_roleplay_prompt_source_text()],
+        scene_brief: Some("Validation scene brief.".to_owned()),
+        review_feedback: Some("Revise validation pacing.".to_owned()),
+    }
+}
+
+fn sample_roleplay_narrator_start_input() -> roleplay::RoleplayNarratorStartInput {
+    roleplay::RoleplayNarratorStartInput {
+        narrator_config: Some(sample_roleplay_narrator_config()),
+        review_enabled: true,
+        max_review_cycles: Some(2),
+        prelude_observations: vec![sample_roleplay_narrator_tool_observation()],
+    }
+}
+
+fn sample_roleplay_narrator_next_input() -> roleplay::RoleplayNarratorNextInput {
+    roleplay::RoleplayNarratorNextInput {
+        state: sample_roleplay_narrator_turn_state(),
+        completed_phase: roleplay::RoleplayNarratorPhaseKind::Explore,
+        output_text: "Validation explore output.".to_owned(),
+    }
+}
+
+fn sample_roleplay_narrator_phase_plan() -> roleplay::RoleplayNarratorPhasePlan {
+    roleplay::RoleplayNarratorPhasePlan {
+        phase: roleplay::RoleplayNarratorPhaseKind::Compose,
+        instructions: "Compose validation response.".to_owned(),
+        allowed_tools: vec!["recall_lore".to_owned()],
+        mandatory_tool_requests: vec![sample_roleplay_narrator_tool_request()],
+        state: sample_roleplay_narrator_turn_state(),
+        terminal: false,
+    }
+}
+
+fn sample_roleplay_durable_message() -> roleplay::RoleplayDurableMessage {
+    roleplay::RoleplayDurableMessage {
+        message_id: sample_message_id().to_string(),
+        session_id: sample_session_id().to_string(),
+        branch_id: Some(sample_conversation_branch_id().to_string()),
+        parent_message_id: Some("validation-parent-message".to_owned()),
+        previous_message_id: Some("validation-previous-message".to_owned()),
+        author_id: "validation-character".to_owned(),
+        author_role: "assistant".to_owned(),
+        status: "completed".to_owned(),
+        body: "Validation assistant message.".to_owned(),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        blocks: vec![json!({"kind": "text", "text": "Validation assistant message."})],
+    }
+}
+
+fn sample_roleplay_message_variant() -> roleplay::RoleplayMessageVariant {
+    roleplay::RoleplayMessageVariant {
+        variant_id: sample_message_variant_id().to_string(),
+        slot_id: sample_message_slot_id().to_string(),
+        source: "primary".to_owned(),
+        ordinal: 0,
+        status: "active".to_owned(),
+        message: sample_roleplay_durable_message(),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_roleplay_message_slot() -> roleplay::RoleplayMessageSlot {
+    roleplay::RoleplayMessageSlot {
+        slot_id: sample_message_slot_id().to_string(),
+        session_id: sample_session_id().to_string(),
+        primary_variant_id: sample_message_variant_id().to_string(),
+        active_variant_id: Some(sample_message_variant_id().to_string()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+        version: 4,
+        primary: sample_roleplay_message_variant(),
+        alternates: vec![roleplay::RoleplayMessageVariant {
+            variant_id: "validation-alternate-variant".to_owned(),
+            source: "alternate".to_owned(),
+            ordinal: 1,
+            ..sample_roleplay_message_variant()
+        }],
+    }
+}
+
+fn sample_roleplay_conversation_branch() -> roleplay::RoleplayConversationBranch {
+    roleplay::RoleplayConversationBranch {
+        branch_id: sample_conversation_branch_id().to_string(),
+        session_id: sample_session_id().to_string(),
+        parent_branch_id: Some("validation-parent-branch".to_owned()),
+        parent_message_id: Some("validation-parent-message".to_owned()),
+        origin_message_id: Some("validation-origin-message".to_owned()),
+        head_message_id: Some(sample_message_id().to_string()),
+        label: Some("Validation Branch".to_owned()),
+        metadata_json: json!({"fixture": true}),
+        created_at: sample_timestamp(),
+        updated_at: sample_timestamp(),
+        version: 5,
+    }
+}
+
+fn sample_roleplay_assistant_alternative_plan_input(
+) -> roleplay::RoleplayAssistantAlternativePlanInput {
+    roleplay::RoleplayAssistantAlternativePlanInput {
+        session_id: sample_session_id().to_string(),
+        requested_slot_id: Some(sample_message_slot_id().to_string()),
+        request_id: Some("validation-request".to_owned()),
+        body: json!({"message": "validation"}),
+        slots: vec![sample_roleplay_message_slot()],
+        active_branch_id: Some(sample_conversation_branch_id().to_string()),
+        branches: vec![sample_roleplay_conversation_branch()],
+    }
+}
+
+fn sample_roleplay_assistant_alternative_plan() -> roleplay::RoleplayAssistantAlternativePlan {
+    roleplay::RoleplayAssistantAlternativePlan {
+        session_id: sample_session_id().to_string(),
+        terminal_slot: sample_roleplay_message_slot(),
+        active_variant: sample_roleplay_message_variant(),
+        variant_projection: roleplay::RoleplayAlternativeSlotProjection {
+            slot_id: sample_message_slot_id().to_string(),
+            active_variant_id: Some(sample_message_variant_id().to_string()),
+            primary_variant_id: sample_message_variant_id().to_string(),
+            alternate_count: 1,
+            variant_count: 2,
+            active_variant: sample_roleplay_message_variant(),
+            variants: vec![sample_roleplay_message_variant()],
+        },
+        next_alternate_ordinal: 2,
+        branch_id_for_variant: Some(sample_conversation_branch_id().to_string()),
+        parent_message_id: Some("validation-parent-message".to_owned()),
+        previous_message_id: Some("validation-previous-message".to_owned()),
+        branch_head_update: Some(roleplay::RoleplayBranchHeadUpdatePlan {
+            branch_id: sample_conversation_branch_id().to_string(),
+            head_message_id: sample_message_id().to_string(),
+        }),
+        append_chat_message: false,
+        variant_write: Some(roleplay::RoleplayAssistantAlternativeVariantWritePlan {
+            slot_id: sample_message_slot_id().to_string(),
+            variant_id: "validation-alternate-variant".to_owned(),
+            message_id: "validation-alternate-message".to_owned(),
+            source: "alternate".to_owned(),
+            ordinal: 2,
+            branch_id: Some(sample_conversation_branch_id().to_string()),
+            parent_message_id: Some("validation-parent-message".to_owned()),
+            previous_message_id: Some("validation-previous-message".to_owned()),
+        }),
     }
 }
 

@@ -5,15 +5,28 @@ import { nativeMappingInventory } from "./generated/native-mapping-inventory.js"
 
 const sourcePath = fileURLToPath(new URL("./index.ts", import.meta.url));
 const source = readFileSync(sourcePath, "utf8");
+const roleplay = nativeMappingInventory.families.roleplay;
 const conversation = nativeMappingInventory.families.conversation;
 const profileRegistry = nativeMappingInventory.families.profileRegistry;
 const modelProvider = nativeMappingInventory.families.modelProvider;
 
 const nativeBridgeBinding = extractInterface("NativeBridgeBinding");
+assertRawMethods("roleplay", roleplay.rawMethods);
 assertRawMethods("conversation", conversation.rawMethods);
 assertRawMethods("profile registry", profileRegistry.rawMethods);
 assertRawMethods("model provider", modelProvider.rawMethods);
 
+assertGeneratedDtoFieldsNonEmpty("roleplay", roleplay.dtoFields);
+assertWrapperCalls(
+  "roleplay",
+  roleplay.passthroughWrappers,
+  roleplay.rawMethods,
+);
+assertJsonInputWrappers(
+  "roleplay",
+  roleplay.jsonInputWrappers,
+  roleplay.jsonInputRawMethods,
+);
 assertGeneratedDtoFieldsNonEmpty("conversation", conversation.dtoFields);
 assertNamedConversationInterfaces();
 assertPassthroughWrappers(
@@ -218,6 +231,15 @@ function assertPassthroughWrappers(
   wrappers: readonly string[],
   rawMethods: readonly string[],
 ) {
+  assertWrapperCalls(label, wrappers, rawMethods);
+  assertJsonInputWrappers(label, wrappers, rawMethods);
+}
+
+function assertWrapperCalls(
+  label: string,
+  wrappers: readonly string[],
+  rawMethods: readonly string[],
+) {
   assert.equal(
     wrappers.length,
     rawMethods.length,
@@ -231,7 +253,33 @@ function assertPassthroughWrappers(
       `NativeBridgeModule is missing generated-checked ${label} wrapper ${wrapper}`,
     );
     assert(
-      source.includes(`binding.${rawMethod}(JSON.stringify(`),
+      source.includes(`binding.${rawMethod}(`),
+      `${label} wrapper ${wrapper} must call generated-checked raw method ${rawMethod}`,
+    );
+  }
+}
+
+function assertJsonInputWrappers(
+  label: string,
+  wrappers: readonly string[],
+  rawMethods: readonly string[],
+) {
+  assert.equal(
+    wrappers.length,
+    rawMethods.length,
+    `${label} JSON wrapper/raw method inventory length mismatch`,
+  );
+  for (const [index, wrapper] of wrappers.entries()) {
+    const rawMethod = rawMethods[index];
+    const callIndex = source.indexOf(`binding.${rawMethod}(`);
+    assert.notEqual(
+      callIndex,
+      -1,
+      `${label} wrapper ${wrapper} must call generated-checked raw method ${rawMethod}`,
+    );
+    const callWindow = source.slice(callIndex, callIndex + 240);
+    assert(
+      callWindow.includes("JSON.stringify("),
       `${label} wrapper ${wrapper} must pass input through ${rawMethod} with JSON.stringify`,
     );
   }
