@@ -264,7 +264,7 @@ try {
   assert.equal(channels.body.data.items[0]?.status, "degraded");
   assert.equal(
     channels.body.data.items[0]?.lastError,
-    "Den Conversation channel is not resolved",
+    "conversation channel has not been resolved",
   );
 
   const mcp = await get("/v1/admin/diagnostics/mcp", token);
