@@ -1,7 +1,9 @@
 use super::*;
 use rusty_crew_brain_runtime::{
-    BrainRuntimeError, BufferedNeutralPendingToolRequest, BufferedNeutralRun,
-    BufferedNeutralRunRegistry, BufferedNeutralToolOutput,
+    BrainRuntimeError, BufferedBrainHostToolResult, BufferedBrainHostToolStatus,
+    BufferedBrainTurnCoordinator, BufferedBrainTurnError, BufferedBrainTurnLimits,
+    BufferedBrainTurnPhase, BufferedBrainTurnRegistry, BufferedBrainTurnRun,
+    BufferedNeutralPendingToolRequest,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -39,12 +41,8 @@ struct JsOpenAiResponsesBrainConfig {
     instructions: Option<String>,
     #[serde(default = "default_responses_stream_idle_timeout_ms")]
     stream_idle_timeout_ms: u64,
-    #[serde(default = "default_responses_wake_timeout_ms")]
-    wake_timeout_ms: u64,
-}
-
-fn default_responses_wake_timeout_ms() -> u64 {
-    300_000
+    #[serde(default)]
+    wake_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -120,7 +118,16 @@ struct JsOpenAiResponsesToolOutputInput {
     wake_id: String,
     call_id: String,
     output: String,
-    is_error: bool,
+    status: BufferedBrainHostToolStatus,
+    #[serde(default)]
+    reason_code: Option<String>,
+    retryable: bool,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    debug_detail_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,10 +138,15 @@ struct JsOpenAiResponsesCancelInput {
     summary: String,
 }
 
-type OpenAiResponsesBufferedRun =
-    BufferedNeutralRun<ResponsesTransportMetrics, OpenAiResponsesCredentialSecretUpdate>;
+#[derive(Debug, Default)]
+pub(crate) struct OpenAiResponsesBufferedRunPayload {
+    transport_metrics: Option<ResponsesTransportMetrics>,
+    credential_secret_update: Option<OpenAiResponsesCredentialSecretUpdate>,
+    provider_finished: bool,
+}
+
 pub(crate) type OpenAiResponsesBufferedRunRegistry =
-    BufferedNeutralRunRegistry<ResponsesTransportMetrics, OpenAiResponsesCredentialSecretUpdate>;
+    BufferedBrainTurnRegistry<OpenAiResponsesBufferedRunPayload>;
 
 struct OneShotOpenAiOauthSecretStore {
     provider_alias: String,
@@ -195,6 +207,10 @@ fn brain_runtime_error_to_napi(error: BrainRuntimeError) -> napi::Error {
     napi::Error::new(status, error.to_string())
 }
 
+fn brain_turn_error_to_napi(error: BufferedBrainTurnError) -> napi::Error {
+    napi::Error::new(napi::Status::InvalidArg, error.to_string())
+}
+
 impl napi::Task for OpenAiResponsesBrainRunTask {
     type Output = String;
     type JsValue = String;
@@ -232,12 +248,21 @@ pub(crate) fn start_openai_responses_brain_json(
                 format!("invalid OpenAI Responses brain input JSON: {error}"),
             )
         })?;
-    let wake_id = input.wake_id;
+    let wake_id = input.wake_id.clone();
+    let mut coordinator = BufferedBrainTurnCoordinator::new(
+        "openai-responses",
+        wake_id.clone(),
+        SessionId::new(input.session_id),
+        input.config.wake_timeout_ms,
+        BufferedBrainTurnLimits::default(),
+    )
+    .map_err(brain_turn_error_to_napi)?;
+    coordinator.start().map_err(brain_turn_error_to_napi)?;
     buffered_runs
-        .insert(
-            wake_id.clone(),
-            OpenAiResponsesBufferedRun::new(input.config.wake_timeout_ms),
-        )
+        .insert(BufferedBrainTurnRun::new(
+            coordinator,
+            OpenAiResponsesBufferedRunPayload::default(),
+        ))
         .map_err(brain_runtime_error_to_napi)?;
     let thread_wake_id = wake_id.clone();
     std::thread::spawn(move || {
@@ -258,52 +283,29 @@ pub(crate) fn drain_openai_responses_brain_stream_json(
 ) -> napi::Result<String> {
     let max_items = max_items.unwrap_or(64).max(1) as usize;
     let terminal = buffered_runs.with_run_mut(&wake_id, |run| {
-        if !run.terminal && run.is_timed_out() {
-            run.terminal = true;
-            run.error = Some(format!(
-                "OpenAI Responses buffered wake {wake_id} exceeded {}ms timeout",
-                run.wake_timeout_ms
-            ));
-            run.record_transition();
-        }
-        let mut items = Vec::new();
-        for _ in 0..max_items {
-            if run.terminal
-                && !items.is_empty()
-                && run
-                    .items
-                    .front()
-                    .is_some_and(BrainWakeStreamItem::is_terminal)
-            {
-                break;
-            }
-            let Some(item) = run.items.pop_front() else {
-                break;
-            };
-            let is_terminal = item.is_terminal();
-            items.push(item);
-            if is_terminal {
-                break;
-            }
-        }
-        if !items.is_empty() {
-            run.record_transition();
-        }
-        let tool_requests = run.drain_pending_tool_requests();
-        let terminal = run.terminal && run.items.is_empty();
+        run.coordinator.timeout_if_due();
+        let drain = run.coordinator.drain_stream(max_items);
+        let tool_requests = run.coordinator.drain_host_tool_requests(128);
+        let terminal = drain.terminal && run.payload.provider_finished;
+        let error = terminal
+            .then(|| run.coordinator.terminal())
+            .flatten()
+            .filter(|_| run.coordinator.has_error())
+            .map(|terminal| terminal.summary.clone());
         let output = json!({
             "wake_id": wake_id,
-            "items": items,
+            "items": drain.items.into_iter().map(|item| item.item).collect::<Vec<_>>(),
             "tool_requests": tool_requests,
             "terminal": terminal,
-            "provider_state": terminal.then(|| run.provider_state.clone()).flatten(),
-            "transport_metrics": terminal.then(|| run.transport_metrics.clone()).flatten(),
-            "credential_secret_update": terminal.then(|| run.credential_secret_update.clone()).flatten(),
-            "error": terminal.then(|| run.error.clone()).flatten(),
-            "cancellation": terminal.then(|| run.cancellation.clone()).flatten(),
+            "provider_state": terminal.then(|| run.coordinator.provider_state_output().cloned()).flatten(),
+            "transport_metrics": terminal.then(|| run.payload.transport_metrics.clone()).flatten(),
+            "credential_secret_update": terminal.then(|| run.payload.credential_secret_update.clone()).flatten(),
+            "error": error,
+            "cancellation": terminal.then(|| run.coordinator.cancellation()).flatten(),
         });
         (terminal, output)
-    }).map_err(brain_runtime_error_to_napi)?;
+    })
+    .map_err(brain_runtime_error_to_napi)?;
     let (terminal, output) = terminal;
     if terminal {
         buffered_runs
@@ -331,16 +333,20 @@ pub(crate) fn cancel_openai_responses_brain_json(
         })?;
     let output = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
-            run.cancel(input.reason_code, input.summary);
-            json!({
-            "ok": true,
-            "wake_id": input.wake_id,
-            "cancelled": true,
-            "terminal": run.terminal,
-            "cancellation": run.cancellation.clone(),
-            })
+            run.coordinator
+                .cancel(input.reason_code, input.summary)
+                .map(|()| {
+                    json!({
+                        "ok": true,
+                        "wake_id": input.wake_id,
+                        "cancelled": true,
+                        "terminal": run.coordinator.phase().is_terminal(),
+                        "cancellation": run.coordinator.cancellation(),
+                    })
+                })
         })
-        .map_err(brain_runtime_error_to_napi)?;
+        .map_err(brain_runtime_error_to_napi)?
+        .map_err(brain_turn_error_to_napi)?;
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::new(
             napi::Status::GenericFailure,
@@ -360,21 +366,29 @@ pub(crate) fn submit_openai_responses_tool_output_json(
                 format!("invalid OpenAI Responses tool output JSON: {error}"),
             )
         })?;
-    buffered_runs
+    let submission = buffered_runs
         .with_run_mut(&input.wake_id, |run| {
-            run.submit_tool_output(
-                input.call_id.clone(),
-                BufferedNeutralToolOutput {
-                    output: input.output,
-                    is_error: input.is_error,
+            run.coordinator.submit_host_tool_result(
+                &input.call_id,
+                BufferedBrainHostToolResult {
+                    status: input.status,
+                    output_text: input.output,
+                    reason_code: input.reason_code,
+                    retryable: input.retryable,
+                    action: input.action,
+                    summary: input.summary,
+                    debug_detail_id: input.debug_detail_id,
                 },
-            );
+            )
         })
-        .map_err(brain_runtime_error_to_napi)?;
+        .map_err(brain_runtime_error_to_napi)?
+        .map_err(brain_turn_error_to_napi)?;
     serde_json::to_string(&json!({
         "ok": true,
         "wake_id": input.wake_id,
         "call_id": input.call_id,
+        "receipt": submission.receipt,
+        "decision": submission.decision,
     }))
     .map_err(|error| {
         napi::Error::new(
@@ -393,11 +407,10 @@ fn run_openai_responses_brain_buffered(
     let sink_buffered_runs = Arc::clone(&buffered_runs);
     let mut sink = move |item: BrainWakeStreamItem| {
         let _ = sink_buffered_runs.with_run_mut(&sink_wake_id, |run| {
-            if run.is_cancelled() {
+            if run.coordinator.phase().is_terminal() {
                 return;
             }
-            run.items.push_back(item);
-            run.record_transition();
+            let _ = run.coordinator.enqueue_stream_item(item);
         });
     };
     let result = run_openai_responses_brain_with_buffered_tools(
@@ -407,21 +420,31 @@ fn run_openai_responses_brain_buffered(
         &mut sink,
     );
     let _ = buffered_runs.with_run_mut(&wake_id, |run| {
-        if run.is_cancelled() {
-            return;
-        }
-        match result {
-            Ok(output) => {
-                run.provider_state = output.provider_state;
-                run.transport_metrics = Some(output.transport_metrics);
-                run.credential_secret_update = output.credential_secret_update;
+        if !run.coordinator.is_cancelled() {
+            match result {
+                Ok(output) => {
+                    if run.coordinator.phase() == BufferedBrainTurnPhase::Completed {
+                        if let Some(provider_state) = output.provider_state {
+                            let _ = run.coordinator.set_provider_state_output(provider_state);
+                        }
+                    }
+                    run.payload.transport_metrics = Some(output.transport_metrics);
+                    run.payload.credential_secret_update = output.credential_secret_update;
+                    if !run.coordinator.phase().is_terminal() {
+                        let _ = run.coordinator.fail(
+                            "provider_stream_missing_terminal",
+                            "OpenAI Responses provider loop ended without a terminal stream item",
+                        );
+                    }
+                }
+                Err(error) => {
+                    if !run.coordinator.phase().is_terminal() {
+                        let _ = run.coordinator.fail("provider_error", error.to_string());
+                    }
+                }
             }
-            Err(error) => {
-                run.error = Some(error.to_string());
-            }
         }
-        run.terminal = true;
-        run.record_transition();
+        run.payload.provider_finished = true;
     });
 }
 
@@ -451,9 +474,9 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
         };
         {
             let queued = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
-                run.queue_pending_tool_request(request);
+                run.coordinator.queue_tool_request(request)
             });
-            if queued.is_err() {
+            if !matches!(queued, Ok(Ok(()))) {
                 return NeutralToolOutput {
                     output: format!(
                         "OpenAI Responses buffered wake {} disappeared before tool request {}",
@@ -466,7 +489,7 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
 
         loop {
             let result = self.buffered_runs.with_run_mut(&self.wake_id, |run| {
-                if let Some(cancellation) = run.cancellation.clone() {
+                if let Some(cancellation) = run.coordinator.cancellation() {
                     return NeutralToolOutput {
                         output: format!(
                             "OpenAI Responses buffered wake {} cancelled before tool output {}: {}",
@@ -475,33 +498,35 @@ impl NeutralToolExecutor for BufferedOpenAiResponsesToolExecutor {
                         is_error: true,
                     };
                 }
-                if let Some(output) = run.take_submitted_tool_output(&call.call_id) {
+                if let Some(output) = run.coordinator.take_submitted_tool_output(&call.call_id) {
                     return NeutralToolOutput {
                         output: output.output,
                         is_error: output.is_error,
                     };
                 }
-                if run.terminal {
+                if run.coordinator.phase().is_terminal() {
+                    let summary = run
+                        .coordinator
+                        .terminal()
+                        .map(|terminal| terminal.summary.as_str())
+                        .unwrap_or("turn ended");
                     return NeutralToolOutput {
                         output: format!(
-                            "OpenAI Responses buffered wake {} ended before tool output {}",
-                            self.wake_id, call.call_id
+                            "OpenAI Responses buffered wake {} ended before tool output {}: {}",
+                            self.wake_id, call.call_id, summary
                         ),
                         is_error: true,
                     };
                 }
-                if run.is_timed_out() {
-                    run.terminal = true;
-                    run.error = Some(format!(
-                        "OpenAI Responses buffered wake {} exceeded {}ms timeout while waiting for tool output {}",
-                        self.wake_id, run.wake_timeout_ms, call.call_id
-                    ));
-                    run.record_transition();
+                if run.coordinator.timeout_if_due() {
                     return NeutralToolOutput {
                         output: run
-                            .error
-                            .clone()
-                            .unwrap_or_else(|| "OpenAI Responses buffered wake timed out".to_string()),
+                            .coordinator
+                            .terminal()
+                            .map(|terminal| terminal.summary.clone())
+                            .unwrap_or_else(|| {
+                                "OpenAI Responses buffered wake timed out".to_string()
+                            }),
                         is_error: true,
                     };
                 }

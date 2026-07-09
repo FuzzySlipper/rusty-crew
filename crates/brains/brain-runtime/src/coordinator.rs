@@ -1,11 +1,15 @@
 use crate::{
-    BufferedBrainHostToolResult, BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision,
-    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput,
+    BrainRuntimeError, BrainRuntimeResult, BufferedBrainHostToolResult,
+    BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision, BufferedNeutralCancellation,
+    BufferedNeutralPendingToolRequest, BufferedNeutralRunCleanupReport,
+    BufferedNeutralRunDiagnostic, BufferedNeutralToolOutput,
 };
 use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem, SessionId};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::sync::Mutex;
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -155,6 +159,7 @@ pub struct SequencedBrainWakeStreamItem {
 pub struct BufferedBrainTurnTerminal {
     pub reason_code: String,
     pub summary: String,
+    pub occurred_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -285,6 +290,37 @@ impl BufferedBrainTurnCoordinator {
         self.terminal.as_ref()
     }
 
+    pub fn wake_timeout_ms(&self) -> Option<u64> {
+        self.wake_timeout_ms
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.phase == BufferedBrainTurnPhase::Cancelled
+    }
+
+    pub fn has_error(&self) -> bool {
+        matches!(
+            self.phase,
+            BufferedBrainTurnPhase::Failed
+                | BufferedBrainTurnPhase::Cancelled
+                | BufferedBrainTurnPhase::TimedOut
+        )
+    }
+
+    pub fn cancellation(&self) -> Option<BufferedNeutralCancellation> {
+        (self.phase == BufferedBrainTurnPhase::Cancelled).then(|| {
+            let terminal = self
+                .terminal
+                .as_ref()
+                .expect("cancelled turn must retain terminal details");
+            BufferedNeutralCancellation {
+                reason_code: terminal.reason_code.clone(),
+                summary: terminal.summary.clone(),
+                cancelled_at: terminal.occurred_at.clone(),
+            }
+        })
+    }
+
     pub fn provider_state_output(&self) -> Option<&BrainWakeProviderStateOutput> {
         self.provider_state_output.as_ref()
     }
@@ -350,6 +386,7 @@ impl BufferedBrainTurnCoordinator {
                 self.terminal = Some(BufferedBrainTurnTerminal {
                     reason_code: format!("{:?}", failure.kind).to_lowercase(),
                     summary: failure.message.clone(),
+                    occurred_at: format_rfc3339(now),
                 });
                 Some(BufferedBrainTurnPhase::Failed)
             }
@@ -363,6 +400,7 @@ impl BufferedBrainTurnCoordinator {
                 self.terminal = Some(BufferedBrainTurnTerminal {
                     reason_code: "completed".to_string(),
                     summary: "brain turn completed".to_string(),
+                    occurred_at: format_rfc3339(now),
                 });
             }
         }
@@ -760,6 +798,7 @@ impl BufferedBrainTurnCoordinator {
         self.terminal = Some(BufferedBrainTurnTerminal {
             reason_code,
             summary,
+            occurred_at: format_rfc3339(now),
         });
         self.record_transition_at(now);
     }
@@ -767,6 +806,149 @@ impl BufferedBrainTurnCoordinator {
     fn record_transition_at(&mut self, now: OffsetDateTime) {
         self.last_transition_at = now;
     }
+}
+
+#[derive(Debug)]
+pub struct BufferedBrainTurnRun<Payload> {
+    pub coordinator: BufferedBrainTurnCoordinator,
+    pub payload: Payload,
+}
+
+impl<Payload> BufferedBrainTurnRun<Payload> {
+    pub fn new(coordinator: BufferedBrainTurnCoordinator, payload: Payload) -> Self {
+        Self {
+            coordinator,
+            payload,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BufferedBrainTurnRegistry<Payload> {
+    module_label: &'static str,
+    runs: Mutex<HashMap<String, BufferedBrainTurnRun<Payload>>>,
+}
+
+impl<Payload> BufferedBrainTurnRegistry<Payload> {
+    pub fn new(module_label: &'static str) -> Self {
+        Self {
+            module_label,
+            runs: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn insert(&self, run: BufferedBrainTurnRun<Payload>) -> BrainRuntimeResult<()> {
+        let wake_id = run.coordinator.wake_id().to_string();
+        let mut runs = self.lock_runs()?;
+        if runs.contains_key(&wake_id) {
+            return Err(BrainRuntimeError::DuplicateWake {
+                module_label: self.module_label,
+                wake_id,
+            });
+        }
+        runs.insert(wake_id, run);
+        Ok(())
+    }
+
+    pub fn with_run_mut<R>(
+        &self,
+        wake_id: &str,
+        operation: impl FnOnce(&mut BufferedBrainTurnRun<Payload>) -> R,
+    ) -> BrainRuntimeResult<R> {
+        let mut runs = self.lock_runs()?;
+        let run = runs
+            .get_mut(wake_id)
+            .ok_or_else(|| BrainRuntimeError::WakeNotFound {
+                module_label: self.module_label,
+                wake_id: wake_id.to_string(),
+            })?;
+        Ok(operation(run))
+    }
+
+    pub fn remove(
+        &self,
+        wake_id: &str,
+    ) -> BrainRuntimeResult<Option<BufferedBrainTurnRun<Payload>>> {
+        Ok(self.lock_runs()?.remove(wake_id))
+    }
+
+    pub fn diagnostics(&self) -> BrainRuntimeResult<Vec<BufferedNeutralRunDiagnostic>> {
+        let now = OffsetDateTime::now_utc();
+        let runs = self.lock_runs()?;
+        let mut diagnostics = runs
+            .values()
+            .map(|run| {
+                let coordinator = &run.coordinator;
+                BufferedNeutralRunDiagnostic {
+                    module_label: self.module_label.to_string(),
+                    wake_id: coordinator.wake_id().to_string(),
+                    queued_stream_item_count: coordinator.queued_stream_item_count(),
+                    pending_tool_request_count: coordinator.pending_tool_request_count(),
+                    submitted_tool_output_count: coordinator.submitted_tool_output_count(),
+                    age_ms: elapsed_ms(coordinator.created_at(), now),
+                    wake_timeout_ms: coordinator.wake_timeout_ms().unwrap_or(0),
+                    terminal: coordinator.phase().is_terminal(),
+                    cancelled: coordinator.is_cancelled(),
+                    has_error: coordinator.has_error(),
+                    started_at: format_rfc3339(
+                        coordinator.started_at().unwrap_or(coordinator.created_at()),
+                    ),
+                    last_transition_at: format_rfc3339(coordinator.last_transition_at()),
+                }
+            })
+            .collect::<Vec<_>>();
+        diagnostics.sort_by(|left, right| left.wake_id.cmp(&right.wake_id));
+        Ok(diagnostics)
+    }
+
+    pub fn cleanup(
+        &self,
+        reason_code: &str,
+        summary: &str,
+    ) -> BrainRuntimeResult<BufferedNeutralRunCleanupReport> {
+        let mut runs = self.lock_runs()?;
+        let active_runs = runs.len();
+        let terminal_runs = runs
+            .values()
+            .filter(|run| run.coordinator.phase().is_terminal())
+            .count();
+        let mut cancelled_nonterminal_runs = 0;
+        for run in runs.values_mut() {
+            if !run.coordinator.phase().is_terminal() {
+                let _ = run.coordinator.cancel(reason_code, summary);
+                cancelled_nonterminal_runs += 1;
+            }
+        }
+        runs.clear();
+        Ok(BufferedNeutralRunCleanupReport {
+            module_label: self.module_label.to_string(),
+            active_runs,
+            terminal_runs,
+            cancelled_nonterminal_runs,
+            removed_runs: active_runs,
+        })
+    }
+
+    fn lock_runs(
+        &self,
+    ) -> BrainRuntimeResult<std::sync::MutexGuard<'_, HashMap<String, BufferedBrainTurnRun<Payload>>>>
+    {
+        self.runs
+            .lock()
+            .map_err(|_| BrainRuntimeError::RegistryPoisoned {
+                module_label: self.module_label,
+            })
+    }
+}
+
+fn elapsed_ms(start: OffsetDateTime, end: OffsetDateTime) -> u64 {
+    (end - start).whole_milliseconds().max(0) as u64
+}
+
+fn format_rfc3339(timestamp: OffsetDateTime) -> String {
+    timestamp
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 #[cfg(test)]
@@ -1227,5 +1409,39 @@ mod tests {
                 name: "max_stream_items"
             }
         );
+    }
+
+    #[test]
+    fn typed_registry_rejects_duplicates_and_cleans_active_runs() {
+        let registry = BufferedBrainTurnRegistry::new("pi-agent");
+        let mut first = coordinator();
+        first.start().expect("start");
+        registry
+            .insert(BufferedBrainTurnRun::new(first, "first"))
+            .expect("insert");
+
+        let duplicate = registry
+            .insert(BufferedBrainTurnRun::new(coordinator(), "duplicate"))
+            .expect_err("duplicate wake");
+        assert!(matches!(
+            duplicate,
+            BrainRuntimeError::DuplicateWake { wake_id, .. } if wake_id == "wake-1"
+        ));
+
+        let diagnostics = registry.diagnostics().expect("diagnostics");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].wake_id, "wake-1");
+        assert!(!diagnostics[0].terminal);
+
+        let cleanup = registry
+            .cleanup("service_shutdown", "service stopping")
+            .expect("cleanup");
+        assert_eq!(cleanup.active_runs, 1);
+        assert_eq!(cleanup.cancelled_nonterminal_runs, 1);
+        assert_eq!(cleanup.removed_runs, 1);
+        assert!(registry
+            .diagnostics()
+            .expect("empty diagnostics")
+            .is_empty());
     }
 }

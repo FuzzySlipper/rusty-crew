@@ -789,8 +789,6 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
   const brainEventCounts: Record<string, number> = {};
   const brainStreamItemCounts: Record<string, number> = {};
   const toolDebugReferences = createOpenAiResponsesToolDebugReferences();
-  const toolFailurePolicy = createOpenAiResponsesToolFailurePolicyState();
-
   try {
     for (;;) {
       if (options?.signal?.aborted) {
@@ -833,20 +831,26 @@ async function runOpenAiResponsesBrainWithIncrementalDrain(
           wakeId: started.wakeId,
           callId: request.request.callId,
           output: output.output,
-          isError: output.isError,
+          status:
+            output.failure?.action === "denied"
+              ? "denied"
+              : output.failure
+                ? "failed"
+                : "succeeded",
+          retryable: output.failure?.retryable ?? false,
+          ...(output.failure === undefined
+            ? {}
+            : { reasonCode: output.failure.reasonCode }),
+          ...(output.failure?.action === undefined
+            ? {}
+            : { action: output.failure.action }),
+          ...(output.failure === undefined
+            ? {}
+            : { summary: output.failure.detail }),
+          ...(request.debugDetailId === undefined
+            ? {}
+            : { debugDetailId: request.debugDetailId }),
         });
-        const stopReport = recordOpenAiResponsesToolFailure(
-          toolFailurePolicy,
-          output.failure,
-        );
-        if (stopReport !== undefined) {
-          await submitOpenAiResponsesBrainEvent(bridge, wake, {
-            type: "provider_status",
-            level: "error",
-            message: stopReport,
-          });
-          throw new Error(stopReport);
-        }
       }
       if (drained.error !== undefined) {
         throw new Error(
@@ -1073,6 +1077,7 @@ interface OpenAiResponsesToolFailure {
   toolName: string;
   reasonCode: string;
   retryable: boolean;
+  action?: string;
   detail: string;
 }
 
@@ -1198,6 +1203,7 @@ async function executePreparedOpenAiResponsesToolRequest(
         toolName: prepared.request.name,
         reasonCode: "tool_preparation_failed",
         retryable: false,
+        action: "failed",
         detail: prepared.preparationError,
       },
     };
@@ -1212,6 +1218,7 @@ async function executePreparedOpenAiResponsesToolRequest(
         toolName: prepared.request.name,
         reasonCode: "tool_unavailable",
         retryable: false,
+        action: "failed",
         detail: output,
       },
     };
@@ -1263,6 +1270,7 @@ async function executePreparedOpenAiResponsesToolRequest(
         toolName: prepared.request.name,
         reasonCode: "tool_exception",
         retryable: true,
+        action: "failed",
         detail,
       },
     };
@@ -1292,12 +1300,14 @@ function openAiResponsesToolFailureFromResult(
     stringField(details, "action") ??
     "tool_reported_unsuccessful_result";
   const operation = stringField(details, "operation");
+  const action = stringField(details, "action");
   const retryable =
     typeof details.retryable === "boolean" ? details.retryable : true;
   return {
     toolName,
     reasonCode,
     retryable,
+    ...(action === undefined ? {} : { action }),
     detail: [
       `${toolName} returned ok=false`,
       operation ? `operation=${operation}` : undefined,
@@ -1512,18 +1522,6 @@ async function submitRustPiAgentBrainEvent(
     return;
   }
   runOptions.events.push(envelope);
-}
-
-async function submitOpenAiResponsesBrainEvent(
-  bridge: NativeBridgeModule,
-  wake: BrainWakeInput,
-  event: BrainEvent,
-): Promise<void> {
-  await bridge.submitBrainEvent({
-    wakeId: wake.wakeId,
-    sessionId: wake.sessionId,
-    event,
-  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

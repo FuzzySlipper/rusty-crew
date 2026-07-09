@@ -215,12 +215,9 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
   debugRecordsCompleted: number;
 }> {
   const observedEvents: BrainEventEnvelope[] = [];
-  const submittedOutputs: Array<{
-    wakeId: string;
-    callId: string;
-    output: string;
-    isError: boolean;
-  }> = [];
+  const submittedOutputs: Array<
+    Parameters<NativeBridgeModule["submitOpenAiResponsesToolOutput"]>[0]
+  > = [];
   const toolCallDebugStore = new MemoryToolCallDebugStore({
     now: () => "2026-07-04T00:00:00.000Z",
   });
@@ -259,6 +256,8 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
         items: [],
         toolRequests: [],
         terminal: true,
+        error:
+          "Stopping assistant turn after repeated memory failure (memory_client_unavailable).",
       };
     },
     submitOpenAiResponsesToolOutput: async (
@@ -338,7 +337,12 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
   );
   assert.equal(submittedOutputs.length, 2);
   assert.equal(
-    submittedOutputs.every((output) => output.isError),
+    submittedOutputs.every(
+      (output) =>
+        output.status === "failed" &&
+        output.reasonCode === "memory_client_unavailable" &&
+        output.retryable,
+    ),
     true,
   );
   assert.match(submittedOutputs[0]?.output ?? "", /memory_client_unavailable/);
@@ -348,7 +352,11 @@ async function runRepeatedFailurePolicyScenario(): Promise<{
       event.event.level === "error" &&
       event.event.message.includes("memory_client_unavailable"),
   );
-  assert.equal(providerStatusReported, true);
+  assert.equal(
+    providerStatusReported,
+    false,
+    "TypeScript must not recreate Rust tool stop-policy status events",
+  );
   const completedDebugRecords = observedEvents
     .filter(
       (event) =>
@@ -391,12 +399,9 @@ async function runSingleDeniedContinuationScenario(): Promise<{
   providerContinuedAfterDenial: boolean;
 }> {
   const observedEvents: BrainEventEnvelope[] = [];
-  const submittedOutputs: Array<{
-    wakeId: string;
-    callId: string;
-    output: string;
-    isError: boolean;
-  }> = [];
+  const submittedOutputs: Array<
+    Parameters<NativeBridgeModule["submitOpenAiResponsesToolOutput"]>[0]
+  > = [];
   let drainCount = 0;
   const bridge = {
     runOpenAiResponsesBrain: async () => {
@@ -513,7 +518,8 @@ async function runSingleDeniedContinuationScenario(): Promise<{
     }),
   );
   assert.equal(submittedOutputs.length, 1);
-  assert.equal(submittedOutputs[0]?.isError, true);
+  assert.equal(submittedOutputs[0]?.status, "denied");
+  assert.equal(submittedOutputs[0]?.retryable, false);
   assert.match(
     submittedOutputs[0]?.output ?? "",
     /memory_manual_review_required/,
@@ -533,7 +539,7 @@ async function runSingleDeniedContinuationScenario(): Promise<{
   assert.equal(providerContinuedAfterDenial, true);
   return {
     submittedOutputs: submittedOutputs.length,
-    outputWasProviderError: submittedOutputs[0]?.isError === true,
+    outputWasProviderError: submittedOutputs[0]?.status !== "succeeded",
     providerContinuedAfterDenial,
   };
 }
