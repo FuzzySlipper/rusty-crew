@@ -104,7 +104,6 @@ import {
   handleAdminDiagnosticsRequest,
   type AdminDiagnosticsContext,
   type MemorySpaceDiagnosticsProjection,
-  type AdminRouteResult,
 } from "./admin-diagnostics-api.js";
 import { handleAdminContextStrategiesRequest } from "./service-context-strategy-routes.js";
 import { handleAdminMcpCatalogRequest } from "./service-mcp-catalog-routes.js";
@@ -163,12 +162,8 @@ import {
   type BackgroundReviewPayload,
   type BackgroundReviewResult,
 } from "./background-memory-skill-review.js";
-import {
-  inspectDirectDebugSession,
-  requestDirectDebugTurn,
-  type DirectDebugResult,
-  type DirectDebugServiceContext,
-} from "./direct-debug-service.js";
+import type { DirectDebugServiceContext } from "./direct-debug-service.js";
+import { handleServiceDirectDebugRequest } from "./service-direct-debug-routes.js";
 import {
   contextStrategyCatalog,
   contextStrategyDescriptor,
@@ -946,7 +941,16 @@ async function handleHttpRequest(
   }
 
   if (route?.id === "debug") {
-    return handleDirectDebugRequest(request, url, state);
+    return handleServiceDirectDebugRequest(request, url, {
+      requestId,
+      readJsonBody,
+      listSessions: () => state.bridge.listSessions(),
+      buildDirectDebugContext: () => buildDirectDebugContext(state),
+      emitContextCompactionDebugEvents: (session, input) =>
+        emitContextCompactionDebugEvents(state, session, input),
+      providerRequestDebugDetail: (input) =>
+        rustyViewProviderRequestDebugDetail(state, input),
+    });
   }
 
   if (route?.id === "admin.scheduler") {
@@ -1352,175 +1356,6 @@ function modelProviderRefreshCommandName(
     return value;
   }
   throw new Error(`unknown model-provider refresh command ${value}`);
-}
-
-async function handleDirectDebugRequest(
-  request: IncomingMessage,
-  url: URL,
-  state: ServiceState,
-): Promise<AdminRouteResult> {
-  const parts = url.pathname.split("/").filter(Boolean);
-  if (
-    parts.length === 5 &&
-    parts[0] === "v1" &&
-    parts[1] === "debug" &&
-    parts[2] === "sessions" &&
-    parts[4] === "context-compaction-events"
-  ) {
-    if ((request.method ?? "GET").toUpperCase() !== "POST") {
-      return failure(405, requestId(request), {
-        code: "method_not_allowed",
-        reason_code: "debug_context_compaction_events_requires_post",
-        message: "context compaction debug event route only supports POST",
-        retryable: false,
-      });
-    }
-    const requestIdValue = requestId(request);
-    const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
-    const sessions = await state.bridge.listSessions();
-    const session = sessions.find(
-      (candidate) => candidate.sessionId === sessionId,
-    );
-    if (!session) {
-      return failure(404, requestIdValue, {
-        code: "not_found",
-        reason_code: "debug_context_compaction_session_not_found",
-        message: `debug session ${sessionId} was not found`,
-        retryable: false,
-      });
-    }
-    const body = recordBody(await readJsonBody(request));
-    const result = await emitContextCompactionDebugEvents(state, session, {
-      wakeId: optionalString(body.wakeId) ?? optionalString(body.wake_id),
-      strategyId:
-        optionalString(body.strategyId) ??
-        optionalString(body.strategy_id) ??
-        "rolling_summary_compaction",
-      estimateQuality:
-        optionalString(body.estimateQuality) ??
-        optionalString(body.estimate_quality) ??
-        "approximate",
-      fillPercent:
-        optionalNumber(body.fillPercent) ?? optionalNumber(body.fill_percent),
-      compactAtPercent:
-        optionalNumber(body.compactAtPercent) ??
-        optionalNumber(body.compact_at_percent),
-      targetPercentAfterCompaction:
-        optionalNumber(body.targetPercentAfterCompaction) ??
-        optionalNumber(body.target_percent_after_compaction),
-      artifactId:
-        optionalString(body.artifactId) ?? optionalString(body.artifact_id),
-      reasonCode:
-        optionalString(body.reasonCode) ?? optionalString(body.reason_code),
-      fail: body.fail === true,
-    });
-    return successRoute(requestIdValue, result);
-  }
-
-  if (
-    parts.length === 5 &&
-    parts[0] === "v1" &&
-    parts[1] === "debug" &&
-    parts[2] === "sessions" &&
-    parts[4] === "context"
-  ) {
-    if ((request.method ?? "GET").toUpperCase() !== "GET") {
-      return failure(405, requestId(request), {
-        code: "method_not_allowed",
-        reason_code: "debug_context_requires_get",
-        message: "direct debug context route only supports GET",
-        retryable: false,
-      });
-    }
-    const result = inspectDirectDebugSession(
-      {
-        sessionId: decodeURIComponent(parts[3] ?? ""),
-        includePromptText:
-          url.searchParams.get("include_prompt_text") === "true",
-        includeMessageBodies:
-          url.searchParams.get("include_message_bodies") === "true",
-        maxPendingMessages: optionalInteger(
-          url.searchParams.get("max_pending_messages"),
-        ),
-        maxRecentEvents: optionalInteger(
-          url.searchParams.get("max_recent_events"),
-        ),
-      },
-      await buildDirectDebugContext(state),
-    );
-    return directDebugResult(requestId(request), result);
-  }
-
-  if (
-    parts.length === 6 &&
-    parts[0] === "v1" &&
-    parts[1] === "debug" &&
-    parts[2] === "sessions" &&
-    parts[4] === "provider-requests"
-  ) {
-    if ((request.method ?? "GET").toUpperCase() !== "GET") {
-      return failure(405, requestId(request), {
-        code: "method_not_allowed",
-        reason_code: "debug_provider_request_requires_get",
-        message: "direct provider request debug route only supports GET",
-        retryable: false,
-      });
-    }
-    const requestIdValue = requestId(request);
-    const sessionId = decodeURIComponent(parts[3] ?? "") as SessionId;
-    const debugDetailId = decodeURIComponent(parts[5] ?? "");
-    const sessions = await state.bridge.listSessions();
-    const session = sessions.find(
-      (candidate) => candidate.sessionId === sessionId,
-    );
-    if (!session) {
-      return failure(404, requestIdValue, {
-        code: "not_found",
-        reason_code: "debug_provider_request_session_not_found",
-        message: `debug session ${sessionId} was not found`,
-        retryable: false,
-      });
-    }
-    const detail = await rustyViewProviderRequestDebugDetail(state, {
-      session,
-      debugDetailId,
-      requestId: requestIdValue,
-    });
-    if (!detail) {
-      return failure(404, requestIdValue, {
-        code: "not_found",
-        reason_code: "debug_provider_request_not_found",
-        message: `provider request debug detail ${debugDetailId} was not found`,
-        retryable: false,
-      });
-    }
-    return successRoute(requestIdValue, detail);
-  }
-
-  if (
-    parts.length === 5 &&
-    parts[0] === "v1" &&
-    parts[1] === "debug" &&
-    parts[2] === "sessions" &&
-    parts[4] === "turn"
-  ) {
-    const body = recordBody(await readJsonBody(request));
-    const result = await requestDirectDebugTurn(
-      {
-        ...body,
-        sessionId: decodeURIComponent(parts[3] ?? ""),
-      } as never,
-      await buildDirectDebugContext(state),
-    );
-    return directDebugResult(requestId(request), result);
-  }
-
-  return failure(404, requestId(request), {
-    code: "not_found",
-    reason_code: "unknown_debug_route",
-    message: `unknown debug route ${url.pathname}`,
-    retryable: false,
-  });
 }
 
 async function buildDiagnosticsContext(
@@ -4828,29 +4663,6 @@ function configuredDebugSessionFallback(state: ServiceState): SessionState[] {
     createdAt: now,
     lastActiveAt: now,
   }));
-}
-
-function directDebugResult<T>(
-  requestIdValue: string,
-  result: DirectDebugResult<T>,
-): AdminRouteResult<T> {
-  if (result.ok) {
-    return {
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: {
-        ok: true,
-        data: result.data,
-        meta: { request_id: requestIdValue, schema_version: 1 },
-      },
-    };
-  }
-  return failure(directDebugStatus(result.error.code), requestIdValue, {
-    code: result.error.code,
-    reason_code: result.error.reasonCode,
-    message: result.error.message,
-    retryable: result.error.retryable,
-  }) as AdminRouteResult<T>;
 }
 
 function createServiceControlExecutor(
@@ -10874,28 +10686,6 @@ function pageParams(url: URL): { limit?: number; offset?: number } {
     ...(limit === undefined ? {} : { limit }),
     ...(offset === undefined ? {} : { offset }),
   };
-}
-
-function directDebugStatus(
-  code:
-    | "not_found"
-    | "forbidden"
-    | "invalid_input"
-    | "failed_precondition"
-    | "internal_error",
-): number {
-  switch (code) {
-    case "not_found":
-      return 404;
-    case "forbidden":
-      return 403;
-    case "invalid_input":
-      return 400;
-    case "failed_precondition":
-      return 412;
-    case "internal_error":
-      return 500;
-  }
 }
 
 function optionalInteger(value: string | null): number | undefined {
