@@ -9,14 +9,11 @@ import type {
   AgentInstanceId,
   BrainImplementationHandle,
   ChannelBindingRecord,
-  ChannelMembershipStatus,
-  ChannelSubscriptionStatus,
   CompletionPacket,
   CoreEvent,
   EngineHandle,
   EngineStorageConfig,
   McpBindingRecord,
-  NormalizedChannelInboundMessage,
   ProfileId,
   ScheduledRunSummary,
   SessionId,
@@ -31,7 +28,6 @@ import {
   type NativeBridgeModule,
   type NativeModelProviderRecord,
   type NativeModelProviderWrite,
-  type NativeChannelIngressRoutePlan,
   type NativeProfileRegistryRecord,
   type NativeProfileRegistryWrite,
   type NativeRoleplayChatLayersWrite,
@@ -52,20 +48,13 @@ import type {
   DenSuccessorGatewayClient,
   McpSurfaceManagerPort,
   TelegramChannelConnectorPort,
-  ChannelIngressRoutePlannerInput,
-  ChannelRouteResolution,
 } from "./service-adapter-ports.js";
 import {
   AgentActivityObservationProducer,
-  type AgentActivityEventInput,
   type AgentActivityObservationEvent,
   type AgentActivityObservationSink,
   type AgentActivityWorkRef,
 } from "./agent-activity-observation.js";
-import {
-  runtimeCoreEventObservationInput,
-  type RuntimeObservationSessionIdentity,
-} from "./runtime-core-event-observation.js";
 import {
   deliveryIntentWakeDecision,
   normalizeChannelWakePolicy,
@@ -178,6 +167,20 @@ import {
   type ChannelProjectionFailureRecord,
   type AdapterDiagnosticsProjection,
 } from "./adapter-diagnostics.js";
+import {
+  activeDenChannelBindings,
+  connectDenSuccessorGateway as connectDenSuccessorGatewayFromModule,
+  denConversationChannelActivityDiagnostics as denConversationChannelActivityDiagnosticsFromModule,
+  drainTelegramOutboundMessages as drainTelegramOutboundMessagesFromModule,
+  ensureDenConversationChannels as ensureDenConversationChannelsFromModule,
+  recordDynamicDenDeliveryChannel as recordDynamicDenDeliveryChannelFromModule,
+  restartTelegramConnector as restartTelegramConnectorFromModule,
+  startDenObservationProjection as startDenObservationProjectionFromModule,
+  startTelegramConnector as startTelegramConnectorFromModule,
+  stopTelegramConnector as stopTelegramConnectorFromModule,
+  telegramChannelActivityDiagnostics as telegramChannelActivityDiagnosticsFromModule,
+  type ServiceAdapterLifecycleContext,
+} from "./service-adapter-lifecycle.js";
 import { buildBackgroundServiceDiagnosticsProjection } from "./background-service-diagnostics.js";
 import {
   runBackgroundMemorySkillReview,
@@ -293,8 +296,6 @@ import {
 } from "./slash-command-router.js";
 import type { RuntimeHealthProjection } from "./runtime-health.js";
 import {
-  announceConfiguredSessionsToDenGateway,
-  denGatewayStartupSummary,
   heartbeatConfiguredSessionsToDenRuntime,
   type DenSuccessorGatewayStartupReport,
 } from "./den-successor-service.js";
@@ -542,6 +543,63 @@ function profileAdminMutationContext(
   };
 }
 
+function adapterLifecycleContext(
+  state: ServiceState,
+): ServiceAdapterLifecycleContext {
+  return {
+    config: state.config,
+    bridge: state.bridge,
+    adapterFactories: state.adapterFactories,
+    get runtimeConfig() {
+      return state.runtimeConfig;
+    },
+    get denGatewayClient() {
+      return state.denGatewayClient;
+    },
+    get denObservationSubscription() {
+      return state.denObservationSubscription;
+    },
+    set denObservationSubscription(subscription) {
+      state.denObservationSubscription = subscription;
+    },
+    get telegramConnector() {
+      return state.telegramConnector;
+    },
+    set telegramConnector(connector) {
+      state.telegramConnector = connector;
+    },
+    get telegramOutboundSubscription() {
+      return state.telegramOutboundSubscription;
+    },
+    set telegramOutboundSubscription(subscription) {
+      state.telegramOutboundSubscription = subscription;
+    },
+    timers: state.timers,
+    denConversationChannelResolutionsByBindingId:
+      state.denConversationChannelResolutionsByBindingId,
+    denConversationChannelIdsByExternalId:
+      state.denConversationChannelIdsByExternalId,
+    denConversationMembershipsByBindingId:
+      state.denConversationMembershipsByBindingId,
+    dynamicDenChannelBindings: state.dynamicDenChannelBindings,
+    channelProjectionFailures: state.channelProjectionFailures,
+    now: state.now,
+    isStopping: () => state.stopping,
+    recordEvent: (event) => recordServiceEvent(state, event),
+    drainSubscriptionEventsUntilIdle: (subscription) =>
+      drainSubscriptionEventsUntilIdle(state.bridge, subscription),
+    createObservationSink: (client) => createDenGatewayObservationSink(client),
+    ensureSessionForChannelBinding: ({ binding }) =>
+      ensureConfiguredSessionForChannelBinding({
+        bridge: state.bridge,
+        runtimeConfig: state.runtimeConfig,
+        binding,
+      }),
+    channelWakePolicyForSession: (session) =>
+      channelWakePolicyForSession(state, session),
+  };
+}
+
 interface ServiceBackgroundReviewRuntime {
   enabled: boolean;
   recentFindings: number;
@@ -716,10 +774,16 @@ export async function createRustyCrewServiceApp(
       stopping: false,
     };
     liveState = state;
-    state.denGatewayStartupReport = await connectDenSuccessorGateway(state);
-    await startDenObservationProjection(state);
-    await ensureDenConversationChannels(state);
-    await startTelegramConnector(state);
+    state.denGatewayStartupReport = await connectDenSuccessorGatewayFromModule(
+      adapterLifecycleContext(state),
+    );
+    await startDenObservationProjectionFromModule(
+      adapterLifecycleContext(state),
+    );
+    await ensureDenConversationChannelsFromModule(
+      adapterLifecycleContext(state),
+    );
+    await startTelegramConnectorFromModule(adapterLifecycleContext(state));
     const backgroundLoops: ServiceBackgroundLoopPort = {
       intervals: {
         schedulerTickIntervalMs:
@@ -741,7 +805,9 @@ export async function createRustyCrewServiceApp(
         heartbeatDenRuntimeInstances: () => heartbeatDenRuntimeInstances(state),
         pollDenDeliveryIntents: () => pollDenDeliveryIntents(state),
         drainTelegramOutboundMessages: () =>
-          drainTelegramOutboundMessages(state),
+          drainTelegramOutboundMessagesFromModule(
+            adapterLifecycleContext(state),
+          ),
         recordFailure: (failureRecord) =>
           recordServiceEvent(state, failureRecord),
         errorMessage,
@@ -2288,8 +2354,13 @@ function buildServiceAdapterDiagnostics(
     channelBindings: state.runtimeConfig.channelBindings,
     dynamicChannelBindings: [...state.dynamicDenChannelBindings.values()],
     channelActivity: [
-      ...telegramChannelActivityDiagnostics(state, now),
-      ...denConversationChannelActivityDiagnostics(state),
+      ...telegramChannelActivityDiagnosticsFromModule(
+        adapterLifecycleContext(state),
+        now,
+      ),
+      ...denConversationChannelActivityDiagnosticsFromModule(
+        adapterLifecycleContext(state),
+      ),
     ],
     channelProjectionFailures: state.channelProjectionFailures,
     channelWakePolicies: channelWakePoliciesByBinding(state),
@@ -2591,655 +2662,6 @@ async function curatorStatus(state: ServiceState): Promise<CuratorAdminStatus> {
   };
 }
 
-async function connectDenSuccessorGateway(
-  state: ServiceState,
-): Promise<DenSuccessorGatewayStartupReport | undefined> {
-  if (state.config.denSuccessorGateway === undefined) {
-    return undefined;
-  }
-  if (state.denGatewayClient === undefined) {
-    return undefined;
-  }
-  let report: DenSuccessorGatewayStartupReport;
-  try {
-    report = await announceConfiguredSessionsToDenGateway({
-      client: state.denGatewayClient,
-      sessions: state.runtimeConfig.sessions,
-      now: state.now(),
-    });
-  } catch (error) {
-    report = {
-      enabled: true,
-      sessionsAnnounced: 0,
-      runtimeInstancesRegistered: 0,
-      runtimeInstancesHeartbeated: 0,
-      failures: [
-        errorMessage(error, "Den successor Gateway connection failed"),
-      ],
-    };
-  }
-  recordServiceEvent(state, {
-    source: "den-successor-gateway",
-    eventType:
-      report.failures.length === 0
-        ? "den_successor_gateway_connected"
-        : "den_successor_gateway_degraded",
-    summary: denGatewayStartupSummary(report),
-    severity: report.failures.length === 0 ? "info" : "warning",
-  });
-  return report;
-}
-
-async function startDenObservationProjection(
-  state: ServiceState,
-): Promise<void> {
-  if (state.denGatewayClient === undefined) return;
-  const subscription = await state.bridge.subscribeEvents({
-    eventKinds: [
-      "session_created",
-      "session_archived",
-      "agent_message_routed",
-      "delegation_lifecycle_observed",
-      "brain_wake_requested",
-      "brain_actions_accepted",
-      "completion_packet_delivered",
-    ],
-  });
-  state.denObservationSubscription = subscription;
-  const timer = setInterval(() => {
-    void drainDenObservationProjection(state).catch((error) =>
-      recordServiceEvent(state, {
-        source: "den-successor-gateway",
-        eventType: "den_observation_projection_degraded",
-        severity: "warning",
-        summary: errorMessage(error, "Den Observation projection failed"),
-      }),
-    );
-  }, 1_000);
-  state.timers.add(timer);
-  recordServiceEvent(state, {
-    source: "den-successor-gateway",
-    eventType: "den_observation_projection_started",
-    summary:
-      "Den Observation projection subscribed to Rusty Crew runtime events.",
-  });
-}
-
-async function drainDenObservationProjection(
-  state: ServiceState,
-): Promise<void> {
-  const subscription = state.denObservationSubscription;
-  if (subscription === undefined || state.denGatewayClient === undefined)
-    return;
-  const events = await drainSubscriptionEventsUntilIdle(
-    state.bridge,
-    subscription,
-  );
-  if (events.length === 0) return;
-
-  const sessionLookup = await runtimeObservationSessionLookup(state);
-  const producer = new AgentActivityObservationProducer({
-    sink: createDenGatewayObservationSink(state.denGatewayClient),
-    required: true,
-  });
-  let projected = 0;
-  let degraded = 0;
-  for (const event of events) {
-    const input: AgentActivityEventInput | undefined =
-      runtimeCoreEventObservationInput(event, {
-        lookupSession: sessionLookup,
-        filters: state.runtimeConfig.denObservation?.eventFilters,
-      });
-    if (input === undefined) continue;
-    const result = await producer.publish(input);
-    if (result.status === "published") {
-      projected += 1;
-    } else if (result.status === "degraded") {
-      degraded += 1;
-    }
-  }
-  if (projected > 0) {
-    recordServiceEvent(state, {
-      source: "den-successor-gateway",
-      eventType: "den_observation_projection_published",
-      summary: `Published ${projected} Den Observation runtime event(s).`,
-    });
-  }
-  if (degraded > 0) {
-    recordServiceEvent(state, {
-      source: "den-successor-gateway",
-      eventType: "den_observation_projection_degraded",
-      severity: "warning",
-      summary: `Publishing ${degraded} Den Observation runtime event(s) degraded.`,
-    });
-  }
-}
-
-async function runtimeObservationSessionLookup(
-  state: ServiceState,
-): Promise<
-  (
-    sessionId: SessionId | string,
-  ) => RuntimeObservationSessionIdentity | undefined
-> {
-  const sessions = await state.bridge.listSessions().catch(() => []);
-  const byId = new Map<string, RuntimeObservationSessionIdentity>();
-  for (const session of sessions) {
-    byId.set(session.sessionId, {
-      sessionId: session.sessionId,
-      agentId: session.agentId,
-      profileId: session.profileId,
-      kind: session.kind,
-    });
-  }
-  for (const session of state.runtimeConfig.sessions) {
-    if (!byId.has(session.sessionId)) {
-      byId.set(session.sessionId, {
-        sessionId: session.sessionId,
-        agentId: session.agentId,
-        profileId: session.profileId,
-        kind: session.kind,
-      });
-    }
-  }
-  return (sessionId) => byId.get(String(sessionId));
-}
-
-async function ensureDenConversationChannels(
-  state: ServiceState,
-): Promise<void> {
-  if (state.denGatewayClient === undefined) return;
-  const bindings = activeDenChannelBindings(
-    state.runtimeConfig.channelBindings,
-  );
-  if (bindings.length === 0) {
-    state.denConversationChannelResolutionsByBindingId.clear();
-    state.denConversationChannelIdsByExternalId.clear();
-    state.denConversationMembershipsByBindingId.clear();
-    return;
-  }
-
-  try {
-    const resolution =
-      await state.adapterFactories.resolveDenConversationChannels({
-        client: state.denGatewayClient,
-        bindings,
-        defaultProjectId: state.config.denConversationProjectId,
-      });
-    state.denConversationChannelResolutionsByBindingId.clear();
-    for (const [
-      bindingId,
-      channelResolution,
-    ] of resolution.resolutionsByBindingId) {
-      state.denConversationChannelResolutionsByBindingId.set(
-        bindingId,
-        channelResolution,
-      );
-    }
-    state.denConversationChannelIdsByExternalId.clear();
-    for (const [
-      externalChannelKey,
-      channelId,
-    ] of resolution.channelIdsByExternalId) {
-      state.denConversationChannelIdsByExternalId.set(
-        externalChannelKey,
-        channelId,
-      );
-    }
-    state.denConversationMembershipsByBindingId.clear();
-    for (const [bindingId, membership] of resolution.membershipsByBindingId) {
-      state.denConversationMembershipsByBindingId.set(bindingId, membership);
-    }
-    if (resolution.membershipResolutionFailure !== undefined) {
-      recordServiceEvent(state, {
-        source: "den-successor-gateway",
-        eventType: "den_conversation_memberships_degraded",
-        severity: "warning",
-        summary: resolution.membershipResolutionFailure,
-      });
-    }
-    recordServiceEvent(state, {
-      source: "den-successor-gateway",
-      eventType: "den_conversation_channels_resolved",
-      summary: `Resolved ${resolution.resolutionsByBindingId.size} Den Conversation channel binding(s), created ${resolution.createdCount}.`,
-    });
-  } catch (error) {
-    recordServiceEvent(state, {
-      source: "den-successor-gateway",
-      eventType: "den_conversation_channels_degraded",
-      severity: "warning",
-      summary: errorMessage(
-        error,
-        "Den Conversation channel resolution failed",
-      ),
-    });
-  }
-}
-
-function activeDenChannelBindings(
-  bindings: readonly ChannelBindingRecord[],
-): ChannelBindingRecord[] {
-  return bindings.filter(
-    (binding) =>
-      binding.status === "active" &&
-      binding.provider === "den_channels" &&
-      binding.externalChannelId.trim(),
-  );
-}
-
-function conversationProjectIdForBinding(
-  state: ServiceState,
-  binding: ChannelBindingRecord,
-): string {
-  return (
-    binding.conversationProjectId?.trim() ??
-    state.config.denConversationProjectId
-  );
-}
-
-async function startTelegramConnector(state: ServiceState): Promise<void> {
-  if (!state.config.telegram.enabled) return;
-  const token = state.config.telegram.botToken;
-  if (!token) return;
-  const adapterId = state.config.telegram.adapterId as never;
-  try {
-    await state.bridge.registerPlatformAdapter(
-      state.adapterFactories.createTelegramAdapterRegistration(adapterId),
-    );
-  } catch (error) {
-    recordServiceEvent(state, {
-      source: "telegram",
-      eventType: "telegram_adapter_registration_degraded",
-      severity: "warning",
-      summary: errorMessage(error, "Telegram adapter registration failed"),
-    });
-  }
-
-  const connector = state.adapterFactories.createTelegramConnector({
-    adapterId,
-    botToken: token,
-    apiBaseUrl: state.config.telegram.apiBaseUrl,
-    offsetStorePath: join(
-      state.config.paths.dataDir,
-      "data",
-      "telegram",
-      `${state.config.telegram.adapterId}-offset.json`,
-    ),
-    bindings: () =>
-      activeTelegramChannelBindings(
-        state.runtimeConfig.channelBindings,
-        state.config.telegram.adapterId,
-      ),
-    ttlMs: state.config.telegram.messageTtlMs,
-    pollIntervalMs: state.config.telegram.pollIntervalMs,
-    pollTimeoutSeconds: state.config.telegram.pollTimeoutSeconds,
-    updateLimit: state.config.telegram.updateLimit,
-    now: state.now,
-    onInbound: async (message) => {
-      await state.adapterFactories.ingestChannelInboundMessage(message, {
-        bridge: {
-          injectExternalEvent: (event) =>
-            state.bridge.injectExternalEvent(event),
-          routeAgentMessage: (agentMessage) =>
-            state.bridge.routeAgentMessage(
-              agentMessage.from,
-              agentMessage.to,
-              agentMessage.body,
-              agentMessage.correlationId,
-            ),
-        },
-        bindings: state.runtimeConfig.channelBindings,
-        ensureSessionForRoute: ({ binding }) =>
-          ensureConfiguredSessionForChannelBinding({
-            bridge: state.bridge,
-            runtimeConfig: state.runtimeConfig,
-            binding,
-          }),
-        routePlanner: (input) => planChannelIngressRoute(state.bridge, input),
-        now: state.now(),
-      });
-    },
-  });
-  const outboundSubscription = await state.bridge.subscribeEvents({
-    eventKinds: ["agent_message_routed"],
-  });
-  state.telegramConnector = connector;
-  state.telegramOutboundSubscription = outboundSubscription;
-  await connector.start();
-  recordServiceEvent(state, {
-    source: "telegram",
-    eventType: "telegram_connector_started",
-    summary: `Telegram connector started with ${connector.diagnostics().bindingCount} active binding(s).`,
-  });
-}
-
-async function restartTelegramConnector(state: ServiceState): Promise<void> {
-  await stopTelegramConnector(state);
-  await startTelegramConnector(state);
-}
-
-async function stopTelegramConnector(state: ServiceState): Promise<void> {
-  state.telegramConnector?.stop();
-  state.telegramConnector = undefined;
-  const subscription = state.telegramOutboundSubscription;
-  state.telegramOutboundSubscription = undefined;
-  if (subscription !== undefined) {
-    await state.bridge.unsubscribeEvents(subscription).catch(() => undefined);
-  }
-}
-
-function activeTelegramChannelBindings(
-  bindings: readonly ChannelBindingRecord[],
-  adapterId: string,
-): ChannelBindingRecord[] {
-  return bindings.filter(
-    (binding) =>
-      binding.status === "active" &&
-      binding.provider === "telegram" &&
-      binding.adapterId === adapterId,
-  );
-}
-
-async function planChannelIngressRoute(
-  bridge: NativeBridgeModule,
-  input: ChannelIngressRoutePlannerInput,
-): Promise<ChannelRouteResolution> {
-  const plan = await bridge.planChannelIngressRoute({
-    message: {
-      adapterId: input.message.adapterId,
-      bindingId: input.message.bindingId,
-      provider: String(input.message.providerRefs.provider),
-      externalChannelId: input.message.providerRefs.externalChannelId,
-      externalThreadId: input.message.providerRefs.externalThreadId,
-      externalUserId: input.message.author.externalUserId,
-      body: input.message.body,
-      mentions: input.message.mentions,
-      expiresAt: input.message.expiresAt,
-      idempotencyKey: input.message.idempotencyKey,
-      runtimeAgentId: input.message.runtime.agentId,
-    },
-    bindings: input.bindings.map((binding) => ({
-      bindingId: binding.bindingId,
-      adapterId: binding.adapterId,
-      provider: String(binding.provider),
-      agentId: binding.agentId,
-      instanceId: binding.instanceId,
-      sessionId: binding.sessionId,
-      profileId: binding.profileId,
-      externalChannelId: binding.externalChannelId,
-      externalThreadId: binding.externalThreadId,
-      externalUserId: binding.externalUserId,
-      conversationProjectId: binding.conversationProjectId,
-      conversationChannelId: binding.conversationChannelId,
-      providerSubscriptionId: binding.providerSubscriptionId,
-      status: binding.status,
-    })),
-    mentionAliases: input.routing?.mentionAliases,
-    systemAgentId: input.routing?.systemAgentId,
-    now: input.now,
-  });
-
-  return channelIngressRoutePlanToResolution(input.message, plan);
-}
-
-function channelIngressRoutePlanToResolution(
-  message: NormalizedChannelInboundMessage,
-  plan: NativeChannelIngressRoutePlan,
-): ChannelRouteResolution {
-  if (plan.status === "routed") {
-    if (plan.route === undefined || plan.binding === undefined) {
-      return {
-        status: "denied",
-        reason:
-          "Rust channel route planner returned a routed decision without route or binding data",
-        reasonCode: "route_plan_missing_route",
-        correlationId: plan.correlationId,
-        candidates: plan.candidates.map(nativeChannelBindingToRecord),
-        message,
-      };
-    }
-    return {
-      status: "routed",
-      binding: nativeChannelBindingToRecord(plan.binding),
-      route: {
-        from: plan.route.from,
-        to: plan.route.to,
-        body: plan.route.body,
-        correlationId: plan.route.correlationId,
-        bindingId: plan.route.bindingId,
-        sessionId: plan.route.sessionId,
-      },
-    };
-  }
-  return {
-    status: plan.status,
-    reason: plan.reason,
-    reasonCode: plan.reasonCode,
-    correlationId: plan.correlationId,
-    candidates: plan.candidates.map(nativeChannelBindingToRecord),
-    message,
-  };
-}
-
-function nativeChannelBindingToRecord(
-  binding: NativeChannelIngressRoutePlan["candidates"][number],
-): ChannelBindingRecord {
-  return {
-    bindingId: binding.bindingId,
-    adapterId: binding.adapterId as AdapterId,
-    provider: binding.provider,
-    agentId: binding.agentId as AgentId,
-    instanceId: binding.instanceId as AgentInstanceId | undefined,
-    sessionId: binding.sessionId as SessionId | undefined,
-    profileId: binding.profileId as ProfileId,
-    externalChannelId: binding.externalChannelId,
-    externalThreadId: binding.externalThreadId,
-    externalUserId: binding.externalUserId,
-    conversationProjectId: binding.conversationProjectId,
-    conversationChannelId: binding.conversationChannelId,
-    providerSubscriptionId: binding.providerSubscriptionId,
-    status: binding.status,
-  };
-}
-
-async function drainTelegramOutboundMessages(
-  state: ServiceState,
-): Promise<void> {
-  const connector = state.telegramConnector;
-  const subscription = state.telegramOutboundSubscription;
-  if (state.stopping || connector === undefined || subscription === undefined) {
-    return;
-  }
-  const events = await state.bridge.drainSubscriptionEvents(subscription, 128);
-  for (const event of events) {
-    if (event.type !== "agent_message_routed") continue;
-    const projection = state.adapterFactories.projectAgentMessageToChannel(
-      event.message,
-      activeTelegramChannelBindings(
-        state.runtimeConfig.channelBindings,
-        state.config.telegram.adapterId,
-      ),
-      { now: state.now() },
-    );
-    if (projection.status === "projected") {
-      const dispatch =
-        await state.adapterFactories.dispatchChannelMessageProjection(
-          {
-            sendMessage: async (message) => {
-              await connector.sendOutbound(message);
-            },
-            sendActivity: async () => undefined,
-          },
-          projection.message,
-        );
-      if (!dispatch.accepted) {
-        recordChannelProjectionFailure(
-          state,
-          projection.binding.bindingId,
-          dispatch.kind,
-          dispatch.degradedReason,
-        );
-      }
-      continue;
-    }
-    if (projection.status !== "not_channel_target") {
-      recordChannelProjectionFailure(
-        state,
-        projection.candidates[0]?.bindingId ?? "telegram:unresolved",
-        "message",
-        projection.reason,
-      );
-    }
-  }
-}
-
-function recordChannelProjectionFailure(
-  state: ServiceState,
-  bindingId: string,
-  kind: ChannelProjectionFailureRecord["kind"],
-  degradedReason: string,
-): void {
-  state.channelProjectionFailures.push({
-    bindingId,
-    kind,
-    degradedReason,
-    observedAt: state.now(),
-  });
-  state.channelProjectionFailures.splice(
-    0,
-    Math.max(0, state.channelProjectionFailures.length - 100),
-  );
-  recordServiceEvent(state, {
-    source: "telegram",
-    eventType: "telegram_projection_degraded",
-    severity: "warning",
-    summary: `${bindingId}: ${degradedReason}`,
-  });
-}
-
-function telegramChannelActivityDiagnostics(
-  state: ServiceState,
-  now: string,
-): ChannelBindingDiagnostics[] {
-  const connector = state.telegramConnector;
-  const diagnostics = connector?.diagnostics();
-  return activeTelegramChannelBindings(
-    state.runtimeConfig.channelBindings,
-    state.config.telegram.adapterId,
-  ).map((binding) => ({
-    bindingId: binding.bindingId,
-    adapterId: binding.adapterId,
-    membershipStatus: "joined",
-    presenceStatus: connector === undefined ? "offline" : "online",
-    subscriptionStatus:
-      connector === undefined
-        ? "disconnected"
-        : diagnostics?.lastError
-          ? "degraded"
-          : "active",
-    degradedReason:
-      connector === undefined
-        ? state.config.telegram.enabled
-          ? "telegram connector is not running"
-          : "telegram connector is disabled"
-        : diagnostics?.lastError,
-    stale:
-      connector === undefined ||
-      (diagnostics?.lastPollAt === undefined
-        ? false
-        : Date.parse(now) - Date.parse(diagnostics.lastPollAt) >
-          Math.max(30_000, state.config.telegram.pollIntervalMs * 5)),
-  }));
-}
-
-function denConversationChannelActivityDiagnostics(
-  state: ServiceState,
-): ChannelBindingDiagnostics[] {
-  return activeDenChannelBindings(state.runtimeConfig.channelBindings).map(
-    (binding) => {
-      const resolution = state.denConversationChannelResolutionsByBindingId.get(
-        binding.bindingId,
-      );
-      const channelId = resolution?.channelId;
-      const membership = state.denConversationMembershipsByBindingId.get(
-        binding.bindingId,
-      );
-      const membershipStatus =
-        membership === undefined
-          ? "missing"
-          : denConversationMembershipStatus(membership.membership_status);
-      const subscriptionStatus = denConversationSubscriptionStatus(membership);
-      const resolved = channelId !== undefined;
-      return {
-        bindingId: binding.bindingId,
-        adapterId: binding.adapterId,
-        conversationProjectId:
-          resolution?.projectId ??
-          conversationProjectIdForBinding(state, binding),
-        conversationChannelId: channelId,
-        membershipStatus,
-        presenceStatus:
-          membershipStatus === "joined"
-            ? "online"
-            : resolved
-              ? "offline"
-              : "missing",
-        subscriptionStatus,
-        degradedReason: denConversationDiagnosticReason({
-          resolved,
-          membership,
-          membershipStatus,
-          subscriptionStatus,
-        }),
-        stale: false,
-      };
-    },
-  );
-}
-
-function denConversationMembershipStatus(
-  status: string,
-): ChannelMembershipStatus {
-  switch (status) {
-    case "active":
-      return "joined";
-    case "left":
-      return "left";
-    case "invited":
-      return "invited";
-    default:
-      return "unknown";
-  }
-}
-
-function denConversationSubscriptionStatus(
-  membership: DenSuccessorConversationMembership | undefined,
-): ChannelSubscriptionStatus | "missing" {
-  if (membership === undefined) return "missing";
-  if (membership.membership_status === "left") return "archived";
-  if (membership.membership_status !== "active") return "degraded";
-  return membership.wake_policy === "never" ? "paused" : "active";
-}
-
-function denConversationDiagnosticReason(input: {
-  resolved: boolean;
-  membership: DenSuccessorConversationMembership | undefined;
-  membershipStatus: ChannelMembershipStatus | "missing";
-  subscriptionStatus: ChannelSubscriptionStatus | "missing";
-}): string | undefined {
-  if (!input.resolved) return "Den Conversation channel is not resolved";
-  if (input.membership === undefined) {
-    return "Den Conversation membership is missing";
-  }
-  if (input.membershipStatus !== "joined") {
-    return `Den Conversation membership is ${input.membership.membership_status}`;
-  }
-  if (input.subscriptionStatus !== "active") {
-    return `Den Conversation wake policy is ${input.membership.wake_policy}`;
-  }
-  return undefined;
-}
-
 async function reloadServiceRuntimeConfig(
   state: ServiceState,
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
@@ -3293,8 +2715,8 @@ async function applyServiceRuntimeConfigFromDisk(
     createServiceBackgroundReviewRuntime(nextRuntimeConfig).enabled;
   state.mcpManager = nextMcpManager;
   await previousMcpManager.shutdown();
-  await ensureDenConversationChannels(state);
-  await restartTelegramConnector(state);
+  await ensureDenConversationChannelsFromModule(adapterLifecycleContext(state));
+  await restartTelegramConnectorFromModule(adapterLifecycleContext(state));
   recordServiceEvent(state, {
     source: "service-host",
     eventType: options.eventType,
@@ -5366,12 +4788,17 @@ async function pollDenDeliveryIntents(state: ServiceState): Promise<void> {
     }
     if (decision.action === "manual_wait") {
       state.claimedDeliveryIntentIds.add(intent.id);
-      recordDynamicDenDeliveryChannel(state, intent, session, {
-        channelId: channelIdFromDeliveryIntent(intent),
-        sourceMessageId: intent.channel_message_id,
-        wakePolicy: decision.wakePolicy,
-        subscriptionStatus: "manual",
-      });
+      recordDynamicDenDeliveryChannelFromModule(
+        adapterLifecycleContext(state),
+        intent,
+        session,
+        {
+          channelId: channelIdFromDeliveryIntent(intent),
+          sourceMessageId: intent.channel_message_id,
+          wakePolicy: decision.wakePolicy,
+          subscriptionStatus: "manual",
+        },
+      );
       recordServiceEvent(state, {
         source: "den-successor-gateway",
         eventType: "den_delivery_intent_manual",
@@ -5381,12 +4808,17 @@ async function pollDenDeliveryIntents(state: ServiceState): Promise<void> {
     }
     if (decision.action === "reject") {
       state.claimedDeliveryIntentIds.add(intent.id);
-      recordDynamicDenDeliveryChannel(state, intent, session, {
-        channelId: channelIdFromDeliveryIntent(intent),
-        sourceMessageId: intent.channel_message_id,
-        wakePolicy: decision.wakePolicy,
-        subscriptionStatus: "disabled",
-      });
+      recordDynamicDenDeliveryChannelFromModule(
+        adapterLifecycleContext(state),
+        intent,
+        session,
+        {
+          channelId: channelIdFromDeliveryIntent(intent),
+          sourceMessageId: intent.channel_message_id,
+          wakePolicy: decision.wakePolicy,
+          subscriptionStatus: "disabled",
+        },
+      );
       void rejectDenDeliveryIntent(state, intent, session, decision).catch(
         (error) =>
           recordServiceEvent(state, {
@@ -5404,13 +4836,18 @@ async function pollDenDeliveryIntents(state: ServiceState): Promise<void> {
     const pause = runtimePauseForSession(state, session);
     if (pause !== undefined) {
       state.claimedDeliveryIntentIds.add(intent.id);
-      recordDynamicDenDeliveryChannel(state, intent, session, {
-        channelId: channelIdFromDeliveryIntent(intent),
-        sourceMessageId: intent.channel_message_id,
-        wakePolicy: decision.wakePolicy,
-        subscriptionStatus: "runtime_paused",
-        lastError: runtimePauseSummary(pause, session.sessionId),
-      });
+      recordDynamicDenDeliveryChannelFromModule(
+        adapterLifecycleContext(state),
+        intent,
+        session,
+        {
+          channelId: channelIdFromDeliveryIntent(intent),
+          sourceMessageId: intent.channel_message_id,
+          wakePolicy: decision.wakePolicy,
+          subscriptionStatus: "runtime_paused",
+          lastError: runtimePauseSummary(pause, session.sessionId),
+        },
+      );
       void rejectPausedDenDeliveryIntent(state, intent, session, pause).catch(
         (error) =>
           recordServiceEvent(state, {
@@ -5466,7 +4903,12 @@ async function processDenDeliveryIntent(
         "Delivery intent has no body in source_ref or channel message",
       );
     }
-    recordDynamicDenDeliveryChannel(state, intent, session, deliveryBody);
+    recordDynamicDenDeliveryChannelFromModule(
+      adapterLifecycleContext(state),
+      intent,
+      session,
+      deliveryBody,
+    );
 
     const wakeReport = await submitServiceTurn(state, {
       sessionId: session.sessionId,
@@ -8094,45 +7536,6 @@ function parseConversationSourceRef(
   return { channelId, messageId };
 }
 
-function recordDynamicDenDeliveryChannel(
-  state: ServiceState,
-  intent: DenSuccessorDeliveryIntent,
-  session: RustyCrewRuntimeConfig["sessions"][number],
-  deliveryBody: {
-    channelId?: number;
-    sourceMessageId?: number;
-    wakePolicy?: ChannelWakePolicy;
-    subscriptionStatus?: string;
-    lastError?: string;
-  },
-): void {
-  if (deliveryBody.channelId === undefined) return;
-  const bindingId = `gateway-delivery:${session.sessionId}:${deliveryBody.channelId}`;
-  state.dynamicDenChannelBindings.set(bindingId, {
-    bindingId,
-    bindingSource: "gateway_delivery",
-    adapterId: "den-successor-gateway",
-    agentId: session.agentId,
-    sessionId: session.sessionId,
-    profileId: session.profileId,
-    provider: "den_successor_gateway",
-    externalChannelId: `conversation:${deliveryBody.channelId}`,
-    conversationChannelId: deliveryBody.channelId,
-    sourceMessageId: deliveryBody.sourceMessageId,
-    deliveryIntentId: intent.id,
-    lastObservedAt: state.now(),
-    wakePolicy:
-      deliveryBody.wakePolicy ?? channelWakePolicyForSession(state, session),
-    status: "active",
-    membershipStatus: "dynamic",
-    presenceStatus: "delivery_intent",
-    subscriptionStatus: deliveryBody.subscriptionStatus ?? "active",
-    stalePresence: false,
-    droppedProjections: 0,
-    lastError: deliveryBody.lastError,
-  });
-}
-
 function scheduledHostExecutorContext(
   state: ServiceState,
 ): Parameters<typeof runScheduledHostExecutors>[0] {
@@ -9248,7 +8651,7 @@ async function stopService(state: ServiceState): Promise<void> {
   for (const timer of state.timers) clearInterval(timer);
   state.timers.clear();
   try {
-    await stopTelegramConnector(state);
+    await stopTelegramConnectorFromModule(adapterLifecycleContext(state));
     if (state.denObservationSubscription !== undefined) {
       await state.bridge
         .unsubscribeEvents(state.denObservationSubscription)
