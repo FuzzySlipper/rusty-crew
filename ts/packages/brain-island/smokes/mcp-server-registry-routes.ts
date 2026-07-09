@@ -100,7 +100,9 @@ assert.equal(createResult.status, 200);
 assert.equal(createResult.body.ok, true);
 assert.equal(createResult.body.data.status, "created");
 assert.deepEqual(applyEvents, ["mcp_server_registry_updated"]);
-assert(runtimeConfig.mcpServers.some((server) => server.id === "profile-extra"));
+assert(
+  runtimeConfig.mcpServers.some((server) => server.id === "profile-extra"),
+);
 
 runtimeConfig.mcpBindings = [
   {

@@ -316,9 +316,10 @@ Task 4579 moved several boundaries from recommendation to checked structure:
 The remaining transitional exceptions are deliberate and should shrink in
 future decomposition work:
 
-- `service-app.ts` still hosts many admin/API route handlers and a Den
-  Observation projection drain timer because those handlers still need
-  explicit port extraction.
+- `service-app.ts` still hosts many admin/API route handlers.
+- `service-adapter-lifecycle.ts` owns the Den Observation projection drain
+  timer because that lifecycle still needs explicit service-host port
+  extraction.
 - `service-chat-stream-routes.ts` owns request-scoped SSE heartbeat timers;
   those are not process background loops.
 

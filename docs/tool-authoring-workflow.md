@@ -34,7 +34,8 @@ metadata is Rust/codegen-validated portable policy.
   `ts/packages/brain-island/src/local-code-tools.ts`.
 - The `patch` implementation lives in
   `ts/packages/brain-island/src/patch-tool.ts`.
-- Production wake proofs live in `ts/packages/brain-island/src/smoke-*.ts`.
+- Production wake proofs live in
+  `ts/packages/brain-island/smokes/smoke-*.ts`.
 
 Do not construct ad hoc per-agent tool lists. Profiles request toolsets or
 explicit tool names; final model-callable tools must flow through the registry,

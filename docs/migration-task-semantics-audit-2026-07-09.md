@@ -70,9 +70,9 @@ These are guardrail wins, not full relocation:
 - `native-bridge-rust-contract-mapping-migration.md`: bridge operation parity,
   fixture drift, fingerprint drift, and validation coverage checks exist, but
   raw TS mappings and many TypeBox schemas are still hand-maintained.
-- `smoke-test-inventory.md`: new smoke placement is constrained and lanes are
-  classified, but many old `brain-island/src/smoke-*.ts` files remain until
-  #5303 finishes the relocation.
+- `smoke-test-inventory.md`: smoke placement is constrained, lanes are
+  classified, and #5303 removed the remaining brain-island `src/smoke-*.ts`
+  inventory.
 - #5307: production filenames with residue terms are blocked unless explicitly
   allowlisted, and legacy test harnesses were quarantined under smoke support.
   This reduces accidental fallback growth; it is not a complete proof that no

@@ -1,0 +1,1752 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer, type Server } from "node:http";
+import { createServer as createTcpServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AgentId, BrainEventEnvelope } from "@rusty-crew/contracts";
+import {
+  loadNativeBridge,
+  type BrainWakeExecutor,
+  type NativeBridgeModule,
+} from "@rusty-crew/native-bridge";
+import { startRustyCrewServiceHost } from "@rusty-crew/service-host";
+import { MemoryToolCallDebugStore } from "../../packages/brain-island/src/tool-call-debug-store.js";
+
+const root = mkdtempSync(join(tmpdir(), "rusty-view-chat-read-api-"));
+const port = await openPort();
+const mcpPort = await openPort();
+const token = "rusty-view-chat-token";
+const retainedDeltaCount = 7_300;
+const toolCallDebugStore = new MemoryToolCallDebugStore();
+writeRuntimeConfig(root, mcpPort);
+const mcpServer = await startMcpServer(mcpPort);
+let host = await startHost();
+
+try {
+  const preflight = await options(
+    "/v1/chat/sessions",
+    "http://rusty-view.local",
+  );
+  assert.equal(preflight.status, 204);
+  assert.equal(
+    preflight.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+  assert.ok(
+    preflight.headers
+      .get("access-control-allow-headers")
+      ?.includes("authorization"),
+  );
+
+  const unauthorized = await get("/v1/chat/sessions", undefined, {
+    origin: "http://rusty-view.local",
+  });
+  assert.equal(unauthorized.status, 401);
+  assert.equal(
+    unauthorized.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+
+  const adminPreflight = await options(
+    "/v1/admin/diagnostics",
+    "http://rusty-view.local",
+  );
+  assert.equal(adminPreflight.status, 204);
+  assert.equal(
+    adminPreflight.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+
+  const page = await get("/v1/chat/sessions", token, {
+    origin: "http://rusty-view.local",
+  });
+  assert.equal(page.status, 200);
+  assert.equal(
+    page.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+  assert.equal(page.body.ok, true);
+  assert.equal(page.body.data.total, 4);
+  const listedChatSession = page.body.data.items.find(
+    (item: { session_id: string }) => item.session_id === "chat-session",
+  );
+  assert.ok(listedChatSession, "chat-session should be listed");
+  assert.equal(typeof listedChatSession.latest_cursor, "string");
+
+  await host.bridge.routeAgentMessage(
+    "human-operator" as AgentId,
+    "chat-agent" as AgentId,
+    "hello from Rusty View",
+    "chat-smoke-1",
+  );
+
+  const opened = await get("/v1/chat/sessions/chat-session", token);
+  assert.equal(opened.status, 200);
+  assert.equal(opened.body.data.session.session_id, "chat-session");
+  assert.deepEqual(
+    opened.body.data.events.map((event: { kind: string }) => event.kind),
+    ["session_snapshot", "message_created"],
+  );
+  assert.equal(
+    opened.body.data.events[1]?.payload.body,
+    "hello from Rusty View",
+  );
+  assert.equal(opened.body.data.events[1]?.payload.role, "user");
+
+  const missing = await get("/v1/chat/sessions/missing-session", token);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.error.reason_code, "chat_session_not_found");
+
+  const streamAbort = new AbortController();
+  const streamResponse = await fetch(
+    `http://127.0.0.1:${port}/v1/chat/sessions/chat-session/stream`,
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "http://rusty-view.local",
+      },
+      signal: streamAbort.signal,
+    },
+  );
+  assert.equal(streamResponse.status, 200);
+  assert.equal(
+    streamResponse.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+  assert.ok(
+    streamResponse.headers.get("content-type")?.includes("text/event-stream"),
+  );
+  const streamedEventsPromise = collectSseEventsUntil(
+    streamResponse,
+    (events) =>
+      events.some((event) => event.kind === "assistant_text_delta") &&
+      events.some((event) => event.kind === "assistant_reasoning_delta") &&
+      events.some((event) => event.kind === "tool_call_started") &&
+      events.some((event) => event.kind === "tool_call_completed"),
+    streamAbort,
+  );
+
+  let postSettled = false;
+  const sentPromise = post(
+    "/v1/chat/sessions/chat-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "please answer from the chat endpoint",
+      client_message_id: "client-message-1",
+    },
+    { "Idempotency-Key": "chat-send-1" },
+  ).finally(() => {
+    postSettled = true;
+  });
+  const streamedEvents = await streamedEventsPromise;
+  assert.equal(
+    postSettled,
+    false,
+    "stream should receive assistant/tool progress before chat POST completes",
+  );
+  const sent = await sentPromise;
+  assert.equal(sent.status, 202);
+  assert.equal(sent.body.ok, true);
+  assert.equal(sent.body.data.status, "accepted");
+  assert.equal(sent.body.data.message_id, "client-message-1");
+  assert.equal(sent.body.data.slot_id, "slot:client-message-1");
+  assert.equal(
+    sent.body.data.primary_variant_id,
+    "variant:slot:client-message-1",
+  );
+  assert.equal(typeof sent.body.data.wake_id, "string");
+
+  const initialTree = await get("/v1/chat/sessions/chat-session/tree", token);
+  assert.equal(initialTree.status, 200);
+  const defaultBranch = initialTree.body.data.branches.find(
+    (branch: { label?: string }) => branch.label === "Default",
+  );
+  assert.ok(defaultBranch, "chat send should create a default branch");
+  assert.equal(defaultBranch.head_message_id, "client-message-1");
+  assert.equal(
+    initialTree.body.data.branch_state.active_branch_id,
+    defaultBranch.branch_id,
+  );
+
+  const messageJump = await get(
+    "/v1/chat/sessions/chat-session/jump?target_type=message&message_id=client-message-1",
+    token,
+  );
+  assert.equal(messageJump.status, 200);
+  assert.equal(messageJump.body.data.branch_id, defaultBranch.branch_id);
+
+  const currentSearch = await get(
+    "/v1/chat/sessions/chat-session/search?q=endpoint&role=user",
+    token,
+  );
+  assert.equal(currentSearch.status, 200);
+  assert.equal(currentSearch.body.data.scope, "current_session");
+  assert.equal(currentSearch.body.data.source, "rust_coordination");
+  assert.equal(
+    currentSearch.body.data.items[0]?.message_id,
+    "client-message-1",
+  );
+  assert.equal(currentSearch.body.data.items[0]?.jump.target.type, "message");
+  assert.equal(
+    currentSearch.body.data.items[0]?.jump.target.message_id,
+    "client-message-1",
+  );
+  assert.ok(
+    currentSearch.body.data.items[0]?.highlights[0]?.start >= 0,
+    "search result should include snippet-relative highlight offsets",
+  );
+
+  const crossSearch = await get(
+    "/v1/chat/search?q=endpoint&profile_id=chat-profile",
+    token,
+  );
+  assert.equal(crossSearch.status, 200);
+  assert.equal(crossSearch.body.data.scope, "cross_conversation");
+  assert.equal(crossSearch.body.data.items[0]?.session_id, "chat-session");
+
+  const filteredSearch = await get(
+    "/v1/chat/sessions/chat-session/search?q=endpoint&role=assistant",
+    token,
+  );
+  assert.equal(filteredSearch.status, 200);
+  assert.equal(filteredSearch.body.data.items.length, 0);
+
+  assert.ok(
+    streamedEvents.some((event) => event.kind === "message_created"),
+    "active stream should receive the submitted message event",
+  );
+  assert.ok(
+    streamedEvents.some((event) => event.kind === "tool_call_completed"),
+    "active stream should receive tool completion while wake is live",
+  );
+  const streamedToolEvents = streamedEvents.filter(
+    (event) =>
+      event.kind === "tool_call_started" ||
+      event.kind === "tool_call_completed",
+  );
+  assert.ok(
+    streamedToolEvents.every(
+      (event) =>
+        typeof event.payload?.tool_call_id === "string" &&
+        event.payload.tool_call_id.length > 0,
+    ),
+    "streamed tool events should include stable tool_call_id values",
+  );
+  assert.ok(
+    streamedEvents.some(
+      (event) =>
+        event.kind === "assistant_reasoning_delta" &&
+        event.payload?.text === "live private reasoning",
+    ),
+    "active stream should receive reasoning deltas separately from text",
+  );
+  const chatTurnEvents = await get(
+    "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+    token,
+  );
+  assert.equal(chatTurnEvents.status, 200);
+  const replayedReasoningEvent = chatTurnEvents.body.data.items.find(
+    (event: { kind: string; payload?: { text?: string; format?: string } }) =>
+      event.kind === "assistant_reasoning_delta",
+  );
+  assert.equal(replayedReasoningEvent?.payload?.text, "live private reasoning");
+  assert.equal(replayedReasoningEvent?.payload?.format, "smoke");
+  const completionEvent = chatTurnEvents.body.data.items.find(
+    (event: { kind: string }) => event.kind === "assistant_message_completed",
+  );
+  assert.equal(
+    completionEvent?.payload.wake_id,
+    sent.body.data.wake_id,
+    "assistant completion events should carry wake_id for client reconciliation",
+  );
+
+  const retainedSend = await post(
+    "/v1/chat/sessions/chat-retention-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "emit enough streamed deltas to cross the old retention limit",
+      client_message_id: "client-message-retention",
+    },
+    { "Idempotency-Key": "chat-send-retention" },
+  );
+  assert.equal(retainedSend.status, 202);
+  const retainedReplay = await get(
+    "/v1/chat/sessions/chat-retention-session/events?cursor=chat-retention-session:1&limit=500",
+    token,
+  );
+  assert.equal(retainedReplay.status, 200);
+  assert.equal(
+    retainedReplay.body.data.items[0]?.kind,
+    "assistant_turn_started",
+    "chat event retention should not drop the start of a long streamed wake",
+  );
+  assert.equal(
+    retainedReplay.body.data.items[1]?.payload?.text,
+    " retained-delta-0",
+    "chat event retention should preserve early deltas from long streamed wakes",
+  );
+  const retainedOpen = await get(
+    "/v1/chat/sessions/chat-retention-session",
+    token,
+  );
+  assert.equal(retainedOpen.status, 200, JSON.stringify(retainedOpen.body));
+  assert.equal(retainedOpen.body.data.has_more_before, true);
+  assert.equal(
+    retainedOpen.body.data.events[1]?.kind,
+    "assistant_text_delta",
+    "fresh session opens should return the latest retained event window",
+  );
+  assert.notEqual(
+    retainedOpen.body.data.events[1]?.payload?.text,
+    " retained-delta-0",
+    "fresh session opens should not pin the transcript to the oldest retained event",
+  );
+  assert.equal(
+    retainedOpen.body.data.events.some(
+      (event: { kind: string }) => event.kind === "assistant_message_completed",
+    ),
+    true,
+    "fresh session opens should include the terminal assistant message event",
+  );
+
+  const failStreamAbort = new AbortController();
+  const failStreamResponse = await fetch(
+    `http://127.0.0.1:${port}/v1/chat/sessions/chat-fail-session/stream`,
+    {
+      headers: { authorization: `Bearer ${token}` },
+      signal: failStreamAbort.signal,
+    },
+  );
+  assert.equal(failStreamResponse.status, 200);
+  const failStreamEventsPromise = collectSseEventsUntil(
+    failStreamResponse,
+    (events) =>
+      events.some((event) => event.kind === "assistant_message_completed") &&
+      events.some((event) => event.kind === "assistant_turn_finished"),
+    failStreamAbort,
+  );
+  const failedSent = await post(
+    "/v1/chat/sessions/chat-fail-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "please fail after partial streamed events",
+      client_message_id: "client-message-fail-1",
+    },
+    { "Idempotency-Key": "chat-send-fail-1" },
+  );
+  assert.equal(failedSent.status, 409);
+  assert.equal(failedSent.body.ok, true);
+  assert.equal(failedSent.body.data.status, "rejected");
+  assert.equal(failedSent.body.data.reason_code, "wake_dispatch_failed");
+  assert.equal(typeof failedSent.body.data.wake_id, "string");
+  const failStreamEvents = await failStreamEventsPromise;
+  const failedCompletion = failStreamEvents.find(
+    (event) => event.kind === "assistant_message_completed",
+  );
+  assert.equal(failedCompletion?.payload?.status, "failed");
+  assert.equal(
+    failedCompletion?.payload?.wake_id,
+    failedSent.body.data.wake_id,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /synthetic live wake failure/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Partial response before failure: partial failure delta/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Failed tool calls: rusty_view_failure_tool/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Tool calls reporting unsuccessful results: rusty_view_unsuccessful_tool \(memory_client_unavailable\)/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Completed tool calls before failure: 3/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Recent provider status: degraded: synthetic provider degraded/,
+  );
+  assert.match(
+    String(failedCompletion?.payload?.summary ?? ""),
+    /Tool calls still in flight: rusty_view_duplicate_tool/,
+  );
+  const failedFinished = failStreamEvents.find(
+    (event) => event.kind === "assistant_turn_finished",
+  );
+  assert.equal(failedFinished?.payload?.status, "failed");
+  assert.equal(failedFinished?.payload?.wake_id, failedSent.body.data.wake_id);
+
+  const postTurnPage = await get("/v1/chat/sessions", token);
+  assert.equal(postTurnPage.status, 200);
+  const postTurnSession = postTurnPage.body.data.items.find(
+    (item: { session_id: string }) => item.session_id === "chat-session",
+  );
+  assert.ok(postTurnSession, "chat-session should be listed after chat turn");
+  assert.notEqual(
+    postTurnSession.latest_cursor,
+    "chat-session:0",
+    "session latest_cursor should advance with chat events",
+  );
+  assert.ok(
+    postTurnSession.message_count >= 2,
+    "session message_count should include user and assistant chat messages",
+  );
+
+  const postTurnOpen = await get("/v1/chat/sessions/chat-session", token);
+  assert.equal(postTurnOpen.status, 200);
+  assert.equal(
+    postTurnOpen.body.data.session.latest_cursor,
+    postTurnSession.latest_cursor,
+  );
+  assert.ok(postTurnOpen.body.data.session.message_count >= 2);
+  assert.ok(
+    postTurnOpen.body.data.message_slots.some(
+      (slot: { slot_id: string; alternates: unknown[] }) =>
+        slot.slot_id === sent.body.data.slot_id && slot.alternates.length === 0,
+    ),
+    "open session should include primary slots without lazy alternates",
+  );
+
+  const slots = await get(
+    "/v1/chat/sessions/chat-session/slots?include_alternates=true",
+    token,
+  );
+  assert.equal(slots.status, 200);
+  const sentSlot = slots.body.data.items.find(
+    (slot: { slot_id: string }) => slot.slot_id === sent.body.data.slot_id,
+  );
+  assert.ok(sentSlot, "sent message slot should be queryable");
+  assert.equal(sentSlot.primary.variant_id, sent.body.data.primary_variant_id);
+
+  const createdSlot = await post(
+    "/v1/chat/sessions/chat-session/slots",
+    token,
+    {
+      slot_id: "slot:manual",
+      primary_variant_id: "variant:manual:primary",
+      message_id: "message:manual:primary",
+      actor: { id: "human-operator", kind: "human" },
+      body: "manual primary",
+    },
+  );
+  assert.equal(createdSlot.status, 201);
+  assert.equal(createdSlot.body.data.status, "created");
+  assert.equal(createdSlot.body.data.slot.slot_id, "slot:manual");
+  assert.equal(
+    createdSlot.body.data.slot.primary.variant_id,
+    "variant:manual:primary",
+  );
+
+  const firstAlternate = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants",
+    token,
+    {
+      variant_id: "variant:manual:alt1",
+      message_id: "message:manual:alt1",
+      actor: { id: "chat-agent", kind: "agent" },
+      body: "alternate one",
+    },
+  );
+  assert.equal(firstAlternate.status, 201);
+  assert.equal(firstAlternate.body.data.variant.source, "alternate");
+  assert.equal(firstAlternate.body.data.variant.ordinal, 1);
+
+  const secondAlternate = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants",
+    token,
+    {
+      variant_id: "variant:manual:alt2",
+      message_id: "message:manual:alt2",
+      actor: { id: "chat-agent", kind: "agent" },
+      body: "alternate two",
+    },
+  );
+  assert.equal(secondAlternate.status, 201);
+  assert.equal(secondAlternate.body.data.variant.ordinal, 2);
+
+  const variants = await get(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants",
+    token,
+  );
+  assert.equal(variants.status, 200);
+  assert.deepEqual(
+    variants.body.data.items.map(
+      (variant: { variant_id: string }) => variant.variant_id,
+    ),
+    ["variant:manual:primary", "variant:manual:alt1", "variant:manual:alt2"],
+  );
+
+  const selected = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/active-variant",
+    token,
+    {
+      active_variant_id: "variant:manual:alt1",
+      expected: { type: "primary" },
+    },
+  );
+  assert.equal(selected.status, 200);
+  assert.equal(selected.body.data.status, "selected");
+  assert.equal(
+    selected.body.data.slot.active_variant_id,
+    "variant:manual:alt1",
+  );
+
+  const conflict = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/active-variant",
+    token,
+    {
+      active_variant_id: "variant:manual:alt2",
+      expected: { type: "primary" },
+    },
+  );
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.body.data.status, "conflict");
+  assert.equal(conflict.body.data.conflict.actual, "variant:manual:alt1");
+
+  const reordered = await post(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants/reorder",
+    token,
+    { ordered_variant_ids: ["variant:manual:alt2", "variant:manual:alt1"] },
+  );
+  assert.equal(reordered.status, 200);
+  assert.deepEqual(
+    reordered.body.data.variants.map(
+      (variant: { variant_id: string }) => variant.variant_id,
+    ),
+    ["variant:manual:primary", "variant:manual:alt2", "variant:manual:alt1"],
+  );
+
+  const deleted = await del(
+    "/v1/chat/sessions/chat-session/slots/slot%3Amanual/variants/variant%3Amanual%3Aalt1",
+    token,
+  );
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.data.status, "deleted");
+  assert.equal(deleted.body.data.slot.active_variant_id, null);
+
+  const lazyOpen = await get("/v1/chat/sessions/chat-session", token);
+  assert.equal(lazyOpen.status, 200);
+  const lazyManualSlot = lazyOpen.body.data.message_slots.find(
+    (slot: { slot_id: string }) => slot.slot_id === "slot:manual",
+  );
+  assert.ok(lazyManualSlot, "manual slot should hydrate on open");
+  assert.deepEqual(
+    lazyManualSlot.alternates,
+    [],
+    "open session should lazy-load alternates by default",
+  );
+
+  const eagerOpen = await get(
+    "/v1/chat/sessions/chat-session?include_alternates=true",
+    token,
+  );
+  assert.equal(eagerOpen.status, 200);
+  const eagerManualSlot = eagerOpen.body.data.message_slots.find(
+    (slot: { slot_id: string }) => slot.slot_id === "slot:manual",
+  );
+  assert.equal(eagerManualSlot.alternates.length, 1);
+  assert.equal(eagerManualSlot.alternates[0].variant_id, "variant:manual:alt2");
+
+  const createdBranch = await post(
+    "/v1/chat/sessions/chat-session/branches",
+    token,
+    {
+      branch_id: "branch:manual",
+      parent_branch_id: defaultBranch.branch_id,
+      parent_message_id: "client-message-1",
+      origin_message_id: "client-message-1",
+      head_message_id: "client-message-1",
+      label: "Manual branch",
+    },
+  );
+  assert.equal(createdBranch.status, 201);
+  assert.equal(createdBranch.body.data.branch.branch_id, "branch:manual");
+
+  const selectedBranch = await post(
+    "/v1/chat/sessions/chat-session/branches/active",
+    token,
+    {
+      active_branch_id: "branch:manual",
+      expected: { type: "branch", branch_id: defaultBranch.branch_id },
+    },
+  );
+  assert.equal(selectedBranch.status, 200);
+  assert.equal(selectedBranch.body.data.status, "selected");
+  assert.equal(
+    selectedBranch.body.data.state.active_branch_id,
+    "branch:manual",
+  );
+
+  const branchConflict = await post(
+    "/v1/chat/sessions/chat-session/branches/active",
+    token,
+    {
+      active_branch_id: defaultBranch.branch_id,
+      expected: { type: "none" },
+    },
+  );
+  assert.equal(branchConflict.status, 409);
+  assert.equal(branchConflict.body.data.status, "conflict");
+  assert.equal(branchConflict.body.data.conflict.actual, "branch:manual");
+
+  const headUpdate = await post(
+    "/v1/chat/sessions/chat-session/branches/branch%3Amanual/head",
+    token,
+    {
+      head_message_id: "client-message-1",
+      expected: { type: "message", message_id: "client-message-1" },
+    },
+  );
+  assert.equal(headUpdate.status, 200);
+  assert.equal(headUpdate.body.data.status, "updated");
+
+  const createdSnapshot = await post(
+    "/v1/chat/sessions/chat-session/snapshots",
+    token,
+    {
+      snapshot_id: "snapshot:manual",
+      branch_id: "branch:manual",
+      message_id: "client-message-1",
+      cursor: "chat-session:1",
+      label: "Manual snapshot",
+      summary: "Snapshot summary",
+      source: "user",
+    },
+  );
+  assert.equal(createdSnapshot.status, 201);
+  assert.equal(
+    createdSnapshot.body.data.snapshot.snapshot_id,
+    "snapshot:manual",
+  );
+
+  const snapshotJump = await get(
+    "/v1/chat/sessions/chat-session/jump?target_type=snapshot&snapshot_id=snapshot%3Amanual",
+    token,
+  );
+  assert.equal(snapshotJump.status, 200);
+  assert.equal(snapshotJump.body.data.cursor, "chat-session:1");
+
+  const branchJump = await get(
+    "/v1/chat/sessions/chat-session/jump?target_type=branch&branch_id=branch%3Amanual",
+    token,
+  );
+  assert.equal(branchJump.status, 200);
+  assert.equal(branchJump.body.data.message_id, "client-message-1");
+
+  const treeAfterBranch = await get(
+    "/v1/chat/sessions/chat-session/tree",
+    token,
+  );
+  assert.equal(treeAfterBranch.status, 200);
+  assert.ok(
+    treeAfterBranch.body.data.snapshots.some(
+      (snapshot: { snapshot_id: string }) =>
+        snapshot.snapshot_id === "snapshot:manual",
+    ),
+  );
+
+  const slotMutationKinds = (
+    await get(
+      "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+      token,
+    )
+  ).body.data.items
+    .map((event: { kind: string }) => event.kind)
+    .filter((kind: string) => kind.startsWith("message_"));
+  for (const kind of [
+    "message_slot_created",
+    "message_variant_created",
+    "message_active_variant_selected",
+    "message_variants_reordered",
+    "message_variant_deleted",
+  ]) {
+    assert.ok(slotMutationKinds.includes(kind), `missing ${kind} event`);
+  }
+
+  const scope = await post(
+    "/v1/chat/sessions/chat-session/data-bank/scopes",
+    token,
+    {
+      scope_id: "scope:reference-pack",
+      label: "Reference pack",
+      description: "Reusable files for the current chat",
+      metadata_json: { source: "smoke" },
+    },
+  );
+  assert.equal(scope.status, 201);
+  assert.equal(scope.body.data.scope.scope_id, "scope:reference-pack");
+
+  const attachment = await post(
+    "/v1/chat/sessions/chat-session/attachments",
+    token,
+    {
+      attachment_id: "attachment:guide",
+      filename: "guide.txt",
+      mime_type: "text/plain",
+      byte_size: 42,
+      download_url:
+        "/v1/chat/sessions/chat-session/attachments/attachment%3Aguide/download",
+      thumbnail_url: null,
+      extracted_text: "hello attachment",
+      extracted_text_truncated: false,
+      message_id: "client-message-1",
+      scope_id: "scope:reference-pack",
+      metadata_json: { kind: "reference" },
+      link_metadata_json: { linked_by: "smoke" },
+    },
+  );
+  assert.equal(attachment.status, 201, JSON.stringify(attachment.body));
+  assert.equal(attachment.body.data.attachment.links.length, 1);
+  assert.equal(
+    attachment.body.data.attachment.links[0].scope_id,
+    "scope:reference-pack",
+  );
+
+  const attachments = await get(
+    "/v1/chat/sessions/chat-session/attachments?message_id=client-message-1",
+    token,
+  );
+  assert.equal(attachments.status, 200);
+  assert.equal(
+    attachments.body.data.items[0]?.attachment_id,
+    "attachment:guide",
+  );
+
+  const scopeAttachments = await get(
+    "/v1/chat/sessions/chat-session/data-bank/scopes/scope%3Areference-pack/attachments",
+    token,
+  );
+  assert.equal(scopeAttachments.status, 200);
+  assert.equal(
+    scopeAttachments.body.data.items[0]?.attachment_id,
+    "attachment:guide",
+  );
+
+  const creationMutationKinds = (
+    await get(
+      "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+      token,
+    )
+  ).body.data.items
+    .map((event: { kind: string }) => event.kind)
+    .filter(
+      (kind: string) =>
+        kind.startsWith("attachment_") || kind.startsWith("data_bank_"),
+    );
+  for (const kind of [
+    "data_bank_scope_created",
+    "attachment_uploaded",
+    "attachment_linked",
+  ]) {
+    assert.ok(creationMutationKinds.includes(kind), `missing ${kind} event`);
+  }
+
+  const duplicate = await post(
+    "/v1/chat/sessions/chat-session/messages",
+    token,
+    {
+      actor: { id: "human-operator", kind: "human" },
+      body: "this duplicate should not dispatch",
+      client_message_id: "client-message-1",
+    },
+    { "Idempotency-Key": "chat-send-1" },
+  );
+  assert.equal(duplicate.status, 202);
+  assert.equal(duplicate.body.data.status, "duplicate");
+  assert.equal(duplicate.body.data.wake_id, sent.body.data.wake_id);
+
+  await host.stop();
+  host = await startHost();
+
+  const persistedRetainedReplay = await get(
+    "/v1/chat/sessions/chat-retention-session/events?cursor=chat-retention-session:0&limit=10",
+    token,
+  );
+  assert.equal(persistedRetainedReplay.status, 200);
+  assert.deepEqual(
+    persistedRetainedReplay.body.data.items
+      .slice(0, 3)
+      .map((event: { kind: string }) => event.kind),
+    ["message_created", "assistant_turn_started", "assistant_text_delta"],
+    "durable chat event replay should preserve the beginning of a long wake after restart",
+  );
+  assert.equal(
+    persistedRetainedReplay.body.data.items[2]?.payload?.text,
+    " retained-delta-0",
+  );
+
+  const persistedRetainedEvents = await readAllChatEvents(
+    "chat-retention-session",
+  );
+  assert.ok(
+    persistedRetainedEvents.length > retainedDeltaCount,
+    `durable chat event replay should page through the whole long wake after restart, got ${persistedRetainedEvents.length}`,
+  );
+  assert.ok(
+    (persistedRetainedEvents.at(-1)?.sequence_id ?? 0) >= 7_281,
+    "durable chat event cursors should survive past the prior 7k live failure shape",
+  );
+
+  const persistedScopeAttachments = await get(
+    "/v1/chat/sessions/chat-session/data-bank/scopes/scope%3Areference-pack/attachments",
+    token,
+  );
+  assert.equal(persistedScopeAttachments.status, 200);
+  assert.equal(
+    persistedScopeAttachments.body.data.items[0]?.attachment_id,
+    "attachment:guide",
+  );
+
+  const persistedScopes = await get(
+    "/v1/chat/sessions/chat-session/data-bank/scopes",
+    token,
+  );
+  assert.equal(persistedScopes.status, 200);
+  assert.equal(
+    persistedScopes.body.data.items[0]?.scope_id,
+    "scope:reference-pack",
+  );
+
+  const removedAttachment = await del(
+    "/v1/chat/sessions/chat-session/attachments/attachment%3Aguide",
+    token,
+  );
+  assert.equal(removedAttachment.status, 200);
+  assert.equal(removedAttachment.body.data.status, "removed");
+
+  const removedScope = await del(
+    "/v1/chat/sessions/chat-session/data-bank/scopes/scope%3Areference-pack",
+    token,
+  );
+  assert.equal(removedScope.status, 200);
+  assert.equal(removedScope.body.data.scope.status, "removed");
+
+  const attachmentMutationKinds = (
+    await get(
+      "/v1/chat/sessions/chat-session/events?cursor=chat-session:0",
+      token,
+    )
+  ).body.data.items
+    .map((event: { kind: string }) => event.kind)
+    .filter(
+      (kind: string) =>
+        kind.startsWith("attachment_") || kind.startsWith("data_bank_"),
+    );
+  for (const kind of ["attachment_removed", "data_bank_scope_removed"]) {
+    assert.ok(attachmentMutationKinds.includes(kind), `missing ${kind} event`);
+  }
+
+  const afterMutationPage = await get("/v1/chat/sessions", token);
+  const afterMutationSession = afterMutationPage.body.data.items.find(
+    (item: { session_id: string }) => item.session_id === "chat-session",
+  );
+  assert.ok(afterMutationSession, "chat-session should still be listed");
+  const afterLatest = await getSseOnce(
+    `/v1/chat/sessions/chat-session/stream?once=true&cursor=${encodeURIComponent(
+      afterMutationSession.latest_cursor,
+    )}`,
+    token,
+  );
+  assert.equal(
+    afterLatest.length,
+    0,
+    "stream replay from latest_cursor should not replay historical turn events",
+  );
+
+  const eventsAfterSnapshot = await get(
+    `/v1/chat/sessions/chat-session/events?cursor=${encodeURIComponent(
+      "chat-session:0",
+    )}`,
+    token,
+  );
+  assert.equal(eventsAfterSnapshot.status, 200);
+  assert.ok(eventsAfterSnapshot.body.data.items.length >= 2);
+  assert.ok(
+    eventsAfterSnapshot.body.data.items.some(
+      (event: { kind: string }) => event.kind === "attachment_removed",
+    ),
+  );
+
+  const replayCursor = streamedEvents[1]?.event_id;
+  assert.equal(typeof replayCursor, "string");
+  const replay = await getSseOnce(
+    `/v1/chat/sessions/chat-session/stream?once=true&cursor=${encodeURIComponent(
+      replayCursor,
+    )}`,
+    token,
+  );
+  assert.ok(
+    replay.every((event) => event.sequence_id > streamedEvents[1].sequence_id),
+    "cursor replay should only return missed events",
+  );
+
+  const empty = await post("/v1/chat/sessions/chat-session/messages", token, {
+    actor: { id: "human-operator", kind: "human" },
+    body: " ",
+  });
+  assert.equal(empty.status, 400);
+  assert.equal(empty.body.error.reason_code, "empty_chat_message");
+
+  const missingSend = await post("/v1/chat/sessions/missing/messages", token, {
+    actor: { id: "human-operator", kind: "human" },
+    body: "hello",
+  });
+  assert.equal(missingSend.status, 404);
+
+  const provider = await post("/v1/admin/model-providers", token, {
+    alias: "default",
+    protocol: "chat_completions",
+    providerKind: "local",
+    baseUrl: "http://127.0.0.1:18082/v1",
+    modelId: "gpt",
+    contextWindowTokens: 128_000,
+    maxOutputTokens: 4096,
+    temperature: 0.5,
+    reasoningEffort: "low",
+    reasoningFormat: "none",
+  });
+  assert.equal(provider.status, 200);
+
+  const contextUsage = await get(
+    "/v1/chat/sessions/chat-session/context",
+    token,
+  );
+  assert.equal(contextUsage.status, 200);
+  assert.equal(contextUsage.body.data.provider.alias, "default");
+  assert.equal(contextUsage.body.data.provider.model_id, "gpt");
+  assert.equal(contextUsage.body.data.provider.context_window_tokens, 128_000);
+  assert.equal(contextUsage.body.data.context.estimate_quality, "approximate");
+  assert.equal(
+    typeof contextUsage.body.data.context.estimated_prompt_tokens,
+    "number",
+  );
+
+  const beforeContextDebug = await get(
+    "/v1/chat/sessions/chat-session/events?cursor=chat-session:0&limit=500",
+    token,
+  );
+  assert.equal(beforeContextDebug.status, 200);
+  const contextDebugCursor = beforeContextDebug.body.data.latest_cursor;
+  const contextDebugAbort = new AbortController();
+  const contextDebugStream = await fetch(
+    `http://127.0.0.1:${port}/v1/chat/sessions/chat-session/stream?cursor=${encodeURIComponent(
+      contextDebugCursor,
+    )}`,
+    {
+      headers: { authorization: `Bearer ${token}` },
+      signal: contextDebugAbort.signal,
+    },
+  );
+  assert.equal(contextDebugStream.status, 200);
+  const contextDebugEventsPromise = collectSseEventsUntil(
+    contextDebugStream,
+    (events) =>
+      events.some((event) => event.kind === "context_compaction_started") &&
+      events.some((event) => event.kind === "context_compaction_completed"),
+    contextDebugAbort,
+  );
+  const fakeContextCompaction = await post(
+    "/v1/debug/sessions/chat-session/context-compaction-events",
+    token,
+    {
+      wakeId: "wake-context-smoke",
+      strategyId: "rolling_summary_compaction",
+      estimateQuality: "approximate",
+      fillPercent: 87,
+      compactAtPercent: 80,
+      targetPercentAfterCompaction: 45,
+      artifactId: "context_artifact_smoke",
+    },
+  );
+  assert.equal(fakeContextCompaction.status, 200);
+  const contextDebugStreamEvents = await contextDebugEventsPromise;
+  const contextStarted = contextDebugStreamEvents.find(
+    (event) => event.kind === "context_compaction_started",
+  );
+  assert.equal(contextStarted?.payload?.model_facing, false);
+  assert.equal(contextStarted?.payload?.ui_debug, true);
+  assert.equal(contextStarted?.payload?.fill_percent, 87);
+  const contextCompleted = contextDebugStreamEvents.find(
+    (event) => event.kind === "context_compaction_completed",
+  );
+  assert.equal(
+    contextCompleted?.payload?.artifact_id,
+    "context_artifact_smoke",
+  );
+  const contextEventsReadback = await get(
+    `/v1/chat/sessions/chat-session/events?cursor=${encodeURIComponent(
+      contextDebugCursor,
+    )}`,
+    token,
+  );
+  assert.equal(contextEventsReadback.status, 200);
+  const readbackKinds = contextEventsReadback.body.data.items.map(
+    (event: { kind: string }) => event.kind,
+  );
+  assert.ok(readbackKinds.includes("context_status"));
+  assert.ok(readbackKinds.includes("context_compaction_started"));
+  assert.ok(readbackKinds.includes("context_compaction_completed"));
+
+  const registry = await get("/v1/chat/commands", token);
+  assert.equal(registry.status, 200);
+  assert.deepEqual(
+    registry.body.data.commands.map(
+      (command: { name: string }) => command.name,
+    ),
+    ["help", "status", "session", "model", "new", "reload-mcp"],
+  );
+  const newDescriptor = registry.body.data.commands.find(
+    (command: { name: string }) => command.name === "new",
+  );
+  assert.ok(newDescriptor);
+  assert.equal(newDescriptor.source, "backend-control");
+  assert.deepEqual(newDescriptor.positional_args[0], {
+    name: "reason",
+    description: "Optional operator-facing reason text.",
+    type: "string",
+    required: false,
+    placeholder: "reason",
+  });
+  assert.ok(newDescriptor.surfaces.includes("chat-input"));
+
+  const autocomplete = await get(
+    "/v1/chat/commands/new/autocomplete?argument=reason",
+    token,
+  );
+  assert.equal(autocomplete.status, 200);
+  assert.deepEqual(autocomplete.body.data, {
+    command_name: "new",
+    argument_name: "reason",
+    items: [],
+    has_more: false,
+  });
+
+  const missingAutocomplete = await get(
+    "/v1/chat/commands/status/autocomplete?argument=missing",
+    token,
+  );
+  assert.equal(missingAutocomplete.status, 404);
+  assert.equal(
+    missingAutocomplete.body.error.reason_code,
+    "chat_command_autocomplete_not_found",
+  );
+
+  const statusCommand = await post(
+    "/v1/chat/sessions/chat-session/commands",
+    token,
+    {
+      command: "/status",
+      actor: { id: "human-operator", kind: "human" },
+    },
+  );
+  assert.equal(statusCommand.status, 200);
+  assert.equal(statusCommand.body.data.status, "completed");
+  assert.equal(statusCommand.body.data.command_name, "status");
+
+  const modelCommand = await post(
+    "/v1/chat/sessions/chat-session/commands",
+    token,
+    {
+      command: "/model",
+      actor: { id: "human-operator", kind: "human" },
+    },
+  );
+  assert.equal(modelCommand.status, 200);
+  assert.equal(modelCommand.body.data.status, "completed");
+  assert.equal(modelCommand.body.data.command_name, "model");
+  assert.equal(modelCommand.body.data.response.fields.providerAlias, "default");
+  assert.equal(modelCommand.body.data.response.fields.modelId, "gpt");
+
+  const unknownCommand = await post(
+    "/v1/chat/sessions/chat-session/commands",
+    token,
+    {
+      command: "/definitely-not-real",
+      actor: { id: "human-operator", kind: "human" },
+    },
+  );
+  assert.equal(unknownCommand.status, 409);
+  assert.equal(unknownCommand.body.data.status, "rejected");
+  assert.equal(unknownCommand.body.data.reason_code, "unknown_command");
+
+  const reloadCommand = await post(
+    "/v1/chat/sessions/mcp-session/commands",
+    token,
+    {
+      command: "/reload-mcp",
+      actor: { id: "human-operator", kind: "human" },
+    },
+  );
+  assert.equal(reloadCommand.status, 200);
+  assert.equal(reloadCommand.body.data.command_name, "reload-mcp");
+  assert.equal(reloadCommand.body.data.status, "completed");
+
+  const newCommand = await post(
+    "/v1/chat/sessions/chat-session/commands",
+    token,
+    {
+      command: "/new fresh start",
+      actor: { id: "human-operator", kind: "human" },
+    },
+  );
+  assert.equal(newCommand.status, 200, JSON.stringify(newCommand.body));
+  assert.equal(newCommand.body.data.command_name, "new");
+  assert.equal(newCommand.body.data.status, "completed");
+  assert.equal(newCommand.body.data.old_session_id, "chat-session");
+  assert.equal(typeof newCommand.body.data.new_session_id, "string");
+
+  await host.stop();
+  host = await startHost();
+
+  const restarted = await get("/v1/chat/sessions/chat-session", token);
+  assert.equal(restarted.status, 200);
+  assert.equal(restarted.body.data.events[0]?.kind, "session_snapshot");
+  assert.equal(restarted.body.data.session.session_id, "chat-session");
+
+  await host.stop();
+  host = await startHost({ RUSTY_CREW_ADMIN_AUTH_MODE: "none" });
+  const noAuth = await get("/v1/chat/commands", undefined, {
+    origin: "http://rusty-view.local",
+  });
+  assert.equal(noAuth.status, 200);
+  assert.equal(noAuth.body.ok, true);
+  assert.equal(
+    noAuth.headers.get("access-control-allow-origin"),
+    "http://rusty-view.local",
+  );
+
+  console.log(
+    JSON.stringify(
+      {
+        sessions: page.body.data.total,
+        openedEvents: opened.body.data.events.length,
+        sendStatus: sent.body.data.status,
+        duplicateStatus: duplicate.body.data.status,
+        streamedEvents: streamedEvents.map((event) => event.kind),
+        restartEvent: restarted.body.data.events[0]?.kind,
+      },
+      null,
+      2,
+    ),
+  );
+} finally {
+  await host.stop().catch(() => undefined);
+  await closeServer(mcpServer).catch(() => undefined);
+  rmSync(root, { recursive: true, force: true });
+}
+
+async function startHost(extraEnv: Record<string, string> = {}) {
+  const bridge = withLiveWakeEventsBridge(
+    await loadNativeBridge(),
+    toolCallDebugStore,
+  );
+  return startRustyCrewServiceHost({
+    env: {
+      RUSTY_CREW_DATA_DIR: root,
+      RUSTY_CREW_ADMIN_HOST: "127.0.0.1",
+      RUSTY_CREW_ADMIN_ALLOW_LAN: "false",
+      RUSTY_CREW_ADMIN_PORT: String(port),
+      RUSTY_CREW_ADMIN_TOKEN: token,
+      RUSTY_CREW_SCHEDULER_TICK_INTERVAL_MS: "0",
+      RUSTY_CREW_WAKE_DISPATCH_INTERVAL_MS: "0",
+      ...extraEnv,
+    },
+    bridge,
+    toolCallDebugStore,
+  });
+}
+
+async function readAllChatEvents(sessionId: string): Promise<SseEvent[]> {
+  const events: SseEvent[] = [];
+  let cursor = `${sessionId}:0`;
+  for (;;) {
+    const page = await get(
+      `/v1/chat/sessions/${encodeURIComponent(sessionId)}/events?cursor=${encodeURIComponent(cursor)}&limit=500`,
+      token,
+    );
+    assert.equal(page.status, 200);
+    events.push(...page.body.data.items);
+    if (!page.body.data.has_more) return events;
+    cursor = page.body.data.latest_cursor;
+    assert.ok(cursor, "paged chat event replay should return latest_cursor");
+  }
+}
+
+async function get(
+  path: string,
+  bearer?: string,
+  extraHeaders: Record<string, string> = {},
+) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      ...extraHeaders,
+    },
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: (await response.json()) as any,
+  };
+}
+
+async function options(path: string, origin: string) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "OPTIONS",
+    headers: {
+      origin,
+      "access-control-request-method": "GET",
+      "access-control-request-headers": "authorization,content-type",
+    },
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+  };
+}
+
+async function post(
+  path: string,
+  bearer: string | undefined,
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "POST",
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      "content-type": "application/json",
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: (await response.json()) as any,
+  };
+}
+
+async function del(path: string, bearer: string | undefined) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "DELETE",
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+    },
+  });
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: (await response.json()) as any,
+  };
+}
+
+async function getSseOnce(path: string, bearer: string): Promise<SseEvent[]> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    headers: { authorization: `Bearer ${bearer}` },
+  });
+  assert.equal(response.status, 200);
+  assert.ok(
+    response.headers.get("content-type")?.includes("text/event-stream"),
+  );
+  const text = await response.text();
+  return parseSseEvents(text);
+}
+
+async function collectSseEvents(
+  response: Response,
+  count: number,
+  controller: AbortController,
+): Promise<SseEvent[]> {
+  return collectSseEventsUntil(
+    response,
+    (events) => events.length >= count,
+    controller,
+  );
+}
+
+async function collectSseEventsUntil(
+  response: Response,
+  done: (events: SseEvent[]) => boolean,
+  controller: AbortController,
+): Promise<SseEvent[]> {
+  assert.ok(response.body, "SSE response should have a body");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  const deadline = Date.now() + 5_000;
+  try {
+    while (!done(parseSseEvents(text)) && Date.now() < deadline) {
+      const remaining = Math.max(deadline - Date.now(), 1);
+      const read = await Promise.race([
+        reader.read(),
+        new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) =>
+          setTimeout(
+            () => resolve({ done: true, value: undefined }),
+            remaining,
+          ),
+        ),
+      ]);
+      if (read.done) break;
+      text += decoder.decode(read.value, { stream: true });
+    }
+  } finally {
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
+  }
+  const events = parseSseEvents(text);
+  assert.ok(
+    done(events),
+    `SSE stream did not reach expected condition; received ${events
+      .map((event) => event.kind)
+      .join(", ")}`,
+  );
+  return events;
+}
+
+function parseSseEvents(text: string): SseEvent[] {
+  return text
+    .split("\n\n")
+    .map((block) => block.trim())
+    .filter((block) => block.includes("data: "))
+    .map((block) => {
+      const data = block
+        .split("\n")
+        .find((line) => line.startsWith("data: "))
+        ?.slice("data: ".length);
+      assert.ok(data, "SSE event should include data");
+      return JSON.parse(data) as SseEvent;
+    });
+}
+
+interface SseEvent {
+  event_id: string;
+  sequence_id: number;
+  kind: string;
+  payload?: Record<string, unknown>;
+}
+
+function withLiveWakeEventsBridge(
+  bridge: NativeBridgeModule,
+  debugStore: MemoryToolCallDebugStore,
+): NativeBridgeModule {
+  return {
+    ...bridge,
+    registerBrainRuntime: async (registration, executor) => {
+      const wrappedExecutor: BrainWakeExecutor = {
+        wake: async (request, buffers) => {
+          if (request.sessionId === "chat-fail-session") {
+            const unsuccessfulDebug = debugStore.start({
+              toolCallId: "rusty-view-unsuccessful-tool-call",
+              sessionId: request.sessionId,
+              wakeId: request.wakeId,
+              toolName: "rusty_view_unsuccessful_tool",
+              arguments: { query: "unavailable memory" },
+              sourceMetadata: {
+                source: "local",
+                serverNames: [],
+                sourceToolName: "rusty_view_unsuccessful_tool",
+              },
+            });
+            debugStore.finish({
+              debugDetailId: unsuccessfulDebug.debug_detail_id,
+              finalResult: {
+                content: [
+                  {
+                    type: "text",
+                    text: "MEMORY_TOOL_RESULT ok=false operation=search action=failed reason=memory_client_unavailable",
+                  },
+                ],
+                details: {
+                  ok: false,
+                  operation: "search",
+                  action: "failed",
+                  reasonCode: "memory_client_unavailable",
+                  retryable: true,
+                },
+              },
+            });
+            await submitLiveWakeEvents(bridge, [
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: { type: "started" },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: { type: "text_delta", text: "partial failure delta" },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "provider_status",
+                  level: "degraded",
+                  message: "synthetic provider degraded",
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_completed_tool",
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_completed_tool",
+                  isError: false,
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_failure_tool",
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_failure_tool",
+                  isError: true,
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_unsuccessful_tool",
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "rusty_view_unsuccessful_tool",
+                    debugDetailId: unsuccessfulDebug.debug_detail_id,
+                  },
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_unsuccessful_tool",
+                  isError: false,
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "rusty_view_unsuccessful_tool",
+                    debugDetailId: unsuccessfulDebug.debug_detail_id,
+                  },
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_duplicate_tool",
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "duplicate-finished",
+                  },
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_finished",
+                  toolName: "rusty_view_duplicate_tool",
+                  isError: false,
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "duplicate-finished",
+                  },
+                },
+              },
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "tool_call_started",
+                  toolName: "rusty_view_duplicate_tool",
+                  metadata: {
+                    source: "local",
+                    serverNames: [],
+                    sourceToolName: "duplicate-in-flight",
+                  },
+                },
+              },
+            ]);
+            throw new Error(
+              "synthetic live wake failure after partial chat events",
+            );
+          }
+          if (request.sessionId === "chat-retention-session") {
+            const retentionEvents: BrainEventEnvelope[] = [
+              {
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: { type: "started" },
+              },
+            ];
+            for (let index = 0; index < retainedDeltaCount; index += 1) {
+              retentionEvents.push({
+                wakeId: request.wakeId,
+                sessionId: request.sessionId,
+                event: {
+                  type: "text_delta",
+                  text: ` retained-delta-${index}`,
+                },
+              });
+            }
+            const liveEvents = submitLiveWakeEventsWithoutDelay(
+              bridge,
+              retentionEvents,
+            );
+            const [result] = await Promise.all([
+              executor.wake(request, buffers),
+              liveEvents,
+            ]);
+            return result;
+          }
+          const liveEvents = submitLiveWakeEvents(bridge, [
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: { type: "text_delta", text: "live streaming delta" },
+            },
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: {
+                type: "reasoning_delta",
+                text: "live private reasoning",
+                format: "smoke",
+              },
+            },
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: {
+                type: "tool_call_started",
+                toolName: "rusty_view_live_tool",
+                metadata: {
+                  source: "local",
+                  serverNames: [],
+                  sourceToolName: "rusty_view_live_tool",
+                  debugDetailId: "tooldbg_live_tool_1",
+                },
+              },
+            },
+            {
+              wakeId: request.wakeId,
+              sessionId: request.sessionId,
+              event: {
+                type: "tool_call_finished",
+                toolName: "rusty_view_live_tool",
+                isError: false,
+                metadata: {
+                  source: "local",
+                  serverNames: [],
+                  sourceToolName: "rusty_view_live_tool",
+                  debugDetailId: "tooldbg_live_tool_1",
+                },
+              },
+            },
+          ]);
+          const [result] = await Promise.all([
+            executor.wake(request, buffers),
+            delay(200),
+            liveEvents,
+          ]);
+          return result;
+        },
+      };
+      return bridge.registerBrainRuntime(registration, wrappedExecutor);
+    },
+  };
+}
+
+async function submitLiveWakeEventsWithoutDelay(
+  bridge: NativeBridgeModule,
+  events: BrainEventEnvelope[],
+): Promise<void> {
+  for (const event of events) {
+    await bridge.submitBrainEvent(event);
+  }
+}
+
+async function submitLiveWakeEvents(
+  bridge: NativeBridgeModule,
+  events: BrainEventEnvelope[],
+): Promise<void> {
+  await delay(25);
+  for (const event of events) {
+    await bridge.submitBrainEvent(event);
+    await delay(10);
+  }
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function writeRuntimeConfig(dataRoot: string, mcpServerPort: number): void {
+  const configDir = join(dataRoot, "config");
+  const profilesDir = join(configDir, "profiles");
+  const skillsDir = join(configDir, "skills");
+  mkdirSync(profilesDir, { recursive: true });
+  mkdirSync(skillsDir, { recursive: true });
+  writeFileSync(
+    join(configDir, "service.json"),
+    JSON.stringify(
+      {
+        profilesDir,
+        skillsDir,
+        brains: [{ profileId: "chat-profile" }],
+        sessions: [
+          {
+            sessionId: "chat-session",
+            agentId: "chat-agent",
+            profileId: "chat-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "mcp-session",
+            agentId: "mcp-agent",
+            profileId: "chat-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "chat-fail-session",
+            agentId: "chat-fail-agent",
+            profileId: "chat-profile",
+            kind: "full",
+          },
+          {
+            sessionId: "chat-retention-session",
+            agentId: "chat-retention-agent",
+            profileId: "chat-profile",
+            kind: "full",
+          },
+        ],
+        mcpBindings: [
+          {
+            bindingId: "mcp-binding",
+            adapterId: "mcp-ts-main",
+            agentId: "mcp-agent",
+            sessionId: "mcp-session",
+            profileId: "chat-profile",
+            serverNames: ["mcp-smoke"],
+            endpointRef: `http://127.0.0.1:${mcpServerPort}/mcp`,
+            transport: "streamable_http",
+            toolProfileKey: "chat-profile",
+            status: "active",
+            diagnostics: {},
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(profilesDir, "chat-profile.json"),
+    JSON.stringify(
+      {
+        profileId: "chat-profile",
+        modelConfig: {
+          provider: "local",
+          modelName: "deterministic",
+        },
+        prompt: {
+          system: "Chat profile system prompt.",
+          instructions: ["Answer concisely."],
+        },
+        toolPolicy: {
+          requestedTools: [],
+        },
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+function startMcpServer(portToListen: number): Promise<Server> {
+  const server = createHttpServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/mcp") {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          tools: [
+            {
+              name: "smoke_tool",
+              description: "Smoke MCP tool.",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+        },
+      }),
+    );
+  });
+  return new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(portToListen, "127.0.0.1", () => resolveListen(server));
+  });
+}
+
+function openPort(): Promise<number> {
+  return new Promise((resolveOpenPort, rejectOpenPort) => {
+    const server = createTcpServer();
+    server.once("error", rejectOpenPort);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        rejectOpenPort(new Error("failed to discover open TCP port"));
+        return;
+      }
+      const open = address.port;
+      server.close((error) => {
+        if (error) rejectOpenPort(error);
+        else resolveOpenPort(open);
+      });
+    });
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolveClose, rejectClose) => {
+    server.close((error) => (error ? rejectClose(error) : resolveClose()));
+  });
+}

@@ -204,8 +204,10 @@ npm run --silent smoke -- --list --json
 The broad buckets at the start of this transition are:
 
 - Root aliases preserve commonly used commands and should shrink over time.
-- `ts/packages/brain-island/src/smoke-*.ts` contains most service, brain,
-  context, tool, memory, command, profile, MCP, and Rusty View contract smokes.
+- `ts/packages/brain-island/smokes/*.ts` contains package-local service, brain,
+  context, tool, memory, command, profile, and Rusty View contract smokes.
+- `ts/smokes/brain-island/*.ts` contains brain-island operator/e2e smokes that
+  compose service-host or adapter packages.
 - `ts/packages/adapter-den/src/smoke-*.ts` contains Den adapter and successor
   service proofs.
 - `ts/packages/adapter-telegram/src/smoke-*.ts`,
@@ -236,12 +238,10 @@ Choose the narrowest layer that proves the behavior:
 5. Live rendered chat behavior belongs in Rusty View live certification, with
    evidence recorded using Rusty View's `docs/live-testing.md` packet format.
 
-Do not add new smoke files under package `src/`. Existing `src/smoke-*.ts`
-files remain supported until they are moved in focused follow-up patches.
-`npm run smoke:architecture-boundaries` enforces the current brain-island
-legacy `src/smoke-*.ts` ceiling so new files do not quietly land in production
-source directories. It also checks package-local `smokes/` imports, with only
-explicit legacy exemptions for old smoke files that still need migration.
+Do not add new smoke files under package `src/`. For brain-island, the
+boundary check enforces a zero `src/smoke-*.ts` ceiling. Package-local smokes
+belong under `ts/packages/brain-island/smokes/`; cross-package/operator smokes
+belong under `ts/smokes/brain-island/`.
 
 Prefer adding a package-local `smoke:<name>` script plus runner metadata instead
 of adding another root alias. Root aliases are reserved for high-muscle-memory
@@ -263,36 +263,13 @@ No useful smoke should be deleted just because it is noisy. Classify it, move it
 when the owning area is touched, and convert pure logic to unit tests where that
 gives a stronger signal.
 
-## Task 4589 Relocation Plan
+## Task 5303 Relocation Result
 
-Task 4589 continues the cleanup from the current repository state. As of
-2026-07-07, `ts/packages/brain-island/src` still contains 134
-`smoke-*.ts` files. The TypeScript package boundary check freezes that count in
-`legacyBrainIslandSrcSmokeCount` and carries exact legacy exemptions for old
-smokes that still import `@rusty-crew/service-host` or adapter packages.
-
-The cleanup should proceed in small relocation lanes:
-
-1. Service-host/cross-package smokes that import `@rusty-crew/service-host`
-   should move first. Prefer `ts/packages/service-host/smokes/*.ts` when the
-   proof belongs to service composition, and `ts/smokes/*.ts` when it composes
-   multiple packages for an operator proof.
-2. Adapter/MCP/channel smokes that import adapter packages should move to the
-   owning adapter package or to `ts/smokes/*.ts` when the proof spans
-   brain-island plus multiple adapters.
-3. Pure brain-island package smokes should move to
-   `ts/packages/brain-island/smokes/*.ts` in domain batches: tools, memory,
-   profile/config/context, admin/commands, observation/diagnostics, brain/wake,
-   and roleplay.
-4. Pure deterministic logic checks should become unit tests under
-   `ts/packages/brain-island/test/*.test.ts` when they do not need smoke-runner
-   classification, service composition, or package-level script execution.
-5. Each relocation patch should update package scripts/root aliases, run the
-   moved smoke plus `npm run smoke -- --list`, and lower
-   `legacyBrainIslandSrcSmokeCount` by the number of moved `src` smokes.
-6. Each relocation patch should delete any now-unused
-   `legacySrcSmokeAllowedImports` entries. New exemptions must be exact and
-   temporary.
+Task 5303 finished the brain-island relocation. As of 2026-07-09,
+`ts/packages/brain-island/src` contains no `smoke-*.ts` files. The relocation
+kept package-local smokes in `ts/packages/brain-island/smokes/` and moved
+operator/e2e smokes that import service-host or adapter packages to
+`ts/smokes/brain-island/`.
 
 The end state is boring: production `src` contains production code, package
 `smokes/` directories contain package-local integration proofs, `ts/smokes/`

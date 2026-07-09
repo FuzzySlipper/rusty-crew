@@ -17,7 +17,7 @@ normal source/document permissions (`0644`):
 - `docs/README.md`
 - `docs/pi-crew-extraction-analysis.md`
 - `docs/pi-crew-core-bridge-manifest.md`
-- `ts/packages/brain-island/src/smoke-roleplay-quality-spike-live.ts`
+- `ts/packages/brain-island/smokes/smoke-roleplay-quality-spike-live.ts`
 
 ## Split To Follow-Up Tasks
 
@@ -48,4 +48,3 @@ guard before replacement.
 The tracked native bridge binary was not changed in #4514. A local build had
 already modified it in the worktree, but that artifact churn is intentionally
 left for #4643 rather than mixed into the triage commit.
-
