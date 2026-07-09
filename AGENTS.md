@@ -99,6 +99,12 @@ not the current planning queue.
       /adapter-*          # remaining adapter boundaries
 ```
 
+## GitHub Check Gates
+
+Den Review check gates must use GitHub job/check-run names, not the workflow
+name. For this repo use `required_checks: ["Verify Offline", "Verify Postgres Backend"]`.
+See `docs/github-check-gates.md`.
+
 ## Local Commands
 
 ```bash
