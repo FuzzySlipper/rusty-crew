@@ -535,6 +535,8 @@ interface NativeBridgeBinding {
   saveMemoryProposalJson(inputJson: string): string;
   planCaptureMemoryProposalsJson(inputJson: string): string;
   planCuratorGovernanceTransitionJson(inputJson: string): string;
+  planCuratorLifecycleTransitionJson(inputJson: string): string;
+  planBackgroundMemoryAutoMutationsJson(inputJson: string): string;
   listMemoryProposalsJson(inputJson: string): string;
   saveSessionActivityDigestJson(inputJson: string): string;
   listSessionActivityDigestsJson(inputJson: string): string;
@@ -2478,6 +2480,8 @@ export interface NativeBridgeModule {
   ): Promise<MemoryProposalRecord>;
   planCaptureMemoryProposals(input: unknown): Promise<unknown>;
   planCuratorGovernanceTransition(input: unknown): Promise<unknown>;
+  planCuratorLifecycleTransition(input: unknown): Promise<unknown>;
+  planBackgroundMemoryAutoMutations(input: unknown): Promise<unknown>;
   listMemoryProposals(
     query: MemoryProposalQuery,
   ): Promise<MemoryProposalRecord[]>;
@@ -2858,6 +2862,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     saveMemoryProposal: unavailable("initialize_engine"),
     planCaptureMemoryProposals: unavailable("initialize_engine"),
     planCuratorGovernanceTransition: unavailable("initialize_engine"),
+    planCuratorLifecycleTransition: unavailable("initialize_engine"),
+    planBackgroundMemoryAutoMutations: unavailable("initialize_engine"),
     listMemoryProposals: unavailable("initialize_engine"),
     saveSessionActivityDigest: unavailable("initialize_engine"),
     listSessionActivityDigests: unavailable("initialize_engine"),

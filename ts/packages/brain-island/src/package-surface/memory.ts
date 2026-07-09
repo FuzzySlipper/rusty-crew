@@ -38,9 +38,12 @@ export type {
 } from "../curator-candidates.js";
 export { runCuratorLifecycleTransitions } from "../curator-lifecycle.js";
 export type {
+  CuratorLifecyclePlanner,
   CuratorLifecyclePolicy,
   CuratorLifecycleReport,
   CuratorLifecycleTransition,
+  RustCuratorLifecyclePlan,
+  RustCuratorLifecyclePlanInput,
 } from "../curator-lifecycle.js";
 export {
   listCuratorArchivedSkills,
@@ -86,6 +89,10 @@ export type {
 } from "../curator-admin-control.js";
 export { runBackgroundMemorySkillReview } from "../background-memory-skill-review.js";
 export type {
+  BackgroundMemoryAutoMutationAction,
+  BackgroundMemoryAutoMutationPlan,
+  BackgroundMemoryAutoMutationPlanner,
+  BackgroundMemoryAutoMutationRequest,
   BackgroundReviewCandidateKind,
   BackgroundReviewDenseMemoryRecord,
   BackgroundReviewFinding,

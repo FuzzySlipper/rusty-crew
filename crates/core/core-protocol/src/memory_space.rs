@@ -1233,6 +1233,332 @@ pub struct CuratorGovernancePlan {
     pub diagnostics: Vec<MemoryPolicyDiagnostic>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CuratorLifecycleTransitionTarget {
+    Active,
+    Stale,
+    Archived,
+    Skipped,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuratorLifecyclePolicyInput {
+    pub stale_after_ms: u64,
+    pub archive_after_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuratorLifecycleCandidateSnapshot {
+    pub candidate_id: String,
+    pub status: CuratorStoredCandidateStatus,
+    pub lifecycle_state: Option<CuratorCandidateLifecycleState>,
+    pub lifecycle_reason_code: Option<String>,
+    pub age_since_activity_ms: Option<u64>,
+    pub stale_duration_ms: Option<u64>,
+    pub activity_after_stale: bool,
+    pub source_current: bool,
+    pub source_current_reason_code: Option<String>,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuratorLifecyclePlanInput {
+    pub candidate: CuratorLifecycleCandidateSnapshot,
+    pub now: IsoTimestamp,
+    pub policy: CuratorLifecyclePolicyInput,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CuratorLifecyclePlan {
+    pub accepted: bool,
+    pub candidate_id: String,
+    pub from: Option<CuratorCandidateLifecycleState>,
+    pub to: CuratorLifecycleTransitionTarget,
+    pub reason_code: Option<String>,
+    pub resulting_lifecycle_state: Option<CuratorCandidateLifecycleState>,
+    pub audit_ref: Option<String>,
+    pub receipt_id: String,
+    pub diagnostics: Vec<MemoryPolicyDiagnostic>,
+}
+
+pub fn plan_curator_lifecycle_transition(input: CuratorLifecyclePlanInput) -> CuratorLifecyclePlan {
+    let mut report = MemoryPolicyReport::accepted();
+    let candidate = &input.candidate;
+    if candidate.candidate_id.trim().is_empty() {
+        report.push_rejection(
+            "curator_candidate_id_required",
+            "curator candidate id must not be empty",
+        );
+    }
+    if input.now.trim().is_empty() {
+        report.push_rejection(
+            "curator_lifecycle_now_required",
+            "curator lifecycle planning requires a non-empty timestamp",
+        );
+    }
+    if input.policy.stale_after_ms == 0 {
+        report.push_rejection(
+            "curator_lifecycle_stale_after_invalid",
+            "stale_after_ms must be greater than zero",
+        );
+    }
+    if input.policy.archive_after_ms == 0 {
+        report.push_rejection(
+            "curator_lifecycle_archive_after_invalid",
+            "archive_after_ms must be greater than zero",
+        );
+    }
+
+    let (to, reason_code, resulting_lifecycle_state) = if report.accepted {
+        curator_lifecycle_decision(candidate, &input.policy)
+    } else {
+        (
+            CuratorLifecycleTransitionTarget::Unchanged,
+            None,
+            candidate.lifecycle_state,
+        )
+    };
+    let receipt_hash = stable_hash64(&format!(
+        "{}:{:?}:{:?}:{}:{}:{}",
+        candidate.candidate_id,
+        candidate.lifecycle_state,
+        to,
+        input.now,
+        input.policy.stale_after_ms,
+        input.policy.archive_after_ms
+    ));
+    CuratorLifecyclePlan {
+        accepted: report.accepted,
+        candidate_id: candidate.candidate_id.clone(),
+        from: candidate.lifecycle_state,
+        to,
+        reason_code: reason_code.clone(),
+        resulting_lifecycle_state,
+        audit_ref: report
+            .accepted
+            .then(|| format!("curator-lifecycle:{}", candidate.candidate_id)),
+        receipt_id: format!("curator-receipt:lifecycle:{receipt_hash:016x}"),
+        diagnostics: report.diagnostics,
+    }
+}
+
+fn curator_lifecycle_decision(
+    candidate: &CuratorLifecycleCandidateSnapshot,
+    policy: &CuratorLifecyclePolicyInput,
+) -> (
+    CuratorLifecycleTransitionTarget,
+    Option<String>,
+    Option<CuratorCandidateLifecycleState>,
+) {
+    if candidate.status == CuratorStoredCandidateStatus::Applied {
+        return (CuratorLifecycleTransitionTarget::Unchanged, None, None);
+    }
+    if candidate.pinned {
+        return (
+            CuratorLifecycleTransitionTarget::Skipped,
+            Some("skill_pinned".to_string()),
+            candidate.lifecycle_state,
+        );
+    }
+    if candidate.lifecycle_state == Some(CuratorCandidateLifecycleState::Archived) {
+        return (
+            CuratorLifecycleTransitionTarget::Unchanged,
+            None,
+            Some(CuratorCandidateLifecycleState::Archived),
+        );
+    }
+    if candidate.lifecycle_state == Some(CuratorCandidateLifecycleState::Stale) {
+        if candidate.source_current && candidate.activity_after_stale {
+            return (
+                CuratorLifecycleTransitionTarget::Active,
+                Some("candidate_reactivated".to_string()),
+                Some(CuratorCandidateLifecycleState::Active),
+            );
+        }
+        if candidate
+            .stale_duration_ms
+            .is_some_and(|elapsed| elapsed >= policy.archive_after_ms)
+        {
+            return (
+                CuratorLifecycleTransitionTarget::Archived,
+                Some("candidate_stale_archive_due".to_string()),
+                Some(CuratorCandidateLifecycleState::Archived),
+            );
+        }
+        return (
+            CuratorLifecycleTransitionTarget::Unchanged,
+            None,
+            Some(CuratorCandidateLifecycleState::Stale),
+        );
+    }
+    if !candidate.source_current {
+        return (
+            CuratorLifecycleTransitionTarget::Stale,
+            Some(
+                candidate
+                    .source_current_reason_code
+                    .clone()
+                    .unwrap_or_else(|| "source_changed".to_string()),
+            ),
+            Some(CuratorCandidateLifecycleState::Stale),
+        );
+    }
+    if candidate
+        .age_since_activity_ms
+        .is_some_and(|elapsed| elapsed >= policy.stale_after_ms)
+    {
+        return (
+            CuratorLifecycleTransitionTarget::Stale,
+            Some("candidate_idle_stale".to_string()),
+            Some(CuratorCandidateLifecycleState::Stale),
+        );
+    }
+    (
+        CuratorLifecycleTransitionTarget::Unchanged,
+        None,
+        candidate
+            .lifecycle_state
+            .or(Some(CuratorCandidateLifecycleState::Active)),
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundMemoryAutoMutationAction {
+    ApproveProposal,
+    ApplyProposal,
+    PruneMemory,
+    UpdateSkill,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackgroundMemoryAutoMutationCandidate {
+    pub action: BackgroundMemoryAutoMutationAction,
+    pub target_ref: String,
+    pub provider_generated: bool,
+    pub human_approved: bool,
+    pub admin_requested: bool,
+    pub confidence: Option<f32>,
+    pub rationale: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackgroundMemoryAutoMutationPlanInput {
+    pub run_id: String,
+    pub profile_id: String,
+    #[serde(default)]
+    pub min_confidence: Option<f32>,
+    #[serde(default)]
+    pub candidates: Vec<BackgroundMemoryAutoMutationCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackgroundMemoryAutoMutationDecision {
+    pub accepted: bool,
+    pub action: BackgroundMemoryAutoMutationAction,
+    pub target_ref: String,
+    pub audit_ref: Option<String>,
+    pub diagnostics: Vec<MemoryPolicyDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackgroundMemoryAutoMutationPlan {
+    pub accepted_count: u32,
+    pub rejected_count: u32,
+    pub receipt_id: String,
+    pub decisions: Vec<BackgroundMemoryAutoMutationDecision>,
+}
+
+pub fn plan_background_memory_auto_mutations(
+    input: BackgroundMemoryAutoMutationPlanInput,
+) -> BackgroundMemoryAutoMutationPlan {
+    let min_confidence = input.min_confidence.unwrap_or(0.95);
+    let decisions = input
+        .candidates
+        .into_iter()
+        .map(|candidate| {
+            background_memory_auto_mutation_decision(
+                &input.run_id,
+                &input.profile_id,
+                min_confidence,
+                candidate,
+            )
+        })
+        .collect::<Vec<_>>();
+    let accepted_count = decisions
+        .iter()
+        .filter(|decision| decision.accepted)
+        .count() as u32;
+    let rejected_count = decisions.len() as u32 - accepted_count;
+    let receipt_hash = stable_hash64(&format!(
+        "{}:{}:{}:{}",
+        input.run_id, input.profile_id, accepted_count, rejected_count
+    ));
+    BackgroundMemoryAutoMutationPlan {
+        accepted_count,
+        rejected_count,
+        receipt_id: format!("background-memory-auto-mutation:{receipt_hash:016x}"),
+        decisions,
+    }
+}
+
+fn background_memory_auto_mutation_decision(
+    run_id: &str,
+    profile_id: &str,
+    min_confidence: f32,
+    candidate: BackgroundMemoryAutoMutationCandidate,
+) -> BackgroundMemoryAutoMutationDecision {
+    let mut report = MemoryPolicyReport::accepted();
+    if run_id.trim().is_empty() {
+        report.push_rejection(
+            "background_auto_mutation_run_id_required",
+            "background auto-mutation planning requires a run id",
+        );
+    }
+    if profile_id.trim().is_empty() {
+        report.push_rejection(
+            "background_auto_mutation_profile_required",
+            "background auto-mutation planning requires a profile id",
+        );
+    }
+    if candidate.target_ref.trim().is_empty() {
+        report.push_rejection(
+            "background_auto_mutation_target_required",
+            "background auto-mutation target must not be empty",
+        );
+    }
+    if candidate.provider_generated && !candidate.human_approved && !candidate.admin_requested {
+        report.push_rejection(
+            "background_provider_output_requires_review",
+            "provider-generated background memory mutations require human or admin approval",
+        );
+    }
+    if candidate
+        .confidence
+        .is_some_and(|confidence| confidence < min_confidence)
+    {
+        report.push_rejection(
+            "background_auto_mutation_confidence_too_low",
+            "background auto-mutation confidence is below the required threshold",
+        );
+    }
+    let audit_hash = stable_hash64(&format!(
+        "{run_id}:{profile_id}:{:?}:{}",
+        candidate.action, candidate.target_ref
+    ));
+    BackgroundMemoryAutoMutationDecision {
+        accepted: report.accepted,
+        action: candidate.action,
+        target_ref: candidate.target_ref,
+        audit_ref: report
+            .accepted
+            .then(|| format!("background-memory-auto-mutation:{audit_hash:016x}")),
+        diagnostics: report.diagnostics,
+    }
+}
+
 pub fn plan_curator_governance_transition(
     input: CuratorGovernancePlanInput,
 ) -> CuratorGovernancePlan {
@@ -2404,6 +2730,117 @@ mod tests {
                 .map(|diagnostic| diagnostic.reason_code.as_str()),
             Some("curator_candidate_stale")
         );
+    }
+
+    #[test]
+    fn curator_lifecycle_planner_owns_stale_archive_and_skip_policy() {
+        let policy = CuratorLifecyclePolicyInput {
+            stale_after_ms: 1_000,
+            archive_after_ms: 5_000,
+        };
+        let stale = plan_curator_lifecycle_transition(CuratorLifecyclePlanInput {
+            candidate: CuratorLifecycleCandidateSnapshot {
+                candidate_id: "curator:lifecycle:idle".to_string(),
+                status: CuratorStoredCandidateStatus::Proposed,
+                lifecycle_state: Some(CuratorCandidateLifecycleState::Active),
+                lifecycle_reason_code: None,
+                age_since_activity_ms: Some(1_500),
+                stale_duration_ms: None,
+                activity_after_stale: false,
+                source_current: true,
+                source_current_reason_code: None,
+                pinned: false,
+            },
+            now: "2026-07-08T00:00:00.000Z".to_string(),
+            policy: policy.clone(),
+        });
+        assert!(stale.accepted);
+        assert_eq!(stale.to, CuratorLifecycleTransitionTarget::Stale);
+        assert_eq!(stale.reason_code.as_deref(), Some("candidate_idle_stale"));
+        assert_eq!(
+            stale.resulting_lifecycle_state,
+            Some(CuratorCandidateLifecycleState::Stale)
+        );
+
+        let archived = plan_curator_lifecycle_transition(CuratorLifecyclePlanInput {
+            candidate: CuratorLifecycleCandidateSnapshot {
+                candidate_id: "curator:lifecycle:archive".to_string(),
+                status: CuratorStoredCandidateStatus::Previewed,
+                lifecycle_state: Some(CuratorCandidateLifecycleState::Stale),
+                lifecycle_reason_code: Some("candidate_idle_stale".to_string()),
+                age_since_activity_ms: Some(10_000),
+                stale_duration_ms: Some(5_000),
+                activity_after_stale: false,
+                source_current: true,
+                source_current_reason_code: None,
+                pinned: false,
+            },
+            now: "2026-07-08T00:01:00.000Z".to_string(),
+            policy: policy.clone(),
+        });
+        assert_eq!(archived.to, CuratorLifecycleTransitionTarget::Archived);
+        assert_eq!(
+            archived.reason_code.as_deref(),
+            Some("candidate_stale_archive_due")
+        );
+
+        let skipped = plan_curator_lifecycle_transition(CuratorLifecyclePlanInput {
+            candidate: CuratorLifecycleCandidateSnapshot {
+                candidate_id: "curator:lifecycle:pinned".to_string(),
+                status: CuratorStoredCandidateStatus::Proposed,
+                lifecycle_state: Some(CuratorCandidateLifecycleState::Active),
+                lifecycle_reason_code: None,
+                age_since_activity_ms: Some(10_000),
+                stale_duration_ms: None,
+                activity_after_stale: false,
+                source_current: true,
+                source_current_reason_code: None,
+                pinned: true,
+            },
+            now: "2026-07-08T00:02:00.000Z".to_string(),
+            policy,
+        });
+        assert_eq!(skipped.to, CuratorLifecycleTransitionTarget::Skipped);
+        assert_eq!(skipped.reason_code.as_deref(), Some("skill_pinned"));
+    }
+
+    #[test]
+    fn background_auto_mutation_planner_rejects_provider_output_without_review() {
+        let plan = plan_background_memory_auto_mutations(BackgroundMemoryAutoMutationPlanInput {
+            run_id: "background-review-run".to_string(),
+            profile_id: "prime".to_string(),
+            min_confidence: Some(0.95),
+            candidates: vec![
+                BackgroundMemoryAutoMutationCandidate {
+                    action: BackgroundMemoryAutoMutationAction::ApplyProposal,
+                    target_ref: "proposal:provider-generated".to_string(),
+                    provider_generated: true,
+                    human_approved: false,
+                    admin_requested: false,
+                    confidence: Some(0.99),
+                    rationale: Some("provider says apply".to_string()),
+                },
+                BackgroundMemoryAutoMutationCandidate {
+                    action: BackgroundMemoryAutoMutationAction::ApproveProposal,
+                    target_ref: "proposal:admin-reviewed".to_string(),
+                    provider_generated: true,
+                    human_approved: false,
+                    admin_requested: true,
+                    confidence: Some(0.99),
+                    rationale: Some("admin requested review".to_string()),
+                },
+            ],
+        });
+
+        assert_eq!(plan.accepted_count, 1);
+        assert_eq!(plan.rejected_count, 1);
+        assert!(!plan.decisions[0].accepted);
+        assert_eq!(
+            plan.decisions[0].diagnostics[0].reason_code,
+            "background_provider_output_requires_review"
+        );
+        assert!(plan.decisions[1].accepted);
+        assert!(plan.decisions[1].audit_ref.is_some());
     }
 
     #[test]

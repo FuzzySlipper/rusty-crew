@@ -184,6 +184,8 @@ pub const OPERATION_NAMES: &[&str] = &[
     "save_memory_proposal",
     "plan_capture_memory_proposals",
     "plan_curator_governance_transition",
+    "plan_curator_lifecycle_transition",
+    "plan_background_memory_auto_mutations",
     "list_memory_proposals",
     "save_session_activity_digest",
     "list_session_activity_digests",

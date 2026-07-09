@@ -12,6 +12,52 @@ export interface CuratorLifecyclePolicy {
   archiveAfterMs: number;
 }
 
+export type RustCuratorLifecycleTarget =
+  | "active"
+  | "stale"
+  | "archived"
+  | "skipped"
+  | "unchanged";
+
+export interface RustCuratorLifecyclePlanInput {
+  candidate: {
+    candidate_id: string;
+    status: "proposed" | "previewed" | "approved" | "applied";
+    lifecycle_state?: "active" | "stale" | "archived";
+    lifecycle_reason_code?: string;
+    age_since_activity_ms?: number;
+    stale_duration_ms?: number;
+    activity_after_stale: boolean;
+    source_current: boolean;
+    source_current_reason_code?: string;
+    pinned: boolean;
+  };
+  now: string;
+  policy: {
+    stale_after_ms: number;
+    archive_after_ms: number;
+  };
+}
+
+export interface RustCuratorLifecyclePlan {
+  accepted: boolean;
+  candidate_id: string;
+  from?: "active" | "stale" | "archived";
+  to: RustCuratorLifecycleTarget;
+  reason_code?: string;
+  resulting_lifecycle_state?: "active" | "stale" | "archived";
+  audit_ref?: string;
+  receipt_id: string;
+  diagnostics: readonly {
+    reason_code: string;
+    message: string;
+  }[];
+}
+
+export type CuratorLifecyclePlanner = (
+  input: RustCuratorLifecyclePlanInput,
+) => Promise<RustCuratorLifecyclePlan> | RustCuratorLifecyclePlan;
+
 export interface CuratorLifecycleTransition {
   candidateId: string;
   targetRef: string;
@@ -37,6 +83,7 @@ export async function runCuratorLifecycleTransitions(input: {
   store: MemoryCuratorGovernanceStore;
   skillsDir: string;
   now: string;
+  planner: CuratorLifecyclePlanner;
   policy?: Partial<CuratorLifecyclePolicy>;
 }): Promise<CuratorLifecycleReport> {
   const policy = {
@@ -52,68 +99,90 @@ export async function runCuratorLifecycleTransitions(input: {
   let unchanged = 0;
 
   for (const stored of input.store.candidates.values()) {
-    if (stored.status === "applied") {
-      unchanged += 1;
-      continue;
-    }
-    const slug = skillSlugFromTarget(stored.candidate.targetRef);
-    if (slug && (await isPinnedSkill(input.skillsDir, slug))) {
-      pinnedSkipped += 1;
-      transitions.push(transition(stored, "skipped", "skill_pinned"));
-      continue;
-    }
-
     const lifecycle = normalizedLifecycle(stored);
-    if (lifecycle.state === "archived") {
-      archived += 1;
+    const plan = await input.planner(
+      await rustLifecyclePlanInput(input, stored, lifecycle, policy),
+    );
+    if (!plan.accepted) {
+      transitions.push(
+        transition(
+          stored,
+          "skipped",
+          plan.diagnostics[0]?.reason_code ?? "curator_lifecycle_rejected",
+        ),
+      );
       unchanged += 1;
       continue;
     }
-
-    const current = await candidateSourcesCurrent(input.skillsDir, stored);
-    if (lifecycle.state === "stale") {
-      const activityAt = latestActivityAt(stored);
-      if (current && activityAt && activityAt > (lifecycle.staleAt ?? "")) {
+    switch (plan.to) {
+      case "active":
         input.store.updateCandidateLifecycle(
           stored.candidate.candidateId,
-          activeLifecycle(input.now, "candidate_reactivated"),
+          activeLifecycle(
+            input.now,
+            plan.reason_code ?? "candidate_reactivated",
+          ),
         );
         active += 1;
         reactivated += 1;
-        transitions.push(transition(stored, "active", "candidate_reactivated"));
-        continue;
-      }
-      if (elapsedMs(lifecycle.staleAt, input.now) >= policy.archiveAfterMs) {
+        transitions.push(
+          transition(
+            stored,
+            "active",
+            plan.reason_code ?? "candidate_reactivated",
+          ),
+        );
+        break;
+      case "stale":
         input.store.updateCandidateLifecycle(
           stored.candidate.candidateId,
-          archivedLifecycle(input.now, lifecycle.reasonCode ?? "idle_stale"),
+          staleLifecycle(input.now, plan.reason_code ?? "candidate_stale"),
+        );
+        stale += 1;
+        transitions.push(
+          transition(stored, "stale", plan.reason_code ?? "candidate_stale"),
+        );
+        break;
+      case "archived":
+        input.store.updateCandidateLifecycle(
+          stored.candidate.candidateId,
+          archivedLifecycle(input.now, plan.reason_code ?? "idle_stale"),
         );
         archived += 1;
         transitions.push(
-          transition(stored, "archived", "candidate_stale_archive_due"),
+          transition(
+            stored,
+            "archived",
+            plan.reason_code ?? "candidate_stale_archive_due",
+          ),
         );
-        continue;
-      }
-      stale += 1;
-      unchanged += 1;
-      continue;
+        break;
+      case "skipped":
+        if (plan.reason_code === "skill_pinned") pinnedSkipped += 1;
+        unchanged += 1;
+        transitions.push(
+          transition(
+            stored,
+            "skipped",
+            plan.reason_code ?? "candidate_skipped",
+          ),
+        );
+        break;
+      case "unchanged":
+        switch (plan.resulting_lifecycle_state) {
+          case "active":
+            active += 1;
+            break;
+          case "stale":
+            stale += 1;
+            break;
+          case "archived":
+            archived += 1;
+            break;
+        }
+        unchanged += 1;
+        break;
     }
-
-    const reasonCode = current
-      ? idleReason(input.store, stored, input.now, policy)
-      : "source_changed";
-    if (reasonCode) {
-      input.store.updateCandidateLifecycle(
-        stored.candidate.candidateId,
-        staleLifecycle(input.now, reasonCode),
-      );
-      stale += 1;
-      transitions.push(transition(stored, "stale", reasonCode));
-      continue;
-    }
-
-    active += 1;
-    unchanged += 1;
   }
 
   return {
@@ -190,35 +259,82 @@ function latestActivityAt(stored: CuratorStoredCandidate): string | undefined {
   return maxIso(stored.previewedAt, stored.approval?.approvedAt);
 }
 
-function idleReason(
-  store: MemoryCuratorGovernanceStore,
+async function rustLifecyclePlanInput(
+  input: {
+    store: MemoryCuratorGovernanceStore;
+    skillsDir: string;
+    now: string;
+  },
   stored: CuratorStoredCandidate,
-  now: string,
+  lifecycle: CuratorCandidateLifecycle,
   policy: CuratorLifecyclePolicy,
-): string | undefined {
-  const lastActivityAt =
-    latestActivityAt(stored) ??
-    store.batches.get(stored.candidate.batchId)?.generatedAt;
-  if (elapsedMs(lastActivityAt, now) >= policy.staleAfterMs) {
-    return "candidate_idle_stale";
-  }
-  return undefined;
+): Promise<RustCuratorLifecyclePlanInput> {
+  const slug = skillSlugFromTarget(stored.candidate.targetRef);
+  const currentness = await candidateSourcesCurrent(input.skillsDir, stored);
+  const latestActivity = latestActivityAt(stored);
+  const activityAt =
+    latestActivity ??
+    input.store.batches.get(stored.candidate.batchId)?.generatedAt;
+  return {
+    candidate: {
+      candidate_id: stored.candidate.candidateId,
+      status: curatorStoredStatus(stored.status),
+      ...(stored.lifecycle?.state
+        ? { lifecycle_state: stored.lifecycle.state }
+        : {}),
+      ...(lifecycle.reasonCode
+        ? { lifecycle_reason_code: lifecycle.reasonCode }
+        : {}),
+      ...(activityAt
+        ? { age_since_activity_ms: elapsedMs(activityAt, input.now) }
+        : {}),
+      ...(lifecycle.staleAt
+        ? { stale_duration_ms: elapsedMs(lifecycle.staleAt, input.now) }
+        : {}),
+      activity_after_stale: Boolean(
+        latestActivity &&
+        lifecycle.staleAt &&
+        latestActivity > lifecycle.staleAt,
+      ),
+      source_current: currentness.sourceCurrent,
+      ...(currentness.reasonCode
+        ? { source_current_reason_code: currentness.reasonCode }
+        : {}),
+      pinned: Boolean(slug && (await isPinnedSkill(input.skillsDir, slug))),
+    },
+    now: input.now,
+    policy: {
+      stale_after_ms: policy.staleAfterMs,
+      archive_after_ms: policy.archiveAfterMs,
+    },
+  };
+}
+
+function curatorStoredStatus(
+  status: CuratorStoredCandidate["status"],
+): RustCuratorLifecyclePlanInput["candidate"]["status"] {
+  if (status === "previewed") return "previewed";
+  if (status === "approved") return "approved";
+  if (status === "applied") return "applied";
+  return "proposed";
 }
 
 async function candidateSourcesCurrent(
   skillsDir: string,
   stored: CuratorStoredCandidate,
-): Promise<boolean> {
+): Promise<{ sourceCurrent: boolean; reasonCode?: string }> {
   for (const ref of stored.candidate.sourceRefs) {
     if (ref.kind !== "skill" || !ref.hash) continue;
     try {
       const current = await curatorSkillSourceRef(skillsDir, ref.ref);
-      if (current.hash !== ref.hash) return false;
+      if (current.hash !== ref.hash) {
+        return { sourceCurrent: false, reasonCode: "source_changed" };
+      }
     } catch {
-      return false;
+      return { sourceCurrent: false, reasonCode: "source_changed" };
     }
   }
-  return true;
+  return { sourceCurrent: true };
 }
 
 async function isPinnedSkill(

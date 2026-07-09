@@ -35,6 +35,8 @@ interface NativeBridgeMemoryBinding {
   saveMemoryProposalJson(inputJson: string): string;
   planCaptureMemoryProposalsJson(inputJson: string): string;
   planCuratorGovernanceTransitionJson(inputJson: string): string;
+  planCuratorLifecycleTransitionJson(inputJson: string): string;
+  planBackgroundMemoryAutoMutationsJson(inputJson: string): string;
   listMemoryProposalsJson(inputJson: string): string;
   saveSessionActivityDigestJson(inputJson: string): string;
   listSessionActivityDigestsJson(inputJson: string): string;
@@ -51,6 +53,8 @@ type NativeBridgeMemoryMethods = Pick<
   | "saveMemoryProposal"
   | "planCaptureMemoryProposals"
   | "planCuratorGovernanceTransition"
+  | "planCuratorLifecycleTransition"
+  | "planBackgroundMemoryAutoMutations"
   | "listMemoryProposals"
   | "saveSessionActivityDigest"
   | "listSessionActivityDigests"
@@ -88,6 +92,14 @@ export function createNativeBridgeMemoryMethods(
     planCuratorGovernanceTransition: async (input: unknown) =>
       JSON.parse(
         binding.planCuratorGovernanceTransitionJson(JSON.stringify(input)),
+      ) as unknown,
+    planCuratorLifecycleTransition: async (input: unknown) =>
+      JSON.parse(
+        binding.planCuratorLifecycleTransitionJson(JSON.stringify(input)),
+      ) as unknown,
+    planBackgroundMemoryAutoMutations: async (input: unknown) =>
+      JSON.parse(
+        binding.planBackgroundMemoryAutoMutationsJson(JSON.stringify(input)),
       ) as unknown,
     listMemoryProposals: async (query: MemoryProposalQuery) =>
       JSON.parse(

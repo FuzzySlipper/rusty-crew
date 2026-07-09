@@ -291,6 +291,7 @@ import {
 import { postTurnMaintenanceDecision } from "./post-turn-maintenance.js";
 import {
   runCuratorLifecycleTransitions,
+  type CuratorLifecyclePlanner,
   type CuratorLifecycleReport,
 } from "./curator-lifecycle.js";
 import { runStructuredCaptureProvider } from "./capture-producer-provider.js";
@@ -10767,6 +10768,10 @@ async function runServiceCuratorLifecycleTransitions(
     store: state.curator.store,
     skillsDir: curatorSkillsDir(state.curator.runtimeConfig),
     now: state.now(),
+    planner: (request) =>
+      state.bridge.planCuratorLifecycleTransition(
+        request,
+      ) as ReturnType<CuratorLifecyclePlanner>,
   });
   state.curator.lastLifecycleRunAt = report.checkedAt;
   state.curator.lastLifecycleReport = report;

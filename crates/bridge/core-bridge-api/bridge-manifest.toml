@@ -1526,6 +1526,24 @@ errors = "core_protocol::CoreError"
 summary = "Validate curator candidate preview, approval, and apply transitions before TS performs file mutations."
 
 [[operation]]
+name = "plan_curator_lifecycle_transition"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::CuratorLifecyclePlanInput"
+output = "core_protocol::CuratorLifecyclePlan"
+errors = "core_protocol::CoreError"
+summary = "Plan curator candidate lifecycle stale, archive, reactivation, and pinned-skip transitions from factual TS inputs."
+
+[[operation]]
+name = "plan_background_memory_auto_mutations"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::BackgroundMemoryAutoMutationPlanInput"
+output = "core_protocol::BackgroundMemoryAutoMutationPlan"
+errors = "core_protocol::CoreError"
+summary = "Plan and reject or approve background memory auto-mutation requests before any durable mutation can run."
+
+[[operation]]
 name = "list_memory_proposals"
 surface = "stable"
 direction = "ts_to_rust"

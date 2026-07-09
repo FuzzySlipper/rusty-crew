@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import type { AgentId, ProfileId, SessionId } from "@rusty-crew/contracts";
+import { loadNativeBridge } from "@rusty-crew/native-bridge";
 import {
+  type BackgroundMemoryAutoMutationPlanner,
   buildToolContextDiagnosticsReport,
   buildToolRegistryDiagnostics,
   runBackgroundMemorySkillReview,
@@ -11,6 +13,11 @@ import { createMemoryAgentActivityObservationSink } from "./test-support.js";
 const now = "2026-06-20T14:00:00.000Z";
 const profileId = "prime" as ProfileId;
 const sessionId = "session-prime" as SessionId;
+const bridge = await loadNativeBridge();
+const autoMutationPlanner: BackgroundMemoryAutoMutationPlanner = (input) =>
+  bridge.planBackgroundMemoryAutoMutations(
+    input,
+  ) as ReturnType<BackgroundMemoryAutoMutationPlanner>;
 const diagnostics = buildToolContextDiagnosticsReport({
   now,
   session: {
@@ -108,6 +115,18 @@ const result = await runBackgroundMemorySkillReview({
     },
     sink: observationSink,
   },
+  autoMutationRequests: [
+    {
+      action: "apply_proposal",
+      target_ref: "proposal:provider-generated",
+      provider_generated: true,
+      human_approved: false,
+      admin_requested: false,
+      confidence: 0.99,
+      rationale: "provider suggested applying directly",
+    },
+  ],
+  autoMutationPlanner,
 });
 
 assert.equal(result.reviewType, "combined");
@@ -119,6 +138,14 @@ assert.equal(result.resultRef.findingIds.length, result.findingCount);
 assert.equal(result.findingFingerprints.length, result.findingCount);
 assert.equal(
   result.skippedReasons.includes("llm_review_no_session_activity_digests"),
+  true,
+);
+assert.equal(result.autoMutationPlan?.accepted_count, 0);
+assert.equal(result.autoMutationPlan?.rejected_count, 1);
+assert.equal(
+  result.skippedReasons.includes(
+    "background_auto_mutation_rejected:background_provider_output_requires_review",
+  ),
   true,
 );
 assert.equal(observationSink.events.length, 1);

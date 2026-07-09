@@ -10,6 +10,7 @@ import {
   runCuratorLifecycleTransitions,
   type CuratorCandidateBatch,
   type CuratorGovernancePlanner,
+  type CuratorLifecyclePlanner,
   type CuratorMutationCandidate,
 } from "./index.js";
 
@@ -25,6 +26,10 @@ const planner: CuratorGovernancePlanner = (input) =>
   bridge.planCuratorGovernanceTransition(
     input,
   ) as ReturnType<CuratorGovernancePlanner>;
+const lifecyclePlanner: CuratorLifecyclePlanner = (input) =>
+  bridge.planCuratorLifecycleTransition(
+    input,
+  ) as ReturnType<CuratorLifecyclePlanner>;
 const skillsDir = join(root, "skills");
 mkdirSync(skillsDir, { recursive: true });
 writeSkill("archive-me", "Archive Me", "Archive body.");
@@ -60,6 +65,7 @@ const first = await runCuratorLifecycleTransitions({
   store,
   skillsDir,
   now: "2026-06-22T00:00:00.000Z",
+  planner: lifecyclePlanner,
   policy: { staleAfterMs: 1_000, archiveAfterMs: 1_000 },
 });
 assert.equal(first.stale, 2);
@@ -91,6 +97,7 @@ const second = await runCuratorLifecycleTransitions({
   store,
   skillsDir,
   now: "2026-06-22T00:02:00.000Z",
+  planner: lifecyclePlanner,
   policy: { staleAfterMs: 1_000, archiveAfterMs: 1_000 },
 });
 assert.equal(second.reactivated, 1);
@@ -103,6 +110,7 @@ const third = await runCuratorLifecycleTransitions({
   store,
   skillsDir,
   now: "2026-06-22T00:03:00.000Z",
+  planner: lifecyclePlanner,
   policy: { staleAfterMs: 1_000, archiveAfterMs: 1_000 },
 });
 assert.equal(third.archived, 1);

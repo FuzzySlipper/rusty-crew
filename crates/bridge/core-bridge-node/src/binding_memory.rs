@@ -84,6 +84,29 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_curator_lifecycle_transition_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<CuratorLifecyclePlanInput>(&input_json, "curator lifecycle plan")?;
+        let plan = plan_curator_lifecycle_transition(input);
+        serialize_json(&plan, "curator lifecycle plan")
+    }
+
+    #[napi]
+    pub fn plan_background_memory_auto_mutations_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<BackgroundMemoryAutoMutationPlanInput>(
+            &input_json,
+            "background memory auto-mutation plan",
+        )?;
+        let plan = plan_background_memory_auto_mutations(input);
+        serialize_json(&plan, "background memory auto-mutation plan")
+    }
+
+    #[napi]
     pub fn list_memory_proposals_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<MemoryProposalQuery>(&input_json, "memory proposal query")?;

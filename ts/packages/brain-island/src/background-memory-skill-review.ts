@@ -59,6 +59,47 @@ export interface BackgroundReviewPayload {
   reason?: string;
 }
 
+export type BackgroundMemoryAutoMutationAction =
+  | "approve_proposal"
+  | "apply_proposal"
+  | "prune_memory"
+  | "update_skill";
+
+export interface BackgroundMemoryAutoMutationRequest {
+  action: BackgroundMemoryAutoMutationAction;
+  target_ref: string;
+  provider_generated: boolean;
+  human_approved: boolean;
+  admin_requested: boolean;
+  confidence?: number;
+  rationale?: string;
+}
+
+export interface BackgroundMemoryAutoMutationPlan {
+  accepted_count: number;
+  rejected_count: number;
+  receipt_id: string;
+  decisions: readonly {
+    accepted: boolean;
+    action: BackgroundMemoryAutoMutationAction;
+    target_ref: string;
+    audit_ref?: string;
+    diagnostics: readonly {
+      reason_code: string;
+      message: string;
+    }[];
+  }[];
+}
+
+export type BackgroundMemoryAutoMutationPlanner = (input: {
+  run_id: string;
+  profile_id: string;
+  min_confidence?: number;
+  candidates: readonly BackgroundMemoryAutoMutationRequest[];
+}) =>
+  | Promise<BackgroundMemoryAutoMutationPlan>
+  | BackgroundMemoryAutoMutationPlan;
+
 export interface BackgroundReviewRunnerInput {
   runId: string;
   now: string;
@@ -77,6 +118,8 @@ export interface BackgroundReviewRunnerInput {
   capturePlanner?: (
     input: BackgroundReviewCapturePlannerInput,
   ) => Promise<CaptureMemoryProposalPlan>;
+  autoMutationRequests?: readonly BackgroundMemoryAutoMutationRequest[];
+  autoMutationPlanner?: BackgroundMemoryAutoMutationPlanner;
   observation?: {
     identity: AgentObservationIdentity;
     sink?: AgentActivityObservationSink;
@@ -154,6 +197,7 @@ export interface BackgroundReviewResult {
   resultRef: BackgroundReviewResultRef;
   observation?: AgentActivityObservationEvent;
   skippedReasons: readonly string[];
+  autoMutationPlan?: BackgroundMemoryAutoMutationPlan;
   dryRun: boolean;
   startedAt: string;
   finishedAt: string;
@@ -229,6 +273,21 @@ export async function runBackgroundMemorySkillReview(
       skippedReasons.push("capture_proposals_truncated");
     }
   }
+  const autoMutationPlan = await planBackgroundAutoMutations(input);
+  if (input.autoMutationRequests?.length && autoMutationPlan === undefined) {
+    skippedReasons.push("background_auto_mutation_planner_unavailable");
+  }
+  if (autoMutationPlan) {
+    for (const decision of autoMutationPlan.decisions) {
+      if (decision.accepted) continue;
+      skippedReasons.push(
+        ...decision.diagnostics.map(
+          (diagnostic) =>
+            `background_auto_mutation_rejected:${diagnostic.reason_code}`,
+        ),
+      );
+    }
+  }
 
   const candidates = [
     ...diagnosticCandidates(input),
@@ -262,10 +321,24 @@ export async function runBackgroundMemorySkillReview(
     resultRef,
     observation,
     skippedReasons,
+    ...(autoMutationPlan ? { autoMutationPlan } : {}),
     dryRun: input.payload.dryRun ?? true,
     startedAt: input.now,
     finishedAt: input.now,
   };
+}
+
+async function planBackgroundAutoMutations(
+  input: BackgroundReviewRunnerInput,
+): Promise<BackgroundMemoryAutoMutationPlan | undefined> {
+  if (!input.autoMutationRequests?.length || !input.autoMutationPlanner) {
+    return undefined;
+  }
+  return input.autoMutationPlanner({
+    run_id: input.runId,
+    profile_id: input.payload.profileId.toString(),
+    candidates: input.autoMutationRequests,
+  });
 }
 
 function capturePlannerInput(

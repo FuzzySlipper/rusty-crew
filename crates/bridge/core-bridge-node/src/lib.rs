@@ -71,9 +71,11 @@ use rusty_crew_core_persistence::{
     SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
 };
 use rusty_crew_core_protocol::{
-    plan_capture_memory_proposals, plan_curator_governance_transition, AttachmentId, BodyState,
-    BrainWakeProviderStateInput, BrainWakeStreamItem, CaptureMemoryProposalPlanInput,
-    ContextCompactionArtifact, ContextCompactionArtifactQuery, CuratorGovernancePlanInput,
+    plan_background_memory_auto_mutations, plan_capture_memory_proposals,
+    plan_curator_governance_transition, plan_curator_lifecycle_transition, AttachmentId,
+    BackgroundMemoryAutoMutationPlanInput, BodyState, BrainWakeProviderStateInput,
+    BrainWakeStreamItem, CaptureMemoryProposalPlanInput, ContextCompactionArtifact,
+    ContextCompactionArtifactQuery, CuratorGovernancePlanInput, CuratorLifecyclePlanInput,
     DataBankScopeId, MemoryGovernanceDecisionInput, MemoryGovernanceDecisionRecord,
     MemoryProposalEnvelope, MemoryProposalQuery, MemoryProposalRecord, MemorySpaceDescriptor,
     MessageSlotId, MessageVariantId, ModelProviderQuery, ModelProviderRefreshImpactRequest,
