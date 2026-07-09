@@ -117,6 +117,43 @@ Acceptance:
 - the hand-written raw interface shrinks or is moved into generated output;
 - stale binary checks still run before bridge use.
 
+Current implementation:
+
+- `smoke:bridge-native-surface` compares the generated napi declaration against
+  the TypeScript raw `NativeBridgeBinding` interface for operation names,
+  parameter counts, method names, and return-kind shape.
+- Task #5302 added `codegen:native-mapping-inventory` and
+  `check:native-mapping-inventory` for generated-check mapper coverage. The
+  first covered family is model providers.
+
+### 1a. Generated-Check Model Provider Mapper Inventory
+
+`cargo run -p rusty-crew-core-bridge-codegen --
+emit-native-mapping-inventory` now emits
+`ts/packages/native-bridge/src/generated/native-mapping-inventory.ts`.
+
+The artifact currently covers the model-provider bridge family:
+
+- manifest operations:
+  `upsert_model_provider`, `list_model_providers`, `get_model_provider`,
+  `get_model_provider_secret`, `model_provider_refresh_impact`, and
+  `plan_model_provider_refresh`;
+- raw method names derived from those operations;
+- raw DTO field inventories for model provider records, credentials, refresh
+  impacts, affected profiles, refresh plans, and refresh actions, derived from
+  Rust-authored sample serialization.
+
+`npm run check:native-mapping-inventory` does two checks:
+
+1. The generated artifact has not drifted from Rust codegen output.
+2. `@rusty-crew/native-bridge` smoke coverage verifies that
+   `native-bridge/src/index.ts` still declares the raw methods/interfaces and
+   that model-provider converter functions read the generated-checked fields.
+
+This is not a full client generator. It is a generated-check inventory that
+keeps the handwritten ergonomic wrapper reviewable while making field omissions
+fail loudly.
+
 ### 2. Expand Rust Fixture Families For Active UI Surfaces
 
 Add Rust-authored fixture families for bridge surfaces that are now live UI/API

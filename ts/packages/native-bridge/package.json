@@ -11,7 +11,8 @@
   "scripts": {
     "build:native": "napi build --manifest-path ../../../crates/bridge/core-bridge-node/Cargo.toml --release --platform --output-dir native",
     "measure:napi": "tsx src/measure-napi-throughput.ts",
-    "smoke:bridge-validation": "tsx src/smoke-bridge-validation.ts"
+    "smoke:bridge-validation": "tsx src/smoke-bridge-validation.ts",
+    "smoke:native-mapping-inventory": "tsx src/smoke-native-mapping-inventory.ts"
   },
   "dependencies": {
     "@rusty-crew/contracts": "0.1.0",
