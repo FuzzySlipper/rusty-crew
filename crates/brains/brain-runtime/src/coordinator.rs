@@ -1,4 +1,7 @@
-use crate::{BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput};
+use crate::{
+    BufferedBrainHostToolResult, BufferedBrainToolFailurePolicy, BufferedBrainToolPolicyDecision,
+    BufferedNeutralPendingToolRequest, BufferedNeutralToolOutput,
+};
 use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem, SessionId};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -170,6 +173,12 @@ pub struct BufferedBrainTurnDrain {
     pub terminal: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BufferedBrainHostToolSubmission {
+    pub receipt: BufferedBrainToolResultReceipt,
+    pub decision: BufferedBrainToolPolicyDecision,
+}
+
 #[derive(Debug)]
 pub struct BufferedBrainTurnCoordinator {
     module_id: String,
@@ -187,6 +196,9 @@ pub struct BufferedBrainTurnCoordinator {
     undelivered_tool_request_ids: VecDeque<String>,
     submitted_tool_outputs: HashMap<String, BufferedNeutralToolOutput>,
     accepted_tool_outputs: HashMap<String, BufferedNeutralToolOutput>,
+    accepted_host_tool_results: HashMap<String, BufferedBrainHostToolResult>,
+    accepted_host_tool_decisions: HashMap<String, BufferedBrainToolPolicyDecision>,
+    tool_failure_policy: BufferedBrainToolFailurePolicy,
     provider_state_output: Option<BrainWakeProviderStateOutput>,
     terminal: Option<BufferedBrainTurnTerminal>,
 }
@@ -233,6 +245,9 @@ impl BufferedBrainTurnCoordinator {
             undelivered_tool_request_ids: VecDeque::new(),
             submitted_tool_outputs: HashMap::new(),
             accepted_tool_outputs: HashMap::new(),
+            accepted_host_tool_results: HashMap::new(),
+            accepted_host_tool_decisions: HashMap::new(),
+            tool_failure_policy: BufferedBrainToolFailurePolicy::default(),
             provider_state_output: None,
             terminal: None,
         })
@@ -280,6 +295,10 @@ impl BufferedBrainTurnCoordinator {
 
     pub fn submitted_tool_output_count(&self) -> usize {
         self.submitted_tool_outputs.len()
+    }
+
+    pub fn tool_failure_policy(&self) -> &BufferedBrainToolFailurePolicy {
+        &self.tool_failure_policy
     }
 
     pub fn queued_stream_item_count(&self) -> usize {
@@ -420,6 +439,68 @@ impl BufferedBrainTurnCoordinator {
         output: BufferedNeutralToolOutput,
     ) -> Result<BufferedBrainToolResultReceipt, BufferedBrainTurnError> {
         self.submit_tool_output_at(call_id, output, OffsetDateTime::now_utc())
+    }
+
+    pub fn submit_host_tool_result(
+        &mut self,
+        call_id: &str,
+        result: BufferedBrainHostToolResult,
+    ) -> Result<BufferedBrainHostToolSubmission, BufferedBrainTurnError> {
+        self.submit_host_tool_result_at(call_id, result, OffsetDateTime::now_utc())
+    }
+
+    pub fn submit_host_tool_result_at(
+        &mut self,
+        call_id: &str,
+        result: BufferedBrainHostToolResult,
+        now: OffsetDateTime,
+    ) -> Result<BufferedBrainHostToolSubmission, BufferedBrainTurnError> {
+        if let Some(accepted) = self.accepted_host_tool_results.get(call_id) {
+            return if accepted == &result {
+                Ok(BufferedBrainHostToolSubmission {
+                    receipt: BufferedBrainToolResultReceipt::Duplicate,
+                    decision: self
+                        .accepted_host_tool_decisions
+                        .get(call_id)
+                        .expect("accepted host result must retain its policy decision")
+                        .clone(),
+                })
+            } else {
+                Err(BufferedBrainTurnError::ConflictingToolResult {
+                    call_id: call_id.to_string(),
+                })
+            };
+        }
+        if self.phase != BufferedBrainTurnPhase::AwaitingHostTools {
+            return Err(self.invalid_transition("submit host tool result"));
+        }
+        let request = self.pending_tool_requests.get(call_id).ok_or_else(|| {
+            BufferedBrainTurnError::UnknownToolRequest {
+                call_id: call_id.to_string(),
+            }
+        })?;
+        let decision = self.tool_failure_policy.record_result(
+            &request.name,
+            &result,
+            self.limits.max_tool_output_bytes,
+        );
+        self.submit_tool_output_at(call_id, decision.provider_output.clone(), now)?;
+        self.accepted_host_tool_results
+            .insert(call_id.to_string(), result);
+        self.accepted_host_tool_decisions
+            .insert(call_id.to_string(), decision.clone());
+        if let Some(stop) = &decision.stop {
+            self.transition_terminal(
+                BufferedBrainTurnPhase::Failed,
+                stop.reason_code.clone(),
+                stop.report.clone(),
+                now,
+            );
+        }
+        Ok(BufferedBrainHostToolSubmission {
+            receipt: BufferedBrainToolResultReceipt::Accepted,
+            decision,
+        })
     }
 
     pub fn submit_tool_output_at(
@@ -851,6 +932,70 @@ mod tests {
                 call_id: "call-1".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn host_tool_policy_returns_single_denial_to_provider_without_stopping() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        turn.queue_tool_request(tool_request("call-1"))
+            .expect("queue");
+        let submission = turn
+            .submit_host_tool_result(
+                "call-1",
+                BufferedBrainHostToolResult::denied(
+                    "manual review required",
+                    "memory_manual_review_required",
+                ),
+            )
+            .expect("submit denial");
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
+        assert!(submission.decision.provider_output.is_error);
+        assert!(submission.decision.stop.is_none());
+        assert_eq!(
+            turn.take_submitted_tool_output("call-1"),
+            Some(submission.decision.provider_output)
+        );
+    }
+
+    #[test]
+    fn repeated_host_failure_stops_once_with_user_facing_report() {
+        let mut turn = coordinator();
+        turn.start().expect("start");
+        let failure = BufferedBrainHostToolResult::failed(
+            "Tool den_get_document is unavailable",
+            "tool_unavailable",
+            false,
+        );
+
+        turn.queue_tool_request(tool_request("call-1"))
+            .expect("first request");
+        let first = turn
+            .submit_host_tool_result("call-1", failure.clone())
+            .expect("first failure");
+        assert!(first.decision.stop.is_none());
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Running);
+
+        turn.queue_tool_request(tool_request("call-2"))
+            .expect("second request");
+        let second = turn
+            .submit_host_tool_result("call-2", failure.clone())
+            .expect("second failure");
+        let stop = second.decision.stop.expect("stop report");
+        assert_eq!(stop.reason_code, "repeated_tool_failure");
+        assert!(stop.report.contains("Tool failure count this turn: 2."));
+        assert!(stop.report.contains("read_file: tool_unavailable"));
+        assert_eq!(turn.phase(), BufferedBrainTurnPhase::Failed);
+        assert_eq!(
+            turn.terminal().map(|terminal| terminal.summary.as_str()),
+            Some(stop.report.as_str())
+        );
+
+        let duplicate = turn
+            .submit_host_tool_result("call-2", failure)
+            .expect("idempotent duplicate after terminal");
+        assert_eq!(duplicate.receipt, BufferedBrainToolResultReceipt::Duplicate);
+        assert_eq!(turn.tool_failure_policy().total_failures(), 2);
     }
 
     #[test]

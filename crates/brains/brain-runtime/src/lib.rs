@@ -1,6 +1,8 @@
 mod coordinator;
+mod tool_policy;
 
 pub use coordinator::*;
+pub use tool_policy::*;
 
 use rusty_crew_core_protocol::{BrainWakeProviderStateOutput, BrainWakeStreamItem};
 use serde::Serialize;
