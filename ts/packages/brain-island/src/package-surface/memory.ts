@@ -65,6 +65,7 @@ export {
   executeCuratorGovernanceRequest,
   FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
+  NativeCuratorGovernanceStore,
   rollbackCuratorMutation,
 } from "../curator-mutations.js";
 export type {
@@ -81,6 +82,7 @@ export type {
   CuratorStoredCandidate,
   CuratorStoredCandidateStatus,
   CuratorSnapshotRef,
+  PersistableCuratorGovernanceStore,
 } from "../curator-mutations.js";
 export { createCuratorAdminControlExecutor } from "../curator-admin-control.js";
 export type {

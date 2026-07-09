@@ -14,6 +14,7 @@ import {
   curatorSkillSourceRef,
   FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
+  NativeCuratorGovernanceStore,
   rollbackCuratorMutation,
   type CuratorGovernancePlanner,
   type CuratorMutationCandidate,
@@ -203,6 +204,82 @@ const persistedApplied = await reloadedExecutor({
 assert.equal(persistedApplied.status, "applied");
 assert.match(readFileSync(join(skillsDir, "managed.md"), "utf8"), /Persisted/);
 assert.equal(reloadedFileStore.mutations.size, 1);
+
+writeFileSync(
+  join(skillsDir, "native-managed.md"),
+  `---
+title: Native Managed
+summary: Native-backed managed skill.
+---
+
+Native original body.
+`,
+);
+const nativeSourceRef = await curatorSkillSourceRef(
+  skillsDir,
+  "native-managed",
+);
+const nativeCandidate: CuratorMutationCandidate = {
+  ...patchCandidate,
+  candidateId: "curator:batch-1:native-managed",
+  fingerprint: "candidate-fingerprint-native",
+  sourceRefs: [nativeSourceRef],
+  targetRef: "skill:native-managed",
+  mutation: {
+    type: "skill_patch",
+    slug: "native-managed",
+    oldString: "Native original body.",
+    newString: "Native persisted body.",
+  },
+};
+const nativeStore = await NativeCuratorGovernanceStore.load({
+  bridge,
+  now: "2026-06-21T14:00:00.000Z",
+  scopeId: "smoke-curator",
+});
+nativeStore.upsertCandidate(nativeCandidate);
+await nativeStore.persist();
+const nativeExecutor = createCuratorGovernanceExecutor({
+  skillsDir,
+  store: nativeStore,
+  now: () => new Date("2026-06-21T14:00:00.000Z"),
+  planner,
+});
+const nativeApproval = await nativeExecutor({
+  action: "approve_candidate",
+  candidateId: nativeCandidate.candidateId,
+  reason: "persist approval through rust storage",
+  dryRun: false,
+});
+assert.equal(nativeApproval.status, "approved");
+
+const reloadedNativeStore = await NativeCuratorGovernanceStore.load({
+  bridge,
+  now: "2026-06-21T14:01:00.000Z",
+  scopeId: "smoke-curator",
+});
+assert.equal(
+  reloadedNativeStore.getCandidate(nativeCandidate.candidateId)?.status,
+  "approved",
+);
+const reloadedNativeExecutor = createCuratorGovernanceExecutor({
+  skillsDir,
+  store: reloadedNativeStore,
+  now: () => new Date("2026-06-21T14:01:00.000Z"),
+  planner,
+});
+const nativeApplied = await reloadedNativeExecutor({
+  action: "apply_candidate",
+  candidateId: nativeCandidate.candidateId,
+  reason: "apply native-backed approval",
+  dryRun: false,
+});
+assert.equal(nativeApplied.status, "applied");
+assert.match(
+  readFileSync(join(skillsDir, "native-managed.md"), "utf8"),
+  /Native persisted body/,
+);
+assert.equal(reloadedNativeStore.mutations.size, 1);
 
 await bridge.shutdownEngine({ engine, drainTimeoutMs: 1_000 });
 console.log("curator mutation smoke passed");

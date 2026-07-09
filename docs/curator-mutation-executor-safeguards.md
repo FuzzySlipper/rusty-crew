@@ -19,7 +19,7 @@ memory editor, Den writer, or shell executor.
 `createCuratorGovernanceExecutor` accepts:
 
 - a skills root;
-- a `MemoryCuratorGovernanceStore`;
+- a curator governance store;
 - optional snapshot root and clock;
 - optional scan callback for `request_scan`.
 
@@ -80,15 +80,20 @@ Rollback restores from the snapshot record:
 - sidecar directories or sidecar files are restored or removed according to
   their snapshot state.
 
-Rollback is recorded on the in-memory mutation record as `rolled_back` or
-`rollback_failed`. Durable rollback audit belongs in the future persistence and
-admin-route work.
+Rollback is recorded on the governance mutation record as `rolled_back` or
+`rollback_failed`. In the running service this record is persisted through the
+Rust-owned native `simple_kv` module, while the filesystem snapshot itself
+remains a skill-storage artifact under the configured backup/snapshot root.
 
 ## Current Limits
 
-`MemoryCuratorGovernanceStore` is a smoke/test scaffold, not durable truth.
-Future tasks should move candidate, approval, mutation, rollback, and audit
-records into Rust-owned or otherwise durable governance persistence.
+`MemoryCuratorGovernanceStore` and `FileCuratorGovernanceStore` are smoke/test
+and local compatibility scaffolds. The running service uses
+`NativeCuratorGovernanceStore`, which loads and saves candidate, approval,
+mutation, rollback, and audit snapshot metadata through Rust-owned Crew
+storage. A future task may replace the whole-snapshot simple-kv representation
+with narrower curator-specific repository tables, but the service no longer
+depends on TypeScript JSON files as production truth.
 
 The executor does not emit observation activity directly yet. Observation and
 admin/control integration remain follow-up tasks so that display projection does

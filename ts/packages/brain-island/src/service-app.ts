@@ -300,11 +300,12 @@ import {
 } from "./curator-skill-admin.js";
 import {
   createCuratorGovernanceExecutor,
-  FileCuratorGovernanceStore,
   MemoryCuratorGovernanceStore,
+  NativeCuratorGovernanceStore,
   rollbackCuratorMutation,
   type CuratorGovernancePlanner,
   type CuratorMutationCandidate,
+  type PersistableCuratorGovernanceStore,
 } from "./curator-mutations.js";
 import type {
   CuratorExecuteContext,
@@ -821,7 +822,8 @@ interface ServiceSchedulerHeartbeatState {
 }
 
 interface ServiceCuratorRuntime {
-  readonly store: MemoryCuratorGovernanceStore;
+  readonly store: MemoryCuratorGovernanceStore &
+    PersistableCuratorGovernanceStore;
   executor: NonNullable<CuratorExecuteContext["executor"]>;
   runtimeConfig: RustyCrewRuntimeConfig;
   lastRunAt?: string;
@@ -882,7 +884,7 @@ export async function createRustyCrewServiceApp(
       runtimeConfig,
       options.adapterFactories,
     );
-    const curator = createServiceCuratorRuntime({
+    const curator = await createServiceCuratorRuntime({
       config,
       runtimeConfig,
       bridge,
@@ -2660,15 +2662,17 @@ function channelWakePoliciesByBinding(
   return policies;
 }
 
-function createServiceCuratorRuntime(input: {
+async function createServiceCuratorRuntime(input: {
   config: RustyCrewServiceConfig;
   runtimeConfig: RustyCrewRuntimeConfig;
   bridge: NativeBridgeModule;
   now: () => string;
-}): ServiceCuratorRuntime {
-  const store = new FileCuratorGovernanceStore(
-    join(input.config.paths.dataDir, "data", "curator-governance.json"),
-  );
+}): Promise<ServiceCuratorRuntime> {
+  const store = await NativeCuratorGovernanceStore.load({
+    bridge: input.bridge,
+    now: input.now(),
+    scopeId: "service",
+  });
   const runtime: ServiceCuratorRuntime = {
     store,
     runtimeConfig: input.runtimeConfig,
@@ -5237,8 +5241,10 @@ function wakeMaintenanceContext(
     saveSessionActivityDigest: async (digest) => {
       await state.bridge.saveSessionActivityDigest(digest);
     },
-    upsertCuratorBatch: (batch, mutations) =>
-      state.curator.store.upsertBatch(batch, mutations),
+    upsertCuratorBatch: async (batch, mutations) => {
+      state.curator.store.upsertBatch(batch, mutations);
+      await state.curator.store.persist();
+    },
     setCuratorLastRunAt: (value) => {
       state.curator.lastRunAt = value;
     },

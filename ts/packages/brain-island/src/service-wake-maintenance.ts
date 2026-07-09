@@ -44,7 +44,7 @@ export interface ServiceWakeMaintenanceContext {
   upsertCuratorBatch(
     batch: CuratorCandidateBatch,
     mutations: readonly CuratorMutationCandidate[],
-  ): void;
+  ): void | Promise<void>;
   setCuratorLastRunAt(value: string): void;
   mutationForCuratorCandidate(
     candidate: CuratorCandidateBatch["candidates"][number],
@@ -205,7 +205,7 @@ export async function runPostTurnMaintenance(input: {
     maxCandidates: 1,
     dryRun: true,
   });
-  input.context.upsertCuratorBatch(
+  await input.context.upsertCuratorBatch(
     batch,
     batch.candidates.flatMap((candidate) =>
       input.context.mutationForCuratorCandidate(candidate),

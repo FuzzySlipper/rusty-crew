@@ -15,6 +15,7 @@ import type {
 import { CuratorExecuteError } from "./planning-tools.js";
 import { loadSkill } from "./profile-loading.js";
 import { skillManageTool, type SkillManagementResult } from "./skills-tools.js";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import type {
   CuratorCandidate,
   CuratorCandidateBatch,
@@ -136,6 +137,10 @@ export interface CuratorGovernanceStoreSnapshot {
   batches: readonly CuratorCandidateBatch[];
   candidates: readonly CuratorStoredCandidate[];
   mutations: readonly CuratorMutationRecord[];
+}
+
+export interface PersistableCuratorGovernanceStore {
+  persist(): void | Promise<void>;
 }
 
 export type RustCuratorGovernanceAction =
@@ -373,8 +378,74 @@ export class FileCuratorGovernanceStore extends MemoryCuratorGovernanceStore {
     return stored;
   }
 
-  private persist(): void {
+  persist(): void {
     writeGovernanceSnapshot(this.stateFilePath, this.snapshot());
+  }
+}
+
+export class NativeCuratorGovernanceStore
+  extends MemoryCuratorGovernanceStore
+  implements PersistableCuratorGovernanceStore
+{
+  static readonly scopeType = "curator_governance";
+  static readonly defaultScopeId = "default";
+  static readonly snapshotKey = "snapshot";
+
+  static async load(input: {
+    bridge: Pick<NativeBridgeModule, "listSimpleKv" | "putSimpleKv">;
+    now: string;
+    scopeId?: string;
+  }): Promise<NativeCuratorGovernanceStore> {
+    const scopeId =
+      input.scopeId ?? NativeCuratorGovernanceStore.defaultScopeId;
+    const [record] = await input.bridge.listSimpleKv({
+      scopeType: NativeCuratorGovernanceStore.scopeType,
+      scopeId,
+      keyPrefix: NativeCuratorGovernanceStore.snapshotKey,
+      limit: 1,
+      now: input.now,
+    });
+    return new NativeCuratorGovernanceStore({
+      bridge: input.bridge,
+      scopeId,
+      now: () => input.now,
+      ...(record
+        ? {
+            snapshot: JSON.parse(
+              record.valueJson,
+            ) as CuratorGovernanceStoreSnapshot,
+          }
+        : {}),
+    });
+  }
+
+  private readonly bridge: Pick<
+    NativeBridgeModule,
+    "listSimpleKv" | "putSimpleKv"
+  >;
+  private readonly scopeId: string;
+  private readonly now: () => string;
+
+  private constructor(input: {
+    bridge: Pick<NativeBridgeModule, "listSimpleKv" | "putSimpleKv">;
+    scopeId: string;
+    now: () => string;
+    snapshot?: CuratorGovernanceStoreSnapshot;
+  }) {
+    super(input.snapshot);
+    this.bridge = input.bridge;
+    this.scopeId = input.scopeId;
+    this.now = input.now;
+  }
+
+  async persist(): Promise<void> {
+    await this.bridge.putSimpleKv({
+      scopeType: NativeCuratorGovernanceStore.scopeType,
+      scopeId: this.scopeId,
+      key: NativeCuratorGovernanceStore.snapshotKey,
+      valueJson: JSON.stringify(this.snapshot()),
+      now: this.now(),
+    });
   }
 }
 
@@ -398,6 +469,7 @@ export async function executeCuratorGovernanceRequest(
       }
       const batch = await options.scan(request);
       options.store.upsertBatch(batch);
+      await persistCuratorStore(options.store);
       return receipt(request, "requested", {
         auditRef: batch.reportId,
         summary: `scan produced ${batch.candidateCount} candidate(s)`,
@@ -423,6 +495,7 @@ export async function executeCuratorGovernanceRequest(
         true,
       );
       options.store.recordPreview(stored.candidate.candidateId, now);
+      await persistCuratorStore(options.store);
       return receipt(request, "previewed", {
         receiptId: plan.receipt_id,
         auditRef: plan.audit_ref,
@@ -450,6 +523,7 @@ export async function executeCuratorGovernanceRequest(
         approvedAt: now,
         fingerprint: stored.candidate.fingerprint,
       });
+      await persistCuratorStore(options.store);
       return receipt(request, "approved", {
         receiptId: plan.receipt_id,
         auditRef: plan.audit_ref,
@@ -508,6 +582,7 @@ export async function executeCuratorGovernanceRequest(
         management,
       };
       options.store.recordApplied(record);
+      await persistCuratorStore(options.store);
       return receipt(request, "applied", {
         receiptId: plan.receipt_id,
         auditRef: plan.audit_ref ?? mutationId,
@@ -526,9 +601,11 @@ export async function rollbackCuratorMutation(
   try {
     await restoreSnapshot(record.snapshot);
     store.recordRollback(mutationId, "rolled_back");
+    await persistCuratorStore(store);
     return store.mutations.get(mutationId)!;
   } catch (error) {
     store.recordRollback(mutationId, "rollback_failed");
+    await persistCuratorStore(store);
     throw new CuratorExecuteError(
       error instanceof CuratorExecuteError
         ? error.reasonCode
@@ -786,6 +863,15 @@ function requiredCandidate(
   const stored = store.getCandidate(candidateId);
   if (!stored) throw new CuratorExecuteError("curator_candidate_not_found");
   return stored;
+}
+
+async function persistCuratorStore(
+  store: MemoryCuratorGovernanceStore,
+): Promise<void> {
+  const persist = (store as Partial<PersistableCuratorGovernanceStore>).persist;
+  if (persist) {
+    await persist.call(store);
+  }
 }
 
 function loadGovernanceSnapshot(
