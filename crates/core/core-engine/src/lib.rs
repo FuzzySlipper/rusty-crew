@@ -4,6 +4,7 @@ mod body_queue;
 mod chat_store;
 mod delegation_store;
 mod memory_spaces;
+mod memory_store;
 mod provider_state_store;
 mod roleplay_lore_store;
 mod scheduler;
@@ -22,6 +23,7 @@ use delegation_store::{
     save_delegated_worker_run_requested, update_delegated_worker_run_status,
     update_delegated_worker_run_status_by_session,
 };
+use memory_store::CrewMemoryStore;
 use provider_state_store::{
     clear_provider_state as clear_provider_state_store,
     list_provider_state_diagnostics as list_provider_state_store_diagnostics,
@@ -1385,7 +1387,7 @@ impl CoreEngine {
         &self,
         query: &ProfileMemoryQuery,
     ) -> CoreResult<Vec<ProfileMemoryRecord>> {
-        self.store.memory().list_profile_memory(query)
+        CrewMemoryStore::list_profile_memory(&self.store, query)
     }
 
     pub fn list_memory_space_descriptors(&self) -> CoreResult<Vec<MemorySpaceDescriptor>> {
@@ -1399,16 +1401,14 @@ impl CoreEngine {
         &self,
         query: &SessionMemoryQuery,
     ) -> CoreResult<Vec<SessionMemoryRecord>> {
-        self.store.memory().query_session_memory_records(query)
+        CrewMemoryStore::query_session_memory_records(&self.store, query)
     }
 
     pub fn build_session_memory_prompt_context(
         &self,
         query: &BranchAwareSessionMemoryQuery,
     ) -> CoreResult<SessionMemoryPromptContext> {
-        self.store
-            .memory()
-            .build_session_memory_prompt_context(query)
+        CrewMemoryStore::build_session_memory_prompt_context(&self.store, query)
     }
 
     pub fn save_memory_proposal(
@@ -1420,57 +1420,49 @@ impl CoreEngine {
         if proposal.created_at.is_none() {
             proposal.created_at = Some(now.clone());
         }
-        self.store
-            .memory()
-            .save_memory_proposal(&proposal, &descriptor, &now)
+        CrewMemoryStore::save_memory_proposal(&self.store, &proposal, &descriptor, &now)
     }
 
     pub fn list_memory_proposals(
         &self,
         query: &MemoryProposalQuery,
     ) -> CoreResult<Vec<MemoryProposalRecord>> {
-        self.store.memory().list_memory_proposals(query)
+        CrewMemoryStore::list_memory_proposals(&self.store, query)
     }
 
     pub fn save_session_activity_digest(
         &self,
         digest: &SessionActivityDigest,
     ) -> CoreResult<SessionActivityDigest> {
-        self.store.memory().save_session_activity_digest(digest)
+        CrewMemoryStore::save_session_activity_digest(&self.store, digest)
     }
 
     pub fn list_session_activity_digests(
         &self,
         query: &SessionActivityDigestQuery,
     ) -> CoreResult<Vec<SessionActivityDigest>> {
-        self.store.memory().list_session_activity_digests(query)
+        CrewMemoryStore::list_session_activity_digests(&self.store, query)
     }
 
     pub fn save_context_compaction_artifact(
         &self,
         artifact: &ContextCompactionArtifact,
     ) -> CoreResult<ContextCompactionArtifact> {
-        self.store
-            .conversation()
-            .save_context_compaction_artifact(artifact)
+        CrewMemoryStore::save_context_compaction_artifact(&self.store, artifact)
     }
 
     pub fn list_context_compaction_artifacts(
         &self,
         query: &ContextCompactionArtifactQuery,
     ) -> CoreResult<Vec<ContextCompactionArtifact>> {
-        self.store
-            .conversation()
-            .list_context_compaction_artifacts(query)
+        CrewMemoryStore::list_context_compaction_artifacts(&self.store, query)
     }
 
     pub fn record_memory_governance_decision(
         &self,
         decision: &MemoryGovernanceDecisionInput,
     ) -> CoreResult<MemoryGovernanceDecisionRecord> {
-        self.store
-            .memory()
-            .record_memory_governance_decision(decision, &self.now())
+        CrewMemoryStore::record_memory_governance_decision(&self.store, decision, &self.now())
     }
 
     fn memory_space_descriptor(
@@ -1494,9 +1486,7 @@ impl CoreEngine {
         target: &ProfileMemoryTarget,
         key: &str,
     ) -> CoreResult<Option<ProfileMemoryRecord>> {
-        self.store
-            .memory()
-            .get_profile_memory(profile_id, target, key)
+        CrewMemoryStore::get_profile_memory(&self.store, profile_id, target, key)
     }
 
     pub fn add_profile_memory(
@@ -1505,7 +1495,7 @@ impl CoreEngine {
         caps: &ProfileMemoryCaps,
     ) -> CoreResult<ProfileMemoryRecord> {
         write.now = self.now();
-        self.store.memory().add_profile_memory(&write, caps)
+        CrewMemoryStore::add_profile_memory(&self.store, &write, caps)
     }
 
     pub fn replace_profile_memory(
@@ -1514,14 +1504,14 @@ impl CoreEngine {
         caps: &ProfileMemoryCaps,
     ) -> CoreResult<ProfileMemoryRecord> {
         replace.write.now = self.now();
-        self.store.memory().replace_profile_memory(&replace, caps)
+        CrewMemoryStore::replace_profile_memory(&self.store, &replace, caps)
     }
 
     pub fn remove_profile_memory(
         &self,
         delete: &ProfileMemoryDelete,
     ) -> CoreResult<ProfileMemoryRecord> {
-        self.store.memory().remove_profile_memory(delete)
+        CrewMemoryStore::remove_profile_memory(&self.store, delete)
     }
 
     pub fn search_runtime(

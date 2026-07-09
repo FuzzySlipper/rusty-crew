@@ -203,13 +203,30 @@ leaving Den memory and generic Crew memory as separate future slices. The
 fake-backed `chat_layer_assignment_uses_fake_roleplay_lore_store` test proves a
 roleplay-lore operation without SQLite/Postgres.
 
+### Crew memory store port
+
+Task #5316 extracted Crew memory storage behind `CrewMemoryStore` in
+`crates/core/core-engine/src/memory_store.rs`.
+
+The port covers Crew-owned memory concepts:
+
+- profile dense memory;
+- session memory records and prompt context;
+- memory proposals and governance decisions;
+- session activity digests;
+- context compaction artifacts.
+
+Roleplay lore remains on the roleplay-specific port, runtime search remains an
+admin/runtime concern, and Den memory remains an external adapter concept
+rather than an alternate Crew storage path. The fake-backed
+`session_activity_digests_use_fake_memory_store` test proves a Crew memory
+operation without SQLite/Postgres.
+
 ## Remaining Extraction Tasks
 
 Continue in domain-sized patches rather than one monolithic trait:
 
-1. Extract memory store ports for profile/session memory, proposals,
-   governance, activity digests, compaction artifacts, and prompt context.
-2. Extract runtime admin store ports for profile/model admin, runtime counters,
+1. Extract runtime admin store ports for profile/model admin, runtime counters,
    diagnostics, maintenance, service/module data, runtime search, and simple
    key/value state.
 
