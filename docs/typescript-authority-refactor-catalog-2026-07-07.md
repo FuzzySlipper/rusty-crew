@@ -12,6 +12,12 @@ target is durable authority code: validation, orchestration, lifecycle,
 selection policy, persistence semantics, cross-record consistency, and provider
 loops that are easier to make reliable in Rust.
 
+Read this catalog with
+`docs/migration-task-semantics-audit-2026-07-09.md`: a heading here names a
+migration target, not a claim that authority already moved. Completed work
+should be described as `migrated`, `ratcheted`, `certified-current-boundary`,
+`planned`, or `residual-deferred` according to the audit vocabulary.
+
 ## Current TypeScript Footprint
 
 Measured in the current working tree:
