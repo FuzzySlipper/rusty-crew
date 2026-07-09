@@ -2,6 +2,262 @@
 
 export const nativeMappingInventory = {
   "families": {
+    "brainProvider": {
+      "directNativeMethods": [
+        "registerBrainImplementation",
+        "replaceBrainImplementation",
+        "unregisterBrainImplementationForProfile",
+        "submitBrainEvent",
+        "buildBrainWakeRequest",
+        "buildBrainWakeRequestForSession",
+        "getBuffer",
+        "releaseBuffer"
+      ],
+      "dtoFields": {
+        "BrainAction": [
+          "capacity_request",
+          "correlation_id",
+          "expected_output",
+          "fan_out_failure_policy",
+          "fan_out_group_id",
+          "fan_out_max_concurrency",
+          "parent_consumption",
+          "priority",
+          "profile_id",
+          "prompt",
+          "resource_limits",
+          "task_id",
+          "timeout_ms",
+          "type"
+        ],
+        "BrainActionBatch": [
+          "actions",
+          "session_id",
+          "wake_id"
+        ],
+        "BrainEventEnvelope": [
+          "event",
+          "session_id",
+          "wake_id"
+        ],
+        "BrainImplementationRegistration": [
+          "implementation_id",
+          "model_config",
+          "profile_id",
+          "provider_state_scope",
+          "strategy",
+          "tool_profile"
+        ],
+        "BrainModelConfig": [
+          "max_output_tokens",
+          "model_name",
+          "provider",
+          "temperature_milli"
+        ],
+        "BrainProviderStateScope": [
+          "profile_fingerprint",
+          "provider_fingerprint"
+        ],
+        "BrainStrategyMetadata": [
+          "module_id",
+          "provider_state",
+          "strategy_id"
+        ],
+        "BrainWakeAccepted": [
+          "accepted",
+          "wake_id"
+        ],
+        "BrainWakeFailure": [
+          "kind",
+          "message",
+          "session_id",
+          "wake_id"
+        ],
+        "BrainWakeProviderStateInput": [
+          "expires_at",
+          "module_id",
+          "payload",
+          "payload_version",
+          "profile_fingerprint",
+          "provider_fingerprint",
+          "strategy_id"
+        ],
+        "BrainWakeProviderStateOutput": [
+          "state",
+          "type"
+        ],
+        "BrainWakeProviderStateUpdate": [
+          "module_id",
+          "payload",
+          "payload_version",
+          "profile_fingerprint",
+          "provider_fingerprint",
+          "strategy_id",
+          "ttl_ms"
+        ],
+        "BrainWakeRequest": [
+          "body_state",
+          "brain",
+          "provider_state",
+          "role_assembly",
+          "session_id",
+          "system_prompt",
+          "wake_id"
+        ],
+        "BrainWakeStreamEventItem": [
+          "event",
+          "type"
+        ],
+        "BrainWakeStreamResult": [
+          "stream"
+        ],
+        "CompletionPacket": [
+          "session_id",
+          "status",
+          "summary"
+        ],
+        "NativeBufferedBrainRunCleanupModuleReport": [
+          "active_runs",
+          "cancelled_nonterminal_runs",
+          "module_label",
+          "removed_runs",
+          "terminal_runs"
+        ],
+        "NativeBufferedBrainRunCleanupSummary": [
+          "active_runs",
+          "cancelled_nonterminal_runs",
+          "modules",
+          "removed_runs",
+          "terminal_runs"
+        ],
+        "NativeBufferedBrainRunDiagnostic": [
+          "age_ms",
+          "cancelled",
+          "has_error",
+          "last_transition_at",
+          "module_label",
+          "pending_tool_request_count",
+          "queued_stream_item_count",
+          "started_at",
+          "submitted_tool_output_count",
+          "terminal",
+          "wake_id",
+          "wake_timeout_ms"
+        ],
+        "NativeBufferedBrainRunDiagnostics": [
+          "active_run_count",
+          "modules",
+          "runs"
+        ],
+        "NativeBufferedBrainRunModuleDiagnostics": [
+          "active_run_count",
+          "module_label"
+        ],
+        "NativeProviderStateDiagnostic": [
+          "createdAt",
+          "expiresAt",
+          "invalidatedAt",
+          "invalidationReason",
+          "lastWakeId",
+          "moduleId",
+          "payloadBytes",
+          "payloadVersion",
+          "sessionId",
+          "status",
+          "strategyId",
+          "updatedAt"
+        ],
+        "RuntimeBufferView": [
+          "byte_len",
+          "bytes",
+          "handle",
+          "media_type"
+        ],
+        "ToolCallMetadata": [
+          "adapter_id",
+          "binding_id",
+          "catalog_revision",
+          "debug_detail_id",
+          "policy",
+          "profile_id",
+          "server_names",
+          "source",
+          "source_tool_name",
+          "tool_profile_key"
+        ],
+        "ToolCallPolicyMetadata": [
+          "allowed",
+          "archive_cleanup",
+          "cancelled",
+          "denial_reason",
+          "timeout_ms"
+        ]
+      },
+      "namedTypeScriptInterfaces": [
+        "NativeProviderStateDiagnostic",
+        "NativeBufferedBrainRunModuleDiagnostics",
+        "NativeBufferedBrainRunDiagnostic",
+        "NativeBufferedBrainRunDiagnostics",
+        "NativeBufferedBrainRunCleanupModuleReport",
+        "NativeBufferedBrainRunCleanupSummary",
+        "RawBrainWakeStreamItem",
+        "RawBrainAction",
+        "RawBrainEvent",
+        "RawToolCallMetadata",
+        "RawToolCallPolicyMetadata",
+        "RawBrainWakeProviderStateOutput"
+      ],
+      "operationNames": [
+        "wake_brain",
+        "submit_brain_event",
+        "submit_brain_actions",
+        "apply_brain_provider_state_output",
+        "run_openai_responses_brain",
+        "start_openai_responses_brain",
+        "drain_openai_responses_brain_stream",
+        "submit_openai_responses_tool_output",
+        "cancel_openai_responses_brain",
+        "start_pi_agent_brain",
+        "drain_pi_agent_brain_stream",
+        "submit_pi_agent_tool_output",
+        "cancel_pi_agent_brain",
+        "buffered_brain_run_diagnostics",
+        "cleanup_buffered_brain_runs",
+        "provider_state_diagnostics"
+      ],
+      "passthroughWrappers": [
+        "clearBrainProviderState",
+        "runOpenAiResponsesBrain",
+        "startOpenAiResponsesBrain",
+        "drainOpenAiResponsesBrainStream",
+        "submitOpenAiResponsesToolOutput",
+        "cancelOpenAiResponsesBrain",
+        "startPiAgentBrain",
+        "drainPiAgentBrainStream",
+        "submitPiAgentToolOutput",
+        "cancelPiAgentBrain",
+        "providerStateDiagnostics",
+        "bufferedBrainRunDiagnostics",
+        "cleanupBufferedBrainRuns",
+        "diagnosticSubmitBrainActionsJson"
+      ],
+      "rawMethods": [
+        "applyBrainProviderStateOutputJson",
+        "runOpenaiResponsesBrainJson",
+        "startOpenaiResponsesBrainJson",
+        "drainOpenaiResponsesBrainStreamJson",
+        "submitOpenaiResponsesToolOutputJson",
+        "cancelOpenaiResponsesBrainJson",
+        "startPiAgentBrainJson",
+        "drainPiAgentBrainStreamJson",
+        "submitPiAgentToolOutputJson",
+        "cancelPiAgentBrainJson",
+        "providerStateDiagnostics",
+        "bufferedBrainRunDiagnosticsJson",
+        "cleanupBufferedBrainRunsJson",
+        "submitBrainActionsJson"
+      ]
+    },
     "conversation": {
       "dtoFields": {
         "AttachmentLinkRecord": [

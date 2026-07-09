@@ -10,6 +10,7 @@ const memoryWrapperSourcePath = fileURLToPath(
 );
 const bridgeSources = `${source}\n${readFileSync(memoryWrapperSourcePath, "utf8")}`;
 const memory = nativeMappingInventory.families.memory;
+const brainProvider = nativeMappingInventory.families.brainProvider;
 const roleplay = nativeMappingInventory.families.roleplay;
 const conversation = nativeMappingInventory.families.conversation;
 const profileRegistry = nativeMappingInventory.families.profileRegistry;
@@ -17,6 +18,7 @@ const modelProvider = nativeMappingInventory.families.modelProvider;
 
 const nativeBridgeBinding = extractInterface("NativeBridgeBinding");
 assertRawMethods("memory", memory.rawMethods);
+assertRawMethods("brain/provider", brainProvider.rawMethods);
 assertRawMethods("roleplay", roleplay.rawMethods);
 assertRawMethods("conversation", conversation.rawMethods);
 assertRawMethods("profile registry", profileRegistry.rawMethods);
@@ -30,6 +32,75 @@ assertJsonInputWrappers(
   memory.jsonInputRawMethods,
 );
 assertDirectNativeMethods("memory", memory.directNativeMethods);
+assertGeneratedDtoFieldsNonEmpty("brain/provider", brainProvider.dtoFields);
+assertWrapperCalls(
+  "brain/provider",
+  brainProvider.passthroughWrappers,
+  brainProvider.rawMethods,
+);
+assertDirectNativeMethods("brain/provider", brainProvider.directNativeMethods);
+assertNamedBrainProviderInterfaces();
+assertRawReads("toBrainWakeStreamItem", "item", [
+  "item.event.wake_id",
+  "item.event.session_id",
+  "item.event.event",
+  "item.batch.wake_id",
+  "item.batch.session_id",
+  "item.batch.actions",
+  "item.failure.wake_id",
+  "item.failure.session_id",
+  "item.failure.kind",
+  "item.failure.message",
+]);
+assertRawReads("toRawBrainWakeStreamItem", "item", [
+  "item.event.wakeId",
+  "item.event.sessionId",
+  "item.event.event",
+  "item.batch.wakeId",
+  "item.batch.sessionId",
+  "item.batch.actions",
+  "item.failure.wakeId",
+  "item.failure.sessionId",
+  "item.failure.kind",
+  "item.failure.message",
+]);
+assertRawReads("toBrainWakeProviderStateOutput", "output", [
+  "output.state.module_id",
+  "output.state.strategy_id",
+  "output.state.profile_fingerprint",
+  "output.state.provider_fingerprint",
+  "output.state.payload_version",
+  "output.state.payload",
+  "output.state.ttl_ms",
+  "output.reason",
+]);
+assertRawReads("toRawBrainWakeProviderStateOutput", "output", [
+  "output.state.moduleId",
+  "output.state.strategyId",
+  "output.state.profileFingerprint",
+  "output.state.providerFingerprint",
+  "output.state.payloadVersion",
+  "output.state.payload",
+  "output.state.ttlMs",
+  "output.reason",
+]);
+assertRawReads("toToolCallMetadata", "metadata", [
+  "metadata.source",
+  "metadata.adapter_id",
+  "metadata.binding_id",
+  "metadata.server_names",
+  "metadata.profile_id",
+  "metadata.tool_profile_key",
+  "metadata.source_tool_name",
+  "metadata.catalog_revision",
+  "metadata.debug_detail_id",
+  "metadata.policy",
+]);
+assertRawReads("toNativeProviderStateDiagnostic", "raw", [
+  ...brainProvider.dtoFields.NativeProviderStateDiagnostic.map(
+    (field) => `raw.${field}`,
+  ),
+]);
 assertGeneratedDtoFieldsNonEmpty("roleplay", roleplay.dtoFields);
 assertWrapperCalls(
   "roleplay",
@@ -231,6 +302,16 @@ function assertNamedConversationInterfaces() {
   }
 }
 
+function assertNamedBrainProviderInterfaces() {
+  for (const interfaceName of brainProvider.namedTypeScriptInterfaces) {
+    assert(
+      source.includes(`interface ${interfaceName}`) ||
+        source.includes(`type ${interfaceName}`),
+      `brain/provider expected named interface ${interfaceName} in native bridge source`,
+    );
+  }
+}
+
 function assertRawMethods(label: string, methods: readonly string[]) {
   for (const method of methods) {
     assert(
@@ -252,7 +333,7 @@ function assertDirectNativeMethods(label: string, methods: readonly string[]) {
       `NativeBridgeModule is missing generated-checked ${label} direct wrapper ${method}`,
     );
     assert(
-      bridgeSources.includes(`binding.${method}(`),
+      hasBindingCall(method),
       `${label} direct wrapper ${method} must call the matching native method`,
     );
   }
@@ -285,7 +366,7 @@ function assertWrapperCalls(
       `NativeBridgeModule is missing generated-checked ${label} wrapper ${wrapper}`,
     );
     assert(
-      bridgeSources.includes(`binding.${rawMethod}(`),
+      hasBindingCall(rawMethod),
       `${label} wrapper ${wrapper} must call generated-checked raw method ${rawMethod}`,
     );
   }
@@ -303,7 +384,7 @@ function assertJsonInputWrappers(
   );
   for (const [index, wrapper] of wrappers.entries()) {
     const rawMethod = rawMethods[index];
-    const callIndex = bridgeSources.indexOf(`binding.${rawMethod}(`);
+    const callIndex = bindingCallIndex(rawMethod);
     assert.notEqual(
       callIndex,
       -1,
@@ -315,6 +396,20 @@ function assertJsonInputWrappers(
       `${label} wrapper ${wrapper} must pass input through ${rawMethod} with JSON.stringify`,
     );
   }
+}
+
+function hasBindingCall(method: string): boolean {
+  return bindingCallIndex(method) >= 0;
+}
+
+function bindingCallIndex(method: string): number {
+  const direct = bridgeSources.indexOf(`binding.${method}(`);
+  if (direct >= 0) return direct;
+  const pattern = new RegExp(
+    `binding\\s*\\.\\s*${escapeRegExp(method)}\\s*\\(`,
+  );
+  const match = pattern.exec(bridgeSources);
+  return match?.index ?? -1;
 }
 
 function assertDtoFields(dtoFields: Record<string, readonly string[]>) {

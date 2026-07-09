@@ -462,6 +462,66 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "replaceProfileMemory",
         "removeProfileMemory",
     ];
+    let brain_provider_operations = vec![
+        "wake_brain",
+        "submit_brain_event",
+        "submit_brain_actions",
+        "apply_brain_provider_state_output",
+        "run_openai_responses_brain",
+        "start_openai_responses_brain",
+        "drain_openai_responses_brain_stream",
+        "submit_openai_responses_tool_output",
+        "cancel_openai_responses_brain",
+        "start_pi_agent_brain",
+        "drain_pi_agent_brain_stream",
+        "submit_pi_agent_tool_output",
+        "cancel_pi_agent_brain",
+        "buffered_brain_run_diagnostics",
+        "cleanup_buffered_brain_runs",
+        "provider_state_diagnostics",
+    ];
+    let brain_provider_raw_methods = vec![
+        "applyBrainProviderStateOutputJson",
+        "runOpenaiResponsesBrainJson",
+        "startOpenaiResponsesBrainJson",
+        "drainOpenaiResponsesBrainStreamJson",
+        "submitOpenaiResponsesToolOutputJson",
+        "cancelOpenaiResponsesBrainJson",
+        "startPiAgentBrainJson",
+        "drainPiAgentBrainStreamJson",
+        "submitPiAgentToolOutputJson",
+        "cancelPiAgentBrainJson",
+        "providerStateDiagnostics",
+        "bufferedBrainRunDiagnosticsJson",
+        "cleanupBufferedBrainRunsJson",
+        "submitBrainActionsJson",
+    ];
+    let brain_provider_wrappers = vec![
+        "clearBrainProviderState",
+        "runOpenAiResponsesBrain",
+        "startOpenAiResponsesBrain",
+        "drainOpenAiResponsesBrainStream",
+        "submitOpenAiResponsesToolOutput",
+        "cancelOpenAiResponsesBrain",
+        "startPiAgentBrain",
+        "drainPiAgentBrainStream",
+        "submitPiAgentToolOutput",
+        "cancelPiAgentBrain",
+        "providerStateDiagnostics",
+        "bufferedBrainRunDiagnostics",
+        "cleanupBufferedBrainRuns",
+        "diagnosticSubmitBrainActionsJson",
+    ];
+    let brain_provider_direct_methods = vec![
+        "registerBrainImplementation",
+        "replaceBrainImplementation",
+        "unregisterBrainImplementationForProfile",
+        "submitBrainEvent",
+        "buildBrainWakeRequest",
+        "buildBrainWakeRequestForSession",
+        "getBuffer",
+        "releaseBuffer",
+    ];
     let roleplay_operations = vec![
         "plan_roleplay_assistant_alternative",
         "plan_roleplay_session_lifecycle",
@@ -604,6 +664,7 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "plan_model_provider_refresh",
     ];
     ensure_family_operations_exist("memory", &memory_operations)?;
+    ensure_family_operations_exist("brain_provider", &brain_provider_operations)?;
     ensure_family_operations_exist("roleplay", &roleplay_operations)?;
     ensure_family_operations_exist("conversation", &conversation_operations)?;
     ensure_family_operations_exist("profile_registry", &profile_registry_operations)?;
@@ -763,6 +824,28 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
     let context_compaction_artifact = serde_json::to_value(sample_context_compaction_artifact())?;
     let context_compaction_artifact_query =
         serde_json::to_value(sample_context_compaction_artifact_query())?;
+    let brain_registration = serde_json::to_value(sample_brain_implementation_registration())?;
+    let brain_model_config = serde_json::to_value(sample_brain_model_config())?;
+    let brain_strategy = serde_json::to_value(sample_brain_strategy_metadata())?;
+    let brain_provider_state_scope = serde_json::to_value(sample_brain_provider_state_scope())?;
+    let brain_wake_request = serde_json::to_value(sample_brain_wake_request())?;
+    let brain_wake_accepted = serde_json::to_value(sample_brain_wake_accepted())?;
+    let brain_wake_stream_result = serde_json::to_value(BrainWakeStreamResultFixture {
+        stream: sample_brain_wake_stream(),
+    })?;
+    let brain_event_envelope = serde_json::to_value(sample_brain_event_envelope())?;
+    let brain_action_batch = serde_json::to_value(sample_brain_action_batch())?;
+    let brain_action = serde_json::to_value(sample_brain_action())?;
+    let brain_wake_failure = serde_json::to_value(sample_brain_wake_failure())?;
+    let brain_provider_state_input = serde_json::to_value(sample_brain_provider_state_input())?;
+    let brain_provider_state_update = serde_json::to_value(sample_brain_provider_state_update())?;
+    let brain_provider_state_output = serde_json::to_value(sample_brain_provider_state_output())?;
+    let brain_tool_call_metadata = serde_json::to_value(sample_tool_call_metadata())?;
+    let brain_completion_packet = serde_json::to_value(sample_completion_packet())?;
+    let runtime_buffer_view = sample_runtime_buffer_view_value();
+    let native_provider_state_diagnostic = sample_native_provider_state_diagnostic_value();
+    let buffered_brain_run_diagnostics = sample_buffered_brain_run_diagnostics_value();
+    let buffered_brain_run_cleanup_summary = sample_buffered_brain_run_cleanup_summary_value();
     let profile_registry_record = serde_json::to_value(sample_profile_registry_record())?;
     let profile_registry_write = serde_json::to_value(sample_profile_registry_write())?;
     let profile_registry_update = serde_json::to_value(sample_profile_registry_update())?;
@@ -818,6 +901,53 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
                     "SessionActivityDigestQuery": object_keys(&session_activity_digest_query)?,
                     "ContextCompactionArtifact": object_keys(&context_compaction_artifact)?,
                     "ContextCompactionArtifactQuery": object_keys(&context_compaction_artifact_query)?,
+                }
+            },
+            "brainProvider": {
+                "operationNames": brain_provider_operations,
+                "rawMethods": brain_provider_raw_methods,
+                "passthroughWrappers": brain_provider_wrappers,
+                "directNativeMethods": brain_provider_direct_methods,
+                "namedTypeScriptInterfaces": [
+                    "NativeProviderStateDiagnostic",
+                    "NativeBufferedBrainRunModuleDiagnostics",
+                    "NativeBufferedBrainRunDiagnostic",
+                    "NativeBufferedBrainRunDiagnostics",
+                    "NativeBufferedBrainRunCleanupModuleReport",
+                    "NativeBufferedBrainRunCleanupSummary",
+                    "RawBrainWakeStreamItem",
+                    "RawBrainAction",
+                    "RawBrainEvent",
+                    "RawToolCallMetadata",
+                    "RawToolCallPolicyMetadata",
+                    "RawBrainWakeProviderStateOutput"
+                ],
+                "dtoFields": {
+                    "BrainImplementationRegistration": object_keys(&brain_registration)?,
+                    "BrainModelConfig": object_keys(&brain_model_config)?,
+                    "BrainStrategyMetadata": object_keys(&brain_strategy)?,
+                    "BrainProviderStateScope": object_keys(&brain_provider_state_scope)?,
+                    "BrainWakeRequest": object_keys(&brain_wake_request)?,
+                    "BrainWakeAccepted": object_keys(&brain_wake_accepted)?,
+                    "BrainWakeStreamResult": object_keys(&brain_wake_stream_result)?,
+                    "BrainWakeStreamEventItem": object_keys(first_array_item(&brain_wake_stream_result, "stream")?)?,
+                    "BrainEventEnvelope": object_keys(&brain_event_envelope)?,
+                    "BrainActionBatch": object_keys(&brain_action_batch)?,
+                    "BrainAction": object_keys(&brain_action)?,
+                    "BrainWakeFailure": object_keys(&brain_wake_failure)?,
+                    "BrainWakeProviderStateInput": object_keys(&brain_provider_state_input)?,
+                    "BrainWakeProviderStateUpdate": object_keys(&brain_provider_state_update)?,
+                    "BrainWakeProviderStateOutput": object_keys(&brain_provider_state_output)?,
+                    "ToolCallMetadata": object_keys(&brain_tool_call_metadata)?,
+                    "ToolCallPolicyMetadata": object_keys(required_value(&brain_tool_call_metadata, "policy")?)?,
+                    "CompletionPacket": object_keys(&brain_completion_packet)?,
+                    "RuntimeBufferView": object_keys(&runtime_buffer_view)?,
+                    "NativeProviderStateDiagnostic": object_keys(&native_provider_state_diagnostic)?,
+                    "NativeBufferedBrainRunDiagnostics": object_keys(&buffered_brain_run_diagnostics)?,
+                    "NativeBufferedBrainRunModuleDiagnostics": object_keys(first_array_item(&buffered_brain_run_diagnostics, "modules")?)?,
+                    "NativeBufferedBrainRunDiagnostic": object_keys(first_array_item(&buffered_brain_run_diagnostics, "runs")?)?,
+                    "NativeBufferedBrainRunCleanupSummary": object_keys(&buffered_brain_run_cleanup_summary)?,
+                    "NativeBufferedBrainRunCleanupModuleReport": object_keys(first_array_item(&buffered_brain_run_cleanup_summary, "modules")?)?,
                 }
             },
             "roleplay": {
@@ -1751,6 +1881,149 @@ fn sample_brain_wake_stream() -> Vec<BrainWakeStreamItem> {
     ]
 }
 
+fn sample_brain_implementation_registration() -> BrainImplementationRegistration {
+    BrainImplementationRegistration {
+        implementation_id: BrainImplementationId::new("validation-brain"),
+        profile_id: sample_profile_id(),
+        tool_profile: sample_tool_profile(),
+        model_config: sample_brain_model_config(),
+        strategy: Some(sample_brain_strategy_metadata()),
+        provider_state_scope: Some(sample_brain_provider_state_scope()),
+    }
+}
+
+fn sample_brain_model_config() -> BrainModelConfig {
+    BrainModelConfig {
+        provider: "openai-compatible".to_owned(),
+        model_name: "gpt-fixture".to_owned(),
+        temperature_milli: Some(500),
+        max_output_tokens: Some(2048),
+    }
+}
+
+fn sample_brain_strategy_metadata() -> BrainStrategyMetadata {
+    BrainStrategyMetadata {
+        module_id: "openai-responses".to_owned(),
+        strategy_id: "responses-replay-v1".to_owned(),
+        provider_state: BrainProviderStateStrategyMetadata {
+            mode: ProviderStateMode::Optional,
+        },
+    }
+}
+
+fn sample_brain_provider_state_scope() -> BrainProviderStateScope {
+    BrainProviderStateScope {
+        profile_fingerprint: "profile-fingerprint-v1".to_owned(),
+        provider_fingerprint: "provider-fingerprint-v1".to_owned(),
+    }
+}
+
+fn sample_brain_wake_request() -> BrainWakeRequest {
+    BrainWakeRequest {
+        brain: BrainImplementationHandle::new(9),
+        session_id: sample_session_id(),
+        body_state: RuntimeBufferHandle::new(42),
+        system_prompt: RuntimeBufferHandle::new(43),
+        role_assembly: RuntimeBufferHandle::new(44),
+        wake_id: "validation-wake".to_owned(),
+        provider_state: Some(sample_brain_provider_state_input()),
+        provider_state_absence: None,
+    }
+}
+
+fn sample_brain_wake_accepted() -> BrainWakeAccepted {
+    BrainWakeAccepted {
+        wake_id: "validation-wake".to_owned(),
+        accepted: true,
+    }
+}
+
+fn sample_brain_event_envelope() -> BrainEventEnvelope {
+    BrainEventEnvelope {
+        wake_id: "validation-wake".to_owned(),
+        session_id: sample_session_id(),
+        event: BrainEvent::ToolCallStarted {
+            tool_name: "read_file".to_owned(),
+            metadata: Some(sample_tool_call_metadata()),
+        },
+    }
+}
+
+fn sample_brain_action_batch() -> BrainActionBatch {
+    BrainActionBatch {
+        wake_id: "validation-wake".to_owned(),
+        session_id: sample_session_id(),
+        actions: vec![sample_brain_action()],
+    }
+}
+
+fn sample_brain_action() -> BrainAction {
+    BrainAction::RequestDelegation {
+        profile_id: sample_profile_id(),
+        task_id: Some(TaskId::new("task-validation")),
+        prompt: "Review bridge mapping inventory coverage.".to_owned(),
+        expected_output: Some("Findings and validation evidence.".to_owned()),
+        resource_limits: Some(sample_resource_limits()),
+        timeout_ms: Some(300_000),
+        priority: Some(DelegationPriority::Normal),
+        fan_out_group_id: Some("bridge-validation-group".to_owned()),
+        fan_out_max_concurrency: Some(2),
+        fan_out_failure_policy: Some(FanOutFailurePolicy::FailSoft),
+        correlation_id: Some("validation-correlation".to_owned()),
+        parent_consumption: Some(ParentConsumptionPolicy::AwaitCompletion),
+        capacity_request: Some(WorkerPoolCapacityRequest {
+            member_id: "bridge-worker".to_owned(),
+            claim_ttl_ms: Some(60_000),
+            fallback_policy: WorkerPoolCapacityFallbackPolicy::RejectOnNoCapacity,
+        }),
+    }
+}
+
+fn sample_brain_wake_failure() -> BrainWakeFailure {
+    BrainWakeFailure {
+        wake_id: "validation-wake".to_owned(),
+        session_id: sample_session_id(),
+        kind: CoreErrorKind::InternalError,
+        message: "Validation fixture wake failed.".to_owned(),
+    }
+}
+
+fn sample_brain_provider_state_input() -> BrainWakeProviderStateInput {
+    BrainWakeProviderStateInput {
+        module_id: "openai-responses".to_owned(),
+        strategy_id: "responses-replay-v1".to_owned(),
+        profile_fingerprint: "profile-fingerprint-v1".to_owned(),
+        provider_fingerprint: "provider-fingerprint-v1".to_owned(),
+        payload_version: "responses-state-v1".to_owned(),
+        payload: json!({
+            "previous_response_id": "resp_validation",
+            "conversation": "validation"
+        }),
+        expires_at: Some("2026-08-01T00:00:00.000Z".to_owned()),
+    }
+}
+
+fn sample_brain_provider_state_update() -> BrainWakeProviderStateUpdate {
+    BrainWakeProviderStateUpdate {
+        module_id: "openai-responses".to_owned(),
+        strategy_id: "responses-replay-v1".to_owned(),
+        profile_fingerprint: "profile-fingerprint-v1".to_owned(),
+        provider_fingerprint: "provider-fingerprint-v1".to_owned(),
+        payload_version: "responses-state-v2".to_owned(),
+        payload: json!({
+            "previous_response_id": "resp_validation_next",
+            "conversation": "validation"
+        }),
+        ttl_ms: Some(86_400_000),
+    }
+}
+
+fn sample_brain_provider_state_output() -> BrainWakeProviderStateOutput {
+    BrainWakeProviderStateOutput::Replace {
+        state: sample_brain_provider_state_update(),
+    }
+}
+
 fn sample_session_state() -> SessionState {
     SessionState {
         handle: SessionHandle::new(1),
@@ -1764,13 +2037,7 @@ fn sample_session_state() -> SessionState {
             max_duration_ms: None,
             max_delegation_depth: Some(3),
         },
-        tool_profile: ToolProfile {
-            tools: vec![ToolDescriptor {
-                name: "send_message".to_owned(),
-                description: "Send a direct runtime message.".to_owned(),
-                input_schema: Some(RuntimeBufferHandle::new(42)),
-            }],
-        },
+        tool_profile: sample_tool_profile(),
         history_window: Some(SessionHistoryWindow {
             max_messages: Some(200),
         }),
@@ -1778,6 +2045,16 @@ fn sample_session_state() -> SessionState {
         brain_turn_count: 7,
         created_at: sample_timestamp(),
         last_active_at: sample_timestamp(),
+    }
+}
+
+fn sample_tool_profile() -> ToolProfile {
+    ToolProfile {
+        tools: vec![ToolDescriptor {
+            name: "send_message".to_owned(),
+            description: "Send a direct runtime message.".to_owned(),
+            input_schema: Some(RuntimeBufferHandle::new(42)),
+        }],
     }
 }
 
@@ -1789,6 +2066,107 @@ fn sample_agent_message() -> AgentMessage {
         correlation_id: Some("validation-correlation".to_owned()),
         projection: None,
     }
+}
+
+fn sample_tool_call_metadata() -> ToolCallMetadata {
+    ToolCallMetadata {
+        source: ToolCallSource::Mcp,
+        adapter_id: Some(AdapterId::new("den")),
+        binding_id: Some("den-mcp".to_owned()),
+        server_names: vec!["den".to_owned(), "project".to_owned()],
+        profile_id: Some(sample_profile_id()),
+        tool_profile_key: Some("planner".to_owned()),
+        source_tool_name: Some("den.get_task".to_owned()),
+        catalog_revision: Some("catalog-revision-validation".to_owned()),
+        debug_detail_id: Some("debug-detail-validation".to_owned()),
+        policy: Some(ToolCallPolicyMetadata {
+            allowed: Some(true),
+            denial_reason: None,
+            timeout_ms: Some(30_000),
+            cancelled: Some(false),
+            archive_cleanup: Some(false),
+        }),
+    }
+}
+
+fn sample_completion_packet() -> CompletionPacket {
+    CompletionPacket {
+        session_id: sample_session_id(),
+        status: CompletionStatus::Completed,
+        summary: "Delegated validation completed.".to_owned(),
+    }
+}
+
+fn sample_runtime_buffer_view_value() -> Value {
+    json!({
+        "handle": 42,
+        "media_type": APPLICATION_JSON,
+        "byte_len": 64,
+        "bytes": [123, 34, 111, 107, 34, 58, 116, 114, 117, 101, 125]
+    })
+}
+
+fn sample_native_provider_state_diagnostic_value() -> Value {
+    json!({
+        "sessionId": sample_session_id().to_string(),
+        "moduleId": "openai-responses",
+        "strategyId": "responses-replay-v1",
+        "status": "valid",
+        "payloadVersion": "responses-state-v1",
+        "payloadBytes": 128,
+        "createdAt": sample_timestamp(),
+        "updatedAt": sample_timestamp(),
+        "expiresAt": "2026-08-01T00:00:00.000Z",
+        "lastWakeId": "validation-wake",
+        "invalidatedAt": null,
+        "invalidationReason": null
+    })
+}
+
+fn sample_buffered_brain_run_diagnostics_value() -> Value {
+    json!({
+        "active_run_count": 1,
+        "modules": [
+            {
+                "module_label": "OpenAI Responses",
+                "active_run_count": 1
+            }
+        ],
+        "runs": [
+            {
+                "module_label": "OpenAI Responses",
+                "wake_id": "validation-wake",
+                "queued_stream_item_count": 2,
+                "pending_tool_request_count": 1,
+                "submitted_tool_output_count": 0,
+                "age_ms": 250,
+                "wake_timeout_ms": 300000,
+                "terminal": false,
+                "cancelled": false,
+                "has_error": false,
+                "started_at": sample_timestamp(),
+                "last_transition_at": sample_timestamp()
+            }
+        ]
+    })
+}
+
+fn sample_buffered_brain_run_cleanup_summary_value() -> Value {
+    json!({
+        "active_runs": 1,
+        "terminal_runs": 0,
+        "cancelled_nonterminal_runs": 1,
+        "removed_runs": 1,
+        "modules": [
+            {
+                "module_label": "OpenAI Responses",
+                "active_runs": 1,
+                "terminal_runs": 0,
+                "cancelled_nonterminal_runs": 1,
+                "removed_runs": 1
+            }
+        ]
+    })
 }
 
 fn sample_query_page() -> persistence::QueryPage {
