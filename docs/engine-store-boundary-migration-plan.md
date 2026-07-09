@@ -167,17 +167,33 @@ a direct delegate to `core-persistence`, and the fake-backed
 `wake_absence_and_diagnostics_use_fake_provider_state_store` test proves wake
 absence and diagnostics can be exercised without SQLite/Postgres.
 
+### Chat store ports
+
+Task #5314 extracted chat/conversation storage behind chat-domain ports in
+`crates/core/core-engine/src/chat_store.rs`.
+
+The slice uses two ports:
+
+- `ChatConversationStore` owns message slots, variants, branches, snapshots,
+  attachments, data-bank scopes, conversation jumps, and branch-head updates.
+- `ChatEventStore` owns append/query access for the durable chat event log.
+
+`CoreEngine` now routes chat read-model pages, chat event log access, message
+variant operations, conversation branch/snapshot operations, attachment
+operations, and data-bank scope operations through those ports. Context
+compaction artifact methods intentionally remain for the memory/compaction
+store slice. The fake-backed `chat_event_port_uses_fake_store_without_database`
+test proves chat event log behavior without SQLite/Postgres.
+
 ## Remaining Extraction Tasks
 
 Continue in domain-sized patches rather than one monolithic trait:
 
-1. Extract chat store ports for conversation branches, snapshots, slots,
-   variants, attachments, data-bank scopes, read models, and event logs.
-2. Extract roleplay lore store ports for lore layers, entries, recall,
+1. Extract roleplay lore store ports for lore layers, entries, recall,
    capture, promotion, provenance, and recall traces.
-3. Extract memory store ports for profile/session memory, proposals,
+2. Extract memory store ports for profile/session memory, proposals,
    governance, activity digests, compaction artifacts, and prompt context.
-4. Extract runtime admin store ports for profile/model admin, runtime counters,
+3. Extract runtime admin store ports for profile/model admin, runtime counters,
    diagnostics, maintenance, service/module data, runtime search, and simple
    key/value state.
 

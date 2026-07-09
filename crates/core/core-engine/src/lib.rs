@@ -1,6 +1,7 @@
 //! Coordination engine composition.
 
 mod body_queue;
+mod chat_store;
 mod delegation_store;
 mod memory_spaces;
 mod provider_state_store;
@@ -12,6 +13,7 @@ pub use scheduler::SchedulerTickReport;
 use body_queue::{
     drain_follow_up_queue_for_wake, enforce_follow_up_queue_cap, save_body_follow_up_message,
 };
+use chat_store::{ChatConversationStore, ChatEventStore};
 use delegation_store::{
     claim_next_worker_pool_work_item, complete_worker_pool_work_item, create_worker_pool_work_item,
     delegated_completions_for_parent, delegated_fan_out_groups_for_parent,
@@ -1053,62 +1055,56 @@ impl CoreEngine {
     }
 
     pub fn save_message_slot(&self, slot: &MessageSlotWrite) -> CoreResult<()> {
-        self.store.conversation().save_message_slot(slot)
+        self.store.save_chat_message_slot(slot)
     }
 
     pub fn save_message_variant(
         &self,
         variant: &MessageVariantWrite,
     ) -> CoreResult<MessageVariantRecord> {
-        self.store.conversation().save_message_variant(variant)
+        self.store.save_chat_message_variant(variant)
     }
 
     pub fn create_chat_message_slot(
         &self,
         request: &CreateChatMessageSlotRequest,
     ) -> CoreResult<CreateChatMessageSlotResult> {
-        self.store.conversation().create_chat_message_slot(request)
+        ChatConversationStore::create_chat_message_slot(&self.store, request)
     }
 
     pub fn create_chat_message_variant(
         &self,
         request: &CreateChatMessageVariantRequest,
     ) -> CoreResult<CreateChatMessageVariantResult> {
-        self.store
-            .conversation()
-            .create_chat_message_variant(request)
+        ChatConversationStore::create_chat_message_variant(&self.store, request)
     }
 
     pub fn delete_chat_message_variant(
         &self,
         request: &DeleteChatMessageVariantRequest,
     ) -> CoreResult<MessageSlotRecord> {
-        self.store
-            .conversation()
-            .delete_chat_message_variant(request)
+        ChatConversationStore::delete_chat_message_variant(&self.store, request)
     }
 
     pub fn reorder_chat_message_variants(
         &self,
         request: &ReorderChatMessageVariantsRequest,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
-        self.store
-            .conversation()
-            .reorder_chat_message_variants(request)
+        ChatConversationStore::reorder_chat_message_variants(&self.store, request)
     }
 
     pub fn query_message_slots(
         &self,
         query: &MessageSlotQuery,
     ) -> CoreResult<Vec<MessageSlotRecord>> {
-        self.store.conversation().query_message_slots(query)
+        self.store.query_chat_message_slots(query)
     }
 
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
-        self.store.conversation().query_message_variants(query)
+        self.store.query_chat_message_variants(query)
     }
 
     pub fn chat_read_model_page(
@@ -1127,17 +1123,14 @@ impl CoreEngine {
 
         let offset = after.min(u32::MAX as u64) as u32;
         let probe_limit = limit.saturating_add(1).min(MAX_CHAT_READ_MODEL_LIMIT + 1);
-        let slots = self
-            .store
-            .conversation()
-            .query_message_slots(&MessageSlotQuery {
-                session_id: Some(query.session_id.clone()),
-                include_alternates: true,
-                page: Some(rusty_crew_core_persistence::QueryPage {
-                    limit: Some(probe_limit),
-                    offset: Some(offset),
-                }),
-            })?;
+        let slots = self.store.query_chat_message_slots(&MessageSlotQuery {
+            session_id: Some(query.session_id.clone()),
+            include_alternates: true,
+            page: Some(rusty_crew_core_persistence::QueryPage {
+                limit: Some(probe_limit),
+                offset: Some(offset),
+            }),
+        })?;
 
         let has_more = slots.len() > limit as usize;
         let items = slots
@@ -1162,43 +1155,39 @@ impl CoreEngine {
     }
 
     pub fn append_chat_event(&self, event: &ChatEventLogAppend) -> CoreResult<ChatEventLogEvent> {
-        self.store.chat_events().append_chat_event(event)
+        self.store.append_chat_event_log(event)
     }
 
     pub fn query_chat_events(&self, query: &ChatEventLogQuery) -> CoreResult<ChatEventLogPage> {
-        self.store.chat_events().query_chat_events(query)
+        self.store.query_chat_event_log(query)
     }
 
     pub fn save_conversation_branch(
         &self,
         branch: &ConversationBranchWrite,
     ) -> CoreResult<ConversationBranchRecord> {
-        self.store.conversation().save_conversation_branch(branch)
+        self.store.save_chat_conversation_branch(branch)
     }
 
     pub fn query_conversation_branches(
         &self,
         query: &ConversationBranchQuery,
     ) -> CoreResult<Vec<ConversationBranchRecord>> {
-        self.store.conversation().query_conversation_branches(query)
+        self.store.query_chat_conversation_branches(query)
     }
 
     pub fn create_chat_conversation_branch(
         &self,
         request: &CreateChatConversationBranchRequest,
     ) -> CoreResult<ConversationBranchRecord> {
-        self.store
-            .conversation()
-            .create_chat_conversation_branch(request)
+        ChatConversationStore::create_chat_conversation_branch(&self.store, request)
     }
 
     pub fn ensure_active_chat_conversation_branch(
         &self,
         request: &EnsureActiveChatConversationBranchRequest,
     ) -> CoreResult<EnsureActiveChatConversationBranchResult> {
-        self.store
-            .conversation()
-            .ensure_active_chat_conversation_branch(request)
+        ChatConversationStore::ensure_active_chat_conversation_branch(&self.store, request)
     }
 
     pub fn get_conversation_branch_state(
@@ -1207,75 +1196,64 @@ impl CoreEngine {
         default_updated_at: &IsoTimestamp,
     ) -> CoreResult<ConversationBranchStateRecord> {
         self.store
-            .conversation()
-            .get_conversation_branch_state(session_id, default_updated_at)
+            .get_chat_conversation_branch_state(session_id, default_updated_at)
     }
 
     pub fn select_active_conversation_branch(
         &self,
         request: &SelectActiveBranchRequest,
     ) -> CoreResult<SelectActiveBranchResult> {
-        self.store
-            .conversation()
-            .select_active_conversation_branch(request)
+        self.store.select_active_chat_conversation_branch(request)
     }
 
     pub fn update_conversation_branch_head(
         &self,
         request: &UpdateBranchHeadRequest,
     ) -> CoreResult<UpdateBranchHeadResult> {
-        self.store
-            .conversation()
-            .update_conversation_branch_head(request)
+        self.store.update_chat_conversation_branch_head(request)
     }
 
     pub fn save_conversation_snapshot(
         &self,
         snapshot: &ConversationSnapshotWrite,
     ) -> CoreResult<ConversationSnapshotRecord> {
-        self.store
-            .conversation()
-            .save_conversation_snapshot(snapshot)
+        self.store.save_chat_conversation_snapshot(snapshot)
     }
 
     pub fn create_chat_conversation_snapshot(
         &self,
         request: &CreateChatConversationSnapshotRequest,
     ) -> CoreResult<CreateChatConversationSnapshotResult> {
-        self.store
-            .conversation()
-            .create_chat_conversation_snapshot(request)
+        ChatConversationStore::create_chat_conversation_snapshot(&self.store, request)
     }
 
     pub fn query_conversation_snapshots(
         &self,
         query: &ConversationSnapshotQuery,
     ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
-        self.store
-            .conversation()
-            .query_conversation_snapshots(query)
+        self.store.query_chat_conversation_snapshots(query)
     }
 
     pub fn resolve_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
     ) -> CoreResult<ConversationJumpResult> {
-        self.store.conversation().resolve_conversation_jump(request)
+        self.store.resolve_chat_conversation_jump(request)
     }
 
     pub fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord> {
-        self.store.conversation().save_attachment(attachment)
+        self.store.save_chat_attachment(attachment)
     }
 
     pub fn create_chat_attachment(
         &self,
         request: &CreateChatAttachmentRequest,
     ) -> CoreResult<CreateChatAttachmentResult> {
-        self.store.conversation().create_chat_attachment(request)
+        ChatConversationStore::create_chat_attachment(&self.store, request)
     }
 
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
-        self.store.conversation().query_attachments(query)
+        self.store.query_chat_attachments(query)
     }
 
     pub fn remove_attachment(
@@ -1283,39 +1261,35 @@ impl CoreEngine {
         attachment_id: &AttachmentId,
         updated_at: &IsoTimestamp,
     ) -> CoreResult<AttachmentRecord> {
-        self.store
-            .conversation()
-            .remove_attachment(attachment_id, updated_at)
+        ChatConversationStore::remove_attachment(&self.store, attachment_id, updated_at)
     }
 
     pub fn remove_chat_attachment(
         &self,
         request: &RemoveChatAttachmentRequest,
     ) -> CoreResult<AttachmentRecord> {
-        self.store.conversation().remove_chat_attachment(request)
+        ChatConversationStore::remove_chat_attachment(&self.store, request)
     }
 
     pub fn save_data_bank_scope(
         &self,
         scope: &DataBankScopeWrite,
     ) -> CoreResult<DataBankScopeRecord> {
-        self.store.conversation().save_data_bank_scope(scope)
+        self.store.save_chat_data_bank_scope(scope)
     }
 
     pub fn create_chat_data_bank_scope(
         &self,
         request: &CreateChatDataBankScopeRequest,
     ) -> CoreResult<CreateChatDataBankScopeResult> {
-        self.store
-            .conversation()
-            .create_chat_data_bank_scope(request)
+        ChatConversationStore::create_chat_data_bank_scope(&self.store, request)
     }
 
     pub fn query_data_bank_scopes(
         &self,
         query: &DataBankScopeQuery,
     ) -> CoreResult<Vec<DataBankScopeRecord>> {
-        self.store.conversation().query_data_bank_scopes(query)
+        self.store.query_chat_data_bank_scopes(query)
     }
 
     pub fn remove_data_bank_scope(
@@ -1323,34 +1297,29 @@ impl CoreEngine {
         scope_id: &DataBankScopeId,
         updated_at: &IsoTimestamp,
     ) -> CoreResult<DataBankScopeRecord> {
-        self.store
-            .conversation()
-            .remove_data_bank_scope(scope_id, updated_at)
+        ChatConversationStore::remove_data_bank_scope(&self.store, scope_id, updated_at)
     }
 
     pub fn remove_chat_data_bank_scope(
         &self,
         request: &RemoveChatDataBankScopeRequest,
     ) -> CoreResult<DataBankScopeRecord> {
-        self.store
-            .conversation()
-            .remove_chat_data_bank_scope(request)
+        ChatConversationStore::remove_chat_data_bank_scope(&self.store, request)
     }
 
     pub fn select_active_message_variant(
         &self,
         request: &SelectActiveVariantRequest,
     ) -> CoreResult<SelectActiveVariantResult> {
-        self.store
-            .conversation()
-            .select_active_message_variant(request)
+        self.store.select_active_chat_message_variant_store(request)
     }
 
     pub fn select_active_chat_message_variant(
         &self,
         request: &SelectActiveChatMessageVariantRequest,
     ) -> CoreResult<SelectActiveChatMessageVariantResult> {
-        let result = self.store.conversation().select_active_message_variant(
+        let result = ChatConversationStore::select_active_chat_message_variant_store(
+            &self.store,
             &SelectActiveVariantRequest {
                 slot_id: request.slot_id.clone(),
                 active_variant_id: request.active_variant_id.clone(),
@@ -1370,7 +1339,8 @@ impl CoreEngine {
         if result.conflict.is_none() {
             if let Some(selected) = selected_message_variant(&result.slot) {
                 if let Some(branch_id) = &selected.message.branch_id {
-                    self.store.conversation().update_conversation_branch_head(
+                    ChatConversationStore::update_chat_conversation_branch_head(
+                        &self.store,
                         &UpdateBranchHeadRequest {
                             branch_id: branch_id.clone(),
                             head_message_id: Some(selected.message.message_id.clone()),
@@ -1393,9 +1363,7 @@ impl CoreEngine {
         variant_id: &MessageVariantId,
         updated_at: &IsoTimestamp,
     ) -> CoreResult<MessageSlotRecord> {
-        self.store
-            .conversation()
-            .delete_message_variant(slot_id, variant_id, updated_at)
+        ChatConversationStore::delete_message_variant(&self.store, slot_id, variant_id, updated_at)
     }
 
     pub fn reorder_message_variants(
@@ -1404,9 +1372,12 @@ impl CoreEngine {
         ordered_variant_ids: &[MessageVariantId],
         updated_at: &IsoTimestamp,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
-        self.store
-            .conversation()
-            .reorder_message_variants(slot_id, ordered_variant_ids, updated_at)
+        ChatConversationStore::reorder_message_variants(
+            &self.store,
+            slot_id,
+            ordered_variant_ids,
+            updated_at,
+        )
     }
 
     pub fn list_profile_memory(
