@@ -15,6 +15,12 @@ schema, context strategy, or delegated-session invariants.
 This plan thins the TypeScript cluster around Rust-owned policy without moving
 external client implementation into Rust for purity.
 
+Use `tool-metadata-execution-authority-split-2026-07-09` for the precise
+language around tool safety. In short: Rust owns durable metadata,
+availability, resource facts, and policy planning; TypeScript still owns
+selected-tool execution wrappers and adapter-local execution checks unless a
+specific Rust planner has landed.
+
 ## Current Surfaces
 
 Primary TypeScript files in scope:

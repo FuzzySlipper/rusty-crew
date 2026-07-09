@@ -8,6 +8,7 @@ Related docs:
 
 - `tool-architecture-registry-rules`
 - `mcp-registry-integration-and-collision-policy`
+- `tool-metadata-execution-authority-split-2026-07-09`
 - `[doc: rusty-crew/brain-island-rust-ownership-audit-2026-06-23]`
 
 ## Decision
@@ -27,6 +28,13 @@ and make the bridge less neutral.
 The next implementation should separate metadata from executable binding first,
 then add a Rust-owned validator or codegen-owned schema for the portable
 metadata shape.
+
+When this document says Rust owns tool policy or safety metadata, it means
+portable catalog, availability, selection, and denial explanation policy. It
+does not mean Rust executes ordinary local, browser, web, MCP, or skill tools.
+Those executor-local safety checks remain in TypeScript unless a separate Rust
+planner is explicitly added; see
+`tool-metadata-execution-authority-split-2026-07-09`.
 
 ## Why
 
