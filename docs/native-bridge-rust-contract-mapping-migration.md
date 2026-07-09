@@ -124,7 +124,7 @@ Current implementation:
   parameter counts, method names, and return-kind shape.
 - Task #5302 added `codegen:native-mapping-inventory` and
   `check:native-mapping-inventory` for generated-check mapper coverage. The
-  first covered family is model providers.
+  first covered families are model providers and profile registry.
 
 ### 1a. Generated-Check Model Provider Mapper Inventory
 
@@ -132,23 +132,31 @@ Current implementation:
 emit-native-mapping-inventory` now emits
 `ts/packages/native-bridge/src/generated/native-mapping-inventory.ts`.
 
-The artifact currently covers the model-provider bridge family:
+The artifact currently covers these bridge families:
 
-- manifest operations:
+- model-provider manifest operations:
   `upsert_model_provider`, `list_model_providers`, `get_model_provider`,
   `get_model_provider_secret`, `model_provider_refresh_impact`, and
   `plan_model_provider_refresh`;
+- profile-registry manifest operations:
+  `plan_profile_registry_mutation`, `create_profile_registry_record`,
+  `update_profile_registry_record`, `list_profile_registry_records`,
+  `get_profile_registry_record`, and `purge_profile`;
 - raw method names derived from those operations;
 - raw DTO field inventories for model provider records, credentials, refresh
-  impacts, affected profiles, refresh plans, and refresh actions, derived from
-  Rust-authored sample serialization.
+  impacts, affected profiles, refresh plans, and refresh actions;
+- raw DTO field inventories for profile registry records, writes, updates,
+  mutation requests/plans, mutation implications, source asset refs, derived
+  runtime refs, import/export metadata, purge reports, and purge table counts.
+
+All DTO field inventories are derived from Rust-authored sample serialization.
 
 `npm run check:native-mapping-inventory` does two checks:
 
 1. The generated artifact has not drifted from Rust codegen output.
 2. `@rusty-crew/native-bridge` smoke coverage verifies that
    `native-bridge/src/index.ts` still declares the raw methods/interfaces and
-   that model-provider converter functions read the generated-checked fields.
+   that covered converter functions read the generated-checked fields.
 
 This is not a full client generator. It is a generated-check inventory that
 keeps the handwritten ergonomic wrapper reviewable while making field omissions

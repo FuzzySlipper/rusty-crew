@@ -72,6 +72,124 @@ export const nativeMappingInventory = {
         "modelProviderRefreshImpactJson",
         "planModelProviderRefreshJson"
       ]
+    },
+    "profileRegistry": {
+      "dtoFields": {
+        "RawProfilePurgeReport": [
+          "agent_ids",
+          "profile_id",
+          "profile_registry_deleted",
+          "rows_deleted",
+          "session_ids",
+          "table_counts"
+        ],
+        "RawProfilePurgeTableCount": [
+          "rows_deleted",
+          "table"
+        ],
+        "RawProfileRegistryDerivedRuntimeRef": [
+          "metadata_json",
+          "ref_id",
+          "ref_kind",
+          "status",
+          "updated_at"
+        ],
+        "RawProfileRegistryImportExportMetadata": [
+          "exported_at",
+          "exported_to",
+          "imported_at",
+          "imported_from",
+          "metadata_json"
+        ],
+        "RawProfileRegistryMutationImplications": [
+          "lifecycle_effects",
+          "profile_files_unchanged",
+          "registry_revision_will_increment",
+          "runtime_rebuild_recommended",
+          "service_config_unchanged"
+        ],
+        "RawProfileRegistryMutationPlan": [
+          "current",
+          "diagnostics",
+          "expected_revision",
+          "implications",
+          "kind",
+          "mode",
+          "next",
+          "next_write",
+          "ok",
+          "profile_id"
+        ],
+        "RawProfileRegistryMutationRequest": [
+          "body_json",
+          "current",
+          "kind",
+          "mode",
+          "now",
+          "profile_id"
+        ],
+        "RawProfileRegistryRecord": [
+          "active_runtime_settings_json",
+          "agent_id",
+          "created_at",
+          "default_session_kind",
+          "derived_runtime_refs",
+          "display_name",
+          "import_export",
+          "lifecycle_status",
+          "owner_id",
+          "profile_id",
+          "prompt_memory_markdown",
+          "prompt_soul_markdown",
+          "revision",
+          "source_asset_refs",
+          "summary",
+          "updated_at"
+        ],
+        "RawProfileRegistrySourceAssetRef": [
+          "asset_kind",
+          "content_hash",
+          "last_seen_at",
+          "metadata_json",
+          "path"
+        ],
+        "RawProfileRegistryUpdate": [
+          "expected_revision",
+          "write"
+        ],
+        "RawProfileRegistryWrite": [
+          "active_runtime_settings_json",
+          "agent_id",
+          "default_session_kind",
+          "derived_runtime_refs",
+          "display_name",
+          "import_export",
+          "lifecycle_status",
+          "now",
+          "owner_id",
+          "profile_id",
+          "prompt_memory_markdown",
+          "prompt_soul_markdown",
+          "source_asset_refs",
+          "summary"
+        ]
+      },
+      "operationNames": [
+        "plan_profile_registry_mutation",
+        "create_profile_registry_record",
+        "update_profile_registry_record",
+        "list_profile_registry_records",
+        "get_profile_registry_record",
+        "purge_profile"
+      ],
+      "rawMethods": [
+        "planProfileRegistryMutationJson",
+        "createProfileRegistryRecordJson",
+        "updateProfileRegistryRecordJson",
+        "listProfileRegistryRecordsJson",
+        "getProfileRegistryRecordJson",
+        "purgeProfileJson"
+      ]
     }
   },
   "formatVersion": 1,

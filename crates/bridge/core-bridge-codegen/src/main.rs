@@ -5,9 +5,11 @@ use rusty_crew_core_config::{
     CreateProfilePlanInput, CreateProfileRequest, CreateProfileSourceRequest,
     ExternalBindingStatusDraft, McpBindingConfigDraft, ProfileBackgroundReviewConfig,
     ProfileBackgroundReviewType, ProfileBrainMetadata, ProfileChannelDefaults,
-    ProfileContextPolicy, ProfileMcpConfig, ProfileModelConfigSeed, ProfileRegistryRuntimeMetadata,
-    ProfileRuntimeMetadata, ProfileRuntimeOptions, ProfileSessionDefaults, RuntimeConfigDraft,
-    RuntimeConfigValidationInput, ScheduledJobConfigDraft, ScheduledJobShape, SessionConfigDraft,
+    ProfileContextPolicy, ProfileMcpConfig, ProfileModelConfigSeed, ProfileRegistryMutationKind,
+    ProfileRegistryMutationMode, ProfileRegistryMutationPlan, ProfileRegistryMutationRequest,
+    ProfileRegistryRuntimeMetadata, ProfileRuntimeMetadata, ProfileRuntimeOptions,
+    ProfileSessionDefaults, RuntimeConfigDraft, RuntimeConfigValidationInput,
+    ScheduledJobConfigDraft, ScheduledJobShape, SessionConfigDraft,
 };
 use rusty_crew_core_protocol::{
     AdapterId, AgentId, AgentInstanceId, BrainImplementationId, ProfileId,
@@ -416,6 +418,14 @@ export const nativeMappingInventory = {artifact_json} as const;
 }
 
 fn native_mapping_inventory_artifact() -> Result<Value> {
+    let profile_registry_operations = vec![
+        "plan_profile_registry_mutation",
+        "create_profile_registry_record",
+        "update_profile_registry_record",
+        "list_profile_registry_records",
+        "get_profile_registry_record",
+        "purge_profile",
+    ];
     let model_provider_operations = vec![
         "upsert_model_provider",
         "list_model_providers",
@@ -424,8 +434,17 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "model_provider_refresh_impact",
         "plan_model_provider_refresh",
     ];
+    ensure_family_operations_exist("profile_registry", &profile_registry_operations)?;
     ensure_family_operations_exist("model_provider", &model_provider_operations)?;
 
+    let profile_registry_record = serde_json::to_value(sample_profile_registry_record())?;
+    let profile_registry_write = serde_json::to_value(sample_profile_registry_write())?;
+    let profile_registry_update = serde_json::to_value(sample_profile_registry_update())?;
+    let profile_registry_mutation_request =
+        serde_json::to_value(sample_profile_registry_mutation_request())?;
+    let profile_registry_mutation_plan =
+        serde_json::to_value(sample_profile_registry_mutation_plan())?;
+    let profile_purge_report = serde_json::to_value(sample_profile_purge_report())?;
     let model_provider_record = serde_json::to_value(sample_model_provider_record())?;
     let refresh_impact = serde_json::to_value(sample_model_provider_refresh_impact())?;
     let refresh_plan = serde_json::to_value(sample_model_provider_refresh_plan())?;
@@ -434,6 +453,26 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "formatVersion": 1,
         "source": "rusty-crew-core-bridge-codegen",
         "families": {
+            "profileRegistry": {
+                "operationNames": profile_registry_operations,
+                "rawMethods": profile_registry_operations
+                    .iter()
+                    .map(|operation| operation_name_to_camel_json_method(operation))
+                    .collect::<Vec<_>>(),
+                "dtoFields": {
+                    "RawProfileRegistryRecord": object_keys(&profile_registry_record)?,
+                    "RawProfileRegistryWrite": object_keys(&profile_registry_write)?,
+                    "RawProfileRegistryUpdate": object_keys(&profile_registry_update)?,
+                    "RawProfileRegistryMutationRequest": object_keys(&profile_registry_mutation_request)?,
+                    "RawProfileRegistryMutationPlan": object_keys(&profile_registry_mutation_plan)?,
+                    "RawProfileRegistryMutationImplications": object_keys(required_value(&profile_registry_mutation_plan, "implications")?)?,
+                    "RawProfileRegistrySourceAssetRef": object_keys(first_array_item(&profile_registry_record, "source_asset_refs")?)?,
+                    "RawProfileRegistryDerivedRuntimeRef": object_keys(first_array_item(&profile_registry_record, "derived_runtime_refs")?)?,
+                    "RawProfileRegistryImportExportMetadata": object_keys(required_value(&profile_registry_record, "import_export")?)?,
+                    "RawProfilePurgeReport": object_keys(&profile_purge_report)?,
+                    "RawProfilePurgeTableCount": object_keys(first_array_item(&profile_purge_report, "table_counts")?)?,
+                }
+            },
             "modelProvider": {
                 "operationNames": model_provider_operations,
                 "rawMethods": model_provider_operations
@@ -1258,6 +1297,83 @@ fn sample_profile_registry_record() -> ProfileRegistryRecord {
         revision: 3,
         created_at: sample_timestamp(),
         updated_at: sample_timestamp(),
+    }
+}
+
+fn sample_profile_registry_write() -> ProfileRegistryWrite {
+    let record = sample_profile_registry_record();
+    ProfileRegistryWrite {
+        profile_id: record.profile_id,
+        lifecycle_status: record.lifecycle_status,
+        display_name: record.display_name,
+        summary: record.summary,
+        default_session_kind: record.default_session_kind,
+        agent_id: record.agent_id,
+        owner_id: record.owner_id,
+        prompt_soul_markdown: record.prompt_soul_markdown,
+        prompt_memory_markdown: record.prompt_memory_markdown,
+        active_runtime_settings_json: record.active_runtime_settings_json,
+        source_asset_refs: record.source_asset_refs,
+        derived_runtime_refs: record.derived_runtime_refs,
+        import_export: record.import_export,
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_profile_registry_update() -> ProfileRegistryUpdate {
+    ProfileRegistryUpdate {
+        write: sample_profile_registry_write(),
+        expected_revision: 3,
+    }
+}
+
+fn sample_profile_registry_mutation_request() -> ProfileRegistryMutationRequest {
+    ProfileRegistryMutationRequest {
+        profile_id: sample_profile_id(),
+        kind: ProfileRegistryMutationKind::Prompt,
+        mode: ProfileRegistryMutationMode::Plan,
+        current: sample_profile_registry_record(),
+        body_json: json!({
+            "expectedRevision": 3,
+            "promptSoulMarkdown": "Updated validation fixture soul.",
+            "promptMemoryMarkdown": "Updated validation fixture memory."
+        }),
+        now: sample_timestamp(),
+    }
+}
+
+fn sample_profile_registry_mutation_plan() -> ProfileRegistryMutationPlan {
+    ProfileRegistryMutationPlan {
+        ok: true,
+        profile_id: sample_profile_id(),
+        kind: ProfileRegistryMutationKind::Prompt,
+        mode: ProfileRegistryMutationMode::Plan,
+        expected_revision: 3,
+        current: sample_profile_registry_record(),
+        next: sample_profile_registry_record(),
+        next_write: sample_profile_registry_write(),
+        diagnostics: vec![],
+        implications: rusty_crew_core_config::ProfileRegistryMutationImplications {
+            registry_revision_will_increment: true,
+            profile_files_unchanged: true,
+            service_config_unchanged: true,
+            runtime_rebuild_recommended: true,
+            lifecycle_effects: "none".to_owned(),
+        },
+    }
+}
+
+fn sample_profile_purge_report() -> ProfilePurgeReport {
+    ProfilePurgeReport {
+        profile_id: sample_profile_id(),
+        profile_registry_deleted: true,
+        session_ids: vec![sample_session_id()],
+        agent_ids: vec![sample_agent_id()],
+        table_counts: vec![ProfilePurgeTableCount {
+            table: "profile_registry".to_owned(),
+            rows_deleted: 1,
+        }],
+        rows_deleted: 3,
     }
 }
 

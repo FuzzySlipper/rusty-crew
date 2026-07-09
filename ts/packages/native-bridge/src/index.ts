@@ -6903,13 +6903,15 @@ interface RawProfileRegistryMutationPlan {
   next: RawProfileRegistryRecord;
   next_write: RawProfileRegistryWrite;
   diagnostics: NativeRuntimeConfigDiagnostic[];
-  implications: {
-    registry_revision_will_increment: boolean;
-    profile_files_unchanged: boolean;
-    service_config_unchanged: boolean;
-    runtime_rebuild_recommended: boolean;
-    lifecycle_effects: "none" | "archive_active_sessions_and_unregister_brain";
-  };
+  implications: RawProfileRegistryMutationImplications;
+}
+
+interface RawProfileRegistryMutationImplications {
+  registry_revision_will_increment: boolean;
+  profile_files_unchanged: boolean;
+  service_config_unchanged: boolean;
+  runtime_rebuild_recommended: boolean;
+  lifecycle_effects: "none" | "archive_active_sessions_and_unregister_brain";
 }
 
 interface RawCreateProfileFileAssetAction {
@@ -6993,10 +6995,12 @@ interface RawProfilePurgeReport {
   profile_registry_deleted: boolean;
   session_ids: string[];
   agent_ids: string[];
-  table_counts: Array<{
-    table: string;
-    rows_deleted: number;
-  }>;
+  table_counts: RawProfilePurgeTableCount[];
+  rows_deleted: number;
+}
+
+interface RawProfilePurgeTableCount {
+  table: string;
   rows_deleted: number;
 }
 

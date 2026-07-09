@@ -5,25 +5,120 @@ import { nativeMappingInventory } from "./generated/native-mapping-inventory.js"
 
 const sourcePath = fileURLToPath(new URL("./index.ts", import.meta.url));
 const source = readFileSync(sourcePath, "utf8");
+const profileRegistry = nativeMappingInventory.families.profileRegistry;
 const modelProvider = nativeMappingInventory.families.modelProvider;
 
 const nativeBridgeBinding = extractInterface("NativeBridgeBinding");
-for (const method of modelProvider.rawMethods) {
-  assert(
-    nativeBridgeBinding.includes(`${method}(`),
-    `NativeBridgeBinding is missing generated-checked model provider raw method ${method}`,
-  );
-}
+assertRawMethods("profile registry", profileRegistry.rawMethods);
+assertRawMethods("model provider", modelProvider.rawMethods);
 
-for (const [interfaceName, fields] of Object.entries(modelProvider.dtoFields)) {
-  const block = extractInterface(interfaceName);
-  for (const field of fields) {
-    assert(
-      new RegExp(`\\b${escapeRegExp(field)}[?:]?`).test(block),
-      `${interfaceName} is missing generated-checked raw field ${field}`,
-    );
-  }
-}
+assertDtoFields(profileRegistry.dtoFields);
+assertDtoFields(modelProvider.dtoFields);
+
+assertRawReads("toNativeProfileRegistryWrite", "write", [
+  ...profileRegistry.dtoFields.RawProfileRegistryWrite.filter(
+    (field) =>
+      field !== "source_asset_refs" &&
+      field !== "derived_runtime_refs" &&
+      field !== "import_export",
+  ).map((field) => `write.${field}`),
+  "write.source_asset_refs",
+  "write.derived_runtime_refs",
+  "write.import_export",
+]);
+assertNativeReads("toRawProfileRegistryWrite", "write", [
+  ...profileRegistry.dtoFields.RawProfileRegistryWrite.filter(
+    (field) =>
+      field !== "source_asset_refs" &&
+      field !== "derived_runtime_refs" &&
+      field !== "import_export",
+  ),
+  "source_asset_refs",
+  "derived_runtime_refs",
+  "import_export",
+]);
+assertNativeReads("toRawProfileRegistryUpdate", "update", [
+  ...profileRegistry.dtoFields.RawProfileRegistryUpdate.filter(
+    (field) => field !== "write",
+  ),
+]);
+assertNativeReads("toRawProfileRegistryMutationRequest", "request", [
+  ...profileRegistry.dtoFields.RawProfileRegistryMutationRequest.filter(
+    (field) => field !== "current",
+  ),
+]);
+assertRawReads("toNativeProfileRegistryMutationPlan", "plan", [
+  ...profileRegistry.dtoFields.RawProfileRegistryMutationPlan.filter(
+    (field) =>
+      field !== "current" &&
+      field !== "next" &&
+      field !== "next_write" &&
+      field !== "diagnostics" &&
+      field !== "implications",
+  ).map((field) => `plan.${field}`),
+  "plan.current",
+  "plan.next",
+  "plan.next_write",
+  "plan.diagnostics",
+  ...profileRegistry.dtoFields.RawProfileRegistryMutationImplications.map(
+    (field) => `plan.implications.${field}`,
+  ),
+]);
+assertRawReads("toNativeProfileRegistryRecord", "record", [
+  ...profileRegistry.dtoFields.RawProfileRegistryRecord.filter(
+    (field) =>
+      field !== "source_asset_refs" &&
+      field !== "derived_runtime_refs" &&
+      field !== "import_export",
+  ).map((field) => `record.${field}`),
+  "record.source_asset_refs",
+  "record.derived_runtime_refs",
+  "record.import_export",
+]);
+assertNativeReads("toRawProfileRegistryRecord", "record", [
+  ...profileRegistry.dtoFields.RawProfileRegistryRecord.filter(
+    (field) =>
+      field !== "source_asset_refs" &&
+      field !== "derived_runtime_refs" &&
+      field !== "import_export",
+  ),
+  "source_asset_refs",
+  "derived_runtime_refs",
+  "import_export",
+]);
+assertRawReads("toNativeProfilePurgeReport", "report", [
+  ...profileRegistry.dtoFields.RawProfilePurgeReport.filter(
+    (field) => field !== "table_counts",
+  ).map((field) => `report.${field}`),
+  "report.table_counts",
+  ...profileRegistry.dtoFields.RawProfilePurgeTableCount.map(
+    (field) => `count.${field}`,
+  ),
+]);
+assertRawReads("toNativeProfileRegistryAssetRef", "ref", [
+  ...profileRegistry.dtoFields.RawProfileRegistrySourceAssetRef.map(
+    (field) => `ref.${field}`,
+  ),
+]);
+assertNativeReads("toRawProfileRegistryAssetRef", "ref", [
+  ...profileRegistry.dtoFields.RawProfileRegistrySourceAssetRef,
+]);
+assertRawReads("toNativeProfileRegistryRuntimeRef", "ref", [
+  ...profileRegistry.dtoFields.RawProfileRegistryDerivedRuntimeRef.map(
+    (field) => `ref.${field}`,
+  ),
+]);
+assertNativeReads("toRawProfileRegistryRuntimeRef", "ref", [
+  ...profileRegistry.dtoFields.RawProfileRegistryDerivedRuntimeRef,
+]);
+assertRawReads("toNativeProfileRegistryImportExport", "metadata", [
+  ...profileRegistry.dtoFields.RawProfileRegistryImportExportMetadata.map(
+    (field) => `metadata.${field}`,
+  ),
+]);
+assertNativeReads("toRawProfileRegistryImportExport", "metadata", [
+  ...profileRegistry.dtoFields.RawProfileRegistryImportExportMetadata,
+]);
 
 assertRawReads("toNativeModelProviderRecord", "record", [
   ...modelProvider.dtoFields.RawModelProviderRecord.filter(
@@ -50,9 +145,7 @@ assertRawReads("toNativeModelProviderRefreshImpact", "impact", [
 ]);
 assertRawReads("toRawModelProviderRefreshImpact", "impact", [
   ...modelProvider.dtoFields.RawModelProviderRefreshImpact.map((field) =>
-    field === "affected_profiles"
-      ? "affectedProfiles"
-      : snakeToCamel(field),
+    field === "affected_profiles" ? "affectedProfiles" : snakeToCamel(field),
   ).map((field) => `impact.${field}`),
 ]);
 assertRawReads("toNativeModelProviderRefreshPlan", "plan", [
@@ -70,7 +163,32 @@ assertRawReads("toNativeModelProviderRefreshPlan", "plan", [
 
 console.log("native mapping inventory smoke passed");
 
-function assertRawReads(functionName: string, parameter: string, reads: string[]) {
+function assertRawMethods(label: string, methods: readonly string[]) {
+  for (const method of methods) {
+    assert(
+      nativeBridgeBinding.includes(`${method}(`),
+      `NativeBridgeBinding is missing generated-checked ${label} raw method ${method}`,
+    );
+  }
+}
+
+function assertDtoFields(dtoFields: Record<string, readonly string[]>) {
+  for (const [interfaceName, fields] of Object.entries(dtoFields)) {
+    const block = extractInterface(interfaceName);
+    for (const field of fields) {
+      assert(
+        new RegExp(`\\b${escapeRegExp(field)}[?:]?`).test(block),
+        `${interfaceName} is missing generated-checked raw field ${field}`,
+      );
+    }
+  }
+}
+
+function assertRawReads(
+  functionName: string,
+  parameter: string,
+  reads: string[],
+) {
   const block = extractFunction(functionName);
   for (const read of reads) {
     assert(
