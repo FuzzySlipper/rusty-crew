@@ -47,6 +47,7 @@ import {
   toCoreConfigWireRuntimeConfigValidationInput,
   toCoreConfigWireRuntimeGraphPlanInput,
 } from "./generated/core-config-facade.js";
+import type { NativeBridgeBinding } from "./generated/native-binding-surface.js";
 import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 
 export {
@@ -147,481 +148,6 @@ interface NativeSessionConfigInput {
 
 interface NativeAddon {
   NativeBridgeBinding: new () => NativeBridgeBinding;
-}
-
-interface NativeBridgeBinding {
-  readonly manifestVersion: number;
-  readonly operationNames: string[];
-  readonly wireShapeFingerprint: string;
-  initializeEngine(config: {
-    engineDataDir: string;
-    fixedClock?: string;
-    defaultTurnBudget: number;
-    defaultIdleTimeoutMs: number;
-    storageBackend?: string;
-    postgresDatabaseUrl?: string;
-    postgresSchema?: string;
-    postgresMaxConnections?: number;
-    postgresStatementTimeoutMs?: number;
-  }): number;
-  registerBrainImplementation(registration: {
-    implementationId: string;
-    profileId: string;
-    toolProfile: {
-      tools: Array<{
-        name: string;
-        description: string;
-        inputSchema?: number;
-      }>;
-    };
-    modelConfig: {
-      provider: string;
-      modelName: string;
-      temperatureMilli?: number;
-      maxOutputTokens?: number;
-    };
-    strategy?: {
-      moduleId: string;
-      strategyId: string;
-      providerState: {
-        mode: string;
-      };
-    };
-    providerStateScope?: {
-      profileFingerprint: string;
-      providerFingerprint: string;
-    };
-  }): number;
-  replaceBrainImplementation(registration: {
-    implementationId: string;
-    profileId: string;
-    toolProfile: {
-      tools: Array<{
-        name: string;
-        description: string;
-        inputSchema?: number;
-      }>;
-    };
-    modelConfig: {
-      provider: string;
-      modelName: string;
-      temperatureMilli?: number;
-      maxOutputTokens?: number;
-    };
-    strategy?: {
-      moduleId: string;
-      strategyId: string;
-      providerState: {
-        mode: string;
-      };
-    };
-    providerStateScope?: {
-      profileFingerprint: string;
-      providerFingerprint: string;
-    };
-  }): number;
-  unregisterBrainImplementationForProfile(profileId: string): number;
-  applyBrainProviderStateOutputJson(
-    brain: number,
-    sessionId: string,
-    wakeId: string,
-    outputJson: string,
-  ): void;
-  exchangeOpenaiOauthCodeJson(inputJson: string): Promise<string>;
-  startBrainRunJson(moduleId: string, inputJson: string): string;
-  drainBrainRunJson(
-    moduleId: string,
-    wakeId: string,
-    maxItems?: number,
-  ): string;
-  submitBrainHostResultJson(moduleId: string, inputJson: string): string;
-  cancelBrainRunJson(moduleId: string, inputJson: string): string;
-  providerStateDiagnostics(limit?: number): NativeProviderStateDiagnostic[];
-  planRoleplayAssistantAlternativeJson(inputJson: string): string;
-  planRoleplaySessionLifecycleJson(inputJson: string): string;
-  planRoleplayChatLayerBindingJson(inputJson: string): string;
-  normalizeRoleplayLoreSearchControlsJson(inputJson: string): string;
-  readRoleplaySceneStateJson(inputJson: string): string;
-  planRoleplaySceneStateUpdateJson(inputJson: string): string;
-  buildRoleplayPromptContextJson(inputJson: string): string;
-  roleplaySpeakerIdentityJson(inputJson: string): string;
-  writeRoleplayCharacterJson(inputJson: string): string;
-  mergeRoleplayCharacterJson(inputJson: string): string;
-  writeRoleplayPlayerPersonaJson(inputJson: string): string;
-  mergeRoleplayPlayerPersonaJson(inputJson: string): string;
-  patchRoleplaySessionMetadataJson(inputJson: string): string;
-  normalizeRoleplayNarratorConfigJson(inputJson: string): string;
-  startRoleplayNarratorTurnJson(inputJson: string): string;
-  advanceRoleplayNarratorTurnJson(inputJson: string): string;
-  saveMessageSlotJson(inputJson: string): void;
-  saveMessageVariantJson(inputJson: string): string;
-  createChatMessageSlotJson(inputJson: string): string;
-  createChatMessageVariantJson(inputJson: string): string;
-  applyRoleplayAlternativeJson(inputJson: string): string;
-  queryMessageSlotsJson(inputJson: string): string;
-  queryMessageSlotsPageJson(inputJson: string): string;
-  queryMessageVariantsJson(inputJson: string): string;
-  queryMessageVariantsPageJson(inputJson: string): string;
-  chatReadModelPageJson(inputJson: string): string;
-  readChatSessionJson(inputJson: string): string;
-  queryChatSessionSummariesJson(inputJson: string): string;
-  appendChatEventJson(inputJson: string): string;
-  queryChatEventsJson(inputJson: string): string;
-  selectActiveMessageVariantJson(inputJson: string): string;
-  selectActiveChatMessageVariantJson(inputJson: string): string;
-  deleteChatMessageVariantJson(inputJson: string): string;
-  reorderChatMessageVariantsJson(inputJson: string): string;
-  deleteMessageVariantJson(inputJson: string): string;
-  reorderMessageVariantsJson(inputJson: string): string;
-  saveConversationBranchJson(inputJson: string): string;
-  createChatConversationBranchJson(inputJson: string): string;
-  ensureActiveChatConversationBranchJson(inputJson: string): string;
-  queryConversationBranchesJson(inputJson: string): string;
-  getConversationBranchStateJson(inputJson: string): string;
-  selectActiveConversationBranchJson(inputJson: string): string;
-  updateConversationBranchHeadJson(inputJson: string): string;
-  saveConversationSnapshotJson(inputJson: string): string;
-  createChatConversationSnapshotJson(inputJson: string): string;
-  queryConversationSnapshotsJson(inputJson: string): string;
-  readConversationTreeJson(inputJson: string): string;
-  searchChatTranscriptJson(inputJson: string): string;
-  resolveConversationJumpJson(inputJson: string): string;
-  saveAttachmentJson(inputJson: string): string;
-  createChatAttachmentJson(inputJson: string): string;
-  queryAttachmentsJson(inputJson: string): string;
-  queryAttachmentsPageJson(inputJson: string): string;
-  removeAttachmentJson(inputJson: string): string;
-  removeChatAttachmentJson(inputJson: string): string;
-  saveDataBankScopeJson(inputJson: string): string;
-  createChatDataBankScopeJson(inputJson: string): string;
-  queryDataBankScopesJson(inputJson: string): string;
-  queryDataBankScopesPageJson(inputJson: string): string;
-  removeDataBankScopeJson(inputJson: string): string;
-  removeChatDataBankScopeJson(inputJson: string): string;
-  putRoleplayCharacterJson(inputJson: string): string;
-  getRoleplayCharacterJson(id: string): string;
-  listRoleplayCharactersJson(inputJson: string): string;
-  putRoleplayPlayerPersonaJson(inputJson: string): string;
-  getRoleplayPlayerPersonaJson(id: string): string;
-  listRoleplayPlayerPersonasJson(inputJson: string): string;
-  putRoleplaySessionMetadataJson(inputJson: string): string;
-  getRoleplaySessionMetadataJson(id: string): string;
-  listRoleplaySessionMetadataJson(inputJson: string): string;
-  applyRoleplaySessionProjectionJson(inputJson: string): string;
-  putRoleplayImportJson(inputJson: string): string;
-  getRoleplayImportJson(id: string): string;
-  listRoleplayImportsJson(inputJson: string): string;
-  addLoreEntryJson(inputJson: string): string;
-  replaceLoreEntryJson(inputJson: string): string;
-  supersedeLoreEntryJson(inputJson: string): string;
-  tombstoneLoreEntryJson(inputJson: string): string;
-  queryLoreEntriesJson(inputJson: string): string;
-  getLoreEntryJson(recordId: string): string;
-  loreEntryProvenanceEventsJson(recordId: string): string;
-  createLoreLayerJson(inputJson: string): string;
-  getLoreLayerJson(layerId: string): string;
-  listLoreLayersJson(profileId: string): string;
-  updateLoreLayerJson(inputJson: string): string;
-  archiveLoreLayerJson(inputJson: string): string;
-  getLoreLayerConfigJson(layerId: string): string;
-  setLoreLayerConfigJson(inputJson: string): string;
-  addEntryToLayerJson(inputJson: string): void;
-  removeEntryFromLayerJson(inputJson: string): void;
-  setEntryConstantJson(inputJson: string): void;
-  listEntriesByLayerJson(layerId: string): string;
-  captureLoreFactJson(inputJson: string): string;
-  promoteLoreEntryJson(inputJson: string): string;
-  setChatLayersJson(inputJson: string): void;
-  getChatLayersJson(chatId: string): string;
-  toggleChatLayerJson(inputJson: string): void;
-  reorderChatLayersJson(inputJson: string): void;
-  recallLoreJson(inputJson: string): string;
-  listRecallTracesJson(inputJson: string): string;
-  getRecallTraceJson(traceId: string): string;
-  registerPlatformAdapter(registration: {
-    adapterId: string;
-    kind: string;
-    displayName: string;
-  }): number;
-  brainCatalogJson(): string;
-  planBrainSelectionJson(inputJson: string): string;
-  validateToolMetadataPolicyJson(inputJson: string): string;
-  validateLocalToolProfilePolicyJson(inputJson: string): string;
-  planToolAvailabilityJson(inputJson: string): string;
-  planLocalCodeResourcePolicyJson(inputJson: string): string;
-  planWebBrowserResourcePolicyJson(inputJson: string): string;
-  validateRuntimeConfigDraftJson(inputJson: string): string;
-  planRuntimeConfigJson(inputJson: string): string;
-  planRuntimeGraphJson(inputJson: string): string;
-  planCreateProfileJson(inputJson: string): string;
-  planProfileRegistryMutationJson(inputJson: string): string;
-  planNewSessionControlJson(inputJson: string): string;
-  planReloadMcpControlJson(inputJson: string): string;
-  planDelegatedRoleLifecycleJson(inputJson: string): string;
-  planChannelIngressRouteJson(inputJson: string): string;
-  planDenProductIngressPolicyJson(inputJson: string): string;
-  shutdownEngine(
-    engine: number,
-    drainTimeoutMs: number,
-  ): {
-    archivedSessions: number;
-    droppedSubscriptions: number;
-  };
-  submitBrainEvent(
-    wakeId: string,
-    sessionId: string,
-    eventType: string,
-    text?: string,
-    toolName?: string,
-    isError?: boolean,
-    metadataJson?: string,
-  ): { accepted: boolean; sequence: number };
-  injectExternalEvent(eventJson: Uint8Array): {
-    accepted: boolean;
-    sequence: number;
-  };
-  injectDenDataUpdate(updateJson: Uint8Array): {
-    accepted: boolean;
-    sequence: number;
-  };
-  cancelDelegatedSession(delegatedSessionId: string): {
-    handle: number;
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: string;
-    status: string;
-  };
-  requestDelegatedCheckpoint(
-    parentSessionId: string,
-    delegatedSessionId: string,
-    reason: string,
-  ): { accepted: boolean; sequence: number };
-  drainDelegatedSessions(parentSessionId?: string): string[];
-  cleanupDelegatedResourcesJson(): string;
-  delegatedSessionStatusJson(delegatedSessionId: string): string;
-  listSessionsJson(): string;
-  submitBrainTextDelta(
-    wakeId: string,
-    sessionId: string,
-    text: string,
-  ): { accepted: boolean; sequence: number };
-  createSession(config: {
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: string;
-    resourceLimits?: ResourceLimits;
-    toolProfile?: ToolProfile;
-    historyWindow?: SessionState["historyWindow"];
-  }): {
-    handle: number;
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: string;
-    status: string;
-  };
-  ensureConfiguredSession(config: {
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: string;
-    resourceLimits?: ResourceLimits;
-    toolProfile?: ToolProfile;
-    historyWindow?: SessionState["historyWindow"];
-  }): {
-    handle: number;
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: string;
-    status: string;
-  };
-  archiveSession(sessionId: string): {
-    handle: number;
-    sessionId: string;
-    agentId: string;
-    profileId: string;
-    kind: string;
-    status: string;
-  };
-  routeAgentMessage(
-    from: string,
-    to: string,
-    body: string,
-    correlationId?: string,
-  ): { accepted: boolean; sequence: number };
-  enqueueBodyFollowUpMessage(
-    sessionId: string,
-    from: string,
-    body: string,
-    correlationId: string | null,
-  ): NativeQueuedMessageRecord;
-  registerScheduledWakeJobJson(
-    jobId: string,
-    targetSessionId: string,
-    intervalMs: number | undefined,
-    firstDueAt: string,
-  ): string;
-  registerScheduledHostJobJson(
-    jobId: string,
-    jobKind: string,
-    intervalMs: number | undefined,
-    firstDueAt: string,
-    payloadJson: string,
-  ): string;
-  listScheduledJobsJson(
-    status?: ScheduledJobStatus,
-    jobKind?: string,
-    limit?: number,
-    offset?: number,
-  ): string;
-  listScheduledRunsJson(
-    jobId?: string,
-    status?: ScheduledRunStatus,
-    trigger?: ScheduledRunTrigger,
-    targetSessionId?: SessionId,
-    limit?: number,
-    offset?: number,
-  ): string;
-  claimScheduledHostRunsJson(
-    supportedJobKinds: string[],
-    limit?: number,
-  ): string;
-  requestScheduledHostJobRunJson(
-    jobId: string,
-    supportedJobKinds: string[],
-  ): string;
-  completeScheduledHostRun(
-    runId: string,
-    status: ScheduledHostRunCompletionInput["status"],
-    outputJson: string,
-    error?: string,
-  ): void;
-  runSchedulerTickJson(): string;
-  requestScheduledJobRunJson(jobId: string): string;
-  pauseScheduledJob(jobId: string): void;
-  resumeScheduledJob(jobId: string, nextDueAt: string): void;
-  buildBrainWakeRequest(
-    brain: number,
-    sessionId: string,
-    bodyStateJson: Uint8Array,
-    systemPrompt: string,
-    roleAssemblyJson: Uint8Array,
-    wakeId: string,
-  ): {
-    bodyState: number;
-    systemPrompt: number;
-    roleAssembly: number;
-    providerStateJson?: string;
-    providerStateAbsence?: string;
-  };
-  buildBrainWakeRequestForSession(
-    brain: number,
-    sessionId: string,
-    systemPrompt: string,
-    roleAssemblyJson: Uint8Array,
-    wakeId: string,
-  ): {
-    bodyState: number;
-    systemPrompt: number;
-    roleAssembly: number;
-    providerStateJson?: string;
-    providerStateAbsence?: string;
-  };
-  projectBodyStateJson(sessionId: string): Uint8Array;
-  submitBrainActionsJson(
-    wakeId: string,
-    sessionId: string,
-    actionsJson: Uint8Array,
-  ): {
-    wakeId: string;
-    acceptedActions: number;
-    rejectedActionsJson: string;
-  };
-  countRows(table: string): number;
-  databaseSize(): NativeRuntimeDatabaseSize;
-  storageDiagnostics(): NativeRuntimeStorageDiagnostics;
-  storageSchema(): NativeRuntimeModuleSchemaRegistryDiagnostics;
-  bufferedBrainRunDiagnosticsJson(): string;
-  cleanupBufferedBrainRunsJson(reasonCode: string, summary: string): string;
-  suspendForGithubGateJson(inputJson: string): string;
-  consumeGithubGateTerminalEventJson(inputJson: string): string;
-  recoverGithubGateWakes(): number;
-  githubGateWaitJson(sessionId: string): string;
-  githubGateEventCursor(): number;
-  createProfileRegistryRecordJson(writeJson: string): string;
-  updateProfileRegistryRecordJson(updateJson: string): string;
-  listProfileRegistryRecordsJson(queryJson: string): string;
-  getProfileRegistryRecordJson(profileId: string): string;
-  purgeProfileJson(profileId: string): string;
-  upsertModelProviderJson(writeJson: string): string;
-  listModelProvidersJson(queryJson: string): string;
-  getModelProviderJson(alias: string): string;
-  getModelProviderSecretJson(alias: string): string;
-  modelProviderRefreshImpactJson(requestJson: string): string;
-  planModelProviderRefreshJson(requestJson: string): string;
-  runMaintenance(
-    policy: NativeRuntimeMaintenancePolicy,
-  ): NativeRuntimeMaintenanceReport;
-  listMemorySpaceDescriptorsJson(): string;
-  querySessionMemoryRecordsJson(inputJson: string): string;
-  buildSessionMemoryPromptContextJson(inputJson: string): string;
-  saveMemoryProposalJson(inputJson: string): string;
-  planCaptureMemoryProposalsJson(inputJson: string): string;
-  planCuratorGovernanceTransitionJson(inputJson: string): string;
-  planCuratorLifecycleTransitionJson(inputJson: string): string;
-  planBackgroundMemoryAutoMutationsJson(inputJson: string): string;
-  listMemoryProposalsJson(inputJson: string): string;
-  saveSessionActivityDigestJson(inputJson: string): string;
-  listSessionActivityDigestsJson(inputJson: string): string;
-  saveContextCompactionArtifactJson(inputJson: string): string;
-  listContextCompactionArtifactsJson(inputJson: string): string;
-  recordMemoryGovernanceDecisionJson(inputJson: string): string;
-  listProfileMemory(
-    query: NativeProfileMemoryQuery,
-  ): NativeProfileMemoryRecord[];
-  listSimpleKv(query: NativeSimpleKvQuery): NativeSimpleKvRecord[];
-  putSimpleKv(write: NativeSimpleKvWrite): NativeSimpleKvRecord;
-  deleteSimpleKv(input: NativeSimpleKvDelete): NativeSimpleKvRecord;
-  getProfileMemory(
-    profileId: string,
-    targetType: string,
-    targetId: string | undefined,
-    key: string,
-  ): NativeProfileMemoryRecord | undefined;
-  addProfileMemory(write: NativeProfileMemoryWrite): NativeProfileMemoryRecord;
-  replaceProfileMemory(
-    replace: NativeProfileMemoryReplace,
-  ): NativeProfileMemoryRecord;
-  removeProfileMemory(
-    remove: NativeProfileMemoryDelete,
-  ): NativeProfileMemoryRecord;
-  searchRuntime(query: NativeRuntimeSearchQuery): NativeRuntimeSearchResult[];
-  queryRuntimeCounters(
-    query: NativeRuntimeCounterQuery,
-  ): NativeRuntimeCounterRecord[];
-  runtimeSummary(
-    scopeType: NativeRuntimeCounterScopeType,
-    scopeId: string | undefined,
-  ): NativeRuntimeCounterSummary;
-  resetRuntimeCounters(query: NativeRuntimeCounterQuery): number;
-  getBuffer(handle: number): {
-    handle: number;
-    mediaType: string;
-    byteLen: number;
-    bytes: Uint8Array;
-  };
-  releaseBuffer(handle: number): void;
-  subscribeEvents(subscription: {
-    eventKinds: string[];
-    sessionId?: string;
-    agentId?: string;
-    adapterId?: string;
-  }): number;
-  unsubscribeEvents(handle: number): void;
-  drainSubscriptionEvents(handle: number, maxEvents: number): string[];
 }
 
 export interface BridgeBufferClient {
@@ -4189,7 +3715,7 @@ function createNativeBridgeModule(
         input.from,
         input.body,
         input.correlationId ?? null,
-      ),
+      ) as unknown as NativeQueuedMessageRecord,
     registerScheduledWakeJob: async (input) =>
       toScheduledJobSummary(
         JSON.parse(
@@ -4980,7 +4506,11 @@ function createNativeBridgeModule(
     providerStateDiagnostics: async (limit = 100) => {
       const stored = binding
         .providerStateDiagnostics(limit)
-        .map(toNativeProviderStateDiagnostic);
+        .map((raw) =>
+          toNativeProviderStateDiagnostic(
+            raw as unknown as NativeProviderStateDiagnostic,
+          ),
+        );
       return validateBridgeValue<NativeProviderStateDiagnostic[]>({
         operation: "provider_state_diagnostics",
         direction: "rust_to_ts",
@@ -4992,18 +4522,20 @@ function createNativeBridgeModule(
       });
     },
     exchangeOpenAiOauthCode: async (input) => {
-      const raw = JSON.parse(
-        await binding.exchangeOpenaiOauthCodeJson(
-          JSON.stringify({
-            issuer: input.issuer,
-            clientId: input.clientId,
-            redirectUri: input.redirectUri,
-            code: input.code,
-            codeVerifier: input.codeVerifier,
-            now: input.now,
-          }),
-        ),
-      ) as RawOpenAiOauthCodeExchangeResult;
+      const result = await binding.exchangeOpenaiOauthCodeJson(
+        JSON.stringify({
+          issuer: input.issuer,
+          clientId: input.clientId,
+          redirectUri: input.redirectUri,
+          code: input.code,
+          codeVerifier: input.codeVerifier,
+          now: input.now,
+        }),
+      );
+      if (typeof result !== "string") {
+        throw new TypeError("OpenAI OAuth native result must be JSON text");
+      }
+      const raw = JSON.parse(result) as RawOpenAiOauthCodeExchangeResult;
       if (!raw.ok) {
         return raw;
       }
@@ -5113,25 +4645,41 @@ function createNativeBridgeModule(
           : undefined,
       };
     },
-    listProfileMemory: async (query) => binding.listProfileMemory(query),
+    listProfileMemory: async (query) =>
+      binding.listProfileMemory(
+        query,
+      ) as unknown as NativeProfileMemoryRecord[],
     listSimpleKv: async (query) => binding.listSimpleKv(query),
     putSimpleKv: async (write) => binding.putSimpleKv(write),
     deleteSimpleKv: async (input) => binding.deleteSimpleKv(input),
     getProfileMemory: async (input) =>
-      binding.getProfileMemory(
+      (binding.getProfileMemory(
         input.profileId,
         input.targetType,
         input.targetId,
         input.key,
-      ) ?? undefined,
-    addProfileMemory: async (write) => binding.addProfileMemory(write),
+      ) as unknown as NativeProfileMemoryRecord | null) ?? undefined,
+    addProfileMemory: async (write) =>
+      binding.addProfileMemory(write) as unknown as NativeProfileMemoryRecord,
     replaceProfileMemory: async (replace) =>
-      binding.replaceProfileMemory(replace),
-    removeProfileMemory: async (remove) => binding.removeProfileMemory(remove),
-    searchRuntime: async (query) => binding.searchRuntime(query),
-    queryRuntimeCounters: async (query) => binding.queryRuntimeCounters(query),
+      binding.replaceProfileMemory(
+        replace,
+      ) as unknown as NativeProfileMemoryRecord,
+    removeProfileMemory: async (remove) =>
+      binding.removeProfileMemory(
+        remove,
+      ) as unknown as NativeProfileMemoryRecord,
+    searchRuntime: async (query) =>
+      binding.searchRuntime(query) as unknown as NativeRuntimeSearchResult[],
+    queryRuntimeCounters: async (query) =>
+      binding.queryRuntimeCounters(
+        query,
+      ) as unknown as NativeRuntimeCounterRecord[],
     runtimeSummary: async (input) =>
-      binding.runtimeSummary(input.scopeType, input.scopeId),
+      binding.runtimeSummary(
+        input.scopeType,
+        input.scopeId,
+      ) as unknown as NativeRuntimeCounterSummary,
     resetRuntimeCounters: async (query) => binding.resetRuntimeCounters(query),
     projectBodyStateJson: async (sessionId) =>
       module.diagnosticProjectBodyStateJson(sessionId),

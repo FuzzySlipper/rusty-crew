@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { nativeBridgeBindingSurface } from "./generated/native-binding-surface.js";
 import { nativeMappingInventory } from "./generated/native-mapping-inventory.js";
 
 const sourcePath = fileURLToPath(new URL("./index.ts", import.meta.url));
@@ -17,7 +18,22 @@ const profileRegistry = nativeMappingInventory.families.profileRegistry;
 const modelProvider = nativeMappingInventory.families.modelProvider;
 const runtimeScheduler = nativeMappingInventory.families.runtimeScheduler;
 
-const nativeBridgeBinding = extractInterface("NativeBridgeBinding");
+const nativeBridgeBindingMethods = new Set<string>(
+  nativeBridgeBindingSurface.methods.map(({ name }) => name),
+);
+assert(
+  !source.includes("interface NativeBridgeBinding"),
+  "raw NativeBridgeBinding declarations must stay in generated output",
+);
+assert.equal(
+  nativeBridgeBindingMethods.size,
+  nativeBridgeBindingSurface.methods.length,
+  "generated native binding method inventory must not contain duplicates",
+);
+assert(
+  nativeBridgeBindingSurface.directHelperNames.includes("assertNoBufferLeaks"),
+  "direct native helpers must remain explicit in generated metadata",
+);
 assertRawMethods("memory", memory.rawMethods);
 assertRawMethods("brain/provider", brainProvider.rawMethods);
 assertRawMethods("roleplay", roleplay.rawMethods);
@@ -388,7 +404,7 @@ function assertNamedRuntimeSchedulerInterfaces() {
 function assertRawMethods(label: string, methods: readonly string[]) {
   for (const method of methods) {
     assert(
-      nativeBridgeBinding.includes(`${method}(`),
+      nativeBridgeBindingMethods.has(method),
       `NativeBridgeBinding is missing generated-checked ${label} raw method ${method}`,
     );
   }
@@ -398,7 +414,7 @@ function assertDirectNativeMethods(label: string, methods: readonly string[]) {
   const moduleInterface = extractInterface("NativeBridgeModule");
   for (const method of methods) {
     assert(
-      nativeBridgeBinding.includes(`${method}(`),
+      nativeBridgeBindingMethods.has(method),
       `NativeBridgeBinding is missing generated-checked ${label} direct method ${method}`,
     );
     assert(

@@ -214,9 +214,15 @@ Acceptance:
 
 Current implementation:
 
-- `smoke:bridge-native-surface` compares the generated napi declaration against
-  the TypeScript raw `NativeBridgeBinding` interface for operation names,
-  parameter counts, method names, and return-kind shape.
+- Task 5396 moved `NativeBridgeBinding` out of `index.ts`. The generated
+  `native-binding-surface.ts` contains a sanitized interface derived from the
+  tracked napi declaration plus method metadata for parameter source/count,
+  exact return type/kind, manifest operation mapping, and direct helpers.
+- `smoke:bridge-native-surface` builds the addon, checks every native `*Json`
+  method against the manifest, then checks the complete generated binding
+  artifact against the fresh napi declaration. Napi's reserved `delete`
+  parameter names and `Buffer` types are sanitized deterministically for the
+  TypeScript compiler; method and wire signatures remain generated evidence.
 - Task #5302 added `codegen:native-mapping-inventory` and
   `check:native-mapping-inventory` for generated-check mapper coverage. The
   first covered families are model providers, profile registry, and
@@ -311,6 +317,11 @@ All DTO field inventories are derived from Rust-authored sample serialization.
 This is not a full client generator. It is a generated-check inventory that
 keeps the handwritten ergonomic wrapper reviewable while making field omissions
 fail loudly.
+
+After task 5396, `index.ts` is 7,761 lines and no longer declares the 215-method
+raw interface. Addon loading, contract diagnostics, and ergonomic wrappers stay
+authored. The generated artifact is deliberately verbose and reviewable; it is
+not a runtime client or a second callable implementation.
 
 ### 2. Expand Rust Fixture Families For Active UI Surfaces
 
