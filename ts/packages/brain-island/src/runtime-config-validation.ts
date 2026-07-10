@@ -5,6 +5,8 @@ import type {
   NativeRuntimeConfigPlan,
   NativeRuntimeConfigValidationInput,
   NativeRuntimeConfigValidationResult,
+  NativeRuntimeGraphPlan,
+  NativeRuntimeGraphPlanInput,
 } from "@rusty-crew/native-bridge";
 import type { ProfileConfig } from "./profile-loading.js";
 import { profileRuntimeMetadataList } from "./profile-runtime-metadata.js";
@@ -94,6 +96,37 @@ export async function planRuntimeConfigWithRust(input: {
   return input.bridge.planRuntimeConfig(
     runtimeConfigValidationInput(input.runtimeConfig, input.profiles),
   );
+}
+
+export async function planRuntimeGraphWithRust(input: {
+  bridge: Pick<NativeBridgeModule, "planRuntimeGraph">;
+  hostFacts: NativeRuntimeGraphPlanInput["hostFacts"];
+  serviceDefaults: NativeRuntimeGraphPlanInput["serviceDefaults"];
+  runtimeConfig: Record<string, unknown>;
+  profiles: readonly ProfileConfig[];
+}): Promise<NativeRuntimeGraphPlan> {
+  return input.bridge.planRuntimeGraph({
+    hostFacts: input.hostFacts,
+    serviceDefaults: input.serviceDefaults,
+    runtimeConfig: input.runtimeConfig,
+    profiles: input.profiles.map(runtimeGraphProfileSource),
+  });
+}
+
+function runtimeGraphProfileSource(
+  profile: ProfileConfig,
+): Record<string, unknown> {
+  return {
+    profileId: profile.profileId,
+    brain: profile.brain,
+    runtime: profile.runtime,
+    localToolProfileId: profile.localToolProfileId,
+    sessionDefaults: profile.sessionDefaults,
+    sessionMemoryPrompt: profile.memoryConfig?.sessionMemoryPrompt,
+    mcpConfig: profile.mcpConfig,
+    backgroundReview: profile.backgroundReview,
+    contextPolicy: profile.contextPolicy,
+  };
 }
 
 export async function planCreateProfileWithRust(input: {

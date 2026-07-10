@@ -372,7 +372,7 @@ function toSnakeCaseKeys(value: unknown): unknown {{
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       camelToSnakeCase(key),
-      toSnakeCaseKeys(item),
+      isOpaqueJsonKey(key) ? item : toSnakeCaseKeys(item),
     ]),
   );
 }}
@@ -389,6 +389,10 @@ function camelToSnakeCase(value: string): string {{
   return value.replace(/[A-Z]/g, (letter) => `_${{letter.toLowerCase()}}`);
 }}
 
+function isOpaqueJsonKey(value: string): boolean {{
+  return value === "payload" || value === "strategyConfig" || value === "strategy_config";
+}}
+
 function toCamelCaseKeys(value: unknown): unknown {{
   if (Array.isArray(value)) {{
     return value.map(toCamelCaseKeys);
@@ -399,7 +403,7 @@ function toCamelCaseKeys(value: unknown): unknown {{
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       snakeToCamelCase(key),
-      toCamelCaseKeys(item),
+      isOpaqueJsonKey(key) ? item : toCamelCaseKeys(item),
     ]),
   );
 }}
@@ -548,7 +552,11 @@ fn to_snake_case_json_keys(value: Value) -> Value {
                             }
                             output
                         }),
-                        to_snake_case_json_keys(value),
+                        if key == "payload" || key == "strategyConfig" {
+                            value
+                        } else {
+                            to_snake_case_json_keys(value)
+                        },
                     )
                 })
                 .collect(),
@@ -1425,7 +1433,9 @@ fn collect_json_field_paths(value: &Value, prefix: &str, paths: &mut Vec<String>
                     format!("{prefix}.{key}")
                 };
                 paths.push(path.clone());
-                collect_json_field_paths(child, &path, paths);
+                if key != "payload" && key != "strategy_config" {
+                    collect_json_field_paths(child, &path, paths);
+                }
             }
         }
         Value::Array(items) => {
@@ -1668,6 +1678,7 @@ fn sample_profile_runtime_metadata() -> ProfileRuntimeMetadata {
             enabled: true,
             review_type: Some(ProfileBackgroundReviewType::Combined),
             schedule: Some("0 * * * *".to_owned()),
+            ..ProfileBackgroundReviewConfig::default()
         }),
         channel_defaults: Some(ProfileChannelDefaults {
             wake_policy: Some(ChannelWakePolicy::Subscription),

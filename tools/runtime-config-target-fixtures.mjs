@@ -36,7 +36,9 @@ function toSnakeCaseKeys(value) {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-      toSnakeCaseKeys(item),
+      key === "payload" || key === "strategyConfig"
+        ? item
+        : toSnakeCaseKeys(item),
     ]),
   );
 }

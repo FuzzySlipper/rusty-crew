@@ -21,6 +21,7 @@ export declare class NativeBridgeBinding {
   planChannelIngressRouteJson(inputJson: string): string
   planDenProductIngressPolicyJson(inputJson: string): string
   planRuntimeConfigJson(inputJson: string): string
+  planRuntimeGraphJson(inputJson: string): string
   createProfileRegistryRecordJson(writeJson: string): string
   updateProfileRegistryRecordJson(updateJson: string): string
   listProfileRegistryRecordsJson(queryJson: string): string

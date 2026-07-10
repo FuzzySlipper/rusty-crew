@@ -689,11 +689,20 @@ pub enum ProfileBackgroundReviewType {
     Combined,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileBackgroundReviewConfig {
     pub enabled: bool,
     pub review_type: Option<ProfileBackgroundReviewType>,
     pub schedule: Option<String>,
+    pub memory_nudge_interval: Option<u32>,
+    pub skill_nudge_interval: Option<u32>,
+    pub max_tokens: Option<u32>,
+    pub max_findings: Option<u32>,
+    pub max_candidates: Option<u32>,
+    pub llm_review_enabled: Option<bool>,
+    pub capture_provider_alias: Option<String>,
+    pub capture_max_proposals: Option<u32>,
+    pub dry_run: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4834,6 +4843,7 @@ mod tests {
                 enabled: true,
                 review_type: Some(ProfileBackgroundReviewType::Combined),
                 schedule: Some("0 3 * * *".to_string()),
+                ..ProfileBackgroundReviewConfig::default()
             }),
             channel_defaults: Some(ProfileChannelDefaults {
                 wake_policy: Some(ChannelWakePolicy::Subscription),

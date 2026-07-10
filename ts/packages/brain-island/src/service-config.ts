@@ -179,6 +179,7 @@ export interface RustyCrewServiceConfig {
   mcp: RustyCrewMcpConfig;
   telegram: RustyCrewTelegramConfig;
   storage: RustyCrewStorageConfig;
+  environmentVariablePresent(name: string): boolean;
   denSuccessorGateway?: DenSuccessorGatewayConfig;
 }
 
@@ -300,6 +301,8 @@ export function loadRustyCrewServiceConfig(
   const mcp = loadRustyCrewMcpConfig(env);
   const telegram = loadRustyCrewTelegramConfig(env);
   const storage = loadRustyCrewStorageConfig(env, paths);
+  const environmentVariablePresent = (name: string) =>
+    normalizeOptional(env[name]) !== undefined;
 
   validateRustyCrewServiceConfig({
     paths,
@@ -311,6 +314,7 @@ export function loadRustyCrewServiceConfig(
     mcp,
     telegram,
     storage,
+    environmentVariablePresent,
     denSuccessorGateway,
   });
   return {
@@ -323,6 +327,7 @@ export function loadRustyCrewServiceConfig(
     mcp,
     telegram,
     storage,
+    environmentVariablePresent,
     denSuccessorGateway,
   };
 }
@@ -702,6 +707,9 @@ function loadRustyCrewStorageConfig(
   const postgresBootMode = parsePostgresBootMode(
     env.RUSTY_CREW_POSTGRES_BOOT_MODE,
   );
+  const databaseUrlEnv =
+    normalizeOptional(env.RUSTY_CREW_POSTGRES_DATABASE_URL_ENV) ??
+    "RUSTY_CREW_DATABASE_URL";
   return {
     backend,
     sqlite: {
@@ -721,9 +729,7 @@ function loadRustyCrewStorageConfig(
         : join(paths.engineDataDir, sqlitePath),
     },
     postgres: {
-      databaseUrlEnv:
-        normalizeOptional(env.RUSTY_CREW_POSTGRES_DATABASE_URL_ENV) ??
-        "RUSTY_CREW_DATABASE_URL",
+      databaseUrlEnv,
       schema: normalizeOptional(env.RUSTY_CREW_POSTGRES_SCHEMA) ?? "rusty_crew",
       bootMode: postgresBootMode,
       maxConnections: parsePositiveInteger(

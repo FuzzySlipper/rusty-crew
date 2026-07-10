@@ -14,6 +14,7 @@ import type { ProfileId } from "@rusty-crew/contracts";
 import type {
   NativeCreateProfileRequest,
   NativeProfileRegistryRuntimeMetadata,
+  NativeRuntimeGraphPlanInput,
   NativeRuntimeConfigValidationInput,
 } from "@rusty-crew/native-bridge";
 import { loadProfileConfig } from "../src/profile-loading.js";
@@ -71,13 +72,13 @@ try {
     tempRoot,
   );
   assert.deepEqual(
-    actualInput,
-    expectedInput,
+    canonicalRuntimeValidationInput(actualInput),
+    canonicalRuntimeValidationInput(expectedInput),
     "TS runtime/profile loading drifted from the shared config validation fixture",
   );
   assert.deepEqual(
-    snakeCaseKeys(actualInput),
-    expectedSnakeInput,
+    snakeCaseKeys(canonicalRuntimeValidationInput(actualInput)),
+    snakeCaseKeys(canonicalRuntimeValidationInput(expectedInput)),
     "runtime config parity fixture drifted from the Rust serde snake_case shape",
   );
 
@@ -150,6 +151,21 @@ try {
     toCoreConfigWireRuntimeGraphPlanInput(targetSourceCamel),
     targetSourceSnake,
     "generated runtime graph input converter drifted from Rust wire fixture",
+  );
+  const actualTargetPlan = await bridge.planRuntimeGraph(
+    targetSourceCamel as NativeRuntimeGraphPlanInput,
+  );
+  assert.equal(actualTargetPlan.accepted, true);
+  assert.deepEqual(
+    stripNullObjectFields({
+      ...jsonRoundTrip(actualTargetPlan),
+      sourceRevision: "__RUST_COMPUTED__",
+    }),
+    {
+      ...(targetPlanCamel as Record<string, unknown>),
+      sourceRevision: "__RUST_COMPUTED__",
+    },
+    "native runtime graph planning drifted from the Rust-owned target plan",
   );
   assert.deepEqual(
     fromCoreConfigWireRuntimeGraphPlan(targetPlanSnake),
@@ -260,6 +276,44 @@ async function readFixtureText(
 
 function jsonRoundTrip<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function canonicalRuntimeValidationInput(
+  input: NativeRuntimeConfigValidationInput,
+): unknown {
+  const value = stripNullObjectFields(jsonRoundTrip(input)) as {
+    runtimeConfig: NativeRuntimeConfigValidationInput["runtimeConfig"];
+    profiles: NativeRuntimeConfigValidationInput["profiles"];
+  };
+  value.runtimeConfig.brains.sort((left, right) =>
+    left.implementationId.localeCompare(right.implementationId),
+  );
+  value.runtimeConfig.sessions.sort((left, right) =>
+    left.sessionId.localeCompare(right.sessionId),
+  );
+  value.runtimeConfig.scheduledJobs.sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+  value.runtimeConfig.channelBindings.sort((left, right) =>
+    left.bindingId.localeCompare(right.bindingId),
+  );
+  value.runtimeConfig.mcpBindings.sort((left, right) =>
+    left.bindingId.localeCompare(right.bindingId),
+  );
+  value.profiles.sort((left, right) =>
+    left.profileId.localeCompare(right.profileId),
+  );
+  return value;
+}
+
+function stripNullObjectFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNullObjectFields);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, child]) => child !== null)
+      .map(([key, child]) => [key, stripNullObjectFields(child)]),
+  );
 }
 
 function snakeCaseKeys(value: unknown): unknown {

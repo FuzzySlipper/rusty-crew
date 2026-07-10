@@ -42,8 +42,10 @@ import {
   rawSessionStateArraySchema,
 } from "./bridge-validation-schemas.js";
 import {
+  fromCoreConfigWireRuntimeGraphPlan,
   toCoreConfigWireCreateProfilePlanInput,
   toCoreConfigWireRuntimeConfigValidationInput,
+  toCoreConfigWireRuntimeGraphPlanInput,
 } from "./generated/core-config-facade.js";
 import { createNativeBridgeMemoryMethods } from "./memory-wrappers.js";
 
@@ -324,6 +326,7 @@ interface NativeBridgeBinding {
   planWebBrowserResourcePolicyJson(inputJson: string): string;
   validateRuntimeConfigDraftJson(inputJson: string): string;
   planRuntimeConfigJson(inputJson: string): string;
+  planRuntimeGraphJson(inputJson: string): string;
   planCreateProfileJson(inputJson: string): string;
   planProfileRegistryMutationJson(inputJson: string): string;
   planNewSessionControlJson(inputJson: string): string;
@@ -1731,6 +1734,102 @@ export interface NativeRuntimeConfigValidationInput {
   profiles: NativeProfileRuntimeMetadata[];
 }
 
+export interface NativeRuntimeGraphPlanInput {
+  hostFacts: {
+    configDir: string;
+    engineDataDir: string;
+    defaultWorkdir?: string;
+    postgresDatabaseUrlEnvPresent: boolean;
+  };
+  serviceDefaults: {
+    wakeTimeout?: {
+      mode: "disabled" | "default";
+      defaultMs?: number;
+    };
+    storage?: {
+      backend: "sqlite" | "postgres";
+      sqlite?: {
+        path?: string;
+        wal?: boolean;
+        busyTimeoutMs?: number;
+      };
+      postgres?: {
+        databaseUrlEnv?: string;
+        schema?: string;
+        bootMode?: "blocked" | "proof_admin" | "active";
+        maxConnections?: number;
+        statementTimeoutMs?: number;
+      };
+    };
+  };
+  runtimeConfig: Record<string, unknown>;
+  profiles: Record<string, unknown>[];
+}
+
+export interface NativeRuntimeGraphPlan {
+  accepted: boolean;
+  sourceRevision: string;
+  runtimeConfig: {
+    profilesDir: string;
+    skillsDir?: string;
+    storage: {
+      backend: "sqlite" | "postgres";
+      implementationStatus:
+        | "active"
+        | "proof_admin_only"
+        | "blocked_unimplemented";
+      sqlite: {
+        path: string;
+        effectivePath: string;
+        wal: boolean;
+        busyTimeoutMs: number;
+      };
+      postgres: {
+        databaseUrlEnv: string;
+        schema: string;
+        bootMode: "blocked" | "proof_admin" | "active";
+        maxConnections: number;
+        statementTimeoutMs: number;
+      };
+    };
+    wakeTimeout: { mode: "disabled" | "default"; defaultMs?: number };
+    brains: NativeBrainConfigDraft[];
+    sessions: Array<
+      NativeSessionConfigDraft & {
+        resourceLimits: ResourceLimits;
+        effectiveWakeTimeoutMs?: number;
+        wakeTimeoutSource:
+          | "disabled"
+          | "session"
+          | "profile_runtime"
+          | "profile_session_default"
+          | "service_default";
+        localToolProfileId?: string;
+        contextPolicyProfileId?: string;
+        sessionMemoryPromptProfileId?: string;
+      }
+    >;
+    scheduledJobs: Array<NativeScheduledJobConfigDraft & { payload?: unknown }>;
+    channelBindings: NativeChannelBindingConfigDraft[];
+    mcpBindings: NativeMcpBindingConfigDraft[];
+  };
+  derived: Array<{
+    kind: "scheduled_job" | "mcp_binding";
+    id: string;
+    source: string;
+  }>;
+  defaultsApplied: Array<{
+    path: string;
+    source:
+      | "canonical_profile_default"
+      | "service_default"
+      | "host_default_workdir"
+      | "profile_runtime_default"
+      | "profile_session_default";
+  }>;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+}
+
 export interface NativeRuntimeConfigDraft {
   profilesDir: string;
   skillsDir?: string;
@@ -2401,6 +2500,9 @@ export interface NativeBridgeModule {
   planRuntimeConfig(
     input: NativeRuntimeConfigValidationInput,
   ): Promise<NativeRuntimeConfigPlan>;
+  planRuntimeGraph(
+    input: NativeRuntimeGraphPlanInput,
+  ): Promise<NativeRuntimeGraphPlan>;
   planCreateProfile(
     input: NativeCreateProfilePlanInput,
   ): Promise<NativeCreateProfilePlan>;
@@ -2914,6 +3016,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     ),
     validateRuntimeConfigDraft: unavailable("validate_runtime_config_draft"),
     planRuntimeConfig: unavailable("plan_runtime_config"),
+    planRuntimeGraph: unavailable("plan_runtime_graph"),
     planCreateProfile: unavailable("plan_create_profile"),
     planProfileRegistryMutation: unavailable("plan_profile_registry_mutation"),
     planNewSessionControl: unavailable("plan_new_session_control"),
@@ -3717,6 +3820,14 @@ function createNativeBridgeModule(
           ),
         ) as RawRuntimeConfigPlan,
       ),
+    planRuntimeGraph: async (input) =>
+      fromCoreConfigWireRuntimeGraphPlan(
+        JSON.parse(
+          binding.planRuntimeGraphJson(
+            JSON.stringify(toCoreConfigWireRuntimeGraphPlanInput(input)),
+          ),
+        ),
+      ) as NativeRuntimeGraphPlan,
     planCreateProfile: async (input) =>
       toNativeCreateProfilePlan(
         JSON.parse(

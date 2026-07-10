@@ -103,7 +103,16 @@
       "background_review": {
         "enabled": true,
         "review_type": "combined",
-        "schedule": "0 3 * * *"
+        "schedule": "0 3 * * *",
+        "memory_nudge_interval": 8,
+        "skill_nudge_interval": 12,
+        "max_tokens": 2048,
+        "max_findings": 10,
+        "max_candidates": 6,
+        "llm_review_enabled": true,
+        "capture_provider_alias": "review-provider",
+        "capture_max_proposals": 4,
+        "dry_run": false
       },
       "context_policy": {
         "enabled": true,
@@ -115,7 +124,7 @@
         "debug_visibility": "status",
         "include_debug_events_in_model_context": false,
         "strategy_config": {
-          "summary_shape": "brief"
+          "summaryShape": "brief"
         }
       }
     }

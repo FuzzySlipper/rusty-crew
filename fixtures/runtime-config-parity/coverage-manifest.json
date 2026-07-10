@@ -2,10 +2,84 @@
   "formatVersion": 1,
   "families": {
     "RuntimeConfigValidationInput": {
-      "exemptFieldPaths": []
+      "exemptFieldPaths": [
+        {
+          "path": "profiles[].background_review.capture_max_proposals",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.capture_provider_alias",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.dry_run",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.llm_review_enabled",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.max_candidates",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.max_findings",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.max_tokens",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.memory_nudge_interval",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
+          "path": "profiles[].background_review.skill_nudge_interval",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        }
+      ]
     },
     "CreateProfilePlanInput": {
-      "exemptFieldPaths": []
+      "exemptFieldPaths": [
+        {
+          "path": "profiles[].background_review.capture_max_proposals",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.capture_provider_alias",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.dry_run",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.llm_review_enabled",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.max_candidates",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.max_findings",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.max_tokens",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.memory_nudge_interval",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
+          "path": "profiles[].background_review.skill_nudge_interval",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        }
+      ]
     },
     "RuntimeGraphPlanInput": {
       "exemptFieldPaths": [
@@ -84,6 +158,10 @@
         {
           "path": "runtime_config.sessions[].turn_timeout_ms",
           "reason": "Intentionally omitted to prove profile and service wake-timeout precedence."
+        },
+        {
+          "path": "service_defaults.storage",
+          "reason": "The target fixture authors storage directly; service-default storage fallback is covered by the core-config service_storage_defaults_are_applied_when_graph_omits_storage test."
         }
       ]
     },

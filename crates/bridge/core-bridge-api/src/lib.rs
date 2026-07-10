@@ -46,6 +46,7 @@ pub const OPERATION_NAMES: &[&str] = &[
     "plan_web_browser_resource_policy",
     "validate_runtime_config_draft",
     "plan_runtime_config",
+    "plan_runtime_graph",
     "plan_create_profile",
     "plan_profile_registry_mutation",
     "plan_new_session_control",

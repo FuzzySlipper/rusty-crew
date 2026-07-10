@@ -215,6 +215,18 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn plan_runtime_graph_json(&self, input_json: String) -> napi::Result<String> {
+        let input: RuntimeGraphPlanInput = serde_json::from_str(&input_json).map_err(|error| {
+            napi::Error::new(
+                napi::Status::InvalidArg,
+                format!("invalid runtime graph plan input JSON: {error}"),
+            )
+        })?;
+        serde_json::to_string(&plan_runtime_graph(&input))
+            .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))
+    }
+
+    #[napi]
     pub fn create_profile_registry_record_json(&self, write_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<ProfileRegistryWrite>(&write_json, "profile registry write")?;

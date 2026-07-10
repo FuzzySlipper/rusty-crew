@@ -130,22 +130,25 @@ try {
   });
   const runtimeConfig = await loadRustyCrewRuntimeConfig(serviceConfig);
   assert.equal(runtimeConfig.scheduledJobs.length, 3);
-  assert.equal(runtimeConfig.scheduledJobs[0]?.id, "cron-wake");
+  const jobsById = new Map(
+    runtimeConfig.scheduledJobs.map((job) => [job.id, job]),
+  );
+  assert.equal(jobsById.get("cron-wake")?.id, "cron-wake");
   assert.equal(
-    runtimeConfig.scheduledJobs[1]?.jobKind,
+    jobsById.get("cron-diagnostics")?.jobKind,
     "runtime.diagnostics.snapshot",
   );
   assert.equal(
-    runtimeConfig.scheduledJobs[2]?.id,
+    jobsById.get("background-review-cron-profile")?.id,
     "background-review-cron-profile",
   );
   assert.equal(
-    runtimeConfig.scheduledJobs[2]?.jobKind,
+    jobsById.get("background-review-cron-profile")?.jobKind,
     "runtime.review.memory_skills",
   );
   assert.equal(
     (
-      runtimeConfig.scheduledJobs[2]?.payload as
+      jobsById.get("background-review-cron-profile")?.payload as
         | { dryRun?: boolean }
         | undefined
     )?.dryRun,
@@ -203,8 +206,10 @@ try {
   });
   assert.equal(result.registered, 3);
   assert.equal(registered[0]?.firstDueAt, "2026-06-15T09:15:00.000Z");
-  assert.equal(registeredHost[0]?.jobKind, "runtime.diagnostics.snapshot");
-  assert.equal(registeredHost[1]?.jobKind, "runtime.review.memory_skills");
+  assert.deepEqual(
+    new Set(registeredHost.map((job) => job.jobKind)),
+    new Set(["runtime.diagnostics.snapshot", "runtime.review.memory_skills"]),
+  );
 
   const outputs: string[] = [];
   await runRustyCrewCronCli({

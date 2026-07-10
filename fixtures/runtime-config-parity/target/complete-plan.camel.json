@@ -59,8 +59,22 @@
         "shape": "host_job",
         "jobKind": "runtime.review.memory_skills",
         "payload": {
+          "schemaVersion": 1,
+          "reviewType": "combined",
           "profileId": "parity-runner",
-          "reviewType": "combined"
+          "triggerSource": "profile_background_review",
+          "includeDenseProfileMemory": true,
+          "includeDenMemoryDiagnostics": true,
+          "memoryNudgeInterval": 8,
+          "skillNudgeInterval": 12,
+          "maxTokens": 2048,
+          "maxFindings": 10,
+          "maxCandidates": 6,
+          "llmReviewEnabled": true,
+          "captureProviderAlias": "review-provider",
+          "captureMaxProposals": 4,
+          "dryRun": false,
+          "reason": "profile parity-runner backgroundReview"
         }
       },
       {

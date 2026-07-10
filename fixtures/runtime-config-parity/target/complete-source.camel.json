@@ -103,7 +103,16 @@
       "backgroundReview": {
         "enabled": true,
         "reviewType": "combined",
-        "schedule": "0 3 * * *"
+        "schedule": "0 3 * * *",
+        "memoryNudgeInterval": 8,
+        "skillNudgeInterval": 12,
+        "maxTokens": 2048,
+        "maxFindings": 10,
+        "maxCandidates": 6,
+        "llmReviewEnabled": true,
+        "captureProviderAlias": "review-provider",
+        "captureMaxProposals": 4,
+        "dryRun": false
       },
       "contextPolicy": {
         "enabled": true,

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type {
   AgentId,
   BrainModelConfig,
@@ -31,8 +31,7 @@ import type {
   NativeBridgeModule,
   NativeBrainConfigDraft,
   NativeRuntimeConfigDiagnostic,
-  NativeRuntimeConfigDraft,
-  NativeRuntimeConfigPlan,
+  NativeRuntimeGraphPlan,
   NativeModelProviderRecord,
   NativeScheduledJobConfigDraft,
   NativeSessionConfigDraft,
@@ -108,11 +107,9 @@ import {
 import type {
   RustyCrewMcpServerConfig,
   RustyCrewServiceConfig,
-  RustyCrewStorageBackend,
   RustyCrewStorageConfig,
 } from "./service-config.js";
-import { RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND } from "./scheduled-host-executors.js";
-import { planRuntimeConfigWithRust } from "./runtime-config-validation.js";
+import { planRuntimeGraphWithRust } from "./runtime-config-validation.js";
 import {
   createSkillsToolResolver,
   type SkillManageMode,
@@ -275,25 +272,15 @@ export interface RuntimeConfigValidationPreflightReport {
 export async function loadRustyCrewRuntimeConfig(
   serviceConfig: RustyCrewServiceConfig,
 ): Promise<RustyCrewRuntimeConfig> {
-  let raw: string;
-  try {
-    raw = await readFile(serviceConfig.paths.serviceConfigFile, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return emptyRuntimeConfig(serviceConfig);
-    }
-    throw error;
-  }
-
-  const parsed = JSON.parse(raw) as unknown;
-  return expandRuntimeConfigFromProfiles(
-    validateRuntimeConfig(parsed, serviceConfig),
-  );
+  const parsed = JSON.parse(
+    await readFile(serviceConfig.paths.serviceConfigFile, "utf8"),
+  ) as unknown;
+  return planEffectiveRuntimeConfig(parsed, serviceConfig);
 }
 
 export async function preflightRustyCrewRuntimeConfig(input: {
   serviceConfig: RustyCrewServiceConfig;
-  bridge?: Pick<NativeBridgeModule, "planRuntimeConfig">;
+  bridge?: Pick<NativeBridgeModule, "planRuntimeGraph">;
 }): Promise<RuntimeConfigValidationPreflightReport> {
   const configPath = input.serviceConfig.paths.serviceConfigFile;
   let parsed: unknown;
@@ -301,93 +288,80 @@ export async function preflightRustyCrewRuntimeConfig(input: {
     parsed = JSON.parse(await readFile(configPath, "utf8")) as unknown;
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
-      parsed = {};
-    } else {
-      return preflightFailure(configPath, "invalid_runtime_config_json", error);
+      return preflightFailure(configPath, "runtime_config_missing", error);
     }
+    return preflightFailure(configPath, "invalid_runtime_config_json", error);
   }
 
-  let runtimeConfig: RustyCrewRuntimeConfig;
+  let source: RuntimeGraphAuthoredSource;
   try {
-    runtimeConfig = validateRuntimeConfig(parsed, input.serviceConfig);
+    source = runtimeGraphAuthoredSource(parsed, input.serviceConfig);
   } catch (error) {
     return preflightFailure(configPath, "invalid_runtime_config_shape", error);
   }
-
-  const loadedProfiles = await loadRuntimeProfilesForValidation(runtimeConfig);
+  const loadedProfiles = await loadRuntimeProfilesForValidation(source);
   if (loadedProfiles.diagnostics.length > 0) {
-    const emptyPlan: NativeRuntimeConfigPlan = {
-      runtimeConfig: runtimeConfigValidationInputShape(runtimeConfig),
+    const emptyPlan: NativeRuntimeGraphPlan = {
+      accepted: false,
+      sourceRevision: "unplanned",
+      runtimeConfig: emptyNativeRuntimeGraph(source, input.serviceConfig),
       diagnostics: loadedProfiles.diagnostics,
-      derivedScheduledJobs: [],
-      derivedMcpBindings: [],
+      derived: [],
+      defaultsApplied: [],
     };
-    return preflightReport(configPath, runtimeConfig, emptyPlan);
+    return preflightReport(configPath, source, emptyPlan);
   }
 
   const bridge = input.bridge ?? (await loadNativeBridge());
-  const plan = await planRuntimeConfigWithRust({
+  const plan = await planRuntimeGraphWithRust({
     bridge,
-    runtimeConfig,
+    ...runtimeGraphPlanningFacts(source, input.serviceConfig),
+    runtimeConfig: source.runtimeConfig,
     profiles: loadedProfiles.profiles,
   });
-  return preflightReport(configPath, runtimeConfig, plan);
+  return preflightReport(configPath, source, plan);
 }
 
-async function expandRuntimeConfigFromProfiles(
-  runtimeConfig: RustyCrewRuntimeConfig,
+async function planEffectiveRuntimeConfig(
+  parsed: unknown,
+  serviceConfig: RustyCrewServiceConfig,
 ): Promise<RustyCrewRuntimeConfig> {
-  const profiles = await loadRuntimeProfiles(runtimeConfig);
+  const source = runtimeGraphAuthoredSource(parsed, serviceConfig);
+  const profiles = await loadRuntimeProfiles(source);
   const bridge = await loadNativeBridge();
-  const plan = await planRuntimeConfigWithRust({
+  const plan = await planRuntimeGraphWithRust({
     bridge,
-    runtimeConfig,
+    ...runtimeGraphPlanningFacts(source, serviceConfig),
+    runtimeConfig: source.runtimeConfig,
     profiles,
   });
   assertRuntimeConfigPlan(plan.diagnostics);
-  return runtimeConfigFromNativeDraft(
-    plan.runtimeConfig,
-    runtimeConfig,
-    profiles,
-  );
+  return runtimeConfigFromGraphPlan(plan, source, profiles);
 }
 
 async function loadRuntimeProfiles(
-  runtimeConfig: RustyCrewRuntimeConfig,
+  source: RuntimeGraphAuthoredSource,
 ): Promise<ProfileConfig[]> {
-  const profileIds = new Set<ProfileId>();
-  for (const session of runtimeConfig.sessions) {
-    profileIds.add(session.profileId);
-  }
+  const profileIds = runtimeGraphProfileIds(source.runtimeConfig);
   const profiles: ProfileConfig[] = [];
   for (const profileId of profileIds) {
-    profiles.push(
-      await loadProfileConfig(runtimeConfig.profilesDir, profileId),
-    );
+    profiles.push(await loadProfileConfig(source.profilesDir, profileId));
   }
   return profiles;
 }
 
 async function loadRuntimeProfilesForValidation(
-  runtimeConfig: RustyCrewRuntimeConfig,
+  source: RuntimeGraphAuthoredSource,
 ): Promise<{
   profiles: ProfileConfig[];
   diagnostics: NativeRuntimeConfigDiagnostic[];
 }> {
-  const profileIds = new Set<ProfileId>();
-  for (const brain of runtimeConfig.brains) {
-    profileIds.add(brain.profileId);
-  }
-  for (const session of runtimeConfig.sessions) {
-    profileIds.add(session.profileId);
-  }
+  const profileIds = runtimeGraphProfileIds(source.runtimeConfig);
   const profiles: ProfileConfig[] = [];
   const diagnostics: NativeRuntimeConfigDiagnostic[] = [];
   for (const profileId of profileIds) {
     try {
-      profiles.push(
-        await loadProfileConfig(runtimeConfig.profilesDir, profileId),
-      );
+      profiles.push(await loadProfileConfig(source.profilesDir, profileId));
     } catch (error) {
       diagnostics.push({
         severity: "error",
@@ -439,10 +413,127 @@ function preflightFailure(
   };
 }
 
+interface RuntimeGraphAuthoredSource {
+  profilesDir: string;
+  runtimeConfig: Record<string, unknown>;
+  denObservation: RustyCrewDenObservationConfig;
+  wakeTimeout: RustyCrewWakeTimeoutConfig;
+  mcpServers: RustyCrewMcpServerConfig[];
+}
+
+function runtimeGraphAuthoredSource(
+  parsed: unknown,
+  serviceConfig: RustyCrewServiceConfig,
+): RuntimeGraphAuthoredSource {
+  if (!isRecord(parsed)) {
+    throw new Error("service runtime config root must be an object");
+  }
+  const profilesDir = pathValue(
+    parsed.profilesDir,
+    join(serviceConfig.paths.configDir, "profiles"),
+  );
+  const skillsDir =
+    parsed.skillsDir == null ? undefined : pathValue(parsed.skillsDir);
+  const runtimeConfig: Record<string, unknown> = {
+    profilesDir,
+    ...(skillsDir === undefined ? {} : { skillsDir }),
+    ...(parsed.storage === undefined ? {} : { storage: parsed.storage }),
+    brains: arrayValue(parsed.brains),
+    sessions: arrayValue(parsed.sessions),
+    scheduledJobs: arrayValue(parsed.scheduledJobs),
+    channelBindings: arrayValue(parsed.channelBindings),
+    mcpBindings: arrayValue(parsed.mcpBindings),
+  };
+  return {
+    profilesDir,
+    runtimeConfig,
+    denObservation: runtimeDenObservationConfig(parsed.denObservation),
+    wakeTimeout: runtimeWakeTimeoutConfig(parsed.wakeTimeout),
+    mcpServers: optionalArrayValue(
+      parsed.mcpServers,
+      serviceConfig.mcp.servers,
+    ).map((item, index) => configuredMcpServer(item, index)),
+  };
+}
+
+function runtimeGraphPlanningFacts(
+  source: RuntimeGraphAuthoredSource,
+  serviceConfig: RustyCrewServiceConfig,
+) {
+  const storage = serviceConfig.storage;
+  const authoredStorage = isRecord(source.runtimeConfig.storage)
+    ? source.runtimeConfig.storage
+    : undefined;
+  const authoredPostgres = isRecord(authoredStorage?.postgres)
+    ? authoredStorage.postgres
+    : undefined;
+  const databaseUrlEnv =
+    optionalString(authoredPostgres?.databaseUrlEnv) ??
+    storage.postgres.databaseUrlEnv;
+  return {
+    hostFacts: {
+      configDir: serviceConfig.paths.configDir,
+      engineDataDir: serviceConfig.paths.engineDataDir,
+      defaultWorkdir: serviceConfig.paths.defaultWorkdir,
+      postgresDatabaseUrlEnvPresent:
+        serviceConfig.environmentVariablePresent(databaseUrlEnv),
+    },
+    serviceDefaults: {
+      wakeTimeout: source.wakeTimeout,
+      storage: {
+        backend: storage.backend,
+        sqlite: {
+          path: storage.sqlite.path,
+          wal: storage.sqlite.wal,
+          busyTimeoutMs: storage.sqlite.busyTimeoutMs,
+        },
+        postgres: {
+          databaseUrlEnv: storage.postgres.databaseUrlEnv,
+          schema: storage.postgres.schema,
+          bootMode: storage.postgres.bootMode,
+          maxConnections: storage.postgres.maxConnections,
+          statementTimeoutMs: storage.postgres.statementTimeoutMs,
+        },
+      },
+    },
+  };
+}
+
+function runtimeGraphProfileIds(
+  runtimeConfig: Record<string, unknown>,
+): Set<ProfileId> {
+  const ids = new Set<ProfileId>();
+  for (const collection of [runtimeConfig.brains, runtimeConfig.sessions]) {
+    for (const item of arrayValue(collection)) {
+      if (!isRecord(item)) continue;
+      const profileId = optionalString(item.profileId);
+      if (profileId !== undefined) ids.add(profileId as ProfileId);
+    }
+  }
+  return ids;
+}
+
+function emptyNativeRuntimeGraph(
+  source: RuntimeGraphAuthoredSource,
+  serviceConfig: RustyCrewServiceConfig,
+): NativeRuntimeGraphPlan["runtimeConfig"] {
+  const storage = serviceConfig.storage;
+  return {
+    profilesDir: source.profilesDir,
+    storage,
+    wakeTimeout: source.wakeTimeout,
+    brains: [],
+    sessions: [],
+    scheduledJobs: [],
+    channelBindings: [],
+    mcpBindings: [],
+  };
+}
+
 function preflightReport(
   configPath: string,
-  original: RustyCrewRuntimeConfig,
-  plan: NativeRuntimeConfigPlan,
+  source: RuntimeGraphAuthoredSource,
+  plan: NativeRuntimeGraphPlan,
 ): RuntimeConfigValidationPreflightReport {
   const diagnostics = plan.diagnostics;
   const errors = diagnostics.filter(
@@ -451,11 +542,13 @@ function preflightReport(
   const warnings = diagnostics.filter(
     (diagnostic) => diagnostic.severity === "warning",
   ).length;
-  const defaultsApplied = sessionDefaultsApplied(original, plan.runtimeConfig);
+  const sessionDefaults = plan.defaultsApplied.filter((item) =>
+    item.path.startsWith("sessions["),
+  );
   return {
     ok: errors === 0,
     configPath,
-    profilesDir: original.profilesDir,
+    profilesDir: source.profilesDir,
     diagnostics,
     summary: {
       diagnostics: diagnostics.length,
@@ -466,86 +559,74 @@ function preflightReport(
       scheduledJobs: plan.runtimeConfig.scheduledJobs.length,
       channelBindings: plan.runtimeConfig.channelBindings.length,
       mcpBindings: plan.runtimeConfig.mcpBindings.length,
-      derivedScheduledJobs: plan.derivedScheduledJobs.length,
-      derivedMcpBindings: plan.derivedMcpBindings.length,
-      sessionDefaultsApplied: defaultsApplied.length,
+      derivedScheduledJobs: plan.derived.filter(
+        (item) => item.kind === "scheduled_job",
+      ).length,
+      derivedMcpBindings: plan.derived.filter(
+        (item) => item.kind === "mcp_binding",
+      ).length,
+      sessionDefaultsApplied: sessionDefaults.length,
     },
     derived: {
-      scheduledJobs: plan.derivedScheduledJobs.map((job) => ({
-        id: job.id,
-        shape: job.shape,
-        jobKind: job.jobKind,
-        targetSessionId: job.targetSessionId,
-      })),
-      mcpBindings: plan.derivedMcpBindings.map((binding) => ({
-        bindingId: binding.bindingId,
-        agentId: binding.agentId,
-        sessionId: binding.sessionId,
-        profileId: binding.profileId,
-        transport: binding.transport,
-        toolProfileKey: binding.toolProfileKey,
-        serverNames: binding.serverNames,
-      })),
-      sessionDefaultsApplied: defaultsApplied,
+      scheduledJobs: plan.runtimeConfig.scheduledJobs
+        .filter((job) =>
+          plan.derived.some(
+            (item) => item.kind === "scheduled_job" && item.id === job.id,
+          ),
+        )
+        .map((job) => ({
+          id: job.id,
+          shape: job.shape,
+          jobKind: job.jobKind,
+          targetSessionId: job.targetSessionId,
+        })),
+      mcpBindings: plan.runtimeConfig.mcpBindings
+        .filter((binding) =>
+          plan.derived.some(
+            (item) =>
+              item.kind === "mcp_binding" && item.id === binding.bindingId,
+          ),
+        )
+        .map((binding) => ({
+          bindingId: binding.bindingId,
+          agentId: binding.agentId,
+          sessionId: binding.sessionId,
+          profileId: binding.profileId,
+          transport: binding.transport,
+          toolProfileKey: binding.toolProfileKey,
+          serverNames: binding.serverNames,
+        })),
+      sessionDefaultsApplied: sessionDefaultSummaries(plan),
     },
   };
 }
 
-function sessionDefaultsApplied(
-  original: RustyCrewRuntimeConfig,
-  planned: NativeRuntimeConfigDraft,
+function sessionDefaultSummaries(
+  plan: NativeRuntimeGraphPlan,
 ): RuntimeConfigValidationPreflightReport["derived"]["sessionDefaultsApplied"] {
-  const originalSessions = new Map(
-    original.sessions.map((session) => [session.sessionId, session]),
-  );
-  return planned.sessions
-    .map((plannedSession) => {
-      const originalSession = originalSessions.get(
-        plannedSession.sessionId as SessionId,
-      );
-      if (!originalSession) return undefined;
-      const applied = {
-        sessionId: plannedSession.sessionId,
-        ownerId:
-          originalSession.ownerId === undefined &&
-          plannedSession.ownerId !== undefined,
-        resourceLimits:
-          originalSession.resourceLimits === undefined &&
-          plannedSession.resourceLimits !== undefined,
-        maxHistoryMessages:
-          originalSession.maxHistoryMessages === undefined &&
-          plannedSession.maxHistoryMessages !== undefined,
-        turnTimeoutMs:
-          originalSession.turnTimeoutMs === undefined &&
-          plannedSession.turnTimeoutMs !== undefined,
-      };
-      return applied.ownerId ||
-        applied.resourceLimits ||
-        applied.maxHistoryMessages ||
-        applied.turnTimeoutMs
-        ? applied
-        : undefined;
-    })
-    .filter(
-      (
-        value,
-      ): value is RuntimeConfigValidationPreflightReport["derived"]["sessionDefaultsApplied"][number] =>
-        value !== undefined,
-    );
-}
-
-function runtimeConfigValidationInputShape(
-  runtimeConfig: RustyCrewRuntimeConfig,
-): NativeRuntimeConfigDraft {
-  return {
-    profilesDir: runtimeConfig.profilesDir,
-    skillsDir: runtimeConfig.skillsDir,
-    brains: runtimeConfig.brains,
-    sessions: runtimeConfig.sessions,
-    scheduledJobs: runtimeConfig.scheduledJobs,
-    channelBindings: runtimeConfig.channelBindings,
-    mcpBindings: runtimeConfig.mcpBindings,
-  };
+  const summaries = new Map<
+    string,
+    RuntimeConfigValidationPreflightReport["derived"]["sessionDefaultsApplied"][number]
+  >();
+  for (const item of plan.defaultsApplied) {
+    const match = /^sessions\[([^\]]+)\]\.(.+)$/.exec(item.path);
+    if (!match) continue;
+    const sessionId = match[1]!;
+    const summary = summaries.get(sessionId) ?? {
+      sessionId,
+      ownerId: false,
+      resourceLimits: false,
+      maxHistoryMessages: false,
+      turnTimeoutMs: false,
+    };
+    const field = match[2]!;
+    summary.ownerId ||= field === "ownerId";
+    summary.resourceLimits ||= field.startsWith("resourceLimits");
+    summary.maxHistoryMessages ||= field === "maxHistoryMessages";
+    summary.turnTimeoutMs ||= field === "turnTimeoutMs";
+    summaries.set(sessionId, summary);
+  }
+  return [...summaries.values()];
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -571,142 +652,134 @@ function assertRuntimeConfigPlan(
   );
 }
 
-function backgroundReviewScheduledJob(
-  profile: Awaited<ReturnType<typeof loadProfileConfig>>,
-): RustyCrewScheduledJob {
-  const review = profile.backgroundReview;
-  const profileId = profile.profileId;
-  return {
-    id: `background-review-${profileId}`,
-    schedule: review?.schedule ?? "0 3 * * *",
-    shape: "host_job",
-    jobKind: RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND,
-    payload: {
-      schemaVersion: 1,
-      reviewType: review?.reviewType ?? "combined",
-      profileId,
-      triggerSource: "profile_background_review",
-      includeDenseProfileMemory: true,
-      includeDenMemoryDiagnostics: true,
-      memoryNudgeInterval: review?.memoryNudgeInterval,
-      skillNudgeInterval: review?.skillNudgeInterval,
-      maxTokens: review?.maxTokens,
-      maxFindings: review?.maxFindings,
-      maxCandidates: review?.maxCandidates,
-      llmReviewEnabled: review?.llmReviewEnabled ?? false,
-      captureProviderAlias: review?.captureProviderAlias,
-      captureMaxProposals: review?.captureMaxProposals,
-      dryRun: review?.dryRun ?? true,
-      reason: `profile ${profileId} backgroundReview`,
-    },
-  };
-}
-
-function runtimeConfigFromNativeDraft(
-  draft: NativeRuntimeConfigDraft,
-  original: RustyCrewRuntimeConfig,
+function runtimeConfigFromGraphPlan(
+  plan: NativeRuntimeGraphPlan,
+  source: RuntimeGraphAuthoredSource,
   profiles: readonly ProfileConfig[],
 ): RustyCrewRuntimeConfig {
-  const originalSessions = new Map(
-    original.sessions.map((session) => [session.sessionId, session]),
-  );
-  const originalScheduledJobs = new Map(
-    original.scheduledJobs.map((job) => [job.id, job]),
-  );
-  const originalChannelBindings = new Map(
-    original.channelBindings.map((binding) => [binding.bindingId, binding]),
-  );
-  const originalMcpBindings = new Map(
-    original.mcpBindings.map((binding) => [binding.bindingId, binding]),
-  );
+  const effective = plan.runtimeConfig;
   const profilesById = new Map(
     profiles.map((profile) => [profile.profileId, profile]),
   );
+  const sessionsById = rawRecordsById(
+    source.runtimeConfig.sessions,
+    "sessionId",
+  );
+  const channelBindingsById = rawRecordsById(
+    source.runtimeConfig.channelBindings,
+    "bindingId",
+  );
+  const mcpBindingsById = rawRecordsById(
+    source.runtimeConfig.mcpBindings,
+    "bindingId",
+  );
   return {
-    profilesDir: draft.profilesDir,
-    skillsDir: draft.skillsDir,
-    storage: original.storage,
-    denObservation: original.denObservation,
-    wakeTimeout: original.wakeTimeout,
-    brains: draft.brains.map((brain) => ({
+    profilesDir: effective.profilesDir,
+    ...(effective.skillsDir == null ? {} : { skillsDir: effective.skillsDir }),
+    storage: effective.storage,
+    denObservation: source.denObservation,
+    wakeTimeout:
+      effective.wakeTimeout.mode === "default"
+        ? {
+            mode: "default",
+            defaultMs: effective.wakeTimeout.defaultMs,
+          }
+        : { mode: "disabled" },
+    mcpServers: source.mcpServers,
+    brains: effective.brains.map((brain) => ({
       implementationId: brain.implementationId as BrainImplementationId,
       profileId: brain.profileId as ProfileId,
     })),
-    sessions: draft.sessions.map((session) => ({
-      ...originalSessions.get(session.sessionId as SessionId),
-      sessionId: session.sessionId as SessionId,
-      agentId: session.agentId as AgentId,
-      profileId: session.profileId as ProfileId,
-      kind: session.kind,
-      resourceLimits: session.resourceLimits,
-      ownerId: session.ownerId,
-      maxHistoryMessages:
-        session.maxHistoryMessages ?? session.historyWindow?.maxMessages,
-      turnTimeoutMs: session.turnTimeoutMs,
-    })),
-    scheduledJobs: draft.scheduledJobs.map((job) => {
-      const originalJob = originalScheduledJobs.get(job.id);
+    sessions: effective.sessions.map((session) => {
+      const profile = profilesById.get(session.profileId as ProfileId);
+      const authored = sessionsById.get(session.sessionId) ?? {};
       return {
-        ...originalJob,
-        id: job.id,
-        schedule: job.schedule,
-        shape: job.shape,
-        jobKind: job.jobKind,
-        targetSessionId: job.targetSessionId as SessionId | undefined,
-        script: job.script,
-        deliveryChannelId: job.deliveryChannelId,
-        payload:
-          originalJob?.payload ??
-          backgroundReviewPayloadForJob(job.id, profilesById),
-      };
+        ...authored,
+        sessionId: session.sessionId as SessionId,
+        agentId: session.agentId as AgentId,
+        profileId: session.profileId as ProfileId,
+        kind: session.kind,
+        resourceLimits: session.resourceLimits,
+        ownerId: session.ownerId,
+        historyWindow: session.historyWindow,
+        maxHistoryMessages:
+          session.maxHistoryMessages ?? session.historyWindow?.maxMessages,
+        turnTimeoutMs: session.effectiveWakeTimeoutMs,
+        sessionMemoryPrompt:
+          profile?.memoryConfig?.sessionMemoryPrompt ??
+          (isRecord(authored.sessionMemoryPrompt)
+            ? sessionMemoryPromptConfig(authored.sessionMemoryPrompt)
+            : undefined),
+        contextPolicy:
+          profile?.contextPolicy ??
+          (isRecord(authored.contextPolicy)
+            ? contextStrategyPolicyFromUnknown(authored.contextPolicy)
+            : undefined),
+      } as RustyCrewConfiguredSession;
     }),
-    channelBindings: draft.channelBindings.map((binding) => ({
-      ...originalChannelBindings.get(binding.bindingId),
-      bindingId: binding.bindingId,
-      adapterId: binding.adapterId as never,
-      provider: binding.provider,
-      agentId: binding.agentId as AgentId,
-      instanceId: binding.instanceId as never,
-      sessionId: binding.sessionId as SessionId | undefined,
-      profileId: binding.profileId as ProfileId,
-      externalChannelId: binding.externalChannelId,
-      externalThreadId: binding.externalThreadId,
-      externalUserId: binding.externalUserId,
-      conversationProjectId: binding.conversationProjectId,
-      conversationChannelId: binding.conversationChannelId,
-      providerSubscriptionId: binding.providerSubscriptionId,
-      status: binding.status,
+    scheduledJobs: effective.scheduledJobs.map((job) => ({
+      id: job.id,
+      schedule: job.schedule,
+      shape: job.shape,
+      jobKind: job.jobKind,
+      targetSessionId: job.targetSessionId as SessionId | undefined,
+      payload: job.payload,
+      script: job.script,
+      deliveryChannelId: job.deliveryChannelId,
     })),
-    mcpServers: original.mcpServers ?? [],
-    mcpBindings: draft.mcpBindings.map((binding) => ({
-      ...originalMcpBindings.get(binding.bindingId),
-      bindingId: binding.bindingId,
+    channelBindings: effective.channelBindings.map((binding) => ({
+      ...(channelBindingsById.get(binding.bindingId) ?? {}),
+      ...binding,
       adapterId: binding.adapterId as never,
       agentId: binding.agentId as AgentId,
       instanceId: binding.instanceId as never,
       sessionId: binding.sessionId as SessionId | undefined,
       profileId: binding.profileId as ProfileId,
-      serverNames: binding.serverNames,
-      endpointRef: binding.endpointRef,
-      transport: binding.transport,
-      toolProfileKey: binding.toolProfileKey,
-      status: binding.status,
-      diagnostics:
-        originalMcpBindings.get(binding.bindingId)?.diagnostics ?? {},
-    })),
+    })) as ChannelBindingRecord[],
+    mcpBindings: effective.mcpBindings.map((binding) => ({
+      ...(mcpBindingsById.get(binding.bindingId) ?? {}),
+      ...binding,
+      adapterId: binding.adapterId as never,
+      agentId: binding.agentId as AgentId,
+      instanceId: binding.instanceId as never,
+      sessionId: binding.sessionId as SessionId | undefined,
+      profileId: binding.profileId as ProfileId,
+      diagnostics: isRecord(mcpBindingsById.get(binding.bindingId)?.diagnostics)
+        ? mcpBindingsById.get(binding.bindingId)!.diagnostics
+        : {},
+    })) as McpBindingRecord[],
   };
 }
 
-function backgroundReviewPayloadForJob(
-  jobId: string,
-  profilesById: ReadonlyMap<ProfileId, ProfileConfig>,
-): unknown {
-  const prefix = "background-review-";
-  if (!jobId.startsWith(prefix)) {
-    return undefined;
+function rawRecordsById(
+  input: unknown,
+  idField: string,
+): Map<string, Record<string, unknown>> {
+  const records = new Map<string, Record<string, unknown>>();
+  for (const item of arrayValue(input)) {
+    if (!isRecord(item)) continue;
+    const id = optionalString(item[idField]);
+    if (id !== undefined) records.set(id, item);
   }
-  const profile = profilesById.get(jobId.slice(prefix.length) as ProfileId);
-  return profile ? backgroundReviewScheduledJob(profile).payload : undefined;
+  return records;
+}
+
+function runtimeGraphSourceFromEffective(
+  runtimeConfig: RustyCrewRuntimeConfig,
+): Record<string, unknown> {
+  return {
+    profilesDir: runtimeConfig.profilesDir,
+    skillsDir: runtimeConfig.skillsDir,
+    storage: runtimeConfig.storage,
+    denObservation: runtimeConfig.denObservation,
+    wakeTimeout: runtimeConfig.wakeTimeout,
+    mcpServers: runtimeConfig.mcpServers,
+    brains: runtimeConfig.brains,
+    sessions: runtimeConfig.sessions,
+    scheduledJobs: runtimeConfig.scheduledJobs,
+    channelBindings: runtimeConfig.channelBindings,
+    mcpBindings: runtimeConfig.mcpBindings,
+  };
 }
 
 export async function applyRustyCrewRuntimeConfig(input: {
@@ -726,8 +799,9 @@ export async function applyRustyCrewRuntimeConfig(input: {
   browserResources?: ServiceBrowserResources;
   onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
-  const runtimeConfig = await expandRuntimeConfigFromProfiles(
-    input.runtimeConfig,
+  const runtimeConfig = await planEffectiveRuntimeConfig(
+    runtimeGraphSourceFromEffective(input.runtimeConfig),
+    input.serviceConfig,
   );
   const browserResources =
     input.browserResources ??
@@ -998,8 +1072,9 @@ export async function rebuildConfiguredBrainRuntime(input: {
   browserResources?: ServiceBrowserResources;
   onBrainWakeResult?: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
-  const runtimeConfig = await expandRuntimeConfigFromProfiles(
-    input.runtimeConfig,
+  const runtimeConfig = await planEffectiveRuntimeConfig(
+    runtimeGraphSourceFromEffective(input.runtimeConfig),
+    input.serviceConfig,
   );
   const browserResources =
     input.browserResources ??
@@ -1732,64 +1807,6 @@ function truncate(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}...`;
 }
 
-function emptyRuntimeConfig(
-  serviceConfig: RustyCrewServiceConfig,
-): RustyCrewRuntimeConfig {
-  return {
-    profilesDir: join(serviceConfig.paths.configDir, "profiles"),
-    storage: serviceConfig.storage,
-    denObservation: runtimeDenObservationConfig(undefined),
-    wakeTimeout: runtimeWakeTimeoutConfig(undefined),
-    brains: [],
-    sessions: [],
-    scheduledJobs: [],
-    channelBindings: [],
-    mcpServers: serviceConfig.mcp.servers,
-    mcpBindings: [],
-  };
-}
-
-function validateRuntimeConfig(
-  parsed: unknown,
-  serviceConfig: RustyCrewServiceConfig,
-): RustyCrewRuntimeConfig {
-  if (!isRecord(parsed)) {
-    throw new Error("service runtime config root must be an object");
-  }
-  const profilesDir = pathValue(
-    parsed.profilesDir,
-    join(serviceConfig.paths.configDir, "profiles"),
-  );
-  const skillsDir =
-    parsed.skillsDir === undefined ? undefined : pathValue(parsed.skillsDir);
-  return {
-    profilesDir,
-    skillsDir,
-    storage: runtimeStorageConfig(parsed.storage, serviceConfig),
-    denObservation: runtimeDenObservationConfig(parsed.denObservation),
-    wakeTimeout: runtimeWakeTimeoutConfig(parsed.wakeTimeout),
-    brains: arrayValue(parsed.brains).map((item, index) =>
-      configuredBrain(item, index),
-    ),
-    sessions: arrayValue(parsed.sessions).map((item, index) =>
-      configuredSession(item, index),
-    ),
-    scheduledJobs: arrayValue(parsed.scheduledJobs).map((item, index) =>
-      configuredScheduledJob(item, index),
-    ),
-    channelBindings: arrayValue(parsed.channelBindings).map((item, index) =>
-      configuredChannelBinding(item, index),
-    ),
-    mcpServers: optionalArrayValue(
-      parsed.mcpServers,
-      serviceConfig.mcp.servers,
-    ).map((item, index) => configuredMcpServer(item, index)),
-    mcpBindings: arrayValue(parsed.mcpBindings).map((item, index) =>
-      configuredMcpBinding(item, index),
-    ),
-  };
-}
-
 const CORE_EVENT_KINDS = new Set<CoreEventKind>([
   "session_created",
   "session_archived",
@@ -1877,71 +1894,6 @@ function denObservationEventFilter(
   };
 }
 
-function runtimeStorageConfig(
-  input: unknown,
-  serviceConfig: RustyCrewServiceConfig,
-): RustyCrewStorageConfig {
-  if (input === undefined) return serviceConfig.storage;
-  if (!isRecord(input)) {
-    throw new Error("storage config must be an object");
-  }
-  const backend = runtimeStorageBackend(input.backend);
-  const sqlite = isRecord(input.sqlite) ? input.sqlite : {};
-  const postgres = isRecord(input.postgres) ? input.postgres : {};
-  const sqlitePath =
-    optionalString(sqlite.path) ?? serviceConfig.storage.sqlite.path;
-  const postgresDatabaseUrlEnv =
-    optionalString(postgres.databaseUrlEnv) ??
-    serviceConfig.storage.postgres.databaseUrlEnv;
-  const postgresSchema =
-    optionalString(postgres.schema) ?? serviceConfig.storage.postgres.schema;
-  const postgresBootMode =
-    runtimePostgresBootMode(postgres.bootMode) ??
-    serviceConfig.storage.postgres.bootMode;
-  const config: RustyCrewStorageConfig = {
-    backend,
-    sqlite: {
-      path: sqlitePath,
-      wal:
-        optionalBoolean(sqlite.wal, "storage.sqlite.wal") ??
-        serviceConfig.storage.sqlite.wal,
-      busyTimeoutMs:
-        optionalPositiveInteger(
-          sqlite.busyTimeoutMs,
-          "storage.sqlite.busyTimeoutMs",
-        ) ?? serviceConfig.storage.sqlite.busyTimeoutMs,
-      effectivePath: isAbsolute(sqlitePath)
-        ? sqlitePath
-        : join(serviceConfig.paths.engineDataDir, sqlitePath),
-    },
-    postgres: {
-      databaseUrlEnv: postgresDatabaseUrlEnv,
-      schema: postgresSchema,
-      bootMode: postgresBootMode,
-      maxConnections:
-        optionalPositiveInteger(
-          postgres.maxConnections,
-          "storage.postgres.maxConnections",
-        ) ?? serviceConfig.storage.postgres.maxConnections,
-      statementTimeoutMs:
-        optionalPositiveInteger(
-          postgres.statementTimeoutMs,
-          "storage.postgres.statementTimeoutMs",
-        ) ?? serviceConfig.storage.postgres.statementTimeoutMs,
-    },
-    implementationStatus:
-      backend === "sqlite"
-        ? "active"
-        : postgresBootMode === "active"
-          ? "active"
-          : postgresBootMode === "proof_admin"
-            ? "proof_admin_only"
-            : "blocked_unimplemented",
-  };
-  validateRuntimeStorageConfig(config);
-  return config;
-}
-
 export function runtimeWakeTimeoutConfig(
   input: unknown,
 ): RustyCrewWakeTimeoutConfig {
@@ -1968,259 +1920,6 @@ export function runtimeWakeTimeoutConfig(
   return {
     mode: "default",
     defaultMs,
-  };
-}
-
-function runtimeStorageBackend(input: unknown): RustyCrewStorageBackend {
-  const value = optionalString(input);
-  if (value === undefined || value === "sqlite") return "sqlite";
-  if (value === "postgres" || value === "postgresql") return "postgres";
-  throw new Error("storage.backend must be sqlite or postgres");
-}
-
-function runtimePostgresBootMode(
-  input: unknown,
-): "blocked" | "proof_admin" | "active" | undefined {
-  const value = optionalString(input);
-  if (value === undefined) return undefined;
-  if (value === "blocked") return "blocked";
-  if (value === "proof_admin" || value === "proof-admin") return "proof_admin";
-  if (value === "active") return "active";
-  throw new Error(
-    "storage.postgres.bootMode must be blocked, proof_admin, or active",
-  );
-}
-
-function validateRuntimeStorageConfig(config: RustyCrewStorageConfig): void {
-  if (!config.sqlite.path.trim()) {
-    throw new Error("storage.sqlite.path must not be empty");
-  }
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.databaseUrlEnv)) {
-    throw new Error(
-      "storage.postgres.databaseUrlEnv must be an environment variable name",
-    );
-  }
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.postgres.schema)) {
-    throw new Error("storage.postgres.schema must be a PostgreSQL identifier");
-  }
-}
-
-function configuredScheduledJob(
-  parsed: unknown,
-  index: number,
-): RustyCrewScheduledJob {
-  if (!isRecord(parsed)) {
-    throw new Error(`configured scheduled job ${index} must be an object`);
-  }
-  const shape = optionalString(parsed.shape) ?? "session_wake";
-  if (
-    shape !== "host_job" &&
-    shape !== "session_wake" &&
-    shape !== "script_only" &&
-    shape !== "data_collection"
-  ) {
-    throw new Error(
-      `scheduledJobs[${index}].shape must be host_job, session_wake, script_only, or data_collection`,
-    );
-  }
-
-  const job = {
-    id: requiredString(parsed.id, `scheduledJobs[${index}].id`),
-    schedule: requiredString(
-      parsed.schedule,
-      `scheduledJobs[${index}].schedule`,
-    ),
-    shape,
-    jobKind: optionalString(parsed.jobKind),
-    targetSessionId: optionalString(parsed.targetSessionId) as
-      | SessionId
-      | undefined,
-    payload: parsed.payload,
-    script: optionalString(parsed.script),
-    deliveryChannelId: optionalString(parsed.deliveryChannelId),
-  } satisfies RustyCrewScheduledJob;
-
-  nextCronDueAt(job.schedule, new Date("2026-06-21T00:00:00Z"));
-  if (job.shape === "session_wake" && !job.targetSessionId) {
-    throw new Error(
-      `scheduledJobs[${index}].targetSessionId is required for session_wake`,
-    );
-  }
-  if (job.shape === "host_job" && !job.jobKind) {
-    throw new Error(`scheduledJobs[${index}].jobKind is required for host_job`);
-  }
-  return job;
-}
-
-function configuredBrain(
-  parsed: unknown,
-  index: number,
-): RustyCrewConfiguredBrain {
-  if (!isRecord(parsed)) {
-    throw new Error(`configured brain ${index} must be an object`);
-  }
-  const profileId = requiredString(
-    parsed.profileId,
-    `brains[${index}].profileId`,
-  );
-  return {
-    profileId: profileId as ProfileId,
-    implementationId: (optionalString(parsed.implementationId) ??
-      `${profileId}-brain`) as BrainImplementationId,
-  };
-}
-
-function configuredSession(
-  parsed: unknown,
-  index: number,
-): RustyCrewConfiguredSession {
-  if (!isRecord(parsed)) {
-    throw new Error(`configured session ${index} must be an object`);
-  }
-  const kind = optionalString(parsed.kind) ?? "full";
-  if (kind !== "full" && kind !== "worker" && kind !== "delegated") {
-    throw new Error(
-      `sessions[${index}].kind must be full, worker, or delegated`,
-    );
-  }
-  return {
-    sessionId: requiredString(
-      parsed.sessionId,
-      `sessions[${index}].sessionId`,
-    ) as SessionId,
-    agentId: requiredString(
-      parsed.agentId,
-      `sessions[${index}].agentId`,
-    ) as AgentId,
-    profileId: requiredString(
-      parsed.profileId,
-      `sessions[${index}].profileId`,
-    ) as ProfileId,
-    kind,
-    resourceLimits: isRecord(parsed.resourceLimits)
-      ? resourceLimits(parsed.resourceLimits)
-      : undefined,
-    ownerId: optionalString(parsed.ownerId),
-    historyWindow: isRecord(parsed.historyWindow)
-      ? {
-          maxMessages: optionalNumber(parsed.historyWindow.maxMessages),
-        }
-      : undefined,
-    maxHistoryMessages: optionalNumber(parsed.maxHistoryMessages),
-    turnTimeoutMs: optionalNumber(parsed.turnTimeoutMs),
-    sessionMemoryPrompt: isRecord(parsed.sessionMemoryPrompt)
-      ? sessionMemoryPromptConfig(parsed.sessionMemoryPrompt)
-      : undefined,
-    contextPolicy: isRecord(parsed.contextPolicy)
-      ? contextStrategyPolicyFromUnknown(parsed.contextPolicy)
-      : isRecord(parsed.context_policy)
-        ? contextStrategyPolicyFromUnknown(parsed.context_policy)
-        : undefined,
-  };
-}
-
-function resourceLimits(parsed: Record<string, unknown>): ResourceLimits {
-  return {
-    workdir: optionalString(parsed.workdir),
-    maxDurationMs: optionalNumber(parsed.maxDurationMs),
-    maxDelegationDepth: optionalNumber(parsed.maxDelegationDepth),
-  };
-}
-
-function configuredChannelBinding(
-  parsed: unknown,
-  index: number,
-): ChannelBindingRecord {
-  if (!isRecord(parsed)) {
-    throw new Error(`configured channel binding ${index} must be an object`);
-  }
-  return {
-    bindingId: requiredString(
-      parsed.bindingId,
-      `channelBindings[${index}].bindingId`,
-    ),
-    adapterId: requiredString(
-      parsed.adapterId,
-      `channelBindings[${index}].adapterId`,
-    ) as never,
-    provider: optionalString(parsed.provider) ?? "den_channels",
-    agentId: requiredString(
-      parsed.agentId,
-      `channelBindings[${index}].agentId`,
-    ) as AgentId,
-    instanceId: optionalString(parsed.instanceId) as never,
-    sessionId: optionalString(parsed.sessionId) as SessionId | undefined,
-    profileId: requiredString(
-      parsed.profileId,
-      `channelBindings[${index}].profileId`,
-    ) as ProfileId,
-    externalChannelId: requiredString(
-      parsed.externalChannelId,
-      `channelBindings[${index}].externalChannelId`,
-    ),
-    externalThreadId: optionalString(parsed.externalThreadId),
-    externalUserId: optionalString(parsed.externalUserId),
-    conversationProjectId: optionalString(parsed.conversationProjectId),
-    conversationChannelId: optionalPositiveInteger(
-      parsed.conversationChannelId,
-      `channelBindings[${index}].conversationChannelId`,
-    ),
-    providerSubscriptionId: optionalString(parsed.providerSubscriptionId),
-    cursor: optionalString(parsed.cursor),
-    membershipState: optionalString(parsed.membershipState),
-    presenceState: optionalString(parsed.presenceState),
-    status: externalBindingStatus(parsed.status),
-    degradedReason: optionalString(parsed.degradedReason),
-  };
-}
-
-function configuredMcpBinding(
-  parsed: unknown,
-  index: number,
-): McpBindingRecord {
-  if (!isRecord(parsed)) {
-    throw new Error(`configured MCP binding ${index} must be an object`);
-  }
-  const profileId = requiredString(
-    parsed.profileId,
-    `mcpBindings[${index}].profileId`,
-  );
-  return {
-    bindingId: requiredString(
-      parsed.bindingId,
-      `mcpBindings[${index}].bindingId`,
-    ),
-    adapterId: requiredString(
-      parsed.adapterId,
-      `mcpBindings[${index}].adapterId`,
-    ) as never,
-    agentId: requiredString(
-      parsed.agentId,
-      `mcpBindings[${index}].agentId`,
-    ) as AgentId,
-    instanceId: optionalString(parsed.instanceId) as never,
-    sessionId: optionalString(parsed.sessionId) as SessionId | undefined,
-    profileId: profileId as ProfileId,
-    serverNames: stringList(
-      parsed.serverNames,
-      `mcpBindings[${index}].serverNames`,
-    ),
-    endpointRef: requiredString(
-      parsed.endpointRef,
-      `mcpBindings[${index}].endpointRef`,
-    ),
-    transport: optionalString(parsed.transport) ?? "stdio",
-    toolProfileKey: optionalString(parsed.toolProfileKey) ?? `${profileId}-mcp`,
-    discoveredToolRevision: optionalString(parsed.discoveredToolRevision),
-    status: externalBindingStatus(parsed.status),
-    degradedReason: optionalString(parsed.degradedReason),
-    diagnostics: isRecord(parsed.diagnostics)
-      ? {
-          lastError: optionalString(parsed.diagnostics.lastError),
-          lastCheckedAt: optionalString(parsed.diagnostics.lastCheckedAt),
-          notes: optionalString(parsed.diagnostics.notes),
-        }
-      : {},
   };
 }
 
@@ -2284,13 +1983,6 @@ function optionalArrayValue(
   return arrayValue(input);
 }
 
-function stringList(input: unknown, name: string): string[] {
-  if (!Array.isArray(input) || input.length === 0) {
-    throw new Error(`${name} must be a non-empty string array`);
-  }
-  return input.map((item, index) => requiredString(item, `${name}[${index}]`));
-}
-
 function enumString<T extends string>(
   input: unknown,
   name: string,
@@ -2304,23 +1996,6 @@ function enumString<T extends string>(
     );
   }
   return input as T;
-}
-
-function externalBindingStatus(
-  input: unknown,
-): "active" | "degraded" | "disconnected" | "archived" {
-  const status = optionalString(input) ?? "active";
-  if (
-    status !== "active" &&
-    status !== "degraded" &&
-    status !== "disconnected" &&
-    status !== "archived"
-  ) {
-    throw new Error(
-      "external binding status must be active, degraded, disconnected, or archived",
-    );
-  }
-  return status;
 }
 
 function pathValue(input: unknown, fallback?: string): string {
@@ -2338,20 +2013,6 @@ function requiredString(input: unknown, name: string): string {
 
 function optionalString(input: unknown): string | undefined {
   return typeof input === "string" && input.trim() ? input.trim() : undefined;
-}
-
-function optionalNumber(input: unknown): number | undefined {
-  return typeof input === "number" && Number.isFinite(input)
-    ? input
-    : undefined;
-}
-
-function optionalBoolean(input: unknown, name: string): boolean | undefined {
-  if (input === undefined || input === null) return undefined;
-  if (typeof input !== "boolean") {
-    throw new Error(`${name} must be a boolean`);
-  }
-  return input;
 }
 
 function optionalPositiveInteger(

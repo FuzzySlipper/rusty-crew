@@ -271,6 +271,15 @@ errors = "core_protocol::CoreError"
 summary = "Validate and expand a service runtime config draft with profile-derived session defaults, MCP bindings, and background review jobs without mutating files or engine state."
 
 [[operation]]
+name = "plan_runtime_graph"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_config::RuntimeGraphPlanInput"
+output = "core_config::RuntimeGraphPlan"
+errors = "core_protocol::CoreError"
+summary = "Expand, default, and validate an authored runtime graph from host and profile facts."
+
+[[operation]]
 name = "plan_create_profile"
 surface = "stable"
 direction = "ts_to_rust"

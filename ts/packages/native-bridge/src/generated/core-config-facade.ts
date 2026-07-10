@@ -12,9 +12,18 @@ export const coreConfigFacadeArtifact = {
       "profile_registry[].revision",
       "profiles",
       "profiles[].background_review",
+      "profiles[].background_review.capture_max_proposals",
+      "profiles[].background_review.capture_provider_alias",
+      "profiles[].background_review.dry_run",
       "profiles[].background_review.enabled",
+      "profiles[].background_review.llm_review_enabled",
+      "profiles[].background_review.max_candidates",
+      "profiles[].background_review.max_findings",
+      "profiles[].background_review.max_tokens",
+      "profiles[].background_review.memory_nudge_interval",
       "profiles[].background_review.review_type",
       "profiles[].background_review.schedule",
+      "profiles[].background_review.skill_nudge_interval",
       "profiles[].brain",
       "profiles[].brain.module",
       "profiles[].brain.strategy",
@@ -140,9 +149,18 @@ export const coreConfigFacadeArtifact = {
     "RuntimeConfigValidationInput": [
       "profiles",
       "profiles[].background_review",
+      "profiles[].background_review.capture_max_proposals",
+      "profiles[].background_review.capture_provider_alias",
+      "profiles[].background_review.dry_run",
       "profiles[].background_review.enabled",
+      "profiles[].background_review.llm_review_enabled",
+      "profiles[].background_review.max_candidates",
+      "profiles[].background_review.max_findings",
+      "profiles[].background_review.max_tokens",
+      "profiles[].background_review.memory_nudge_interval",
       "profiles[].background_review.review_type",
       "profiles[].background_review.schedule",
+      "profiles[].background_review.skill_nudge_interval",
       "profiles[].brain",
       "profiles[].brain.module",
       "profiles[].brain.strategy",
@@ -279,8 +297,6 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.scheduled_jobs[].id",
       "runtime_config.scheduled_jobs[].job_kind",
       "runtime_config.scheduled_jobs[].payload",
-      "runtime_config.scheduled_jobs[].payload.profile_id",
-      "runtime_config.scheduled_jobs[].payload.review_type",
       "runtime_config.scheduled_jobs[].schedule",
       "runtime_config.scheduled_jobs[].script",
       "runtime_config.scheduled_jobs[].shape",
@@ -331,9 +347,18 @@ export const coreConfigFacadeArtifact = {
       "host_facts.postgres_database_url_env_present",
       "profiles",
       "profiles[].background_review",
+      "profiles[].background_review.capture_max_proposals",
+      "profiles[].background_review.capture_provider_alias",
+      "profiles[].background_review.dry_run",
       "profiles[].background_review.enabled",
+      "profiles[].background_review.llm_review_enabled",
+      "profiles[].background_review.max_candidates",
+      "profiles[].background_review.max_findings",
+      "profiles[].background_review.max_tokens",
+      "profiles[].background_review.memory_nudge_interval",
       "profiles[].background_review.review_type",
       "profiles[].background_review.schedule",
+      "profiles[].background_review.skill_nudge_interval",
       "profiles[].brain",
       "profiles[].brain.module",
       "profiles[].brain.strategy",
@@ -345,7 +370,6 @@ export const coreConfigFacadeArtifact = {
       "profiles[].context_policy.include_debug_events_in_model_context",
       "profiles[].context_policy.max_context_percent_for_wake",
       "profiles[].context_policy.strategy_config",
-      "profiles[].context_policy.strategy_config.summary_shape",
       "profiles[].context_policy.strategy_id",
       "profiles[].context_policy.target_percent_after_compaction",
       "profiles[].local_tool_profile_id",
@@ -427,6 +451,7 @@ export const coreConfigFacadeArtifact = {
       "runtime_config.storage.sqlite.path",
       "runtime_config.storage.sqlite.wal",
       "service_defaults",
+      "service_defaults.storage",
       "service_defaults.wake_timeout",
       "service_defaults.wake_timeout.default_ms",
       "service_defaults.wake_timeout.mode"
@@ -502,7 +527,7 @@ function toSnakeCaseKeys(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       camelToSnakeCase(key),
-      toSnakeCaseKeys(item),
+      isOpaqueJsonKey(key) ? item : toSnakeCaseKeys(item),
     ]),
   );
 }
@@ -519,6 +544,10 @@ function camelToSnakeCase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
+function isOpaqueJsonKey(value: string): boolean {
+  return value === "payload" || value === "strategyConfig" || value === "strategy_config";
+}
+
 function toCamelCaseKeys(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(toCamelCaseKeys);
@@ -529,7 +558,7 @@ function toCamelCaseKeys(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       snakeToCamelCase(key),
-      toCamelCaseKeys(item),
+      isOpaqueJsonKey(key) ? item : toCamelCaseKeys(item),
     ]),
   );
 }

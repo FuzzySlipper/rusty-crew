@@ -37,6 +37,7 @@ pub struct RuntimeGraphHostFacts {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeGraphServiceDefaults {
     pub wake_timeout: Option<RuntimeGraphWakeTimeoutSource>,
+    pub storage: Option<RuntimeGraphStorageSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,7 +120,7 @@ pub enum RuntimeGraphPostgresBootMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeGraphStorageSource {
-    pub backend: RuntimeGraphStorageBackend,
+    pub backend: String,
     pub sqlite: Option<RuntimeGraphSqliteStorageSource>,
     pub postgres: Option<RuntimeGraphPostgresStorageSource>,
 }
@@ -620,10 +621,7 @@ fn plan_scheduled_jobs(
             shape: ScheduledJobShape::HostJob,
             job_kind: Some(RUNTIME_REVIEW_MEMORY_SKILLS_JOB_KIND.to_string()),
             target_session_id: None,
-            payload: serde_json::json!({
-                "profile_id": profile.profile_id,
-                "review_type": review_type,
-            }),
+            payload: background_review_payload(profile, review, review_type),
             script: None,
             delivery_channel_id: None,
         });
@@ -635,6 +633,44 @@ fn plan_scheduled_jobs(
     }
     jobs.sort_by(|left, right| left.id.cmp(&right.id));
     (jobs, derived)
+}
+
+fn background_review_payload(
+    profile: &RuntimeGraphProfileSource,
+    review: &ProfileBackgroundReviewConfig,
+    review_type: &str,
+) -> Value {
+    let mut payload = serde_json::json!({
+        "schemaVersion": 1,
+        "reviewType": review_type,
+        "profileId": profile.profile_id,
+        "triggerSource": "profile_background_review",
+        "includeDenseProfileMemory": true,
+        "includeDenMemoryDiagnostics": true,
+        "llmReviewEnabled": review.llm_review_enabled.unwrap_or(false),
+        "dryRun": review.dry_run.unwrap_or(true),
+        "reason": format!("profile {} backgroundReview", profile.profile_id),
+    });
+    let object = payload.as_object_mut().expect("payload is an object");
+    insert_optional_u32(object, "memoryNudgeInterval", review.memory_nudge_interval);
+    insert_optional_u32(object, "skillNudgeInterval", review.skill_nudge_interval);
+    insert_optional_u32(object, "maxTokens", review.max_tokens);
+    insert_optional_u32(object, "maxFindings", review.max_findings);
+    insert_optional_u32(object, "maxCandidates", review.max_candidates);
+    insert_optional_u32(object, "captureMaxProposals", review.capture_max_proposals);
+    if let Some(alias) = &review.capture_provider_alias {
+        object.insert(
+            "captureProviderAlias".to_string(),
+            Value::String(alias.clone()),
+        );
+    }
+    payload
+}
+
+fn insert_optional_u32(object: &mut serde_json::Map<String, Value>, key: &str, value: Option<u32>) {
+    if let Some(value) = value {
+        object.insert(key.to_string(), Value::from(value));
+    }
 }
 
 fn plan_mcp_bindings(
@@ -726,12 +762,28 @@ fn plan_storage(
     diagnostics: &mut Vec<RuntimeConfigDiagnostic>,
 ) -> RuntimeGraphStoragePlan {
     let source = input.runtime_config.storage.as_ref();
-    let backend = source
-        .map(|source| source.backend)
-        .unwrap_or(RuntimeGraphStorageBackend::Sqlite);
+    let service_default = input.service_defaults.storage.as_ref();
+    let backend_source = source
+        .map(|source| source.backend.as_str())
+        .or_else(|| service_default.map(|source| source.backend.as_str()))
+        .unwrap_or("sqlite");
+    let backend = match backend_source {
+        "sqlite" => RuntimeGraphStorageBackend::Sqlite,
+        "postgres" => RuntimeGraphStorageBackend::Postgres,
+        _ => {
+            diagnostics.push(RuntimeConfigDiagnostic::error(
+                "storage_backend_invalid",
+                "runtimeConfig.storage.backend",
+                "storage backend must be sqlite or postgres",
+            ));
+            RuntimeGraphStorageBackend::Sqlite
+        }
+    };
     let sqlite_source = source.and_then(|source| source.sqlite.as_ref());
+    let sqlite_default = service_default.and_then(|source| source.sqlite.as_ref());
     let sqlite_path = sqlite_source
         .and_then(|sqlite| sqlite.path.clone())
+        .or_else(|| sqlite_default.and_then(|sqlite| sqlite.path.clone()))
         .unwrap_or_else(|| "runtime.sqlite3".to_string());
     if sqlite_path.trim().is_empty() {
         diagnostics.push(RuntimeConfigDiagnostic::error(
@@ -750,11 +802,14 @@ fn plan_storage(
         )
     };
     let postgres_source = source.and_then(|source| source.postgres.as_ref());
+    let postgres_default = service_default.and_then(|source| source.postgres.as_ref());
     let database_url_env = postgres_source
         .and_then(|postgres| postgres.database_url_env.clone())
+        .or_else(|| postgres_default.and_then(|postgres| postgres.database_url_env.clone()))
         .unwrap_or_else(|| "RUSTY_CREW_POSTGRES_URL".to_string());
     let schema = postgres_source
         .and_then(|postgres| postgres.schema.clone())
+        .or_else(|| postgres_default.and_then(|postgres| postgres.schema.clone()))
         .unwrap_or_else(|| "rusty_crew".to_string());
     if !valid_identifier(&database_url_env) {
         diagnostics.push(RuntimeConfigDiagnostic::error(
@@ -770,18 +825,20 @@ fn plan_storage(
             "Postgres schema is not a valid identifier",
         ));
     }
+    let boot_mode = postgres_source
+        .and_then(|postgres| postgres.boot_mode)
+        .or_else(|| postgres_default.and_then(|postgres| postgres.boot_mode))
+        .unwrap_or(RuntimeGraphPostgresBootMode::Active);
     if backend == RuntimeGraphStorageBackend::Postgres
+        && boot_mode == RuntimeGraphPostgresBootMode::Active
         && !input.host_facts.postgres_database_url_env_present
     {
         diagnostics.push(RuntimeConfigDiagnostic::error(
             "postgres_database_url_env_missing",
             "hostFacts.postgresDatabaseUrlEnvPresent",
-            "selected Postgres database URL environment variable is not present",
+            "active Postgres storage requires the selected database URL environment variable",
         ));
     }
-    let boot_mode = postgres_source
-        .and_then(|postgres| postgres.boot_mode)
-        .unwrap_or(RuntimeGraphPostgresBootMode::Active);
     let implementation_status = match (backend, boot_mode) {
         (RuntimeGraphStorageBackend::Sqlite, _) | (_, RuntimeGraphPostgresBootMode::Active) => {
             RuntimeGraphStorageImplementationStatus::Active
@@ -799,9 +856,13 @@ fn plan_storage(
         sqlite: RuntimeGraphSqliteStoragePlan {
             path: sqlite_path,
             effective_path,
-            wal: sqlite_source.and_then(|sqlite| sqlite.wal).unwrap_or(true),
+            wal: sqlite_source
+                .and_then(|sqlite| sqlite.wal)
+                .or_else(|| sqlite_default.and_then(|sqlite| sqlite.wal))
+                .unwrap_or(true),
             busy_timeout_ms: sqlite_source
                 .and_then(|sqlite| sqlite.busy_timeout_ms)
+                .or_else(|| sqlite_default.and_then(|sqlite| sqlite.busy_timeout_ms))
                 .unwrap_or(5_000),
         },
         postgres: RuntimeGraphPostgresStoragePlan {
@@ -810,9 +871,11 @@ fn plan_storage(
             boot_mode,
             max_connections: postgres_source
                 .and_then(|postgres| postgres.max_connections)
+                .or_else(|| postgres_default.and_then(|postgres| postgres.max_connections))
                 .unwrap_or(16),
             statement_timeout_ms: postgres_source
                 .and_then(|postgres| postgres.statement_timeout_ms)
+                .or_else(|| postgres_default.and_then(|postgres| postgres.statement_timeout_ms))
                 .unwrap_or(30_000),
         },
     }
@@ -921,6 +984,21 @@ mod tests {
             session.resource_limits.workdir.as_deref(),
             Some("/explicit")
         );
+    }
+
+    #[test]
+    fn service_storage_defaults_are_applied_when_graph_omits_storage() {
+        let mut input = source_fixture("complete-source.camel.json");
+        let storage = input.runtime_config.storage.take().unwrap();
+        input.service_defaults.storage = Some(storage);
+        let plan = plan_runtime_graph(&input);
+        assert!(plan.accepted, "diagnostics: {:?}", plan.diagnostics);
+        assert_eq!(
+            plan.runtime_config.storage.backend,
+            RuntimeGraphStorageBackend::Sqlite
+        );
+        assert_eq!(plan.runtime_config.storage.sqlite.path, "runtime.sqlite3");
+        assert_eq!(plan.runtime_config.storage.sqlite.busy_timeout_ms, 5_000);
     }
 
     fn source_fixture(name: &str) -> RuntimeGraphPlanInput {
