@@ -316,3 +316,13 @@ export const rawModelProviderSecretSchema = Type.Union([
   Type.String(),
   Type.Null(),
 ]);
+
+export const nativeRuntimeBufferViewSchema = Type.Object(
+  {
+    handle: nativeHandleSchema,
+    mediaType: Type.String(),
+    byteLen: Type.Number({ minimum: 0 }),
+    bytes: Type.Unknown(),
+  },
+  { additionalProperties: false },
+);

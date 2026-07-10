@@ -432,9 +432,9 @@ The final 2026-07-10 bridge baseline is:
 - manifest operations: 200;
 - generated raw native binding methods: 215;
 - generated Rust output schemas: 122 operations;
-- covered manifest operations: 198;
+- covered manifest operations: 200;
 - first-class unit-return operations: 13;
-- explicit value/helper exemptions: 2;
+- explicit value/helper exemptions: 0;
 - handwritten `to*`/`from*` converters: 91 maximum;
 - `native-bridge/src/index.ts`: 1,747 lines maximum;
 - focused family/composition modules under the boundary ratchet: 15.
@@ -444,10 +444,11 @@ are no longer mislabeled as deferred output schemas. A strict native-binding
 proxy validates direct engine, ingress, session, delegation, OAuth, buffered
 run, model-secret, and GitHub gate outputs in their actual camelCase object or
 snake_case JSON representation. Secret-bearing validation uses synthetic
-values and never logs payloads. The two remaining value/helper exemptions have
-one explicit implementation task:
-
-- #5566: event subscription and runtime-buffer value contracts (2).
+values and never logs payloads. Subscription handles and runtime-buffer views
+are also checked at the binding boundary; buffer validation inspects the live
+`Uint8Array` and byte length without copying binary data into fixtures. All 200
+manifest operations now have generated, fixture-backed, unit-return, or
+runtime boundary validation evidence, with no exemption catalog remaining.
 
 The ST import smoke now declares its service-host lane explicitly and uses the
 supported `pi-agent` production brain without invoking a provider. This keeps

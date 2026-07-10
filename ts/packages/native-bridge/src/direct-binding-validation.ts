@@ -11,6 +11,7 @@ import {
   nativeEventReceiptSchema,
   nativeHandleSchema,
   nativeQueuedMessageRecordSchema,
+  nativeRuntimeBufferViewSchema,
   nativeSessionIdArraySchema,
   nativeSessionStateSummarySchema,
   nativeShutdownSummarySchema,
@@ -28,6 +29,7 @@ interface DirectOutputDescriptor {
   operation: ManifestOperationName;
   schema: TSchema;
   encoding: "value" | "json_text";
+  validateValue?: (output: unknown) => void;
 }
 
 const value = (
@@ -38,6 +40,22 @@ const jsonText = (
   operation: ManifestOperationName,
   schema: TSchema,
 ): DirectOutputDescriptor => ({ operation, schema, encoding: "json_text" });
+const runtimeBufferView = (): DirectOutputDescriptor => ({
+  operation: "get_buffer",
+  schema: nativeRuntimeBufferViewSchema,
+  encoding: "value",
+  validateValue(output) {
+    const view = output as { byteLen?: unknown; bytes?: unknown };
+    if (!(view.bytes instanceof Uint8Array)) {
+      throw new TypeError("get_buffer bytes must be a Uint8Array");
+    }
+    if (view.byteLen !== view.bytes.byteLength) {
+      throw new TypeError(
+        `get_buffer byteLen ${String(view.byteLen)} does not match bytes length ${view.bytes.byteLength}`,
+      );
+    }
+  },
+});
 
 const directOutputByMethod = {
   initializeEngine: value("initialize_engine", nativeHandleSchema),
@@ -125,6 +143,8 @@ const directOutputByMethod = {
     rawNullableGitHubGateWaitRecordSchema,
   ),
   githubGateEventCursor: value("github_gate_event_cursor", nativeHandleSchema),
+  subscribeEvents: value("subscribe_events", nativeHandleSchema),
+  getBuffer: runtimeBufferView(),
 } as const satisfies Record<string, DirectOutputDescriptor>;
 
 export const directBridgeValidatedOperations = Object.freeze(
@@ -191,4 +211,5 @@ function validateOutput(
     value: output,
     env,
   });
+  descriptor.validateValue?.(output);
 }

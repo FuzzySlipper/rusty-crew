@@ -133,6 +133,13 @@ const validBinding = withDirectBridgeOutputValidation(
     recoverGithubGateWakes: () => 1,
     githubGateWaitJson: () => JSON.stringify(githubWait()),
     githubGateEventCursor: () => 9,
+    subscribeEvents: () => 10,
+    getBuffer: () => ({
+      handle: 11,
+      mediaType: "application/json",
+      byteLen: 0,
+      bytes: new Uint8Array(),
+    }),
   },
   env,
 );
@@ -166,7 +173,20 @@ const extraField = withDirectBridgeOutputValidation(
 );
 assert.throws(() => extraField.injectExternalEvent(), BridgeValidationError);
 
-assert.equal(new Set(directBridgeValidatedOperations).size, 25);
+const invalidBuffer = withDirectBridgeOutputValidation(
+  {
+    getBuffer: () => ({
+      handle: 1,
+      mediaType: "application/octet-stream",
+      byteLen: 1,
+      bytes: new Uint8Array(),
+    }),
+  },
+  env,
+);
+assert.throws(() => invalidBuffer.getBuffer(), /does not match bytes length/);
+
+assert.equal(new Set(directBridgeValidatedOperations).size, 27);
 console.log(
   JSON.stringify({
     directOperationsValidated: directBridgeValidatedOperations.length,
@@ -175,6 +195,7 @@ console.log(
     jsonTextValidation: true,
     syntheticSecretSamples: true,
     secretPayloadsLogged: false,
+    binaryPayloadCopiedToFixture: false,
   }),
 );
 

@@ -15,19 +15,13 @@ export interface RustBridgeValidationFixtureSummary {
   }>;
 }
 
-interface OperationExemptionGroup {
-  group: string;
-  reason: string;
-  operations: readonly ManifestOperationName[];
-}
-
 const EXPECTED_MANIFEST_OPERATION_COUNT = 200;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 122;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 198;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 2;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 200;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 0;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -116,15 +110,6 @@ const UNIT_RETURN_MANIFEST_OPERATIONS = [
   "unsubscribe_events",
 ] as const satisfies readonly ManifestOperationName[];
 
-const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
-  {
-    group: "subscriptions_and_buffers",
-    reason:
-      "Event subscription and runtime-buffer lease semantics are protocol/lifecycle concerns; bump MANIFEST_VERSION for breaking changes until buffer fixtures exist.",
-    operations: ["subscribe_events", "get_buffer"],
-  },
-] as const satisfies readonly OperationExemptionGroup[];
-
 const BRIDGE_COVERAGE_GREENPATH = [
   "Bridge coverage ratchet failed.",
   "Follow docs/bridge-contract-validation.md#adding-a-bridge-family and docs/native-bridge-rust-contract-mapping-migration.md.",
@@ -194,9 +179,7 @@ export function assertBridgeValidationCoverageRatchet(
     EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT,
   );
 
-  const exemptions = sortedUnique(
-    BRIDGE_OPERATION_EXEMPTION_GROUPS.flatMap((group) => group.operations),
-  );
+  const exemptions: ManifestOperationName[] = [];
   assertEqual(
     "bridge manifest operation exemptions",
     exemptions.length,
