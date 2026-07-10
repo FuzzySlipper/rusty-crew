@@ -1,0 +1,123 @@
+{
+  "hostFacts": {
+    "configDir": "__FIXTURE_ROOT__/config",
+    "engineDataDir": "__FIXTURE_ROOT__/engine",
+    "defaultWorkdir": "__FIXTURE_ROOT__/work",
+    "postgresDatabaseUrlEnvPresent": true
+  },
+  "serviceDefaults": {
+    "wakeTimeout": {
+      "mode": "default",
+      "defaultMs": 120000
+    }
+  },
+  "runtimeConfig": {
+    "profilesDir": "__FIXTURE_ROOT__/profiles",
+    "skillsDir": "__FIXTURE_ROOT__/skills",
+    "storage": {
+      "backend": "sqlite",
+      "sqlite": {
+        "path": "runtime.sqlite3",
+        "wal": true,
+        "busyTimeoutMs": 5000
+      },
+      "postgres": {
+        "databaseUrlEnv": "RUSTY_CREW_POSTGRES_URL",
+        "schema": "rusty_crew",
+        "bootMode": "active",
+        "maxConnections": 16,
+        "statementTimeoutMs": 30000
+      }
+    },
+    "brains": [
+      {
+        "profileId": "parity-runner"
+      }
+    ],
+    "sessions": [
+      {
+        "sessionId": "parity-runner-session",
+        "agentId": "parity-runner",
+        "profileId": "parity-runner"
+      }
+    ],
+    "scheduledJobs": [
+      {
+        "id": "parity-runner-wake",
+        "schedule": "*/10 * * * *",
+        "shape": "session_wake",
+        "targetSessionId": "parity-runner-session"
+      }
+    ],
+    "channelBindings": [
+      {
+        "bindingId": "parity-runner-channel",
+        "adapterId": "den-gateway",
+        "provider": "den_conversation",
+        "agentId": "parity-runner",
+        "sessionId": "parity-runner-session",
+        "profileId": "parity-runner",
+        "externalChannelId": "40",
+        "status": "active"
+      }
+    ],
+    "mcpBindings": []
+  },
+  "profiles": [
+    {
+      "profileId": "parity-runner",
+      "brain": {
+        "module": "pi-agent",
+        "strategy": "default"
+      },
+      "runtime": {
+        "defaultResourceLimits": {
+          "maxDurationMs": 60000,
+          "maxDelegationDepth": 4
+        },
+        "maxTurnDurationMs": 30000,
+        "maxTokensPerTurn": 4096
+      },
+      "localToolProfileId": "full-agent",
+      "sessionDefaults": {
+        "ownerId": "parity-owner",
+        "maxHistoryMessages": 128,
+        "turnTimeoutMs": 45000
+      },
+      "sessionMemoryPrompt": {
+        "enabled": true,
+        "maxRecords": 12,
+        "includeAncestors": true,
+        "includeSiblings": false
+      },
+      "mcpConfig": {
+        "bindingId": "parity-runner-mcp",
+        "endpointRef": "config://mcp/parity-runner",
+        "serverNames": [
+          "den",
+          "memory"
+        ],
+        "transport": "streamable_http",
+        "toolProfile": "planner"
+      },
+      "backgroundReview": {
+        "enabled": true,
+        "reviewType": "combined",
+        "schedule": "0 3 * * *"
+      },
+      "contextPolicy": {
+        "enabled": true,
+        "strategyId": "rolling_summary_compaction",
+        "autoCompactionEnabled": true,
+        "compactAtPercent": 82,
+        "targetPercentAfterCompaction": 58,
+        "maxContextPercentForWake": 95,
+        "debugVisibility": "status",
+        "includeDebugEventsInModelContext": false,
+        "strategyConfig": {
+          "summaryShape": "brief"
+        }
+      }
+    }
+  ]
+}

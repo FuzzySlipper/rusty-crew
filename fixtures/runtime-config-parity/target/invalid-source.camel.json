@@ -1,0 +1,81 @@
+{
+  "hostFacts": {
+    "configDir": "__FIXTURE_ROOT__/config",
+    "engineDataDir": "__FIXTURE_ROOT__/engine",
+    "postgresDatabaseUrlEnvPresent": false
+  },
+  "serviceDefaults": {
+    "wakeTimeout": {
+      "mode": "default"
+    }
+  },
+  "runtimeConfig": {
+    "profilesDir": "__FIXTURE_ROOT__/profiles",
+    "storage": {
+      "backend": "postgres",
+      "postgres": {
+        "databaseUrlEnv": "bad env name",
+        "schema": "bad-schema",
+        "bootMode": "active"
+      }
+    },
+    "brains": [
+      {
+        "profileId": "missing-profile"
+      },
+      {
+        "profileId": "missing-profile"
+      }
+    ],
+    "sessions": [
+      {
+        "sessionId": "duplicate-session",
+        "agentId": "wrong-agent",
+        "profileId": "known-profile"
+      },
+      {
+        "sessionId": "duplicate-session",
+        "agentId": "known-profile",
+        "profileId": "known-profile"
+      }
+    ],
+    "scheduledJobs": [
+      {
+        "id": "broken-job",
+        "schedule": "not a cron",
+        "shape": "session_wake",
+        "targetSessionId": "missing-session"
+      }
+    ],
+    "channelBindings": [
+      {
+        "bindingId": "broken-channel",
+        "adapterId": "den-gateway",
+        "provider": "den_conversation",
+        "agentId": "wrong-agent",
+        "sessionId": "duplicate-session",
+        "profileId": "known-profile",
+        "externalChannelId": "40",
+        "status": "active"
+      }
+    ],
+    "mcpBindings": []
+  },
+  "profiles": [
+    {
+      "profileId": "known-profile"
+    }
+  ],
+  "expectedDiagnosticCodes": [
+    "wake_timeout_default_required",
+    "postgres_database_url_env_invalid",
+    "postgres_database_url_env_missing",
+    "postgres_schema_invalid",
+    "duplicate_brain_profile_id",
+    "missing_profile_metadata",
+    "duplicate_session_id",
+    "scheduled_job_schedule_invalid",
+    "scheduled_job_target_missing",
+    "binding_session_mismatch"
+  ]
+}
