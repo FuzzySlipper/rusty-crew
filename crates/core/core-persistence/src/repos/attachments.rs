@@ -56,6 +56,57 @@ impl CoordinationStore {
         query_attachments(&conn, query)
     }
 
+    pub fn query_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin query attachments page", error))?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let message_id = query.message_id.as_ref().map(|value| value.0.as_str());
+        let block_id = query.block_id.as_ref().map(|value| value.0.as_str());
+        let scope_id = query.scope_id.as_ref().map(|value| value.0.as_str());
+        let status = query.status.map(AttachmentStatus::as_str);
+        let total = tx
+            .query_row(
+                "SELECT COUNT(DISTINCT a.attachment_id)
+                 FROM attachments a
+                 LEFT JOIN attachment_links l ON l.attachment_id = a.attachment_id
+                 WHERE (?1 IS NULL OR a.session_id = ?1)
+                   AND (?2 OR a.status <> 'removed')
+                   AND (?3 IS NULL OR l.message_id = ?3)
+                   AND (?4 IS NULL OR l.scope_id = ?4)
+                   AND (?5 IS NULL OR l.block_id = ?5)
+                   AND (?6 IS NULL OR a.status = ?6)
+                   AND (
+                        (?7 AND a.expires_at IS NOT NULL AND ?8 IS NOT NULL AND a.expires_at <= ?8)
+                        OR
+                        (NOT ?7 AND (?9 OR a.expires_at IS NULL OR ?8 IS NULL OR a.expires_at > ?8))
+                   )",
+                params![
+                    session_id,
+                    query.include_removed,
+                    message_id,
+                    scope_id,
+                    block_id,
+                    status,
+                    query.expired_only,
+                    query.now,
+                    query.include_expired,
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("count attachments page", error))?
+            .max(0) as u64;
+        let (limit, offset) = normalized_attachment_page(query.page);
+        let items = query_attachments(&tx, query)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit query attachments page", error))?;
+        Ok(ExactPage::new(items, total, limit, offset))
+    }
+
     pub fn remove_attachment(
         &self,
         attachment_id: &AttachmentId,
@@ -170,6 +221,35 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<DataBankScopeRecord>> {
         let conn = self.conn()?;
         query_data_bank_scopes(&conn, query)
+    }
+
+    pub fn query_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin query data-bank scopes page", error))?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let status = query.status.map(DataBankScopeStatus::as_str);
+        let total = tx
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM data_bank_scopes
+                 WHERE (?1 IS NULL OR session_id = ?1)
+                   AND (?2 OR status <> 'removed')
+                   AND (?3 IS NULL OR status = ?3)",
+                params![session_id, query.include_removed, status],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("count data-bank scopes page", error))?
+            .max(0) as u64;
+        let (limit, offset) = normalized_attachment_page(query.page);
+        let items = query_data_bank_scopes(&tx, query)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit query data-bank scopes page", error))?;
+        Ok(ExactPage::new(items, total, limit, offset))
     }
 
     pub fn remove_data_bank_scope(
@@ -556,6 +636,17 @@ fn query_attachments(
         .collect()
 }
 
+fn normalized_attachment_page(page: Option<QueryPage>) -> (u32, u32) {
+    let page = page.unwrap_or(QueryPage {
+        limit: None,
+        offset: None,
+    });
+    (
+        page.limit.unwrap_or(100).clamp(1, 1_000),
+        page.offset.unwrap_or(0),
+    )
+}
+
 fn load_attachment(
     conn: &Connection,
     attachment_id: &AttachmentId,
@@ -921,6 +1012,10 @@ pub(crate) mod conformance {
     pub(crate) trait AttachmentDataBankConformanceStore {
         fn save_attachment(&self, attachment: &AttachmentWrite) -> CoreResult<AttachmentRecord>;
         fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>>;
+        fn query_attachments_page(
+            &self,
+            query: &AttachmentQuery,
+        ) -> CoreResult<ExactPage<AttachmentRecord>>;
         fn remove_attachment(
             &self,
             attachment_id: &AttachmentId,
@@ -934,6 +1029,10 @@ pub(crate) mod conformance {
             &self,
             query: &DataBankScopeQuery,
         ) -> CoreResult<Vec<DataBankScopeRecord>>;
+        fn query_data_bank_scopes_page(
+            &self,
+            query: &DataBankScopeQuery,
+        ) -> CoreResult<ExactPage<DataBankScopeRecord>>;
         fn remove_data_bank_scope(
             &self,
             scope_id: &DataBankScopeId,
@@ -948,6 +1047,13 @@ pub(crate) mod conformance {
 
         fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
             CoordinationStore::query_attachments(self, query)
+        }
+
+        fn query_attachments_page(
+            &self,
+            query: &AttachmentQuery,
+        ) -> CoreResult<ExactPage<AttachmentRecord>> {
+            CoordinationStore::query_attachments_page(self, query)
         }
 
         fn remove_attachment(
@@ -970,6 +1076,13 @@ pub(crate) mod conformance {
             query: &DataBankScopeQuery,
         ) -> CoreResult<Vec<DataBankScopeRecord>> {
             CoordinationStore::query_data_bank_scopes(self, query)
+        }
+
+        fn query_data_bank_scopes_page(
+            &self,
+            query: &DataBankScopeQuery,
+        ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+            CoordinationStore::query_data_bank_scopes_page(self, query)
         }
 
         fn remove_data_bank_scope(
@@ -1110,6 +1223,36 @@ pub(crate) mod conformance {
                 }),
             })
             .unwrap();
+
+        let attachment_page = store
+            .query_attachments_page(&AttachmentQuery {
+                session_id: Some(session.clone()),
+                scope_id: Some(scope.clone()),
+                now: Some("2026-06-26T04:10:00Z".to_string()),
+                page: Some(QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                }),
+                ..AttachmentQuery::default()
+            })
+            .unwrap();
+        assert_eq!(attachment_page.items.len(), 1);
+        assert_eq!(attachment_page.total, 2);
+        assert_eq!(attachment_page.next_offset, Some(1));
+        let scope_page = store
+            .query_data_bank_scopes_page(&DataBankScopeQuery {
+                session_id: Some(session.clone()),
+                include_removed: false,
+                page: Some(QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                }),
+                ..DataBankScopeQuery::default()
+            })
+            .unwrap();
+        assert_eq!(scope_page.items.len(), 1);
+        assert_eq!(scope_page.total, 2);
+        assert_eq!(scope_page.next_offset, Some(1));
 
         let by_message = store
             .query_attachments(&AttachmentQuery {

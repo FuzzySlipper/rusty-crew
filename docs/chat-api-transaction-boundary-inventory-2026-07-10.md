@@ -161,3 +161,21 @@ transport layer:
 
 Rust remains authoritative for event allocation, durable replay ordering,
 cursor validation, and retention boundaries consumed by that transport.
+
+## Implementation Status
+
+- #5375 evolved the existing chat-slot transaction to own default-branch
+  selection, parent/head inheritance, slot and primary-variant writes,
+  branch-head advancement, and a durable session-scoped idempotency receipt.
+  TypeScript no longer keeps a process-local chat receipt map or orders those
+  durable writes itself.
+- #5379 added backend-neutral exact-page contracts for slots, variants,
+  attachments, and data-bank scopes; one conversation-tree projection; SQL
+  transcript search over the full selected dataset; and unified session
+  summary/open/replay facts with explicit `event_log`, `message_slots`,
+  `pending_messages`, or `empty` source selection. SQLite and PostgreSQL share
+  conformance coverage, including restart readback.
+- #5383 remains responsible for switching the HTTP route layer to these typed
+  calls and deleting the superseded TypeScript fallback ladders, scans, and
+  capped ownership pre-reads. SSE framing and live subscriber fan-out remain
+  TypeScript transport concerns.

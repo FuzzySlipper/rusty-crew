@@ -311,12 +311,69 @@ impl CoordinationStore {
         query_message_slots(&conn, query)
     }
 
+    pub fn query_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin query message slots page", error))?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let total = tx
+            .query_row(
+                "SELECT COUNT(*) FROM message_slots WHERE (?1 IS NULL OR session_id = ?1)",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("count message slots page", error))?
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(query.page);
+        let items = query_message_slots(&tx, query)?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit query message slots page", error))?;
+        Ok(ExactPage::new(items, total, limit, offset))
+    }
+
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         let conn = self.conn()?;
         query_message_variants(&conn, query)
+    }
+
+    pub fn query_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin query message variants page", error))?;
+        ensure_slot_belongs_to_session_in_tx(&tx, &query.session_id, &query.slot_id)?;
+        let total = tx
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM message_variants
+                 WHERE slot_id = ?1 AND (?2 OR status <> 'deleted')",
+                params![query.slot_id.0, query.include_deleted],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("count message variants page", error))?
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(Some(query.page));
+        let items = query_message_variants_in_tx(
+            &tx,
+            &MessageVariantQuery {
+                slot_id: Some(query.slot_id.clone()),
+                include_deleted: query.include_deleted,
+                page: Some(query.page),
+            },
+        )?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit query message variants page", error))?;
+        Ok(ExactPage::new(items, total, limit, offset))
     }
 
     pub fn save_conversation_branch(
@@ -639,6 +696,159 @@ impl CoordinationStore {
     ) -> CoreResult<Vec<ConversationSnapshotRecord>> {
         let conn = self.conn()?;
         query_conversation_snapshots(&conn, query)
+    }
+
+    pub fn read_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin read conversation tree", error))?;
+        let (limit, offset) = normalized_exact_page(Some(query.page));
+        let branch_query = ConversationBranchQuery {
+            session_id: Some(query.session_id.clone()),
+            parent_branch_id: None,
+            page: Some(query.page),
+        };
+        let branch_total = tx
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_branches WHERE session_id = ?1",
+                params![query.session_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("count conversation tree branches", error))?
+            .max(0) as u64;
+        let branches = query_conversation_branches(&tx, &branch_query)?;
+        let snapshot_total = if query.include_snapshots {
+            tx.query_row(
+                "SELECT COUNT(*) FROM conversation_snapshots WHERE session_id = ?1",
+                params![query.session_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("count conversation tree snapshots", error))?
+            .max(0) as u64
+        } else {
+            0
+        };
+        let snapshots = if query.include_snapshots {
+            query_conversation_snapshots(
+                &tx,
+                &ConversationSnapshotQuery {
+                    session_id: Some(query.session_id.clone()),
+                    branch_id: None,
+                    message_id: None,
+                    page: Some(query.page),
+                },
+            )?
+        } else {
+            Vec::new()
+        };
+        let branch_state = load_conversation_branch_state_in_tx(
+            &tx,
+            &query.session_id,
+            &query.default_updated_at,
+        )?;
+        let active_branch_id = branch_state.active_branch_id.clone();
+        tx.commit()
+            .map_err(|error| persistence_error("commit read conversation tree", error))?;
+        Ok(ConversationTreeReadResult {
+            branches: ExactPage::new(branches, branch_total, limit, offset),
+            snapshots: ExactPage::new(snapshots, snapshot_total, limit, offset),
+            branch_state,
+            active_branch_id,
+        })
+    }
+
+    pub fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage> {
+        validate_chat_transcript_search_query(query)?;
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| persistence_error("begin search chat transcript", error))?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+        let total = tx
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM message_variants v
+                 JOIN message_slots s ON s.slot_id = v.slot_id
+                 JOIN messages m ON m.message_id = v.message_id
+                 LEFT JOIN sessions runtime_session ON runtime_session.session_id = s.session_id
+                 WHERE v.status <> 'deleted'
+                   AND instr(lower(m.body), lower(?1)) > 0
+                   AND (?2 IS NULL OR s.session_id = ?2)
+                   AND (?3 IS NULL OR runtime_session.profile_id = ?3)
+                   AND (?4 IS NULL OR m.author_role = ?4)
+                   AND (?5 IS NULL OR m.created_at >= ?5)
+                   AND (?6 IS NULL OR m.created_at <= ?6)",
+                params![
+                    query.query,
+                    session_id,
+                    profile_id,
+                    query.author_role,
+                    query.created_after,
+                    query.created_before,
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| persistence_error("count chat transcript search", error))?
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(Some(query.page));
+        let mut stmt = tx
+            .prepare(
+                "SELECT v.variant_id
+                 FROM message_variants v
+                 JOIN message_slots s ON s.slot_id = v.slot_id
+                 JOIN messages m ON m.message_id = v.message_id
+                 LEFT JOIN sessions runtime_session ON runtime_session.session_id = s.session_id
+                 WHERE v.status <> 'deleted'
+                   AND instr(lower(m.body), lower(?1)) > 0
+                   AND (?2 IS NULL OR s.session_id = ?2)
+                   AND (?3 IS NULL OR runtime_session.profile_id = ?3)
+                   AND (?4 IS NULL OR m.author_role = ?4)
+                   AND (?5 IS NULL OR m.created_at >= ?5)
+                   AND (?6 IS NULL OR m.created_at <= ?6)
+                 ORDER BY m.created_at ASC, s.session_id ASC, s.slot_id ASC,
+                          v.ordinal ASC, v.variant_id ASC
+                 LIMIT ?7 OFFSET ?8",
+            )
+            .map_err(|error| persistence_error("prepare chat transcript search", error))?;
+        let variant_ids = stmt
+            .query_map(
+                params![
+                    query.query,
+                    session_id,
+                    profile_id,
+                    query.author_role,
+                    query.created_after,
+                    query.created_before,
+                    i64::from(limit),
+                    i64::from(offset),
+                ],
+                |row| Ok(MessageVariantId::new(row.get::<_, String>(0)?)),
+            )
+            .map_err(|error| persistence_error("query chat transcript search", error))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| persistence_error("load chat transcript search ids", error))?;
+        drop(stmt);
+        let items = variant_ids
+            .iter()
+            .map(|variant_id| load_message_variant_in_tx(&tx, variant_id))
+            .map(|variant| variant.and_then(|variant| transcript_search_result(query, variant)))
+            .collect::<CoreResult<Vec<_>>>()?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit search chat transcript", error))?;
+        Ok(ChatTranscriptSearchPage {
+            page: ExactPage::new(items, total, limit, offset),
+            query: query.query.trim().to_string(),
+            scope: query.scope,
+            source: "rust_coordination".to_string(),
+        })
     }
 
     pub fn resolve_conversation_jump(
@@ -1253,6 +1463,136 @@ fn query_message_slots(
         .iter()
         .map(|slot_id| load_message_slot(conn, slot_id, query.include_alternates))
         .collect()
+}
+
+fn normalized_exact_page(page: Option<QueryPage>) -> (u32, u32) {
+    let page = page.unwrap_or(QueryPage {
+        limit: None,
+        offset: None,
+    });
+    (
+        page.limit.unwrap_or(100).clamp(1, 1_000),
+        page.offset.unwrap_or(0),
+    )
+}
+
+pub(crate) fn validate_chat_transcript_search_query(
+    query: &ChatTranscriptSearchQuery,
+) -> CoreResult<()> {
+    if query.query.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "chat transcript search query must not be empty",
+        ));
+    }
+    if query.scope == ChatTranscriptSearchScope::CurrentSession && query.session_id.is_none() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "current-session transcript search requires session_id",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn transcript_search_result(
+    query: &ChatTranscriptSearchQuery,
+    variant: MessageVariantRecord,
+) -> CoreResult<ChatTranscriptSearchResult> {
+    let Some((snippet, highlight)) = transcript_snippet(&variant.message.body, query.query.trim())
+    else {
+        return Err(CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            "chat transcript search row no longer matched within its read transaction",
+        ));
+    };
+    let result_id = stable_chat_read_id(
+        "search-result",
+        &format!(
+            "{}:{}:{}:{}",
+            variant.message.session_id,
+            variant.message.message_id,
+            variant.variant_id,
+            highlight.start
+        ),
+    );
+    Ok(ChatTranscriptSearchResult {
+        result_id,
+        scope: query.scope,
+        session_id: variant.message.session_id.clone(),
+        slot_id: variant.slot_id.clone(),
+        variant_id: variant.variant_id.clone(),
+        message_id: variant.message.message_id.clone(),
+        branch_id: variant.message.branch_id.clone(),
+        author_role: variant.message.author_role.clone(),
+        created_at: variant.message.created_at.clone(),
+        snippet,
+        highlights: vec![highlight],
+        jump: ConversationJumpResult {
+            session_id: variant.message.session_id.clone(),
+            target: ConversationJumpTarget::Message {
+                message_id: variant.message.message_id.clone(),
+            },
+            branch_id: variant.message.branch_id.clone(),
+            message_id: Some(variant.message.message_id),
+            cursor: None,
+            snapshot_id: None,
+        },
+        source: "rust_coordination".to_string(),
+    })
+}
+
+fn transcript_snippet(body: &str, query: &str) -> Option<(String, ChatTranscriptHighlight)> {
+    let body_chars = body.chars().collect::<Vec<_>>();
+    let query_chars = query.chars().collect::<Vec<_>>();
+    if query_chars.is_empty() || query_chars.len() > body_chars.len() {
+        return None;
+    }
+    let lowered_query = query_chars
+        .iter()
+        .map(|character| character.to_lowercase().collect::<String>())
+        .collect::<Vec<_>>();
+    let match_start = body_chars.windows(query_chars.len()).position(|window| {
+        window
+            .iter()
+            .map(|character| character.to_lowercase().collect::<String>())
+            .eq(lowered_query.iter().cloned())
+    })?;
+    let start = match_start.saturating_sub(80);
+    let end = (match_start + query_chars.len() + 80).min(body_chars.len());
+    let prefix = if start > 0 { "..." } else { "" };
+    let suffix = if end < body_chars.len() { "..." } else { "" };
+    let excerpt = body_chars[start..end].iter().collect::<String>();
+    let snippet = format!("{prefix}{excerpt}{suffix}");
+    // Browser consumers index strings in UTF-16 code units. Preserve that wire
+    // contract even though the Rust search window is measured in scalars.
+    let before_match = body_chars[start..match_start].iter().collect::<String>();
+    let matched_text = body_chars[match_start..match_start + query_chars.len()]
+        .iter()
+        .collect::<String>();
+    let highlight_start = prefix.encode_utf16().count() + before_match.encode_utf16().count();
+    let highlight_end = highlight_start + matched_text.encode_utf16().count();
+    Some((
+        snippet,
+        ChatTranscriptHighlight {
+            start: highlight_start as u32,
+            end: highlight_end as u32,
+        },
+    ))
+}
+
+fn stable_chat_read_id(prefix: &str, raw: &str) -> String {
+    let normalized = raw
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || "._:-".contains(character) {
+                character
+            } else {
+                '_'
+            }
+        })
+        .take(160)
+        .collect::<String>();
+    format!("{prefix}:{normalized}")
 }
 
 fn query_message_variants(
@@ -2782,6 +3122,15 @@ fn row_to_context_compaction_artifact(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn transcript_highlights_use_browser_utf16_offsets() {
+        let (snippet, highlight) = transcript_snippet("A 🚀 bright crest", "crest").unwrap();
+
+        assert_eq!(snippet, "A 🚀 bright crest");
+        assert_eq!(highlight.start, 12);
+        assert_eq!(highlight.end, 17);
+    }
 
     #[test]
     fn conversations_repo_persists_variant_and_branch_conflicts_across_reopen() {

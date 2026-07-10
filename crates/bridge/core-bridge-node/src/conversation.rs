@@ -39,6 +39,13 @@ impl NativeBridge {
         self.engine()?.query_message_slots(query)
     }
 
+    pub fn query_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+        self.engine()?.query_message_slots_page(query)
+    }
+
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
@@ -46,11 +53,32 @@ impl NativeBridge {
         self.engine()?.query_message_variants(query)
     }
 
+    pub fn query_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+        self.engine()?.query_message_variants_page(query)
+    }
+
     pub fn chat_read_model_page(
         &self,
         query: &ChatReadModelQuery,
     ) -> CoreResult<ChatReadModelPage> {
         self.engine()?.chat_read_model_page(query)
+    }
+
+    pub fn read_chat_session(
+        &self,
+        query: &ChatSessionReadQuery,
+    ) -> CoreResult<ChatSessionReadResult> {
+        self.engine()?.read_chat_session(query)
+    }
+
+    pub fn query_chat_session_summaries(
+        &self,
+        query: &ChatSessionSummaryPageQuery,
+    ) -> CoreResult<ChatSessionSummaryPage> {
+        self.engine()?.query_chat_session_summaries(query)
     }
 
     pub fn append_chat_event(&self, event: &ChatEventLogAppend) -> CoreResult<ChatEventLogEvent> {
@@ -134,6 +162,20 @@ impl NativeBridge {
         self.engine()?.query_conversation_snapshots(query)
     }
 
+    pub fn read_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult> {
+        self.engine()?.read_conversation_tree(query)
+    }
+
+    pub fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage> {
+        self.engine()?.search_chat_transcript(query)
+    }
+
     pub fn resolve_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
@@ -154,6 +196,13 @@ impl NativeBridge {
 
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         self.engine()?.query_attachments(query)
+    }
+
+    pub fn query_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>> {
+        self.engine()?.query_attachments_page(query)
     }
 
     pub fn remove_attachment(
@@ -190,6 +239,13 @@ impl NativeBridge {
         query: &DataBankScopeQuery,
     ) -> CoreResult<Vec<DataBankScopeRecord>> {
         self.engine()?.query_data_bank_scopes(query)
+    }
+
+    pub fn query_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+        self.engine()?.query_data_bank_scopes_page(query)
     }
 
     pub fn remove_data_bank_scope(

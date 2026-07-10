@@ -668,6 +668,78 @@ errors = "core_protocol::CoreError"
 summary = "Project durable message slots into a Rusty View chat read-model page."
 
 [[operation]]
+name = "read_chat_session"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ChatSessionReadQuery"
+output = "core_persistence::ChatSessionReadResult"
+errors = "core_protocol::CoreError"
+summary = "Read one session through the authoritative event, slot, or pending-message projection."
+
+[[operation]]
+name = "query_chat_session_summaries"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ChatSessionSummaryPageQuery"
+output = "core_persistence::ChatSessionSummaryPage"
+errors = "core_protocol::CoreError"
+summary = "Return an exact bounded page of chat session summary facts."
+
+[[operation]]
+name = "query_message_slots_page"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::MessageSlotQuery"
+output = "core_persistence::ExactPage<core_persistence::MessageSlotRecord>"
+errors = "core_protocol::CoreError"
+summary = "Return a message-slot page with exact total and next-offset facts."
+
+[[operation]]
+name = "query_message_variants_page"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::SessionMessageVariantPageQuery"
+output = "core_persistence::ExactPage<core_persistence::MessageVariantRecord>"
+errors = "core_protocol::CoreError"
+summary = "Return a session-scoped message-variant page with exact paging facts."
+
+[[operation]]
+name = "read_conversation_tree"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ConversationTreeReadQuery"
+output = "core_persistence::ConversationTreeReadResult"
+errors = "core_protocol::CoreError"
+summary = "Read branches, snapshots, and active branch state as one exact projection."
+
+[[operation]]
+name = "search_chat_transcript"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::ChatTranscriptSearchQuery"
+output = "core_persistence::ChatTranscriptSearchPage"
+errors = "core_protocol::CoreError"
+summary = "Search the full selected transcript dataset with exact paging and highlights."
+
+[[operation]]
+name = "query_attachments_page"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::AttachmentQuery"
+output = "core_persistence::ExactPage<core_persistence::AttachmentRecord>"
+errors = "core_protocol::CoreError"
+summary = "Return an attachment page with exact paging facts."
+
+[[operation]]
+name = "query_data_bank_scopes_page"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_persistence::DataBankScopeQuery"
+output = "core_persistence::ExactPage<core_persistence::DataBankScopeRecord>"
+errors = "core_protocol::CoreError"
+summary = "Return a data-bank scope page with exact paging facts."
+
+[[operation]]
 name = "append_chat_event"
 surface = "stable"
 direction = "ts_to_rust"

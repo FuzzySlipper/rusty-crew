@@ -259,8 +259,12 @@ interface NativeBridgeBinding {
   createChatMessageVariantJson(inputJson: string): string;
   applyRoleplayAlternativeJson(inputJson: string): string;
   queryMessageSlotsJson(inputJson: string): string;
+  queryMessageSlotsPageJson(inputJson: string): string;
   queryMessageVariantsJson(inputJson: string): string;
+  queryMessageVariantsPageJson(inputJson: string): string;
   chatReadModelPageJson(inputJson: string): string;
+  readChatSessionJson(inputJson: string): string;
+  queryChatSessionSummariesJson(inputJson: string): string;
   appendChatEventJson(inputJson: string): string;
   queryChatEventsJson(inputJson: string): string;
   selectActiveMessageVariantJson(inputJson: string): string;
@@ -279,15 +283,19 @@ interface NativeBridgeBinding {
   saveConversationSnapshotJson(inputJson: string): string;
   createChatConversationSnapshotJson(inputJson: string): string;
   queryConversationSnapshotsJson(inputJson: string): string;
+  readConversationTreeJson(inputJson: string): string;
+  searchChatTranscriptJson(inputJson: string): string;
   resolveConversationJumpJson(inputJson: string): string;
   saveAttachmentJson(inputJson: string): string;
   createChatAttachmentJson(inputJson: string): string;
   queryAttachmentsJson(inputJson: string): string;
+  queryAttachmentsPageJson(inputJson: string): string;
   removeAttachmentJson(inputJson: string): string;
   removeChatAttachmentJson(inputJson: string): string;
   saveDataBankScopeJson(inputJson: string): string;
   createChatDataBankScopeJson(inputJson: string): string;
   queryDataBankScopesJson(inputJson: string): string;
+  queryDataBankScopesPageJson(inputJson: string): string;
   removeDataBankScopeJson(inputJson: string): string;
   removeChatDataBankScopeJson(inputJson: string): string;
   putRoleplayCharacterJson(inputJson: string): string;
@@ -2444,6 +2452,8 @@ export interface NativeChatReadModelPage {
   items: NativeChatReadModelEvent[];
   latest_cursor: string;
   has_more: boolean;
+  total: number;
+  source: "event_log" | "message_slots" | "pending_messages" | "empty";
 }
 
 export interface NativeChatEventLogEvent {
@@ -2459,6 +2469,9 @@ export interface NativeChatEventLogPage {
   items: NativeChatEventLogEvent[];
   latest_cursor: string;
   has_more: boolean;
+  total: number;
+  message_count: number;
+  has_more_before: boolean;
 }
 
 export interface NativeBridgeModule {
@@ -2839,10 +2852,14 @@ export interface NativeBridgeModule {
   createChatMessageVariant(input: unknown): Promise<unknown>;
   applyRoleplayAlternative(input: unknown): Promise<unknown>;
   chatReadModelPage(input: unknown): Promise<NativeChatReadModelPage>;
+  readChatSession(input: unknown): Promise<unknown>;
+  queryChatSessionSummaries(input: unknown): Promise<unknown>;
   appendChatEvent(input: unknown): Promise<NativeChatEventLogEvent>;
   queryChatEvents(input: unknown): Promise<NativeChatEventLogPage>;
   queryMessageSlots(query: unknown): Promise<unknown[]>;
+  queryMessageSlotsPage(query: unknown): Promise<unknown>;
   queryMessageVariants(query: unknown): Promise<unknown[]>;
+  queryMessageVariantsPage(query: unknown): Promise<unknown>;
   selectActiveMessageVariant(input: unknown): Promise<unknown>;
   selectActiveChatMessageVariant(input: unknown): Promise<unknown>;
   deleteChatMessageVariant(input: unknown): Promise<unknown>;
@@ -2859,15 +2876,19 @@ export interface NativeBridgeModule {
   saveConversationSnapshot(input: unknown): Promise<unknown>;
   createChatConversationSnapshot(input: unknown): Promise<unknown>;
   queryConversationSnapshots(query: unknown): Promise<unknown[]>;
+  readConversationTree(query: unknown): Promise<unknown>;
+  searchChatTranscript(query: unknown): Promise<unknown>;
   resolveConversationJump(input: unknown): Promise<unknown>;
   saveAttachment(input: unknown): Promise<unknown>;
   createChatAttachment(input: unknown): Promise<unknown>;
   queryAttachments(query: unknown): Promise<unknown[]>;
+  queryAttachmentsPage(query: unknown): Promise<unknown>;
   removeAttachment(input: unknown): Promise<unknown>;
   removeChatAttachment(input: unknown): Promise<unknown>;
   saveDataBankScope(input: unknown): Promise<unknown>;
   createChatDataBankScope(input: unknown): Promise<unknown>;
   queryDataBankScopes(query: unknown): Promise<unknown[]>;
+  queryDataBankScopesPage(query: unknown): Promise<unknown>;
   removeDataBankScope(input: unknown): Promise<unknown>;
   removeChatDataBankScope(input: unknown): Promise<unknown>;
   providerStateDiagnostics(
@@ -3303,10 +3324,14 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     createChatMessageVariant: unavailable("create_chat_message_variant"),
     applyRoleplayAlternative: unavailable("apply_roleplay_alternative"),
     chatReadModelPage: unavailable("chat_read_model_page"),
+    readChatSession: unavailable("read_chat_session"),
+    queryChatSessionSummaries: unavailable("query_chat_session_summaries"),
     appendChatEvent: unavailable("append_chat_event"),
     queryChatEvents: unavailable("query_chat_events"),
     queryMessageSlots: unavailable("query_message_slots"),
+    queryMessageSlotsPage: unavailable("query_message_slots_page"),
     queryMessageVariants: unavailable("query_message_variants"),
+    queryMessageVariantsPage: unavailable("query_message_variants_page"),
     selectActiveMessageVariant: unavailable("select_active_message_variant"),
     selectActiveChatMessageVariant: unavailable(
       "select_active_chat_message_variant",
@@ -3323,6 +3348,8 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
       "ensure_active_chat_conversation_branch",
     ),
     queryConversationBranches: unavailable("query_conversation_branches"),
+    readConversationTree: unavailable("read_conversation_tree"),
+    searchChatTranscript: unavailable("search_chat_transcript"),
     getConversationBranchState: unavailable("get_conversation_branch_state"),
     selectActiveConversationBranch: unavailable(
       "select_active_conversation_branch",
@@ -3339,11 +3366,13 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     saveAttachment: unavailable("save_attachment"),
     createChatAttachment: unavailable("create_chat_attachment"),
     queryAttachments: unavailable("query_attachments"),
+    queryAttachmentsPage: unavailable("query_attachments_page"),
     removeAttachment: unavailable("remove_attachment"),
     removeChatAttachment: unavailable("remove_chat_attachment"),
     saveDataBankScope: unavailable("save_data_bank_scope"),
     createChatDataBankScope: unavailable("create_chat_data_bank_scope"),
     queryDataBankScopes: unavailable("query_data_bank_scopes"),
+    queryDataBankScopesPage: unavailable("query_data_bank_scopes_page"),
     removeDataBankScope: unavailable("remove_data_bank_scope"),
     removeChatDataBankScope: unavailable("remove_chat_data_bank_scope"),
     providerStateDiagnostics: unavailable("provider_state_diagnostics"),
@@ -4747,6 +4776,12 @@ function createNativeBridgeModule(
           binding.chatReadModelPageJson(JSON.stringify(input)),
         ) as unknown,
       }),
+    readChatSession: async (input) =>
+      JSON.parse(binding.readChatSessionJson(JSON.stringify(input))) as unknown,
+    queryChatSessionSummaries: async (input) =>
+      JSON.parse(
+        binding.queryChatSessionSummariesJson(JSON.stringify(input)),
+      ) as unknown,
     appendChatEvent: async (input) =>
       validateBridgeValue<NativeChatEventLogEvent>({
         operation: "append_chat_event",
@@ -4769,10 +4804,18 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.queryMessageSlotsJson(JSON.stringify(query)),
       ) as unknown[],
+    queryMessageSlotsPage: async (query) =>
+      JSON.parse(
+        binding.queryMessageSlotsPageJson(JSON.stringify(query)),
+      ) as unknown,
     queryMessageVariants: async (query) =>
       JSON.parse(
         binding.queryMessageVariantsJson(JSON.stringify(query)),
       ) as unknown[],
+    queryMessageVariantsPage: async (query) =>
+      JSON.parse(
+        binding.queryMessageVariantsPageJson(JSON.stringify(query)),
+      ) as unknown,
     selectActiveMessageVariant: async (input) =>
       JSON.parse(
         binding.selectActiveMessageVariantJson(JSON.stringify(input)),
@@ -4837,6 +4880,14 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.queryConversationSnapshotsJson(JSON.stringify(query)),
       ) as unknown[],
+    readConversationTree: async (query) =>
+      JSON.parse(
+        binding.readConversationTreeJson(JSON.stringify(query)),
+      ) as unknown,
+    searchChatTranscript: async (query) =>
+      JSON.parse(
+        binding.searchChatTranscriptJson(JSON.stringify(query)),
+      ) as unknown,
     resolveConversationJump: async (input) =>
       JSON.parse(
         binding.resolveConversationJumpJson(JSON.stringify(input)),
@@ -4851,6 +4902,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.queryAttachmentsJson(JSON.stringify(query)),
       ) as unknown[],
+    queryAttachmentsPage: async (query) =>
+      JSON.parse(
+        binding.queryAttachmentsPageJson(JSON.stringify(query)),
+      ) as unknown,
     removeAttachment: async (input) =>
       JSON.parse(
         binding.removeAttachmentJson(JSON.stringify(input)),
@@ -4871,6 +4926,10 @@ function createNativeBridgeModule(
       JSON.parse(
         binding.queryDataBankScopesJson(JSON.stringify(query)),
       ) as unknown[],
+    queryDataBankScopesPage: async (query) =>
+      JSON.parse(
+        binding.queryDataBankScopesPageJson(JSON.stringify(query)),
+      ) as unknown,
     removeDataBankScope: async (input) =>
       JSON.parse(
         binding.removeDataBankScopeJson(JSON.stringify(input)),

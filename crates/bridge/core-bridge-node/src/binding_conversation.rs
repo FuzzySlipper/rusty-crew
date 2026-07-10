@@ -67,6 +67,16 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn query_message_slots_page_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<MessageSlotQuery>(&input_json, "message slot page query")?;
+        let page = self
+            .bridge()?
+            .query_message_slots_page(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&page, "message slot page")
+    }
+
+    #[napi]
     pub fn query_message_variants_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<MessageVariantQuery>(&input_json, "message variant query")?;
@@ -77,11 +87,47 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn query_message_variants_page_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<SessionMessageVariantPageQuery>(
+            &input_json,
+            "session message variant page query",
+        )?;
+        let page = self
+            .bridge()?
+            .query_message_variants_page(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&page, "message variant page")
+    }
+
+    #[napi]
     pub fn chat_read_model_page_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let query = parse_json::<ChatReadModelQuery>(&input_json, "chat read-model query")?;
         let page = bridge.chat_read_model_page(&query).map_err(to_napi_error)?;
         serialize_json(&page, "chat read-model page")
+    }
+
+    #[napi]
+    pub fn read_chat_session_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<ChatSessionReadQuery>(&input_json, "chat session read query")?;
+        let result = self
+            .bridge()?
+            .read_chat_session(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "chat session read result")
+    }
+
+    #[napi]
+    pub fn query_chat_session_summaries_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<ChatSessionSummaryPageQuery>(
+            &input_json,
+            "chat session summary page query",
+        )?;
+        let page = self
+            .bridge()?
+            .query_chat_session_summaries(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&page, "chat session summary page")
     }
 
     #[napi]
@@ -232,6 +278,28 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn read_conversation_tree_json(&self, input_json: String) -> napi::Result<String> {
+        let query =
+            parse_json::<ConversationTreeReadQuery>(&input_json, "conversation tree read query")?;
+        let result = self
+            .bridge()?
+            .read_conversation_tree(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&result, "conversation tree read result")
+    }
+
+    #[napi]
+    pub fn search_chat_transcript_json(&self, input_json: String) -> napi::Result<String> {
+        let query =
+            parse_json::<ChatTranscriptSearchQuery>(&input_json, "chat transcript search query")?;
+        let page = self
+            .bridge()?
+            .search_chat_transcript(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&page, "chat transcript search page")
+    }
+
+    #[napi]
     pub fn resolve_conversation_jump_json(&self, input_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let request =
@@ -269,6 +337,16 @@ impl NativeBridgeBinding {
         let query = parse_json::<AttachmentQuery>(&input_json, "attachment query")?;
         let records = bridge.query_attachments(&query).map_err(to_napi_error)?;
         serialize_json(&records, "attachment records")
+    }
+
+    #[napi]
+    pub fn query_attachments_page_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<AttachmentQuery>(&input_json, "attachment page query")?;
+        let page = self
+            .bridge()?
+            .query_attachments_page(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&page, "attachment page")
     }
 
     #[napi]
@@ -324,6 +402,16 @@ impl NativeBridgeBinding {
             .query_data_bank_scopes(&query)
             .map_err(to_napi_error)?;
         serialize_json(&records, "data-bank scope records")
+    }
+
+    #[napi]
+    pub fn query_data_bank_scopes_page_json(&self, input_json: String) -> napi::Result<String> {
+        let query = parse_json::<DataBankScopeQuery>(&input_json, "data-bank scope page query")?;
+        let page = self
+            .bridge()?
+            .query_data_bank_scopes_page(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&page, "data-bank scope page")
     }
 
     #[napi]

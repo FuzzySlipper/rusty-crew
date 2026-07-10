@@ -47,31 +47,32 @@ use crate::{
     BranchAwareSessionMemoryQuery, BranchHeadConflict, BranchHeadExpectation, ChannelBindingQuery,
     ChannelBindingRecord, ChatAttachmentMutationStatus, ChatConversationSnapshotMutationStatus,
     ChatDataBankScopeMutationStatus, ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage,
-    ChatEventLogQuery, CompletionPacketQuery, CompletionPacketRecord, ContextCompactionArtifact,
-    ContextCompactionArtifactQuery, ConversationBranchId, ConversationBranchQuery,
-    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
-    ConversationJumpRequest, ConversationJumpResult, ConversationJumpTarget,
-    ConversationSnapshotId, ConversationSnapshotQuery, ConversationSnapshotRecord,
-    ConversationSnapshotSource, ConversationSnapshotWrite, CoreError, CoreErrorKind, CoreEvent,
-    CoreEventKind, CoreResult, CreateChatAttachmentRequest, CreateChatAttachmentResult,
-    CreateChatConversationBranchRequest, CreateChatConversationSnapshotRequest,
-    CreateChatConversationSnapshotResult, CreateChatDataBankScopeRequest,
-    CreateChatDataBankScopeResult, CreateChatMessageSlotRequest, CreateChatMessageSlotResult,
-    CreateChatMessageVariantRequest, CreateChatMessageVariantResult, DataBankScopeId,
-    DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus, DataBankScopeWrite,
-    DelegatedCompletion, DeleteChatMessageVariantRequest, DenRuntimeReference, DurableAgentKind,
-    DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord, DurableMessageStatus,
-    DurableMessageWrite, EnsureActiveChatConversationBranchRequest,
-    EnsureActiveChatConversationBranchResult, ExternalBindingStatus, IsoTimestamp, LoreRecallEntry,
-    LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord,
-    McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord, MessageId,
-    MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId,
-    MessageVariantQuery, MessageVariantRecord, MessageVariantSource, MessageVariantStatus,
-    MessageVariantWrite, ModelProviderCredential, ModelProviderProtocol, ModelProviderQuery,
-    ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite,
-    PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery,
-    ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite,
-    ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
+    ChatEventLogQuery, ChatTranscriptSearchPage, ChatTranscriptSearchQuery, CompletionPacketQuery,
+    CompletionPacketRecord, ContextCompactionArtifact, ContextCompactionArtifactQuery,
+    ConversationBranchId, ConversationBranchQuery, ConversationBranchRecord,
+    ConversationBranchStateRecord, ConversationBranchWrite, ConversationJumpRequest,
+    ConversationJumpResult, ConversationJumpTarget, ConversationSnapshotId,
+    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotSource,
+    ConversationSnapshotWrite, ConversationTreeReadQuery, ConversationTreeReadResult, CoreError,
+    CoreErrorKind, CoreEvent, CoreEventKind, CoreResult, CreateChatAttachmentRequest,
+    CreateChatAttachmentResult, CreateChatConversationBranchRequest,
+    CreateChatConversationSnapshotRequest, CreateChatConversationSnapshotResult,
+    CreateChatDataBankScopeRequest, CreateChatDataBankScopeResult, CreateChatMessageSlotRequest,
+    CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
+    DataBankScopeId, DataBankScopeQuery, DataBankScopeRecord, DataBankScopeStatus,
+    DataBankScopeWrite, DelegatedCompletion, DeleteChatMessageVariantRequest, DenRuntimeReference,
+    DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord,
+    DurableMessageStatus, DurableMessageWrite, EnsureActiveChatConversationBranchRequest,
+    EnsureActiveChatConversationBranchResult, ExactPage, ExternalBindingStatus, IsoTimestamp,
+    LoreRecallEntry, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord,
+    MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantId, MessageVariantQuery, MessageVariantRecord, MessageVariantSource,
+    MessageVariantStatus, MessageVariantWrite, ModelProviderCredential, ModelProviderProtocol,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus,
+    ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete,
+    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
+    ProfileMemoryWrite, ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
     ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
     ProviderStateAbsenceReason, ProviderWireStateDiagnostic, ProviderWireStateInvalidationReason,
     ProviderWireStateKey, ProviderWireStateRecord, ProviderWireStateWakeLookup,
@@ -96,10 +97,10 @@ use crate::{
     SessionMemoryCompactionReport, SessionMemoryPromptContext, SessionMemoryPromptContextPolicy,
     SessionMemoryPromptDiagnostics, SessionMemoryPromptExcludedCounts, SessionMemoryQuery,
     SessionMemoryRecord, SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
-    SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionState, SessionStatus,
-    SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvScope,
-    SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest,
-    UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
+    SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionMessageVariantPageQuery,
+    SessionState, SessionStatus, SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery,
+    SimpleKvRecord, SimpleKvScope, SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
     WorkerPoolCompletionRequest, WorkerPoolLeaseRecord, WorkerPoolLeaseStatus,
     WorkerPoolMemberRecord, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
     WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery, WorkerRunRecord,
@@ -9138,9 +9139,10 @@ mod tests {
     };
     use crate::repos::runtime_counters::{COUNTER_MESSAGES, COUNTER_WAKES};
     use crate::{
-        ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, CoordinationStore,
-        ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite, RoleplayChatLayerLink,
-        RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose, RoleplayLoreVisibility,
+        ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, ChatTranscriptSearchScope,
+        CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
+        RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
+        RoleplayLoreVisibility,
     };
     use postgres::NoTls;
     use rusty_crew_core_protocol::{
@@ -9331,10 +9333,18 @@ mod tests {
             &self,
             query: &MessageSlotQuery,
         ) -> CoreResult<Vec<MessageSlotRecord>>;
+        fn query_message_slots_page(
+            &self,
+            query: &MessageSlotQuery,
+        ) -> CoreResult<ExactPage<MessageSlotRecord>>;
         fn query_message_variants(
             &self,
             query: &MessageVariantQuery,
         ) -> CoreResult<Vec<MessageVariantRecord>>;
+        fn query_message_variants_page(
+            &self,
+            query: &SessionMessageVariantPageQuery,
+        ) -> CoreResult<ExactPage<MessageVariantRecord>>;
         fn select_active_message_variant(
             &self,
             request: &SelectActiveVariantRequest,
@@ -9376,6 +9386,14 @@ mod tests {
             &self,
             request: &ConversationJumpRequest,
         ) -> CoreResult<ConversationJumpResult>;
+        fn read_conversation_tree(
+            &self,
+            query: &ConversationTreeReadQuery,
+        ) -> CoreResult<ConversationTreeReadResult>;
+        fn search_chat_transcript(
+            &self,
+            query: &ChatTranscriptSearchQuery,
+        ) -> CoreResult<ChatTranscriptSearchPage>;
     }
 
     trait ProfileMemoryConformanceStore {
@@ -9771,11 +9789,25 @@ mod tests {
             CoordinationStore::query_message_slots(self, query)
         }
 
+        fn query_message_slots_page(
+            &self,
+            query: &MessageSlotQuery,
+        ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+            CoordinationStore::query_message_slots_page(self, query)
+        }
+
         fn query_message_variants(
             &self,
             query: &MessageVariantQuery,
         ) -> CoreResult<Vec<MessageVariantRecord>> {
             CoordinationStore::query_message_variants(self, query)
+        }
+
+        fn query_message_variants_page(
+            &self,
+            query: &SessionMessageVariantPageQuery,
+        ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+            CoordinationStore::query_message_variants_page(self, query)
         }
 
         fn select_active_message_variant(
@@ -9846,6 +9878,20 @@ mod tests {
             request: &ConversationJumpRequest,
         ) -> CoreResult<ConversationJumpResult> {
             CoordinationStore::resolve_conversation_jump(self, request)
+        }
+
+        fn read_conversation_tree(
+            &self,
+            query: &ConversationTreeReadQuery,
+        ) -> CoreResult<ConversationTreeReadResult> {
+            CoordinationStore::read_conversation_tree(self, query)
+        }
+
+        fn search_chat_transcript(
+            &self,
+            query: &ChatTranscriptSearchQuery,
+        ) -> CoreResult<ChatTranscriptSearchPage> {
+            CoordinationStore::search_chat_transcript(self, query)
         }
     }
 
@@ -10279,11 +10325,25 @@ mod tests {
             PostgresBackendStore::query_message_slots(self, query)
         }
 
+        fn query_message_slots_page(
+            &self,
+            query: &MessageSlotQuery,
+        ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+            PostgresBackendStore::query_message_slots_page(self, query)
+        }
+
         fn query_message_variants(
             &self,
             query: &MessageVariantQuery,
         ) -> CoreResult<Vec<MessageVariantRecord>> {
             PostgresBackendStore::query_message_variants(self, query)
+        }
+
+        fn query_message_variants_page(
+            &self,
+            query: &SessionMessageVariantPageQuery,
+        ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+            PostgresBackendStore::query_message_variants_page(self, query)
         }
 
         fn select_active_message_variant(
@@ -10359,6 +10419,20 @@ mod tests {
         ) -> CoreResult<ConversationJumpResult> {
             PostgresBackendStore::resolve_conversation_jump(self, request)
         }
+
+        fn read_conversation_tree(
+            &self,
+            query: &ConversationTreeReadQuery,
+        ) -> CoreResult<ConversationTreeReadResult> {
+            PostgresBackendStore::read_conversation_tree(self, query)
+        }
+
+        fn search_chat_transcript(
+            &self,
+            query: &ChatTranscriptSearchQuery,
+        ) -> CoreResult<ChatTranscriptSearchPage> {
+            PostgresBackendStore::search_chat_transcript(self, query)
+        }
     }
 
     impl AttachmentDataBankConformanceStore for PostgresBackendStore {
@@ -10368,6 +10442,13 @@ mod tests {
 
         fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
             PostgresBackendStore::query_attachments(self, query)
+        }
+
+        fn query_attachments_page(
+            &self,
+            query: &AttachmentQuery,
+        ) -> CoreResult<ExactPage<AttachmentRecord>> {
+            PostgresBackendStore::query_attachments_page(self, query)
         }
 
         fn remove_attachment(
@@ -10390,6 +10471,13 @@ mod tests {
             query: &DataBankScopeQuery,
         ) -> CoreResult<Vec<DataBankScopeRecord>> {
             PostgresBackendStore::query_data_bank_scopes(self, query)
+        }
+
+        fn query_data_bank_scopes_page(
+            &self,
+            query: &DataBankScopeQuery,
+        ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+            PostgresBackendStore::query_data_bank_scopes_page(self, query)
         }
 
         fn remove_data_bank_scope(
@@ -13046,6 +13134,32 @@ mod tests {
         assert!(!retried.duplicate);
         assert!(retried.conflict.is_none());
         assert!(retried.slot.is_some());
+        let ingest_page = store
+            .query_message_slots_page(&MessageSlotQuery {
+                session_id: Some(SessionId::new("session-chat-ingest")),
+                include_alternates: true,
+                page: Some(QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                }),
+            })
+            .unwrap();
+        assert_eq!(ingest_page.items.len(), 1);
+        assert_eq!(ingest_page.total, 2);
+        assert_eq!(ingest_page.next_offset, Some(1));
+        let variant_page = store
+            .query_message_variants_page(&SessionMessageVariantPageQuery {
+                session_id: SessionId::new("session-chat-ingest"),
+                slot_id: ingest.slot.slot_id.clone(),
+                include_deleted: false,
+                page: QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                },
+            })
+            .unwrap();
+        assert_eq!(variant_page.total, 1);
+        assert_eq!(variant_page.next_offset, None);
 
         seed_conversation_base_fixture(store, "session-conversation", "slot-conversation");
 
@@ -13254,6 +13368,43 @@ mod tests {
             })
             .unwrap();
         assert_eq!(snapshots.len(), 1);
+        let tree = store
+            .read_conversation_tree(&ConversationTreeReadQuery {
+                session_id: SessionId::new("session-conversation"),
+                include_snapshots: true,
+                page: QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                },
+                default_updated_at: "2026-06-26T02:05:01Z".to_string(),
+            })
+            .unwrap();
+        assert_eq!(tree.branches.total, 2);
+        assert_eq!(tree.branches.next_offset, Some(1));
+        assert_eq!(tree.snapshots.total, 1);
+        assert_eq!(
+            tree.active_branch_id,
+            Some(ConversationBranchId::new("branch-conversation-child"))
+        );
+        let search = store
+            .search_chat_transcript(&ChatTranscriptSearchQuery {
+                scope: ChatTranscriptSearchScope::CurrentSession,
+                session_id: Some(SessionId::new("session-conversation")),
+                profile_id: None,
+                query: "alternate".to_string(),
+                author_role: None,
+                created_after: None,
+                created_before: None,
+                page: QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                },
+            })
+            .unwrap();
+        assert_eq!(search.page.items.len(), 1);
+        assert_eq!(search.page.total, 2);
+        assert_eq!(search.page.next_offset, Some(1));
+        assert_eq!(search.page.items[0].highlights[0].start, 0);
 
         let branch_jump = store
             .resolve_conversation_jump(&ConversationJumpRequest {

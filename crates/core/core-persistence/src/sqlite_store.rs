@@ -987,6 +987,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn query_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_message_slots_page(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_message_slots_page(query),
+        }
+    }
+
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
@@ -995,6 +1006,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.query_message_variants(query),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.query_message_variants(query),
+        }
+    }
+
+    pub fn query_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_message_variants_page(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_message_variants_page(query),
         }
     }
 
@@ -1172,6 +1194,28 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn read_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.read_conversation_tree(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.read_conversation_tree(query),
+        }
+    }
+
+    pub fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.search_chat_transcript(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.search_chat_transcript(query),
+        }
+    }
+
     pub fn resolve_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
@@ -1207,6 +1251,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.query_attachments(query),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.query_attachments(query),
+        }
+    }
+
+    pub fn query_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_attachments_page(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_attachments_page(query),
         }
     }
 
@@ -1263,6 +1318,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(sqlite) => sqlite.query_data_bank_scopes(query),
             #[cfg(feature = "postgres")]
             Self::Postgres(postgres) => postgres.query_data_bank_scopes(query),
+        }
+    }
+
+    pub fn query_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.query_data_bank_scopes_page(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.query_data_bank_scopes_page(query),
         }
     }
 
@@ -1993,11 +2059,25 @@ impl ConversationRepositorySet<'_> {
         self.store.query_message_slots(query)
     }
 
+    pub fn query_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+        self.store.query_message_slots_page(query)
+    }
+
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         self.store.query_message_variants(query)
+    }
+
+    pub fn query_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+        self.store.query_message_variants_page(query)
     }
 
     pub fn save_conversation_branch(
@@ -2072,6 +2152,20 @@ impl ConversationRepositorySet<'_> {
         self.store.query_conversation_snapshots(query)
     }
 
+    pub fn read_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult> {
+        self.store.read_conversation_tree(query)
+    }
+
+    pub fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage> {
+        self.store.search_chat_transcript(query)
+    }
+
     pub fn resolve_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
@@ -2092,6 +2186,13 @@ impl ConversationRepositorySet<'_> {
 
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         self.store.query_attachments(query)
+    }
+
+    pub fn query_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>> {
+        self.store.query_attachments_page(query)
     }
 
     pub fn remove_attachment(
@@ -2128,6 +2229,13 @@ impl ConversationRepositorySet<'_> {
         query: &DataBankScopeQuery,
     ) -> CoreResult<Vec<DataBankScopeRecord>> {
         self.store.query_data_bank_scopes(query)
+    }
+
+    pub fn query_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+        self.store.query_data_bank_scopes_page(query)
     }
 
     pub fn remove_data_bank_scope(

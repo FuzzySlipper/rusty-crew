@@ -286,8 +286,11 @@ export const chatReadModelPageSchema = Type.Object(
               ]),
               body: Type.String(),
               correlation_id: Type.Optional(nullableString),
-              source: Type.Literal("durable_message_slot"),
-              slot_status: Type.String(),
+              source: Type.Union([
+                Type.Literal("durable_message_slot"),
+                Type.Literal("pending_body_state"),
+              ]),
+              slot_status: Type.Optional(Type.String()),
             },
             { additionalProperties: true },
           ),
@@ -297,6 +300,13 @@ export const chatReadModelPageSchema = Type.Object(
     ),
     latest_cursor: Type.String(),
     has_more: Type.Boolean(),
+    total: Type.Number(),
+    source: Type.Union([
+      Type.Literal("event_log"),
+      Type.Literal("message_slots"),
+      Type.Literal("pending_messages"),
+      Type.Literal("empty"),
+    ]),
   },
   { additionalProperties: true },
 );
@@ -318,6 +328,9 @@ export const chatEventLogPageSchema = Type.Object(
     items: Type.Array(chatEventLogEventSchema),
     latest_cursor: Type.String(),
     has_more: Type.Boolean(),
+    total: Type.Number(),
+    message_count: Type.Number(),
+    has_more_before: Type.Boolean(),
   },
   { additionalProperties: false },
 );

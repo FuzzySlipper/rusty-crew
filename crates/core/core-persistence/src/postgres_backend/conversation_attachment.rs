@@ -245,6 +245,60 @@ impl PostgresBackendStore {
         query_attachments(&mut *client, &schema, query)
     }
 
+    pub fn query_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start query PostgreSQL attachments page", error))?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let message_id = query.message_id.as_ref().map(|value| value.0.as_str());
+        let block_id = query.block_id.as_ref().map(|value| value.0.as_str());
+        let scope_id = query.scope_id.as_ref().map(|value| value.0.as_str());
+        let status = query.status.map(AttachmentStatus::as_str);
+        let total = tx
+            .query_one(
+                &format!(
+                    "SELECT COUNT(DISTINCT a.attachment_id)
+                     FROM {schema}.attachments a
+                     LEFT JOIN {schema}.attachment_links l ON l.attachment_id = a.attachment_id
+                     WHERE ($1::text IS NULL OR a.session_id = $1)
+                       AND ($2 OR a.status <> 'removed')
+                       AND ($3::text IS NULL OR l.message_id = $3)
+                       AND ($4::text IS NULL OR l.scope_id = $4)
+                       AND ($5::text IS NULL OR l.block_id = $5)
+                       AND ($6::text IS NULL OR a.status = $6)
+                       AND (
+                            ($7 AND a.expires_at IS NOT NULL AND $8::text IS NOT NULL AND a.expires_at <= $8)
+                            OR
+                            (NOT $7 AND ($9 OR a.expires_at IS NULL OR $8::text IS NULL OR a.expires_at > $8))
+                       )"
+                ),
+                &[
+                    &session_id,
+                    &query.include_removed,
+                    &message_id,
+                    &scope_id,
+                    &block_id,
+                    &status,
+                    &query.expired_only,
+                    &query.now,
+                    &query.include_expired,
+                ],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL attachments page", error))?
+            .get::<_, i64>(0)
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(query.page);
+        let items = query_attachments(&mut tx, &schema, query)?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit query PostgreSQL attachments page", error))?;
+        Ok(ExactPage::new(items, total, limit, offset))
+    }
+
     pub fn remove_attachment(
         &self,
         attachment_id: &AttachmentId,
@@ -372,6 +426,39 @@ impl PostgresBackendStore {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         query_data_bank_scopes(&mut *client, &schema, query)
+    }
+
+    pub fn query_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start query PostgreSQL data-bank scopes page", error)
+        })?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let status = query.status.map(DataBankScopeStatus::as_str);
+        let total = tx
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*)
+                     FROM {schema}.data_bank_scopes
+                     WHERE ($1::text IS NULL OR session_id = $1)
+                       AND ($2 OR status <> 'removed')
+                       AND ($3::text IS NULL OR status = $3)"
+                ),
+                &[&session_id, &query.include_removed, &status],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL data-bank scopes page", error))?
+            .get::<_, i64>(0)
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(query.page);
+        let items = query_data_bank_scopes(&mut tx, &schema, query)?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit query PostgreSQL data-bank scopes page", error)
+        })?;
+        Ok(ExactPage::new(items, total, limit, offset))
     }
 
     pub fn remove_data_bank_scope(
@@ -886,6 +973,52 @@ impl PostgresBackendStore {
             .collect()
     }
 
+    pub fn query_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start query PostgreSQL message slots page", error))?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let total = tx
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*) FROM {schema}.message_slots
+                     WHERE ($1::text IS NULL OR session_id = $1)"
+                ),
+                &[&session_id],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL message slots page", error))?
+            .get::<_, i64>(0)
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(query.page);
+        let rows = tx
+            .query(
+                &format!(
+                    "SELECT slot_id FROM {schema}.message_slots
+                     WHERE ($1::text IS NULL OR session_id = $1)
+                     ORDER BY created_at ASC, slot_id ASC
+                     LIMIT $2 OFFSET $3"
+                ),
+                &[&session_id, &(i64::from(limit)), &(i64::from(offset))],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL message slots page", error))?;
+        let slot_ids = rows
+            .iter()
+            .map(|row| MessageSlotId::new(row.get::<_, String>(0)))
+            .collect::<Vec<_>>();
+        let items = slot_ids
+            .iter()
+            .map(|slot_id| load_message_slot(&mut tx, &schema, slot_id, query.include_alternates))
+            .collect::<CoreResult<Vec<_>>>()?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit query PostgreSQL message slots page", error))?;
+        Ok(ExactPage::new(items, total, limit, offset))
+    }
+
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
@@ -893,6 +1026,43 @@ impl PostgresBackendStore {
         let schema = self.quoted_schema();
         let mut client = self.client()?;
         query_message_variants(&mut *client, &schema, query)
+    }
+
+    pub fn query_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start query PostgreSQL message variants page", error)
+        })?;
+        ensure_slot_belongs_to_session_in_tx(&mut tx, &schema, &query.session_id, &query.slot_id)?;
+        let total = tx
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*) FROM {schema}.message_variants
+                     WHERE slot_id = $1 AND ($2 OR status <> 'deleted')"
+                ),
+                &[&query.slot_id.0, &query.include_deleted],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL message variants page", error))?
+            .get::<_, i64>(0)
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(Some(query.page));
+        let items = query_message_variants(
+            &mut tx,
+            &schema,
+            &MessageVariantQuery {
+                slot_id: Some(query.slot_id.clone()),
+                include_deleted: query.include_deleted,
+                page: Some(query.page),
+            },
+        )?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit query PostgreSQL message variants page", error)
+        })?;
+        Ok(ExactPage::new(items, total, limit, offset))
     }
 
     pub fn select_active_message_variant(
@@ -1525,6 +1695,198 @@ impl PostgresBackendStore {
             .collect()
     }
 
+    pub fn read_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start read PostgreSQL conversation tree", error))?;
+        let (limit, offset) = normalized_exact_page(Some(query.page));
+        let branch_total = tx
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*) FROM {schema}.conversation_branches WHERE session_id = $1"
+                ),
+                &[&query.session_id.0],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL conversation tree branches", error))?
+            .get::<_, i64>(0)
+            .max(0) as u64;
+        let branch_rows = tx
+            .query(
+                &format!(
+                    "SELECT branch_id FROM {schema}.conversation_branches
+                     WHERE session_id = $1
+                     ORDER BY created_at ASC, branch_id ASC
+                     LIMIT $2 OFFSET $3"
+                ),
+                &[&query.session_id.0, &i64::from(limit), &i64::from(offset)],
+            )
+            .map_err(|error| {
+                postgres_error("query PostgreSQL conversation tree branches", error)
+            })?;
+        let branch_ids = branch_rows
+            .iter()
+            .map(|row| ConversationBranchId::new(row.get::<_, String>(0)))
+            .collect::<Vec<_>>();
+        let branches = branch_ids
+            .iter()
+            .map(|branch_id| load_conversation_branch(&mut tx, &schema, branch_id))
+            .collect::<CoreResult<Vec<_>>>()?;
+
+        let (snapshot_total, snapshots) = if query.include_snapshots {
+            let total = tx
+                .query_one(
+                    &format!(
+                        "SELECT COUNT(*) FROM {schema}.conversation_snapshots WHERE session_id = $1"
+                    ),
+                    &[&query.session_id.0],
+                )
+                .map_err(|error| {
+                    postgres_error("count PostgreSQL conversation tree snapshots", error)
+                })?
+                .get::<_, i64>(0)
+                .max(0) as u64;
+            let rows = tx
+                .query(
+                    &format!(
+                        "SELECT snapshot_id FROM {schema}.conversation_snapshots
+                         WHERE session_id = $1
+                         ORDER BY created_at ASC, snapshot_id ASC
+                         LIMIT $2 OFFSET $3"
+                    ),
+                    &[&query.session_id.0, &i64::from(limit), &i64::from(offset)],
+                )
+                .map_err(|error| {
+                    postgres_error("query PostgreSQL conversation tree snapshots", error)
+                })?;
+            let ids = rows
+                .iter()
+                .map(|row| ConversationSnapshotId::new(row.get::<_, String>(0)))
+                .collect::<Vec<_>>();
+            let records = ids
+                .iter()
+                .map(|snapshot_id| load_conversation_snapshot(&mut tx, &schema, snapshot_id))
+                .collect::<CoreResult<Vec<_>>>()?;
+            (total, records)
+        } else {
+            (0, Vec::new())
+        };
+        let branch_state = load_conversation_branch_state_in_tx(
+            &mut tx,
+            &schema,
+            &query.session_id,
+            &query.default_updated_at,
+        )?;
+        let active_branch_id = branch_state.active_branch_id.clone();
+        tx.commit()
+            .map_err(|error| postgres_error("commit read PostgreSQL conversation tree", error))?;
+        Ok(ConversationTreeReadResult {
+            branches: ExactPage::new(branches, branch_total, limit, offset),
+            snapshots: ExactPage::new(snapshots, snapshot_total, limit, offset),
+            branch_state,
+            active_branch_id,
+        })
+    }
+
+    pub fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage> {
+        crate::repos::conversations::validate_chat_transcript_search_query(query)?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start search PostgreSQL chat transcript", error))?;
+        let session_id = query.session_id.as_ref().map(|value| value.0.as_str());
+        let profile_id = query.profile_id.as_ref().map(|value| value.0.as_str());
+        let total = tx
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*)
+                     FROM {schema}.message_variants v
+                     JOIN {schema}.message_slots s ON s.slot_id = v.slot_id
+                     JOIN {schema}.messages m ON m.message_id = v.message_id
+                     LEFT JOIN {schema}.sessions runtime_session ON runtime_session.session_id = s.session_id
+                     WHERE v.status <> 'deleted'
+                       AND strpos(lower(m.body), lower($1)) > 0
+                       AND ($2::text IS NULL OR s.session_id = $2)
+                       AND ($3::text IS NULL OR runtime_session.profile_id = $3)
+                       AND ($4::text IS NULL OR m.author_role = $4)
+                       AND ($5::text IS NULL OR m.created_at >= $5)
+                       AND ($6::text IS NULL OR m.created_at <= $6)"
+                ),
+                &[
+                    &query.query,
+                    &session_id,
+                    &profile_id,
+                    &query.author_role,
+                    &query.created_after,
+                    &query.created_before,
+                ],
+            )
+            .map_err(|error| postgres_error("count PostgreSQL chat transcript search", error))?
+            .get::<_, i64>(0)
+            .max(0) as u64;
+        let (limit, offset) = normalized_exact_page(Some(query.page));
+        let rows = tx
+            .query(
+                &format!(
+                    "SELECT v.variant_id
+                     FROM {schema}.message_variants v
+                     JOIN {schema}.message_slots s ON s.slot_id = v.slot_id
+                     JOIN {schema}.messages m ON m.message_id = v.message_id
+                     LEFT JOIN {schema}.sessions runtime_session ON runtime_session.session_id = s.session_id
+                     WHERE v.status <> 'deleted'
+                       AND strpos(lower(m.body), lower($1)) > 0
+                       AND ($2::text IS NULL OR s.session_id = $2)
+                       AND ($3::text IS NULL OR runtime_session.profile_id = $3)
+                       AND ($4::text IS NULL OR m.author_role = $4)
+                       AND ($5::text IS NULL OR m.created_at >= $5)
+                       AND ($6::text IS NULL OR m.created_at <= $6)
+                     ORDER BY m.created_at ASC, s.session_id ASC, s.slot_id ASC,
+                              v.ordinal ASC, v.variant_id ASC
+                     LIMIT $7 OFFSET $8"
+                ),
+                &[
+                    &query.query,
+                    &session_id,
+                    &profile_id,
+                    &query.author_role,
+                    &query.created_after,
+                    &query.created_before,
+                    &i64::from(limit),
+                    &i64::from(offset),
+                ],
+            )
+            .map_err(|error| postgres_error("query PostgreSQL chat transcript search", error))?;
+        let variant_ids = rows
+            .iter()
+            .map(|row| MessageVariantId::new(row.get::<_, String>(0)))
+            .collect::<Vec<_>>();
+        let items = variant_ids
+            .iter()
+            .map(|variant_id| load_message_variant(&mut tx, &schema, variant_id))
+            .map(|variant| {
+                variant.and_then(|variant| {
+                    crate::repos::conversations::transcript_search_result(query, variant)
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        tx.commit()
+            .map_err(|error| postgres_error("commit search PostgreSQL chat transcript", error))?;
+        Ok(ChatTranscriptSearchPage {
+            page: ExactPage::new(items, total, limit, offset),
+            query: query.query.trim().to_string(),
+            scope: query.scope,
+            source: "rust_coordination".to_string(),
+        })
+    }
+
     pub fn resolve_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
@@ -1533,6 +1895,17 @@ impl PostgresBackendStore {
         let mut client = self.client()?;
         resolve_conversation_jump(&mut *client, &schema, request)
     }
+}
+
+fn normalized_exact_page(page: Option<QueryPage>) -> (u32, u32) {
+    let page = page.unwrap_or(QueryPage {
+        limit: None,
+        offset: None,
+    });
+    (
+        page.limit.unwrap_or(100).clamp(1, 1_000),
+        page.offset.unwrap_or(0),
+    )
 }
 
 fn save_conversation_branch_in_tx(

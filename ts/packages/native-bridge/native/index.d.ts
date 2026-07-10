@@ -39,8 +39,12 @@ export declare class NativeBridgeBinding {
   createChatMessageVariantJson(inputJson: string): string
   applyRoleplayAlternativeJson(inputJson: string): string
   queryMessageSlotsJson(inputJson: string): string
+  queryMessageSlotsPageJson(inputJson: string): string
   queryMessageVariantsJson(inputJson: string): string
+  queryMessageVariantsPageJson(inputJson: string): string
   chatReadModelPageJson(inputJson: string): string
+  readChatSessionJson(inputJson: string): string
+  queryChatSessionSummariesJson(inputJson: string): string
   appendChatEventJson(inputJson: string): string
   queryChatEventsJson(inputJson: string): string
   saveConversationBranchJson(inputJson: string): string
@@ -53,15 +57,19 @@ export declare class NativeBridgeBinding {
   saveConversationSnapshotJson(inputJson: string): string
   createChatConversationSnapshotJson(inputJson: string): string
   queryConversationSnapshotsJson(inputJson: string): string
+  readConversationTreeJson(inputJson: string): string
+  searchChatTranscriptJson(inputJson: string): string
   resolveConversationJumpJson(inputJson: string): string
   saveAttachmentJson(inputJson: string): string
   createChatAttachmentJson(inputJson: string): string
   queryAttachmentsJson(inputJson: string): string
+  queryAttachmentsPageJson(inputJson: string): string
   removeAttachmentJson(inputJson: string): string
   removeChatAttachmentJson(inputJson: string): string
   saveDataBankScopeJson(inputJson: string): string
   createChatDataBankScopeJson(inputJson: string): string
   queryDataBankScopesJson(inputJson: string): string
+  queryDataBankScopesPageJson(inputJson: string): string
   removeDataBankScopeJson(inputJson: string): string
   removeChatDataBankScopeJson(inputJson: string): string
   selectActiveMessageVariantJson(inputJson: string): string

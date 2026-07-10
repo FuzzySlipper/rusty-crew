@@ -87,12 +87,34 @@ pub(crate) fn validate_chat_event_append(event: &ChatEventLogAppend) -> CoreResu
 
 fn query_chat_events(conn: &Connection, query: &ChatEventLogQuery) -> CoreResult<ChatEventLogPage> {
     let after = chat_event_cursor_sequence(query.cursor.as_deref(), &query.session_id);
+    let (total, latest_sequence, message_count): (i64, i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(MAX(sequence_id), 0),
+                    COALESCE(SUM(CASE WHEN kind = 'message_created' THEN 1 ELSE 0 END), 0)
+             FROM chat_events WHERE session_id = ?1",
+            params![query.session_id.0],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|error| persistence_error("read chat event page stats", error))?;
+    let total = total.max(0) as u64;
+    let latest_sequence = latest_sequence.max(0) as u64;
+    let message_count = message_count.max(0) as u64;
     let limit = normalize_chat_event_limit(query.limit);
     if limit == 0 {
         return Ok(ChatEventLogPage {
             items: Vec::new(),
-            latest_cursor: chat_event_cursor_for(&query.session_id, after),
+            latest_cursor: chat_event_cursor_for(
+                &query.session_id,
+                if query.cursor.is_none() {
+                    latest_sequence
+                } else {
+                    after
+                },
+            ),
             has_more: false,
+            total,
+            message_count,
+            has_more_before: query.cursor.is_none() && total > 0,
         });
     }
     let probe_limit = limit.saturating_add(1).min(MAX_CHAT_EVENT_LIMIT + 1);
@@ -126,6 +148,9 @@ fn query_chat_events(conn: &Connection, query: &ChatEventLogQuery) -> CoreResult
             items: records,
             latest_cursor: chat_event_cursor_for(&query.session_id, latest_sequence),
             has_more,
+            total,
+            message_count,
+            has_more_before: has_more,
         });
     }
     let mut stmt = conn
@@ -156,6 +181,9 @@ fn query_chat_events(conn: &Connection, query: &ChatEventLogQuery) -> CoreResult
         items: records,
         latest_cursor: chat_event_cursor_for(&query.session_id, latest_sequence),
         has_more,
+        total,
+        message_count,
+        has_more_before: after > 0,
     })
 }
 

@@ -775,10 +775,14 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "create_chat_message_slot",
         "create_chat_message_variant",
         "chat_read_model_page",
+        "read_chat_session",
+        "query_chat_session_summaries",
         "append_chat_event",
         "query_chat_events",
         "query_message_slots",
+        "query_message_slots_page",
         "query_message_variants",
+        "query_message_variants_page",
         "select_active_message_variant",
         "select_active_chat_message_variant",
         "delete_chat_message_variant",
@@ -795,15 +799,19 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "save_conversation_snapshot",
         "create_chat_conversation_snapshot",
         "query_conversation_snapshots",
+        "read_conversation_tree",
+        "search_chat_transcript",
         "resolve_conversation_jump",
         "save_attachment",
         "create_chat_attachment",
         "query_attachments",
+        "query_attachments_page",
         "remove_attachment",
         "remove_chat_attachment",
         "save_data_bank_scope",
         "create_chat_data_bank_scope",
         "query_data_bank_scopes",
+        "query_data_bank_scopes_page",
         "remove_data_bank_scope",
         "remove_chat_data_bank_scope",
     ];
@@ -2983,6 +2991,8 @@ fn sample_chat_read_model_page() -> persistence::ChatReadModelPage {
         }],
         latest_cursor: "validation-read-cursor".to_owned(),
         has_more: true,
+        total: 2,
+        source: persistence::ChatReadModelSource::MessageSlots,
     }
 }
 
@@ -3015,6 +3025,9 @@ fn sample_chat_event_log_page() -> persistence::ChatEventLogPage {
         }],
         latest_cursor: "validation-log-cursor".to_owned(),
         has_more: true,
+        total: 3,
+        message_count: 2,
+        has_more_before: true,
     }
 }
 

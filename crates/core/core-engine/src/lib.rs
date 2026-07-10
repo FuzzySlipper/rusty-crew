@@ -51,17 +51,20 @@ use rusty_crew_core_persistence::{
     ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, AttachmentQuery,
     AttachmentRecord, AttachmentWrite, BranchAwareSessionMemoryQuery, BranchHeadExpectation,
     ChatEventLogAppend, ChatEventLogEvent, ChatEventLogPage, ChatEventLogQuery, ChatReadModelEvent,
-    ChatReadModelEventKind, ChatReadModelPage, ChatReadModelQuery, ConversationBranchQuery,
-    ConversationBranchRecord, ConversationBranchStateRecord, ConversationBranchWrite,
-    ConversationJumpRequest, ConversationJumpResult, ConversationSnapshotQuery,
-    ConversationSnapshotRecord, ConversationSnapshotWrite, CoreCoordinationStore,
+    ChatReadModelEventKind, ChatReadModelPage, ChatReadModelQuery, ChatReadModelSource,
+    ChatSessionReadFacts, ChatSessionReadQuery, ChatSessionReadResult, ChatSessionSummaryPage,
+    ChatSessionSummaryPageQuery, ChatTranscriptSearchPage, ChatTranscriptSearchQuery,
+    ConversationBranchQuery, ConversationBranchRecord, ConversationBranchStateRecord,
+    ConversationBranchWrite, ConversationJumpRequest, ConversationJumpResult,
+    ConversationSnapshotQuery, ConversationSnapshotRecord, ConversationSnapshotWrite,
+    ConversationTreeReadQuery, ConversationTreeReadResult, CoreCoordinationStore,
     CreateChatAttachmentRequest, CreateChatAttachmentResult, CreateChatConversationBranchRequest,
     CreateChatConversationSnapshotRequest, CreateChatConversationSnapshotResult,
     CreateChatDataBankScopeRequest, CreateChatDataBankScopeResult, CreateChatMessageSlotRequest,
     CreateChatMessageSlotResult, CreateChatMessageVariantRequest, CreateChatMessageVariantResult,
     DataBankScopeQuery, DataBankScopeRecord, DataBankScopeWrite, DeleteChatMessageVariantRequest,
     DurableMessageRecord, EnsureActiveChatConversationBranchRequest,
-    EnsureActiveChatConversationBranchResult, LoreRecallQuery, LoreRecallResult,
+    EnsureActiveChatConversationBranchResult, ExactPage, LoreRecallQuery, LoreRecallResult,
     LoreRecallTraceQuery, LoreRecallTraceRecord, MessageSlotQuery, MessageSlotRecord,
     MessageSlotWrite, MessageVariantQuery, MessageVariantRecord, MessageVariantWrite,
     ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
@@ -85,11 +88,11 @@ use rusty_crew_core_persistence::{
     RuntimeStateSummary, RuntimeStorageDiagnostics, SelectActiveBranchRequest,
     SelectActiveBranchResult, SelectActiveChatMessageVariantRequest,
     SelectActiveChatMessageVariantResult, SelectActiveVariantRequest, SelectActiveVariantResult,
-    SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord, SimpleKvDelete,
-    SimpleKvQuery, SimpleKvRecord, SimpleKvWrite, UpdateBranchHeadRequest, UpdateBranchHeadResult,
-    WorkerPoolClaimRecord, WorkerPoolClaimRequest, WorkerPoolCompletionRequest,
-    WorkerPoolMemberStatus, WorkerPoolNoCapacityReason, WorkerPoolWorkItemRecord,
-    WorkerPoolWorkStatus, WorkerRunRecord, WorkerRunStatus,
+    SessionMemoryPromptContext, SessionMemoryQuery, SessionMemoryRecord,
+    SessionMessageVariantPageQuery, SimpleKvDelete, SimpleKvQuery, SimpleKvRecord, SimpleKvWrite,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
+    WorkerPoolCompletionRequest, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
+    WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunRecord, WorkerRunStatus,
 };
 use rusty_crew_core_protocol::{
     session_memory_space_descriptor, ActionBatchReceipt, ActionRejection, AgentId, AgentMessage,
@@ -1413,11 +1416,25 @@ impl CoreEngine {
         self.store.query_chat_message_slots(query)
     }
 
+    pub fn query_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+        self.store.query_chat_message_slots_page(query)
+    }
+
     pub fn query_message_variants(
         &self,
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         self.store.query_chat_message_variants(query)
+    }
+
+    pub fn query_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+        self.store.query_chat_message_variants_page(query)
     }
 
     pub fn chat_read_model_page(
@@ -1426,36 +1443,58 @@ impl CoreEngine {
     ) -> CoreResult<ChatReadModelPage> {
         let after = chat_cursor_sequence(query.cursor.as_deref(), &query.session_id);
         let limit = normalize_chat_read_model_limit(query.limit);
-        if limit == 0 {
+        let offset = after.min(u32::MAX as u64) as u32;
+        let slots = self
+            .store
+            .query_chat_message_slots_page(&MessageSlotQuery {
+                session_id: Some(query.session_id.clone()),
+                include_alternates: true,
+                page: Some(rusty_crew_core_persistence::QueryPage {
+                    limit: Some(limit.max(1)),
+                    offset: Some(offset),
+                }),
+            })?;
+        if slots.total > 0 {
+            let items = slots
+                .items
+                .into_iter()
+                .take(limit as usize)
+                .enumerate()
+                .map(|(index, slot)| {
+                    chat_read_model_event_from_slot(
+                        &query.session_id,
+                        &query.agent_id,
+                        after + index as u64 + 1,
+                        &slot,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let latest_sequence = items.last().map(|event| event.sequence_id).unwrap_or(after);
             return Ok(ChatReadModelPage {
-                items: Vec::new(),
-                latest_cursor: chat_cursor_for(&query.session_id, after),
-                has_more: false,
+                items,
+                latest_cursor: chat_cursor_for(&query.session_id, latest_sequence),
+                has_more: u64::from(offset).saturating_add(u64::from(limit)) < slots.total,
+                total: slots.total,
+                source: ChatReadModelSource::MessageSlots,
             });
         }
 
-        let offset = after.min(u32::MAX as u64) as u32;
-        let probe_limit = limit.saturating_add(1).min(MAX_CHAT_READ_MODEL_LIMIT + 1);
-        let slots = self.store.query_chat_message_slots(&MessageSlotQuery {
-            session_id: Some(query.session_id.clone()),
-            include_alternates: true,
-            page: Some(rusty_crew_core_persistence::QueryPage {
-                limit: Some(probe_limit),
-                offset: Some(offset),
-            }),
-        })?;
-
-        let has_more = slots.len() > limit as usize;
-        let items = slots
+        let body = self.project_body_state(&query.session_id)?;
+        let total = body.pending_messages.len() as u64;
+        let session = body.session;
+        let created_at = self.now();
+        let items = body
+            .pending_messages
             .into_iter()
+            .skip(offset as usize)
             .take(limit as usize)
             .enumerate()
-            .map(|(index, slot)| {
-                chat_read_model_event_from_slot(
-                    &query.session_id,
-                    &query.agent_id,
+            .map(|(index, message)| {
+                pending_message_event(
+                    &session,
                     after + index as u64 + 1,
-                    &slot,
+                    &message,
+                    created_at.clone(),
                 )
             })
             .collect::<Vec<_>>();
@@ -1463,7 +1502,139 @@ impl CoreEngine {
         Ok(ChatReadModelPage {
             items,
             latest_cursor: chat_cursor_for(&query.session_id, latest_sequence),
-            has_more,
+            has_more: u64::from(offset).saturating_add(u64::from(limit)) < total,
+            total,
+            source: if total == 0 {
+                ChatReadModelSource::Empty
+            } else {
+                ChatReadModelSource::PendingMessages
+            },
+        })
+    }
+
+    pub fn read_chat_session(
+        &self,
+        query: &ChatSessionReadQuery,
+    ) -> CoreResult<ChatSessionReadResult> {
+        let session = self.get_session(&query.session_id)?;
+        let event_page = self.query_chat_events(&ChatEventLogQuery {
+            session_id: query.session_id.clone(),
+            cursor: query.cursor.clone(),
+            limit: Some(query.limit),
+        })?;
+        let message_slots = self.query_message_slots_page(&MessageSlotQuery {
+            session_id: Some(query.session_id.clone()),
+            include_alternates: query.include_alternates,
+            page: Some(rusty_crew_core_persistence::QueryPage {
+                limit: Some(query.limit.max(1)),
+                offset: Some(0),
+            }),
+        })?;
+        if event_page.total > 0 {
+            return Ok(ChatSessionReadResult {
+                session,
+                events: event_page.items,
+                latest_cursor: event_page.latest_cursor,
+                has_more: event_page.has_more,
+                has_more_before: event_page.has_more_before,
+                total: event_page.total,
+                source: ChatReadModelSource::EventLog,
+                message_slots,
+            });
+        }
+        let read_model = self.chat_read_model_page(&ChatReadModelQuery {
+            session_id: query.session_id.clone(),
+            agent_id: session.agent_id.to_string(),
+            cursor: query.cursor.clone(),
+            limit: Some(query.limit),
+        })?;
+        Ok(ChatSessionReadResult {
+            session,
+            events: read_model
+                .items
+                .into_iter()
+                .map(chat_read_model_event_as_log_event)
+                .collect(),
+            latest_cursor: read_model.latest_cursor,
+            has_more: read_model.has_more,
+            has_more_before: false,
+            total: read_model.total,
+            source: read_model.source,
+            message_slots,
+        })
+    }
+
+    pub fn query_chat_session_summaries(
+        &self,
+        query: &ChatSessionSummaryPageQuery,
+    ) -> CoreResult<ChatSessionSummaryPage> {
+        let mut sessions = self.list_sessions()?;
+        sessions.retain(|session| {
+            query
+                .profile_id
+                .as_ref()
+                .is_none_or(|profile_id| &session.profile_id == profile_id)
+                && query
+                    .status
+                    .as_deref()
+                    .is_none_or(|status| session_status_wire_value(&session.status) == status)
+        });
+        sessions.sort_by(|left, right| left.session_id.0.cmp(&right.session_id.0));
+        let total = sessions.len() as u64;
+        let limit = query.page.limit.unwrap_or(100).clamp(1, 500);
+        let offset = query.page.offset.unwrap_or(0);
+        let items = sessions
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .map(|session| {
+                let event_page = self.query_chat_events(&ChatEventLogQuery {
+                    session_id: session.session_id.clone(),
+                    cursor: None,
+                    limit: Some(0),
+                })?;
+                if event_page.total > 0 {
+                    return Ok(ChatSessionReadFacts {
+                        session,
+                        message_count: event_page.message_count,
+                        latest_cursor: event_page.latest_cursor,
+                        source: ChatReadModelSource::EventLog,
+                    });
+                }
+                let slot_page = self.query_message_slots_page(&MessageSlotQuery {
+                    session_id: Some(session.session_id.clone()),
+                    include_alternates: false,
+                    page: Some(rusty_crew_core_persistence::QueryPage {
+                        limit: Some(1),
+                        offset: Some(0),
+                    }),
+                })?;
+                if slot_page.total > 0 {
+                    return Ok(ChatSessionReadFacts {
+                        latest_cursor: chat_cursor_for(&session.session_id, slot_page.total),
+                        session,
+                        message_count: slot_page.total,
+                        source: ChatReadModelSource::MessageSlots,
+                    });
+                }
+                let pending = self
+                    .project_body_state(&session.session_id)?
+                    .pending_messages;
+                let message_count = pending.len() as u64;
+                Ok(ChatSessionReadFacts {
+                    latest_cursor: chat_cursor_for(&session.session_id, message_count),
+                    session,
+                    message_count,
+                    source: if message_count == 0 {
+                        ChatReadModelSource::Empty
+                    } else {
+                        ChatReadModelSource::PendingMessages
+                    },
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        Ok(ChatSessionSummaryPage {
+            page: ExactPage::new(items, total, limit, offset),
         })
     }
 
@@ -1547,6 +1718,20 @@ impl CoreEngine {
         self.store.query_chat_conversation_snapshots(query)
     }
 
+    pub fn read_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult> {
+        self.store.read_chat_conversation_tree(query)
+    }
+
+    pub fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage> {
+        ChatConversationStore::search_chat_transcript(&self.store, query)
+    }
+
     pub fn resolve_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
@@ -1567,6 +1752,13 @@ impl CoreEngine {
 
     pub fn query_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         self.store.query_chat_attachments(query)
+    }
+
+    pub fn query_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>> {
+        self.store.query_chat_attachments_page(query)
     }
 
     pub fn remove_attachment(
@@ -1603,6 +1795,13 @@ impl CoreEngine {
         query: &DataBankScopeQuery,
     ) -> CoreResult<Vec<DataBankScopeRecord>> {
         self.store.query_chat_data_bank_scopes(query)
+    }
+
+    pub fn query_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+        self.store.query_chat_data_bank_scopes_page(query)
     }
 
     pub fn remove_data_bank_scope(
@@ -2863,6 +3062,64 @@ fn durable_message_event(
         created_at: message.created_at.clone(),
         kind: ChatReadModelEventKind::MessageCreated,
         payload_json: payload,
+    }
+}
+
+fn pending_message_event(
+    session: &SessionState,
+    sequence: u64,
+    message: &AgentMessage,
+    created_at: IsoTimestamp,
+) -> ChatReadModelEvent {
+    let message_id = message
+        .correlation_id
+        .as_deref()
+        .map(|correlation_id| format!("pending:{correlation_id}"))
+        .unwrap_or_else(|| format!("pending:{sequence}"));
+    let role = if message.from == session.agent_id {
+        "assistant"
+    } else {
+        "user"
+    };
+    let mut payload = json!({
+        "message_id": message_id,
+        "role": role,
+        "body": message.body.as_str(),
+        "source": "pending_body_state",
+    });
+    if let Some(correlation_id) = message.correlation_id.as_deref() {
+        if let Some(payload) = payload.as_object_mut() {
+            payload.insert("correlation_id".to_string(), json!(correlation_id));
+        }
+    }
+    ChatReadModelEvent {
+        event_id: chat_cursor_for(&session.session_id, sequence),
+        session_id: session.session_id.clone(),
+        sequence_id: sequence,
+        created_at,
+        kind: ChatReadModelEventKind::MessageCreated,
+        payload_json: payload,
+    }
+}
+
+fn chat_read_model_event_as_log_event(event: ChatReadModelEvent) -> ChatEventLogEvent {
+    ChatEventLogEvent {
+        event_id: event.event_id,
+        session_id: event.session_id,
+        sequence_id: event.sequence_id,
+        created_at: event.created_at,
+        kind: match event.kind {
+            ChatReadModelEventKind::MessageCreated => "message_created".to_string(),
+        },
+        payload_json: event.payload_json,
+    }
+}
+
+fn session_status_wire_value(status: &SessionStatus) -> &str {
+    match status {
+        SessionStatus::Idle => "idle",
+        SessionStatus::Active => "active",
+        SessionStatus::Archived => "archived",
     }
 }
 
@@ -6451,6 +6708,162 @@ mod tests {
         assert_eq!(page.items[0].payload_json["source"], "durable_message_slot");
         assert_eq!(page.latest_cursor, "chat-session:2");
         assert!(page.has_more);
+        assert_eq!(page.total, 3);
+        assert_eq!(page.source, ChatReadModelSource::MessageSlots);
+    }
+
+    #[test]
+    fn chat_session_read_and_summary_choose_durable_sources_explicitly() {
+        let engine = test_engine();
+        let pending = engine
+            .create_session(session_config(
+                "pending-chat-session",
+                "pending-agent",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let logged = engine
+            .create_session(session_config(
+                "logged-chat-session",
+                "logged-agent",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .route_agent_message(AgentMessage {
+                from: AgentId::new("operator"),
+                to: pending.agent_id.clone(),
+                body: "pending hello".to_string(),
+                correlation_id: Some("pending-correlation".to_string()),
+                projection: None,
+            })
+            .unwrap();
+        engine
+            .append_chat_event(&ChatEventLogAppend {
+                session_id: logged.session_id.clone(),
+                created_at: "2026-06-19T00:01:00Z".to_string(),
+                kind: "message_created".to_string(),
+                payload_json: json!({"body": "logged hello"}),
+            })
+            .unwrap();
+        engine
+            .append_chat_event(&ChatEventLogAppend {
+                session_id: logged.session_id.clone(),
+                created_at: "2026-06-19T00:01:01Z".to_string(),
+                kind: "tool_call_completed".to_string(),
+                payload_json: json!({"tool_name": "read_file"}),
+            })
+            .unwrap();
+
+        let pending_read = engine
+            .read_chat_session(&ChatSessionReadQuery {
+                session_id: pending.session_id.clone(),
+                cursor: None,
+                limit: 10,
+                include_alternates: false,
+            })
+            .unwrap();
+        assert_eq!(pending_read.source, ChatReadModelSource::PendingMessages);
+        assert_eq!(pending_read.total, 1);
+        assert_eq!(pending_read.events[0].payload_json["body"], "pending hello");
+        assert_eq!(pending_read.message_slots.total, 0);
+
+        let logged_read = engine
+            .read_chat_session(&ChatSessionReadQuery {
+                session_id: logged.session_id.clone(),
+                cursor: None,
+                limit: 10,
+                include_alternates: false,
+            })
+            .unwrap();
+        assert_eq!(logged_read.source, ChatReadModelSource::EventLog);
+        assert_eq!(logged_read.total, 2);
+        assert_eq!(logged_read.events[0].payload_json["body"], "logged hello");
+
+        let summaries = engine
+            .query_chat_session_summaries(&ChatSessionSummaryPageQuery {
+                profile_id: Some(ProfileId::new("prime-profile")),
+                status: Some("idle".to_string()),
+                page: rusty_crew_core_persistence::QueryPage {
+                    limit: Some(1),
+                    offset: Some(0),
+                },
+            })
+            .unwrap();
+        assert_eq!(summaries.page.total, 2);
+        assert_eq!(summaries.page.items.len(), 1);
+        assert_eq!(summaries.page.next_offset, Some(1));
+        assert_eq!(summaries.page.items[0].message_count, 1);
+    }
+
+    #[test]
+    fn chat_session_read_sources_survive_engine_restart() {
+        let data_dir = unique_data_dir("chat-session-read-restart");
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let pending = engine
+            .create_session(session_config(
+                "restart-pending-session",
+                "restart-pending-agent",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        let logged = engine
+            .create_session(session_config(
+                "restart-logged-session",
+                "restart-logged-agent",
+                "prime-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        engine
+            .route_agent_message(AgentMessage {
+                from: AgentId::new("operator"),
+                to: pending.agent_id.clone(),
+                body: "pending across restart".to_string(),
+                correlation_id: Some("restart-pending".to_string()),
+                projection: None,
+            })
+            .unwrap();
+        engine
+            .append_chat_event(&ChatEventLogAppend {
+                session_id: logged.session_id.clone(),
+                created_at: "2026-06-19T00:01:00Z".to_string(),
+                kind: "message_created".to_string(),
+                payload_json: json!({"body": "logged across restart"}),
+            })
+            .unwrap();
+        drop(engine);
+
+        let restarted = test_engine_with_data_dir(data_dir);
+        let pending_read = restarted
+            .read_chat_session(&ChatSessionReadQuery {
+                session_id: pending.session_id,
+                cursor: None,
+                limit: 10,
+                include_alternates: false,
+            })
+            .unwrap();
+        assert_eq!(pending_read.source, ChatReadModelSource::PendingMessages);
+        assert_eq!(
+            pending_read.events[0].payload_json["body"],
+            "pending across restart"
+        );
+        let logged_read = restarted
+            .read_chat_session(&ChatSessionReadQuery {
+                session_id: logged.session_id,
+                cursor: None,
+                limit: 10,
+                include_alternates: false,
+            })
+            .unwrap();
+        assert_eq!(logged_read.source, ChatReadModelSource::EventLog);
+        assert_eq!(
+            logged_read.events[0].payload_json["body"],
+            "logged across restart"
+        );
     }
 
     #[test]

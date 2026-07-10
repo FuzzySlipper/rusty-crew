@@ -19,11 +19,11 @@ interface OperationExemptionGroup {
   operations: readonly ManifestOperationName[];
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 192;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 200;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 41;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 34;
-const EXPECTED_EXEMPT_OPERATION_COUNT = 158;
+const EXPECTED_EXEMPT_OPERATION_COUNT = 166;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "append_chat_event",
@@ -180,7 +180,11 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "create_chat_message_slot",
       "create_chat_message_variant",
       "query_message_slots",
+      "query_message_slots_page",
       "query_message_variants",
+      "query_message_variants_page",
+      "read_chat_session",
+      "query_chat_session_summaries",
       "select_active_message_variant",
       "select_active_chat_message_variant",
       "delete_chat_message_variant",
@@ -197,6 +201,8 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
       "save_conversation_snapshot",
       "create_chat_conversation_snapshot",
       "query_conversation_snapshots",
+      "read_conversation_tree",
+      "search_chat_transcript",
       "resolve_conversation_jump",
       "create_chat_attachment",
       "remove_chat_attachment",
@@ -211,9 +217,11 @@ const BRIDGE_OPERATION_EXEMPTION_GROUPS = [
     operations: [
       "save_attachment",
       "query_attachments",
+      "query_attachments_page",
       "remove_attachment",
       "save_data_bank_scope",
       "query_data_bank_scopes",
+      "query_data_bank_scopes_page",
       "remove_data_bank_scope",
     ],
   },

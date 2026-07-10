@@ -80,6 +80,29 @@ impl QueryPage {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExactPage<T> {
+    pub items: Vec<T>,
+    pub total: u64,
+    pub limit: u32,
+    pub offset: u32,
+    pub next_offset: Option<u32>,
+}
+
+impl<T> ExactPage<T> {
+    pub fn new(items: Vec<T>, total: u64, limit: u32, offset: u32) -> Self {
+        let next_offset = (u64::from(offset) + (items.len() as u64) < total)
+            .then(|| offset.saturating_add(items.len() as u32));
+        Self {
+            items,
+            total,
+            limit,
+            offset,
+            next_offset,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SessionQuery {
     pub agent_id: Option<AgentId>,
@@ -330,6 +353,17 @@ pub struct ChatReadModelPage {
     pub items: Vec<ChatReadModelEvent>,
     pub latest_cursor: String,
     pub has_more: bool,
+    pub total: u64,
+    pub source: ChatReadModelSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatReadModelSource {
+    EventLog,
+    MessageSlots,
+    PendingMessages,
+    Empty,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +404,9 @@ pub struct ChatEventLogPage {
     pub items: Vec<ChatEventLogEvent>,
     pub latest_cursor: String,
     pub has_more: bool,
+    pub total: u64,
+    pub message_count: u64,
+    pub has_more_before: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -388,6 +425,120 @@ pub struct MessageVariantQuery {
     pub slot_id: Option<MessageSlotId>,
     pub include_deleted: bool,
     pub page: Option<QueryPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMessageVariantPageQuery {
+    pub session_id: SessionId,
+    pub slot_id: MessageSlotId,
+    pub include_deleted: bool,
+    pub page: QueryPage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationTreeReadQuery {
+    pub session_id: SessionId,
+    pub include_snapshots: bool,
+    pub page: QueryPage,
+    pub default_updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationTreeReadResult {
+    pub branches: ExactPage<ConversationBranchRecord>,
+    pub snapshots: ExactPage<ConversationSnapshotRecord>,
+    pub branch_state: ConversationBranchStateRecord,
+    pub active_branch_id: Option<ConversationBranchId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatTranscriptSearchScope {
+    CurrentSession,
+    AllConversations,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTranscriptSearchQuery {
+    pub scope: ChatTranscriptSearchScope,
+    pub session_id: Option<SessionId>,
+    pub profile_id: Option<ProfileId>,
+    pub query: String,
+    pub author_role: Option<String>,
+    pub created_after: Option<IsoTimestamp>,
+    pub created_before: Option<IsoTimestamp>,
+    pub page: QueryPage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTranscriptHighlight {
+    pub start: u32,
+    pub end: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTranscriptSearchResult {
+    pub result_id: String,
+    pub scope: ChatTranscriptSearchScope,
+    pub session_id: SessionId,
+    pub slot_id: MessageSlotId,
+    pub variant_id: MessageVariantId,
+    pub message_id: MessageId,
+    pub branch_id: Option<ConversationBranchId>,
+    pub author_role: String,
+    pub created_at: IsoTimestamp,
+    pub snippet: String,
+    pub highlights: Vec<ChatTranscriptHighlight>,
+    pub jump: ConversationJumpResult,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTranscriptSearchPage {
+    pub page: ExactPage<ChatTranscriptSearchResult>,
+    pub query: String,
+    pub scope: ChatTranscriptSearchScope,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatSessionSummaryPageQuery {
+    pub profile_id: Option<ProfileId>,
+    pub status: Option<String>,
+    pub page: QueryPage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatSessionReadFacts {
+    pub session: SessionState,
+    pub message_count: u64,
+    pub latest_cursor: String,
+    pub source: ChatReadModelSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatSessionSummaryPage {
+    pub page: ExactPage<ChatSessionReadFacts>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatSessionReadQuery {
+    pub session_id: SessionId,
+    pub cursor: Option<String>,
+    pub limit: u32,
+    pub include_alternates: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatSessionReadResult {
+    pub session: SessionState,
+    pub events: Vec<ChatEventLogEvent>,
+    pub latest_cursor: String,
+    pub has_more: bool,
+    pub has_more_before: bool,
+    pub total: u64,
+    pub source: ChatReadModelSource,
+    pub message_slots: ExactPage<MessageSlotRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

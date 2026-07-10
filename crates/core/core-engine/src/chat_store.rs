@@ -34,10 +34,18 @@ pub(crate) trait ChatConversationStore {
         &self,
         query: &MessageSlotQuery,
     ) -> CoreResult<Vec<MessageSlotRecord>>;
+    fn query_chat_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>>;
     fn query_chat_message_variants(
         &self,
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>>;
+    fn query_chat_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>>;
     fn save_chat_conversation_branch(
         &self,
         branch: &ConversationBranchWrite,
@@ -79,6 +87,14 @@ pub(crate) trait ChatConversationStore {
         &self,
         query: &ConversationSnapshotQuery,
     ) -> CoreResult<Vec<ConversationSnapshotRecord>>;
+    fn read_chat_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult>;
+    fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage>;
     fn resolve_chat_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
@@ -89,6 +105,10 @@ pub(crate) trait ChatConversationStore {
         request: &CreateChatAttachmentRequest,
     ) -> CoreResult<CreateChatAttachmentResult>;
     fn query_chat_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>>;
+    fn query_chat_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>>;
     fn remove_attachment(
         &self,
         attachment_id: &AttachmentId,
@@ -110,6 +130,10 @@ pub(crate) trait ChatConversationStore {
         &self,
         query: &DataBankScopeQuery,
     ) -> CoreResult<Vec<DataBankScopeRecord>>;
+    fn query_chat_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>>;
     fn remove_data_bank_scope(
         &self,
         scope_id: &DataBankScopeId,
@@ -195,11 +219,25 @@ impl ChatConversationStore for CoreCoordinationStore {
         self.conversation().query_message_slots(query)
     }
 
+    fn query_chat_message_slots_page(
+        &self,
+        query: &MessageSlotQuery,
+    ) -> CoreResult<ExactPage<MessageSlotRecord>> {
+        self.conversation().query_message_slots_page(query)
+    }
+
     fn query_chat_message_variants(
         &self,
         query: &MessageVariantQuery,
     ) -> CoreResult<Vec<MessageVariantRecord>> {
         self.conversation().query_message_variants(query)
+    }
+
+    fn query_chat_message_variants_page(
+        &self,
+        query: &SessionMessageVariantPageQuery,
+    ) -> CoreResult<ExactPage<MessageVariantRecord>> {
+        self.conversation().query_message_variants_page(query)
     }
 
     fn save_chat_conversation_branch(
@@ -277,6 +315,20 @@ impl ChatConversationStore for CoreCoordinationStore {
         self.conversation().query_conversation_snapshots(query)
     }
 
+    fn read_chat_conversation_tree(
+        &self,
+        query: &ConversationTreeReadQuery,
+    ) -> CoreResult<ConversationTreeReadResult> {
+        self.conversation().read_conversation_tree(query)
+    }
+
+    fn search_chat_transcript(
+        &self,
+        query: &ChatTranscriptSearchQuery,
+    ) -> CoreResult<ChatTranscriptSearchPage> {
+        self.conversation().search_chat_transcript(query)
+    }
+
     fn resolve_chat_conversation_jump(
         &self,
         request: &ConversationJumpRequest,
@@ -297,6 +349,13 @@ impl ChatConversationStore for CoreCoordinationStore {
 
     fn query_chat_attachments(&self, query: &AttachmentQuery) -> CoreResult<Vec<AttachmentRecord>> {
         self.conversation().query_attachments(query)
+    }
+
+    fn query_chat_attachments_page(
+        &self,
+        query: &AttachmentQuery,
+    ) -> CoreResult<ExactPage<AttachmentRecord>> {
+        self.conversation().query_attachments_page(query)
     }
 
     fn remove_attachment(
@@ -334,6 +393,13 @@ impl ChatConversationStore for CoreCoordinationStore {
         query: &DataBankScopeQuery,
     ) -> CoreResult<Vec<DataBankScopeRecord>> {
         self.conversation().query_data_bank_scopes(query)
+    }
+
+    fn query_chat_data_bank_scopes_page(
+        &self,
+        query: &DataBankScopeQuery,
+    ) -> CoreResult<ExactPage<DataBankScopeRecord>> {
+        self.conversation().query_data_bank_scopes_page(query)
     }
 
     fn remove_data_bank_scope(
@@ -442,6 +508,17 @@ mod tests {
                 items,
                 latest_cursor: format!("{}:{latest}", query.session_id),
                 has_more,
+                total: events
+                    .iter()
+                    .filter(|event| event.session_id == query.session_id)
+                    .count() as u64,
+                message_count: events
+                    .iter()
+                    .filter(|event| {
+                        event.session_id == query.session_id && event.kind == "message_created"
+                    })
+                    .count() as u64,
+                has_more_before: after > 0,
             })
         }
     }
